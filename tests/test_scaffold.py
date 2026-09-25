@@ -122,7 +122,7 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         "labs/01_session-1/.gitkeep",
         # Seeded inert, purely so faculty find out the withhold list exists.
         ".releaseignore",
-        # The other half of that question: what the semester site may host in the open.
+        # The other half of that question: what the public website may publish.
         "publish.yml",
     }
     assert fake.skips == []

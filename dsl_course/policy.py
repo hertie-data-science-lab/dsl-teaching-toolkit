@@ -108,6 +108,7 @@ SCHEMA = {
                 "url": {"type": "string"},
                 "address": {"type": "string"},
                 "dsl_org_url": {"type": "string"},
+                "console_url": {"type": "string"},
             },
             "required": ["name", "url", "address", "dsl_org_url"],
             "additionalProperties": False,

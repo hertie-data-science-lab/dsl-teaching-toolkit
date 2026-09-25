@@ -1848,9 +1848,10 @@ def render_new_materials(materials: list[str] | None = None) -> str:
 # arrive exactly as you left them. Leave it on the first option for a fresh starter.
 # The dropdown is refreshed by the 'Refresh actions' workflow.
 #
-# The last two boxes write the new repo's `publish.yml` - what the semester site may host
-# publicly, so an HTML deck opens rendered in a browser instead of showing as source on
-# GitHub. Everything else stays private, exactly as today. They seed the file and nothing
+# The last two boxes write the new repo's `publish.yml` - what the public website may
+# publish, so an HTML deck opens rendered in a browser instead of showing as source on
+# GitHub. Not used yet: the toolkit records the selection until the public website is
+# rebuilt. Everything else stays private. They seed the file and nothing
 # more: edit it in the repo afterwards, and no workflow rewrites it. A copied repo brings
 # its own, so they are ignored on `copy_from`.
 
@@ -1861,8 +1862,8 @@ on:
         description: "Semester, e.g. f2026 or s2026 - creates course-materials-<semester>"
         required: true
 {_copy_from_input(f"Materials repo to copy forward - {_FRESH_STARTER} is the empty skeleton", materials)}
-{_choice_input("public_dirs", "Rendered publicly on the semester site: which folders. Everything else stays private to enrolled students", list(PUBLIC_DIRS), NOTHING_PUBLIC, required=False)}
-{_choice_input("public_types", "Rendered publicly on the semester site: which file types out of those folders", list(PUBLIC_TYPES), PUBLIC_HTML_PDF, required=False)}
+{_choice_input("public_dirs", "For the public website: which folders. Everything else stays private to enrolled students", list(PUBLIC_DIRS), NOTHING_PUBLIC, required=False)}
+{_choice_input("public_types", "For the public website: which file types out of those folders", list(PUBLIC_TYPES), PUBLIC_HTML_PDF, required=False)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:

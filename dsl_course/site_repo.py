@@ -57,28 +57,25 @@ _THEME_CONFIG = {
 }
 
 # The collections the shipped templates read (`site.lectures`, `site.assignments`,
-# `site.events`, `site.announcements`) and the layout an assignment page gets. Both are
-# multi-line blocks rather than scalars, so `_upsert_config` writes them whole; both are
-# a CONTRACT of templates/site/ rather than a preference, and a site missing either
-# builds green into empty pages - the worst way for this to be wrong.
+# `site.events`, `site.announcements`). A multi-line block rather than a scalar, so
+# `_upsert_config` writes it whole; a CONTRACT of templates/site/ rather than a
+# preference, and a site missing it builds green into empty pages - the worst way for
+# this to be wrong. `assignments` is data only: its entries are schedule rows, not pages.
 _COLLECTIONS_BLOCK = """collections:
   events:
     output: true
   lectures:
     output: true
   assignments:
-    output: true
+    output: false
   announcements:
     output: false
 """
 
-_DEFAULTS_BLOCK = """defaults:
-  - scope:
-      path: ""
-      type: "assignments"
-    values:
-      layout: "assignment"
-"""
+# No collection has a default layout any more: the one there was, `assignment`, rendered
+# the assignment pages a semester site no longer has (decision 0011 rule 5). Written as an
+# empty list rather than dropped, so a site synced before this loses the stale block.
+_DEFAULTS_BLOCK = "defaults: []\n"
 
 
 def slug(text: str) -> str:
@@ -163,16 +160,21 @@ def site_readme(org: str, semester: bool) -> str:
         f"| Path | Holds |\n"
         f"| --- | --- |\n"
         f"| `_lectures/` | one page per session and lab |\n"
-        f"| `_assignments/` | one page per handed-out assignment |\n"
+        f"| `_assignments/` | each assignment's hand-out and due rows |\n"
         f"| `_events/` | exams, semester dates, display-only rows |\n"
         f"| `_data/people.yml` | the instructor cards |\n"
         f"| `_data/nav.yml` | the nav bar |\n"
-        + ("| `_data/materials.yml` | the All Materials index |\n" if semester else "")
+        + (
+            "| `_data/materials.yml` | the syllabus the home page pins |\n"
+            "| `_data/console.yml` | the banner's link to the student console |\n"
+            if semester
+            else ""
+        )
         + f"| the tab pages - {tab_pages} | the wrappers the tabs point at |\n"
         + "| `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders |\n"
         + "| `.github/workflows/deploy.yml` | the Pages build |\n"
         + "| `_config.yml` | the course identity keys, the pinned theme, and the "
-        "`collections:`/`defaults:` the layouts need |\n\n"
+        "`collections:` the layouts need |\n\n"
         "Each collection is CLEARED and rewritten on every sync, so a file you add to one "
         "disappears on the next run. The tab pages are rewritten too - they are generated "
         "wrappers, so put your own words in `index.md`, or in a page of your own linked "
@@ -336,31 +338,48 @@ _ASSIGNMENTS_PAGE = _ThemePage(
     "Assignments by hand-out date.",
 )
 
-# Pages only a SEMESTER site has, after its kind tabs and Assignments.
-_SEMESTER_PAGES = (
-    _ThemePage(
-        "materials.md",
-        "materials",
-        "All Materials",
-        "/materials/",
-        "fas fa-folder-open",
-        # Deliberately not "everything released": a semester org also holds each student's
-        # private submission repo, which this must never list. See `_indexable_repos`.
-        "All released course material so far; only accessible to enrolled "
-        "students/auditors.",
-    ),
-    _ThemePage(
-        "profile.md",
-        "profile",
-        "Your Profile",
-        "/profile/",
-        "fas fa-user-cog",
-        # The same slot as every other page's access rule, and this page has one of its
-        # own: it is the only page that holds anything of the reader's, and it holds it
-        # where nobody else - faculty included - can reach it.
-        "Saved in your local browser only.",
-    ),
+# The pages and templates of the sections a semester site no longer has (decision 0011
+# rule 5: a public calendar only). The pages go only where the sync wrote them; the
+# templates and the hosted copies were always the sync's.
+_RETIRED_PAGES = re.compile(
+    r"\A---\nlayout: (assignments|materials|profile)\ntitle: .*\npermalink: /"
 )
+RETIRED_TEMPLATES = (
+    "_layouts/assignment.html",
+    "_layouts/materials.html",
+    "_layouts/profile.html",
+    "_includes/materials_entry.html",
+    "_includes/open_in.html",
+)
+HOSTED_COPIES_DIR = "files"
+
+
+def retired_sections(site_wd: Path) -> tuple[str, ...]:
+    """For a semester site's `SitePlan.retire`: its Assignments, All Materials and Your
+    Profile tabs (when the sync wrote them), the templates only they used, and the hosted
+    copies under `files/`."""
+    pages = []
+    for name in ("assignments.md", "materials.md", "profile.md"):
+        try:
+            text = (site_wd / name).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if _RETIRED_PAGES.match(text):
+            pages.append(name)
+    return (*pages, *RETIRED_TEMPLATES, HOSTED_COPIES_DIR)
+
+
+def console_yaml(semester_org: str) -> str:
+    """`_data/console.yml`: where the banner on every page sends a reader - this
+    semester's screens in the student console (the policy's `console_url`), or nothing when
+    the institution runs none."""
+    url = policy.load()["institution"].get("console_url") or ""
+    return (
+        "# Generated by `python3 -m dsl_course.site sync` from the institution policy.\n"
+        "# Rewritten on every sync.\n"
+        + (f'url: "{url}?semester={semester_org}#week"\n' if url else "")
+    )
+
 
 # The public site's `/materials/` - the readings page under its original name, which is
 # where that site has always kept them.
@@ -446,11 +465,10 @@ def retired_kind_pages(present: Iterable[str], site_wd: Path) -> tuple[str, ...]
 
 
 def _site_pages(semester: bool, kinds: Iterable[str] = ()) -> tuple[_ThemePage, ...]:
-    """The pages this kind of site gets, in nav order: a semester site's kind tabs,
-    Assignments, All Materials and Your Profile; the public site's fixed row pages,
-    Assignments and its `/materials/` readings page."""
+    """The pages this kind of site gets, in nav order: a semester site's kind tabs; the
+    public site's fixed row pages, Assignments and its `/materials/` readings page."""
     if semester:
-        return (*kind_pages(kinds), _ASSIGNMENTS_PAGE, *_SEMESTER_PAGES)
+        return kind_pages(kinds)
     return (*_PUBLIC_ROW_PAGES, _ASSIGNMENTS_PAGE, _PUBLIC_MATERIALS_PAGE)
 
 

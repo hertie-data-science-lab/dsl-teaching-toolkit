@@ -44,7 +44,7 @@ would leave the box showing one real update out of seven, or none at all.
             {%- if n.kind == 'readings' -%}{%- assign verb = "are" -%}{%- endif -%}
             New {{ noun }} {{ verb }} up: {{ n.title }} {% include lecture_links.html lecture=n %}
         {%- elsif n.kind == 'assignment' -%}
-            New Assignment released: [<a href="{{ n.url | prepend: site.baseurl }}">{{ n.title }}</a>]
+            New Assignment released: {{ n.title }}
         {%- else -%}
             {%- comment -%}
             A hand-written `_announcements/` entry, or the archive row. `details` first,

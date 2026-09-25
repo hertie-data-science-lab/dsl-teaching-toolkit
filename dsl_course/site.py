@@ -2,11 +2,12 @@
 
 Two sites, two audiences, one set of Jekyll templates (`templates/site/`):
 
-- **semester site** (`<semester>.github.io`, `sync_site`) - student-facing. Its lecture links
-  point at the semester's PRIVATE content repos (wherever a release actually landed each
-  section - see `discovery.discover_release_sources`), so they 404 for non-members (the gate is
-  deliberate). Regenerates `_lectures/`, `_assignments/`, `_events/` from the release state.
-  Releases call it; the Sync site action runs it on demand.
+- **semester site** (`<semester>.github.io`, `sync_site`) - a PUBLIC calendar (decision 0011
+  rule 5): the schedule by kind, the home text and announcements, under a banner to the
+  student console, which has everything else. Its lecture links point at the semester's
+  PRIVATE content repos, so they 404 for non-members (the gate is deliberate). Regenerates
+  `_lectures/`, `_assignments/`, `_events/` from the release state. Releases call it; the
+  Sync site action runs it on demand.
 
 - **course site** (`<course-org>.github.io`) - PUBLIC open courseware, opt-in, built in
   `public_site`; `public-sync` here is its CLI. It hosts the shared files rather than
@@ -23,12 +24,8 @@ Usage:
 
 from __future__ import annotations
 
-import hashlib
 import re
-import shutil
-import stat
 import sys
-import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from functools import cache
@@ -38,22 +35,18 @@ from urllib.parse import quote
 
 import yaml
 
-from . import policy, schedule, status, teams
+from . import policy, schedule, status
 from .course import (
     CONFIG_REPO,
-    CUTOFF_SENTENCE,
     INSTRUCTORS_FILE,
-    PUBLISH_FILE,
     SELF_SELECT,
     assignment_slug,
     identifier,
-    late_rule,
     pages_repo,
     row_name,
     semester_label,
     semester_of,
     session_number,
-    shape_note,
     shared_repo,
     submission_repo,
 )
@@ -70,16 +63,9 @@ from .discovery import (
     semester_is_live,
 )
 from .gh_contents import get_file_content, repo_tree
-from .ghcli import clone
-from .grades import load_grading_spec, spoken_day, team_cap, total_points
-from .log import CLIParser, log, log_err, log_step, log_withheld
-from .materials import (
-    DECK_EXTENSIONS,
-    Feed,
-    alias_kind,
-    hosted_copy,
-    publishable,
-)
+from .grades import load_grading_spec, spoken_day
+from .log import CLIParser, log_err, log_step
+from .materials import alias_kind, publishable
 from .materials import read as read_materials
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
@@ -100,14 +86,15 @@ from .site_repo import (
     Link,
     SitePlan,
     block,
+    console_yaml,
     iso_when,
     kinds_yaml,
     links_block,
-    liquid_raw,
     nav_yaml,
     people_yaml,
     q,
     retired_kind_pages,
+    retired_sections,
     row_file,
     site_readme,
     site_templates,
@@ -164,213 +151,15 @@ def _ext(name: str) -> str:
     return name.rsplit(".", 1)[-1].lower() if "." in name.rsplit("/", 1)[-1] else ""
 
 
-# ---------------------------------------------------------------- publicly hosted copies
-
-# Where a semester site serves the public copies, under its root. `files/`, never `<repo>/`:
-# `/materials/` is the All Materials page's own permalink, and a semester whose content repo
-# is called `materials` would otherwise take that page's URL. Jekyll serves any path that
-# does not begin with `_`, so nothing has to be declared for these to be published.
-SITE_FILES_DIR = "files"
-
-# What is worth linking a hosted copy for - a deck, plus pdf, on which the browser opens
-# its own viewer. Everything else (`ipynb`, `md`, `csv`) GitHub already renders, so a
-# second copy would only be a second place for it to go stale.
-_RENDERED_EXTENSIONS = frozenset({*DECK_EXTENSIONS, "pdf"})
-
-# GitHub refuses a file over 100 MB on a push, so one carried into the site repo fails the
-# sync's own push rather than the release that put it in the materials repo.
-_MAX_PUBLIC_FILE_BYTES = 100 * 1024 * 1024
-
-# Semester repo -> the paths this run actually copied under `files/<repo>/`. The ONE record
-# of what is hosted: the mirror hands it back and every renderer reads it, so a page cannot
-# link a rendered copy that a size cap, a broken clone or a denylist stopped being made.
-Hosted = dict[str, frozenset[str]]
-
-
-@cache
-def _publish_policy(course_org: str, source_repo: str) -> tuple[str, ...]:
-    """What `publish.yml` in `source_repo` declares public: its `public:` patterns, empty
-    when it declares nothing.
-
-    The policy is COURSE-level and lives in the source repo faculty actually edit, not in
-    each semester's copy: one file per course, applying to every semester of it. Its
-    patterns match THAT repo's paths (`materials.hosted_copy` translates a renamed copy
-    back). Memoised for the run because `--all-semesters` asks the same course the same
-    question once per semester.
-
-    A file that is absent or empty is "nothing public", said deliberately, and the mirror
-    may then delete what an earlier sync copied. A file that does not PARSE, or whose
-    `public:` is not a list of patterns, stops the sync and reports - the same rule
-    `instructors.yml` follows next door, and for the same reason: read as "nothing public" it
-    would unpublish a whole course's rendered decks over a typo, on a green run."""
-    declared = yaml_file(course_org, source_repo, PUBLISH_FILE).get("public")
-    if declared is None:
-        return ()
-    if not isinstance(declared, list) or not all(isinstance(x, str) for x in declared):
-        raise ValueError(
-            f"{course_org}/{source_repo}/{PUBLISH_FILE}: `public:` must be a list of "
-            "patterns"
-        )
-    return tuple(declared)
-
-
-def _publish_policies(
-    course_org: str, sched: schedule.Schedule, content_repos: list[str]
-) -> dict[str, tuple[Feed, ...]]:
-    """Each semester content repo the schedule releases into, mapped to the source repos
-    that feed it: each one's patterns and the (source, semester) path pairs of its copies.
-
-    Keyed on the DESTINATION, because that is the repo whose files the site links and
-    whose bytes the mirror copies. Several sources may feed one destination (`lectures/`
-    from the materials repo, `datasets/` from another), so a path is public if the
-    policy of the source it came from says so.
-
-    Every source repo is a feed, patterns or none: a copy from a repo that hosts nothing
-    still owns the folder it lands in (`materials.hosted_copy`). A destination whose feeds
-    declare nothing is the instruction to delete what an earlier sync copied for it. A repo no release plan names is absent, because nothing
-    was ever copied for it.
-
-    The schedule's declared destinations, not discovery's findings: this decides what gets
-    CLONED and copied into a public site repo, so it reads a faculty declaration rather
-    than a heuristic over an org listing (the same argument `_indexable_repos` makes)."""
-    pairs: dict[str, dict[str, set[tuple[str, str]]]] = {}
-    for release in sched.releases:
-        for d in release.deploy:
-            if d.semester_dest_repo in content_repos:
-                pairs.setdefault(d.semester_dest_repo, {}).setdefault(
-                    d.course_source_repo, set()
-                ).add((d.course_source_path, deploy_dest(d)))
-    return {
-        repo: tuple(
-            Feed(_publish_policy(course_org, source), tuple(sorted(copies)))
-            for source, copies in sorted(sources.items())
-        )
-        for repo, sources in pairs.items()
-    }
-
-
-def _view_url(semester_org: str, repo: str, path: str) -> str:
-    """Where the semester site serves its own copy of one published file.
-
-    Absolute, not site-relative: the templates prepend `site.baseurl` to anything without
-    a scheme, and a link record now carries two destinations - so the one that is already
-    a full URL on every other row stays a full URL here too."""
-    return f"https://{pages_repo(semester_org)}/{SITE_FILES_DIR}/{repo}/{quote(path)}"
-
-
-def _public_selection(
-    src: Path, repo: str, paths: tuple[str, ...], feeds: tuple[Feed, ...]
-) -> frozenset[str]:
-    """Which paths of `repo` the site can host, out of its released tree.
-
-    `materials.hosted_copy`: each path judged under the source path it was released from,
-    by the policy of the repo it came from (last match wins, which is what makes
-    `!lectures/09_*/**` carve a session back out), plus the asset folders beside each
-    matched deck. The denylist gates every candidate, bundles included, and cannot be
-    written around.
-
-    A file GitHub would refuse on a push is dropped with a warning rather than failing the
-    sync: one 200 MB recording in a materials repo would otherwise take a semester's whole
-    site offline, and the file it is a copy of is still on GitHub. So is anything that is
-    not a regular file - `lstat`, so a `notes.pdf -> ../solution/answers.pdf` is judged as
-    the link it is rather than as what it points at - and anything the clone does not
-    have, which is a tree and a clone that disagree, not a file to publish.
-
-    Judged over the same tree the links are built from (`_repo_tree`); the clone is only
-    where the bytes and the sizes come from."""
-    keep = set()
-    for path in hosted_copy(paths, feeds):
-        try:
-            st = (src / path).lstat()
-        except OSError:
-            continue
-        if not stat.S_ISREG(st.st_mode):
-            continue
-        if st.st_size > _MAX_PUBLIC_FILE_BYTES:
-            log_withheld(
-                f"{repo}/{path} from the semester site's public copies: it is over "
-                f"{_MAX_PUBLIC_FILE_BYTES // (1024 * 1024)} MB, which GitHub refuses"
-            )
-            continue
-        keep.add(path)
-    return frozenset(keep)
-
-
-def _mirror_public(
-    site_wd: Path, semester_org: str, policies: dict[str, tuple[Feed, ...]]
-) -> Hosted:
-    """Copy every publicly declared file of this semester's content repos into the site's
-    own `files/<repo>/` tree, and say what actually landed there.
-
-    The copy source is the RELEASED semester repo, never the course-org source: one release
-    boundary for the whole toolkit, so a `.releaseignore` that held a file back from the
-    semester holds it back from the public site without publishing having to re-ask. The
-    clone is shallow - this wants the files at HEAD, not a term of old blobs.
-
-    Deleted and rebuilt per repo on every sync, which is what makes unpublishing work:
-    removing a pattern removes the copy. Only ever AFTER a successful clone - a site that
-    republished with every rendered deck deleted because one clone failed is a worse
-    outage than a copy one sync stale. (The site repo's git history keeps the old bytes
-    either way; purging those is done by hand, and the docs say so.)
-
-    Logs name repos and paths only. A materials repo is course property, and nothing here
-    reads a student's repo: `policies` covers the release plan's declared destinations."""
-    hosted: Hosted = {}
-    root = site_wd / SITE_FILES_DIR
-    for repo in sorted(policies):
-        served = root / repo
-        if not any(feed.public for feed in policies[repo]):
-            # Nothing declared public. No clone is needed to know it, and an earlier
-            # sync's copy has to go.
-            if served.exists():
-                shutil.rmtree(served)
-            continue
-        _branch, paths = _repo_tree(semester_org, repo)
-        with tempfile.TemporaryDirectory() as work:
-            src = Path(work) / repo
-            if not clone(semester_org, repo, src, shallow=True):
-                log_err(
-                    f"could not clone {semester_org}/{repo} - its public copies on the "
-                    "site are left as the last sync made them"
-                )
-                continue
-            keep = _public_selection(src, repo, paths, policies[repo])
-            if served.exists():
-                shutil.rmtree(served)
-            if not keep:
-                continue
-            for rel in keep:
-                dest = served / rel
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src / rel, dest)
-            hosted[repo] = keep
-            log(f"  hosting {len(keep)} public file(s) from {repo}")
-    return hosted
-
-
 def _gh_url(org: str, repo: str, branch: str, kind: str, path: str) -> str:
-    """A GitHub `blob`/`tree` URL for a path in a repo. One template, three callers.
-
-    The semester site's own script parses THIS shape out of the rendered page to offer a file
-    in the student's own fork or clone (`templates/site/_includes/open_in.html`), so the
-    two change together."""
+    """A GitHub `blob`/`tree` URL for a path in a repo. One template, every caller."""
     return f"https://github.com/{org}/{repo}/{kind}/{branch}/{quote(path)}"
 
 
-def _file_link(
-    semester_org: str, repo: str, branch: str, path: str, name: str, hosted: Hosted
-) -> Link:
-    """One released file as a link: the GitHub blob it always has, plus the site's own
-    hosted copy when the mirror actually made one AND a browser would render it
-    (`_RENDERED_EXTENSIONS`). The one place the two destinations are paired, and it reads
-    what was COPIED rather than re-deciding what should have been - a page cannot link a
-    copy that does not exist."""
-    view = (
-        _view_url(semester_org, repo, path)
-        if _ext(path) in _RENDERED_EXTENSIONS and path in hosted.get(repo, ())
-        else ""
-    )
-    return Link(name, _gh_url(semester_org, repo, branch, "blob", path), view)
+def _file_link(semester_org: str, repo: str, branch: str, path: str, name: str) -> Link:
+    """One released file as a link to its GitHub blob. The semester site hosts no copies
+    (decision 0011 rule 5): the student console opens files from the private repo."""
+    return Link(name, _gh_url(semester_org, repo, branch, "blob", path))
 
 
 # The link name for the escape hatch out of an allowlist: whatever the list does not
@@ -427,8 +216,7 @@ def _shape_links(
 
     `blobs` is every file under the folder, named by path relative to it (`_landed`);
     `tree_base` is the folder's own GitHub tree URL. Order follows `blobs` (path
-    sorted), files before folders, for a stable diff. A FOLDER link never carries a hosted
-    copy: what it opens is a GitHub listing, and this site hosts files, not directories."""
+    sorted), files before folders, for a stable diff."""
     blobs = [b for b in blobs if not has_never_material_component(b.name)]
     if allow:
         return [b for b in blobs if _ext(b.name) in allow] + [
@@ -457,7 +245,7 @@ class _Landed:
     links: list[Link]
     overlays: list[str] = field(default_factory=list)
     # A single file at the repo's root - a course document (the syllabus, a README),
-    # which is what the home page and All Materials show rather than a row.
+    # which is what the home page shows rather than a row.
     root_file: bool = False
 
 
@@ -465,7 +253,6 @@ def _landed(
     semester_org: str,
     deploy: schedule.Deploy,
     allow: frozenset[str],
-    hosted: Hosted,
     readings: bool,
 ) -> _Landed | None:
     """What `deploy` has landed, or None while nothing has: a file is one link, a folder
@@ -481,7 +268,7 @@ def _landed(
         name = path.rsplit("/", 1)[-1]
         if readings and is_reading_overlay(name):
             return _Landed(repo, section, [], [path])
-        link = _file_link(semester_org, repo, branch, path, name, hosted)
+        link = _file_link(semester_org, repo, branch, path, name)
         return _Landed(repo, section, [link], root_file="/" not in path)
     prefix = f"{path}/" if path else ""
     inside = [b for b in blobs if b.startswith(prefix)]
@@ -489,7 +276,7 @@ def _landed(
         return None
     overlays = [b for b in inside if readings and is_reading_overlay(b)]
     files = [
-        _file_link(semester_org, repo, branch, b, b[len(prefix) :], hosted)
+        _file_link(semester_org, repo, branch, b, b[len(prefix) :])
         for b in inside
         if b not in overlays
     ]
@@ -505,7 +292,6 @@ def _row_landed(
     semester_org: str,
     deploys: tuple[schedule.Deploy, ...],
     allow: frozenset[str],
-    hosted: Hosted,
     live_repos: frozenset[str],
     readings: bool,
 ) -> list[_Landed]:
@@ -524,7 +310,7 @@ def _row_landed(
     for deploy, (repo, path) in zip(deploys, dests, strict=True):
         if repo not in live_repos or inside(repo, path):
             continue
-        landed = _landed(semester_org, deploy, allow, hosted, readings)
+        landed = _landed(semester_org, deploy, allow, readings)
         if landed is not None:
             out.append(landed)
     return out
@@ -547,228 +333,35 @@ def _reading_list(semester_org: str, landed: list[_Landed]) -> str:
     return "\n\n".join(parts)
 
 
-def _section_boundary(repo: str, path: str) -> tuple[str, str]:
-    """(section, the prefix of `path` that names it) for one released blob already known
-    to hold a "/" - a root file is handled separately by the caller.
-
-    The ordinal decides only the LEVEL a section is read at, never whether a file shows up:
-
-    - a repo whose top-level directories are session folders (`01_intro/...`) IS one
-      section, the repo's own name - the shape a semester gets from
-      `semester_dest_repo: lectures`. Nothing is stripped, so a session folder is itself the
-      first node the tree gets.
-    - a repo holding `lectures/`, `labs/`, `datasets/` gives one section EACH, named after
-      the top directory - the shape from a single `materials` repo. That directory name IS
-      the prefix, stripped so its own children become the section's nodes.
-
-    Both live semester shapes therefore land where a reader expects. Same reading as
-    `deploy_section` - head-of-path, else the repo - one level down."""
-    head, _sep, _rest = path.partition("/")
-    if session_number(head) is not None:
-        return repo, ""
-    return head, f"{head}/"
-
-
-@dataclass
-class _IndexEntry:
-    """One node of the All Materials index - a file, or a directory nesting its own
-    children to whatever depth the release actually has. `files` is 1 for a file and the
-    total under a directory, so a level's total is always `sum(e.files for e in level)`
-    regardless of what it mixes."""
-
-    name: str
-    is_dir: bool
-    # Both destinations in one record, the same one a session row carries. A directory's
-    # never has a hosted copy: what it opens is a GitHub listing.
-    link: Link
-    files: int = 0
-    entries: dict[str, _IndexEntry] = field(default_factory=dict)
-
-    @property
-    def label(self) -> str:
-        """How the row reads: a directory keeps its trailing slash so it is obviously not
-        a file."""
-        return f"{self.name}/" if self.is_dir else self.name
-
-    @property
-    def children(self) -> list[_IndexEntry]:
-        """This node's own entries, sorted for display."""
-        return _sorted_entries(self.entries)
-
-
-def _sorted_entries(entries: dict[str, _IndexEntry]) -> list[_IndexEntry]:
-    """One level of the All Materials tree, directories before files, both alphabetically:
-    this is a directory listing, where the structure is what a reader scans - the ordering
-    every level uses, from a section's own top down to its deepest file."""
-    return sorted(entries.values(), key=lambda e: (not e.is_dir, e.name.lower()))
-
-
-def _insert_released_path(
-    root: dict[str, _IndexEntry],
-    semester_org: str,
-    repo: str,
-    branch: str,
-    full_path: str,
-    prefix: str,
-    hosted: Hosted,
-) -> None:
-    """Add one released blob into the nested tree rooted at `root`, creating every
-    ancestor directory it needs and counting the file into each one's `files`.
-
-    `full_path` is the blob's path in `repo`; `prefix` is the part `_section_boundary`
-    already spent naming the section, so what remains is split and walked exactly as deep
-    as the release actually is - a file three folders down nests three folders down, unlike
-    a session row's links (`_shape_links`), which fold a subfolder into a count because
-    this is the one page a reader opens to see the whole shape instead."""
-    parts = full_path[len(prefix) :].split("/")
-    node = root
-    entry_path = prefix.rstrip("/")
-    for i, part in enumerate(parts):
-        is_dir = i < len(parts) - 1
-        entry_path = f"{entry_path}/{part}" if entry_path else part
-        entry = node.get(part)
-        if entry is None:
-            link = (
-                Link(part, _gh_url(semester_org, repo, branch, "tree", entry_path))
-                if is_dir
-                else _file_link(semester_org, repo, branch, entry_path, part, hosted)
-            )
-            entry = node[part] = _IndexEntry(part, is_dir, link)
-        entry.files += 1
-        node = entry.entries
-
-
-def _emit_entries(entries: list[_IndexEntry], indent: str) -> list[str]:
-    """YAML lines for one level of the All Materials tree, `indent` growing with every
-    level it recurses into - a file three folders down reads no differently than one at
-    the top, just deeper in the page."""
-    lines: list[str] = []
-    for e in entries:
-        lines.append(f'{indent}- name: "{q(e.label)}"')
-        lines.append(f"{indent}  url: {e.link.url}")
-        # Written only where there is one, exactly as `links_block` writes it: an index
-        # with nothing public is byte-identical to the one every course has today.
-        if e.link.view_url:
-            lines.append(f"{indent}  view_url: {e.link.view_url}")
-        if e.is_dir:
-            lines.append(f"{indent}  files: {e.files}")
-            lines.append(f"{indent}  entries:")
-            lines.extend(_emit_entries(e.children, indent + "    "))
-    return lines
-
-
 def _indexable_repos(
     sched: schedule.Schedule, release_sources: list[tuple[str, str, str, int]]
 ) -> set[str]:
-    """Which semester repos the All Materials index is allowed to read.
+    """Which semester repos the site's rows and syllabus lookup are allowed to read.
 
     A POSITIVE allowlist, deliberately. `discover_semester_repos` works by exclusion - a repo
     is content unless it carries an infra topic - and that topic is written once, on
     creation, with its result ignored (`assign.py`), so a submission repo whose tag failed
     is content forever. That was survivable while a repo only reached the site by holding
-    `NN_` session folders; this index reads whole trees, and the site repo it writes into is
-    PUBLIC, so the same slip would publish every path of a student's private work.
+    `NN_` session folders; the off-plan rows read whole trees, and the site repo they write
+    into is PUBLIC, so the same slip would publish a student's private folder names.
 
     Two positive signals, both faculty declarations: a repo the release plan names as a
     destination, and a repo discovery actually found a released session in (which covers a
     manual release into a repo the plan never mentions). Non-ordinal material - a root
-    `SYLLABUS.md`, a flat `datasets/` - is still indexed, because the signal is the REPO,
-    not the folder shape inside it."""
+    `SYLLABUS.md`, a flat `datasets/` - is still read, because the signal is the REPO, not
+    the folder shape inside it."""
     planned = {d.semester_dest_repo for r in sched.releases for d in r.deploy}
     return planned | {repo for repo, _sub, _folder, _n in release_sources}
 
 
-def _materials_index(
-    semester_org: str,
-    content_repos: list[str],
-    hosted: Hosted,
-    syllabus: Link | None = None,
-) -> str:
-    """`_data/materials.yml` - every file released to this semester, nested exactly as its
-    repo has it, for the All Materials tab.
-
-    The catch-all. Every other page is curated: a row exists because the schedule named a
-    session, and its links are the files of that session. This is the complete index, so
-    it answers the two questions the curated pages cannot - a student's "what do I have?"
-    and a teaching team's "did my file actually ship?" - including material no session
-    ordinal covers.
-
-    Nested, not folded: contrast the session rows (`_shape_links`), which count a
-    subfolder rather than open it because a deck's rendered assets would otherwise bury the
-    three files a student opens. This index is the one page meant to show the whole shape
-    of what shipped, so a directory carries its own children all the way down instead.
-    Filtered by name only where `_shape_links` is - no rule about dots, because a dotfile
-    can be course material and most real clutter is not dotted, but the closed list of
-    names that are never course material anywhere (`repos.NEVER_MATERIAL`) applies here
-    too. Showing the whole shape of what shipped is not a reason to tell a class that a
-    `.gitkeep` is one of their materials.
-
-    Directories lead, then files, both alphabetically, at every level: this is a directory
-    listing, where the structure is what a reader scans - unlike a session row, which leads
-    with the deliverables because there the files ARE the material.
-
-    Root files come out separately as `documents:` rather than as sections of their own,
-    because a course-level document is not a section: a README released into three content
-    repos was appearing three times, once under each repo's heading."""
-    found: dict[str, dict[str, _IndexEntry]] = {}
-    # Course-level documents - the syllabus, the README - keyed by NAME, not by the repo
-    # they happen to sit in. They used to take the repo as their section, so a README
-    # released into three content repos showed up three times, once under each. Deduping by
-    # name is not lossy: a root document reaches a semester by being released FROM one file in
-    # the course materials repo, so the copies are the same document by construction.
-    docs: dict[str, _IndexEntry] = {}
-    for repo in sorted(content_repos):
-        branch, paths = _repo_tree(semester_org, repo)
-        for path in paths:
-            # A released `solution/`, `grading_config.yml` or hidden `tests/` is not course
-            # material, and this index is the one page that lists everything a release
-            # happened to carry - so it was the shortest route from "someone released a
-            # folder wholesale" to "the whole class has the answers".
-            #
-            # The second check is the harmless twin of the first and stays a separate
-            # list: nothing on it leaks anything, it is what a machine drops in a folder
-            # (see `repos.NEVER_MATERIAL`).
-            if not publishable(path):
-                continue
-            if "/" not in path:
-                doc = _file_link(semester_org, repo, branch, path, path, hosted)
-                docs.setdefault(path, _IndexEntry(path, False, doc, files=1))
-                continue
-            section, prefix = _section_boundary(repo, path)
-            _insert_released_path(
-                found.setdefault(section, {}),
-                semester_org,
-                repo,
-                branch,
-                path,
-                prefix,
-                hosted,
-            )
-    rows_out: list[str] = []
-    for section in sorted(found):
-        entries = _sorted_entries(found[section])
-        rows_out.append(f'  - name: "{q(section)}"')
-        rows_out.append(f"    files: {sum(e.files for e in entries)}")
-        rows_out.append("    entries:")
-        rows_out.extend(_emit_entries(entries, "      "))
-    # Through the same emitter as every other node: a root document is a file entry that
-    # happens to sit at the top level, and a second copy of "how a node is written" is how
-    # the two come to disagree about a field.
-    doc_rows = _emit_entries(sorted(docs.values(), key=lambda e: e.name.lower()), "  ")
-    header = (
-        "# Generated by `python3 -m dsl_course.site sync` - every released file, nested\n"
-        "# as its repo has it. Edit nothing here; it is rewritten on every sync.\n"
-    ) + (
-        # ONE key: the home page pins a single link, so what it opens is the hosted copy
-        # where there is one and the GitHub blob otherwise.
-        f"syllabus: {syllabus.view_url or syllabus.url}\n" if syllabus else ""
+def _home_data(syllabus: Link | None) -> str:
+    """`_data/materials.yml`: now only the syllabus the home page pins (absent when none
+    has been released). The All Materials index went with its tab: the student console
+    lists a semester's files from the repo itself."""
+    return (
+        "# Generated by `python3 -m dsl_course.site sync`. Rewritten on every sync.\n"
+        + (f"syllabus: {syllabus.url}\n" if syllabus else "")
     )
-    # Stated, not reached: `sections: []` is the empty index, the same shape
-    # `links_block` uses for a row with nothing to link.
-    # Documents first, then the sections - the order the page renders them in.
-    body = "documents:\n" + "\n".join(doc_rows) + "\n" if doc_rows else ""
-    body += "sections:\n" + "\n".join(rows_out) if rows_out else "sections: []"
-    return header + body + "\n"
 
 
 def _dest_link(semester_org: str, dest: str, live_repos: frozenset[str]) -> str:
@@ -968,7 +561,6 @@ def _offplan_rows(
     semester_org: str,
     rows: list[PlannedRow],
     allow: frozenset[str],
-    hosted: Hosted,
     live_repos: frozenset[str],
 ) -> list[tuple[str, _Row]]:
     """`(key, row)` for each off-plan folder: unnumbered, undated, named for its folder. A
@@ -977,7 +569,7 @@ def _offplan_rows(
 
     def land(repo: str, folder: str, readings: bool) -> list[_Landed]:
         deploy = schedule.Deploy("", folder, repo)
-        return _row_landed(semester_org, (deploy,), allow, hosted, live_repos, readings)
+        return _row_landed(semester_org, (deploy,), allow, live_repos, readings)
 
     folders = _offplan_folders(semester_org, rows, live_repos)
     lectures = {
@@ -1009,7 +601,6 @@ def _site_rows(
     semester_org: str,
     rows: list[PlannedRow],
     allow: frozenset[str],
-    hosted: Hosted,
     live_repos: frozenset[str],
 ) -> tuple[dict[str, str], list[str]]:
     """The `_lectures` collection - one file per site row (`schedule_plan.site_rows`),
@@ -1022,16 +613,14 @@ def _site_rows(
     for sr in site_rows(rows):
         r = sr.row
         landed = _row_landed(
-            semester_org, r.deploys, allow, hosted, live_repos, r.kind == "readings"
+            semester_org, r.deploys, allow, live_repos, r.kind == "readings"
         )
         if not r.shown and all(item.root_file for item in landed):
             continue
         readings = []
         pending = False
         for attached in sr.readings:
-            got = _row_landed(
-                semester_org, attached.deploys, allow, hosted, live_repos, True
-            )
+            got = _row_landed(semester_org, attached.deploys, allow, live_repos, True)
             readings += got
             pending = pending or not got
         row = _Row(
@@ -1048,7 +637,7 @@ def _site_rows(
             dests=r.dests,
         )
         built.append((r.key, row))
-    built += _offplan_rows(semester_org, rows, allow, hosted, live_repos)
+    built += _offplan_rows(semester_org, rows, allow, live_repos)
     out: dict[str, str] = {}
     tabs: dict[str, None] = {}
     for key, row in built:
@@ -1064,7 +653,6 @@ def _declared_syllabus(
     semester_org: str,
     sched: schedule.Schedule,
     live_repos: frozenset[str],
-    hosted: Hosted,
 ) -> Link | None:
     """The syllabus released to this semester (`schedule_plan.declared_syllabus`) as the
     home page's link, or None - the home page then shows no line."""
@@ -1078,35 +666,7 @@ def _declared_syllabus(
         return None
     repo, path = found
     branch, _blobs = _repo_tree(semester_org, repo)
-    return _file_link(semester_org, repo, branch, path, path.rsplit("/", 1)[-1], hosted)
-
-
-def member_digest(semester_org: str, handle: str) -> str:
-    """A team member as the public semester site carries them: SHA-256 of
-    `<semester org>:<handle, lower-cased>`, hex. Never the handle itself - the page's script
-    hashes its reader's saved handle the same way (_layouts/assignment.html, `memberKey`)
-    to recognise their team, and nothing else can read one back. Salted with the org so one
-    student's digest differs from semester to semester. `.lower()`, not `.casefold()`, because
-    the browser side is `toLowerCase` and GitHub handles are ASCII."""
-    return hashlib.sha256(f"{semester_org}:{handle.lower()}".encode()).hexdigest()
-
-
-def _formed_teams(semester_org: str, key: str) -> list[tuple[str, list[str]]]:
-    """`(team, member handles)` for every team formed for `key` so far, by name.
-
-    The same reader `team_formation.open_windows` uses, on the same private file and keyed
-    on the same SCHEDULE key - so the table the site prints and the fault the teaching team
-    gets count one thing.
-
-    Never fatal, and that is the point of catching here: teams.csv is student-written, and a
-    row somebody broke must not take down the render of a semester's whole website. The
-    callout above still goes out; only the table is missing."""
-    try:
-        groups = teams.teams_for(teams.load(semester_org), key)
-    except RuntimeError as exc:
-        log_err(f"could not read {semester_org}'s teams for {key}: {exc}")
-        return []
-    return sorted((team, sorted(members)) for team, members in groups.items())
+    return _file_link(semester_org, repo, branch, path, path.rsplit("/", 1)[-1])
 
 
 def _assignment_entry(
@@ -1120,8 +680,11 @@ def _assignment_entry(
     now: datetime | None = None,
     sched: schedule.Schedule | None = None,
 ) -> str:
-    """An assignment's page, plus the two schedule rows it drives: the entry's own
-    `date:` is the "released!" row and its `due_event:` sub-block the due row.
+    """The two schedule rows one assignment drives, as one `_assignments` entry: its
+    `date:` is the hand-out ("Assignment out") row and its `due_event:` sub-block the due
+    row. There is no assignment PAGE (decision 0011 rule 5): the brief, the shape note, the
+    late rule and the teams are the student console's (`student_status`), so the entry
+    carries the calendar and nothing else.
 
     `when` is the due date (a real one from schedule.yml, or a synthesised fallback);
     `handout` the scheduled provisioning moment when there is one. A handout dates the
@@ -1129,73 +692,20 @@ def _assignment_entry(
     unscheduled assignment keeps both rows on the due date (the only date known).
 
     `found` is this assignment's `(slug, entry)` from the plan, already resolved by the
-    caller, or None for one the plan does not name. It supplies the semester-side repo name
-    exactly as assign.py / collect.py resolve it (`semester_dest_repo` else the slug, else
-    the course repo minus its -fYYYY/-sYYYY tag), so the page names the repo students
-    actually get - deriving it from the course repo alone named the wrong repo, and titled
-    the page wrong, whenever an entry set `semester_dest_repo`.
+    caller (two entries may cite one template, so a lookup here by repo would merge them),
+    or None for one the plan does not name. It supplies the semester-side name exactly as
+    assign.py / collect.py resolve it.
 
-    Handed IN rather than looked up here, because `schedule.entry_for_repo` maps a repo to
-    the FIRST entry citing it - and two entries may legitimately cite one
-    `course_source_repo` (a copy-paste, or two variants handed out from one template).
-    Looking it up here gave both of them the same slug, the same dates and one collection
-    file, so the second assignment vanished from the site.
+    An assignment NOT YET HANDED OUT is flagged `handout_pending: true` and its body says
+    so: the plan is public from the day it is written, the payload arrives on hand-out, so
+    its name comes from the template's `title:` alone until then (its README heading is
+    the brief's, and waits). Handed out means `handed_out` holds its semester-side name (the
+    frozen semester template exists) or its `handout` has passed.
 
-    BOTH orgs, because the two halves of an assignment live in different ones: the template
-    and its README are read from `course_org`, and the repo a student actually works in is
-    in `semester_org`. This took `course_org` alone and used it for both, so every released
-    assignment told students their repo was "in `<course-org>`'s semester org" - naming the
-    org they have no access to, and leaving them to guess the one they do.
-
-    A released entry carries `repo_url` / `repo_name` for that repo. The URL is the semester
-    org's repo list filtered to this assignment, not a per-student address: the site is one
-    public page for the whole semester and cannot know who is reading it, but GitHub shows a
-    signed-in student only the repos they can see - so the filter resolves to their own (or
-    their team's). `repo_name` is the shape to expect, `<slug>-<your-handle>` or
-    `-<your-team>` for a group assignment.
-
-    An assignment NOT YET HANDED OUT is a PLACEHOLDER, flagged `handout_pending: true`:
-    both schedule rows, and an entry the Assignments tab renders unlinked, saying it is
-    not out yet. What is withheld is the assignment's CONTENT, which is the same line
-    `_row_entry` draws for an unreleased session - the plan is public from the day it
-    is written, the payload arrives on release.
-
-    The distinction matters here more than anywhere else on the site. The rows are driven
-    by the course org's `assignment-*` TEMPLATE repos
-    (`discovery.discover_assignments`), which exist from the moment faculty write the
-    assignment - weeks before it hands out - so the README is not read at all while the
-    assignment is pending: neither the brief nor the real title (`# Detecting fraud in the
-    transfer dataset` is the assignment, not its name) can reach the public semester site
-    early. The placeholder carries only what the plan already publishes on the schedule -
-    the slug's own name, the hand-out date and the deadline.
-
-    Handed out means EITHER of two things, and it takes both being false to withhold:
-
-    - `handed_out` holds this assignment's semester-side name - a frozen semester template repo
-      exists (`discovery.discover_handed_out_assignments`), so students have their repos
-      whatever route fired it. This is the same "what actually shipped" signal a session
-      row reads, and the only one that covers the manual workflow, whose documented mode
-      pins no `handout_datetime` at all until it fires.
-    - `handout` has passed. A pin whose provisioning then failed still says the brief was
-      meant to be out by now, and a schedule that says so is not a secret worth keeping.
-
-    `now` is the moment to judge the pin against (default: actual now, in the handout's own
-    semester timezone - `_coerce_datetime` hands out nothing naive).
-
-    A self-select GROUP assignment inside its team-formation window is the third state,
-    and it exists because the second bullet above is right about the brief and silent about
-    everything else: that handout parks and provisions nothing until a team exists, so the
-    pin published the brief and, beside it, a `repo_url` into a repo list an unteamed
-    student sees nothing in. Both stay - the assignment really is out, and a team that
-    formed on day one owns its repo already - and `team_join_url` / `team_join_cap` /
-    `team_join_closes` are written ALONGSIDE them: the thing the student can actually do
-    about an empty listing.
-
-    The WINDOW, off `sched` and never "has any team formed yet": the second is
-    semester-wide, so the first team to form would take the invitation away from every
-    student still looking for one. `sched` is the plan the caller already parsed; without
-    it (a caller that has no plan to hand) there is no window and the page reads as it
-    always did."""
+    While a self-select group assignment's team-formation window is open
+    (`schedule.formation_state`, the same answer the Join-team form's lock reads), the
+    hand-out row carries `team_join_url` / `team_join_closes`: the one thing a student can
+    do about it, and the day the door shuts. Never the teams."""
     slug = schedule.semester_name(*found) if found else assignment_slug(repo)
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
     due = iso_when(when, "23:59:00")
@@ -1204,76 +714,30 @@ def _assignment_entry(
         now or datetime.now(handout.tzinfo)
     )
     out = slug in handed_out or pinned_out
-    # A group assignment fans out one repo per TEAM, so the shape a student looks for
-    # differs. Off the assignment's own spec, like every other consumer, rather than a
-    # second copy of the rule here - which is how the site comes to name a shape the
-    # handout does not create. It costs the template's grading_config.yml, memoised per
-    # template per process; the semester's schedule.yml, which the site used to read it
-    # from for free, no longer has a say.
     spec = load_grading_spec(
         course_org,
         repo,
         semester_org=semester_org if found else "",
         slug=found[0] if found else "",
     )
-    # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half
-    # that must not change at hand-out. It used to be overwritten by the README heading, so
-    # a row published as "Assignment 2" became "Assignment 1 - linear regression from
-    # scratch (individual)" the moment it shipped - the same row apparently becoming a
-    # different thing. Exactly `_row_entry`'s split: `title` identifies, `subtitle`
-    # names (and the theme renders the pair identically for both).
+    # The slug's own name is the row's IDENTIFIER, and it does not change at hand-out;
+    # the template's `title:`, else (once out) its README heading, is its NAME.
     title = identifier(slug)
-    # The template's `title:` (its one home, decision 0009) wins, and is the only name
-    # that can appear BEFORE hand-out: the README it otherwise comes from is embargoed
-    # until then.
     subtitle = spec.title
-    # The plan's `details:`, filling the Details column of BOTH rows above what they
-    # already generate - the link to the brief on one, the submit address on the other.
-    # There is no README fallback for it: the brief is the page's body, and a sentence
-    # that appeared on the schedule only once the assignment shipped would be a different
-    # row's worth of information arriving at hand-out.
     details = found[1].details if found else ""
-    # Display-only, and it reaches nothing but the two rows: `due` above is already
-    # resolved, and the freeze, the late window and the cutoff are `schedule.grading_cutoff_datetime`'s
-    # business off `due_datetime`. A deadline that says "(TBC)" still closes when it says.
+    # Display-only: a deadline that says "(TBC)" still closes when it says.
     tbc_fm = "tbc: true\n" if found and found[1].tbc else ""
     tbc_due = indent(tbc_fm, "    ")
     external = spec.submit_external
-    # Is this assignment waiting on its teams RIGHT NOW? `schedule.formation_state` is the
-    # same call `grades.team_lock_entries` makes for the lock the Join-team form reads, so
-    # the page cannot invite a student through a door the form has already shut. The shape
-    # question is the spec's, like every other shape fact on this page: `assigned` teams
-    # are the teaching team's to write, and there is nothing for a student to open.
     window, shuts = (
         schedule.formation_state(sched, found[0], now or datetime.now(UTC))
         if sched is not None and found is not None
         else ("closed", None)
     )
-    # Whether this page should ASK for a team. Keyed on the window, never on whether a
-    # team has formed: "has anybody formed one" is a semester-wide answer, so the first team
-    # to form would take the call to action away from every student still without one.
-    #
-    # It does NOT suppress `repo_url`. Hiding the button for the whole window would punish
-    # exactly the students who acted first - a team that forms on day one would lose the
-    # link to its own repo until the window shut - and for a shared drop box, which exists
-    # from the hand-out whatever the teams do, it would hide a URL that was never empty.
-    # The two live side by side: the button works for a student whose team exists (GitHub
-    # filters the listing by what they can read), and the call to action beside it says
-    # what to do if it comes back empty.
     forming = window == "open" and spec.team_formation_resolved == SELF_SELECT
-    # Where the work goes. `submit_shape` is the SHAPE in one word (`course.submit_shape`:
-    # `assignment-repo-private`, `assignment-repo-public`, `external`), written whatever
-    # the handout state
-    # because it is the plan's and is known before anything ships - the theme `case`s on
-    # it, and without it both the page and the due row told a Moodle semester to submit by
-    # pushing to `main`. ONE key and not the `submit_via`/`visibility` pair it is derived
-    # from: the two are orthogonal in the config and are not on the page, and a theme that
-    # branched on both had to be re-opened for every shape that is neither. An ADDRESS is a
-    # place to go NOW, so `repo_url` and `submit_url` both wait until there is something at
-    # the other end of them; a shape that creates no repo has no name to print at all.
+    # Where the work goes, on the due row: the SHAPE in one word, and the address once
+    # there is something at the other end of it.
     repo_lines = [f'submit_shape: "{spec.submit_shape}"']
-    # Whose folder, or whose repo: a group assignment fans out per TEAM, and the two words
-    # are the same word wherever the page names one.
     whose = "<your-team>" if spec.is_group else "<your-handle>"
     repo_name = ""
     if external:
@@ -1281,9 +745,6 @@ def _assignment_entry(
             repo_lines.append(f'submit_url: "{q(spec.submit_url)}"')
             repo_lines.append(f'submit_host: "{q(spec.submit_host)}"')
     elif spec.submit_shared:
-        # The REAL name, and a real URL: there is one drop box for the whole semester, so
-        # unlike every other shape the page can name the repo exactly rather than describe
-        # its shape. No `repo_name_is_shape` with it - see below.
         repo_name = shared_repo(slug)
         repo_lines.append(f'submit_path: "{whose}/"')
         if out:
@@ -1298,165 +759,40 @@ def _assignment_entry(
                 f'repo_url: "https://github.com/orgs/{semester_org}/repositories?q={slug}-"'
             )
         repo_lines.append(f'repo_name: "{q(repo_name)}"')
-        # Whether `repo_name` is a SHAPE to substitute a handle into, or a real repo
-        # name. The theme marks the button and the link for `open_in.html` on this and on
-        # nothing else: a shared drop box is named exactly, has no `<your-handle>` to
-        # replace, and a rewrite of it would point every reader at a repo that does not
-        # exist. One flag rather than a second `case` in the theme, so a shape added later
-        # says which it is rather than being matched by name.
-        repo_lines.append("repo_name_is_shape: true")
-    # What happens after the deadline, as the sentence the page's callout closes with
-    # (`course.late_rule`, off the assignment's own grading_config.yml like every other
-    # shape fact). Written for every TIMED shape and for no other: `external` creates no
-    # repo, so no commit is pinned, no day is counted and no penalty is ever applied
-    # (`course.collects_commits`) - a rule quoted there would be about a deadline this
-    # toolkit does not hold. The page alone, not the due row: the row is a glance at WHEN
-    # and WHERE, and the rule belongs beside the answer it qualifies.
-    # When the work is READ, closing the route the callout has just given - one sentence
-    # from `course.CUTOFF_SENTENCE`, which the repo's own About line carries too, so the
-    # page and the repo cannot come to name two different moments. Front matter rather
-    # than a line in the layout for that reason alone: three arms of one `case` would
-    # otherwise hold three copies of it, and the About line a fourth.
-    # Gated exactly like `late_rule` below, and for the same reason: `external` pins no
-    # commit, so there is no `main` for a cutoff to be read off.
-    cutoff_fm = (
-        f'cutoff_sentence: "{q(CUTOFF_SENTENCE)}"\n' if spec.collects_commits else ""
-    )
-    late_fm = (
-        f'late_rule: "{q(late_rule(spec.late_window_days, spec.late_penalty_per_day))}"\n'
-        if spec.collects_commits
-        else ""
-    )
-    # What the assignment is out of, off the `questions:` maxima it declares - the same
-    # sum the gradebook prints beside a score (`grades.total_points`), so the two cannot
-    # disagree. Written only when there IS one: `questions:` is optional, and a course may
-    # write `Q1: see rubric`, where there is no total to print at all. The brief asks
-    # nobody to type it (`scaffold._brief_stub`): a fact the assignment already declares
-    # is read from the declaration. The page alone, like `late_rule` - the due row is a
-    # glance at WHEN and WHERE.
-    points = total_points(spec)
-    points_fm = f'max_points: "{points}"\n' if points else ""
-    # Who can read the repo this shape hands out, as the aside the layout prints under the
-    # brief (`course.SHAPE_NOTES` - the same sentence the repo's own About line carries, so
-    # the page and the repo cannot come to say different things). Written for every shape
-    # that hands one out, the ordinary private repo included; empty for `external`, which
-    # hands out no repo for a sentence to be about.
-    # The PAGE alone: the due row is a glance at when and where, and a warning in it would
-    # be read on the schedule by everyone, about every assignment, at once.
-    # And only once the brief is out: a warning about a repo that does not exist yet would
-    # sit above the line saying the assignment has not been handed out.
-    note = shape_note(spec.submit_shape) if out else ""
-    note_fm = f'shape_note: "{q(note)}"\n' if note else ""
-    # The one thing a student can act on while this assignment waits for its teams: the
-    # `join` repo's issue chooser, the cap on a team and the day the door shuts. Three
-    # keys and no fourth flag - their PRESENCE is the state, so a theme that has never
-    # heard of team formation renders nothing rather than an empty callout, and the layout
-    # and the schedule row read the same two facts rather than each wording its own.
-    #
-    # The first thing on either site to link `join` at all, so it is built from the
-    # SEMESTER org: the course org has no join repo, and the one this semester's students
-    # are members of is the only one that would answer them.
-    #
-    # The day, not the moment, and SPOKEN here (`grades.spoken_day`, in the semester's zone):
-    # it is the same day the Join-team form's refusal and the mail name, in the same
-    # spelling, and an hour would invite a student to read a deadline off a page whose
-    # timezone it does not state.
-    #
-    # WHICH teams exist rides with them, off the semester's private teams.csv: a student
-    # deciding whether to start a team or ask to join one needs to know what is already
-    # there, and this page is the one list of them - a push to teams.csv re-syncs it.
-    #
-    # NAMES AND COUNTS, and no readable handle: each team's members ride as salted SHA-256
-    # digests (`member_digest`), for the page's script to recognise its own reader's team
-    # and nothing else.
-    #
-    # And each team's own repo URL, precomputed here off the same `submission_repo` the
-    # handout provisions with, so the page's script links a recognised reader straight to
-    # it without a second spelling of the name. A shared drop box is one repo for every
-    # team, so its URL is the drop box's; an external assignment has no repo to link.
     team_fm = ""
     if forming and shuts is not None:
-        join_url = join_issue_url(semester_org)
-        cap = team_cap(course_org, spec)
-
-        def team_entry(name: str, handles: list[str]) -> str:
-            if external:
-                url = ""
-            elif spec.submit_shared:
-                url = f"https://github.com/{semester_org}/{q(shared_repo(slug))}"
-            else:
-                url = f"https://github.com/{semester_org}/{q(submission_repo(slug, name))}"
-            digests = ", ".join(f'"{member_digest(semester_org, h)}"' for h in handles)
-            return (
-                f'  - name: "{q(name)}"\n    members: {len(handles)}\n    cap: {cap}\n'
-                f"    members_sha256: [{digests}]\n"
-                + (f'    repo_url: "{url}"\n' if url else "")
-            )
-
-        listed = "".join(
-            team_entry(name, handles)
-            for name, handles in _formed_teams(semester_org, found[0])
-        )
         closes = spoken_day(schedule.in_semester_zone(sched, shuts))
         team_fm = (
-            f'team_join_url: "{join_url}"\n'
-            f'team_join_cap: "{cap}"\n'
+            f'team_join_url: "{join_issue_url(semester_org)}"\n'
             f'team_join_closes: "{closes}"\n'
-            f'team_salt: "{q(semester_org)}"\n'
-            + (f"teams:\n{listed}" if listed else "")
         )
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
-    # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
-    # student when to submit is the one that should say where.
+    # `map: "due_event"`, so it cannot see its parent's fields.
     repo_fm = "".join(f"{ln}\n" for ln in repo_lines)
     repo_due = "".join(f"    {ln}\n" for ln in repo_lines)
     if out:
-        readme = get_file_content(course_org, repo, "README.md") or ""
-        for line in readme.splitlines():
-            if line.startswith("# ") and not subtitle:
-                subtitle = row_name(line[2:], title)
-                break
-        brief = "\n".join(
-            ln for ln in readme.splitlines() if not ln.startswith("# ")
-        ).strip()
-        flags = ""
-        # No trailing "your repo appears once the teaching team provisions it" line: the
-        # repo exists by the time this renders, and the theme now links it twice off the
-        # fields above. The body is the brief, and nothing else.
-        body = liquid_raw(brief or "Assignment brief.")
+        if not subtitle:
+            readme = get_file_content(course_org, repo, "README.md") or ""
+            heading = next(
+                (ln[2:] for ln in readme.splitlines() if ln.startswith("# ")), ""
+            )
+            subtitle = row_name(heading, title)
+        flags, body = "", ""
     else:
-        # A flag as well as the prose: the theme leaves the title unlinked off this,
-        # and the sentence says why. Its twin on a session row, `unreleased: true`, is
-        # written for the same reason - and the Readings tab now reads it rather than
-        # inferring the state from an empty body.
-        # No `repo_url`: there is nothing at the other end of it yet.
         flags = "handout_pending: true\n"
-        # Word for word the shape of an unreleased session's line (`_row_entry`):
-        # "**<what> is not yet released** - <where it will be> when <it is>", bold lead
-        # inside italics. They render in the same table column and on adjacent tabs, so
-        # they read as one status vocabulary or as two.
-        # The word describes the repo the handout will CREATE, which for the shape whose
-        # flag the students hold is a private one - `student_choice` is a rule about who
-        # may change it later, not a repo anybody is ever handed.
+        # Word for word the shape of an unreleased session's line (`_row_entry`).
         born = "private" if spec.visibility_is_students else spec.visibility
         if external:
-            coming = "the brief appears here when it is"
+            coming = ""
         elif spec.submit_shared:
-            # Not "your repo": there is one, it is the semester's, and what is the student's
-            # own is a folder in it.
-            coming = f"the `{repo_name}` drop box appears when it is"
+            coming = f" - the `{repo_name}` drop box appears when it is"
         else:
-            coming = f"your {born} `{repo_name}` repo appears when it is"
-        body = f"_**{title} is not yet released** - {coming}._"
-    # After the branch above, which is where a released entry learns its name from the
-    # README. The due row is the same assignment, so it shows the same two halves -
-    # identifier bold, name beneath - rather than one of them.
+            coming = f" - your {born} `{repo_name}` repo appears when it is"
+        body = f"_**{title} is not yet released**{coming}._"
     sub_fm = f'subtitle: "{q(subtitle)}"\n' if subtitle else ""
     sub_due = f'    subtitle: "{q(subtitle)}"\n' if subtitle else ""
-    # Written at BOTH levels for the same reason `repo_lines` is: the due row is a
-    # sub-hash the theme reaches through `map: "due_event"`, so it cannot see its parent's
-    # `details`, and the row that tells a student when to hand in is as entitled to the
-    # sentence as the one that tells them it is out.
+    # Both rows carry the plan's `details:`: the due row is a sub-hash the theme reaches
+    # through `map: "due_event"`, so it cannot see its parent's.
     details_fm = _details(details)
     details_due = indent(details_fm, "    ")
     return (
@@ -1469,10 +805,6 @@ def _assignment_entry(
         f"{tbc_fm}"
         f"{flags}"
         f"{repo_fm}"
-        f"{cutoff_fm}"
-        f"{late_fm}"
-        f"{points_fm}"
-        f"{note_fm}"
         f"{team_fm}"
         f"due_event:\n"
         f"    kind: due\n"
@@ -1658,10 +990,13 @@ def _term_date_entry(name: str, when: date) -> str:
 
 
 def sync_site(course_org: str, semester_org: str) -> int:
-    """Regenerate the semester's student-facing site from the live org state: the term's
-    lecture and lab rows (released ones linked into the private content repos, planned
-    ones marked not-yet-released), this year's assignments, and the display-only rows of
-    the schedule (exams, special events and term dates)."""
+    """Regenerate the semester's public calendar from the live org state: the term's rows
+    by kind (released ones linked into the private content repos, planned ones marked
+    not-yet-released), the assignments' hand-out and due rows, the display-only rows of
+    the schedule (exams, special events and term dates), the home text and the
+    announcements, under a banner to the student console (decision 0011 rule 5). No
+    assignment pages, team lists, hosted copies or materials index: the console has
+    them."""
 
     def build(site_wd: Path) -> SitePlan:
         # ONE listing of the semester answers both questions this build asks of it: which
@@ -1714,12 +1049,6 @@ def sync_site(course_org: str, semester_org: str) -> int:
         indexable = sorted(
             set(content_repos) & _indexable_repos(sched, release_sources)
         )
-        # What this course declares PUBLIC, per release destination (`publish.yml` in the
-        # source repo the plan names). The copy happens here, before a single row is
-        # rendered, so every page that links a hosted copy links one that exists.
-        policies = _publish_policies(course_org, sched, content_repos)
-        hosted = _mirror_public(site_wd, semester_org, policies)
-
         # The rows: one per `releases:` entry, in date order, kind declared or inferred
         # once from where its first copy lands (the source repo's `materials.yml` aliases,
         # else the built-in ones).
@@ -1729,7 +1058,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # The repos the release plan names or a released session was found in: never a
         # student's repo, whose folder names would reach this public site.
         live = frozenset(indexable)
-        rows, present = _site_rows(semester_org, planned, allow, hosted, live)
+        rows, present = _site_rows(semester_org, planned, allow, live)
         log_step(
             f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} row(s) "
             f"({sum('unreleased: true' in text for text in rows.values())} not released "
@@ -1823,19 +1152,12 @@ def sync_site(course_org: str, semester_org: str) -> int:
                 ),
                 "_data/nav.yml": nav_yaml(semester=True, kinds=present),
                 "_data/kinds.yml": kinds_yaml(),
-                # The catch-all index behind the All Materials tab: every released file,
-                # including what no session ordinal covers - across the repos faculty
-                # actually release into, never everything discovery failed to exclude.
-                "_data/materials.yml": _materials_index(
-                    semester_org,
-                    indexable,
-                    hosted,
-                    # Absent when the semester has no syllabus, so the home page shows no
-                    # line rather than an empty one.
-                    syllabus=_declared_syllabus(
-                        course_org, semester_org, sched, live, hosted
-                    ),
+                # The syllabus the home page pins, and nothing else.
+                "_data/materials.yml": _home_data(
+                    _declared_syllabus(course_org, semester_org, sched, live)
                 ),
+                # The banner every page carries: this semester in the student console.
+                "_data/console.yml": console_yaml(semester_org),
                 **theme_pages(semester=True, kinds=present),
                 # The course-specific layouts, includes and stylesheet - shipped
                 # from templates/site/, not from the shared theme, so a change to
@@ -1870,22 +1192,20 @@ def sync_site(course_org: str, semester_org: str) -> int:
                 },
                 "_events": event_entries,
             },
-            # The tab of a kind this semester has no rows of goes.
-            retire=retired_kind_pages(present, site_wd),
+            # The tab of a kind this semester has no rows of goes, and so does every page
+            # and template of the sections a semester site no longer has.
+            retire=retired_kind_pages(present, site_wd) + retired_sections(site_wd),
             commit="site: sync from org structure",
             title="Student site",
         )
 
-    # `--all-semesters` loops this in one process, and the index reads EVERY release
+    # `--all-semesters` loops this in one process, and the rows read EVERY release
     # destination's tree, not just the session-bearing ones - so the memo would pin a few
     # hundred KB per repo for the whole run. Cleared on ENTRY rather than on the way out:
     # most semesters in a daily cron are already up to date and return early, so an exit-path
     # clear ran on the rare path and never on the common one. Keys include the org, so this
     # is purely about memory, never staleness.
     _repo_tree.cache_clear()
-    # Cleared for memory, like the tree memo above, not for staleness: the key names the
-    # course org, and the policy is one small file per source repo.
-    _publish_policy.cache_clear()
     return sync_site_repo(semester_org, build)
 
 

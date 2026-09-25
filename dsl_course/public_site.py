@@ -42,6 +42,7 @@ from .repos import (
 )
 from .site_repo import (
     PUBLISH_CONFIG,
+    RETIRED_TEMPLATES,
     ROW_NOUN,
     Link,
     SitePlan,
@@ -371,6 +372,8 @@ def sync_public_site(
                     f"include_lectures: {str(include_lectures).lower()}\n"
                 ),
             },
+            # Templates this toolkit no longer ships (a semester site's retired sections).
+            retire=RETIRED_TEMPLATES,
             commit=f"site: publish public course site from {source_repo}",
             label="public site",
             title="Public website",

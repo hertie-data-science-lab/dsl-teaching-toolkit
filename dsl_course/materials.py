@@ -15,7 +15,7 @@ the top folder of the DESTINATION path, or the destination repo itself when the 
 at its root. The source repo's `kinds:` first, then the built-in aliases, both matched
 case-insensitively, else `lecture`.
 
-`publish.yml` beside it says which files the semester site hosts openly. Its patterns match
+`publish.yml` beside it says which files the public website may publish. Its patterns match
 the paths of THIS repo (`hosted_paths`), and a release that renames a path is translated
 back through its copies (`hosted_copy`), so the hosted set is what the console previewed.
 """
