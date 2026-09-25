@@ -32,6 +32,7 @@ from .course import (
     CONFIG_REPO,
     COURSE_DEFAULT_CHOICE,
     MATERIALS_REPO_PREFIX,
+    MIGRATE_DRIVER,
     NO_STARTER,
     NOTHING_PUBLIC,
     PUBLIC_DIRS,
@@ -1480,7 +1481,8 @@ on:
 
 # The semester a run is SCOPED to, or ''. Only a semester-config dispatcher's push names one
 # (`templates/semester-config/dispatch-scheduled-release.yml` sends driver=semester-config
-# and its own org as semester_org). The run releases into the one semester that changed and
+# and its own org as semester_org), and so does the migration's catch-up after a semester's
+# unpause (driver=migrate). The run releases into the one semester that changed and
 # hands any site render to Sync site's queue - which a schedule.yml / instructors.yml / teams.csv
 # push has usually just started as well - rather than racing it. Every other arrival - the GitHub cron, the ds01 timer's dispatch
 # (driver=ds01, no semester), the button - walks every semester as before. The payload is
@@ -1488,7 +1490,8 @@ on:
 # the course's own registry before it touches anything.
 _SCOPED_SEMESTER = (
     "(github.event_name == 'repository_dispatch' "
-    f"&& github.event.client_payload.driver == '{CONFIG_REPO}' "
+    f"&& (github.event.client_payload.driver == '{CONFIG_REPO}' "
+    f"|| github.event.client_payload.driver == '{MIGRATE_DRIVER}') "
     f"&& {_PAYLOAD_SEMESTER} || '')"
 )
 

@@ -911,3 +911,8 @@ def row_name(declared: str, identifier: str) -> str:
 # counted, a push in semester A would shrink the gap a late release in semester B is measured
 # by, and hide it.
 SCOPED_RUN_TITLE = "Scheduled release for cohort"
+# The `client_payload.driver` of the Scheduled release and Sync membership a migration
+# dispatches after its unpause, in place of the ticks the pause dropped: the run history
+# tells a catch-up from a real config push by it. With a `semester_org`, the run is scoped
+# to that semester like a semester-config push.
+MIGRATE_DRIVER = "migrate"
