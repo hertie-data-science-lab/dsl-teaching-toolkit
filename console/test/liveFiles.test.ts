@@ -8,8 +8,7 @@ import { courseFileAfter, detailsOf } from '../src/screens/CourseEdit';
 import { YamlText, obj } from '../src/edit/yamlText';
 import { PERSON } from '../src/tiers/people';
 
-const COURSE = `org: demo-course
-course_name: Deep Learning (Demo)
+const COURSE = `course_name: Deep Learning (Demo)
 course_code: E1234
 central_ref: preview
 people:

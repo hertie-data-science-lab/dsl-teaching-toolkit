@@ -53,6 +53,7 @@ from .course import (
     INSTRUCTORS_FILE,
     INSTRUCTORS_TEAM,
     OLD_PEOPLE_FILE,
+    RETIRED_COURSE_KEYS,
     active_today,
     semester_of,
 )
@@ -61,7 +62,7 @@ from .discovery import (
     discover_content_repos,
     live_semesters,
 )
-from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
+from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, Unusable, not_migrated_fault
 from .gh_contents import line_of, load_yaml_config, take_lines
 from .gh_teams import (
     CREATED,
@@ -598,6 +599,28 @@ def _course_fault(what: str, field: str = "", lineno: int | None = None) -> Conf
     )
 
 
+def retired_course_faults(
+    meta: dict, lines: dict[str, int] | None = None
+) -> list[ConfigFault]:
+    """A NOT_MIGRATED fault for each key `dsl-course.yml` no longer has (decision 0009):
+    `course.RETIRED_COURSE_KEYS`. Pure, so the migration verifies with the same rule."""
+    return [
+        ConfigFault(
+            COURSE_CONFIG,
+            f"`{key}:` is no longer read - remove it",
+            field=key,
+            file=COURSE_CONFIG,
+            in_repo=".github",
+            lineno=line_of(lines or {}, key),
+            fix_text=f"delete the `{key}:` line, or run the migration "
+            "(`python -m dsl_course.migrate`), which strips it",
+            code=NOT_MIGRATED,
+        )
+        for key in RETIRED_COURSE_KEYS
+        if key in meta
+    ]
+
+
 def read_course_config(
     course_org: str, faults: list[ConfigFault]
 ) -> dict[str, list[dict]] | None:
@@ -641,6 +664,7 @@ def read_course_config(
     # for `central_ref:` - and so the loader's reserved key cannot survive into anything
     # that renders this mapping.
     lines = take_lines(meta)
+    faults += retired_course_faults(meta, lines)
     faculty = parse_faculty_from_meta(meta, faults, file=COURSE_CONFIG, repo=".github")
     try:
         resolve_central_ref(

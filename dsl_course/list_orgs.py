@@ -90,7 +90,7 @@ def _tier_or_none(org: str, declared: dict) -> str | None:
 def discover_course_orgs() -> list[dict]:
     """Find every `.github` repo tagged `dsl-course-hub` and fetch its metadata.
 
-    Returns a list of dicts with keys: org, readable, org_name, course_name, course_code,
+    Returns a list of dicts with keys: org, readable, course_name, course_code,
     central_ref, url. Sorted by org name.
 
     An org whose metadata could not be read is carried through with `readable: False` and
@@ -112,7 +112,6 @@ def discover_course_orgs() -> list[dict]:
             {
                 "org": owner,
                 "readable": meta is not None,
-                "org_name": declared.get("org_name", owner),
                 "course_name": declared.get("course_name", ""),
                 "course_code": declared.get("course_code", ""),
                 # The deployment tier this course (and every semester under it) runs. Read

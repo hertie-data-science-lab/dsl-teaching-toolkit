@@ -22,9 +22,11 @@ from dsl_course import (
     gh_contents,
     ghcli,
     grades,
+    policy,
     releaseignore,
     repos,
     scaffold,
+    settings,
     workflows_place,
     workflows_render,
 )
@@ -647,8 +649,8 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     # handout, the sheet and the Join-team form all read, over the course's own defaults.
     written = _solution_files(monkeypatch)
     monkeypatch.setattr(
-        scaffold,
-        "course_assignment_defaults",
+        settings,
+        "course_defaults",
         lambda org: {
             "max_team_size": 3,
             "late_window_days": 7,
@@ -674,14 +676,48 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     assert (
         spec.title == "Neural networks: from scratch"
     )  # the colon survives the round trip
-    assert (spec.type, spec.team_formation, spec.max_team_size) == (
-        "group",
-        "assigned",
-        3,
-    )
+    assert (spec.type, spec.team_formation) == ("group", "assigned")
     assert (spec.submit_via, spec.format, spec.autograde) == ("external", "ipynb", True)
-    assert (spec.late_window_days, spec.late_penalty_per_day) == (7, "10%")
-    assert written["grading_config.yml"].startswith("# INSTRUCTOR-OWNED")
+    # Asked for: live. Not asked for: commented at the course's value, so the cascade
+    # (and not a stamped copy of today's default) answers it at read time.
+    assert "team_formation" in spec.declared
+    assert not {"max_team_size", "late_window_days", "late_penalty_per_day"} & (
+        spec.declared
+    )
+    text = written["grading_config.yml"]
+    assert "\n# late_window_days: 7 " in text
+    assert "# this course's default (dsl-course.yml); set here to override" in text
+    resolved = grades.with_run_settings(spec, "Org")
+    assert (resolved.max_team_size, resolved.late_window_days) == (3, 7)
+    assert dict(resolved.sources)["late_window_days"] == "course"
+    assert text.startswith("# INSTRUCTOR-OWNED")
+
+
+def test_an_unasked_run_setting_leaves_the_semester_layer_to_answer(fake, monkeypatch):
+    # No box answered: nothing the scaffold writes may hide `assignments.yml`.
+    written = _solution_files(monkeypatch)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["ipynb"], "group") == 0
+    text = written["grading_config.yml"]
+    assert "\n# late_window_days: 10 " in text and "institution default" in text
+    monkeypatch.setattr(
+        settings,
+        "_assignments_text",
+        lambda org: (
+            "defaults:\n  late_window_days: 3\n  late_penalty_per_day: 5%\n"
+            "  visibility: public\n  team_formation: assigned\n  max_team_size: 2\n"
+        ),
+    )
+    monkeypatch.setattr(grades, "_grading_text", lambda org, template: text)
+    spec = grades.load_grading_spec("Org", "t", semester_org="Sem", slug="a1")
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (3, "5%")
+    assert (spec.visibility, spec.team_formation, spec.max_team_size) == (
+        "public",
+        "assigned",
+        2,
+    )
+    sources = dict(spec.sources)
+    del sources["submit_url"]  # nobody states one
+    assert set(sources.values()) == {"semester"}
 
 
 def test_the_default_shape_is_seeded_as_assignment_repo_never_github(fake, monkeypatch):
@@ -879,18 +915,18 @@ def test_a_course_with_no_defaults_gets_the_toolkit_late_policy(fake, monkeypatc
     # the numbers the assignment will be graded by rather than a pair of comments and a
     # default read from somewhere else. The team cap nobody declared stays a comment.
     written = _solution_files(monkeypatch)
-    monkeypatch.setattr(scaffold, "course_assignment_defaults", lambda org: {})
+    monkeypatch.setattr(settings, "course_defaults", lambda org: {})
     assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
     text = written["grading_config.yml"]
     spec = grades.parse_grading_spec(text)
     assert (spec.late_window_days, spec.late_penalty_per_day) == (
-        course.DEFAULT_LATE_WINDOW_DAYS,
-        course.DEFAULT_LATE_PENALTY_PER_DAY,
+        policy.defaults()["late_window_days"],
+        policy.defaults()["late_penalty_per_day"],
     )
     assert spec.max_team_size is None
     assert "# max_team_size:" in text
-    assert f"late_window_days: {course.DEFAULT_LATE_WINDOW_DAYS}" in text
-    assert f"late_penalty_per_day: {course.DEFAULT_LATE_PENALTY_PER_DAY}" in text
+    assert f"late_window_days: {policy.defaults()['late_window_days']}" in text
+    assert f"late_penalty_per_day: {policy.defaults()['late_penalty_per_day']}" in text
 
 
 @pytest.mark.parametrize(

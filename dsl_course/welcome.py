@@ -417,7 +417,7 @@ def refresh_semester_pointer(org: str, course_org: str) -> int:
         CONFIG_REPO,
         {
             records.path("pointer"): template("semester/dsl-course.yml")
-            .format(course=course_org, org=org)
+            .format(course=course_org)
             .encode()
         },
         "ci: refresh semester -> course pointer",

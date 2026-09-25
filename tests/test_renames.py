@@ -18,14 +18,15 @@ from test_renderers import ALL_RENDERED
 
 from dsl_course import (
     assign,
-    bootstrap_course,
     collect,
+    course,
     deploy,
     discovery,
     grades,
     list_orgs,
     schedule,
     schemas,
+    settings,
     site,
     status,
     status_json,
@@ -233,12 +234,16 @@ def test_a_cli_takes_only_the_new_flag(monkeypatch, capsys, flag):
         assert seen == [("C", "Sem")]
 
 
-def test_bootstrap_refuses_the_old_cohort_defaults_block(monkeypatch):
+@pytest.mark.parametrize("key", course.RETIRED_COURSE_KEYS)
+def test_a_retired_course_key_is_not_migrated(monkeypatch, key):
     monkeypatch.setattr(
-        bootstrap_course, "org_meta", lambda org: {"cohort_defaults": {}}
+        sync_faculty,
+        "load_yaml_config",
+        lambda *a, **k: {key: "x", "people": {"course_admins": []}},
     )
-    with pytest.raises(NotMigrated):
-        bootstrap_course.course_semester_defaults("C")
+    faults: list = []
+    sync_faculty.read_course_config("C", faults)
+    assert [f.field for f in faults if f.code == NOT_MIGRATED] == [key]
 
 
 @pytest.mark.parametrize(
@@ -484,7 +489,7 @@ def test_a_template_naming_only_format_is_refused_whole(monkeypatch, capsys):
     assert spec.formats == ("py",)
     assert [(d.field, d.code) for d in spec.dropped] == [("format", NOT_MIGRATED)]
     # Loaded, it is flagged rather than read as the defaults, and the handout refuses it.
-    monkeypatch.setattr(grades, "_grading_text", lambda org, t: "format: ipynb\n")
+    monkeypatch.setattr(grades, "_grading_text", lambda org, t, **_: "format: ipynb\n")
     assert grades.load_grading_spec("C", "a1").not_migrated
     assert grades.declared_grading_spec("C", "a1").not_migrated
     assert assign.provision_all("C", "a1", "S") == (1, False)
@@ -496,8 +501,8 @@ def test_a_template_naming_only_format_is_refused_whole(monkeypatch, capsys):
 
 
 def test_a_course_default_under_the_old_format_key_is_not_read():
-    assert grades.parse_assignment_defaults({"format": "py"}) == {}
-    assert grades.parse_assignment_defaults({"formats": "py"}) == {"formats": "py"}
+    assert settings.parse_assignment_defaults({"format": "py"}) == {}
+    assert settings.parse_assignment_defaults({"formats": "py"}) == {"formats": ("py",)}
 
 
 # ------------------------------------------------ preview (dry_run, write) and notify

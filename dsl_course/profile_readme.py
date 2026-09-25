@@ -242,7 +242,6 @@ Built and kept in sync by the [DSL teaching toolkit](https://github.com/{CENTRAL
 
 def render_profile_readme(
     org: str,
-    org_name: str,
     course_name: str,
     repos: list[dict],
     is_semester: bool,
@@ -462,7 +461,6 @@ Maintained by the [Hertie Data Science Lab](https://github.com/hertie-data-scien
 
 def profile_files(
     org: str,
-    org_name: str | None = None,
     course_name: str | None = None,
     *,
     central_ref: str,
@@ -471,22 +469,20 @@ def profile_files(
     """The org's `.github` READMEs exactly as `update_profile_readme` writes them, without
     writing: `README.md` always, `profile/README.md` unless an instructor's page is left
     as it is (see `_semester_profile_body`)."""
-    if org_name is None or course_name is None:
+    if course_name is None:
         # Guarded load: absent (None) is normal - a semester org has no dsl-course.yml of its
-        # own, so fall back to the org name. A MALFORMED config raises here (with a clear,
-        # logged message) rather than the bare `yaml.safe_load` traceback that used to
-        # surface from mid-refresh - a non-mapping is likewise refused, not coerced to {}.
+        # own. A MALFORMED config raises here (with a clear, logged message) rather than
+        # the bare `yaml.safe_load` traceback that used to surface from mid-refresh - a
+        # non-mapping is likewise refused, not coerced to {}.
         cfg = org_meta(org)
-        org_name = org_name or cfg.get("org_name") or org
         # A SEMESTER org has no dsl-course.yml of its own (its pointer lives in its config
         # repo), so this used to fall all the way back to the org slug and title the
         # students' landing page "hertie-dsl-demo-f2026". Follow the pointer to the course
         # org that does hold the name; the slug stays as the last resort.
         course_name = (
-            course_name
-            or cfg.get("course_name")
+            cfg.get("course_name")
             or (course_name_for_semester(org) if not cfg else "")
-            or org_name
+            or org
         )
     if repos is None:
         repos = list_org_repos(org)
@@ -496,7 +492,6 @@ def profile_files(
     semesters = None if is_semester else discover_semesters(org)
     body = render_profile_readme(
         org,
-        org_name,
         course_name,
         repos,
         is_semester,
@@ -515,7 +510,6 @@ def profile_files(
 
 def update_profile_readme(
     org: str,
-    org_name: str | None = None,
     course_name: str | None = None,
     *,
     central_ref: str,
@@ -534,9 +528,7 @@ def update_profile_readme(
     Returns the number of failed writes (0 or 1), so the nightly refresh can count it:
     the commit's return used to be discarded under an unconditional "refreshed" line, and
     a whole org whose landing pages never converged reported success every night."""
-    files = profile_files(
-        org, org_name, course_name, central_ref=central_ref, repos=repos
-    )
+    files = profile_files(org, course_name, central_ref=central_ref, repos=repos)
     # Both are rendered from the same org snapshot and move together, so they belong in one
     # commit - kept separate from the workflow refresh's commit, because `docs:` vs `ci:` is
     # the one distinction in this history worth reading.

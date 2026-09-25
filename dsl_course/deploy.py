@@ -66,7 +66,7 @@ from .repos import (
     is_never_material,
     repo_is_archived,
 )
-from .schedule import Deploy
+from .schedule import DEFAULT_DEST_REPO, Deploy
 from .schedule_plan import deploy_dest
 
 # Never copied, at any depth: a `.git` landing in the dest overwrites its git metadata and
@@ -748,8 +748,9 @@ def main() -> int:
     parser.add_argument("--semester-org", required=True, help="Semester org (target)")
     parser.add_argument(
         "--semester-dest-repo",
-        default="materials",
-        help="Target repo in the semester org, created if missing (default: materials)",
+        default=DEFAULT_DEST_REPO,
+        help="Target repo in the semester org, created if missing "
+        f"(default: {DEFAULT_DEST_REPO})",
     )
     parser.add_argument(
         "--course-source-path",
@@ -768,7 +769,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    dest_repo = args.semester_dest_repo.strip() or "materials"
+    dest_repo = args.semester_dest_repo.strip() or DEFAULT_DEST_REPO
     if (args.course_org, args.course_source_repo) == (args.semester_org, dest_repo):
         log_err("source and target must differ.")
         return 1

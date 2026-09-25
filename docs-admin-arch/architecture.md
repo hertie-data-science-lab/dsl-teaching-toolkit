@@ -196,7 +196,7 @@ sequenceDiagram
   participant Bot as bot, DSL_BOT_TOKEN
   participant Org as new course org
   Note over F,Org: org created by hand + bot invited as Owner first
-  F->>A: workflow_dispatch (org, org_name, course_code, admin?)
+  F->>A: workflow_dispatch (org, course_name, course_code, admin?)
   A->>A: check-team - faculty/instructors/admin in central org
   A->>Bot: bootstrap_course --propagate-secret
   Bot->>Org: org settings (base permissions; 2FA attempted) + role teams

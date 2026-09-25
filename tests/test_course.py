@@ -4,7 +4,7 @@ assertions are the whole contract."""
 
 from __future__ import annotations
 
-from dsl_course import course, discovery
+from dsl_course import course, discovery, policy
 
 
 def test_session_number_extracts_ordinal_prefix():
@@ -121,7 +121,8 @@ def test_the_late_rule_reads_as_one_sentence_for_every_way_it_can_be_declared():
     # default is the Hertie syllabus rule, not silence (`grades.parse_grading_spec`).
     assert (
         course.late_rule(
-            course.DEFAULT_LATE_WINDOW_DAYS, course.DEFAULT_LATE_PENALTY_PER_DAY
+            policy.defaults()["late_window_days"],
+            policy.defaults()["late_penalty_per_day"],
         )
         == "10% per day, up to 10 days"
     )

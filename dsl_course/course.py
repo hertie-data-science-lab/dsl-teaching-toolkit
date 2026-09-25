@@ -18,6 +18,11 @@ from . import records
 # The per-org identity/config file, at the root of every org's `.github` repo: a course
 # org's declares its name and its faculty SSOT, a semester org's is a pointer back to it.
 COURSE_CONFIG = "dsl-course.yml"
+# Its keys that went (decision 0009): the org is the repo owner, the name is `course_name`,
+# and a semester's timezone and archive grace are the semester's own facts with the
+# institution's defaults. Never read: a file still carrying one is NOT_MIGRATED, and
+# `migrate` strips them.
+RETIRED_COURSE_KEYS = ("org", "org_name", "cohort_defaults", "semester_defaults")
 # The private per-semester config repo: roster, teams, schedule, grades, autograde records.
 # Every semester org has exactly one, under exactly this name.
 CONFIG_REPO = "semester-config"
@@ -152,21 +157,6 @@ SELF_SELECT = "self_select"  # students use the Join-team form in `join`
 ASSIGNED = "assigned"  # the teaching team writes teams.csv; the form refuses
 TEAM_FORMATIONS = (SELF_SELECT, ASSIGNED)
 NO_TEAMS = "none"
-# The cap the Join-team form enforces when neither the assignment nor its course says
-# otherwise. Here because three places have to agree on it: the `grading_config.yml` the
-# New assignment button writes, the lock file the form reads, and the form itself.
-DEFAULT_MAX_TEAM_SIZE = 5
-# The late-work rule an assignment gets when neither its own `grading_config.yml` nor its
-# course's `assignment_defaults:` states one. It is the Hertie School standard, carried
-# verbatim in the Machine Learning, Causal ML and NLP syllabi: "For each day the assignment
-# is turned in late, the grade will be reduced by 10%", with no free days and no cap. Ten
-# days is where 10% a day has taken the whole grade, so that is where collecting late work
-# stops. A course that accepts nothing after the deadline writes `late_window_days: 0`.
-# Here, beside the team cap, because the same three places have to agree on it: the
-# `grading_config.yml` New assignment writes, the spec every reader parses, and the rule
-# the site and the receipts quote to a semester.
-DEFAULT_LATE_WINDOW_DAYS = 10
-DEFAULT_LATE_PENALTY_PER_DAY = "10%"
 # Which starter stubs `New assignment` seeds, and nothing else: grading reads whatever
 # is in the repo, and a student may commit anything. The button takes any number of them,
 # comma-separated; `none` is the raw-repo answer and the one that stands alone - which is
@@ -518,9 +508,9 @@ def late_rule(window_days: int | None, penalty: str | None) -> str:
     "Late work: " - `10% per day, up to 10 days`, `accepted up to 7 days late`, or `not
     accepted after the deadline`.
 
-    Takes the spec's RESOLVED values, which carry `DEFAULT_LATE_*` for an assignment whose
-    course said nothing (`grades.parse_grading_spec`); a window of 0 or None here is a
-    course that turned late work off, not one that has yet to choose.
+    Takes the spec's RESOLVED values (`settings`: the institution's rule for an
+    assignment nobody set one for); a window of 0 or None here is a layer that turned late
+    work off, not one that has yet to choose.
 
     The rule itself, spelt once. It is the deadline half of an assignment's page on the
     semester site, and a second spelling of it elsewhere is how one semester comes to read two

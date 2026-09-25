@@ -250,7 +250,9 @@ def open_windows(
             continue
         # The template's own definition, asked once for the two facts below: memoised per
         # template per process, and read already by `self_select_keys` above.
-        spec = grades.declared_grading_spec(course_org, entry.course_source_repo)
+        spec = grades.declared_grading_spec(
+            course_org, entry.course_source_repo, semester_org=semester_org, slug=key
+        )
         name = schedule.semester_name(key, entry)
         found.append(
             Window(
@@ -263,7 +265,7 @@ def open_windows(
                 sizes=tuple(sorted((t, len(m)) for t, m in groups.items())),
                 waiting=waiting,
                 enrolled=len(participants),
-                cap=grades.team_cap(course_org, spec),
+                cap=grades.team_cap(course_org, spec, semester_org, key),
                 shut=shut,
                 opens=opens,
             )

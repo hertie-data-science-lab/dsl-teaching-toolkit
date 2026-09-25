@@ -8,11 +8,11 @@ import { useEnv, type Env } from '../env';
 import { badgeFiles } from '../edit/badges';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual, obj } from '../edit/yamlText';
-import { SchemaForm, effective, fieldErrors } from '../forms/Form';
+import { SchemaForm, fieldErrors } from '../forms/Form';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { ABOUT, ASSIGNMENT_DEFAULTS, SEMESTER_DEFAULTS } from '../tiers/course';
+import { ABOUT, ASSIGNMENT_DEFAULTS } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
 import { publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
@@ -48,7 +48,7 @@ export interface Admin {
 }
 
 export function detailsOf(meta: Record<string, unknown>) {
-  const ad = obj(meta.assignment_defaults), cd = obj(meta.semester_defaults), arch = obj(cd.archive);
+  const ad = obj(meta.assignment_defaults);
   const people = obj(meta.people);
   const admins = (Array.isArray(people.course_admins) ? people.course_admins : []).map((a) => {
     const x = obj(a);
@@ -56,9 +56,8 @@ export function detailsOf(meta: Record<string, unknown>) {
   });
   const links = Array.isArray(meta.site_link_extensions) ? meta.site_link_extensions.map(String).join(', ') : typeof meta.site_link_extensions === 'string' ? meta.site_link_extensions : '';
   return {
-    about: clean({ course_name: meta.course_name, course_code: meta.course_code, course_description: meta.course_description, org_name: meta.org_name }),
+    about: clean({ course_name: meta.course_name, course_code: meta.course_code, course_description: meta.course_description }),
     defaults: clean({ ...ad, formats: formatsList(ad.formats)[0] }),
-    cohort: clean({ timezone: cd.timezone, archive_auto: arch.auto === false ? false : true, grace_days: arch.grace_days }),
     admins,
     links,
   };
@@ -78,12 +77,6 @@ export function writeDetails(y: YamlText, before: Details, after: Details, meta:
   for (const k of Object.keys({ ...before.about, ...after.about })) if (!deepEqual(before.about[k], after.about[k])) y.assign([k], after.about[k]);
   for (const k of Object.keys({ ...before.defaults, ...after.defaults }))
     if (!deepEqual(before.defaults[k], after.defaults[k])) y.assign(['assignment_defaults', k], k === 'formats' ? formatsAfter(meta, after.defaults[k]) : after.defaults[k]);
-  const c = after.cohort, b = before.cohort;
-  if (!deepEqual(b.timezone, c.timezone)) y.assign(['semester_defaults', 'timezone'], c.timezone);
-  if (!deepEqual(b.archive_auto, c.archive_auto) || !deepEqual(b.grace_days, c.grace_days)) {
-    const raw = obj(obj(meta.semester_defaults).archive);
-    y.assign(['semester_defaults', 'archive'], { ...raw, auto: c.archive_auto === false ? false : raw.auto === true ? true : undefined, grace_days: c.archive_auto === false ? undefined : c.grace_days });
-  }
   if (!deepEqual(before.admins, after.admins)) {
     const raws = (Array.isArray(obj(meta.people).course_admins) ? (obj(meta.people).course_admins as unknown[]) : []).map(obj);
     const rawBy = (h: string) => raws.find((r) => String(r.github_handle ?? '') === h) ?? {};
@@ -100,7 +93,6 @@ export function writeDetails(y: YamlText, before: Details, after: Details, meta:
     if (v && typeof v === 'object' && !Object.keys(v as object).length) y.delete([k]);
   };
   emptyMap('assignment_defaults');
-  emptyMap('semester_defaults');
 }
 
 /**
@@ -192,7 +184,7 @@ export function DetailsScreen(p: CourseProps) {
     if (!y || file.kind !== 'ready') return;
     if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
     if (Object.keys(errs).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    const after = { ...d, cohort: effective(SEMESTER_DEFAULTS, d.cohort) };
+    const after = d;
     const out = courseFileAfter(file.text, before, after, meta);
     if ('error' in out) return setSave({ kind: 'bad', text: out.error });
     const missing = await missingAdmin(env, before.admins, after.admins);
@@ -233,11 +225,6 @@ export function DetailsScreen(p: CourseProps) {
             <div class="form-section">
               <h3>Assignment defaults</h3>
               <SchemaForm id="cdx" schema={null} tiers={ASSIGNMENT_DEFAULTS} values={d.defaults} onChange={(v) => set({ defaults: v })} />
-            </div>
-            <div class="form-section">
-              <h3>Semester defaults</h3>
-              <p class="footnote">Written into each new semester’s schedule when it is set up; a semester can change them in its own schedule.</p>
-              <SchemaForm id="cdc" schema={null} tiers={SEMESTER_DEFAULTS} values={d.cohort} onChange={(v) => set({ cohort: v })} />
             </div>
             <div class="form-section">
               <h3>Site links</h3>

@@ -109,7 +109,7 @@ def entry_requests(request: Request) -> list[Request]:
         )
     groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for d in found.deploy:
-        key = (d.course_source_repo, d.semester_dest_repo or "materials")
+        key = (d.course_source_repo, d.semester_dest_repo or schedule.DEFAULT_DEST_REPO)
         dest = d.semester_dest_path or d.course_source_path
         groups.setdefault(key, []).append((d.course_source_path, dest))
     return [

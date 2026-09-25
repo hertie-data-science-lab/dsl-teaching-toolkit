@@ -45,7 +45,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
-from . import roster
+from . import policy, roster
 from .log import log, log_err, log_ok, log_person
 
 
@@ -148,13 +148,13 @@ def graph_config_from_env() -> GraphConfig | None:
     )
 
 
-def maintainer_address() -> str | None:
-    """Where to mail the toolkit maintainer about a fault, or None if nowhere.
+def maintainer_address() -> str:
+    """Where to mail the toolkit maintainer about a fault. Always an address.
 
     `DSL_MAINTAINER_EMAIL` when the org has it, else `GRAPH_SENDER` - the shared mailbox
     the toolkit already sends AS is a mailbox the maintainer can read, which beats a fault
-    nobody hears about. None only when neither is set, and then the caller says so once
-    and carries on.
+    nobody hears about - else the institution's `contact` (policy.yml), so a fault always
+    has somewhere to go.
 
     Never logged: every faculty workflow runs in a PUBLIC repo. Log the NAME, or
     `mask_email` of the value."""
@@ -162,7 +162,7 @@ def maintainer_address() -> str | None:
         value = (os.environ.get(name) or "").strip()
         if value:
             return value
-    return None
+    return policy.load()["contact"]
 
 
 def course_admin_addresses(declared: Iterable[str] = ()) -> tuple[str, ...]:

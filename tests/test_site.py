@@ -47,7 +47,7 @@ def _individual_by_default(monkeypatch):
     refuses. Individual is what an unanswered read gives anyway; the one test about the
     group shape sets its own."""
     monkeypatch.setattr(
-        site, "load_grading_spec", lambda *a: grades.parse_grading_spec("")
+        site, "load_grading_spec", lambda *a, **k: grades.parse_grading_spec("")
     )
 
 
@@ -530,7 +530,9 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
         site, "get_file_content", lambda *a, **k: "# Group project\nThe brief."
     )
     monkeypatch.setattr(
-        site, "load_grading_spec", lambda *a: grades.parse_grading_spec("type: group\n")
+        site,
+        "load_grading_spec",
+        lambda *a, **k: grades.parse_grading_spec("type: group\n"),
     )
     sched = Schedule(
         assignments={
@@ -571,7 +573,7 @@ def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) 
         site, "get_file_content", lambda *a, **k: "# Group project\nThe brief."
     )
     monkeypatch.setattr(
-        site, "load_grading_spec", lambda *a: grades.parse_grading_spec(config)
+        site, "load_grading_spec", lambda *a, **k: grades.parse_grading_spec(config)
     )
     monkeypatch.setattr(
         site.teams,
@@ -744,7 +746,7 @@ def _entry_for(monkeypatch, config: str, **kw) -> str:
         site, "get_file_content", lambda *a, **k: "# Moodle essay\nThe brief."
     )
     monkeypatch.setattr(
-        site, "load_grading_spec", lambda *a: grades.parse_grading_spec(config)
+        site, "load_grading_spec", lambda *a, **k: grades.parse_grading_spec(config)
     )
     return site._assignment_entry(
         "Course",
@@ -803,7 +805,7 @@ def test_a_public_assignment_says_so_at_both_levels(monkeypatch):
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a: grades.parse_grading_spec("visibility: public\n"),
+        lambda *a, **k: grades.parse_grading_spec("visibility: public\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -824,7 +826,7 @@ def test_a_pending_public_assignment_names_the_repo_it_will_make(monkeypatch):
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a: grades.parse_grading_spec("visibility: public\n"),
+        lambda *a, **k: grades.parse_grading_spec("visibility: public\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -846,7 +848,7 @@ def test_a_student_choice_assignment_says_so_at_both_levels(monkeypatch):
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a: grades.parse_grading_spec("visibility: student_choice\n"),
+        lambda *a, **k: grades.parse_grading_spec("visibility: student_choice\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -867,7 +869,7 @@ def test_a_pending_student_choice_assignment_promises_a_private_repo(monkeypatch
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a: grades.parse_grading_spec("visibility: student_choice\n"),
+        lambda *a, **k: grades.parse_grading_spec("visibility: student_choice\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -1031,7 +1033,7 @@ def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a: grades.parse_grading_spec("submit_via: github\n"),
+        lambda *a, **k: grades.parse_grading_spec("submit_via: github\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -2552,7 +2554,7 @@ def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a: grades.parse_grading_spec("submit_via: shared_dropbox_repo\n"),
+        lambda *a, **k: grades.parse_grading_spec("submit_via: shared_dropbox_repo\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -2578,7 +2580,7 @@ def test_a_shared_group_assignment_names_the_team_s_folder(monkeypatch):
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a: grades.parse_grading_spec(
+        lambda *a, **k: grades.parse_grading_spec(
             "submit_via: shared_dropbox_repo\ntype: group\n"
         ),
     )
@@ -2601,7 +2603,7 @@ def test_a_pending_shared_assignment_promises_a_drop_box_and_not_a_repo(monkeypa
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a: grades.parse_grading_spec("submit_via: shared_dropbox_repo\n"),
+        lambda *a, **k: grades.parse_grading_spec("submit_via: shared_dropbox_repo\n"),
     )
     out = site._assignment_entry(
         "Course",

@@ -9,7 +9,7 @@ Accompanies the e2e [worked example](../example-course/).
 | | Step | Org Level | Where | Input | Output |
 |---|------|-------|-------|-------|--------|
 | `[required]` | 1. Create the course org | course | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-<CODE>` (no year); invite **`hertie-dsl-bot`** as **Owner** (must accept) | an empty org the bot can bootstrap |
-| `[required]` | 2. Bootstrap | course | [central repo → Actions → **Bootstrap Course Org**](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/bootstrap-org.yml) | `org`, `org_name`, `course_code`; optional `admin` (your handle); `central_ref` defaults to `release` | the `.github` control panel with every workflow, the `course-admin` team, [`dsl-course.yml`](#dsl-courseyml), `DSL_BOT_TOKEN` set for you |
+| `[required]` | 2. Bootstrap | course | [central repo → Actions → **Bootstrap Course Org**](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/bootstrap-org.yml) | `org`, `course_name`, `course_code`; optional `admin` (your handle); `central_ref` defaults to `release` | the `.github` control panel with every workflow, the `course-admin` team, [`dsl-course.yml`](#dsl-courseyml), `DSL_BOT_TOKEN` set for you |
 | `[required]` | 3. Materials | course | course `.github` → **New materials repo**, then `git push` | `semester` (e.g. `f2026`); then your content ([layout](#materials-repo)) | `course-materials-<semester>` with run-from-repo Release workflows |
 | `[required]` | 4. Assignment(s) | course | course `.github` → **New assignment**, then `git push` | `number` + `semester` + `formats` (one or more starters, the first runnable) + `type` (individual/group); brief + starter on `main`, optional autograding on `solution` ([layout](#assignment-template)) | one `assignment-N-<semester>` template each, with its own run-from-repo Release assignment workflow |
 | *(optional)* | 5. Course admins | course | edit [`dsl-course.yml`](#dsl-courseyml), commit to `main` ([05](05-manage-teaching-team.md)) | GitHub handles, optional `start`/`end` | admin on the course org + every semester, reconciled |
@@ -51,9 +51,7 @@ Live example: [`example-course/course-org/dsl-course.yml`](../example-course/cou
 - Bootstrap writes it; edit it as needed.
 
 ```yaml
-org: hertie-dsl-demo-course-e1234
-org_name: DSL Demo Course        # names the ORG - the websites never show it
-course_name: Deep Learning       # the semester websites' title
+course_name: Deep Learning       # the course's name: every site's title
 course_code: E1234               # shown beside it
 course_description: One or two sentences, on one line - the sites' blurb
 site_link_extensions: [pdf, html]  # optional - semester sites only; see below
@@ -73,19 +71,15 @@ display-only cards; TAs are declared per semester in [`instructors.yml`](#instru
 Runbook: [05](05-manage-teaching-team.md).
 
 An admin's `email` is optional. When any admin has one, a fault in this file is mailed to
-those addresses; when none has, it goes to the `DSL_COURSE_ADMIN_EMAILS` org secret. This
-file is public, so an address written here is public too.
+those addresses; when none has, it goes to the `DSL_COURSE_ADMIN_EMAILS` org secret (retiring
+after one release). This file is public, so an address written here is public too.
 
-`assignment_defaults:` is what **New assignment** stamps into each new assignment's
-`grading_config.yml`: `max_team_size`, `late_window_days` and `late_penalty_per_day`, plus
-`formats`, `submit_via`, `team_formation` and `visibility`, which answer the button's boxes
-of the same name when they are left at `(course default)`.
-
-`semester_defaults:` is what **Bootstrap semester** writes into a new semester's `schedule.yml`:
-`timezone:`, and `archive: {auto, grace_days}` - `auto: false` seeds no `archive:` block,
-so that semester is never archived automatically; `grace_days` sets how long after
-`semester_end` it is. Unset, a new semester gets today's skeleton. Neither block changes a
-semester or an assignment that already exists.
+`assignment_defaults:` (optional) is this course's defaults for its assignments:
+`max_team_size`, `late_window_days`, `late_penalty_per_day`, `team_formation`,
+`visibility` apply to every assignment that does not set its own; unset, the institution's
+apply. `formats`, `submit_via`, `team_formation` and `visibility` also answer New
+assignment's boxes left at `(course default)`. A semester's timezone and archive grace are
+set in its own `schedule.yml` (default: the institution's, Europe/Berlin and 60 days).
 
 `course_name` / `course_code` / `course_description` are the fields that reach every
 semester website - a push here re-syncs them all: [11](11-configure-cohort-site.md).

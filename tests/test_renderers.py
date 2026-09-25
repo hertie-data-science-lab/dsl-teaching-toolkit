@@ -497,7 +497,7 @@ def test_the_student_landing_page_invites_a_pull_request():
     # is written once. Both files are seeded ONCE: live semesters keep what they have.
     invitation = "open a pull request"
     page = profile_readme.render_profile_readme(
-        "My-Course-f2026", "My-Course-f2026", "My Course", [], True, central_ref="main"
+        "My-Course-f2026", "My Course", [], True, central_ref="main"
     )
     assert invitation in page
     assert "fork" in page.lower()
@@ -812,7 +812,7 @@ def test_bootstrap_org_workflow_routes_inputs_through_env_not_the_shell():
     step = yaml.safe_load(wf)["jobs"]["bootstrap"]["steps"][-1]
     assert "${{" not in step["run"]
     assert step["env"]["ORG"] == "${{ inputs.org }}"
-    assert step["env"]["ORG_NAME"] == "${{ inputs.org_name }}"
+    assert step["env"]["COURSE_NAME"] == "${{ inputs.course_name }}"
     assert step["env"]["COURSE_CODE"] == "${{ inputs.course_code }}"
 
 
@@ -1370,9 +1370,7 @@ def _semester_readme(monkeypatch, existing):
     monkeypatch.setattr(
         P, "put_files", lambda org, repo, files, msg, **k: written.update(files) or True
     )
-    P.update_profile_readme(
-        "Semester-f2026", "Org", "Deep Learning", central_ref="release"
-    )
+    P.update_profile_readme("Semester-f2026", "Deep Learning", central_ref="release")
     return written
 
 
@@ -2608,7 +2606,7 @@ def test_a_broken_console_run_is_reported_but_a_refused_caller_is_not(tmp_path):
 
 def test_the_course_page_lists_the_console_as_auto_handled():
     page = profile_readme.render_profile_readme(
-        "My-Course-E1", "My-Course-E1", "My Course", [], False, central_ref="main"
+        "My-Course-E1", "My Course", [], False, central_ref="main"
     )
     auto = page.split("### Automatically handled")[1]
     (row,) = [line for line in auto.splitlines() if "console.yml" in line]

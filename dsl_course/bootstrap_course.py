@@ -25,7 +25,7 @@ import argparse
 import os
 import sys
 
-from . import mailer, records, scaffold, schedule, seed, site, sync_faculty
+from . import mailer, policy, records, scaffold, seed, site, sync_faculty
 from .access import COURSE_TEAM_ACCESS, SEMESTER_WRITE_REPOS, grant_team_repo_access
 from .central import pin_central_ref, resolve_central_ref
 from .course import (
@@ -43,10 +43,9 @@ from .discovery import (
     SEMESTERS_PATH,
     central_ref_for,
     not_migrated_org,
-    org_meta,
     register_semester,
 )
-from .faults import NotMigrated, not_migrated_text
+from .faults import not_migrated_text
 from .gh_contents import put_file, put_files, seed_if_absent
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
@@ -385,8 +384,6 @@ def _course_admins_block(admins: list[str] | None) -> str:
 
 
 def _course_metadata(
-    org: str,
-    org_name: str,
     course_name: str,
     course_code: str,
     admins: list[str] | None = None,
@@ -405,8 +402,6 @@ def _course_metadata(
     the template is itself parsed as YAML by the shipped-workflow sweep, so it cannot carry
     a placeholder on a line of its own."""
     identity = template("course/dsl-course.yml").format(
-        org=org,
-        org_name=org_name,
         course_name=course_name,
         course_code=course_code or "",
     )
@@ -419,17 +414,16 @@ def _course_metadata(
     return identity + tier + _course_admins_block(admins)
 
 
-def _semester_metadata(org: str, course: str) -> str:
+def _semester_metadata(course: str) -> str:
     """dsl-course.yml for a SEMESTER org's .github repo: a pointer back to its persistent
     course org. This is the single source the semester's semester-config dispatchers
     (dispatch-sync / dispatch-sync-site) read to find where to fire Sync membership /
     Sync site - so without it those auto-triggers can't resolve the course org."""
-    return template("semester/dsl-course.yml").format(course=course, org=org)
+    return template("semester/dsl-course.yml").format(course=course)
 
 
 def create_profile_repo(
     org: str,
-    org_name: str,
     course_name: str,
     course_code: str = "",
     *,
@@ -476,9 +470,7 @@ def create_profile_repo(
         # USER-owned: seeded once, never rewritten by a later repair run.
         # (The org-overview profile/README.md is generated at the end of bootstrap,
         # once all repos exist, by profile_readme.update_profile_readme - see main.)
-        metadata = _course_metadata(
-            org, org_name, course_name, course_code, admins, central_ref
-        )
+        metadata = _course_metadata(course_name, course_code, admins, central_ref)
         if not seed_if_absent(
             org,
             ".github",
@@ -510,28 +502,25 @@ def validate_secret_presence(org: str, secret_name: str) -> bool:
     return exists
 
 
-# The two lines of the seeded schedule.yml a course's `semester_defaults:` rewrites. Matched
-# as text, not re-emitted as YAML: the file is a commented skeleton faculty read.
-_TZ_LINE = "# timezone: Europe/Berlin           # OPTIONAL - default: Europe/Berlin\n"
-_ARCHIVE_HEAD = "# archive the org (every repo read-only)"
-
-
 def _scaffold_text(
     path: str,
     rel: str,
     central_ref: str,
     tag: str,
     year: int,
-    semester_defaults: dict | None,
 ) -> bytes:
     """One semester-config scaffold, rendered for this semester. Pinned first, formatted
     second: the scaffolds link the runbooks, and an org must be sent to the docs for the
-    engine it actually runs."""
+    engine it actually runs. The skeleton names the institution's defaults (policy.yml)
+    for the settings it leaves commented out."""
+    ours = policy.defaults()
     text = pin_central_ref(template(rel), central_ref).format(
-        tag=tag, year=year, year_next=year + 1
+        tag=tag,
+        year=year,
+        year_next=year + 1,
+        timezone=ours["timezone"],
+        grace_days=ours["archive"]["grace_days"],
     )
-    if path == schedule.SCHEDULE_PATH:
-        text = seed_schedule(text, semester_defaults or {})
     return text.encode()
 
 
@@ -539,72 +528,10 @@ def semester_scaffold(org: str, path: str, central_ref: str) -> str:
     """One semester-config scaffold exactly as Bootstrap semester seeds it for `org` (the
     migration replaces an untouched old skeleton with the current one)."""
     tag, year = _tag_and_year(org)
-    return _scaffold_text(
-        path, CONFIG_SCAFFOLDS[path], central_ref, tag, year, None
-    ).decode()
+    return _scaffold_text(path, CONFIG_SCAFFOLDS[path], central_ref, tag, year).decode()
 
 
-def seed_schedule(text: str, defaults: dict) -> str:
-    """The seeded `schedule.yml` with the course's `semester_defaults:` applied
-    (`schedule.parse_semester_defaults`). No defaults, no change - today's skeleton.
-
-    `timezone` becomes a live line. `archive.auto: false` comments the live `archive:`
-    block out, since the block's presence is what archives a semester; `auto: true` keeps it
-    and writes `grace_days:` into it when the course gives one."""
-    tz = defaults.get("timezone")
-    if tz:
-        text = text.replace(
-            _TZ_LINE,
-            f"timezone: {tz}                    # from the course's semester_defaults\n",
-        )
-    archive = defaults.get("archive")
-    head = text.find(_ARCHIVE_HEAD)
-    if archive and head >= 0:
-        block = text[head:]
-        if not archive["auto"]:
-            block = "".join(
-                line if line.startswith("#") else f"# {line}"
-                for line in block.splitlines(keepends=True)
-            )
-            block = (
-                "# The course's semester_defaults turn automatic archiving OFF: uncomment the "
-                "block below to archive this semester.\n" + block
-            )
-        elif archive.get("grace_days") is not None:
-            block = block.replace(
-                "archive:\n",
-                f"archive:\n  grace_days: {archive['grace_days']}"
-                f"                # default date = semester_end + this many days\n",
-                1,
-            )
-        text = text[:head] + block
-    return text
-
-
-def course_semester_defaults(course_org: str) -> dict:
-    """The course's `semester_defaults:`, or `{}` when there is none or it cannot be read -
-    a new semester then gets today's skeleton, never a failed bootstrap."""
-    if not course_org:
-        return {}
-    try:
-        meta = org_meta(course_org)
-    except Exception as exc:
-        log_err(f"  ! could not read {course_org}'s semester_defaults ({exc})")
-        return {}
-    if "cohort_defaults" in meta:
-        # The block's old name (decision 0012): refused, so a semester is never bootstrapped
-        # with defaults nobody reads any more.
-        raise NotMigrated(
-            "cohort_defaults",
-            "semester_defaults",
-            f"{course_org}/.github/dsl-course.yml",
-        )
-    return schedule.parse_semester_defaults(meta.get("semester_defaults"))
-
-
-def setup_semester_extras(
-    org: str, central_ref: str, semester_defaults: dict | None = None
-) -> int:
+def setup_semester_extras(org: str, central_ref: str) -> int:
     """Semester-only: seed the student-facing repos.
 
     Layered on top of the common bootstrap when --semester is passed (the safe-by-default
@@ -704,9 +631,7 @@ def setup_semester_extras(
             org,
             CONFIG_REPO,
             {
-                path: _scaffold_text(
-                    path, rel, central_ref, tag, year, semester_defaults
-                )
+                path: _scaffold_text(path, rel, central_ref, tag, year)
                 for path, rel in CONFIG_SCAFFOLDS.items()
             },
             "init: semester-config scaffolds (roster, teams, schedule, people)",
@@ -799,16 +724,10 @@ def main() -> int:
     parser = CLIParser(description=__doc__)
     parser.add_argument("--org", required=True, help="Course org to bootstrap")
     parser.add_argument(
-        "--org-name",
-        default=None,
-        help="Full org name for README (e.g. 'Deep Learning'). "
-        "If not set, uses --org as-is.",
-    )
-    parser.add_argument(
         "--course-name",
         default=None,
-        help="Course name for README (e.g. 'Deep Learning (GRAD-E1394)'). "
-        "If not set, uses --org-name.",
+        help="Course name, written to dsl-course.yml `course_name` and the org README "
+        "(e.g. 'Deep Learning'). If not set, uses --org.",
     )
     parser.add_argument(
         "--course-code",
@@ -903,8 +822,7 @@ def _outcome_lines(steps: list[tuple[int, str]]) -> str:
 def _run(args: argparse.Namespace) -> int:
     """The bootstrap itself, in order: preflight, org settings, teams, repos, secret,
     profile README. Split from main so the whole sequence sits under one guard."""
-    org_name = args.org_name or args.org
-    course_name = args.course_name or org_name
+    course_name = args.course_name or args.org
     admin_logins = _parse_handles(args.admins)
     # Which tier of the toolkit everything seeded below runs: the flag when given (a
     # course org's own dsl-course.yml does not exist yet on a first bootstrap), else what
@@ -924,7 +842,6 @@ def _run(args: argparse.Namespace) -> int:
     steps: list[tuple[int, str]] = []
 
     log(f"Bootstrapping org: {args.org}")
-    log(f"  Org name: {org_name}")
     log(f"  Course name: {course_name}")
 
     # 0. Preflight - the org must already exist (GitHub can't create one via API).
@@ -959,7 +876,6 @@ def _run(args: argparse.Namespace) -> int:
     # sync doesn't undo that invite.
     profile_failures = create_profile_repo(
         args.org,
-        org_name,
         course_name,
         args.course_code,
         is_semester=args.semester,
@@ -975,9 +891,7 @@ def _run(args: argparse.Namespace) -> int:
     workflow_failures = 0
     if args.semester:
         # Semester: student-facing join + roster + tightened perms.
-        workflow_failures = setup_semester_extras(
-            args.org, central_ref, course_semester_defaults(args.course)
-        )
+        workflow_failures = setup_semester_extras(args.org, central_ref)
         if args.course:
             # Pointer back to the course org, in this semester's semester-config/.system/ -
             # the semester-config dispatchers read its `course:` line to know where to
@@ -995,7 +909,7 @@ def _run(args: argparse.Namespace) -> int:
                 args.org,
                 CONFIG_REPO,
                 records.path("pointer"),
-                _semester_metadata(args.org, args.course).encode(),
+                _semester_metadata(args.course).encode(),
                 "ci: seed semester -> course pointer (dispatchers read this)",
             ):
                 steps.append((1, ""))
@@ -1124,9 +1038,7 @@ def _run(args: argparse.Namespace) -> int:
     # 5. Generate the org-overview README now that all repos exist (clickable index).
     steps.append(
         (
-            update_profile_readme(
-                args.org, org_name, course_name, central_ref=central_ref
-            ),
+            update_profile_readme(args.org, course_name, central_ref=central_ref),
             "",
         )
     )

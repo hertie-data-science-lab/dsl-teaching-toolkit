@@ -35,7 +35,7 @@ Set up once per course; it serves every future semester. Per-semester setup of t
    | Input | Value | Notes |
    |-------|-------|-------|
    | `org` | the org you just made | e.g. `hertie-dsl-demo-course-e1234` |
-   | `org_name` | display name | e.g. `DSL Demo Course` |
+   | `course_name` | the course's name | e.g. `Deep Learning` - `course_name` in `dsl-course.yml`, the title of every site |
    | `course_code` | short code | e.g. `E1234` |
    | `set_secret` | `true` (default) | propagates `DSL_BOT_TOKEN` - **don't set the secret by hand** |
    | `admin` | *your handle* | adds you to `course-admin` so you can run the course workflows |

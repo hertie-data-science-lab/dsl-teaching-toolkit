@@ -15,7 +15,17 @@ from shutil import copytree
 import pytest
 import yaml
 
-from dsl_course import course, gh_contents, ghcli, grades, issues, repos, roster
+from dsl_course import (
+    course,
+    gh_contents,
+    ghcli,
+    grades,
+    issues,
+    policy,
+    repos,
+    roster,
+    settings,
+)
 from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER, repo_row
 
@@ -2225,7 +2235,7 @@ def _lock(
         grades, "_grading_text", lambda org, template: configs.get(template)
     )
     monkeypatch.setattr(
-        grades, "org_meta", lambda org: yaml.safe_load(defaults or "{}") or {}
+        settings, "org_meta", lambda org: yaml.safe_load(defaults or "{}") or {}
     )
     return grades.team_lock_text(grades.team_lock_entries("COURSE", sched, now))
 
@@ -2407,9 +2417,9 @@ def test_a_template_with_no_spec_has_no_window_either(monkeypatch):
 def _writes(monkeypatch, existing, ok: bool = True) -> list[dict]:
     """Stub everything the lock write touches and collect what it puts. `existing` is what
     `get_file_with_sha` answers: `(text, sha)`, None for a 404, or an exception to raise."""
-    monkeypatch.setattr(grades, "_grading_text", lambda org, t: "type: group\n")
-    monkeypatch.setattr(grades, "org_meta", lambda org: {})
-    monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: False)
+    monkeypatch.setattr(grades, "_grading_text", lambda org, t, **_: "type: group\n")
+    monkeypatch.setattr(settings, "org_meta", lambda org: {})
+    monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo, **_: False)
     # The course org's templates, which number the assignment pages the lock links.
     monkeypatch.setattr(
         grades.schedule,
@@ -2542,8 +2552,8 @@ def test_a_file_that_says_nothing_about_late_work_gets_the_hertie_rule():
     # sentence is 10% a day, and ten days is where that has taken the whole grade.
     spec = grades.parse_grading_spec("title: Neural networks\n")
     assert (spec.late_window_days, spec.late_penalty_per_day) == (
-        course.DEFAULT_LATE_WINDOW_DAYS,
-        course.DEFAULT_LATE_PENALTY_PER_DAY,
+        policy.defaults()["late_window_days"],
+        policy.defaults()["late_penalty_per_day"],
     )
     assert (
         course.late_rule(spec.late_window_days, spec.late_penalty_per_day)

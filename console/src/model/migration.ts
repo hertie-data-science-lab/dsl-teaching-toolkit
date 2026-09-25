@@ -9,10 +9,10 @@ import { CONFIG_REPO, COURSE_REPO, INSTRUCTORS_FILE, JOIN_REPO, NAMES, REGISTRY_
 
 export const NOT_MIGRATED = 'NOT_MIGRATED';
 
-/** A retired spelling found in an org, and the name that replaced it. */
+/** A retired spelling found in an org, and the name that replaced it (none for a key that was removed). */
 export interface Leftover {
   old: string;
-  new: string;
+  new?: string;
 }
 
 /** The retired spellings the console can see from outside. */
@@ -24,15 +24,18 @@ export const RETIRED = {
   registry_file: 'cohort-courses-pages.yml',
   semester_topic: 'dsl-cohort',
   registry_key: 'cohorts',
-  semester_defaults: 'cohort_defaults',
 } as const;
+
+/** The `dsl-course.yml` keys the engine no longer reads (`course.RETIRED_COURSE_KEYS`); the migration strips them. */
+export const RETIRED_COURSE_KEYS = ['org', 'org_name', 'cohort_defaults', 'semester_defaults'] as const;
 
 export const COURSE_META = 'dsl-course.yml';
 
 export const SEMESTER_TOPIC = 'dsl-semester';
 
-/** The engine's sentence (`faults.not_migrated_text`), word for word. */
-export const notMigratedText = (l: Leftover) => `${NOT_MIGRATED}: \`${l.old}\` is the old name of \`${l.new}\` - run the migration`;
+/** The engine's sentence (`faults.not_migrated_text`), word for word; a removed key is no longer read. */
+export const notMigratedText = (l: Leftover) =>
+  l.new ? `${NOT_MIGRATED}: \`${l.old}\` is the old name of \`${l.new}\` - run the migration` : `${NOT_MIGRATED}: \`${l.old}\` is no longer read - run the migration`;
 
 const has = (paths: string[], p: string) => paths.some((x) => x === p || x.startsWith(`${p}/`));
 
@@ -73,7 +76,7 @@ const keysOf = (text: string | undefined): string[] => {
 
 /**
  * What a course org's `.github` still carries under a retired name: the registry file or its
- * `cohorts:` key, `cohort_defaults:` in dsl-course.yml, and `.dsl/`.
+ * `cohorts:` key, a retired key in dsl-course.yml (`RETIRED_COURSE_KEYS`), and `.dsl/`.
  */
 export async function courseLeftovers(client: GitHubClient, org: string): Promise<Leftover[]> {
   const tree = await client.listTree(org, COURSE_REPO, 'HEAD');
@@ -86,7 +89,8 @@ export async function courseLeftovers(client: GitHubClient, org: string): Promis
   const out: Leftover[] = [];
   if (has(paths, RETIRED.registry_file) && !has(paths, REGISTRY_FILE)) out.push({ old: RETIRED.registry_file, new: REGISTRY_FILE });
   if (keysOf(registry?.text).includes(RETIRED.registry_key)) out.push({ old: `${RETIRED.registry_key}:`, new: 'semesters:' });
-  if (keysOf(meta?.text).includes(RETIRED.semester_defaults)) out.push({ old: `${RETIRED.semester_defaults}:`, new: 'semester_defaults:' });
+  const metaKeys = keysOf(meta?.text);
+  for (const k of RETIRED_COURSE_KEYS) if (metaKeys.includes(k)) out.push({ old: `${k}:` });
   if (has(paths, RETIRED.system_dir)) out.push({ old: `${RETIRED.system_dir}/`, new: `${NAMES.system_dir}/` });
   return out;
 }

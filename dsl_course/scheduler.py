@@ -185,7 +185,9 @@ def due_snapshots(
     two passes that collect, and is applied there."""
     passed = []
     for slug, entry in sched.assignments.items():
-        gspec = load_grading_spec(course_org, entry.course_source_repo)
+        gspec = load_grading_spec(
+            course_org, entry.course_source_repo, semester_org=sched.org, slug=slug
+        )
         at = grading_cutoff_datetime(sched, slug, gspec.late_window_days)
         if at is not None and at <= now:
             passed.append((slug, at))
@@ -339,7 +341,9 @@ def _handout_decisions(
     for release in handouts:
         key = release.assignment_slug
         entry = sched.assignments.get(key)
-        gspec = load_grading_spec(course_org, release.assignment)
+        gspec = load_grading_spec(
+            course_org, release.assignment, semester_org=semester_org, slug=key
+        )
         if entry is None or not gspec.creates_repos:
             continue
         name = schedule.semester_name(key, entry)
@@ -1396,7 +1400,9 @@ def _reprivatise_student_repos(
     for slug, entry in sorted(sched.assignments.items()):
         if entry.handout_datetime is None:
             continue
-        gspec = load_grading_spec(course_org, entry.course_source_repo)
+        gspec = load_grading_spec(
+            course_org, entry.course_source_repo, semester_org=semester_org, slug=slug
+        )
         if not gspec.visibility_is_students:
             continue
         at = grading_cutoff_datetime(sched, slug, gspec.late_window_days)

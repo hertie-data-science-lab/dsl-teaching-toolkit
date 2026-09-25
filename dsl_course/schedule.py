@@ -92,6 +92,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
+from . import policy
 from .course import (
     CONFIG_REPO,
     assignment_slug,
@@ -137,7 +138,7 @@ SCHEDULE_PATH = "schedule.yml"
 # one that freezes late. A semester that wants another date says so in
 # `archive.event_datetime`, and
 # only a semester that writes the block at all is ever archived off this (`_parse_archive`).
-ARCHIVE_GRACE = timedelta(days=60)
+ARCHIVE_GRACE = timedelta(days=policy.defaults()["archive"]["grace_days"])  # policy.yml
 
 # How long before that date a semester is TOLD. Two weeks is long enough to move the date,
 # to finish a late piece of marking or to pull a copy of anything somebody wants to keep,
@@ -159,7 +160,10 @@ ARCHIVE_TITLE = "Semester archived"
 # see `faults`. Every Part I call site (and its `isinstance`) reads unchanged.
 SourceFault = ConfigFault
 
-DEFAULT_TZ = "Europe/Berlin"
+# The zone a schedule.yml that names none is read in, and where a release lands when its
+# deploy entry names no semester repo: both the institution's (policy.yml).
+DEFAULT_TZ = policy.defaults()["timezone"]
+DEFAULT_DEST_REPO = policy.defaults()["semester_dest_repo"]
 
 # What a release SYNTHESISED from `assignments.<slug>.handout_datetime` is labelled:
 # `<slug>-handout`. There is no such entry in any file - `scheduler._handout_releases`
@@ -264,7 +268,7 @@ class Deploy:
 
     course_source_repo: str
     course_source_path: str
-    semester_dest_repo: str = "materials"
+    semester_dest_repo: str = DEFAULT_DEST_REPO
     semester_dest_path: str | None = None
     deploy_datetime: datetime | None = None
     # The line each of this copy's keys is written on, as the loader saw them (see
@@ -478,6 +482,9 @@ class ArchiveRow:
 @dataclass
 class Schedule:
     timezone: str = DEFAULT_TZ
+    # The semester org it was loaded from ("" for a plan parsed from text): what an
+    # assignment's run settings resolve against (`settings`, `grades.load_grading_spec`).
+    org: str = field(default="", compare=False)
     releases: list[Release] = field(default_factory=list)
     semester_start: date | None = None
     semester_end: date | None = None
@@ -908,7 +915,9 @@ def _parse_deploy(raw: object, tz: ZoneInfo, drops: Drops, label: str) -> list[D
             Deploy(
                 course_source_repo=str(src_repo),
                 course_source_path=str(src_path),
-                semester_dest_repo=str(d.get("semester_dest_repo") or "materials"),
+                semester_dest_repo=str(
+                    d.get("semester_dest_repo") or DEFAULT_DEST_REPO
+                ),
                 semester_dest_path=str(dest_path) if dest_path else None,
                 deploy_datetime=_flagged_datetime(
                     d,
@@ -1418,48 +1427,6 @@ def _grace(raw: object, drops: Drops) -> timedelta:
     return timedelta(days=days)
 
 
-def parse_semester_defaults(raw: object) -> dict:
-    """The course's `semester_defaults:` block in `dsl-course.yml`: what Bootstrap semester
-    seeds into a new semester's `schedule.yml`. Returns only what it could use -
-    `timezone` (a known zone name) and `archive` (`{"auto": bool, "grace_days": int |
-    None}`); anything else is logged and dropped, and `{}` means seed today's skeleton."""
-    if raw is None:
-        return {}
-    where = "dsl-course.yml semester_defaults"
-    if not isinstance(raw, dict):
-        log_err(f"  ! {where}: must be a block of settings - ignored")
-        return {}
-    out: dict = {}
-    for key in raw:
-        if key not in ("timezone", "archive"):
-            log_err(
-                f"  ! {where}: `{key}:` is not a setting the toolkit reads - ignored"
-            )
-    tz = raw.get("timezone")
-    if tz is not None:
-        name = str(tz).strip()
-        if name and str(_tz(name)) == name:
-            out["timezone"] = name
-        else:
-            log_err(f"  ! {where}: `timezone: {tz}` is not a known zone - ignored")
-    archive = raw.get("archive")
-    if archive is not None:
-        if not isinstance(archive, dict) or not isinstance(archive.get("auto"), bool):
-            log_err(
-                f"  ! {where}: `archive:` needs `auto: true` or `auto: false` - ignored"
-            )
-        else:
-            grace = archive.get("grace_days")
-            days = _whole_days(grace) if grace is not None else None
-            if grace is not None and days is None:
-                log_err(
-                    f"  ! {where}: `archive.grace_days: {grace}` is not a whole number "
-                    f"of days - ignored"
-                )
-            out["archive"] = {"auto": archive["auto"], "grace_days": days}
-    return out
-
-
 def _parse_archive(
     meta: dict, semester_end: date | None, drops: Drops
 ) -> ArchiveRow | None:
@@ -1919,6 +1886,7 @@ def load(semester_org: str) -> Schedule:
             )
         )
     sched = parse(meta if isinstance(meta, dict) else {})
+    sched.org = semester_org
     sched.unparseable = bool(unparseable)
     sched.faults.extend(unparseable)
     if sched.dropped:

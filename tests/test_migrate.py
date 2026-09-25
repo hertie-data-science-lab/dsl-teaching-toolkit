@@ -583,7 +583,8 @@ def course(fake, monkeypatch):
         {
             "cohort-courses-pages.yml": b"# registry\ncohorts:\n- Sem-f2026\n",
             "dsl-course.yml": (
-                b"course_name: X\ncohort_defaults:\n  timezone: Europe/Berlin\n"
+                b"org: C\norg_name: C\ncourse_name: X\n"
+                b"cohort_defaults:\n  timezone: Europe/Berlin\n"
                 b"assignment_defaults:\n  format: ipynb  # the runnable one\n"
             ),
             ".dsl/status.json": b"{}\n",
@@ -659,7 +660,9 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     assert records.path("missing_semesters") in tree
     assert ".github/.last-refresh" not in tree and ".dsl/status.json" not in tree
     meta = tree["dsl-course.yml"].decode()
-    assert "semester_defaults:" in meta and "cohort_defaults" not in meta
+    assert yaml.safe_load(meta)["course_name"] == "X"
+    for key in ("org", "org_name", "cohort_defaults", "semester_defaults"):
+        assert key not in yaml.safe_load(meta)
     assert "  formats: [ipynb]  # the runnable one" in meta
     grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
     assert grading == b"formats: [ipynb]\nautograde: true\n"
@@ -794,3 +797,34 @@ def test_a_checkout_that_is_not_the_pinned_ref_is_named_by_file(
     err = capsys.readouterr().err
     assert "this checkout differs from main" in err
     assert "2 file(s): dsl_course/grades.py, templates/x.yml" in err
+
+
+def test_the_course_config_rewrite_strips_the_retired_keys_and_keeps_the_rest():
+    text = (
+        "# INSTRUCTOR-OWNED\n"
+        "org: C\n"
+        "org_name: The course  # shown nowhere\n"
+        "course_name: X\n"
+        "semester_defaults:\n"
+        "  timezone: Europe/Berlin\n"
+        "  # a comment in the block\n"
+        "  archive:\n"
+        "    auto: true\n"
+        "\n"
+        "# the admins\n"
+        "assignment_defaults:\n"
+        "  format: py\n"
+        "  max_team_size: 4\n"
+    )
+    got = migrate.course_config_keys(text)
+    assert got == (
+        "# INSTRUCTOR-OWNED\n"
+        "course_name: X\n"
+        "\n"
+        "# the admins\n"
+        "assignment_defaults:\n"
+        "  formats: [py]\n"
+        "  max_team_size: 4\n"
+    )
+    assert migrate.course_config_keys(got) == got
+    assert migrate.retired_course_faults(yaml.safe_load(got)) == []

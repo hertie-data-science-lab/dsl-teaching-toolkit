@@ -448,14 +448,13 @@ def course_org_for_semester(semester_org: str) -> str:
 def course_name_of(course_org: str) -> str:
     """A COURSE org's display name from its own identity file. "" when unnamed or absent.
 
-    The toolkit's single spelling of that fallback - `course_name`, else `org_name` - so a
-    semester landing page, a status row and an email cannot disagree about what a course is
-    called. Takes "" and returns "" so a caller holding a semester pointer that names no
+    `course_name` and nothing else, so a semester landing page, a status row and an email
+    cannot disagree about what a course is called. Takes "" and returns "" so a caller holding a semester pointer that names no
     course org needs no guard of its own."""
     if not course_org:
         return ""
     meta = org_meta(course_org)
-    return str(meta.get("course_name") or meta.get("org_name") or "")
+    return str(meta.get("course_name") or "")
 
 
 def central_ref_for(org: str) -> str:

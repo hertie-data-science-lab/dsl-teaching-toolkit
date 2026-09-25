@@ -288,7 +288,7 @@ describe('editing screens', () => {
     expect(out).toContain('value="Machine Learning"');
     expect(out).toContain('value="a@staff.example.org"');
     expect(out).toContain('Assignment defaults');
-    expect(out).toContain('Semester defaults');
+    expect(out).not.toContain('Semester defaults'); // the engine reads none from dsl-course.yml
   });
   it('materials settings previews what is public and what is withheld', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);

@@ -172,20 +172,18 @@ DUMPED = {
 SEEDED = {
     "semester-config/schedule.yml (seeded)": lambda: welcome.template(
         "semester-config/schedule.yml"
-    ).format(tag="f2026", year=2026),
+    ).format(tag="f2026", year=2026, timezone="Europe/Berlin", grace_days=60),
     "semester-config/instructors.yml (seeded)": lambda: welcome.template(
         "semester-config/instructors.yml"
     ).format(year=2026, year_next=2027),
     "course/dsl-course.yml (seeded, commented)": lambda: (
-        bootstrap_course._course_metadata("Org", "Org Name", "Course", "CODE")
+        bootstrap_course._course_metadata("Course", "CODE")
     ),
     "course/dsl-course.yml (seeded, --admins)": lambda: (
-        bootstrap_course._course_metadata(
-            "Org", "Org Name", "Course", "CODE", admins=["adminhandle"]
-        )
+        bootstrap_course._course_metadata("Course", "CODE", admins=["adminhandle"])
     ),
     "semester/dsl-course.yml (seeded)": lambda: bootstrap_course._semester_metadata(
-        "Org", "Course"
+        "Course"
     ),
     "grading_config.yml (scaffolded, group)": lambda: _grading_config(
         title="Neural networks from scratch",

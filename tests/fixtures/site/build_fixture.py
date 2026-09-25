@@ -168,7 +168,7 @@ def _formed_teams(_org: str, _key: str) -> list[tuple[str, list[str]]]:
     ]
 
 
-def _grading_spec(_org: str, repo: str):
+def _grading_spec(_org: str, repo: str, **_):
     """The assignment's own definition, which names the repo shape a student looks for,
     says whether the work is handed in on GitHub at all, and declares what happens to work
     that arrives late. The fixture's assignments are individual, so the rest of the empty

@@ -1,0 +1,107 @@
+{
+  "contact": "datasciencelab@hertie-school.org",
+  "defaults": {
+    "archive": {
+      "grace_days": 60
+    },
+    "formats": [
+      "ipynb"
+    ],
+    "late_penalty_per_day": "10%",
+    "late_window_days": 10,
+    "max_team_size": 5,
+    "semester_dest_repo": "materials",
+    "team_formation": "self_select",
+    "timezone": "Europe/Berlin",
+    "visibility": "private"
+  },
+  "institution": {
+    "address": "Data Science Lab\nHertie School\nFriedrichstra\u00dfe 180\n10117 Berlin, Germany\n",
+    "dsl_org_url": "https://github.com/hertie-data-science-lab",
+    "name": "Hertie School",
+    "url": "https://hertie-school.org/en/datasciencelab"
+  },
+  "kinds": [
+    {
+      "background": "#f2dede",
+      "colour": "#a94442",
+      "key": "lecture",
+      "label": "Lecture",
+      "system": false
+    },
+    {
+      "background": "#dff0d8",
+      "colour": "#3c763d",
+      "key": "lab",
+      "label": "Lab",
+      "system": false
+    },
+    {
+      "background": "#dcefec",
+      "colour": "#2b6a60",
+      "key": "readings",
+      "label": "Readings",
+      "system": false
+    },
+    {
+      "background": "#f0f1f2",
+      "colour": "#5a5f66",
+      "key": "exam",
+      "label": "Exam",
+      "system": false
+    },
+    {
+      "background": "#d9edf7",
+      "colour": "#31708f",
+      "key": "assignment",
+      "label": "Assignment",
+      "system": true
+    },
+    {
+      "background": "#e5dcf0",
+      "colour": "#59468f",
+      "key": "term",
+      "label": "Semester",
+      "system": true
+    },
+    {
+      "background": "#fbf2d5",
+      "colour": "#7d6230",
+      "key": "archive",
+      "label": "Archive",
+      "system": true
+    },
+    {
+      "background": "#fbe3d6",
+      "colour": "#8f4a1c",
+      "key": "drop-in",
+      "label": "Drop-in",
+      "system": false
+    },
+    {
+      "background": "#fbf2d5",
+      "colour": "#7d6230",
+      "key": "other",
+      "label": "Event",
+      "system": false
+    }
+  ],
+  "licences": [
+    {
+      "name": "CC BY-NC-SA 4.0",
+      "url": "https://creativecommons.org/licenses/by-nc-sa/4.0/"
+    },
+    {
+      "name": "CC BY 4.0",
+      "url": "https://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "name": "CC BY-SA 4.0",
+      "url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    },
+    {
+      "name": "All rights reserved",
+      "url": ""
+    }
+  ]
+}

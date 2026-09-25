@@ -181,7 +181,7 @@ Unlike a `releases:` label, **an assignment's slug is shown to students**: it na
 | `tbc` | no | `false` | the deadline is provisional: both rows are marked **(TBC)**. **Display only** - the deadline, the late window and the grading snapshot all still fire on the dates above |
 | `handout_datetime` | no* | - | when repos are provisioned, automatically. |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
-| `grading_datetime` | no | `due_datetime` + the template's `late_window_days` | when the snapshot freezes and it is [autograded](#deadline-snapshots-and-autograding) - i.e. the END of the late window, not the deadline it is measured from |
+| `grading_datetime` | no | `due_datetime` + the assignment's effective `late_window_days` (its own, else the semester's `assignments.yml` - coming with the next release - else the course's, else the institution's) | when the snapshot freezes and it is [autograded](#deadline-snapshots-and-autograding) - i.e. the END of the late window, not the deadline it is measured from |
 | `solution_datetime` | no | - | when the template's `solution/` is pushed into every provisioned repo. **No default** - omit it and the solution only ever goes out by hand. Must be **after** `handout_datetime`, and needs it set |
 | `course_source_repo` | **yes** | - | the course-org repo this hands out from - one repo per student (or team) is generated from it |
 | `semester_dest_repo` | no | the slug | what the semester-side repos are called: `<name>-<handle>` per student (or `<name>-<team>`), and the frozen semester template `<name>` |

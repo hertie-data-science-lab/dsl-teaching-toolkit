@@ -77,13 +77,6 @@
     "course_name": {
       "type": "string"
     },
-    "org": {
-      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$",
-      "type": "string"
-    },
-    "org_name": {
-      "type": "string"
-    },
     "people": {
       "additionalProperties": false,
       "properties": {
@@ -138,27 +131,6 @@
       },
       "type": "object"
     },
-    "semester_defaults": {
-      "additionalProperties": false,
-      "properties": {
-        "archive": {
-          "additionalProperties": false,
-          "properties": {
-            "auto": {
-              "type": "boolean"
-            },
-            "grace_days": {
-              "type": "integer"
-            }
-          },
-          "type": "object"
-        },
-        "timezone": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
     "site_link_extensions": {
       "items": {
         "type": "string"
@@ -166,9 +138,6 @@
       "type": "array"
     }
   },
-  "required": [
-    "org"
-  ],
   "title": ".github/dsl-course.yml",
   "type": "object"
 }

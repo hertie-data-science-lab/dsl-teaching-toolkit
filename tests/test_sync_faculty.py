@@ -162,7 +162,7 @@ people:
 
 
 def test_parse_faculty_with_no_people_block_is_empty():
-    assert _parse("org: My-Course-E1\n") == {}
+    assert _parse("course_name: My Course\n") == {}
 
 
 def test_desired_team_members_maps_roles_and_filters_by_date():
@@ -481,7 +481,7 @@ def _raiser(exc):
 # past the whole course, so it earns a digest of its own in the course org.
 
 
-COURSE_CONFIG = """org: Course-Org
+COURSE_CONFIG = """course_name: Course
 central_ref: release
 people:
   course_admins:
@@ -530,7 +530,9 @@ def test_a_display_only_instructor_card_is_not_asked_for_an_address(monkeypatch)
 
 
 def test_a_central_ref_nothing_can_be_pinned_to_is_a_fault(monkeypatch):
-    _faculty, found = _course(monkeypatch, "org: Course-Org\ncentral_ref: stagign\n")
+    _faculty, found = _course(
+        monkeypatch, "course_name: Course\ncentral_ref: stagign\n"
+    )
     (fault,) = found
     assert fault.field == "central_ref" and fault.lineno == 2
     assert "stays at its previous rendering" in fault.what
@@ -575,7 +577,7 @@ def test_a_course_config_that_could_not_be_READ_still_raises(monkeypatch):
 def test_a_clean_course_config_has_no_faults(monkeypatch):
     faculty, found = _course(
         monkeypatch,
-        "org: Course-Org\npeople:\n  course_admins:\n    - github_handle: jan-g\n",
+        "course_name: Course\npeople:\n  course_admins:\n    - github_handle: jan-g\n",
     )
     assert [p["github_handle"] for p in faculty["course_admins"]] == ["jan-g"]
     assert found == []

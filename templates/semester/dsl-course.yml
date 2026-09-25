@@ -5,4 +5,3 @@
 # Send codes. Identity lives in the course org's .github/dsl-course.yml, the schedule
 # in this repo's schedule.yml.
 course: {course}
-org: {org}

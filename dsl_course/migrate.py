@@ -53,6 +53,7 @@ from .course import (
     OLD_JOIN_REPO,
     OLD_PEOPLE_FILE,
     OLD_SEMESTER_TOPIC,
+    RETIRED_COURSE_KEYS,
     SEMESTER_TOPIC,
     SOLUTION_BRANCH,
     SYLLABUS_SAMPLE_FILE,
@@ -84,6 +85,9 @@ from .grades import (
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 from .profile_readme import profile_files, update_profile_readme
 from .repos import default_branch, repo_missing, set_repo_topics
+from .setting_readers import RENAMED_SETTINGS
+from .settings import ASSIGNMENT_DEFAULTS_KEY
+from .sync_faculty import retired_course_faults
 from .welcome import (
     config_system_files,
     join_files,
@@ -210,15 +214,19 @@ def grading_config_keys(text: str) -> str:
 
 
 def course_config_keys(text: str) -> str:
-    """The course `dsl-course.yml`: `cohort_defaults:` -> `semester_defaults:`, and the
-    `format:` under `assignment_defaults:` -> `formats:`."""
+    """The course `dsl-course.yml`: every retired key (`course.RETIRED_COURSE_KEYS` -
+    `org`, `org_name`, `cohort_defaults`, `semester_defaults`) removed with its block, and
+    the `format:` under `assignment_defaults:` -> `formats:`. `assignment_defaults` stays:
+    it is the course layer of the cascade (decision 0009)."""
     out, section = [], ""
     for line in text.split("\n"):
         if top := _TOP_KEY.match(line):
             section = top.group(1)
-            if section == "cohort_defaults":
-                line = "semester_defaults:" + line[len("cohort_defaults:") :]
-        elif section == "assignment_defaults":
+        if section in RETIRED_COURSE_KEYS and (top or line[:1] in (" ", "\t")):
+            continue  # the key's own line, or a line of its block
+        if section in RETIRED_COURSE_KEYS and line.strip():
+            section = ""  # a top-level comment ends the block
+        if section == ASSIGNMENT_DEFAULTS_KEY and not top:
             indent = re.match(r"^(\s+)format:", line)
             if indent:
                 line = formats_line(line, indent.group(1))
@@ -818,11 +826,7 @@ class Semester:
         return moves, files, deletes, old_pointer
 
     def pointer(self) -> bytes:
-        return (
-            template("semester/dsl-course.yml")
-            .format(course=self.course, org=self.org)
-            .encode()
-        )
+        return template("semester/dsl-course.yml").format(course=self.course).encode()
 
     def layout_done(self) -> bool:
         if not self.renamed():
@@ -1076,14 +1080,20 @@ class Course:
         return text == new
 
     def meta_verified(self) -> bool:
+        """Re-read with this engine's own rules: no retired key, no old spelling in the
+        course layer."""
         text, _ = self.meta_text()
         meta = _yaml(text)
-        defaults = meta.get("assignment_defaults") or {}
-        return (
-            self.meta_done()
-            and "cohort_defaults" not in meta
-            and "format" not in (defaults if isinstance(defaults, dict) else {})
-        )
+        defaults = meta.get(ASSIGNMENT_DEFAULTS_KEY) or {}
+        bad = [f.field for f in retired_course_faults(meta)]
+        bad += [
+            f"{ASSIGNMENT_DEFAULTS_KEY}.{key}"
+            for key in RENAMED_SETTINGS
+            if key in (defaults if isinstance(defaults, dict) else {})
+        ]
+        for key in bad:
+            log_err(f"{COURSE_CONFIG}: `{key}` is still NOT_MIGRATED")
+        return self.meta_done() and not bad
 
     def rewrite_meta(self) -> bool:
         text, new = self.meta_text()
@@ -1201,7 +1211,7 @@ class Course:
                 done=self.meta_done,
                 plan=lambda: [
                     (
-                        "cohort_defaults: -> semester_defaults:, "
+                        f"remove {', '.join(RETIRED_COURSE_KEYS)}; "
                         "assignment_defaults format: -> formats:"
                     )
                 ],

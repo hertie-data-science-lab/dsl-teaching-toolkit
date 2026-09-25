@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 
-from . import mailer
+from . import mailer, policy
 from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
 from .course import (
     ASSIGNMENT_TYPES,
@@ -791,7 +791,7 @@ def _copy_from_input(description: str, options: list[str]) -> str:
 # it. This box used to be required-and-blank on the theory that naming the destination was
 # worth forcing - but a mandatory free-text field IS the typo surface that theory feared, and
 # it made the button contradict the schedule for no gain. A cleared box is still safe:
-# deploy.main resolves `semester_dest_repo.strip() or "materials"`.
+# deploy.main resolves `semester_dest_repo.strip() or` the policy's `semester_dest_repo`.
 _COURSE_SOURCE_REPO_DESC = "1. repo to release from in the course org"
 
 _COURSE_SOURCE_PATH_INPUT = """\
@@ -799,10 +799,10 @@ _COURSE_SOURCE_PATH_INPUT = """\
         description: "2. within-repo folder/file path to copy from (or comma-separated list)"
         required: true"""
 
-_SEMESTER_DEST_INPUTS = """\
+_SEMESTER_DEST_INPUTS = f"""\
       semester_dest_repo:
         description: "4. repo to release to in the semester org; created if missing"
-        default: "materials"
+        default: "{policy.defaults()["semester_dest_repo"]}"
         required: true
       semester_dest_path:
         description: "5. within-repo destination path (blank mirrors box 2's path(s)); created if missing"
@@ -1459,7 +1459,7 @@ on:
           # to GRAPH_SENDER like everything else.
           DSL_MAINTAINER_EMAIL: ${{{{ secrets.DSL_MAINTAINER_EMAIL }}}}
         run: |
-          python3 -m dsl_course.bootstrap_course --org "$SEMESTER" --org-name "$SEMESTER" \\
+          python3 -m dsl_course.bootstrap_course --org "$SEMESTER" \\
             --semester --course "$COURSE" --propagate-secret
           python3 -m dsl_course.seed refresh --course-org "$COURSE"
 """
@@ -1866,10 +1866,10 @@ on:
 # `course.STARTER_FORMATS`, like the three dropdowns below it, because a box offering a
 # word the reader would refuse is exactly the form that lies. It and three of the
 # dropdowns arrive at `COURSE_DEFAULT_CHOICE`: the course's `assignment_defaults:` answers
-# them, else the toolkit's own (`scaffold.resolve_answers`).
+# them, else the institution policy (`scaffold.resolve_answers`, `settings`).
 _STARTER_FORMATS_INPUT = f"""\
       formats:
-        description: "5. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only. The first is the runnable one. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else ipynb"
+        description: "5. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only. The first is the runnable one. {COURSE_DEFAULT_CHOICE} = the course's default, else the institution policy's"
         default: "{COURSE_DEFAULT_CHOICE}\""""
 
 
@@ -1878,10 +1878,10 @@ def render_new_assignment(assignments: list[str] | None = None) -> str:
 
     TEN boxes, and between them they are the whole assignment: everything but `formats`
     lands verbatim in the solution branch's `grading_config.yml`, which the handout, the
-    grading sheet, the receipts and the Join-team form all read. What the form does NOT ask
-    - the team cap, the late window, the penalty, the question maxima - comes from the
-    course's own `assignment_defaults:` in dsl-course.yml, and is written into that same
-    file so it can be revised there per assignment afterwards.
+    grading sheet, the receipts and the Join-team form all read. A run setting the form
+    does not ask - the team cap, the late window, the penalty - or one left at
+    `COURSE_DEFAULT_CHOICE` is written into that same file COMMENTED, at the value the
+    cascade gives it, so it can be set there per assignment afterwards.
 
     `copy_from` is the box that asks for none of it: last year's template arrives whole,
     and the `grading_config.yml` that comes with it is the definition, so boxes 5-10 are
@@ -1912,13 +1912,13 @@ on:
 {_copy_from_input("4. Copy an existing template forward instead - both branches, whole history. Boxes 5-10 are then ignored", assignments or [])}
 {_STARTER_FORMATS_INPUT}
 {_choice_input("type", "6. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual", required=False)}
-{_choice_input("team_formation", f"7. Group only: self_select = students use the Join team form; assigned = you write teams.csv. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else self_select", [COURSE_DEFAULT_CHOICE, *TEAM_FORMATIONS], COURSE_DEFAULT_CHOICE, required=False)}
-{_choice_input("submit_via", f"8. Where students hand in. assignment_repo = they push to their repo and the late cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole semester, each student pushes into their own folder, peers can read it. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else assignment_repo", [COURSE_DEFAULT_CHOICE, *SUBMIT_VIA], COURSE_DEFAULT_CHOICE, required=False)}
+{_choice_input("team_formation", f"7. Group only: self_select = students use the Join team form; assigned = you write teams.csv. {COURSE_DEFAULT_CHOICE} = the course's default, else the institution policy's", [COURSE_DEFAULT_CHOICE, *TEAM_FORMATIONS], COURSE_DEFAULT_CHOICE, required=False)}
+{_choice_input("submit_via", f"8. Where students hand in. assignment_repo = they push to their repo and the late cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole semester, each student pushes into their own folder, peers can read it. {COURSE_DEFAULT_CHOICE} = the course's default, else assignment_repo", [COURSE_DEFAULT_CHOICE, *SUBMIT_VIA], COURSE_DEFAULT_CHOICE, required=False)}
       autograde:
         description: "9. Also run hidden tests at the late cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean
         default: false
-{_choice_input("visibility", f"10. Who may read each student's repo. private = the student and the instructors; public = the whole internet, for portfolio work such as a hackathon; student_choice = private, but the student is its admin and may publish it once the grading cutoff has passed. Read when the repo is created: editing it later changes nothing. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else private", [COURSE_DEFAULT_CHOICE, *VISIBILITIES], COURSE_DEFAULT_CHOICE, required=False)}
+{_choice_input("visibility", f"10. Who may read each student's repo. private = the student and the instructors; public = the whole internet, for portfolio work such as a hackathon; student_choice = private, but the student is its admin and may publish it once the grading cutoff has passed. Read when the repo is created: editing it later changes nothing. {COURSE_DEFAULT_CHOICE} = the course's default, else the institution policy's", [COURSE_DEFAULT_CHOICE, *VISIBILITIES], COURSE_DEFAULT_CHOICE, required=False)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:

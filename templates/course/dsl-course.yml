@@ -1,7 +1,5 @@
 # INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
 #
-org: {org}
-org_name: {org_name}
 course_name: {course_name}
 course_code: {course_code}
 # central_ref: <40-character commit SHA>   # OPTIONAL: pin this course to one known
@@ -20,31 +18,22 @@ course_code: {course_code}
 #   # WHICH of those files the semester site hosts publicly, so an HTML deck opens rendered
 #   # instead of showing as source, is `publish.yml` in the materials repo - not here.
 
-# What every assignment under this course starts from. **New assignment** stamps these
-# values into the `grading_config.yml` it generates, so each assignment's own file says
-# what it does and can be edited there afterwards; changing them here changes the NEXT
-# assignment, never one that already exists. The two late-work lines are the toolkit's
-# own default, applied when they are absent here and from the assignment too. The four
-# commented lines answer New assignment's boxes of the same name when they are left at
-# "(course default)"; unset, the button uses the value shown.
+# Defaults for this course's assignments (all OPTIONAL). Each run setting resolves
+# nearest-first: the assignment's block in a semester's `semester-config/assignments.yml`,
+# that file's `defaults:`, this block, then the institution's policy - the values shown are
+# the institution's, so an unset line changes nothing. A line set here applies to every
+# assignment that does not set its own, from the next run on. `formats`, `submit_via`,
+# `team_formation` and `visibility` also answer New assignment's boxes of the same name when
+# they are left at "(course default)". A late line alone is a whole rule: the other half
+# is then none.
 assignment_defaults:
-  max_team_size: 5            # group assignments only
-  late_window_days: 10        # 0 = nothing after the due date is accepted
-  late_penalty_per_day: 10%   # of the EARNED grade, per day started
+  # max_team_size: 5            # group assignments only
+  # late_window_days: 10        # 0 = nothing after the due date is accepted
+  # late_penalty_per_day: 10%   # of the EARNED grade, per day started
   # formats: [ipynb]            # ipynb | py | rmd | qmd | latex | none - starters, first runnable
   # submit_via: assignment_repo # assignment_repo | external | shared_dropbox_repo
   # team_formation: self_select # self_select | assigned - group assignments only
   # visibility: private         # private | public | student_choice
-
-# What Bootstrap semester writes into each NEW semester's schedule.yml. Changing it here
-# changes the next semester, never one that already exists - edit that semester's
-# schedule.yml instead. Unset, a new semester gets Europe/Berlin and is archived 60 days
-# after its semester_end.
-# semester_defaults:
-#   timezone: Europe/Berlin     # the zone every time in the semester's schedule is read in
-#   archive:
-#     auto: true                # false = the semester is never archived automatically
-#     grace_days: 60            # days after semester_end the semester is archived
 
 # `course_name`, `course_code` and `course_description` are what reach the semester
 # websites. Editing them here re-syncs every semester site already bootstrapped from this

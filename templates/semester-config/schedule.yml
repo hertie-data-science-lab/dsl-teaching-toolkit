@@ -6,7 +6,7 @@
 # - worked example: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/semester-org/schedule.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/schedule/
 #
-# Times are Europe/Berlin unless you set `timezone:`. Scheduled release ticks about every
+# Times are {timezone} unless you set `timezone:`. Scheduled release ticks about every
 # 15 minutes, so a time is honoured to roughly that, not to the minute. Pin a release AHEAD
 # of the class that needs it (see `deploy_datetime` below) rather than at its start time.
 #
@@ -34,7 +34,7 @@
 # What follows is a SKELETON: uncomment and fill what you want. For a full worked semester -
 # a real release plan, a group project, exams - see the worked example above.
 
-# timezone: Europe/Berlin           # OPTIONAL - default: Europe/Berlin
+# timezone: {timezone}           # OPTIONAL - default: {timezone}
 # semester_start:                   # OPTIONAL - default: inferred from the semester tag (f2026 -> 1 Sep 2026)
 # semester_end:                     # OPTIONAL - default: 15 weeks after the start
 
@@ -127,7 +127,7 @@
 
 # archive the org (every repo read-only): removes all write permissions, retains all read permissions
 archive:
-  event_datetime:             # optional (default: semester_end + 60 days)
+  event_datetime:             # optional (default: semester_end + {grace_days} days)
   title: Semester archived      # optional - the row's Title column
   show_on_site: true          # a "Semester archived" row on the site's Schedule tab, also sends a notice email 14 days out
   tbc: false                  # optional - true marks the date "(TBC)". Display only: the freeze still happens on the date above

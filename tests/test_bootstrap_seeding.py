@@ -44,6 +44,7 @@ from dsl_course import (
     scaffold,
     schedule,
     seed,
+    settings,
     site_repo,
     sync_faculty,
     teams,
@@ -615,22 +616,15 @@ def test_the_seeded_assignment_defaults_block_parses_with_the_real_reader(capsys
     # silently dropped there rather than here. Both files that carry it are checked.
     for text in (
         welcome.template("course/dsl-course.yml").format(
-            org="Course-E1",
-            org_name="Course",
             course_name="Deep Learning",
             course_code="E1",
         ),
         welcome.example_course_file("dsl-course.yml"),
     ):
-        block = yaml.safe_load(text)[grades.ASSIGNMENT_DEFAULTS_KEY]
-        # Only what `New assignment` does not ask for: a block carrying `submit_via` or
-        # `autograde` would read as policy and change nothing, since the button answers
-        # both on every run.
-        assert grades.parse_assignment_defaults(block) == {
-            "max_team_size": 5,
-            "late_window_days": 10,
-            "late_penalty_per_day": "10%",
-        }
+        block = yaml.safe_load(text)[settings.ASSIGNMENT_DEFAULTS_KEY]
+        # Whatever a course states here is read through the same readers as the
+        # assignment's own settings; the seed states nothing (the institution answers).
+        assert settings.parse_assignment_defaults(block) == (block or {})
     assert capsys.readouterr().err == ""
 
 
@@ -731,7 +725,7 @@ def test_course_dsl_course_yml_is_never_rewritten(fake, monkeypatch):
     )
     fake.files[(".github", "dsl-course.yml")] = edited
 
-    bc.create_profile_repo("My-Course-E1", "My Course", "Deep Learning", "E1")
+    bc.create_profile_repo("My-Course-E1", "Deep Learning", "E1")
 
     assert fake.files[(".github", "dsl-course.yml")] == edited
     assert fake.writes == []
@@ -1609,7 +1603,7 @@ def test_semester_bootstrap_reds_when_faculty_sync_reports_errors(monkeypatch, c
 def test_semester_bootstrap_reds_when_student_repos_half_seeded(monkeypatch, capsys):
     # setup_semester_extras returns the count of welcome/config-sample writes that failed.
     stub_bootstrap(monkeypatch)
-    monkeypatch.setattr(bc, "setup_semester_extras", lambda org, ref, defaults: 4)
+    monkeypatch.setattr(bc, "setup_semester_extras", lambda org, ref: 4)
     monkeypatch.setattr(bc.site, "sync_site", lambda c, o: 0)
     monkeypatch.setattr("sys.argv", _semester_argv())
 
@@ -1744,9 +1738,7 @@ def _profile_repo_run(monkeypatch, *, seeded=True, topics=True):
     monkeypatch.setattr(bc, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(bc, "seed_if_absent", lambda *a, **k: seeded)
     monkeypatch.setattr(bc, "set_repo_topics", lambda *a, **k: topics)
-    return bc.create_profile_repo(
-        "Course-Org", "Org", "Course", "C1", is_semester=False
-    )
+    return bc.create_profile_repo("Course-Org", "Course", "C1", is_semester=False)
 
 
 def test_an_unseeded_course_ssot_reds_the_bootstrap(monkeypatch, capsys):

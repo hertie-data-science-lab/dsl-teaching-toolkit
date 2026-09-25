@@ -29,26 +29,20 @@ import textwrap
 import time
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from functools import cache
 from pathlib import Path
-from typing import NamedTuple, Self
+from typing import NamedTuple
 from urllib.parse import urlsplit
 
 import yaml
 
-from . import gh_teams, mailer, records, roster, schedule
+from . import gh_teams, mailer, policy, records, roster, schedule, settings
 from .access import FACULTY_READ_ACCESS, grant_faculty
 from .course import (
-    ASSIGNMENT_TYPES,
     CONFIG_REPO,
-    COURSE_CONFIG,
-    DEFAULT_LATE_PENALTY_PER_DAY,
-    DEFAULT_LATE_WINDOW_DAYS,
-    DEFAULT_MAX_TEAM_SIZE,
-    FORMATS,
     GRADEBOOK_PREFIX,
     MARKS_RETURNED_NOTE,
     NO_STARTER,
@@ -58,13 +52,8 @@ from .course import (
     RECEIPTS_ISSUE_MARKS,
     RECEIPTS_ISSUE_TITLE,
     SELF_SELECT,
-    SETTING_PLACEHOLDER,
     SOLUTION_BRANCH,
-    SUBMIT_VIA,
-    TEAM_FORMATIONS,
-    VISIBILITIES,
     can_hold_solution,
-    canonical_submit_via,
     collects_commits,
     course_phrase,
     creates_repos,
@@ -87,9 +76,8 @@ from .discovery import (
     exists_in,
     listing_by_name,
     listing_row,
-    org_meta,
 )
-from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, not_migrated_text
+from .faults import NOT_MIGRATED, ConfigFault, NotMigrated
 from .gh_contents import (
     blob_sha,
     dump_csv,
@@ -122,6 +110,15 @@ from .repos import (
     repo_is_archived,
     set_repo_topics,
 )
+from .setting_readers import (
+    SPEC_KEYS,
+    Dropped,
+    as_decimal,
+    penalty_fault,
+    read_settings,
+    refuse_renamed,
+)
+from .settings import LATE_PAIR
 
 GRADEBOOK_DIR = records.path(
     "gradebook"
@@ -516,7 +513,7 @@ class _SheetLoader(yaml.SafeLoader):
     came back holding values they never wrote, and the toolkit rewrote their file to match.
     Only the null rule survives here, which is the one implicit type the sheet actually
     declares (`key:`, `~`, `null` all mean "not filled in"); every other plain scalar is a
-    `str`. The arithmetic never needed the typing - `_decimal` parses the text - and this
+    `str`. The arithmetic never needed the typing - `as_decimal` parses the text - and this
     is what lets `adjustment_individual: +4` still say `+4` after a refresh.
 
     A SUBCLASS, like `_SheetDumper`: `yaml.safe_load` is called all over this package and
@@ -681,7 +678,7 @@ def _points_clause(questions: dict[str, str]) -> str:
     """`50 points (Q1 15, Q2 15, Q3 10, Q4 10)` - with the total only when every maximum is
     a number, since `questions` holds whatever the course wrote."""
     listed = ", ".join(f"{name} {maximum}" for name, maximum in questions.items())
-    maxima = [_decimal(maximum) for maximum in questions.values()]
+    maxima = [as_decimal(maximum) for maximum in questions.values()]
     if None in maxima:
         return f"({listed})"
     return f"{_plain(sum(maxima, Decimal(0)))} points ({listed})"
@@ -859,29 +856,6 @@ def dump_sheet(sheet: dict, spec: SheetSpec, status_line: str) -> str:
     return _sheet_header(spec, status_line) + _annotate(body, spec)
 
 
-def _decimal(value: object) -> Decimal | None:
-    """`value` as a Decimal, or None when it is blank or not a number.
-
-    Grades are free text and stay that way: `pass`, `A-` and `see me` are legitimate marks
-    that no arithmetic applies to, so they come back None and are passed through verbatim
-    rather than coerced into a number nobody typed."""
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, Decimal):
-        return value
-    text = str(value).strip()
-    if not text:
-        return None
-    try:
-        number = Decimal(text)
-    except InvalidOperation:
-        return None
-    # `Decimal` accepts `nan` and `Infinity`, and comparing either of them RAISES - so a
-    # grader who typed one into a score cell would take the whole distribution down rather
-    # than have that one mark passed through as the text it is.
-    return number if number.is_finite() else None
-
-
 def _plain(number: Decimal) -> str:
     """A Decimal with no exponent and no trailing zeros - `50`, not `5E+1` or `50.0`."""
     return format(number.normalize(), "f")
@@ -903,57 +877,19 @@ def score_total(
     beside it and nothing said. The unit is held for a person either way (see
     `sheet_hold_reasons`); this is what stops the number existing at all."""
     if not isinstance(score, dict):
-        return _decimal(score)
+        return as_decimal(score)
     total, marked = Decimal(0), False
     for key, value in score.items():
         if questions and key not in questions:
             continue
         if value is None or not str(value).strip():
             continue
-        number = _decimal(value)
+        number = as_decimal(value)
         if number is None:
             return None
         total += number
         marked = True
     return total if marked else None
-
-
-# Every way `late_penalty_per_day` can be written wrong, and what to say about it. One
-# multiplies every late mark in the semester, so none of them may pass quietly: a bare `10`
-# meant no penalty at all while the header still advertised one, and `-10%` ADDED marks for
-# being late.
-_PENALTY_FAULTS = {
-    "unwritten": "is not a number - write `10%` or `0.1`",
-    "bare": "is neither a percentage nor a fraction - write `10%` or `0.1`",
-    "negative": "is negative - that would ADD marks for lateness",
-    "over": "is more than 100% a day",
-}
-
-
-def penalty_fault(text: object) -> str:
-    """Why `late_penalty_per_day` cannot be used, as a `_PENALTY_FAULTS` key, or "".
-
-    Blank and absent are not faults - plenty of assignments accept no late work at all, or
-    accept it without a deduction."""
-    if text is None:
-        return ""
-    raw = str(text).strip()
-    if not raw:
-        return ""
-    percent = raw.endswith("%")
-    rate = _decimal(raw[:-1] if percent else raw)
-    if rate is None:
-        return "unwritten"
-    if percent:
-        rate /= 100
-    elif rate >= 1:
-        # A BARE `10` is read neither as 1000% nor, silently, as 10%. The two spellings a
-        # course actually writes are the percentage and the fraction; guessing between
-        # them on a number that multiplies every late mark is not a guess worth making.
-        return "bare"
-    if rate < 0:
-        return "negative"
-    return "over" if rate > 1 else ""
 
 
 def penalty_rate(text: object) -> Decimal | None:
@@ -966,7 +902,7 @@ def penalty_rate(text: object) -> Decimal | None:
     raw = str(text or "").strip()
     if not raw:
         return None
-    return _decimal(raw[:-1]) / 100 if raw.endswith("%") else _decimal(raw)
+    return as_decimal(raw[:-1]) / 100 if raw.endswith("%") else as_decimal(raw)
 
 
 def final_grade(
@@ -979,13 +915,13 @@ def final_grade(
     day count is no penalty, so an assignment with no late policy needs no special case.
     A total that is not a number gets no arithmetic at all and comes back None - the caller
     distributes the mark exactly as the grader typed it."""
-    earned = _decimal(total)
+    earned = as_decimal(total)
     if earned is None:
         return None
-    penalty, days = _decimal(rate), _decimal(days_late)
+    penalty, days = as_decimal(rate), as_decimal(days_late)
     if penalty is not None and days is not None and days > 0:
         earned *= Decimal(1) - penalty * days
-    return max(Decimal(0), earned + (_decimal(adjustment) or Decimal(0)))
+    return max(Decimal(0), earned + (as_decimal(adjustment) or Decimal(0)))
 
 
 # ------------------------------------------------- the assignment's own definition
@@ -1002,282 +938,8 @@ GRADING_FILE = "grading_config.yml"  # on the template's solution branch
 LEGACY_GRADING_FILE = "grading.yml"
 
 
-class Dropped(str):
-    """One line the parse of an assignment's definition refused, and what it was about.
-
-    A `str`, because that is what `GradingSpec.dropped` has always been and what every
-    reader of it prints, logs and greps for. The key it names and the vocabulary it would
-    have accepted ride along, so the same line can also become the fault that cites the
-    line to edit and says what is allowed there; a second, parallel list of records would
-    be a second answer to "what did this parse refuse"."""
-
-    field: str
-    what: str
-    allowed: tuple[str, ...]
-    code: str
-
-    def __new__(
-        cls,
-        where: str,
-        field: str,
-        what: str,
-        allowed: tuple[str, ...] = (),
-        code: str = "",
-    ) -> Self:
-        # `  ! <where>: ` is the run-log form, unchanged; `what` on its own is what a
-        # notification says, where the file is already named above it.
-        out = super().__new__(cls, f"  ! {where}: {what}")
-        out.field, out.what, out.allowed, out.code = field, what, allowed, code
-        return out
-
-
-def _one_of(
-    value: object,
-    allowed: tuple[str, ...],
-    field: str,
-    default: str,
-    where: str,
-    dropped: list[str],
-) -> str:
-    """A closed vocabulary, or the default with a warning. Never the raw value: an
-    unrecognised `submit_via` would silently turn late arithmetic off for a semester."""
-    text = str(value or "").strip().lower()
-    if text in allowed:
-        return text
-    dropped.append(
-        Dropped(
-            where,
-            field,
-            f"`{field}: {value}` is not one of {'/'.join(allowed)} - using `{default}`",
-            allowed,
-        )
-    )
-    return default
-
-
-def _formats(value: object, where: str, dropped: list[str]) -> tuple[str, ...]:
-    """`formats:` - the starter formats, a YAML list (or, as the New assignment box types
-    it, a comma-separated string). The FIRST is the runnable one: the completion check and
-    the autograder run it. `none` stands alone. An unusable value is dropped with a warning
-    and reads as no starter at all."""
-    items = value if isinstance(value, list) else str(value or "").split(",")
-    named = tuple(
-        dict.fromkeys(str(t).strip().lower() for t in items if str(t).strip())
-    )
-    if all(t in FORMATS for t in named) and (
-        NO_STARTER not in named or len(named) == 1
-    ):
-        return () if named == (NO_STARTER,) else named
-    dropped.append(
-        Dropped(
-            where,
-            "formats",
-            f"`formats: {value}` is not a list of {'/'.join(FORMATS)} - no starter "
-            f"format is recorded",
-            FORMATS,
-        )
-    )
-    return ()
-
-
-# Settings RENAMED (decision 0012), old -> new. The old key is never read: it is dropped
-# as NOT_MIGRATED, which names the new one, and the setting takes its default meanwhile.
-RENAMED_SETTINGS = {"format": "formats"}
-
-
-def _refuse_renamed(data: dict, where: str, dropped: list[str]) -> dict:
-    """`data` without its old keys, each one noted in `dropped` as NOT_MIGRATED."""
-    out = dict(data)
-    for old, new in RENAMED_SETTINGS.items():
-        if old in out:
-            del out[old]
-            dropped.append(
-                Dropped(where, old, not_migrated_text(old, new), code=NOT_MIGRATED)
-            )
-    return out
-
-
-def _boolean(value: object, field: str, where: str, dropped: list[str]) -> bool:
-    """A YAML boolean, or one spelt as text. Anything else is false with a warning:
-    `autograde: "false"` is a non-empty string, and reading it as truthy turned hidden
-    tests on for an assignment that had asked for the opposite."""
-    if isinstance(value, bool):
-        return value
-    text = str(value if value is not None else "").strip().lower()
-    if text in ("true", "yes", "on", "1"):
-        return True
-    if text in ("false", "no", "off", "0", ""):
-        return False
-    dropped.append(
-        Dropped(
-            where,
-            field,
-            f"`{field}: {value}` is not true or false - using false",
-            ("true", "false"),
-        )
-    )
-    return False
-
-
-def _questions(value: object, where: str, dropped: list[str]) -> dict[str, str] | None:
-    """`questions:` as {name: maximum AS TEXT}.
-
-    Text, because the maxima are only ever DISPLAYED - beside each blank in the sheet, and
-    in its header - and a course that writes `1.5` must read back what it wrote. Anything
-    that is not a mapping is dropped with a warning rather than half-read."""
-    if not isinstance(value, dict):
-        dropped.append(
-            Dropped(
-                where,
-                "questions",
-                "`questions:` must be a mapping of name -> points - ignored",
-            )
-        )
-        return None
-    questions = {
-        str(name).strip(): ("" if points is None else str(points).strip())
-        for name, points in value.items()
-        if str(name).strip()
-    }
-    return questions or None
-
-
-def _whole_days(value: object, where: str, dropped: list[str]) -> int | None:
-    """`late_window_days` as a whole number of days, or None with a warning."""
-    try:
-        return max(0, int(str(value).strip()))
-    except (TypeError, ValueError):
-        dropped.append(
-            Dropped(
-                where,
-                "late_window_days",
-                f"`late_window_days: {value}` is not a whole number of days - ignored",
-            )
-        )
-        return None
-
-
-def _team_cap(value: object, where: str, dropped: list[str]) -> int | None:
-    """`max_team_size` as a positive whole number, or None with a warning. None means
-    the Join-team form falls back to the course default, so a typo costs the cap and
-    nothing else."""
-    try:
-        cap = int(str(value).strip())
-    except (TypeError, ValueError):
-        cap = 0
-    if cap > 0:
-        return cap
-    dropped.append(
-        Dropped(
-            where,
-            "max_team_size",
-            f"`max_team_size: {value}` is not a whole number of members - ignored",
-        )
-    )
-    return None
-
-
-def _penalty(value: object, where: str, dropped: list[str]) -> str | None:
-    """`late_penalty_per_day` as it was typed, or None with a warning saying which way it
-    is wrong.
-
-    Checked here, once per spec, like every other malformed field: the derivation itself
-    stays pure and is called per student. Refusing without saying so meant every late mark
-    in that semester quietly lost its deduction while the sheet's header still advertised
-    one."""
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    fault = penalty_fault(raw)
-    if fault:
-        dropped.append(
-            Dropped(
-                where,
-                "late_penalty_per_day",
-                f"`late_penalty_per_day: {value}` {_PENALTY_FAULTS[fault]}; no late "
-                f"penalty is applied",
-            )
-        )
-        return None
-    return raw
-
-
-def _submit_url(value: object, where: str, dropped: list[str]) -> str:
-    """Where an EXTERNAL assignment is handed in - the address behind the site's
-    `Submit on <host>` button.
-
-    `https://` only, and FILLED IN: this is the one link on a public course site that sends
-    a whole semester somewhere on the strength of one hand-typed line, and `CHANGE-ME` is the
-    placeholder the scaffold seeds - a file still carrying it has had the line uncommented
-    and not answered. Refused rather than raised, so the site shows the brief with no
-    button."""
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    if (
-        text.lower().startswith("https://")
-        and urlsplit(text).hostname
-        and SETTING_PLACEHOLDER not in text
-    ):
-        return text
-    dropped.append(
-        Dropped(
-            where,
-            "submit_url",
-            f"`submit_url: {value}` is not a filled-in `https://` address - the site "
-            f"shows the brief with no submit button",
-        )
-    )
-    return ""
-
-
-# One reader per key, so the per-assignment file and the course-wide defaults block below
-# validate the same value the same way and cannot drift into two vocabularies.
-_READERS = {
-    "title": lambda v, w, d: str(v or "").strip(),
-    "type": lambda v, w, d: _one_of(v, ASSIGNMENT_TYPES, "type", "individual", w, d),
-    "team_formation": lambda v, w, d: _one_of(
-        v, TEAM_FORMATIONS, "team_formation", "self_select", w, d
-    ),
-    "max_team_size": _team_cap,
-    # `canonical_submit_via` first, so the legacy `github` spelling reads as
-    # `assignment_repo` and never earns a Dropped warning; `shared` (renamed before it
-    # ever shipped) has no alias and is Dropped like any other unrecognised word.
-    "submit_via": lambda v, w, d: _one_of(
-        canonical_submit_via(v), SUBMIT_VIA, "submit_via", "assignment_repo", w, d
-    ),
-    "visibility": lambda v, w, d: _one_of(
-        v, VISIBILITIES, "visibility", "private", w, d
-    ),
-    "submit_url": _submit_url,
-    "formats": _formats,
-    "questions": _questions,
-    "late_window_days": _whole_days,
-    "late_penalty_per_day": _penalty,
-    "autograde": lambda v, w, d: _boolean(v, "autograde", w, d),
-    "completion_check": lambda v, w, d: _boolean(v, "completion_check", w, d),
-    "tests": lambda v, w, d: str(v or "tests").strip() or "tests",
-    "grader_pdf": lambda v, w, d: _boolean(v, "grader_pdf", w, d),
-}
-SPEC_KEYS = tuple(_READERS)
-# What a COURSE may set once for every assignment under it, in `dsl-course.yml`. The
-# first three are settings `New assignment` does NOT ask for and stamps from here; the
-# other four ARE boxes on the form, and apply when the box is left at
-# `course.COURSE_DEFAULT_CHOICE` (see `scaffold.resolve_answers`). The per-assignment
-# keys - the title, the type, the question maxima - are deliberately not among them: they
-# are what makes one assignment different from the next.
-COURSE_DEFAULT_KEYS = (
-    "max_team_size",
-    "late_window_days",
-    "late_penalty_per_day",
-    "formats",
-    "submit_via",
-    "team_formation",
-    "visibility",
-)
-# Where the course-wide block lives, for the warnings it produces.
-ASSIGNMENT_DEFAULTS_KEY = "assignment_defaults"
-_DEFAULTS_WHERE = f"{COURSE_CONFIG} {ASSIGNMENT_DEFAULTS_KEY}"
+# The institution's defaults, read once: the run settings of a spec nobody has resolved yet.
+_INSTITUTION = policy.defaults()
 
 
 @dataclass(frozen=True)
@@ -1291,25 +953,27 @@ class GradingSpec(_Shape):
 
     title: str = ""
     type: str = "individual"
-    team_formation: str = "self_select"
+    # The run settings (`settings.RUN_KEYS`) default to the institution's policy; a spec
+    # built by `load_grading_spec` carries their EFFECTIVE values (`with_run_settings`).
+    team_formation: str = _INSTITUTION["team_formation"]
     max_team_size: int | None = None
     submit_via: str = "assignment_repo"
-    # PRIVATE unless the assignment asks otherwise: everything the toolkit creates for a
-    # student is private to them and the teaching team, and a default that published a
-    # semester's work would be a default nobody chose.
-    visibility: str = "private"
+    # PRIVATE unless the assignment asks otherwise (the policy's default): everything the
+    # toolkit creates for a student is private to them and the teaching team, and a
+    # default that published a semester's work would be a default nobody chose.
+    visibility: str = _INSTITUTION["visibility"]
     # Where an `external` assignment is handed in (Moodle, Kaggle). Only the site reads it,
     # and only to put a button beside the brief.
     submit_url: str = ""
     # The starter formats, in order; the FIRST is the runnable one (see `format`).
     formats: tuple[str, ...] = ()
     questions: dict[str, str] | None = None
-    # The Hertie standard from `course` unless this file says otherwise, so an assignment
+    # The institution's late rule unless a nearer layer says otherwise, so an assignment
     # nobody has written a late policy for is still graded by the one the syllabi state.
-    # A file that declares ONE of the two leaves the other empty rather than taking half a
-    # default it never asked for - see `_late_pair`.
-    late_window_days: int | None = DEFAULT_LATE_WINDOW_DAYS
-    late_penalty_per_day: str | None = DEFAULT_LATE_PENALTY_PER_DAY
+    # A layer that declares ONE of the two leaves the other empty rather than taking half
+    # a default it never asked for - see `_late_pair`.
+    late_window_days: int | None = _INSTITUTION["late_window_days"]
+    late_penalty_per_day: str | None = _INSTITUTION["late_penalty_per_day"]
     # OFF unless the assignment asks for it. Most assignments are hand-marked, and a
     # default of true made every template without the key try to run hidden tests that
     # were never written - a red tick every quarter of an hour for the rest of the term.
@@ -1327,6 +991,11 @@ class GradingSpec(_Shape):
     # nothing hands out or grades from it until it is migrated.
     not_migrated: bool = False
     dropped: tuple[str, ...] = ()
+    # The keys this `grading_config.yml` itself states: its run settings are the
+    # template's part of the assignment layer until they move to `assignments.yml`.
+    declared: frozenset[str] = field(default=frozenset(), compare=False)
+    # `{run key: layer}` - where each run setting's value came from (`with_run_settings`).
+    sources: tuple[tuple[str, str], ...] = field(default=(), compare=False)
 
     @property
     def format(self) -> str:
@@ -1366,74 +1035,6 @@ class GradingSpec(_Shape):
         if self.completion_check is None:
             return self.format == "ipynb"
         return self.completion_check
-
-
-def _read_settings(
-    data: dict, allowed: tuple[str, ...], where: str, dropped: list[str]
-) -> dict:
-    """The keys of `data` this schema understands, each through its own reader; everything
-    else recorded as an unknown key. Unknown rather than ignored, because the settings
-    that used to live in schedule.yml now live here and a misfiled one has to say so."""
-    out: dict = {}
-    for key, value in data.items():
-        name = str(key)
-        if name not in allowed:
-            dropped.append(
-                Dropped(
-                    where,
-                    name,
-                    f"`{name}:` is not a setting the toolkit reads - ignored",
-                )
-            )
-            continue
-        out[name] = _READERS[name](value, where, dropped)
-    return out
-
-
-def parse_assignment_defaults(raw: object) -> dict:
-    """The course-wide `assignment_defaults:` block, validated exactly as an assignment's
-    own file is. Returns the settings it declares; anything else it says is warned about
-    and dropped. A course that declares none gets `{}` and every assignment keeps the
-    toolkit's own defaults."""
-    if raw is None:
-        return {}
-    dropped: list[str] = []
-    if not isinstance(raw, dict):
-        log_err(f"  ! {_DEFAULTS_WHERE}: must be a block of settings - ignored")
-        return {}
-    # `formats` here answers New assignment's box, which takes a comma-separated list of
-    # starters. Read as the box reads it, and dropped when unusable, so the toolkit's own
-    # answer applies rather than `none`.
-    raw = _refuse_renamed(raw, _DEFAULTS_WHERE, dropped)
-    starters = raw.get("formats")
-    values = _read_settings(
-        {k: v for k, v in raw.items() if k != "formats"},
-        COURSE_DEFAULT_KEYS,
-        _DEFAULTS_WHERE,
-        dropped,
-    )
-    if starters is not None:
-        items = starters if isinstance(starters, list) else str(starters).split(",")
-        named = [str(t).strip().lower() for t in items if str(t).strip()]
-        if (
-            named
-            and all(t in FORMATS for t in named)
-            and (NO_STARTER not in named or len(named) == 1)
-        ):
-            values["formats"] = ",".join(dict.fromkeys(named))
-        else:
-            dropped.append(
-                Dropped(
-                    _DEFAULTS_WHERE,
-                    "formats",
-                    f"`formats: {starters}` is not a list of "
-                    f"{'/'.join(FORMATS)} - using the toolkit's default",
-                    FORMATS,
-                )
-            )
-    for line in dropped:
-        log_err(line)
-    return values
 
 
 def _cross_check(values: dict, dropped: list[str]) -> None:
@@ -1524,16 +1125,13 @@ def _late_pair(values: dict) -> None:
 
 
 def parse_grading_spec(text: str) -> GradingSpec:
-    """Parse a `grading_config.yml` into a `GradingSpec`.
+    """Parse a `grading_config.yml` into a `GradingSpec` - the TEMPLATE's view.
 
-    A missing key falls back to the field's own default, and to nothing else: the course's
-    `assignment_defaults` stand behind an assignment at WRITE time, stamped into the file
-    by `New assignment` (see `course_assignment_defaults`), so what a reader sees is what
-    the file says. The late-work pair is the one default a reader may still supply, because
-    a file written before the course had a policy would otherwise grade by "nothing after
-    the deadline" - a rule no syllabus states. A malformed VALUE is logged and dropped,
-    never raised and never passed through: this file is hand-edited by faculty and read by
-    an hourly cron, so one bad line costs the field it sits on and nothing else."""
+    A missing key falls back to the field's own default; `with_run_settings` then resolves
+    the run settings through the cascade (`settings`), which is what `load_grading_spec`
+    hands every reader. A malformed VALUE is logged and dropped, never raised and never
+    passed through: this file is hand-edited by faculty and read by an hourly cron, so one
+    bad line costs the field it sits on and nothing else."""
     data = yaml.safe_load(text) if text.strip() else {}
     if not isinstance(data, dict):
         data = {}
@@ -1543,13 +1141,43 @@ def parse_grading_spec(text: str) -> GradingSpec:
     if "format" in data and "formats" not in data:
         raise NotMigrated("format", "formats", GRADING_FILE)
     dropped: list[str] = []
-    data = _refuse_renamed(data, GRADING_FILE, dropped)
-    values = _read_settings(data, SPEC_KEYS, GRADING_FILE, dropped)
+    data = refuse_renamed(data, GRADING_FILE, dropped)
+    values = read_settings(data, SPEC_KEYS, GRADING_FILE, dropped)
+    # A refused value states nothing (the field's default stands, and the cascade answers
+    # the run keys) - except a late key, which still states the pair (`_late_pair`).
+    values = {k: v for k, v in values.items() if v is not None or k in LATE_PAIR}
     _late_pair(values)
+    declared = frozenset(values)
     _cross_check(values, dropped)
     for line in dropped:
         log_err(line)
-    return GradingSpec(**values, dropped=tuple(dropped))
+    return GradingSpec(**values, dropped=tuple(dropped), declared=declared)
+
+
+def with_run_settings(
+    spec: GradingSpec, course_org: str, semester_org: str = "", slug: str = ""
+) -> GradingSpec:
+    """`spec` with every run setting at its EFFECTIVE value (`settings.effective_all`) and
+    `sources` saying which layer gave it. Without a semester, the semester's layers are
+    empty. The shape rules the parse applies to the file hold for what the cascade brings
+    too, silently - a course default of `public` says nothing about an assignment that
+    creates no repo of its own."""
+    template = {
+        key: getattr(spec, key) for key in settings.RUN_KEYS if key in spec.declared
+    }
+    resolved = settings.effective_all(
+        semester_org, slug, course_org=course_org, template=template
+    )
+    values = {key: value for key, (value, _) in resolved.items()}
+    if not creates_unit_repos(spec.submit_via):
+        values["visibility"] = "private"
+    if spec.submit_via != "external":
+        values["submit_url"] = ""
+    return replace(
+        spec,
+        **values,
+        sources=tuple((key, source) for key, (_, source) in resolved.items()),
+    )
 
 
 @cache
@@ -1563,28 +1191,9 @@ def _grading_text(course_org: str, template: str) -> str | None:
     return get_file_content(course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
 
 
-@cache
-def course_assignment_defaults(course_org: str) -> dict:
-    """A course's `assignment_defaults:` block, read ONCE per course per process.
-
-    The one place a course states the team cap, the late window and the penalty it uses
-    everywhere. Read WHEN AN ASSIGNMENT IS WRITTEN, not every time one is read: `New
-    assignment` stamps these values into the `grading_config.yml` it generates, so the file
-    a grader opens says what the assignment does rather than pointing at another file in
-    another repo - and the hourly tick pays for no extra read at all. NEVER raises: a
-    malformed identity file must cost the defaults, not the run. tests/conftest.py clears
-    it."""
-    if not course_org:
-        return {}
-    try:
-        meta = org_meta(course_org)
-    except RuntimeError as exc:
-        log_err(f"  ! could not read {course_org}/.github/{COURSE_CONFIG}: {exc}")
-        return {}
-    return parse_assignment_defaults(meta.get(ASSIGNMENT_DEFAULTS_KEY))
-
-
-def declared_grading_spec(course_org: str, template: str) -> GradingSpec | None:
+def declared_grading_spec(
+    course_org: str, template: str, *, semester_org: str = "", slug: str = ""
+) -> GradingSpec | None:
     """`load_grading_spec`, but None when there is no definition to read at all - the
     template repo does not exist yet, or it carries no `grading_config.yml`.
 
@@ -1600,7 +1209,7 @@ def declared_grading_spec(course_org: str, template: str) -> GradingSpec | None:
     if text is None:
         return None
     try:
-        return parse_grading_spec(text)
+        spec = parse_grading_spec(text)
     except NotMigrated as exc:
         # Refused, and SAYS so: the lock reads it as no definition (its Join-team form
         # refuses), and the handout and the grader refuse to act on it.
@@ -1610,17 +1219,27 @@ def declared_grading_spec(course_org: str, template: str) -> GradingSpec | None:
         log_err(
             f"  ! {template}/{GRADING_FILE} is not valid YAML - using defaults: {exc}"
         )
-        return GradingSpec()
+        spec = GradingSpec()
+    return with_run_settings(spec, course_org, semester_org, slug)
 
 
-def load_grading_spec(course_org: str, template: str) -> GradingSpec:
-    """The assignment's definition from the course template's `solution` branch.
+def load_grading_spec(
+    course_org: str, template: str, *, semester_org: str = "", slug: str = ""
+) -> GradingSpec:
+    """The assignment's definition from the course template's `solution` branch, with its
+    run settings resolved for `slug` (the schedule key) of `semester_org`.
 
-    NEVER raises: it sits under the hourly cron, and a template with no solution branch, no
-    definition file, or one that does not parse must leave the rest of the tick running on
-    the defaults rather than take the semester down with it."""
-    spec = declared_grading_spec(course_org, template)
-    return spec if spec is not None else GradingSpec()
+    A template with no solution branch, no definition file, or one that does not parse
+    leaves the rest of the tick running on the defaults rather than taking the semester
+    down with it. A failed read of a CASCADE layer (the course's `dsl-course.yml`, the
+    semester's `assignments.yml`) does raise (`settings.course_defaults`): those decide
+    what the defaults are."""
+    spec = declared_grading_spec(
+        course_org, template, semester_org=semester_org, slug=slug
+    )
+    if spec is None:
+        spec = with_run_settings(GradingSpec(), course_org, semester_org, slug)
+    return spec
 
 
 # ------------------------------------ what an assignment's definition will not grade as
@@ -1680,6 +1299,7 @@ def grading_spec_faults(
     fires: datetime | None,
     handed_out: list[dict] | None = None,
     releases_solution: bool = False,
+    semester_org: str = "",
 ) -> tuple[list[ConfigFault], GradingSpec | None]:
     """Everything in ONE `grading_config.yml` the parse had to refuse, as faults - and the
     spec that parse produced, so the caller does not read and parse the same file again.
@@ -1700,7 +1320,12 @@ def grading_spec_faults(
 
     `releases_solution` is whether this assignment's `schedule.yml` entry carries a
     `solution_datetime:` - the one fact about it that the definition here can contradict
-    (see below), and the only thing read from outside this file."""
+    (see below), and the only thing read from outside this file.
+
+    The checks against the handed-out repos and the solution release read the RESOLVED
+    spec (`with_run_settings` for `slug` of `semester_org`), the one the handout acts on:
+    a visibility set in `assignments.yml` or the course's defaults is what the repos were
+    created with, and the template alone would give the digest a second answer."""
     try:
         spec = parse_grading_spec(text)
     except NotMigrated as exc:
@@ -1733,6 +1358,7 @@ def grading_spec_faults(
                 f"the assignment is marked on the toolkit's defaults.",
             )
         ], None
+    spec = with_run_settings(spec, course_org, semester_org, slug)
     lines = key_lines(text)
     faults = [
         _spec_fault(
@@ -1862,6 +1488,7 @@ def grading_config_faults(
             fires,
             handed_out,
             releases_solution=entry.solution_datetime is not None,
+            semester_org=semester_org,
         )
         faults += spec_faults
         if handed_out and spec is not None and spec.visibility_is_students:
@@ -2174,7 +1801,9 @@ def team_lock_entries(
     pages = pages or {}
     entries: dict[str, tuple[str, int, str, str, str]] = {}
     for key, entry in sched.assignments.items():
-        spec = declared_grading_spec(course_org, entry.course_source_repo)
+        spec = declared_grading_spec(
+            course_org, entry.course_source_repo, semester_org=sched.org, slug=key
+        )
         if spec is None or spec.not_migrated:
             # Named by SLUG, never by anyone in it: this runs in a public workflow.
             log_err(
@@ -2182,7 +1811,8 @@ def team_lock_entries(
                 f"locking it to `{NO_TEAMS}`, so no team can be formed for it until the "
                 f"template declares what the assignment is"
             )
-            entries[key] = (NO_TEAMS, team_cap(course_org, spec), "none", "", "")
+            cap = team_cap(course_org, spec, sched.org, key)
+            entries[key] = (NO_TEAMS, cap, "none", "", "")
             continue
         formation = spec.team_formation_resolved
         window, shuts, page = "none", "", ""
@@ -2215,7 +1845,11 @@ def self_select_keys(course_org: str, sched: schedule.Schedule) -> list[str]:
     return [
         key
         for key, entry in sched.assignments.items()
-        if (spec := declared_grading_spec(course_org, entry.course_source_repo))
+        if (
+            spec := declared_grading_spec(
+                course_org, entry.course_source_repo, semester_org=sched.org, slug=key
+            )
+        )
         is not None
         and not spec.not_migrated
         and spec.team_formation_resolved == SELF_SELECT
@@ -2239,13 +1873,15 @@ def _formation_pages(
     }
 
 
-def team_cap(course_org: str, spec: GradingSpec | None) -> int:
-    """How many may be in one team: the assignment's own `max_team_size`, else the
-    course's `assignment_defaults`, else the toolkit's.
-
-    `New assignment` stamps the course default into the file it generates, so the first
-    answer is the usual one and the rest are for an assignment written by hand - or for
-    one whose template says nothing at all, which is what `spec=None` is.
+def team_cap(
+    course_org: str,
+    spec: GradingSpec | None,
+    semester_org: str = "",
+    slug: str = "",
+) -> int:
+    """How many may be in one team: the effective `max_team_size` (`settings`) - the spec's
+    own when it carries one, else the cascade's answer for an assignment whose template
+    says nothing at all, which is what `spec=None` is.
 
     One place, because the number is now both enforced and PRINTED: the lock file the
     Join-team form refuses on, and the semester site's callout inviting a student to form a
@@ -2253,10 +1889,10 @@ def team_cap(course_org: str, spec: GradingSpec | None) -> int:
     would be the page's fault."""
     if spec is not None and spec.max_team_size:
         return spec.max_team_size
-    return (
-        course_assignment_defaults(course_org).get("max_team_size")
-        or DEFAULT_MAX_TEAM_SIZE
+    value, _ = settings.effective(
+        semester_org, slug, "max_team_size", course_org=course_org
     )
+    return int(value)
 
 
 class LockWrite(NamedTuple):
@@ -2842,7 +2478,7 @@ def total_points(spec: SheetSpec | GradingSpec) -> str:
     One implementation: a second sum of the same maxima is a second answer to "what is
     this assignment out of", and the two would part company the first time one was
     changed."""
-    maxima = [_decimal(maximum) for maximum in (spec.questions or {}).values()]
+    maxima = [as_decimal(maximum) for maximum in (spec.questions or {}).values()]
     if not maxima or None in maxima:
         return ""
     return _plain(sum(maxima, Decimal(0)))
@@ -2854,7 +2490,7 @@ def _penalty_display(rate: Decimal | None, days_late: object) -> str:
     Rounded to two decimals, because `rate` is a hundredth of whatever the course wrote and
     the product carries its trailing digits: `3.333%` for three days is a deduction, not
     `-9.999%`."""
-    days = _decimal(days_late)
+    days = as_decimal(days_late)
     if rate is None or days is None or days <= 0:
         return ""
     return f"-{_plain((rate * days * 100).quantize(Decimal('0.01')))}%"
@@ -2969,7 +2605,7 @@ def _is_typo(value: object) -> bool:
     arithmetic ask this. `−3` with a Unicode minus, which is what a word processor
     produces, is exactly the case: it read as no adjustment at all while the grader
     believed a penalty had been waived."""
-    return not is_blank(value) and _decimal(value) is None
+    return not is_blank(value) and as_decimal(value) is None
 
 
 def _score_fault(spec: SheetSpec, score: object) -> str:
@@ -3278,7 +2914,7 @@ def needs_hand_decision(view: dict) -> bool:
     return (
         "penalty" in view
         and "final_grade" in view
-        and _decimal(view["final_grade"]) is None
+        and as_decimal(view["final_grade"]) is None
     )
 
 
@@ -3364,7 +3000,7 @@ def _over_max(value: object, max_points: object) -> str:
 
 def _late_display(days_late: object) -> str:
     """`on time`, `1 day late`, `2 days late` - "" where nothing was timed."""
-    days = _decimal(days_late)
+    days = as_decimal(days_late)
     if days is None:
         return ""
     if days <= 0:
@@ -3883,7 +3519,9 @@ def sheet_specs(course_org: str, sched) -> dict[str, SheetSpec]:
     for key, entry in sched.assignments.items():
         name = schedule.semester_name(key, entry)
         gspec = (
-            load_grading_spec(course_org, entry.course_source_repo)
+            load_grading_spec(
+                course_org, entry.course_source_repo, semester_org=sched.org, slug=key
+            )
             if course_org
             else GradingSpec()
         )

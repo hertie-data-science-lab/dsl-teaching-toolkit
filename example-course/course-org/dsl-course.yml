@@ -1,14 +1,10 @@
-org: hertie-dsl-demo-course-e1234
-org_name: DSL Demo Course
 course_name: Deep Learning (Demo)
 course_code: E1234
 course_description: A demo course - the blurb every semester site shows under the title.
 
-# What every assignment under this course starts from. **New assignment** stamps these
-# values into the `grading_config.yml` it generates, so each assignment's own file says
-# what it does and can be edited there afterwards; changing them here changes the NEXT
-# assignment, never one that already exists. The two late-work lines are the toolkit's
-# own default, applied when they are absent here and from the assignment too.
+# Defaults for this course's assignments (optional): each applies to every assignment
+# that does not set its own in a semester's `assignments.yml`; unset, the institution's
+# policy applies.
 assignment_defaults:
   max_team_size: 5            # group assignments only
   late_window_days: 10        # 0 = nothing after the due date is accepted
