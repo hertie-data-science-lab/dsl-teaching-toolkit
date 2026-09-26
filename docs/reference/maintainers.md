@@ -701,6 +701,14 @@ the site page says, so a run that drove one of them proved the wiring for one of
 student really publishes their `student_choice` repo - once before the grading cutoff,
 which the next tick undoes, and once after it, which stands.
 
+The timeline moves only `due_datetime`. The late window is whole days, so the run states
+its own late rule (1 day, 10%) and, after the student's one on-time push, moves the due date
+back a day so the computed cutoff lands minutes ahead (refresh) and then just behind
+(freeze). The push is therefore one day late by the engine's rule, and the assertions say
+so. Preflight refuses without the student's handle and token, and within two hours of
+local midnight or a clock change (`days_late` counts calendar days); each due-date move
+re-checks that the push will still read one day late.
+
     DSL_E2E=1 \
     DSL_ORG_ALLOWLIST=hertie-dsl-demo-course-e1234,hertie-dsl-demo-f2026 \
     GH_TOKEN=<maintainer classic PAT, incl. delete_repo> \
