@@ -246,8 +246,12 @@ def _preflight(run_id: str) -> None:
     presses are not the buttons under review; a missing roster row hands out to nobody;
     a semester short of a gradebook ends in drift the teardown cannot undo;
     and a namespace that is not empty means a previous run is still lying around and its
-    repos would be read as this one's.
+    repos would be read as this one's. And a run with no student token has no hand-in to
+    test.
     """
+    # First, before a single call: the push is the student's own, with their own token,
+    # and nothing may stand in for it.
+    student.require_env()
     allowlist.assert_fence()
     for org in (COURSE_ORG, SEMESTER_ORG):
         allowlist.assert_allowed(org)

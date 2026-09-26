@@ -41,6 +41,24 @@ def _env(name: str) -> str:
     return value
 
 
+def require_env() -> None:
+    """Refuse the run unless both of the student's variables are set - called before the
+    harness reads or writes anything.
+
+    Without the token there is no hand-in to test: the push must be the student's own, and
+    the run would otherwise get as far as five handouts before failing at the push, with
+    repos made and nothing proved."""
+    missing = [
+        name for name in (HANDLE_ENV, TOKEN_ENV) if not os.environ.get(name, "").strip()
+    ]
+    if missing:
+        raise RuntimeError(
+            f"{' and '.join(missing)} not set - the live run needs a test student's "
+            f"handle and their own fine-grained PAT on the semester org (Contents R/W, "
+            f"Administration R/W); see tests/e2e/test_assignment_pipeline.py"
+        )
+
+
 def handle() -> str:
     """The GitHub handle of the account standing in for a student."""
     return _env(HANDLE_ENV)

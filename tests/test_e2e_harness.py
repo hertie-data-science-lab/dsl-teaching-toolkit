@@ -1470,3 +1470,27 @@ def test_the_student_publishes_before_the_cutoff_and_after_it(monkeypatch):
     assert edits[0] < flips[0] < edits[1] < edits[2] < flips[1]
     choice = shapes.slug(RUN, module.CHOICE)
     assert all(order[i] == f"flip {choice}-ada-l" for i in flips)
+
+
+@pytest.mark.parametrize("value", [None, "", " "], ids=["deleted", "empty", "blank"])
+@pytest.mark.parametrize("unset", [student.TOKEN_ENV, student.HANDLE_ENV])
+def test_the_run_refuses_without_the_students_own_credentials(
+    monkeypatch, unset, value
+):
+    # Before any call at all: a run with no student token would hand out five
+    # assignments and then fail at the push, with nothing proved and repos to sweep.
+    module = _pipeline_module(monkeypatch)
+    monkeypatch.setenv(student.HANDLE_ENV, "ada-l")
+    monkeypatch.setenv(student.TOKEN_ENV, "github_pat_x")
+    if value is None:
+        monkeypatch.delenv(unset)
+    else:
+        monkeypatch.setenv(unset, value)
+    calls: list[tuple] = []
+    monkeypatch.setattr(module.ghcli, "gh", lambda *a, **k: calls.append(a) or (0, ""))
+    monkeypatch.setattr(
+        module.allowlist, "assert_fence", lambda: calls.append(("fence",))
+    )
+    with pytest.raises(RuntimeError, match=f"{unset} not set"):
+        module._preflight(RUN)
+    assert calls == []
