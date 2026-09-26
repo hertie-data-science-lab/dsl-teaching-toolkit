@@ -16,7 +16,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from dsl_course import cadence, course, issues, settings
+from conftest import issue_row
+
+from dsl_course import cadence, course, ghcli, issues, settings
 from dsl_course.schedule import AssignmentEntry, Deploy, Release, Schedule
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -708,3 +710,47 @@ def test_own_run_id_comes_from_the_actions_environment(monkeypatch):
     assert cadence.own_run_id() is None
     monkeypatch.setenv("GITHUB_RUN_ID", "17")
     assert cadence.own_run_id() == "17"
+
+
+# ---- the API budget
+
+
+def _budget(remaining: int) -> ghcli.Budget:
+    # 1_790_000_400 is 14:20Z.
+    return ghcli.Budget("dsl-bot", 5000, remaining, 5000 - remaining, 1_790_000_400)
+
+
+def test_a_tick_that_starts_under_a_quarter_opens_the_budget_issue(gh):
+    fake = gh([])
+    assert cadence.report_budget("Course-Org", _budget(1249)) == 0
+    (created,) = fake.did("issue", "create")
+    assert created[created.index("--repo") + 1] == "Course-Org/.github"
+    assert created[created.index("--title") + 1] == cadence.BUDGET_TITLE
+    body = fake.body_of("issue", "create")
+    assert "1249 of 5000" in body and "14:20Z" in body
+
+
+def test_a_standing_budget_issue_is_rewritten_not_repeated(gh):
+    fake = gh([issue_row(4, cadence.BUDGET_TITLE, "older numbers")])
+    assert cadence.report_budget("Course-Org", _budget(300)) == 0
+    assert fake.did("issue", "create") == fake.did("issue", "comment") == []
+    assert "300 of 5000" in fake.body_of("issue", "edit")
+
+
+def test_between_a_quarter_and_a_half_whatever_stands_stands(gh):
+    fake = gh([issue_row(4, cadence.BUDGET_TITLE)])
+    assert cadence.report_budget("Course-Org", _budget(2000)) == 0
+    assert fake.calls == []
+
+
+def test_a_tick_that_starts_over_half_closes_it(gh):
+    fake = gh([issue_row(4, cadence.BUDGET_TITLE)])
+    assert cadence.report_budget("Course-Org", _budget(2501)) == 0
+    (closed,) = fake.did("issue", "close")
+    assert closed[2] == "4" and "2501 of 5000" in closed[closed.index("--comment") + 1]
+
+
+def test_no_start_reading_reports_nothing(gh):
+    fake = gh([])
+    assert cadence.report_budget("Course-Org", None) == 0
+    assert fake.calls == []

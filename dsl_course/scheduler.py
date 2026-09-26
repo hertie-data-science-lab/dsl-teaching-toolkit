@@ -111,7 +111,7 @@ from .course import COURSE_ADMIN_TEAM, shared_repo, submission_repo
 from .deploy import WITHHELD_ROOT_STUBS, deploy_many, is_withheld_stub
 from .faults import ConfigFault, FaultKind, Severity, Unusable
 from .gh_contents import get_file_content
-from .ghcli import gh
+from .ghcli import gh, start_budget
 from .grades import (
     grading_config_faults,
     load_grading_spec,
@@ -2062,6 +2062,10 @@ def main() -> int:
         # is not this run's problem to fix, only to report.
         if verdict is not None:
             rc |= cadence.report_course(args.course_org, verdict, args.preview)
+        # The budget alarm rides on the same real, whole-course pass: a quarter-hourly
+        # reading per course org, and the listing it needs is the one just made.
+        if phases["release"] and not args.preview:
+            rc |= cadence.report_budget(args.course_org, start_budget())
         return rc
 
     if not args.semester_org:

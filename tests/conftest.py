@@ -202,6 +202,7 @@ def clear_process_memos() -> None:
     ghcli.bot_login.cache_clear()
     gh_contents.read_once(False)
     issues.list_once(False)
+    ghcli._start_budget = None
 
 
 def stub_bootstrap(monkeypatch) -> None:

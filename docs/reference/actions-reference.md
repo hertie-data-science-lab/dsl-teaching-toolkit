@@ -117,10 +117,11 @@ pass keeps *"Scheduled release is failing"*, and a semester whose autograding fa
 *"Scheduled release (autograde &lt;semester&gt;) is failing"* - so one stuck semester neither hides
 the others nor delays them.
 
-Two further issues watch the schedule being *kept* rather than a run's exit code, and also close
+Three further issues watch the schedule being *kept* rather than a run's exit code, and also close
 themselves. What opens each one is in
 [07](../07-schedule-releases.md#what-drives-the-scheduler):
 
 - *"Scheduled release: driver health"*, in your `.github`, cc `course-admin`.
 - *"Scheduled release: late delivery"*, in the semester's private `semester-config`, cc that
   semester's `instructors`.
+- *"GitHub API budget is running low"*, in your `.github`.

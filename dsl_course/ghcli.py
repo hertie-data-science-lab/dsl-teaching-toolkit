@@ -765,6 +765,15 @@ def _budget_at_end(start: Budget) -> None:
         print(budget_end_line(start, end), file=sys.stderr, flush=True)
 
 
+# What this run's start line said, for the scheduler's budget alarm (`cadence.report_budget`).
+_start_budget: Budget | None = None
+
+
+def start_budget() -> Budget | None:
+    """The budget this process read at its start, or None (no token, or not a CLI run)."""
+    return _start_budget
+
+
 def budget_at_start(stop: bool = True) -> None:
     """The start line, and the end line registered for exit - or, below
     BUDGET_STOP_BELOW and with `stop`, the run stopped before it spends the last of the
@@ -772,7 +781,8 @@ def budget_at_start(stop: bool = True) -> None:
     token.
 
     stderr, because some CLIs' stdout is read by the workflow (`list_orgs`, `scheduler`)."""
-    start = read_budget()
+    global _start_budget
+    start = _start_budget = read_budget()
     if start is None:
         return
     if stop and start.remaining < BUDGET_STOP_BELOW:
