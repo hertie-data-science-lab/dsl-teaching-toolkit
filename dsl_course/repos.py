@@ -7,12 +7,19 @@ from __future__ import annotations
 import json
 import time
 from fnmatch import fnmatch
-from functools import cache
 from typing import NamedTuple
 
 from .course import RETIRED_REPO_NAMES
 from .faults import NOT_MIGRATED
-from .ghcli import ALL, FILES, gh, is_already_exists, is_missing_resource, on_write
+from .ghcli import (
+    ALL,
+    FILES,
+    META,
+    gh,
+    is_already_exists,
+    is_missing_resource,
+    on_write,
+)
 from .log import log, log_err, log_err_person, log_ok, log_person, log_skip
 
 
@@ -25,16 +32,23 @@ class _RepoReadFailed(RuntimeError):
         self.out = out
 
 
-@cache
+# Keyed by the casefolded `org/name`: GitHub's names are not case-sensitive, and callers do
+# not agree on the spelling. Cleared between tests (tests/conftest.py).
+_repos: dict[str, dict] = {}
+
+
 def _repo(org: str, name: str) -> dict:
     """The repo object, read once per repo per process.
 
     "Is it there", "is it private", "is it archived", "what is its default branch" are
     four questions about ONE object, and a single sweep asks several of them about the
-    same repo; a repo's identity cannot change under one run. A failed read RAISES rather
-    than returning a sentinel, because functools.cache does not memoise a raise - so a 502
-    is retried on the next question instead of being pinned for the life of the process.
-    Cleared between tests (tests/conftest.py)."""
+    same repo; a repo's identity cannot change under one run except by this process's own
+    writes, which `_forget_repo` hears. A failed read RAISES rather than returning a
+    sentinel and is not held - so a 502 is retried on the next question instead of being
+    pinned for the life of the process."""
+    key = f"{org}/{name}".casefold()
+    if key in _repos:
+        return _repos[key]
     code, out = gh("api", f"repos/{org}/{name}")
     if code != 0:
         raise _RepoReadFailed(out)
@@ -44,14 +58,19 @@ def _repo(org: str, name: str) -> dict:
         raise _RepoReadFailed(out) from exc
     if not isinstance(body, dict):
         raise _RepoReadFailed(out)
+    _repos[key] = body
     return body
 
 
 def _forget_repo(kind: str, targets: frozenset[str]) -> None:
-    """A write that makes, renames, archives or deletes a repo (an org-wide target, see
-    `ghcli.written`) makes `_repo`'s answers stale. Rare, so the whole memo goes."""
+    """A write that makes, renames or deletes a repo (an org-wide target, see
+    `ghcli.written`) makes every answer stale - rare, so the whole memo goes. A settings
+    write to one repo (`META`: archived, visibility, forking) makes that repo's alone."""
     if kind in (FILES, ALL) and any("/" not in t for t in targets):
-        _repo.cache_clear()
+        _repos.clear()
+    elif kind == META:
+        for target in targets:
+            _repos.pop(target, None)
 
 
 on_write(_forget_repo)
@@ -598,6 +617,11 @@ def create_repo(
             f"its renamed repo - {NOT_MIGRATED}: run the migration"
         )
         return False
+    if f"{org}/{name}".casefold() in _repos:
+        # This run has already read the repo object, so it is there: the POST would only
+        # be refused. A release asks this of its dest on every tick.
+        (log_person if person else log_skip)(f"repo {org}/{name}")
+        return True
     args = [
         "api",
         "--method",

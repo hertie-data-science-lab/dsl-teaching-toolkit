@@ -184,7 +184,11 @@ def clear_process_memos() -> None:
     (`gh_contents`, `issues`) go back to off, as a CLI start turns them on."""
     site._repo_tree.cache_clear()
     central.central_ref_exists.cache_clear()
-    repos._repo.cache_clear()
+    repos._repos.clear()
+    gh_teams.get_org_owners.cache_clear()
+    gh_teams.acting_login.cache_clear()
+    ghcli.bot_login.cache_clear()
+    discovery.hold_listings(False)
     roster._roster_text.cache_clear()
     teams._teams_text.cache_clear()
     schedule._schedule_text.cache_clear()

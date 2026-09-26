@@ -20,6 +20,7 @@ from functools import cache
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from .log import CLIParser, log_err, on_cli_start, plural
 
@@ -86,10 +87,16 @@ def _run_gh(
     _pace_writes(args)
     if not _is_mutating(args):
         return _run_gh_ladder(args, stdin, retries)
+    result = None
     try:
-        return _run_gh_ladder(args, stdin, retries)
+        result = _run_gh_ladder(args, stdin, retries)
+        return result
     finally:
         kind, targets = written(args)
+        if kind and result is not None and result[0] != 0:
+            # A create refused for a name already taken made nothing: only what this
+            # process held about that one name can be wrong (an absence, say).
+            targets = _refused_create(args, result[1] + result[2]) or targets
         if kind:
             _wrote(kind, targets)
 
@@ -256,11 +263,15 @@ def _pace_writes(args: tuple[str, ...]) -> None:
 # then hear about every write that could change what it holds. Every write goes through
 # `_run_gh` or `git push`, so the news is sent from there rather than from each writer.
 #
-# Two kinds, so a write clears only what it can change: FILES (a file, a tree, a branch, a
-# repo made, renamed or deleted) and ISSUES (an issue opened, edited, commented on or
-# closed). Every other write - teams, collaborators, invitations, topics, secrets, Actions
-# settings, dispatches - changes neither, and a tick makes dozens of them.
+# Four kinds, so a write clears only what it can change: FILES (a tree, a branch, a push,
+# a repo made, renamed or deleted), FILE (the one path a contents write names), META (one
+# repo's settings - archived, visibility, forking - which change no file) and ISSUES (an
+# issue opened, edited, commented on or closed). Every other write - teams, collaborators,
+# invitations, topics, secrets, Actions settings, dispatches - changes none of them, and a
+# tick makes dozens.
 FILES = "files"
+FILE = "file"  # target `org/repo/path`: owner and repo casefolded, the path as written
+META = "meta"
 ISSUES = "issues"
 ALL = "all"  # both kinds: `forget_all`, and a write this module cannot read
 EVERYTHING = "*"  # the target of a write that names no repo it could be pinned to
@@ -312,17 +323,37 @@ def written(args: tuple[str, ...]) -> tuple[str | None, frozenset[str]]:
         path = next((w for w in words[1:] if w.startswith(("repos/", "orgs/"))), "")
         if match := _API_REPO.match(path.split("?")[0]):
             org, repo, rest = match.group(1), match.group(2), match.group(3) or ""
-            if rest.startswith(("/contents/", "/git/")) or rest.endswith("/merge"):
+            if rest.startswith("/contents/"):
+                # A contents write commits ONE path: that file, the directories above it
+                # and the branch move; every other file of the repo is what it was.
+                where = rest.removeprefix("/contents/").strip("/")
+                return FILE, frozenset({f"{org}/{repo}".casefold() + f"/{where}"})
+            if rest.startswith("/git/") or rest.endswith("/merge"):
                 return FILES, _target(org, repo)
             if rest == "/generate":
                 owner = next(
                     (m.group(1) for w in flat if (m := _OWNER_FIELD.match(w))), org
                 )
                 return FILES, _target(owner)
-            if rest == "":  # the repo object itself: a rename, an archive, a delete
-                return FILES, _target(org)
+            if rest == "":
+                # The repo object itself. A delete, or a PATCH carrying a new `name`, can
+                # make or unmake a name in the org; any other PATCH (archived,
+                # visibility, forking, description) changes that repo's settings only.
+                method = next(
+                    (v.upper() for f, v in pairwise(flat) if f in ("--method", "-X")),
+                    "",
+                )
+                if method == "DELETE" or any(w.startswith("name=") for w in flat):
+                    return FILES, _target(org)
+                if any(w.startswith("default_branch=") for w in flat):
+                    # Every read that names no ref now answers from another branch.
+                    return FILES, _target(org, repo)
+                return META, _target(org, repo)
             if rest.startswith("/issues"):
                 return ISSUES, _target(org, repo)
+            if rest == "/topics":
+                # The repo object and the org's listing carry them; no file does.
+                return META, _target(org, repo)
             return None, frozenset()
         if match := re.match(r"^orgs/([A-Za-z0-9._-]+)/repos$", path.split("?")[0]):
             return FILES, _target(match.group(1))
@@ -337,19 +368,49 @@ def written(args: tuple[str, ...]) -> tuple[str | None, frozenset[str]]:
         org, _, repo = named.partition("/")
         if not org:
             return FILES, frozenset({EVERYTHING})
+        if command == "repo" and verb in ("edit", "archive") and repo:
+            return META, _target(org, repo)
         return FILES, _target(org, repo) if command == "pr" else _target(org)
     return None, frozenset()
+
+
+def _refused_create(args: tuple[str, ...], out: str) -> frozenset[str] | None:
+    """The one repo a create names, when GitHub refused it because that name is already
+    taken: nothing was made, so the org's other repos are exactly as they were. None for
+    any other write or outcome."""
+    if not is_already_exists(out):
+        return None
+    flat = _split_flags(args)
+    words = [a for a in flat if not a.startswith("-")]
+    path = next((w for w in words[1:] if w.startswith(("repos/", "orgs/"))), "")
+    path = path.split("?")[0]
+    name = next((w.removeprefix("name=") for w in flat if w.startswith("name=")), "")
+    if re.match(r"^orgs/[A-Za-z0-9._-]+/repos$", path) and name:
+        return _target(path.split("/")[1], name)
+    if path.endswith("/generate") and name:
+        owner = next((m.group(1) for w in flat if (m := _OWNER_FIELD.match(w))), "")
+        return _target(owner, name) if owner else None
+    return None
 
 
 def forget_written(held: dict[str, Any], targets: frozenset[str]) -> None:
     """Drop from `held` (keyed by casefolded `org/repo`) every entry a write to `targets`
     may have changed."""
-    if EVERYTHING in targets:
-        held.clear()
-        return
     for key in list(held):
-        if key in targets or key.split("/", 1)[0] in targets:
+        if forgets(key, targets):
             del held[key]
+
+
+def forgets(key: str, targets: frozenset[str]) -> bool:
+    """Whether a write to `targets` may have changed what is held under `key` (a
+    casefolded `org/repo`)."""
+    return EVERYTHING in targets or key in targets or key.split("/", 1)[0] in targets
+
+
+def file_target(target: str) -> tuple[str, str]:
+    """A FILE target as `(casefolded org/repo, path)`."""
+    org, repo, path = (target.split("/", 2) + ["", ""])[:3]
+    return f"{org}/{repo}", unquote(path)
 
 
 # --------------------------------------------------------- the opt-in org allowlist
@@ -608,7 +669,10 @@ def bot_login() -> str:
     call per process, cached, because the question is asked once per submission repo.
 
     "" when it cannot be read, which every caller must treat as "cannot tell" - never as
-    "not the bot", or a transient here would turn a handout commit into a submission."""
+    "not the bot", or a transient here would turn a handout commit into a submission.
+    A CLI run has already asked, for its budget line."""
+    if _start_budget is not None and _start_budget.login != UNKNOWN_LOGIN:
+        return _start_budget.login
     code, out = gh("api", "user", "--jq", ".login")
     return out.strip() if code == 0 else ""
 
@@ -692,6 +756,10 @@ _LOGIN = re.compile(r'"login"\s*:\s*"([^"]+)"')
 _at_exit = atexit.register
 
 
+# What the budget line calls a token whose `GET /user` named no login.
+UNKNOWN_LOGIN = "this token"
+
+
 @dataclass(frozen=True)
 class Budget:
     """The account's REST budget as one response's headers told it."""
@@ -717,7 +785,7 @@ def parse_budget(out: str) -> Budget | None:
         return None
     login = _LOGIN.search(out)
     return Budget(
-        login.group(1) if login else "this token",
+        login.group(1) if login else UNKNOWN_LOGIN,
         found["limit"],
         found["remaining"],
         found["used"],

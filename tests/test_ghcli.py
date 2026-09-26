@@ -551,13 +551,23 @@ def test_a_graphql_mutation_is_refused_because_it_names_no_org(monkeypatch, ran)
 
 # ------------------------------------------------------ what a write makes stale
 
-FILES, ISSUES = ghcli.FILES, ghcli.ISSUES
+FILES, FILE, META, ISSUES = ghcli.FILES, ghcli.FILE, ghcli.META, ghcli.ISSUES
 
 
 @pytest.mark.parametrize(
     ("argv", "kind", "targets"),
     [
-        (("api", "--method", "PUT", "repos/O/R/contents/a.yml"), FILES, {"o/r"}),
+        # one path, the owner and repo casefolded and the path as written
+        (
+            ("api", "--method", "PUT", "repos/O/R/contents/Dir/a.yml"),
+            FILE,
+            {"o/r/Dir/a.yml"},
+        ),
+        (
+            ("api", "--method", "DELETE", "repos/o/r/contents/a.yml"),
+            FILE,
+            {"o/r/a.yml"},
+        ),
         (("api", "--method", "POST", "repos/o/r/git/trees"), FILES, {"o/r"}),
         (("api", "--method", "PUT", "repos/o/r/pulls/3/merge"), FILES, {"o/r"}),
         (("api", "--method", "POST", "orgs/o/repos", "-f", "name=x"), FILES, {"o"}),
@@ -569,6 +579,21 @@ FILES, ISSUES = ghcli.FILES, ghcli.ISSUES
         # a rename: the NEW name's absence was a definite answer too
         (("api", "--method", "PATCH", "repos/o/old", "-f", "name=new"), FILES, {"o"}),
         (("api", "--method", "DELETE", "repos/o/r"), FILES, {"o"}),
+        # a settings PATCH makes and unmakes no name, and changes no file
+        (
+            ("api", "--method", "PATCH", "repos/O/R", "--field", "allow_forking=true"),
+            META,
+            {"o/r"},
+        ),
+        (("api", "-X", "PATCH", "repos/o/r", "-F", "archived=true"), META, {"o/r"}),
+        # ... but a new default branch is what every ref-less read answers from
+        (
+            ("api", "-X", "PATCH", "repos/O/R", "-f", "default_branch=dev"),
+            FILES,
+            {"o/r"},
+        ),
+        (("repo", "edit", "o/r", "--visibility", "public"), META, {"o/r"}),
+        (("api", "--method", "PUT", "repos/o/r/topics"), META, {"o/r"}),
         (("repo", "create", "o/r", "--private"), FILES, {"o"}),
         (("pr", "merge", "3", "--repo", "o/r"), FILES, {"o/r"}),
         (("issue", "close", "7", "--repo", "O/R"), ISSUES, {"o/r"}),
@@ -585,7 +610,6 @@ def test_a_write_names_what_it_may_have_changed(argv, kind, targets):
     [
         ("api", "--method", "PUT", "orgs/o/teams/t/memberships/u"),
         ("api", "--method", "PUT", "repos/o/r/collaborators/u"),
-        ("api", "--method", "PUT", "repos/o/r/topics"),
         ("api", "--method", "PUT", "repos/o/r/actions/permissions"),
         ("api", "--method", "POST", "repos/o/.github/dispatches"),
         ("secret", "set", "X", "--org", "o"),
@@ -621,7 +645,49 @@ def test_every_write_is_reported_even_one_that_failed(monkeypatch):
     _gh_exits(monkeypatch, 1)
     ghcli.gh("api", "--method", "PUT", "repos/o/r/contents/a", retries=0)
     ghcli.gh("api", "repos/o/r/contents/a", retries=0)
-    assert heard == [(ghcli.FILES, frozenset({"o/r"}))]
+    assert heard == [(ghcli.FILE, frozenset({"o/r/a"}))]
+
+
+def _gh_answers(monkeypatch, err: str) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=1, stdout="", stderr=err),
+    )
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("api", "--method", "POST", "orgs/O/repos", "--field", "name=Mat"),
+        (
+            "api",
+            "--method",
+            "POST",
+            "repos/c/tmpl/generate",
+            "--field",
+            "owner=O",
+            "--field",
+            "name=Mat",
+        ),
+    ],
+)
+def test_a_create_refused_for_a_taken_name_forgets_only_that_name(monkeypatch, argv):
+    # Nothing was made, so the org's other repos are as they were; what was held about
+    # the name itself (its absence, say) is all that can be wrong.
+    heard = []
+    monkeypatch.setattr(ghcli, "_write_listeners", [lambda k, t: heard.append((k, t))])
+    _gh_answers(monkeypatch, "gh: name already exists on this account (HTTP 422)")
+    ghcli.gh(*argv, retries=0)
+    assert heard == [(FILES, frozenset({"o/mat"}))]
+
+
+def test_a_create_refused_for_any_other_reason_still_forgets_the_org(monkeypatch):
+    heard = []
+    monkeypatch.setattr(ghcli, "_write_listeners", [lambda k, t: heard.append((k, t))])
+    _gh_answers(monkeypatch, "gh: Validation Failed (HTTP 422)")
+    ghcli.gh("api", "--method", "POST", "orgs/o/repos", "--field", "name=x", retries=0)
+    assert heard == [(FILES, frozenset({"o"}))]
 
 
 def test_a_push_reports_the_repo_its_remote_names(monkeypatch, ran):
