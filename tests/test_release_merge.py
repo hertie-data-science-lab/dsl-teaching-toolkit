@@ -62,6 +62,7 @@ def world(tmp_path, monkeypatch) -> World:
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "pulls", fake)
     return built

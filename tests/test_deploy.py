@@ -288,6 +288,38 @@ def test_a_released_repo_is_actually_granted_to_both_semester_role_teams(monkeyp
     assert ("auditors", "materials", "pull") in granted
 
 
+def test_a_dest_already_holding_every_grant_is_granted_nothing_again(monkeypatch):
+    # Every tick visits the dest: one listing of its teams stands in for four PUTs, and a
+    # team held ABOVE what the release grants (instructors raised to admin by hand) is
+    # left there rather than demoted.
+    granted: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        access,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm, **k: granted.append((team, repo, perm)) or True,
+    )
+    held = {"students": "pull", "auditors": "pull", "instructors": "admin"}
+    _stub_deploy_many(monkeypatch, _one_file, real_grants=True, held=held)
+    deploy.deploy_many("COURSE", "SEMESTER", [_deploy("sec")], sync=False)
+    assert granted == [("course-admin", "materials", "admin")]
+
+
+def test_a_role_team_holding_more_than_read_is_put_back_to_read(monkeypatch):
+    # The never-demote floor is faculty's: students and auditors get exactly read, so a
+    # role team found holding push on the dest is PUT back to pull.
+    granted: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        access,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm, **k: granted.append((team, repo, perm)) or True,
+    )
+    held = {"students": "push", "auditors": "pull", "instructors": "push"}
+    held["course-admin"] = "admin"
+    _stub_deploy_many(monkeypatch, _one_file, real_grants=True, held=held)
+    deploy.deploy_many("COURSE", "SEMESTER", [_deploy("sec")], sync=False)
+    assert granted == [("students", "materials", "pull")]
+
+
 SUPERSEDED = "Released course materials (enrolled students only)"
 CURRENT = "Released lectures, labs, readings, & other materials"
 
@@ -560,7 +592,7 @@ def _one_file(src):
     (src / "sec" / "notes.md").write_text("real\n")
 
 
-def _stub_deploy_many(monkeypatch, build_source, real_grants=False):
+def _stub_deploy_many(monkeypatch, build_source, real_grants=False, held=None):
     """Drive deploy_many against local trees: `build_source(path)` fills each source clone,
     dest clones start empty, and nothing is committed.
 
@@ -602,6 +634,7 @@ def _stub_deploy_many(monkeypatch, build_source, real_grants=False):
     monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: held)
     if not real_grants:
         monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
         monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)

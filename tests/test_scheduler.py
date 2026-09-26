@@ -1083,6 +1083,7 @@ def test_deploy_many_clones_each_repo_once(monkeypatch):
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     deploys = [
@@ -1115,6 +1116,7 @@ def test_deploy_many_missing_course_source_path_is_an_error_not_silent(monkeypat
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
@@ -1148,6 +1150,7 @@ def _no_io(monkeypatch, fake_gh):
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
 
@@ -1195,6 +1198,7 @@ def test_a_dest_that_could_not_be_made_forkable_still_releases(monkeypatch):
     monkeypatch.setattr(deploy, "allow_forking", lambda *a: False)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     assert deploy.deploy_many(
@@ -1213,7 +1217,13 @@ def test_an_archived_dest_is_skipped_rather_than_failed(monkeypatch, capsys):
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
-    for name in ("create_repo", "allow_forking", "grant_read_teams", "grant_faculty"):
+    for name in (
+        "create_repo",
+        "allow_forking",
+        "grant_read_teams",
+        "grant_faculty",
+        "repo_team_permissions",
+    ):
         monkeypatch.setattr(
             deploy,
             name,
@@ -1240,6 +1250,7 @@ def test_a_live_dest_beside_an_archived_one_still_releases(monkeypatch):
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(
         deploy, "repo_is_archived", lambda org, repo: repo == "last-term"
@@ -1267,6 +1278,7 @@ def test_a_dest_whose_archived_flag_cannot_be_read_is_released_anyway(monkeypatc
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     assert deploy.deploy_many(
@@ -1427,6 +1439,7 @@ def test_deploy_many_never_copies_a_dot_git_directory(monkeypatch):
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
@@ -1548,6 +1561,7 @@ def test_deploy_many_counts_a_real_commit_failure(monkeypatch, capsys):
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
@@ -1574,6 +1588,7 @@ def test_deploy_many_reports_nothing_new_when_index_is_empty(monkeypatch, capsys
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
@@ -1596,6 +1611,7 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     def boom(course, semester):
@@ -3260,6 +3276,7 @@ def _run_release(monkeypatch, seed_source, deploys) -> tuple[int, set[str]]:
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     errors, _changed = deploy.deploy_many(
         "Course-Org", "Semester-Org", deploys, sync=False
@@ -3368,6 +3385,7 @@ def test_withholding_the_stub_never_deletes_the_semesters_own_readme(monkeypatch
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     errors, _changed = deploy.deploy_many(
         "Course-Org", "Semester-Org", [Deploy("cm", "/", "materials", None)], sync=False
