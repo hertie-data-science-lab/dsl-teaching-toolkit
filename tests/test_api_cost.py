@@ -563,6 +563,152 @@ def test_a_status_refresh_stays_under_its_ceiling(github, monkeypatch):
     assert _reads_twice(github.calls) == []
 
 
+# ------------------------------------------------ every operation, a term into its run
+
+# Every CLI a workflow or the Console runs, against a semester a term into its run: a real
+# release tick has already run on the fake, so the sheets, the snapshots and the team lock
+# are there, every student is a member, every grant is held. Each runs at 2 and at 4
+# students, so a cost that grows per student (or per student repo: the fake has 3 per
+# student, 7 besides) shows as the difference.
+#
+# `(base, per_student)` is what was measured here on 2026-09-26 after the cuts of WP-H5;
+# the ceiling is 25% over `base + per_student * students`. The live numbers are in
+# docs/reference/maintainers.md ("API budget").
+NOW = "2026-09-26T12:00:00+00:00"
+_C, _S = ("--course-org", COURSE), ("--semester-org", SEMESTER)
+_TICK = ("scheduler", *_C, "--all-semesters", "--skip-autograde", "--now", NOW)
+OPERATIONS = {
+    # Scheduled release: the listing step, the release step, one grading leg. Nobody in
+    # the fixture has pushed since the handout; each student who has adds two commit
+    # reads per assignment whose sheet is still open (`collect._provisional_pins`).
+    "tick: list the semesters": (("scheduler", *_C, "--list-semesters"), 3, 0),
+    "tick: release (real)": ((*_TICK, "--no-preview"), 36, 0),
+    "tick: release (preview)": ((*_TICK, "--preview"), 31, 0),
+    "tick: autograde leg": (
+        ("scheduler", *_C, *_S, "--autograde-only", "--now", NOW, "--preview"),
+        12,
+        0,
+    ),
+    "membership: course config check": (
+        ("scheduler", *_C, "--check-course-config", "--now", NOW, "--no-preview"),
+        4,
+        0,
+    ),
+    "membership: sync (real)": (
+        ("sync_membership", *_C, "--all-semesters", "--no-preview"),
+        28,
+        0,
+    ),
+    "membership: sync (preview)": (
+        ("sync_membership", *_C, "--all-semesters", "--preview"),
+        22,
+        0,
+    ),
+    "status: check (preview)": (("status", *_C, *_S, "--preview"), 11, 0),
+    "status: write status.json": (("status", *_C, *_S, "--no-preview"), 48, 0),
+    "site: sync": (("site", "sync", *_C, *_S), 56, 0),
+    "seed: refresh": (("seed", "refresh", *_C), 102, 0),
+    "collect: refresh the sheet (preview)": (
+        ("collect", *_C, "--course-source-repo", "assignment-1-f2026", *_S)
+        + ("--refresh-only", "--preview"),
+        10,
+        0,
+    ),
+    "grades: distribute (preview)": (
+        ("grades", "distribute", *_S, "--preview"),
+        13,
+        0,
+    ),
+    "propagate (preview)": (("propagate", *_C, *_S, "--preview"), 3, 0),
+    "team formation (preview)": (
+        ("team_formation", *_C, *_S, "--assignment", "assignment-1", "--preview"),
+        6,
+        0,
+    ),
+    "enrol codes: resend (preview)": (
+        ("enrol_codes", *_S, "--dispatched-by", COURSE, "--resend-unjoined")
+        + ("--preview",),
+        4,
+        0,
+    ),
+    "deploy: release now (preview)": (
+        ("deploy", *_C, "--course-source-repo", "course-materials-f2026", *_S)
+        + ("--course-source-path", "lectures", "--semester-dest-repo", "materials")
+        + ("--semester-dest-path", "lectures", "--preview"),
+        1,
+        0,
+    ),
+    "assign: hand out now (preview)": (
+        ("assign", *_C, "--course-source-repo", "assignment-1-f2026", *_S, "--preview"),
+        8,
+        0,
+    ),
+    "archive (preview)": (("archive", *_C, *_S, "--preview"), 5, 0),
+}
+# Not covered: the real runs of a hand-out, a release now and an archive, and New
+# assignment / New materials (`scaffold`). Each is a button pressed once per assignment,
+# release or term, not a cron; their previews are above.
+
+
+def _drive(monkeypatch, argv: tuple[str, ...]) -> None:
+    """One CLI run as a workflow step makes it: fresh process memos, start hooks live."""
+    module = __import__(f"dsl_course.{argv[0]}", fromlist=["main"])
+    clear_process_memos()
+    monkeypatch.setattr(log, "_cli_started", False)
+    monkeypatch.setattr(sys, "argv", list(argv))
+    try:
+        module.main()
+    except SystemExit:
+        pass
+
+
+@pytest.mark.parametrize("students", [2, 4])
+@pytest.mark.parametrize("name", list(OPERATIONS))
+def test_every_operation_stays_under_its_ceiling(
+    github, monkeypatch, capsys, name, students
+):
+    argv, base, per_student = OPERATIONS[name]
+    fake = FakeGitHub(tuple(f"octo-{i}" for i in range(students)))
+    monkeypatch.setattr(subprocess, "run", fake.run)
+    monkeypatch.setenv("DSL_BOT_TOKEN", "a-token")
+    _drive(monkeypatch, (*_TICK, "--no-preview"))
+    fake.calls.clear()
+    _drive(monkeypatch, argv)
+    capsys.readouterr()
+    assert len(fake.calls) <= 1.25 * (base + per_student * students), fake.calls
+    if "--preview" in argv:
+        assert _reads_twice(fake.calls) == []
+
+
+def _cost_in_a_term(monkeypatch, argv, **term) -> int:
+    fake = FakeGitHub(**term)
+    monkeypatch.setattr(subprocess, "run", fake.run)
+    _drive(monkeypatch, (*_TICK, "--no-preview"))
+    fake.calls.clear()
+    _drive(monkeypatch, argv)
+    return len(fake.calls)
+
+
+def test_a_student_who_pushed_costs_two_reads_per_open_sheet(github, monkeypatch):
+    # The one per-student term a tick keeps: each student who pushed since the sheet
+    # last looked is read twice for each assignment in its late window (one here).
+    # Measured 2026-09-26: +4 for two pushers.
+    tick = (*_TICK, "--no-preview")
+    quiet = _cost_in_a_term(monkeypatch, tick)
+    busy = _cost_in_a_term(monkeypatch, tick, pushed=STUDENTS)
+    assert 0 < busy - quiet <= 1.25 * 2 * len(STUDENTS)
+
+
+def test_a_student_who_left_costs_one_invitation_read_per_repo(github, monkeypatch):
+    # The prune still reads the invitations of every repo named after a handle off the
+    # roster; their collaborators come from the one GraphQL query. Measured 2026-09-26:
+    # +2 for one leaver with two submission repos.
+    sync = ("sync_membership", *_C, "--all-semesters", "--no-preview")
+    stayed = _cost_in_a_term(monkeypatch, sync)
+    left = _cost_in_a_term(monkeypatch, sync, gone=("octo-gone",))
+    assert 0 < left - stayed <= 1.25 * len(ASSIGNMENTS)
+
+
 # --------------------------------------------------------------- the read-once memo
 
 
