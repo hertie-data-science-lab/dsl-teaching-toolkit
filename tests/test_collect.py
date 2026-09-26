@@ -3506,18 +3506,37 @@ def test_strip_student_test_rigging_survives_a_symlink_cycle(tmp_path):
 def test_has_autograde_results_checks_the_records_not_bare_directory(monkeypatch):
     # The marker is the _graded.json sentinel OR the _skipped.json record - NEVER bare
     # autograde/<slug>/ existence, which an aborted run can leave populated but un-sentineled.
-    def only(record: str):
-        return lambda *args: (
-            (0, "") if any(a.endswith(record) for a in args) else (1, "not found")
-        )
+    # Read off one tree of semester-config.
+    base = ".system/autograde/assignment-1"
+    monkeypatch.setattr(collect, "default_branch", lambda *a, **k: "main")
 
-    monkeypatch.setattr(gh_contents, "gh", only("_graded.json"))
+    def tree(*paths: str):
+        lines = "\n".join(["false", *(f"{p}\tsha" for p in paths)])
+        return lambda *args: (0, lines)
+
+    monkeypatch.setattr(gh_contents, "gh", tree(f"{base}/_graded.json"))
     assert collect.has_autograde_results("Semester", "assignment-1")  # a completed run
-    monkeypatch.setattr(gh_contents, "gh", only("_skipped.json"))
+    monkeypatch.setattr(gh_contents, "gh", tree(f"{base}/_skipped.json"))
     assert collect.has_autograde_results("Semester", "assignment-1")  # a recorded skip
     # a populated directory with neither record present is NOT graded (the old bug)
-    monkeypatch.setattr(gh_contents, "gh", lambda *a: (1, "not found"))
+    monkeypatch.setattr(gh_contents, "gh", tree(f"{base}/1234.json"))
     assert not collect.has_autograde_results("Semester", "assignment-1")
+
+
+def test_an_unreadable_tree_falls_back_to_probing_the_records(monkeypatch):
+    monkeypatch.setattr(collect, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(
+        gh_contents,
+        "gh",
+        lambda *args: (
+            (1, "gh: HTTP 502")
+            if any("/git/trees/" in a for a in args)
+            else (0, "")
+            if any(a.endswith("_graded.json") for a in args)
+            else (1, "not found")
+        ),
+    )
+    assert collect.has_autograde_results("Semester", "assignment-1")
 
 
 def test_collect_writes_the_graded_sentinel_as_the_last_autograde_write(monkeypatch):

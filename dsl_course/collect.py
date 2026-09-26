@@ -134,6 +134,7 @@ from .gh_contents import (
     get_file_with_sha,
     is_untouched_stub,
     put_file,
+    read_repo,
     repo_blob_shas,
 )
 from .ghcli import BOT_EMAIL, GIT_ENV, bot_login, clone, gh, git, is_missing_resource
@@ -799,8 +800,13 @@ def _snapshot_sha(
     the student pushed nothing.
     Returns None when the API call itself failed - the caller then abandons the whole
     snapshot so the next cron tick retries, rather than baking a transient error into a
-    record that is never rewritten."""
-    code, out = gh(
+    record that is never rewritten.
+
+    Read once per run (`read_repo`): the freeze and the sheet refresh of one tick ask the
+    same question of every repo in the late window, and only a push can change the answer."""
+    code, out = read_repo(
+        semester_org,
+        repo,
         "api",
         "-X",
         "GET",
@@ -812,6 +818,7 @@ def _snapshot_sha(
         *(("-f", f"path={path}") if path else ()),
         "--jq",
         _COMMIT_FIELDS,
+        reader=gh,
     )
     if code == 0:
         lines = [line for line in out.splitlines() if line.strip()]
@@ -1049,7 +1056,9 @@ def _warn_if_late_commits_only(
     `path` narrows it to one folder of a shared drop box, for the same reason the pin is
     narrowed: without it every unit that had not submitted would be told that the repo has
     commits, because fifty other units are pushing into it."""
-    code, out = gh(
+    code, out = read_repo(
+        semester_org,
+        repo,
         "api",
         "-X",
         "GET",
@@ -1059,6 +1068,7 @@ def _warn_if_late_commits_only(
         *(("-f", f"path={path}") if path else ()),
         "--jq",
         '.[0].sha // ""',
+        reader=gh,
     )
     if code == 0 and out.strip():
         log(
@@ -1076,11 +1086,18 @@ def has_autograde_results(semester_org: str, slug: str) -> bool:
     The scheduler grades an assignment only while neither record is present, so a machine score
     is written once and never silently refreshed under a marker's hand-edits. A deliberate
     re-grade means deleting `.system/autograde/<slug>/` (the next tick then regrades) or running the
-    autograder."""
-    return any(
-        file_exists(semester_org, CONFIG_REPO, f"{autograde_path(slug)}/{record}")
-        for record in (GRADED_RECORD, SKIP_RECORD)
-    )
+    autograder.
+
+    Off ONE tree read of semester-config per run rather than two probes per assignment:
+    the grading job asks it of every passed deadline on every tick. A tree that cannot be
+    read, or came back truncated, falls back to probing the two records."""
+    records = [f"{autograde_path(slug)}/{r}" for r in (GRADED_RECORD, SKIP_RECORD)]
+    try:
+        branch = default_branch(semester_org, CONFIG_REPO)
+        present = repo_blob_shas(semester_org, CONFIG_REPO, branch)
+    except RuntimeError:
+        return any(file_exists(semester_org, CONFIG_REPO, r) for r in records)
+    return any(r in present for r in records)
 
 
 def mark_not_autograded(semester_org: str, slug: str, why: str) -> bool:
