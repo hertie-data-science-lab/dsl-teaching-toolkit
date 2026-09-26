@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import unquote
 
 import pytest
 import yaml
@@ -81,6 +83,10 @@ OLD_RECORDS = {
 }
 
 
+def _iso(at: float) -> str:
+    return datetime.fromtimestamp(at, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 class FakeClock:
     """The wall clock `settle` reads and the sleep it waits with: a sleep moves the clock,
     and says so in `calls` (shared with the fake GitHub, so a test reads one sequence)."""
@@ -112,6 +118,10 @@ class FakeGitHub:
         self.paused_at_commit: list[bool] = []
         self.puts: list[tuple[str, str, bool]] = []
         self.dispatches: list[tuple[str, dict]] = []  # (org/repo, the fields sent)
+        # (org, repo, folder) -> the date its first commit landed; absent: no commit
+        self.history: dict[tuple[str, str, str], str] = {}
+        # the state a dispatched run is in when it shows up (its hooks may move it)
+        self.dispatched_state = "completed"
         self.fail_dispatch = False
         self.fail_rename = False
         self.redirect_renames = True  # GitHub's 301 from a renamed repo's old name
@@ -248,7 +258,14 @@ class FakeGitHub:
             if self.fail_dispatch:
                 return 1, "HTTP 422: Unprocessable"
             self.dispatches.append((f"{org}/{name}", fields))
+            self.runs.setdefault(key, []).append(
+                (_iso(self.clock.at), self.dispatched_state)
+            )
             return 0, ""
+        if parts[3:] == ["commits"]:
+            params = dict(p.split("=", 1) for p in query.split("&"))
+            folder = unquote(params["path"])
+            return 0, self.history.get((org, name, folder), "")
         if parts[3:] == ["actions", "permissions"]:
             if method == "PUT":
                 on = fields["enabled"] is True
@@ -444,7 +461,8 @@ def semester(fake, monkeypatch):
         migrate,
         "sync_team_lock",
         lambda c, s: (
-            _render(fake, s, CONFIG_REPO, {records.path("lock"): lock})
+            calls.append("lock")
+            or _render(fake, s, CONFIG_REPO, {records.path("lock"): lock})
             or SimpleNamespace(ok=True)
         ),
     )
@@ -560,7 +578,7 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
     )
     assert all(fake.paused_at_commit[1:-1]) and not fake.paused_at_commit[-1]
     assert all(fake.enabled(*key) for key in fake.workflow_repos())
-    assert semester == ["join", "config", "profile", "status"]
+    assert semester == ["lock", "join", "config", "profile", "status"]
     # The ticks the pause dropped, dispatched once Actions are back, scoped to this
     # semester exactly as its semester-config push would send them.
     assert fake.dispatches == [
@@ -600,9 +618,9 @@ def test_a_second_run_finds_every_step_already_migrated(
 
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     out = capsys.readouterr().out
-    # Eight steps, each "already migrated" in the plan and again in the run: nothing is
+    # Nine steps, each "already migrated" in the plan and again in the run: nothing is
     # paused, nothing written, status.json not rewritten.
-    assert out.count("already migrated") == 16
+    assert out.count("already migrated") == 18
     assert fake.commits == commits and fake.puts == puts and semester == []
     assert len(fake.dispatches) == 2  # nothing paused, so nothing was dropped
 
@@ -791,7 +809,7 @@ def test_a_semester_re_render_that_failed_off_the_files_is_run_again(
     semester.clear()
     monkeypatch.setattr(migrate, "sync_team_lock", synced)
     assert _main(monkeypatch, SEM, "--no-preview") == 0
-    assert semester == ["join", "config", "profile", "status"]
+    assert semester == ["lock", "join", "config", "profile", "status"]
 
 
 def test_an_archived_semester_is_never_touched(fake, semester, monkeypatch, capsys):
@@ -1255,7 +1273,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     course.clear()
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    assert capsys.readouterr().out.count("already migrated") == 22
+    assert capsys.readouterr().out.count("already migrated") == 24
     assert course == [] and fake.commits == commits and fake.puts == puts
 
 
@@ -2248,3 +2266,239 @@ def test_a_template_s_seeded_lines_take_the_semester_wording():
         old = new.replace("whole semester", "whole cohort")
         assert "whole cohort" in old
         assert migrate.seeded_yaml(old, "main", COURSE) == new
+
+
+# ---------------------------------------------------------------- the join form and lock
+
+
+def test_the_join_form_is_rendered_from_the_synced_lock(fake, semester, monkeypatch):
+    # The Join team form is rendered from the lock as it is in the repo. The re-render
+    # syncs the lock FIRST, so a lock that changes in this run is the one the form (and
+    # the verify, which renders from the synced lock) reads.
+    old, new = b"assignments: {old: {}}\n", b"assignments: {new: {}}\n"
+    fake.tree(SEM, OLD_CONFIG_REPO)["assignments.lock.yml"] = old
+
+    def form(org):
+        lock = fake.tree(org, CONFIG_REPO).get(records.path("lock"), b"")
+        return {".github/ISSUE_TEMPLATE/team-form.yml": b"form from " + lock}
+
+    monkeypatch.setattr(migrate, "join_files", form)
+    monkeypatch.setattr(migrate, "team_lock_content", lambda course, sem: new)
+    monkeypatch.setattr(
+        migrate,
+        "refresh_join_workflows",
+        lambda org: semester.append("join") or _render(fake, org, JOIN_REPO, form(org)),
+    )
+    monkeypatch.setattr(
+        migrate,
+        "sync_team_lock",
+        lambda c, s: (
+            semester.append("lock")
+            or _render(fake, s, CONFIG_REPO, {records.path("lock"): new})
+            or SimpleNamespace(ok=True)
+        ),
+    )
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert semester[:2] == ["lock", "join"]
+    assert fake.tree(SEM, JOIN_REPO)[".github/ISSUE_TEMPLATE/team-form.yml"] == (
+        b"form from " + new
+    )
+
+
+# ---------------------------------------------------------------- the catch-up
+
+
+def test_the_catch_up_waits_for_the_runs_it_dispatched(
+    fake, semester, monkeypatch, capsys
+):
+    # The runs start queued and finish a poll later: the tool waits, then says so, so
+    # the next org's preflight finds the course's `.github` quiet.
+    fake.dispatched_state = "queued"
+
+    def finish(_at):
+        for key, runs in fake.runs.items():
+            fake.runs[key] = [(at, "completed") for at, _ in runs]
+
+    real = fake.gh
+
+    def gh(*args, **kwargs):
+        out = real(*args, **kwargs)
+        if "dispatches" in " ".join(args) and finish not in fake.clock.hooks:
+            fake.clock.hooks.append(finish)
+        return out
+
+    monkeypatch.setattr(migrate, "gh", gh)
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    out = capsys.readouterr().out
+    assert f"waiting for the catch-up run(s) in {COURSE}/.github to finish" in out
+    assert f"the catch-up run(s) in {COURSE}/.github finished" in out
+    assert fake.calls[-1] == "runs Course-E1/.github"
+    assert "sleep 15" in fake.calls[fake.calls.index(f"on {SEM}/{CONFIG_REPO}") :]
+
+
+def test_a_catch_up_still_running_at_the_bound_is_said_and_is_no_failure(
+    fake, semester, monkeypatch, capsys
+):
+    fake.dispatched_state = "in_progress"
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    out = capsys.readouterr().out
+    assert (
+        f"the catch-up run(s) in {COURSE}/.github are still going after 10 minutes - "
+        "the next migration waits for them before it pauses"
+    ) in out
+    assert f"{SEM} is migrated" in out
+
+
+# ---------------------------------------------------------------- proposed releases
+
+LAYOUTS = Path(__file__).parent / "fixtures" / "layouts"
+
+
+def _nlp(fake):
+    """The nlp semester as it is on 25 Sep 2026: every folder released by hand, none in
+    its plan (paths and dates from the real repos, tests/fixtures/layouts/)."""
+    tree = {
+        p: b"x" for p in (LAYOUTS / "nlp-tree.txt").read_text().split() if p.strip()
+    }
+    fake.repos[(SEM, "materials")]["branches"]["main"] = dict(tree)
+    fake.tree(COURSE, "course-materials-f2026").update(tree)
+    config = fake.tree(SEM, OLD_CONFIG_REPO)
+    config["schedule.yml"] = (LAYOUTS / "nlp-schedule.yml").read_bytes()
+    for line in (LAYOUTS / "nlp-landed.txt").read_text().splitlines():
+        if line and not line.startswith("#"):
+            folder, when = line.split()
+            fake.history[(SEM, "materials", folder)] = when
+
+
+def test_a_preview_proposes_a_releases_plan_for_the_folders_outside_it(
+    fake, semester, monkeypatch, capsys
+):
+    _nlp(fake)
+    before = _state(fake)
+    assert _main(monkeypatch, SEM) == 0
+    out = capsys.readouterr().out
+    assert (
+        f"write {CONFIG_REPO}/{migrate.PROPOSED_RELEASES}: a releases plan for 14 "
+        "folder(s) released outside the plan"
+    ) in out
+    # The plan shows the block itself, as it will be written.
+    assert "-     lecture-01:\n    -       event_datetime: 2026-08-31T22:35\n" in out
+    assert "-           course_source_path: labs/04_session-4\n" in out
+    assert _state(fake) == before
+
+
+def test_the_proposal_is_written_beside_the_schedule_never_into_it(
+    fake, semester, monkeypatch
+):
+    _nlp(fake)
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    tree = fake.tree(SEM, CONFIG_REPO)
+    assert "releases" not in yaml.safe_load(tree["schedule.yml"])
+    text = tree[migrate.PROPOSED_RELEASES].decode()
+    assert text.startswith(migrate.PROPOSAL_HEADER)
+    # What faculty paste reads clean with this engine: one entry per folder, kind from
+    # its section, dated by its first commit in the semester's time zone.
+    sched = migrate.schedule.parse(yaml.safe_load(text))
+    assert sched.faults == [] and sched.dropped == []
+    by_label = {r.label: r for r in sched.releases}
+    assert sorted(by_label) == sorted(
+        [f"lecture-0{n}" for n in range(1, 5)]
+        + [f"lab-0{n}" for n in range(1, 5)]
+        + [f"readings-0{n}" for n in range(1, 7)]
+    )
+    lab = by_label["lab-01"]
+    assert (lab.kind, lab.title, lab.show_on_site) == ("lab", "Session 1", True)
+    assert lab.when.isoformat() == "2026-09-01T21:26:00+02:00"
+    assert [(d.course_source_repo, d.course_source_path, d.semester_dest_repo)
+            for d in lab.deploy] == [
+        ("course-materials-f2026", "labs/01_session-1", "materials")
+    ]  # fmt: skip
+    # A readings entry has no title: it attaches to the lecture that follows it.
+    assert by_label["readings-01"].title == ""
+    rows = migrate.offplan_folders(
+        [d for r in sched.releases for d in r.deploy],
+        {"materials": list(fake.tree(SEM, "materials"))},
+    )
+    assert rows == []  # accepted, the proposal leaves no folder outside the plan
+    # Once the file is there the step is done: a rerun proposes nothing new.
+    commits = list(fake.commits)
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert fake.commits == commits
+
+
+def test_a_folder_no_one_course_repo_holds_names_no_source(fake, semester, monkeypatch):
+    _nlp(fake)
+    course = fake.tree(COURSE, "course-materials-f2026")
+    for path in [p for p in course if p.startswith("labs/02_session-2/")]:
+        del course[path]
+    # A label the schedule already uses is never proposed again.
+    fake.tree(SEM, OLD_CONFIG_REPO)["schedule.yml"] += (
+        b"releases:\n  lab-01:\n    event_datetime: 2026-09-01\n"
+    )
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    text = fake.tree(SEM, CONFIG_REPO)[migrate.PROPOSED_RELEASES].decode()
+    entries = yaml.safe_load(text)["releases"]
+    assert "lab-01" not in entries and "lab-01-2" in entries
+    assert entries["lab-02"]["deploy"][0]["course_source_repo"] == "CHANGE-ME"
+    assert entries["lab-03"]["deploy"][0]["course_source_repo"] == (
+        "course-materials-f2026"
+    )
+
+
+def test_a_semester_whose_folders_are_all_in_the_plan_proposes_nothing(
+    fake, semester, monkeypatch, capsys
+):
+    assert _main(monkeypatch, SEM) == 0
+    assert "proposed releases: already migrated" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- publish.yml
+
+
+def _publish(header: str, patterns: str = '  - "lectures/**/*.html"\n') -> bytes:
+    return (header + "public:\n" + patterns).encode()
+
+
+def test_the_old_seeded_publish_comment_takes_the_current_one(
+    fake, course, monkeypatch, capsys
+):
+    cohort, renamed = ("\n".join(h) + "\n" for h in migrate.old_publish_headers())
+    edited = renamed.replace("Edit,\n", "Edit (we do),\n")
+    fake.tree(COURSE, "course-materials-f2026")["publish.yml"] = _publish(cohort)
+    for name, header in (("f2025", renamed), ("f2024", edited)):
+        fake.add(
+            COURSE,
+            f"course-materials-{name}",
+            {"publish.yml": _publish(header)},
+            topics=["dsl-materials"],
+        )
+    assert _main(monkeypatch, COURSE) == 0
+    out = capsys.readouterr().out
+    assert "- course-materials-f2026/publish.yml: the seeded comment" in out
+    assert "- course-materials-f2025/publish.yml: the seeded comment" in out
+    # Not as seeded: listed by line (the old rule's two lines), never rewritten.
+    assert "-   course-materials-f2024/publish.yml: line(s) 6, 7" in out
+    assert "course-materials-f2024/publish.yml: the seeded" not in out
+
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    for name in ("f2026", "f2025"):
+        body = fake.tree(COURSE, f"course-materials-{name}")["publish.yml"]
+        assert body == _publish(scaffold.PUBLISH_HEADER), name
+    assert fake.tree(COURSE, "course-materials-f2024")["publish.yml"] == _publish(
+        edited
+    )
+    capsys.readouterr()
+    assert _main(monkeypatch, COURSE) == 0
+    out = capsys.readouterr().out
+    # Done, and the hand-edited one is still listed for a person.
+    assert "publish.yml comment: already migrated" in out
+    assert "-   course-materials-f2024/publish.yml: line(s) 6, 7" in out
+
+
+def test_the_publish_header_is_the_one_the_scaffold_seeds():
+    stub = scaffold._publish_stub(scaffold.PUBLIC_LECTURES, scaffold.PUBLIC_HTML, [])
+    assert stub.startswith(scaffold.PUBLISH_HEADER + "public:\n")
+    old = migrate.OLD_PUBLISH_HEADER + "public:\n"
+    assert migrate.publish_header(old.replace("\n", "\r\n")) == (
+        scaffold.PUBLISH_HEADER + "public:\n"
+    ).replace("\n", "\r\n")

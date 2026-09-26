@@ -10,12 +10,19 @@ touches GitHub or renders anything - `site` turns rows into pages, `syllabus` in
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from . import schedule
-from .materials import DEFAULT_KIND, DEFAULT_SYLLABUS, Declared, infer_kind
+from .materials import (
+    DEFAULT_KIND,
+    DEFAULT_SYLLABUS,
+    Declared,
+    alias_kind,
+    infer_kind,
+    publishable,
+)
 
 # A source repo -> its `materials.yml` folder aliases. The caller reads them; the plan
 # stays pure.
@@ -215,3 +222,40 @@ def declared_syllabus(
                 return repo, path
             fallback = fallback or (repo, path)
     return fallback
+
+
+def offplan_folders(
+    deploys: Iterable[schedule.Deploy], trees: Mapping[str, Iterable[str]]
+) -> list[tuple[str, str, str]]:
+    """`(repo, folder, kind)` for every released folder of a kind-named section
+    (`lectures/05_x`, `labs/lab-2`, ..., or a top folder of a repo so named) that none of
+    `deploys` covers: material released outside the plan (decision 0013 item 4). `trees`
+    is `{semester repo: its blob paths}`. The site's off-plan rows follow the same rule."""
+    copies = [(d.semester_dest_repo, deploy_dest(d)) for d in deploys]
+
+    def covered(repo: str, folder: str) -> bool:
+        return any(
+            r == repo
+            and (
+                not p
+                or p == folder
+                or folder.startswith(f"{p}/")
+                or p.startswith(f"{folder}/")
+            )
+            for r, p in copies
+        )
+
+    found: dict[tuple[str, str], str] = {}
+    for repo in sorted(trees):
+        for path in sorted(trees[repo]):
+            parts = path.split("/")
+            if len(parts) >= 3 and (kind := alias_kind(parts[0])):
+                folder = "/".join(parts[:2])
+            elif len(parts) >= 2 and (kind := alias_kind(repo)):
+                folder = parts[0]
+            else:
+                continue
+            if not publishable(path) or covered(repo, folder):
+                continue
+            found.setdefault((repo, folder), kind)
+    return [(repo, folder, kind) for (repo, folder), kind in found.items()]

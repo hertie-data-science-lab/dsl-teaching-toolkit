@@ -23,13 +23,15 @@ workflows, for the window, and enabled again at the end. (An org variable cannot
 on GitHub Free org variables do not reach private repos, and the workflows already live in
 an org carry no gate until they are re-rendered.) It waits for quiet before it switches
 anything. GitHub drops, rather than queues, what fires into a disabled repo, so the unpause
-dispatches one Scheduled release and one Sync membership in its place. For a real course
+dispatches one Scheduled release and one Sync membership in its place, and waits (bounded)
+for those runs, so the next org's migration finds the course quiet. For a real course
 the tier moves inside a HOLD of every org of the course (`--hold`, `--release`); a
 migration under a hold neither pauses nor unpauses.
 
-Semester org, in order: preflight, pause, rename repos, layout, keys, topic, re-render,
-status, unpause. Course org: preflight, pause, registry, .system/, dsl-course.yml keys,
-template keys, materials files, re-render, status, unpause.
+Semester org, in order: preflight, pause, rename repos, layout, keys, proposed releases,
+topic, re-render, status, unpause. Course org: preflight, pause, registry, .system/,
+dsl-course.yml keys, template keys, seeded text, materials topic, materials files,
+publish.yml comment, re-render, status, unpause.
 """
 
 from __future__ import annotations
@@ -41,10 +43,11 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import sleep
 from time import time as clock
+from urllib.parse import quote
 
 import yaml
 
@@ -65,8 +68,10 @@ from .course import (
     OLD_JOIN_REPO,
     OLD_PEOPLE_FILE,
     OLD_SEMESTER_TOPIC,
+    PUBLISH_FILE,
     RETIRED_COURSE_KEYS,
     SEMESTER_TOPIC,
+    SETTING_PLACEHOLDER,
     SOLUTION_BRANCH,
     SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
@@ -108,7 +113,8 @@ from .repos import (
     repo_missing,
     set_repo_topics,
 )
-from .scaffold import materials_system_files
+from .scaffold import PUBLISH_HEADER, materials_system_files
+from .schedule_plan import label_number, offplan_folders
 from .setting_readers import RENAMED_SETTINGS, read_settings
 from .settings import ASSIGNMENT_DEFAULTS_KEY, RUN_KEYS
 from .sync_faculty import retired_course_faults
@@ -971,6 +977,148 @@ def review_plan(texts: dict[str, str]) -> list[str]:
     ]
 
 
+# ------------------------------------------------------------------ publish.yml
+# A materials repo's `publish.yml` header as New materials repo seeded it before #330: it
+# said a pattern matches the SEMESTER copy, the opposite of the rule now (patterns match
+# SOURCE paths; a negated folder excludes its subtree). The file is instructor-owned, but
+# a header still exactly as seeded is the toolkit's wording, so it takes the current one.
+# Two spellings are live: as first seeded (`cohort`), and after the 0012 rename.
+OLD_PUBLISH_HEADER = f"""\
+# INSTRUCTOR-OWNED - yours. Written once when this repo was scaffolded, and never
+# rewritten by the toolkit, so anything you put here stays.
+#
+# What the cohort site hosts PUBLICLY, so a rendered deck opens in a browser instead of
+# showing as source on GitHub. Same syntax as .gitignore, relative to this repo - or,
+# strictly, to the cohort's copy, so a release that renames a path with cohort_dest_path
+# needs the pattern written the way the COHORT repo has it. Anything unmatched stays
+# exactly as it is today: enrolled students open it on GitHub. A deck's
+# <name>_files/ bundle follows its deck. solution/, tests/, grading files and .env are
+# never copied whatever is written here. Applies to every cohort of this course. Edit,
+# then press Sync site (or wait for the next release / daily sync) - a file that does not
+# parse stops the sync and is reported, rather than quietly publishing nothing. Full rules:
+# https://github.com/{CENTRAL}/blob/main/docs/11-configure-cohort-site.md
+"""
+_RENAMED_PUBLISH_WORDS = (
+    ("cohort site hosts", "semester site hosts"),
+    ("cohort's copy", "semester's copy"),
+    ("cohort_dest_path", "semester_dest_path"),
+    ("COHORT repo", "SEMESTER repo"),
+    ("every cohort of", "every semester of"),
+)
+# The old rule in a header someone has edited: listed by line, never rewritten.
+_OLD_PUBLISH_RULE = re.compile(
+    r"(?i)the way the (?:semester|cohort) repo has it|to the (?:semester|cohort)'s copy"
+)
+
+
+def old_publish_headers() -> list[list[str]]:
+    """The old seeded `publish.yml` header's lines, in each spelling a live repo has."""
+    renamed_header = OLD_PUBLISH_HEADER
+    for old, new in _RENAMED_PUBLISH_WORDS:
+        renamed_header = renamed_header.replace(old, new)
+    return [h.rstrip("\n").split("\n") for h in (OLD_PUBLISH_HEADER, renamed_header)]
+
+
+def publish_header(text: str) -> str:
+    """`publish.yml` with its header, where still exactly as seeded, the current one."""
+    for old in old_publish_headers():
+        text = _replace_block(text, old, PUBLISH_HEADER)
+    return text
+
+
+def old_rule_lines(text: str) -> list[int]:
+    """The line numbers of `text` that still state the old rule."""
+    return [
+        n
+        for n, line in enumerate(text.split("\n"), 1)
+        if _OLD_PUBLISH_RULE.search(line)
+    ]
+
+
+# ------------------------------------------------------------------ proposed releases
+# Decision 0013 item 4: a semester whose materials repos hold folders no `releases:` entry
+# copies (released by hand) gets a releases plan PROPOSED, dated by the commit that
+# landed each folder. Faculty content: written beside the schedule, never into it.
+PROPOSED_RELEASES = records.path("proposed_releases")
+PROPOSAL_COMMIT = "migrate: propose releases"
+PROPOSAL_HEADER = f"""\
+# PROPOSED by the migration - read by nothing, and not part of schedule.yml.
+#
+# These folders of this semester were released outside the plan (no `releases:` entry
+# copies them): the site shows them unnumbered on their kind's tab, off the Schedule. To
+# put them in the plan, copy the entries you want under `releases:` in schedule.yml,
+# check each date and title, then delete this file. Each is dated by the commit that
+# first landed its folder in this semester. The dates have passed, so the next tick
+# copies each folder again from its course repo (nothing changes where the source has
+# not). `course_source_repo: {SETTING_PLACEHOLDER}`: no one course repo holds that
+# folder - name the one it came from.
+"""
+
+
+def first_landed(org: str, repo: str, folder: str) -> datetime | None:
+    """When the first commit touching `folder` landed in `org/repo` (its oldest commit
+    date), or None when no commit touches it. Raises when GitHub cannot say."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"repos/{org}/{repo}/commits?path={quote(folder)}&per_page=100",
+        "--jq",
+        ".[-1].commit.committer.date",
+    )
+    if code != 0:
+        raise RuntimeError(f"could not read the history of {org}/{repo}: {out[:200]}")
+    dates = [line.strip() for line in out.splitlines() if line.strip()]
+    return datetime.fromisoformat(dates[-1].replace("Z", "+00:00")) if dates else None
+
+
+def _folder_slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "folder"
+
+
+def _folder_title(name: str) -> str:
+    """A folder's name as the site's off-plan row titles it (`01_session-1` -> `Session
+    1`), so the row reads the same once it is in the plan."""
+    name = re.sub(r"^0*\d+_", "", name)
+    return name.replace("-", " ").replace("_", " ").strip().capitalize()
+
+
+def proposed_entries(
+    folders: list[tuple[str, str, str, datetime | None, str]],
+    taken: set[str],
+    tz,
+) -> str:
+    """The `releases:` block for `folders` (`(semester repo, folder, kind, landed, course
+    repo)`), in date order (an undated one last, `tbc`), each label `<kind>-NN` from the
+    folder's number (else its name), never one `taken`. A readings entry has no title, so
+    it attaches to its lecture (decision 0013 item 3)."""
+    taken = set(taken)
+    rows = []
+    for repo, folder, kind, landed, source in sorted(
+        folders, key=lambda f: (f[3] is None, f[3] or datetime.min.replace(tzinfo=UTC))
+    ):
+        name = folder.rsplit("/", 1)[-1]
+        n = label_number(name)
+        base = f"{kind}-{n:02d}" if n is not None else _folder_slug(name)
+        label, i = base, 2
+        while label in taken:
+            label, i = f"{base}-{i}", i + 1
+        taken.add(label)
+        when = f"{landed.astimezone(tz):%Y-%m-%dT%H:%M}" if landed else "tbc"
+        rows += [f"  {label}:", f"    event_datetime: {when}"]
+        if kind != "readings":
+            rows.append(f"    title: {_scalar(_folder_title(name))}")
+        rows += [
+            f"    kind: {kind}",
+            "    show_on_site: true",
+            "    deploy:",
+            f"      - course_source_repo: {_scalar(source)}",
+            f"        course_source_path: {_scalar(folder)}",
+        ]
+        if repo != schedule.DEFAULT_DEST_REPO:
+            rows.append(f"        semester_dest_repo: {_scalar(repo)}")
+    return "\n".join(["releases:", *rows]) + "\n"
+
+
 # ------------------------------------------------------------------ GitHub, narrowly
 
 
@@ -1140,6 +1288,9 @@ class Step:
     # Runs whenever a step before it has work (the re-render: see RERUN_NOTE), so the
     # plan never calls it "already migrated" then.
     after_work: bool = False
+    # Lines for a person to act on by hand, shown in the plan whether or not the step has
+    # work (a done step says "already migrated" and would otherwise say nothing).
+    notes: Callable[[], list[str]] = list
 
 
 def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
@@ -1171,11 +1322,13 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
                 log(f"  {step.name}: runs after the steps above")
             elif planned(step):
                 log(f"  {step.name}: already migrated")
+                for line in step.notes():
+                    log(f"    - {line}")
                 continue
             else:
                 log(f"  {step.name}:")
             pending = pending or not step.bracket
-            for line in step.plan():
+            for line in [*step.plan(), *step.notes()]:
                 log(f"    - {line}")
         if preview:
             log_ok("PREVIEW - nothing was written. Run again with --no-preview.")
@@ -1323,6 +1476,10 @@ TICK_SECONDS = sorted(
 # How long a real run waits for the runs in flight to finish, and how often it looks.
 QUIET_WAIT = 4 * 60
 QUIET_POLL = 15
+# How long the catch-up waits for the runs it dispatched: the next org's migration (the
+# runbook runs course -> semester -> semester back to back) waits only QUIET_WAIT for
+# quiet in the course's `.github` before it pauses.
+CATCH_UP_WAIT = 10 * 60
 
 
 def next_tick(at: float) -> float:
@@ -1563,9 +1720,12 @@ class Pause:
 
     # after the unpause ---------------------------------------------------------
     def catch_up(self) -> None:
-        """Dispatch what the pause dropped, and say where each run shows up. Not waited
-        for, and never a failure of the migration: the org is migrated by now, and the
-        next tick (at most 15 minutes, the next hour for membership) covers a miss."""
+        """Dispatch what the pause dropped, say where each run shows up, then wait for
+        those runs (`await_catch_up`), so the next org's migration starts clear. Never a
+        failure of the migration: the org is migrated by now, and the next tick (at most
+        15 minutes, the next hour for membership) covers a miss."""
+        since = datetime.fromtimestamp(clock(), UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        sent = 0
         for tick in lost_ticks(self.semester_org):
             url = _runs_url(self.course_org, tick.workflow)
             code, out = gh(
@@ -1578,12 +1738,47 @@ class Pause:
                 *tick.payload,
             )
             if code == 0:
+                sent += 1
                 log_ok(f"dispatched {tick.what}: {url}")
             else:
                 log_err(
                     f"could not dispatch {tick.what} ({out[:200]}) - the next tick "
                     f"catches up; the runs: {url}"
                 )
+        if sent:
+            try:
+                self.await_catch_up(sent, since)
+            except RuntimeError as exc:
+                log_err(f"could not follow the catch-up run(s): {exc}")
+
+    def await_catch_up(self, count: int, since: str) -> None:
+        """Wait, up to CATCH_UP_WAIT, until the `count` runs dispatched at `since` have
+        started in the course's `.github` and none is still going. A `repository_dispatch`
+        answers with no run id: the runs are the dispatched ones created since then."""
+        query = f"event=repository_dispatch&created=%3E%3D{since}"
+        where = f"{self.course_org}/.github"
+        log(
+            f"  waiting for the catch-up run(s) in {where} to finish (up to "
+            f"{CATCH_UP_WAIT // 60} minutes), so the next migration starts clear"
+        )
+        deadline = clock() + CATCH_UP_WAIT
+        while True:
+            started = _run_count(self.course_org, ".github", query)
+            going = sum(
+                _run_count(self.course_org, ".github", f"{query}&status={state}")
+                for state in LIVE_RUN_STATES
+            )
+            if started >= count and not going:
+                log_ok(f"the catch-up run(s) in {where} finished")
+                return
+            if clock() >= deadline:
+                log(
+                    f"  the catch-up run(s) in {where} are still going after "
+                    f"{CATCH_UP_WAIT // 60} minutes - the next migration waits for them "
+                    f"before it pauses"
+                )
+                return
+            sleep(QUIET_POLL)
 
     def steps(self) -> tuple[Step, Step]:
         names = lambda: ", ".join(f"{o}/{r}" for o, r in self.targets())
@@ -1616,6 +1811,10 @@ class Pause:
                     f"dispatch {t.what} in {self.course_org}/.github (the tick the "
                     f"pause dropped)"
                     for t in lost_ticks(self.semester_org)
+                ),
+                (
+                    f"wait for those runs to finish (up to {CATCH_UP_WAIT // 60} "
+                    "minutes)"
                 ),
             ]
 
@@ -2171,6 +2370,87 @@ class Semester:
             and _schedule_clean(text, instance)
         )
 
+    # proposed releases -------------------------------------------------------
+    def offplan(self) -> list[tuple[str, str, str]]:
+        """`(repo, folder, kind)` for each folder of the semester's release repos that no
+        entry of the schedule - as the keys step leaves it - copies."""
+        _, text = self.keys_text()
+        sched = schedule.parse(
+            load_yaml_lines(text or "") or {},
+            settings.parse_instance(self.instance_text()),
+        )
+        deploys = [d for r in sched.releases for d in r.deploy]
+        listing = _listing(self.org)
+        dests = {schedule.DEFAULT_DEST_REPO, *(d.semester_dest_repo for d in deploys)}
+        trees = {
+            repo: list(_files(self.org, repo))
+            for repo in sorted(dests)
+            if repo in listing and not listing[repo].get("archived")
+        }
+        return offplan_folders(deploys, trees)
+
+    def proposal(self) -> str | None:
+        """The proposed releases plan (header and `releases:` block), or None when every
+        released folder is in the plan. Read once per run: each folder costs a history
+        read."""
+        if not hasattr(self, "_proposal"):
+            self._proposal = self._propose()
+        return self._proposal
+
+    def _propose(self) -> str | None:
+        folders = self.offplan()
+        if not folders:
+            return None
+        _, text = self.keys_text()
+        meta = _yaml(text)
+        course = Course(self.course)
+        sources = {r: set(_files(self.course, r)) for r in course.materials_repos()}
+        rows = []
+        for repo, folder, kind in folders:
+            holders = [
+                r
+                for r, paths in sources.items()
+                if any(p.startswith(f"{folder}/") for p in paths)
+            ]
+            source = holders[0] if len(holders) == 1 else SETTING_PLACEHOLDER
+            rows.append(
+                (repo, folder, kind, first_landed(self.org, repo, folder), source)
+            )
+        releases = meta.get("releases")
+        taken = {str(k) for k in releases} if isinstance(releases, dict) else set()
+        tz = schedule._tz(meta.get("timezone"))
+        return PROPOSAL_HEADER + proposed_entries(rows, taken, tz)
+
+    def proposal_done(self) -> bool:
+        """Proposed already (the file is there), or nothing to propose."""
+        if PROPOSED_RELEASES in _files(self.org, self.config()):
+            return True
+        return self.proposal() is None
+
+    def proposal_plan(self) -> list[str]:
+        text = self.proposal() or ""
+        block = [line for line in text.split("\n") if line and not line.startswith("#")]
+        return [
+            (
+                f"write {CONFIG_REPO}/{PROPOSED_RELEASES}: a releases plan for "
+                f"{len(self.offplan())} folder(s) released outside the plan, for faculty "
+                f"to copy into {schedule.SCHEDULE_PATH} by hand (never merged by this tool)"
+            ),
+            *(f"  {line}" for line in block),
+        ]
+
+    def propose(self) -> bool:
+        text = self.proposal()
+        if text is None:
+            return True
+        return move_files(
+            self.org,
+            self.config(),
+            {},
+            PROPOSAL_COMMIT,
+            files={PROPOSED_RELEASES: text.encode()},
+        )
+
     # topic -------------------------------------------------------------------
     def topics(self) -> set[str]:
         return _topics(_listing(self.org))
@@ -2221,10 +2501,12 @@ class Semester:
 
     def rerender(self) -> bool:
         ref = central_ref_for(self.course)
-        failures = refresh_join_workflows(self.org)
+        # The lock first: the Join team form is rendered from it, and the verify renders
+        # from the synced lock.
+        failures = 0 if sync_team_lock(self.course, self.org).ok else 1
+        failures += refresh_join_workflows(self.org)
         failures += refresh_config_system_files(self.org, ref)
         failures += refresh_semester_pointer(self.org, self.course)
-        failures += 0 if sync_team_lock(self.course, self.org).ok else 1
         failures += update_profile_readme(self.org, central_ref=ref)
         return failures == 0
 
@@ -2260,6 +2542,17 @@ class Semester:
                 rollback=(
                     f"git revert the '{KEYS_COMMIT}' commit in {repo} (it holds "
                     f"{schedule.SCHEDULE_PATH} and {ASSIGNMENTS_FILE})"
+                ),
+            ),
+            Step(
+                "proposed releases",
+                done=self.proposal_done,
+                plan=self.proposal_plan,
+                do=self.propose,
+                verify=lambda: PROPOSED_RELEASES in _files(self.org, self.config()),
+                rollback=(
+                    f"git revert the '{PROPOSAL_COMMIT}' commit in {repo} (it holds "
+                    f"only {PROPOSED_RELEASES})"
                 ),
             ),
             Step(
@@ -2556,6 +2849,51 @@ class Course:
             for repo in self.untopicked_materials()
         )
 
+    # publish.yml -------------------------------------------------------------
+    def publish_texts(self) -> dict[str, tuple[str, str]]:
+        """`{materials repo: (its publish.yml now, after this step)}`, for each that has
+        one."""
+        out = {}
+        for repo in self.materials_repos():
+            text = get_file_content(self.org, repo, PUBLISH_FILE)
+            if text is not None:
+                out[repo] = (text, publish_header(text))
+        return out
+
+    def publish_work(self) -> dict[str, bytes]:
+        return {
+            repo: new.encode()
+            for repo, (text, new) in self.publish_texts().items()
+            if new != text
+        }
+
+    def publish_notes(self) -> list[str]:
+        """Each `publish.yml` that still states the old rule where it is not as seeded:
+        listed by line, for a person to reword."""
+        found = {
+            repo: lines
+            for repo, (_, new) in self.publish_texts().items()
+            if (lines := old_rule_lines(new))
+        }
+        if not found:
+            return []
+        return [
+            (
+                f"{PUBLISH_FILE} still says patterns match the semester's copy (they match "
+                "SOURCE paths now) - reword by hand, left as it is:"
+            ),
+            *(
+                f"  {repo}/{PUBLISH_FILE}: line(s) {', '.join(map(str, lines))}"
+                for repo, lines in found.items()
+            ),
+        ]
+
+    def rewrite_publish(self) -> bool:
+        return all(
+            move_files(self.org, repo, {}, TEXT_COMMIT, files={PUBLISH_FILE: body})
+            for repo, body in self.publish_work().items()
+        )
+
     # re-render ---------------------------------------------------------------
     def drift(self) -> list[str]:
         """Every file the course re-render (`seed.refresh`) writes that is not what this
@@ -2709,6 +3047,21 @@ class Course:
                 do=self.move_materials,
                 verify=lambda: not self.materials_moves(),
                 rollback=f"git revert the '{LAYOUT_COMMIT}' commit in each materials repo",
+            ),
+            Step(
+                f"{PUBLISH_FILE} comment",
+                done=lambda: not self.publish_work(),
+                plan=lambda: [
+                    (
+                        f"{repo}/{PUBLISH_FILE}: the seeded comment -> the current one "
+                        "(patterns match SOURCE paths)"
+                    )
+                    for repo in self.publish_work()
+                ],
+                do=self.rewrite_publish,
+                verify=lambda: not self.publish_work(),
+                rollback=f"git revert the '{TEXT_COMMIT}' commit in each materials repo",
+                notes=self.publish_notes,
             ),
             Step(
                 "re-render",

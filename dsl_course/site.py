@@ -65,7 +65,6 @@ from .discovery import (
 from .gh_contents import get_file_content, repo_tree
 from .grades import load_grading_spec, spoken_day
 from .log import CLIParser, log_err, log_step
-from .materials import alias_kind, publishable
 from .materials import read as read_materials
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
@@ -78,6 +77,7 @@ from .schedule_plan import (
     declared_syllabus,
     deploy_dest,
     deploy_section,
+    offplan_folders,
     planned_rows,
     site_rows,
 )
@@ -519,51 +519,14 @@ def _row_filename(row: _Row, key: str, taken: dict[str, str]) -> str:
     return name
 
 
-def _offplan_folders(
-    semester_org: str, rows: list[PlannedRow], live_repos: frozenset[str]
-) -> list[tuple[str, str, str]]:
-    """`(repo, folder path, kind)` for every released folder of a kind-named section
-    (`lectures/`, `labs/`, `readings/`, ..., or a repo so named) that no entry copies:
-    material released outside the plan (the manual workflow, a semester with no
-    `releases:`). Decision 0013: it keeps a row, on its kind's tab."""
-    copies = [(d.semester_dest_repo, deploy_dest(d)) for r in rows for d in r.deploys]
-
-    def covered(repo: str, folder: str) -> bool:
-        return any(
-            r == repo
-            and (
-                not p
-                or p == folder
-                or folder.startswith(f"{p}/")
-                or p.startswith(f"{folder}/")
-            )
-            for r, p in copies
-        )
-
-    found: dict[tuple[str, str], str] = {}
-    for repo in sorted(live_repos):
-        _branch, blobs = _repo_tree(semester_org, repo)
-        for path in blobs:
-            parts = path.split("/")
-            if len(parts) >= 3 and (kind := alias_kind(parts[0])):
-                folder = "/".join(parts[:2])
-            elif len(parts) >= 2 and (kind := alias_kind(repo)):
-                folder = parts[0]
-            else:
-                continue
-            if not publishable(path) or covered(repo, folder):
-                continue
-            found.setdefault((repo, folder), kind)
-    return [(repo, folder, kind) for (repo, folder), kind in found.items()]
-
-
 def _offplan_rows(
     semester_org: str,
     rows: list[PlannedRow],
     allow: frozenset[str],
     live_repos: frozenset[str],
 ) -> list[tuple[str, _Row]]:
-    """`(key, row)` for each off-plan folder: unnumbered, undated, named for its folder. A
+    """`(key, row)` for each off-plan folder (`schedule_plan.offplan_folders`; decision
+    0013: it keeps a row, on its kind's tab): unnumbered, undated, named for its folder. A
     readings folder joins the lecture folder of the same `NN_` ordinal, as such folders
     always did; the rest are rows of their own."""
 
@@ -571,7 +534,10 @@ def _offplan_rows(
         deploy = schedule.Deploy("", folder, repo)
         return _row_landed(semester_org, (deploy,), allow, live_repos, readings)
 
-    folders = _offplan_folders(semester_org, rows, live_repos)
+    folders = offplan_folders(
+        (d for r in rows for d in r.deploys),
+        {repo: _repo_tree(semester_org, repo)[1] for repo in live_repos},
+    )
     lectures = {
         session_number(f.rsplit("/", 1)[-1]): (repo, f)
         for repo, f, kind in folders

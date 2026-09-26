@@ -900,8 +900,11 @@ pause, rename repos (each old name must redirect), layout (records into `.system
 checked against the old file before anything is committed, the seeded skeleton replaced by
 the new one, the pointer moved in, samples deleted - one `migrate: layout` commit), keys
 (`schedule.yml` loses the keys that left it and `assignments.yml` gains what they and the
-templates said, in one commit, both re-read with this engine: zero `NOT_MIGRATED`), topic,
-re-render (drift
+templates said, in one commit, both re-read with this engine: zero `NOT_MIGRATED`), proposed
+releases (decision 0013: for folders of a kind section that no entry copies, a `releases:`
+plan dated by the commit that first landed each folder, written to
+`semester-config/.system/proposed-releases.yml` for faculty to copy by hand - never into
+`schedule.yml`), topic, re-render (the lock synced first, so the Join team form reads it; drift
 checked over the dispatchers, README, pointer, lock, join files and org READMEs), status,
 unpause (status.json first, so re-enabled workflows never race it). A move never overwrites:
 a target holding other bytes refuses the whole commit, naming both paths. Course steps: preflight (not archived; no `cohort_defaults` / `semester_defaults`
@@ -912,7 +915,9 @@ still keyed `cohorts:`), `.system/` in `.github`, `dsl-course.yml` keys, templat
 and the run settings out, recorded first in `.github/.system/migration-run-keys.json` for
 the semesters, re-read with `parse_grading_spec` - course-owned, so here rather than per
 semester),
-materials files, re-render (Refresh actions from the checkout, the course's own repos only -
+materials files, `publish.yml` comment (a header still exactly as seeded before #330 takes the
+current one; one that states the old rule otherwise is listed by line), re-render (Refresh
+actions from the checkout, the course's own repos only -
 no semester; with no `DSL_BOT_TOKEN` on the laptop the repo secret is left, with a note, to
 the org's next Refresh actions; drift checked in `.github`, every content repo and every
 live template), status, unpause. The `dsl-course.yml` keys
@@ -928,7 +933,8 @@ What the demo rehearsal (2026-09-25) changed, one line each:
   tool dispatches one Scheduled release and one Sync membership into the course's `.github`
   (a semester's: scoped to it, like its `semester-config` push; a course's: every
   semester, as the ds01 timers do), each marked `driver: migrate` so the run history tells
-  a catch-up from a real push, and prints where each run shows up, without waiting.
+  a catch-up from a real push, prints where each run shows up, and waits (up to 10
+  minutes) for those runs to finish, so the next org's migration finds the course quiet.
 - **The pause verify** counts only unfinished runs, whenever they started (the separate
   "started after the pause" count, and the GitHub clock it read, are gone).
 - **A step's done is its verify.** The re-render's verify and its done read the same

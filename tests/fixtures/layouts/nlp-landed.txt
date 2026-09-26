@@ -1,0 +1,16 @@
+# When the first commit touching each folder landed in the nlp semester's `materials`
+# repo (read 25 Sep 2026): folder, then its date (UTC).
+labs/01_session-1 2026-09-01T19:26:01Z
+labs/02_session-2 2026-09-08T12:16:34Z
+labs/03_session-3 2026-09-15T06:11:39Z
+labs/04_session-4 2026-09-23T03:44:42Z
+lectures/01_session-1 2026-08-31T20:35:59Z
+lectures/02_session-2 2026-09-07T20:13:24Z
+lectures/03_session-3 2026-09-14T20:30:06Z
+lectures/04_session-4 2026-09-23T09:25:09Z
+readings/01_session-1 2026-08-28T14:06:15Z
+readings/02_session-2 2026-09-18T19:45:52Z
+readings/03_session-3 2026-09-18T19:47:42Z
+readings/04_session-4 2026-09-18T19:49:09Z
+readings/05_session-5 2026-09-18T19:50:50Z
+readings/06_session-6 2026-09-18T19:52:25Z
