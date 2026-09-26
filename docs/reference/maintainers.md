@@ -994,3 +994,35 @@ exhausted` and exits non-zero - except `notify`, whose parser says `budget_stop=
 mail needs no GitHub budget and reports the failure. The numbers are the `X-RateLimit-*`
 headers of `GET /user`; `GET /rate_limit` is not truthful for this (it reported `used=0`
 against a live window). No token, no line.
+
+A real whole-course Scheduled release tick that starts under a quarter of the limit opens (or
+rewrites) *GitHub API budget is running low* in the course org's `.github`, naming what was
+left and the reset time; a later tick that starts over half closes it
+(`cadence.report_budget`). The title is frozen like the digest titles: a rewording is
+appended as a recognised older title, never edited.
+
+**Read once per process.** Inside a CLI run, `gh_contents` answers each file, tree and blob
+read from GitHub once, and `issues` lists each repo's OPEN issues once for every title the
+run asks about (a closed issue is searched by title, only when a digest needs its body).
+Every write tells them what it may have changed (`ghcli.written`, `ghcli.on_write`):
+
+- a file write (`contents`, `git/*`, a PR merge) forgets that repo's files;
+- making, renaming, archiving or deleting a repo (`orgs/X/repos`, `generate`, a repo
+  `PATCH`/`DELETE`, `gh repo create/edit/delete`) forgets the org's files and every repo's
+  metadata;
+- a `git push` forgets the repo its remote names, or everything when that cannot be read;
+- an issue write forgets that repo's listing only;
+- every other write (teams, collaborators, invitations, topics, secrets, Actions settings,
+  dispatches) forgets nothing.
+
+Keys are case-insensitive, as GitHub's owner and repo names are. Blobs are never forgotten.
+The memos are off outside a CLI run (the e2e harness reads what remote runs write), and off
+for a CLI whose parser says `CLIParser(read_once=False)`: `migrate`, and any future CLI
+that waits on other runs and then acts on what they wrote. `migrate.settle` also forgets
+everything when it returns (`ghcli.forget_all`). The Console runs its op and the closing
+status refresh in one process, so the refresh reads through the op's memo; the op's own
+writes are what keeps it current.
+
+`tests/test_api_cost.py` drives a preview tick, a membership sync and a status run against a
+fake `gh` and fails when one costs more than its ceiling. Its unit is one `gh` invocation:
+a listing is one request per hundred rows, so one call may be several pages.

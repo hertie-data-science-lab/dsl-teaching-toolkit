@@ -66,7 +66,7 @@ from datetime import datetime, timedelta
 from itertools import pairwise
 
 from .course import SCOPED_RUN_TITLE
-from .ghcli import gh_json
+from .ghcli import BUDGET_STOP_BELOW, Budget, gh_json
 from .issues import close_issues_titled, find_issue, upsert_issue
 from .log import log, log_err, log_step, log_withheld
 from .schedule import (
@@ -118,6 +118,12 @@ _EXECUTED = frozenset({"success", "failure"})
 # that varied with the fault would never match and every tick would open a new issue.
 DRIVER_TITLE = "Scheduled release: driver health"
 LATE_TITLE = "Scheduled release: late delivery"
+
+# The API budget alarm, in the course org's `.github`. Opens (or is rewritten) when a tick
+# STARTS with under a quarter of the hour's budget left, and closes when a later tick starts
+# with over half: the gap between the two is the hysteresis, for the reason the two alarms
+# above have one.
+BUDGET_TITLE = "GitHub API budget is running low"
 
 _STATE_RE = re.compile(r"<!-- dsl-cadence-state: (\{.*?\}) -->", re.DOTALL)
 
@@ -638,4 +644,61 @@ def report_semester(
         ).errors
     except Exception as exc:
         log_err(f"could not report {semester_org}'s late deliveries: {exc}")
+        return 1
+
+
+def _budget_body(start: Budget) -> str:
+    """The budget issue: what was left, and when the hour resets. Counts and times only -
+    this repo is world-readable."""
+    return "\n".join(
+        [
+            (
+                f"The GitHub account `{start.login}`, which runs every workflow in every "
+                f"course org, had **{start.remaining} of {start.limit}** API calls left "
+                f"this hour when a `Scheduled release` tick started. The hour resets at "
+                f"{start.resets}Z."
+            ),
+            "",
+            (
+                f"Below {BUDGET_STOP_BELOW} a run stops before it starts, so releases, "
+                "handouts and syncs can fail until the reset. The budget is shared with "
+                "every other course, so the cause may be elsewhere: each run's log says "
+                "what it cost on its `[budget]` lines."
+            ),
+            "",
+            (
+                f"Rewritten by every tick that starts under a quarter ({start.limit // 4}); "
+                f"it closes itself once a tick starts with more than half "
+                f"({start.limit // 2}) left."
+            ),
+        ]
+    )
+
+
+def report_budget(course_org: str, start: Budget | None) -> int:
+    """Keep the course org's budget issue in line with the budget this run STARTED with.
+    Returns the error count and never raises, the same contract as `report_course`.
+
+    Nothing without a start reading (no token). Between a quarter and a half left, whatever
+    stands, stands."""
+    if start is None:
+        return 0
+    repo = f"{course_org}/.github"
+    try:
+        if start.remaining < start.limit // 4:
+            log_step(
+                f"GitHub API budget low: {start.remaining} of {start.limit} left, "
+                f"resets {start.resets}Z"
+            )
+            return upsert_issue(repo, BUDGET_TITLE, _budget_body(start)).errors
+        if start.remaining > start.limit // 2:
+            return close_issues_titled(
+                repo,
+                BUDGET_TITLE,
+                f"A tick started with {start.remaining} of {start.limit} left - the "
+                "budget has recovered.",
+            )
+        return 0
+    except Exception as exc:
+        log_err(f"could not report the API budget in {course_org}: {exc}")
         return 1

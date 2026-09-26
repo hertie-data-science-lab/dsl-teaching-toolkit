@@ -96,6 +96,7 @@ def cadence_calls(monkeypatch):
         "evaluate": [],
         "report_course": [],
         "report_semester": [],
+        "report_budget": [],
     }
 
     def _record(name: str, answer):
@@ -111,6 +112,7 @@ def cadence_calls(monkeypatch):
     monkeypatch.setattr(
         scheduler.cadence, "report_semester", _record("report_semester", 0)
     )
+    monkeypatch.setattr(scheduler.cadence, "report_budget", _record("report_budget", 0))
     return calls
 
 
@@ -2788,8 +2790,12 @@ def test_the_cadence_is_read_once_per_course_not_once_per_semester(
         "discover_semesters",
         lambda org: ["Semester-A", "Semester-B"],
     )
+    budget = ghcli.Budget("bot", 5000, 900, 4100, 0)
+    monkeypatch.setattr(scheduler, "start_budget", lambda: budget)
     _all_semesters_argv(monkeypatch)
     assert scheduler.main() == 0
+    # The budget alarm rides on the same pass, with what this run's start line read.
+    assert cadence_calls["report_budget"] == [("Course-Org", budget)]
     assert len(cadence_calls["fetch_runs"]) == 1
     assert len(cadence_calls["evaluate"]) == 1
     assert len(cadence_calls["report_course"]) == 1
@@ -2809,7 +2815,7 @@ def test_a_dry_run_never_reads_or_writes_the_cadence(monkeypatch, cadence_calls)
     )
     _all_semesters_argv(monkeypatch, "--preview")
     assert scheduler.main() == 0
-    assert cadence_calls["fetch_runs"] == []
+    assert cadence_calls["fetch_runs"] == cadence_calls["report_budget"] == []
     assert cadence_calls["report_course"] == cadence_calls["report_semester"] == []
 
 

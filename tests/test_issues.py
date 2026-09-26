@@ -9,10 +9,13 @@ on an issue that already existed, because a new one notifies by being created.
 
 from __future__ import annotations
 
+import subprocess
+from types import SimpleNamespace
+
 import pytest
 from conftest import CREATED_ISSUE_URL, issue_row
 
-from dsl_course import issues
+from dsl_course import ghcli, issues
 
 REPO = "Semester-f2026/semester-config"
 TITLE = "Scheduled release: late delivery"
@@ -42,15 +45,25 @@ def test_a_human_quoting_the_title_is_never_rewritten_but_gets_a_neighbour(gh):
     assert len(fake.did("issue", "create")) == 1
 
 
-def test_the_lookup_asks_for_more_than_the_default_page(gh):
+def test_the_lookup_lists_the_open_issues_rather_than_searching(gh):
     # `gh issue list` returns 30 by default and the title match is client-side, so a repo
     # whose issue list buried ours past the 30th result read as "no issue" - and every
-    # tick opened a fresh one.
+    # tick opened a fresh one. And `--search` lags by minutes, so an issue opened a moment
+    # ago read as absent too. Open only: closed ones pile up all term.
     fake = gh([])
     assert issues.find_issue(REPO, TITLE) is None
     (args,) = fake.did("issue", "list")
-    assert args[args.index("--limit") + 1] == "100"
+    assert args[args.index("--limit") + 1] == str(issues._LISTING_LIMIT)
     assert args[args.index("--state") + 1] == "open"
+    assert "--search" not in args
+
+
+def test_a_repo_too_full_to_list_falls_back_to_the_title_search(gh):
+    rows = [_issue(n, f"other {n}") for n in range(issues._LISTING_LIMIT)]
+    fake = gh(rows + [_issue(5000, TITLE, "ours")])
+    assert issues.find_issue(REPO, TITLE) == issues.Issue(5000, "ours")
+    searched = fake.did("issue", "list")[-1]
+    assert searched[searched.index("--search") + 1] == f"{TITLE} in:title"
 
 
 def test_a_listing_that_could_not_be_read_is_not_no_issue(gh):
@@ -177,10 +190,9 @@ def test_no_comment_means_a_silent_body_edit(gh):
 # ------------------------------------------------------------- the issue somebody closed
 
 
-def test_both_halves_of_the_title_come_back_from_one_search(gh):
+def test_both_halves_of_the_title_come_back(gh):
     # A caller whose state lives in the body it last wrote needs the newest thing it
-    # wrote, open or closed - and asking for the closed half separately is a second
-    # listing on every tick that has no open issue.
+    # wrote, open or closed. The closed half is a title search of its own.
     fake = gh(
         [_issue(11, TITLE, "current")],
         closed=[_issue(3, TITLE, "older"), _issue(9, TITLE, "newest")],
@@ -188,8 +200,17 @@ def test_both_halves_of_the_title_come_back_from_one_search(gh):
     found = issues.find_issues(REPO, TITLE)
     assert found.open == issues.Issue(11, "current")
     assert found.last_closed == issues.Issue(9, "newest", closed=True)
-    (listed,) = fake.did("issue", "list")
-    assert listed[listed.index("--state") + 1] == "all"
+    listed, searched = fake.did("issue", "list")
+    assert listed[listed.index("--state") + 1] == "open"
+    assert searched[searched.index("--state") + 1] == "closed"
+    assert searched[searched.index("--search") + 1] == f"{TITLE} in:title"
+
+
+def test_the_closed_half_alone_is_one_search(gh):
+    fake = gh([_issue(11, TITLE)], closed=[_issue(9, TITLE, "newest")])
+    assert issues.find_closed(REPO, TITLE) == issues.Issue(9, "newest", closed=True)
+    (searched,) = fake.did("issue", "list")
+    assert searched[searched.index("--state") + 1] == "closed"
 
 
 def test_a_closed_issue_a_human_titled_similarly_is_not_ours_either(gh):
@@ -209,8 +230,8 @@ def test_upsert_uses_the_listing_the_caller_already_made(gh):
     # Every consumer reads the body for its own previous state before deciding what to
     # write, so a second search here is a second listing on every tick.
     fake = gh([_issue(7, TITLE, "stale")])
-    found = issues.find_issues(REPO, TITLE)
-    assert issues.upsert_issue(REPO, TITLE, "fresh", existing=found.open).errors == 0
+    found = issues.find_issue(REPO, TITLE)
+    assert issues.upsert_issue(REPO, TITLE, "fresh", existing=found).errors == 0
     assert len(fake.did("issue", "list")) == 1
     assert fake.body_of("issue", "edit") == "fresh"
 
@@ -219,7 +240,7 @@ def test_a_caller_that_looked_and_found_nothing_is_not_asked_again(gh):
     # `existing=None` is an ANSWER - "I looked, nothing is open" - and it must not read as
     # "I did not look", or the tick that has to CREATE searches twice.
     fake = gh([])
-    issues.find_issues(REPO, TITLE)
+    issues.find_issue(REPO, TITLE)
     assert issues.upsert_issue(REPO, TITLE, "ours", existing=None).errors == 0
     assert len(fake.did("issue", "list")) == 1
     assert len(fake.did("issue", "create")) == 1
@@ -294,3 +315,86 @@ def test_a_listing_that_could_not_be_read_is_not_an_empty_one(gh):
     gh([], list_code=1)
     with pytest.raises(RuntimeError):
         issues.open_titles(REPO)
+
+
+# ---------------------------------------------------- one listing per repo per process
+
+
+OTHER = "people.yml has entries the sync cannot use"
+
+
+def test_with_the_memo_on_every_title_shares_one_listing(gh):
+    # A tick asks about eight fault titles in one semester-config: eight listings, before.
+    issues.list_once(True)
+    fake = gh([_issue(3, TITLE, "late"), _issue(4, OTHER)])
+    assert issues.find_issue(REPO, TITLE) == issues.Issue(3, "late")
+    assert issues.find_issue(REPO.upper(), OTHER) == issues.Issue(4, "")
+    assert issues.open_titles(REPO) == {TITLE, OTHER}
+    assert len(fake.did("issue", "list")) == 1
+
+
+def test_with_the_memo_off_every_question_lists_afresh(gh):
+    # Off is the default outside a CLI run: the e2e harness reads what remote runs write.
+    fake = gh([])
+    issues.find_issue(REPO, TITLE)
+    issues.find_issue(REPO, OTHER)
+    assert len(fake.did("issue", "list")) == 2
+
+
+def test_an_issue_this_process_opened_is_in_the_listing_it_holds(gh):
+    issues.list_once(True)
+    fake = gh([])
+    assert issues.upsert_issue(REPO, TITLE, "new").errors == 0
+    assert issues.find_issue(REPO, TITLE) == issues.Issue(12, "new")
+    assert len(fake.did("issue", "list")) == 1
+
+
+def test_an_edited_body_and_a_close_are_in_the_listing_it_holds(gh):
+    issues.list_once(True)
+    fake = gh([_issue(7, TITLE, "stale"), _issue(8, OTHER)])
+    issues.upsert_issue(REPO, TITLE, "fresh", comment="changed")
+    assert issues.find_issue(REPO, TITLE) == issues.Issue(7, "fresh")
+    assert issues.close_issues_titled(REPO, OTHER) == 0
+    assert issues.open_titles(REPO) == {TITLE}
+    assert len(fake.did("issue", "list")) == 1
+
+
+def _gh_exits(monkeypatch, code: int) -> None:
+    """The `gh` binary itself answering `code`, so a write goes through the real
+    `ghcli.gh` and the write news the memo listens to."""
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=code, stdout="", stderr="HTTP 422"),
+    )
+
+
+def test_a_write_that_failed_drops_the_listing(gh, monkeypatch):
+    # It may still have landed: the next question lists again.
+    issues.list_once(True)
+    fake = gh([_issue(7, TITLE, "stale")])
+    issues.find_issue(REPO, TITLE)
+    _gh_exits(monkeypatch, 1)
+    ghcli.gh("issue", "edit", "7", "--repo", REPO, "--body", "fresh", retries=0)
+    issues.find_issue(REPO, TITLE)
+    assert len(fake.did("issue", "list")) == 2
+
+
+def test_an_issue_write_from_anywhere_else_drops_the_listing(gh, monkeypatch):
+    issues.list_once(True)
+    fake = gh([_issue(7, TITLE)])
+    issues.find_issue(REPO, TITLE)
+    _gh_exits(monkeypatch, 0)
+    ghcli.gh("api", "--method", "POST", f"repos/{REPO}/issues/7/comments")
+    issues.find_issue(REPO, TITLE)
+    assert len(fake.did("issue", "list")) == 2
+
+
+def test_a_file_write_keeps_the_listing(gh, monkeypatch):
+    issues.list_once(True)
+    fake = gh([_issue(7, TITLE)])
+    issues.find_issue(REPO, TITLE)
+    _gh_exits(monkeypatch, 0)
+    ghcli.gh("api", "--method", "PUT", f"repos/{REPO}/contents/a.yml")
+    issues.find_issue(REPO, TITLE)
+    assert len(fake.did("issue", "list")) == 1

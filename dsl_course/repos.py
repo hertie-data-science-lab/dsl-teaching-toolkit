@@ -12,7 +12,7 @@ from typing import NamedTuple
 
 from .course import RETIRED_REPO_NAMES
 from .faults import NOT_MIGRATED
-from .ghcli import gh, is_already_exists, is_missing_resource
+from .ghcli import ALL, FILES, gh, is_already_exists, is_missing_resource, on_write
 from .log import log, log_err, log_err_person, log_ok, log_person, log_skip
 
 
@@ -45,6 +45,16 @@ def _repo(org: str, name: str) -> dict:
     if not isinstance(body, dict):
         raise _RepoReadFailed(out)
     return body
+
+
+def _forget_repo(kind: str, targets: frozenset[str]) -> None:
+    """A write that makes, renames, archives or deletes a repo (an org-wide target, see
+    `ghcli.written`) makes `_repo`'s answers stale. Rare, so the whole memo goes."""
+    if kind in (FILES, ALL) and any("/" not in t for t in targets):
+        _repo.cache_clear()
+
+
+on_write(_forget_repo)
 
 
 def repo_missing(org: str, name: str) -> bool:

@@ -17,9 +17,76 @@ from typing import Any
 import yaml
 
 from .faults import ConfigFault, Unusable, header_fault
-from .ghcli import gh, gh_json, is_missing_resource
-from .log import log_err, log_err_person, log_skip
+from .ghcli import (
+    ALL,
+    FILES,
+    forget_written,
+    gh,
+    gh_json,
+    is_missing_resource,
+    on_write,
+)
+from .log import log_err, log_err_person, log_skip, on_cli_start
 from .repos import default_branch
+
+
+# ------------------------------------------------------------------ read once per process
+
+# A tick asks for the same file many times over: a semester's pointer to its course org was
+# read 45 times in one preview tick of a two-student demo (2026-09-26), because every spec,
+# cutoff and fault route resolves through it. So every read below is answered from the
+# network once per CLI process, keyed by its exact argv under its casefolded `org/repo`,
+# and forgotten the moment this process makes a write that can change that repo's files
+# (`ghcli.on_write`, which hears a `git push` too). Only a definite answer is kept - a
+# file, a 404, an empty repo's 409 - so a transient failure is asked again. A blob is
+# addressed by its sha and never changes, so no write forgets one.
+#
+# OFF until a CLI command line has parsed (`log.on_cli_start`), and off for a CLI whose
+# parser says `read_once=False` (`migrate`, which waits on other runs): a run that only
+# ever sees its own writes is the one this is right for. The e2e harness is one long
+# process reading what remote runs write, and never turns it on.
+_reads: dict[str, dict[tuple[str, ...], tuple[int, str]]] | None = None
+_blobs: dict[tuple[str, ...], tuple[int, str]] | None = None
+
+
+def read_once(on: bool) -> None:
+    """Turn the per-process read memo on (empty) or off. `tests/conftest.py` turns it off
+    between tests."""
+    global _reads, _blobs
+    _reads, _blobs = ({}, {}) if on else (None, None)
+
+
+def _read(org: str, repo: str, *args: str) -> tuple[int, str]:
+    """`gh(*args)` for a read of `org/repo`, through the memo when it is on."""
+    if _reads is None:
+        return gh(*args)
+    # The owner and repo are not case-sensitive on GitHub; the path inside the repo is.
+    prefix = f"repos/{org}/{repo}"
+    key = tuple(a.replace(prefix, prefix.casefold(), 1) for a in args)
+    return _held(_reads.setdefault(f"{org}/{repo}".casefold(), {}), args, key)
+
+
+def _held(
+    held: dict[tuple[str, ...], tuple[int, str]],
+    args: tuple[str, ...],
+    key: tuple[str, ...] | None = None,
+) -> tuple[int, str]:
+    key = key or args
+    if key in held:
+        return held[key]
+    code, out = gh(*args)
+    if code == 0 or is_missing_resource(out) or "HTTP 409" in out:
+        held[key] = (code, out)
+    return code, out
+
+
+def _forget(kind: str, targets: frozenset[str]) -> None:
+    if _reads is not None and kind in (FILES, ALL):
+        forget_written(_reads, targets)
+
+
+on_write(_forget)
+on_cli_start(lambda parser: read_once(parser.read_once))
 
 
 def missing_columns(
@@ -202,7 +269,9 @@ def file_exists(org: str, repo: str, path: str) -> bool:
     failure to read reads as absent, which costs a re-run rather than a missed one -
     unlike get_file_content, whose callers act on the CONTENT and must never take a rate
     limit for an empty file."""
-    code, _ = gh("api", f"repos/{org}/{repo}/contents/{path}", "--jq", ".sha")
+    code, _ = _read(
+        org, repo, "api", f"repos/{org}/{repo}/contents/{path}", "--jq", ".sha"
+    )
     return code == 0
 
 
@@ -326,8 +395,13 @@ def _tree(org: str, repo: str, branch: str, jq: str) -> list[str]:
     seed). Any OTHER failure RAISES rather than reporting an empty tree, the same rule as
     get_file_content: swallowed, an unreadable tree reads as "nothing is there", and the
     caller then rewrites the files it could not see or drops the links it never found."""
-    code, out = gh(
-        "api", f"repos/{org}/{repo}/git/trees/{branch}?recursive=1", "--jq", jq
+    code, out = _read(
+        org,
+        repo,
+        "api",
+        f"repos/{org}/{repo}/git/trees/{branch}?recursive=1",
+        "--jq",
+        jq,
     )
     if code != 0:
         if is_missing_resource(out) or "HTTP 409" in out:
@@ -394,7 +468,8 @@ def get_blob(org: str, repo: str, sha: str) -> bytes | None:
     What comes back is checked against the sha it was asked for, so an empty or truncated
     payload is a failure here rather than an empty file somewhere downstream. Same
     fail-loud rule as the rest of this module: only a genuine 404 is None."""
-    code, out = gh("api", f"repos/{org}/{repo}/git/blobs/{sha}", "--jq", ".content")
+    args = ("api", f"repos/{org}/{repo}/git/blobs/{sha}", "--jq", ".content")
+    code, out = gh(*args) if _blobs is None else _held(_blobs, args)
     if code != 0:
         if is_missing_resource(out):
             return None
@@ -846,7 +921,7 @@ def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | Non
     url = f"repos/{org}/{repo}/contents/{path}"
     if ref:
         url += f"?ref={ref}"
-    code, out = gh("api", url, "--jq", ".content")
+    code, out = _read(org, repo, "api", url, "--jq", ".content")
     if code != 0:
         if is_missing_resource(out):
             return None
@@ -871,7 +946,7 @@ def get_file_with_sha(
     url = f"repos/{org}/{repo}/contents/{path}"
     if ref:
         url += f"?ref={ref}"
-    code, out = gh("api", url, "--jq", r'"\(.sha)\n" + .content')
+    code, out = _read(org, repo, "api", url, "--jq", r'"\(.sha)\n" + .content')
     if code != 0:
         if is_missing_resource(out):
             return None

@@ -171,12 +171,17 @@ def _not_on_a_runner(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _clear_process_memos():
+    clear_process_memos()
+
+
+def clear_process_memos() -> None:
     """The per-process memos a single CLI run is entitled to keep: a repo's tree and its
     paths, a repo's metadata and its last committer, whether a central ref exists, the
     semester-config files a run re-reads (students.csv, teams.csv, schedule.yml,
     instructors.yml), an assignment's definition, its course's defaults and its handed-out
     starters, and the login the token belongs to. Tests reuse the same org/repo names
-    with different fakes, so clear them between tests."""
+    with different fakes, so clear them between tests - and the CLI's read-once memos
+    (`gh_contents`, `issues`) go back to off, as a CLI start turns them on."""
     site._repo_tree.cache_clear()
     central.central_ref_exists.cache_clear()
     repos._repo.cache_clear()
@@ -195,6 +200,9 @@ def _clear_process_memos():
     gh_contents.path_committers.cache_clear()
     sync_faculty.load_semester_faculty.cache_clear()
     ghcli.bot_login.cache_clear()
+    gh_contents.read_once(False)
+    issues.list_once(False)
+    ghcli._start_budget = None
 
 
 def stub_bootstrap(monkeypatch) -> None:

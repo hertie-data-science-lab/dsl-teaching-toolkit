@@ -312,8 +312,9 @@ If a driver stops, or something due ships late, the scheduler files an issue and
 
 - **Scheduled release: driver health**, in the course org's `.github` - the lab server has stopped dispatching, so only GitHub's unreliable cron is left; tell whoever runs the infrastructure. It ccs your `course-admin` team.
 - **Scheduled release: late delivery**, in the semester's private `semester-config` - something due shipped more than an hour late, naming the schedule entries and by how many minutes. It ccs the semester's `instructors`.
+- **GitHub API budget is running low**, in the course org's `.github` - the account that runs every course's workflows had under a quarter of its hourly budget left when a tick started, so runs may fail until the reset it names. It closes once a tick starts with over half left.
 
-A newly bootstrapped org raises neither until it has seen its first dispatched run. Thresholds and timing: [maintainers.md](reference/maintainers.md#the-schedulers-two-drivers).
+A newly bootstrapped org raises neither of the first two until it has seen its first dispatched run; the budget issue needs none. Thresholds and timing: [maintainers.md](reference/maintainers.md#the-schedulers-two-drivers).
 
 ## Changing dates mid-term
 

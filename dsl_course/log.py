@@ -195,12 +195,19 @@ class CLIParser(argparse.ArgumentParser):
 
     `budget_stop=False` is for a CLI that only MAILS (`notify`): it prints the API budget
     line but is never stopped by a low budget, because its mail needs none and it is what
-    reports the failure a low budget causes."""
+    reports the failure a low budget causes.
 
-    def __init__(self, *args, budget_stop: bool = True, **kwargs) -> None:
+    `read_once=False` is for a CLI that waits on OTHER runs and then acts on what they
+    wrote (`migrate`): it keeps every read live rather than read once per process (see
+    `gh_contents.read_once`)."""
+
+    def __init__(
+        self, *args, budget_stop: bool = True, read_once: bool = True, **kwargs
+    ) -> None:
         kwargs.setdefault("allow_abbrev", False)
         super().__init__(*args, **kwargs)
         self.budget_stop = budget_stop
+        self.read_once = read_once
 
     def _known_flags(self) -> set[str]:
         flags = set(self._option_string_actions)

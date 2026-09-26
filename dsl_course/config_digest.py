@@ -72,9 +72,10 @@ from .faults import (
 )
 from .grades import GRADING_FILE, SHEETS_DIR
 from .issues import (
-    Titled,
+    Issue,
     close_issues_titled,
-    find_issues,
+    find_closed,
+    find_issue,
     issue_url,
     upsert_issue,
 )
@@ -211,17 +212,23 @@ def split_assignments(faults: list) -> tuple[list, list]:
     return [f for f in faults if f not in ours], ours
 
 
-def find_digest(repo: str, digest: Digest) -> Titled:
-    """`digest`'s issue in `repo` under any title of its chain: the first title with an
-    open issue wins; with none open, the newest closed one under the first title that has
-    one. One search per title only while nothing open has been found."""
-    closed = None
+def find_digest(repo: str, digest: Digest) -> Issue | None:
+    """`digest`'s OPEN issue in `repo` under any title of its chain, the first title with
+    one winning. Every title is answered by the repo's one open listing."""
     for title in digest.titles:
-        found = find_issues(repo, title)
-        if found.open:
+        if found := find_issue(repo, title):
             return found
-        closed = closed or found.last_closed
-    return Titled(None, closed)
+    return None
+
+
+def last_closed_digest(repo: str, digest: Digest) -> Issue | None:
+    """The newest closed issue under the first title of the chain that has one: one
+    search per title, so asked only by a tick that has faults to report and no open issue
+    to read its previous state from."""
+    for title in digest.titles:
+        if found := find_closed(repo, title):
+            return found
+    return None
 
 
 def close_digest(repo: str, digest: Digest, comment: str) -> int:
@@ -813,11 +820,11 @@ def hold(
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
-    if not found.open:
+    if not found:
         # No open issue means nothing recorded the crossing either, so there is nothing
         # to put back and the next tick will find it as new regardless.
         return 0
-    body = found.open.body or ""
+    body = found.body or ""
     state = dict(_read_marker(body, _STATE, {}))
     for key, rung in held.items():
         if rung is None:
@@ -839,7 +846,7 @@ def hold(
         clock_marker = _MARKER_RE.format(name=_CLOCK)
         if re.search(clock_marker, patched, re.DOTALL):
             patched = _patch_marker(patched, _CLOCK, {"sent": clock}, clock_marker)
-    errors = upsert_issue(repo, digest.title, patched, existing=found.open).errors
+    errors = upsert_issue(repo, digest.title, patched, existing=found).errors
     if not errors:
         log_ok(
             f"{len(held)} held notification(s) put back in {repo} for the next tick"
@@ -894,7 +901,7 @@ def _superseded(repo: str, digest: Digest, absorb: str | None, body: str):
     if not absorb or _read_marker(body, _ABSORBED, "") == absorb:
         return None
     try:
-        return find_issues(repo, absorb).open
+        return find_issue(repo, absorb)
     except RuntimeError as exc:
         log_err(str(exc))
         return None
@@ -946,17 +953,11 @@ def sync(
     could not be delivered must not take a release cron down with it."""
     repo = f"{semester_org}/{digest.repo}"
     by_key = {f.key: f for f in faults}
-    # ONE listing, open and closed together. The PREVIOUS state rides along in the body,
-    # and where there is no open issue to read it from, the newest CLOSED one is where it
-    # is: somebody who closes this issue by hand has not staged anything, so without
-    # adopting what it left behind the next tick reports every standing fault as newly
-    # appeared and notifies the semester about all of it again.
     try:
-        found = find_digest(repo, digest)
+        open_issue = find_digest(repo, digest)
     except RuntimeError as exc:
         log_err(str(exc))
         return DigestResult(errors=1, faults_by_key=by_key)
-    open_issue, closed = found.open, found.last_closed
     url = issue_url(repo, open_issue.number) if open_issue else None
 
     if not faults:
@@ -982,7 +983,20 @@ def sync(
     if not open_issue and worst_severity(faults, now) < NOTIFY_FROM:
         return DigestResult(faults_by_key=by_key)
 
-    body = open_issue.body if open_issue else (closed.body if closed else "")
+    # The PREVIOUS state rides along in the body, and where there is no open issue to read
+    # it from, the newest CLOSED one is where it is: somebody who closes this issue by
+    # hand has not staged anything, so without adopting what it left behind the next tick
+    # reports every standing fault as newly appeared and notifies the semester about all
+    # of it again. Searched only here, where it is needed.
+    if open_issue:
+        body = open_issue.body
+    else:
+        try:
+            closed = last_closed_digest(repo, digest)
+        except RuntimeError as exc:
+            log_err(str(exc))
+            return DigestResult(errors=1, faults_by_key=by_key)
+        body = closed.body if closed else ""
     recorded = _read_marker(body, _STATE, {})
     superseded = _superseded(repo, digest, absorb, body)
     if superseded:
