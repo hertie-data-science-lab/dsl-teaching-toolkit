@@ -26,6 +26,7 @@ from dsl_course import (
     ghcli,
     grades,
     issues,
+    log,
     pulls,
     repos,
     roster,
@@ -73,6 +74,14 @@ def _team_lag_waits_cost_nothing(monkeypatch):
     at once, so a test that stubs a 404 member listing does not wait two real minutes."""
     monkeypatch.setattr(gh_teams, "_lag_spent", 0)
     monkeypatch.setattr(gh_teams, "_sleep", lambda s: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_start_of_run_hooks(monkeypatch):
+    """Mark the start-of-run hooks as already run, so a test that parses a CLI's command
+    line does not read the API budget (a live `GET /user`). The budget line's own tests
+    drive `ghcli.budget_at_start` directly."""
+    monkeypatch.setattr(log, "_cli_started", True)
 
 
 @pytest.fixture(autouse=True)
