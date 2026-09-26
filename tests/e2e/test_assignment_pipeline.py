@@ -27,7 +27,17 @@ does about it either side of the grading cutoff. Contents R/W is the push.
 
 Optional: `DSL_E2E_ORGS` narrows the scope (never widens it); `DSL_VERBOSE=1` makes the
 harness print repo and handle names locally. Budget ~60-75 minutes of wall clock, almost
-all of it waiting on Actions - run it under `nohup`.
+all of it waiting on Actions - run it under `nohup`. It refuses to start unless the whole
+budget fits before the semester's next local midnight and clock change
+(`fits_in_one_day` says why), and re-checks before each due-date move (`one_day_late`).
+
+The timeline. The late window is whole days (decision 0009): the engine's cutoff is the due
+date plus `late_window_days`, so a cutoff minutes away is a due date a day ago. The student
+pushes ONCE, while the due date is still a day ahead; the harness then moves the due
+date back so that due + one day lands minutes ahead (the refresh pass), then just behind
+(the freeze).
+By the engine's own rule the push is therefore ONE DAY LATE, and every assertion about
+`days_late`, the receipts, the sheet header and the gradebook says so.
 
 One-off setup: every onboarded enrolled student in the demo semester must already have their
 `grades-<handle>` gradebook - run
@@ -122,6 +132,8 @@ PUBLIC = shapes.BY_NAME["public"]
 CHOICE = shapes.BY_NAME["student-choice"]
 EXTERNAL = shapes.BY_NAME["external"]
 SHARED = shapes.BY_NAME["shared"]
+# The shapes the student pushes to, and so the ones the late arithmetic applies to.
+COMMITTING = tuple(s for s in shapes.SHAPES if s.collects_commits)
 
 
 @dataclass(frozen=True)
@@ -247,7 +259,7 @@ def _preflight(run_id: str) -> None:
     a semester short of a gradebook ends in drift the teardown cannot undo;
     and a namespace that is not empty means a previous run is still lying around and its
     repos would be read as this one's. And a run with no student token has no hand-in to
-    test.
+    test, and one that would run past local midnight has no late arithmetic it can predict.
     """
     # First, before a single call: the push is the student's own, with their own token,
     # and nothing may stand in for it.
@@ -255,6 +267,16 @@ def _preflight(run_id: str) -> None:
     allowlist.assert_fence()
     for org in (COURSE_ORG, SEMESTER_ORG):
         allowlist.assert_allowed(org)
+
+    # The clock next, since it needs one read and nothing else: a run that cannot finish
+    # inside one local day, on one UTC offset, has no late arithmetic it can predict.
+    now = datetime.now(_semester_timezone())
+    assert fits_in_one_day(now), (
+        f"a run started at {now:%H:%M} would cross local midnight or a clock change, and "
+        f"the late arithmetic counts calendar days - start before "
+        f"{(datetime.combine(now.date(), datetime.max.time()) - RUN_BUDGET):%H:%M} on a "
+        f"day the clocks do not change"
+    )
 
     # Before anything is created, not after: a token that cannot delete leaves every repo
     # this run makes behind it.
@@ -338,24 +360,88 @@ def _schedule_block(slug: str, handout: datetime, due: datetime) -> str:
     )
 
 
-def late_days(due: datetime, cutoff: datetime) -> int:
-    """The whole days `late_window_days` must say for the cutoff to fall at or after
-    `cutoff`. The window is whole days (decision 0009), so a cutoff minutes after the due
-    date is a cutoff a day after it."""
-    return max(0, -(-(cutoff - due) // timedelta(days=1)))
+# The run's late rule, stated for all five shapes in the semester's `assignments.yml`. ONE
+# day: the window is whole days (decision 0009), and one is the least that keeps the due
+# date and the cutoff apart - from the due date the cron REFRESHES the sheet and posts
+# receipts, and only at the cutoff does it freeze. Both halves of the pair, because a layer
+# that states one answers the other with "no such rule" (`settings.resolve`), and a penalty
+# is what gives the late arithmetic something to show.
+LATE_WINDOW_DAYS = 1
+LATE_PENALTY = "10%"
+
+# What the engine must write for the one push this run makes, which lands a day after the
+# due date it is finally measured against (see the module docstring's timeline).
+EXPECTED_DAYS_LATE = 1
+EXPECTED_LATE = "1 day late"
+EXPECTED_PENALTY = "-10%"
+EXPECTED_FINAL = "79.2"  # E2E_SCORE less 10%
+
+# The wall clock a run may take, generously: ~60-75 minutes, almost all of it Actions.
+RUN_BUDGET = timedelta(hours=2)
 
 
-def _instance_block(
-    slug: str, shape: shapes.Shape, due: datetime, cutoff: datetime
-) -> str:
-    """One assignment's run settings, as the semester's `assignments.yml` wants them.
+def due_for_cutoff(cutoff: datetime) -> datetime:
+    """The due date that puts the engine's late cutoff at `cutoff`.
 
-    `cutoff` is separate from `due` because the two drive different passes: from the due
-    date the cron REFRESHES the sheet and posts receipts, and only at the cutoff does it
-    freeze. Collapsing them would skip the refresh entirely, which is most of what there
-    is to test here."""
+    The inverse of `schedule.grading_cutoff_datetime`, which is `due_datetime +
+    timedelta(days=late_window_days)` on the due date as parsed in the semester's zone:
+    an aware sum, so the SAME wall-clock time N calendar days on (23 or 25 hours across a
+    clock change) - not the end of day N. To the minute, because that is how schedule.yml
+    is written (`_schedule_block`). `fold=0`, because that is how the engine parses the
+    naive string it is written as: an hour that happens twice (the night the clocks go
+    back) means its first occurrence there, so it means that here too."""
+    due = cutoff.replace(second=0, microsecond=0) - timedelta(days=LATE_WINDOW_DAYS)
+    return due.replace(fold=0)
+
+
+def cutoff_for_due(due: datetime) -> datetime:
+    """The late cutoff the engine computes for `due` under this run's window."""
+    return due + timedelta(days=LATE_WINDOW_DAYS)
+
+
+def fits_in_one_day(start: datetime, budget: timedelta = RUN_BUDGET) -> bool:
+    """Whether a run starting at `start` (in the semester's zone) ends on the same date.
+
+    `collect.days_late` counts CALENDAR days in the semester's zone: work is one day late
+    when its date is the day after the due date's. Every due date this run writes after the
+    push is one day before a cutoff minutes from now, so the push is exactly one day late
+    while the push and each cutoff share a local date - and on time by the calendar if a
+    midnight falls in between. The run refuses to start rather than assert either.
+
+    And on ONE UTC offset: across a clock change the wall-clock arithmetic above still
+    holds, but a naive time written into schedule.yml can name an hour that happens twice
+    or not at all, and what the run would then assert is a guess."""
+    end = start + budget
+    return end.date() == start.date() and end.utcoffset() == start.utcoffset()
+
+
+def one_day_late(pushed: datetime, cutoff: datetime) -> bool:
+    """Whether a push at `pushed` is exactly one day late against the due date written
+    for `cutoff`: the due date's local date is the day before the push's. Asked before
+    each due-date move, so a run that has drifted towards midnight stops before it writes
+    something the assertions cannot predict."""
+    due = due_for_cutoff(cutoff)
+    return pushed < due + timedelta(days=LATE_WINDOW_DAYS) and (
+        due.date() + timedelta(days=1) == pushed.astimezone(due.tzinfo).date()
+    )
+
+
+def _assert_one_day_late(pushed: dict[str, dict], cutoff: datetime) -> None:
+    """Refuse a due-date move that would leave any push other than one day late."""
+    for name, push in pushed.items():
+        assert one_day_late(push["at"], cutoff), (
+            f"the {name} push at {push['at']:%Y-%m-%d %H:%M} would not be one day late "
+            f"against a cutoff at {cutoff:%Y-%m-%d %H:%M} - the run drifted across local "
+            f"midnight; clean up and start earlier in the day"
+        )
+
+
+def _instance_block(slug: str, shape: shapes.Shape) -> str:
+    """One assignment's run settings, as the semester's `assignments.yml` wants them: the
+    run's late rule, then the shape's own."""
     settings = {
-        "late_window_days": late_days(due, cutoff),
+        "late_window_days": LATE_WINDOW_DAYS,
+        "late_penalty_per_day": LATE_PENALTY,
         **shapes.run_settings(shape),
     }
     return "\n".join([f"  {slug}:", *(f"    {k}: {v}" for k, v in settings.items())])
@@ -373,15 +459,14 @@ def _schedule_blocks(run_id: str, handout: datetime, due: datetime) -> str:
     )
 
 
-def _instance_blocks(run_id: str, due: datetime, cutoff: datetime) -> str:
+def _instance_blocks(run_id: str) -> str:
     """All five of this run's assignments' run settings, for `assignments.yml`."""
     return "\n".join(
-        _instance_block(shapes.slug(run_id, shape), shape, due, cutoff)
-        for shape in shapes.SHAPES
+        _instance_block(shapes.slug(run_id, shape), shape) for shape in shapes.SHAPES
     )
 
 
-def _write_instance(run_id: str, due: datetime, cutoff: datetime) -> str:
+def _write_instance(run_id: str) -> str:
     """Put (or move) this run's fenced block into the semester's `assignments.yml`, the
     file created (with an `assignments:` key) where the semester has none yet."""
     read = gh_contents.get_file_with_sha(
@@ -391,15 +476,13 @@ def _write_instance(run_id: str, due: datetime, cutoff: datetime) -> str:
     edited = schedule_edit.insert_block(
         schedule_edit.with_assignments_key(text),
         run_id,
-        _instance_blocks(run_id, due, cutoff),
+        _instance_blocks(run_id),
     )
     assert schedule_edit.put_instance(SEMESTER_ORG, edited, sha)
     return edited
 
 
-def _write_schedule(
-    run_id: str, handout: datetime, due: datetime, cutoff: datetime
-) -> Stage:
+def _write_schedule(run_id: str, handout: datetime, due: datetime) -> Stage:
     """Put (or move) this run's fenced block into the semester's schedule.yml.
 
     One fenced block for all five assignments, replaced whole on every move: the fence is
@@ -411,8 +494,8 @@ def _write_schedule(
     starts a real tick. It is waited out here rather than raced, so the pass dispatched
     next is the one whose log and artefacts the stage after it reads."""
     # The run settings first: the schedule push below is what drives the tick, and that
-    # tick must read the cutoff this stage means.
-    instance = _write_instance(run_id, due, cutoff)
+    # tick must read the late window this stage's cutoff is computed with.
+    instance = _write_instance(run_id)
     read = gh_contents.get_file_with_sha(
         SEMESTER_ORG, course.CONFIG_REPO, "schedule.yml"
     )
@@ -428,7 +511,7 @@ def _write_schedule(
         "schedule",
         detail={
             "due": due,
-            "cutoff": due + timedelta(days=late_days(due, cutoff)),
+            "cutoff": cutoff_for_due(due),
             "text": edited,
             "instance": instance,
             "driven": driven,
@@ -741,13 +824,14 @@ def _distributed(name: str, dry_run: bool, run_id: str, who: str) -> Stage:
     )
 
 
-def _push_submissions(run_id: str, who: str) -> Stage:
+def _push_submissions(run_id: str, who: str, tz: ZoneInfo) -> Stage:
     """The student hands in, for real, with their own token - once per shape that takes a
     push.
 
     `external` takes none by definition (the work went to Moodle), and the drop box takes
     one into the student's OWN FOLDER, which is the whole of the shape: same push, same
-    token, a path instead of a repo of one's own."""
+    token, a path instead of a repo of one's own. `at` is read just after the push lands:
+    within seconds of what both the committer date and GitHub's push record will say."""
     pushed: dict[str, dict] = {}
     for shape in shapes.SHAPES:
         if not shape.collects_commits:
@@ -762,7 +846,12 @@ def _push_submissions(run_id: str, who: str) -> Stage:
                 SUBMISSION_BODY,
                 "e2e: submit",
             )
-        pushed[shape.name] = {"repo": repo, "path": path, "sha": sha}
+        pushed[shape.name] = {
+            "repo": repo,
+            "path": path,
+            "sha": sha,
+            "at": datetime.now(tz),
+        }
     return Stage("submission", detail={"pushed": pushed})
 
 
@@ -784,11 +873,14 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
     #    moves nothing that has already been created.
     stages["configure"] = _configure(run_id)
 
-    # 3. The schedule block: handed out five minutes ago, due in twenty, cutoff later
-    #    still - so nothing has happened yet but the handout.
+    # 3. The schedule block: handed out five minutes ago, due a day from NOW (a fresh
+    #    clock: the presses above take a while). Well ahead on purpose - a cron tick
+    #    landing after the due date but before step 7 would derive `days_late: 0` and post
+    #    the once-only receipt against it, and the refresh would then have nothing new
+    #    to say. The push below is made while this due date is still ahead.
     handout = now - timedelta(minutes=5)
     stages["schedule"] = _write_schedule(
-        run_id, handout, now + timedelta(minutes=20), now + timedelta(minutes=40)
+        run_id, handout, datetime.now(tz) + timedelta(days=1)
     )
 
     # 4. Scheduler pass one: the handout of all five. The grading sheets come with it.
@@ -808,7 +900,8 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
     )
 
     # 5. The student pushes, for real, with their own token.
-    stages["submission"] = _push_submissions(run_id, who)
+    stages["submission"] = _push_submissions(run_id, who, tz)
+    pushed = stages["submission"].detail["pushed"]
 
     # 6. ...and publishes the one repo that is theirs to publish, while the grading cutoff
     #    is still ahead. The next tick has to close it again.
@@ -818,15 +911,13 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
         detail={"ok": student.set_visibility(SEMESTER_ORG, choice_repo, "public")},
     )
 
-    # 7. Move the DUE date into the past but leave the cutoff ahead - the only way to
-    #    reach the refresh pass inside the budget without adding a `now` input to the
-    #    ungated cron workflow.
-    stages["due"] = _write_schedule(
-        run_id,
-        handout,
-        datetime.now(tz) - timedelta(minutes=1),
-        datetime.now(tz) + timedelta(minutes=30),
-    )
+    # 7. Move the DUE date back a day, so that the cutoff it implies is half an hour
+    #    ahead - the only way to reach the refresh pass inside the budget without adding
+    #    a `now` input to the ungated cron workflow. The push above now lands a day after
+    #    the due date, which is exactly what the engine will say about it.
+    ahead = datetime.now(tz) + timedelta(minutes=30)
+    _assert_one_day_late(pushed, ahead)
+    stages["due"] = _write_schedule(run_id, handout, due_for_cutoff(ahead))
 
     # 8. Scheduler pass two: the sheet refresh, the due-date receipts, and the
     #    re-privatising of anything published before its cutoff.
@@ -863,12 +954,9 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
     # 10. Move the cutoff into the past. From here on the toolkit owes the student_choice
     #     repo nothing, so publishing it AFTER this edit has landed - and before the tick
     #     that freezes - is the other half of the promise: this one stands.
-    stages["cutoff"] = _write_schedule(
-        run_id,
-        handout,
-        datetime.now(tz) - timedelta(minutes=2),
-        datetime.now(tz) - timedelta(minutes=1),
-    )
+    passed = datetime.now(tz) - timedelta(minutes=1)
+    _assert_one_day_late(pushed, passed)
+    stages["cutoff"] = _write_schedule(run_id, handout, due_for_cutoff(passed))
     stages["published_late"] = Stage(
         "published_late",
         detail={"ok": student.set_visibility(SEMESTER_ORG, choice_repo, "public")},
@@ -911,6 +999,9 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
                 ),
             ),
             "rulesets": _ruleset_names(SHARED.repo(run_id, who)),
+            # The thread as the freeze left it: it posts one receipt of its own, so THIS
+            # is what the distribute presses are measured against, not the due-date one.
+            "comments": _per_shape(lambda s: _issue_comments(s.repo(run_id, who))),
         },
     )
 
@@ -1172,11 +1263,12 @@ def test_the_due_date_fills_info_from_the_students_own_push(pipeline):
     info = sheet["submissions"][pipeline.student]["info"]
     assert info["submitted"], "the refresh recorded no submission time"
     # `parse_sheet` hands back what the file says, as text (`grades._SheetLoader`): a mark
-    # a grader typed must come back the way they typed it, so `0` here is "0".
-    assert int(info["days_late"]) == 0
+    # a grader typed must come back the way they typed it, so `1` here is "1". ONE, not
+    # 0: the due date was moved back a day after the push (see the module docstring).
+    assert int(info["days_late"]) == EXPECTED_DAYS_LATE
     # The refresh reads no push records (`_provisional_pins` says why), so the only note
     # it can write is `SUSPECT_NOTE` - the pinned commit dated before the push that
-    # delivered it. A genuine push seconds ago earns none, and `days_late: 0` above is
+    # delivered it. A genuine push minutes ago earns none, and `days_late` above is
     # therefore a time the grader can act on. The push rung itself is proved at the
     # freeze, where it is decided once and written down.
     assert "submitted_note" not in info, info.get("submitted_note")
@@ -1198,16 +1290,39 @@ def test_the_due_date_posts_one_submission_receipt(pipeline):
     pushed = pipeline.stages["submission"].detail["pushed"][PRIVATE.name]
     assert pushed["sha"][:7] in receipts[0]
     assert "<!-- dsl-receipt:" in receipts[0]
+    # The late arithmetic, quoted to the student as the engine counts it.
+    assert f"{EXPECTED_LATE} ({EXPECTED_PENALTY})" in receipts[0]
+
+
+def test_the_freeze_posts_one_frozen_receipt(pipeline):
+    # The second of the two once-only receipts: the pin closing, in plain days and without
+    # the percentage (that was quoted when the push was recorded).
+    before = pipeline.stages["after_due"].detail["comments"][PRIVATE.name]
+    after = pipeline.stages["artefacts"].detail["comments"][PRIVATE.name]
+    assert after[: len(before)] == before
+    frozen = [b for b in after[len(before) :] if "**Frozen for grading**" in b]
+    # Exactly one new comment, and it is that one: anything else the freeze said on the
+    # thread would pass a filter for the Frozen body.
+    assert after[len(before) :] == frozen and len(frozen) == 1, after[len(before) :]
+    pushed = pipeline.stages["submission"].detail["pushed"][PRIVATE.name]
+    assert pushed["sha"][:7] in frozen[0]
+    assert f"{EXPECTED_LATE}. No further pushes count." in frozen[0]
 
 
 def test_only_a_shape_with_a_thread_gets_a_receipt(pipeline):
     # The receipt rides on the Submission receipts issue, so the four shapes without one are silent
     # by construction. Measured rather than assumed: `_post_receipts` asks the live
     # visibility too, and a receipt posted into a public repo is a hand-in time published.
-    for shape in shapes.SHAPES:
-        if shape is PRIVATE:
-            continue
-        assert pipeline.stages["after_due"].detail["comments"][shape.name] == []
+    # Asked after the due date AND after the freeze, which posts receipts of its own - at a
+    # moment the student_choice repo is public.
+    for stage in ("after_due", "artefacts"):
+        for shape in shapes.SHAPES:
+            if shape is PRIVATE:
+                continue
+            assert pipeline.stages[stage].detail["comments"][shape.name] == [], (
+                shape.name,
+                stage,
+            )
 
 
 def test_collect_submissions_over_an_unchanged_semester_writes_nothing(pipeline):
@@ -1226,7 +1341,68 @@ def test_the_cutoff_freezes_the_sheet(pipeline):
     assert "# Status: FROZEN " in sheet_text
     info = grades.parse_sheet(sheet_text)["submissions"][pipeline.student]["info"]
     assert info["submitted"]
-    assert int(info["days_late"]) == 0  # text, like every scalar on the sheet
+    assert int(info["days_late"]) == EXPECTED_DAYS_LATE  # text, like every scalar
+
+
+# ------------------------------------------------ the late arithmetic, shape by shape
+
+
+def _info(pipeline, stage: str, shape: shapes.Shape) -> dict:
+    """The student's `info:` block on one shape's sheet, as one stage recorded it."""
+    sheet = grades.parse_sheet(pipeline.stages[stage].detail["sheets"][shape.name])
+    return sheet["submissions"][pipeline.student]["info"]
+
+
+@pytest.mark.parametrize("shape", COMMITTING, ids=lambda s: s.name)
+def test_every_push_is_one_day_late_at_the_due_date_and_at_the_freeze(pipeline, shape):
+    # Measured twice because two different clocks decide it: the committer date at the
+    # due-date refresh, GitHub's own push record at the freeze. Against a due date a day
+    # before the push, both read one day started.
+    for stage in ("after_due", "artefacts"):
+        info = _info(pipeline, stage, shape)
+        assert info["submitted"], f"{shape.name} recorded no submission ({stage})"
+        assert int(info["days_late"]) == EXPECTED_DAYS_LATE, (shape.name, stage)
+
+
+@pytest.mark.parametrize("shape", shapes.SHAPES, ids=lambda s: s.name)
+def test_every_sheet_header_states_the_cutoff_the_engine_computed(pipeline, shape):
+    # The cutoff is never written anywhere: it is due + `late_window_days`. The header
+    # quoting the instant this run computed for each due date it wrote is the proof that
+    # the engine computed the same one - open while it is ahead, frozen once it is past.
+    open_text = pipeline.stages["after_due"].detail["sheets"][shape.name]
+    frozen_text = pipeline.stages["artefacts"].detail["sheets"][shape.name]
+    ahead = grades._display_moment(pipeline.stages["due"].detail["cutoff"])
+    passed = grades._display_moment(pipeline.stages["cutoff"].detail["cutoff"])
+    if not shape.collects_commits:
+        assert "no late arithmetic" in open_text
+        assert "# Status: submitted outside GitHub" in frozen_text
+        return
+    assert f"late work to {ahead} at {LATE_PENALTY}/day" in open_text
+    assert "# Status: OPEN - 1 of " in open_text
+    assert f"# Status: FROZEN {passed}\n" in frozen_text
+
+
+def _gradebook_section(readme: str, shape: shapes.Shape) -> str:
+    """The one section of the gradebook README that carries this shape's feedback."""
+    found = [s for s in readme.split("\n## ") if feedback_for(shape) in s]
+    assert len(found) == 1, f"{shape.name} has {len(found)} gradebook section(s)"
+    return found[0]
+
+
+@pytest.mark.parametrize("shape", shapes.SHAPES, ids=lambda s: s.name)
+def test_the_gradebook_applies_the_late_penalty_the_engine_counted(pipeline, shape):
+    # The arithmetic a student is shown beside their mark: one day, 10% off, and the final
+    # grade that leaves. An external assignment counts no days, so its mark stands.
+    readme = _text(pipeline.stages["distribute"].detail["after"]["readme"])
+    section = _gradebook_section(readme, shape)
+    if not shape.collects_commits:
+        assert f"**Final grade:** {E2E_SCORE}" in section
+        assert "late" not in section.split("\n", 2)[1]
+        return
+    assert (
+        f"{EXPECTED_LATE} · penalty {EXPECTED_PENALTY} · **Final grade:** "
+        f"{EXPECTED_FINAL}"
+    ) in section
 
 
 # ------------------------------------------------------------------------ public repos
@@ -1419,16 +1595,16 @@ def test_a_dry_run_distributes_nothing(pipeline):
     stage = pipeline.stages["distribute_dry"]
     assert stage.conclusion == "success"
     assert stage.detail["after"] == pipeline.stages["shared_before"].detail
-    assert stage.detail["comments"] == pipeline.stages["after_due"].detail["comments"]
+    assert stage.detail["comments"] == pipeline.stages["artefacts"].detail["comments"]
 
 
 def test_the_real_run_posts_no_comment_on_any_repo(pipeline):
     # Marks and feedback go to ONE place, the gradebook. Measured against every shape's
     # thread, including the private one that HAS a thread and is read only by its student:
-    # the press must leave it exactly as the receipts pass left it.
+    # the press must leave it exactly as the freeze (the last receipt) left it.
     stage = pipeline.stages["distribute"]
     assert stage.conclusion == "success"
-    assert stage.detail["comments"] == pipeline.stages["after_due"].detail["comments"]
+    assert stage.detail["comments"] == pipeline.stages["artefacts"].detail["comments"]
     for name, bodies in stage.detail["comments"].items():
         assert not [b for b in bodies if "<!-- dsl-grade:" in b], name
         assert not [b for b in bodies if feedback_for(shapes.BY_NAME[name]) in b], name

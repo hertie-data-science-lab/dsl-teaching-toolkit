@@ -12,13 +12,15 @@ import base64
 import dataclasses
 import importlib
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
 
 from dsl_course import (
+    collect,
     course,
     ghcli,
     grades,
@@ -790,7 +792,6 @@ def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
     indentation slip here would not fail the harness, it would fail the semester."""
     module = _pipeline_module(monkeypatch)
     when = datetime(2026, 9, 4, 14, 0)
-    later = datetime(2026, 9, 4, 15, 0)
     block = module._schedule_block("assignment-90-e2eab12cd", when, when)
     doc = yaml.safe_load(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", block))
     assert set(doc) == {"timezone", "assignments", "events"}
@@ -798,16 +799,200 @@ def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
     assert entry["course_source_repo"] == "assignment-90-e2eab12cd"
     assert set(entry) <= schedule.KNOWN_ASSIGNMENT
     # The due date and the cutoff are separate instants: collapsing them would skip the
-    # refresh pass entirely, which is most of what the live run is there to exercise.
+    # refresh pass entirely, which is most of what the live run is there to exercise. And
+    # both halves of the late rule, or the penalty reads as "no such rule".
     shape = shapes.BY_NAME["private"]
-    run = module._instance_block("assignment-90-e2eab12cd", shape, when, later)
+    run = module._instance_block("assignment-90-e2eab12cd", shape)
     instance = settings.parse_instance(
         schedule_edit.insert_block(
             schedule_edit.with_assignments_key(""), "e2eab12cd", run
         )
     )
     assert not instance.faults
-    assert instance.blocks["assignment-90-e2eab12cd"]["late_window_days"] == 1
+    block = instance.blocks["assignment-90-e2eab12cd"]
+    assert block["late_window_days"] == module.LATE_WINDOW_DAYS == 1
+    assert block["late_penalty_per_day"] == module.LATE_PENALTY
+
+
+# ------------------------------------------------- the timeline, against the engine
+
+BERLIN = ZoneInfo("Europe/Berlin")
+
+
+def _clock_at(start: datetime) -> type[datetime]:
+    """A `datetime` whose `now()` starts at `start` and moves a minute per call - roughly
+    what a live run spends between two looks at the clock - so a walk over stubs reads a
+    clock that neither stands still nor depends on when CI runs."""
+    ticks = iter(range(1, 10**6))
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return (start + timedelta(minutes=next(ticks))).astimezone(tz)
+
+    return Clock
+
+
+def test_the_preflight_itself_refuses_a_start_near_midnight(monkeypatch):
+    # Asked right after the fence and before the token probe, so a late start costs one
+    # read and creates nothing.
+    module = _pipeline_module(monkeypatch)
+    monkeypatch.setenv(student.HANDLE_ENV, "ada-l")
+    monkeypatch.setenv(student.TOKEN_ENV, "github_pat_x")
+    monkeypatch.setattr(module.allowlist, "assert_fence", lambda: None)
+    monkeypatch.setattr(module.allowlist, "assert_allowed", lambda org: None)
+    monkeypatch.setattr(module, "_semester_timezone", lambda: BERLIN)
+    monkeypatch.setattr(
+        module, "datetime", _clock_at(datetime(2026, 9, 26, 22, 30, tzinfo=BERLIN))
+    )
+    probed: list[str] = []
+    monkeypatch.setattr(
+        module, "_assert_can_delete_repos", lambda: probed.append("token")
+    )
+    with pytest.raises(AssertionError, match="would cross local midnight"):
+        module._preflight(RUN)
+    assert probed == []
+
+
+def _engine_reads(monkeypatch, module, handout, due) -> schedule.Schedule:
+    """What the ENGINE makes of the two fenced blocks the harness writes for `due`: the
+    schedule text through `schedule.parse`, the run settings through the real cascade."""
+    blocks = schedule_edit.insert_block(
+        schedule_edit.with_assignments_key(""), RUN, module._instance_blocks(RUN)
+    )
+    settings.semester_blocks.cache_clear()
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: blocks)
+    text = schedule_edit.insert_block(
+        SCHEDULE, RUN, module._schedule_blocks(RUN, handout, due)
+    )
+    sched = schedule.parse(yaml.safe_load(text))
+    sched.org = SEMESTER
+    return sched
+
+
+@pytest.mark.parametrize(
+    "cutoff",
+    [
+        datetime(2026, 9, 26, 14, 31, 42, tzinfo=BERLIN),
+        # The night the clocks go back: the day before is 25 hours long, and the engine's
+        # window is calendar days, not 24-hour blocks.
+        datetime(2026, 10, 25, 14, 31, tzinfo=BERLIN),
+    ],
+    ids=["ordinary-day", "clocks-go-back"],
+)
+def test_the_due_date_the_harness_writes_gives_the_cutoff_it_means(monkeypatch, cutoff):
+    # THE timeline's premise: the harness never writes a cutoff, so each due date it
+    # writes must be one the engine turns back into the instant the pass needs.
+    module = _pipeline_module(monkeypatch)
+    due = module.due_for_cutoff(cutoff)
+    sched = _engine_reads(monkeypatch, module, due - timedelta(hours=1), due)
+    wanted = cutoff.replace(second=0, microsecond=0)
+    for shape in shapes.SHAPES:
+        slug = shapes.slug(RUN, shape)
+        assert schedule.grading_cutoff_datetime(sched, slug) == wanted, shape.name
+        assert sched.assignments[slug].due_datetime == due
+    assert module.cutoff_for_due(due) == wanted
+
+
+def test_a_cutoff_a_day_off_is_not_a_cutoff_24_hours_off(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    # Same wall-clock time the day before, which on the night the clocks go back is 25
+    # real hours earlier (subtraction across zones, so the offsets count).
+    cutoff = datetime(2026, 10, 25, 12, 0, tzinfo=BERLIN)
+    due = module.due_for_cutoff(cutoff)
+    assert (due.hour, due.minute, due.day) == (12, 0, 24)
+    elapsed = cutoff - due.astimezone(ZoneInfo("UTC"))
+    assert elapsed == timedelta(hours=25)
+
+
+@pytest.mark.parametrize(
+    "day",
+    [(2026, 9, 26), (2026, 10, 25), (2026, 3, 29)],
+    ids=["ordinary-day", "clocks-go-back", "clocks-go-forward"],
+)
+def test_the_push_the_run_makes_is_one_day_late_by_the_engines_count(monkeypatch, day):
+    # The push is made while the first due date is still ahead; by the freeze the due
+    # date is a day before a cutoff minutes from now. `collect.days_late` - calendar days
+    # in the semester's zone - must read exactly what the live assertions expect, on
+    # both of the days a year the day before is not 24 hours long too.
+    module = _pipeline_module(monkeypatch)
+    start = datetime(*day, 10, 0, tzinfo=BERLIN)
+    first = _engine_reads(
+        monkeypatch, module, start, start + timedelta(days=1)
+    ).assignments[shapes.slug(RUN, module.PRIVATE)]
+    pushed = start + timedelta(minutes=12)
+    assert pushed < first.due_datetime  # on time when it was made
+    # The refresh's cutoff, half an hour ahead, and the freeze's, just behind.
+    for cutoff in (pushed + timedelta(minutes=45), pushed + timedelta(minutes=70)):
+        sched = _engine_reads(monkeypatch, module, start, module.due_for_cutoff(cutoff))
+        due = sched.assignments[shapes.slug(RUN, module.PRIVATE)].due_datetime
+        assert collect.days_late(pushed, due, "Europe/Berlin") == 1
+        assert module.EXPECTED_DAYS_LATE == 1
+        assert module.one_day_late(pushed, cutoff)
+
+
+def test_a_push_after_the_cutoff_or_across_midnight_is_not_one_day_late(monkeypatch):
+    # What the walk asks before each due-date move, and the two ways it says no.
+    module = _pipeline_module(monkeypatch)
+    pushed = datetime(2026, 9, 26, 23, 40, tzinfo=BERLIN)
+    assert module.one_day_late(pushed, pushed + timedelta(minutes=15))
+    assert not module.one_day_late(pushed, pushed + timedelta(minutes=30))  # midnight
+    assert not module.one_day_late(pushed, pushed - timedelta(minutes=5))  # too late
+
+
+def test_a_midnight_inside_the_run_would_make_the_push_on_time(monkeypatch):
+    # Why the preflight refuses to start late in the evening: with a midnight between
+    # the push and the cutoff, the due date shares the push's date and nothing is late.
+    module = _pipeline_module(monkeypatch)
+    pushed = datetime(2026, 9, 26, 23, 50, tzinfo=BERLIN)
+    due = module.due_for_cutoff(pushed + timedelta(minutes=30))
+    assert collect.days_late(pushed, due, "Europe/Berlin") == 0
+    assert not module.fits_in_one_day(pushed - timedelta(minutes=30))
+
+
+@pytest.mark.parametrize(
+    "start,fits",
+    [
+        (datetime(2026, 9, 26, 0, 5, tzinfo=BERLIN), True),
+        (datetime(2026, 9, 26, 21, 59, tzinfo=BERLIN), True),
+        # Exactly the budget before midnight ends ON the next day.
+        (datetime(2026, 9, 26, 22, 0, tzinfo=BERLIN), False),
+        (datetime(2026, 9, 26, 22, 1, tzinfo=BERLIN), False),
+        # Same date, but the clocks go back at 03:00 inside the run.
+        (datetime(2026, 10, 25, 1, 30, tzinfo=BERLIN), False),
+        (datetime(2026, 10, 25, 4, 0, tzinfo=BERLIN), True),
+        # And forward at 02:00.
+        (datetime(2026, 3, 29, 1, 0, tzinfo=BERLIN), False),
+    ],
+)
+def test_a_run_fits_in_one_day_only_with_its_whole_budget(monkeypatch, start, fits):
+    module = _pipeline_module(monkeypatch)
+    assert module.RUN_BUDGET == timedelta(hours=2)
+    assert module.fits_in_one_day(start) is fits
+
+
+@pytest.mark.parametrize("value", [None, "", " "], ids=["deleted", "empty", "blank"])
+@pytest.mark.parametrize("unset", [student.TOKEN_ENV, student.HANDLE_ENV])
+def test_the_run_refuses_without_the_students_own_credentials(
+    monkeypatch, unset, value
+):
+    # Before any call at all: a run with no student token would hand out five
+    # assignments and then fail at the push, with nothing proved and repos to sweep.
+    module = _pipeline_module(monkeypatch)
+    monkeypatch.setenv(student.HANDLE_ENV, "ada-l")
+    monkeypatch.setenv(student.TOKEN_ENV, "github_pat_x")
+    if value is None:
+        monkeypatch.delenv(unset)
+    else:
+        monkeypatch.setenv(unset, value)
+    calls: list[tuple] = []
+    monkeypatch.setattr(module.ghcli, "gh", lambda *a, **k: calls.append(a) or (0, ""))
+    monkeypatch.setattr(
+        module.allowlist, "assert_fence", lambda: calls.append(("fence",))
+    )
+    with pytest.raises(RuntimeError, match=f"{unset} not set"):
+        module._preflight(RUN)
+    assert calls == []
 
 
 def test_the_privacy_scan_keeps_every_line_the_toolkit_printed(monkeypatch):
@@ -1176,7 +1361,6 @@ def test_the_run_puts_one_schedule_entry_per_shape_in_one_fence(monkeypatch):
     module = _pipeline_module(monkeypatch)
     when = datetime(2026, 9, 4, 14, 0)
     due = datetime(2026, 9, 4, 15, 0)
-    cutoff = datetime(2026, 9, 4, 16, 0)
     blocks = module._schedule_blocks("e2eab12cd", when, due)
     doc = yaml.safe_load(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", blocks))
     assert set(doc) == {"timezone", "assignments", "events"}
@@ -1192,11 +1376,13 @@ def test_the_run_puts_one_schedule_entry_per_shape_in_one_fence(monkeypatch):
         schedule_edit.insert_block(
             schedule_edit.with_assignments_key(""),
             "e2eab12cd",
-            module._instance_blocks("e2eab12cd", due, cutoff),
+            module._instance_blocks("e2eab12cd"),
         )
     )
     assert not instance.faults and set(instance.blocks) == mine
-    assert all(b["late_window_days"] >= 1 for b in instance.blocks.values())
+    for block in instance.blocks.values():
+        assert block["late_window_days"] == module.LATE_WINDOW_DAYS
+        assert block["late_penalty_per_day"] == module.LATE_PENALTY
     # And removing the one fence takes all five out again.
     fenced = schedule_edit.insert_block(SCHEDULE, "e2eab12cd", blocks)
     assert schedule_edit.remove_block(fenced, "e2eab12cd") == SCHEDULE
@@ -1358,6 +1544,9 @@ def _stub_estate(monkeypatch, module) -> list[tuple[str, dict]]:
     monkeypatch.setattr(module.drive, "wait_for_idle", lambda *a, **k: None)
     monkeypatch.setattr(module.drive, "run_ids", lambda *a, **k: set())
     monkeypatch.setattr(module.drive, "wait_for_push_driven_tick", lambda *a, **k: None)
+    monkeypatch.setattr(
+        module, "datetime", _clock_at(datetime(2026, 9, 26, 10, 0, tzinfo=BERLIN))
+    )
     return dispatched
 
 
@@ -1457,9 +1646,8 @@ def test_the_student_publishes_before_the_cutoff_and_after_it(monkeypatch):
     monkeypatch.setattr(
         module,
         "_write_schedule",
-        lambda run_id, handout, due, cutoff: (
-            order.append(f"schedule cutoff={cutoff}")
-            or real_write(run_id, handout, due, cutoff)
+        lambda run_id, handout, due: (
+            order.append(f"schedule due={due}") or real_write(run_id, handout, due)
         ),
     )
     module._walk(RUN, {})
@@ -1472,25 +1660,34 @@ def test_the_student_publishes_before_the_cutoff_and_after_it(monkeypatch):
     assert all(order[i] == f"flip {choice}-ada-l" for i in flips)
 
 
-@pytest.mark.parametrize("value", [None, "", " "], ids=["deleted", "empty", "blank"])
-@pytest.mark.parametrize("unset", [student.TOKEN_ENV, student.HANDLE_ENV])
-def test_the_run_refuses_without_the_students_own_credentials(
-    monkeypatch, unset, value
-):
-    # Before any call at all: a run with no student token would hand out five
-    # assignments and then fail at the push, with nothing proved and repos to sweep.
+def test_the_walk_moves_the_due_date_so_the_cutoff_passes_after_the_push(monkeypatch):
+    # The three due dates the walk writes, against the clock: ahead at the handout (the
+    # push is on time when made), then a day back so the cutoff is ahead for the refresh
+    # and the button, then a day back from a cutoff already past for the freeze.
     module = _pipeline_module(monkeypatch)
-    monkeypatch.setenv(student.HANDLE_ENV, "ada-l")
-    monkeypatch.setenv(student.TOKEN_ENV, "github_pat_x")
-    if value is None:
-        monkeypatch.delenv(unset)
-    else:
-        monkeypatch.setenv(unset, value)
-    calls: list[tuple] = []
-    monkeypatch.setattr(module.ghcli, "gh", lambda *a, **k: calls.append(a) or (0, ""))
+    _stub_estate(monkeypatch, module)
+    order: list[tuple[str, datetime]] = []
+    real_write = module._write_schedule
     monkeypatch.setattr(
-        module.allowlist, "assert_fence", lambda: calls.append(("fence",))
+        module,
+        "_write_schedule",
+        lambda run_id, handout, due: (
+            order.append(("due", due, module.datetime.now(due.tzinfo)))
+            or real_write(run_id, handout, due)
+        ),
     )
-    with pytest.raises(RuntimeError, match=f"{unset} not set"):
-        module._preflight(RUN)
-    assert calls == []
+    monkeypatch.setattr(
+        module.student,
+        "push_file",
+        lambda *a: order.append(("push", None, None)) or "abc1234",
+    )
+    module._walk(RUN, {})
+    kinds = [kind for kind, *_ in order]
+    assert kinds[0] == "due" and kinds[-2:] == ["due", "due"]
+    assert set(kinds[1:-2]) == {"push"}
+    (_, first, at_first), (_, second, at_second), (_, third, at_third) = [
+        o for o in order if o[0] == "due"
+    ]
+    assert first > at_first
+    assert second < at_second and module.cutoff_for_due(second) > at_second
+    assert module.cutoff_for_due(third) <= at_third
