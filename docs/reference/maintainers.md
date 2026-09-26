@@ -1002,18 +1002,36 @@ left and the reset time; a later tick that starts over half closes it
 appended as a recognised older title, never edited.
 
 **Read once per process.** Inside a CLI run, `gh_contents` answers each file, tree and blob
-read from GitHub once, and `issues` lists each repo's OPEN issues once for every title the
-run asks about (a closed issue is searched by title, only when a digest needs its body).
-Every write tells them what it may have changed (`ghcli.written`, `ghcli.on_write`):
+read from GitHub once, `discovery.list_org_repos` lists each org once, and `issues` lists
+each repo's OPEN issues once for every title the run asks about (a closed issue is searched
+by title, only when a digest needs its body). Every write tells them what it may have
+changed (`ghcli.written`, `ghcli.on_write`):
 
-- a file write (`contents`, `git/*`, a PR merge) forgets that repo's files;
-- making, renaming, archiving or deleting a repo (`orgs/X/repos`, `generate`, a repo
-  `PATCH`/`DELETE`, `gh repo create/edit/delete`) forgets the org's files and every repo's
-  metadata;
-- a `git push` forgets the repo its remote names, or everything when that cannot be read;
-- an issue write forgets that repo's listing only;
-- every other write (teams, collaborators, invitations, topics, secrets, Actions settings,
+- a contents write (`contents/<path>`) forgets that path, the directories above it and the
+  repo's trees and commit listings - not its other files;
+- a Git Data write (`git/*`), a PR merge or a `git push` forgets that repo's files (a push
+  whose remote cannot be read forgets everything);
+- making, renaming or deleting a repo (`orgs/X/repos`, `generate`, a `PATCH` with `name=`,
+  a `DELETE`, `gh repo create/delete/rename`) forgets the org's files and listing and every
+  repo's metadata - except a create GitHub refused because the name is taken, which made
+  nothing and forgets that name only;
+- a repo's settings or topics (`PATCH` without `name=`, `topics`, `gh repo edit/archive`)
+  forget that repo's metadata and its org's listing, and no file - except a new
+  `default_branch`, which forgets that repo's files;
+- an issue write forgets that repo's issue listing only;
+- every other write (teams, collaborators, invitations, secrets, Actions settings,
   dispatches) forgets nothing.
+
+A file read that a write forgot is asked again with `If-None-Match: "<blob sha>"` (a file's
+Contents-API ETag is its blob sha), unfiltered and with `--include`: gh runs `--jq` over a
+304's empty body and fails, so the answer is projected in Python. An unchanged file comes
+back as a 304, which GitHub does not count. The ETags live for the run only. Per-repo
+questions a sync asks hourly are answered from one read each: one GraphQL query per
+semester lists every repo's direct collaborators with their permission (GraphQL has its own
+budget), one listing gives the org's members, and a release dest's or an
+`instructors-<tag>` team's grants are read once. A faculty grant held at or above its level
+is left alone (the floor never demotes); a student or role-team grant is skipped only when
+it is exactly read, so an over-grant is still put back.
 
 Keys are case-insensitive, as GitHub's owner and repo names are. Blobs are never forgotten.
 The memos are off outside a CLI run (the e2e harness reads what remote runs write), and off
@@ -1023,6 +1041,33 @@ everything when it returns (`ghcli.forget_all`). The Console runs its op and the
 status refresh in one process, so the refresh reads through the op's memo; the op's own
 writes are what keeps it current.
 
-`tests/test_api_cost.py` drives a preview tick, a membership sync and a status run against a
-fake `gh` and fails when one costs more than its ceiling. Its unit is one `gh` invocation:
-a listing is one request per hundred rows, so one call may be several pages.
+`tests/test_api_cost.py` drives every operation a workflow or the Console runs against a
+fake `gh`, a term into its run, at two and at four students, and fails when one costs more
+than 25% over what was measured. Its unit is one `gh` invocation: a listing is one request
+per hundred rows, so one call may be several pages.
+
+**Cost model** (the input to decision 0014). Measured on the demo on 2026-09-26, idle. `S`
+live semesters; in semester `s`, `A` assignments and `R` repos (about `(A + 1) x students`).
+
+- A Scheduled release tick: `10 + sum_s (17 + 7 A + r + ceil(R / 100))`. The 10 is the
+  listing step and the release step's own course reads. Per semester: the release step's
+  preview reads (`11 + 5.5 A`), the grading leg (`4 + 1.4 A`) and its report leg (2). `r`
+  is what a real release adds to its preview per semester (the dest, its grants, digests,
+  re-reads after writes): 40 measured before WP-H5 (an isolated tick, 149 for a preview of
+  66); the fake puts it at 5 after, an extrapolation not yet measured live. Each student who
+  pushed to an assignment whose sheet is still open adds 2.
+- A Sync membership run: `12 + sum_s (20 + stale + 2 ceil(R / 100))`, `stale` being the
+  repos of students who left the roster (their invitations are read per repo).
+- A status write (a config push, a Console run, the nightly refresh): 48.
+- Daily: Sync site 55 a semester, Refresh 100 to 170 a course.
+
+A course costs `t x tick + membership + 48 w + (55 S + 170) / 24` calls an hour, `t` ticks
+and `w` status writes an hour. Typically `t = 4` (the ds01 timer; GitHub's cron delivers
+2-7% of its fires) and `w = 0`. The worst case has both drivers delivering every slot,
+`t = 8`, plus a push-scoped tick and a status write per semester-config push. With `r = 40`,
+one live semester with six assignments and 60 students is about 500 calls in a typical hour
+and 1,000 in the worst: one shared account holds five such courses with 2x headroom
+typically, and in the worst case five use the whole budget and two keep 2x headroom. At
+`r = 5` the figures are about 370 and 730. Archived semesters cost nothing. A step's
+`[budget] used` counts the whole account: the ds01 timer fires every course in the same
+minute, so a tick it delivered reads higher than one GitHub's cron delivered alone.

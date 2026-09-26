@@ -101,11 +101,39 @@ def test_sync_semester_instructors_counts_failed_grants(monkeypatch):
     monkeypatch.setattr(
         sync_faculty, "grant_team_repo_access", lambda *a, **k: False
     )  # every grant fails
+    monkeypatch.setattr(sync_faculty, "team_repo_access", lambda org, team: None)
     errors = sync_faculty.sync_semester_instructors(
         "Course", "Course-f2026", ["course-materials-f2026"], []
     )
     # _tag_repos always includes .github + the one matching content repo -> 2 failed grants
     assert errors == 2
+
+
+def test_a_tag_grant_the_team_already_holds_is_not_made_again(monkeypatch):
+    # Hourly, and almost always already there: one listing of the team's repos stands in
+    # for a PUT per repo. Held at push or above is held; below it is granted. Names are
+    # matched whatever their case, on both the team and the repo.
+    monkeypatch.setattr(sync_faculty, "load_semester_faculty", lambda org: {})
+    monkeypatch.setattr(sync_faculty, "reconcile_team_members", lambda *a, **k: 0)
+    monkeypatch.setattr(sync_faculty, "semester_of", lambda org: "f2026")
+    monkeypatch.setattr(
+        sync_faculty, "create_team_outcome", lambda *a, **k: gh_teams.EXISTED
+    )
+    monkeypatch.setattr(
+        sync_faculty,
+        "team_repo_access",
+        lambda org, team: {".GitHub": "admin", "Course-Materials-f2026": "pull"},
+    )
+    granted = []
+    monkeypatch.setattr(
+        sync_faculty,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm: granted.append(repo) or True,
+    )
+    sync_faculty.sync_semester_instructors(
+        "Course", "Course-f2026", ["course-materials-f2026"], []
+    )
+    assert granted == ["course-materials-f2026"]
 
 
 def test_sync_semester_instructors_skips_wiring_when_team_creation_fails(monkeypatch):
@@ -622,6 +650,7 @@ def test_a_just_created_instructors_tag_team_is_not_read_back(
     )
     monkeypatch.setattr(sync_faculty, "create_team_outcome", lambda *a, **k: outcome)
     monkeypatch.setattr(sync_faculty, "grant_team_repo_access", lambda *a, **k: True)
+    monkeypatch.setattr(sync_faculty, "team_repo_access", lambda org, team: None)
     read = []
     monkeypatch.setattr(
         gh_teams, "get_team_members", lambda org, team: read.append(org) or set()

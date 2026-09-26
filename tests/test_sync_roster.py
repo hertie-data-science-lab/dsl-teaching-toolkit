@@ -76,6 +76,7 @@ def test_sync_hands_the_prune_each_teams_own_github_ids(monkeypatch):
     )
     monkeypatch.setattr(roster, "load", lambda org: students)
     monkeypatch.setattr(sync_roster, "set_org_membership", lambda *a, **kw: True)
+    monkeypatch.setattr(sync_roster, "org_member_logins", lambda org: None)
     monkeypatch.setattr(sync_roster, "list_org_repos", lambda org: [])
     seen: dict[str, set[str]] = {}
     monkeypatch.setattr(
@@ -87,6 +88,29 @@ def test_sync_hands_the_prune_each_teams_own_github_ids(monkeypatch):
     )
     assert sync_roster.sync("SEMESTER", prune=True) == 0
     assert seen == {sync_roster.TEAM: {"42"}, sync_roster.AUDITOR_TEAM: {"99"}}
+
+
+def test_a_student_the_member_listing_shows_is_not_asked_about(monkeypatch):
+    # Hourly, and after the first week nearly everyone is a member: one listing of the
+    # org stands in for a membership read per student. A case-only difference is the
+    # same account.
+    students = _roster(
+        "ada@uni.edu,Ada,enrolled,Ada-L,42,dsl-abc",
+        "bo@uni.edu,Bo,enrolled,bo-b,99,dsl-def",
+    )
+    monkeypatch.setattr(roster, "load", lambda org: students)
+    monkeypatch.setattr(
+        sync_roster, "org_member_logins", lambda org: frozenset({"ada-l"})
+    )
+    asked = []
+    monkeypatch.setattr(
+        sync_roster,
+        "set_org_membership",
+        lambda org, handle, role="member": asked.append(handle) or True,
+    )
+    monkeypatch.setattr(sync_roster, "reconcile_team_members", lambda *a, **kw: 0)
+    assert sync_roster.sync("SEMESTER") == 0
+    assert asked == ["bo-b"]
 
 
 def test_sync_reconciles_nothing_without_a_roster_and_reds_for_neither(monkeypatch):
@@ -104,6 +128,7 @@ def test_sync_reconciles_nothing_without_a_roster_and_reds_for_neither(monkeypat
         "set_org_membership",
         lambda *a, **kw: reconciled.append(a) or True,
     )
+    monkeypatch.setattr(sync_roster, "org_member_logins", lambda org: None)
 
     monkeypatch.setattr(roster, "load", lambda org: None)
     assert sync_roster.sync("some-semester", prune=True) == 0
@@ -204,7 +229,7 @@ def _offboard_stubs(monkeypatch, *, collaborators, declared=None, probed=None):
     monkeypatch.setattr(sync_roster, "list_org_repos", lambda org: repos)
     monkeypatch.setattr(sync_roster.teams, "load", lambda org: declared or {})
 
-    def collaborator(org, repo, login, person=False):
+    def collaborator(org, repo, login, person=False, held=None):
         if probed is not None:
             probed.append(repo)
         return login in collaborators
@@ -336,6 +361,7 @@ def test_a_pruning_sync_revokes_a_vanished_handles_submission_repos(monkeypatch)
     students = _roster("ada@uni.edu,Ada,enrolled,Ada-L,42,dsl-abc")
     monkeypatch.setattr(roster, "load", lambda org: students)
     monkeypatch.setattr(sync_roster, "set_org_membership", lambda *a, **kw: True)
+    monkeypatch.setattr(sync_roster, "org_member_logins", lambda org: None)
     monkeypatch.setattr(sync_roster, "reconcile_team_members", lambda *a, **kw: 0)
     removed = _offboard_stubs(monkeypatch, collaborators={"ada-l", "zoe-z"})
 

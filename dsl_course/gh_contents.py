@@ -9,18 +9,22 @@ import csv
 import hashlib
 import io
 import json
-from collections.abc import Iterable
+import re
+from collections.abc import Callable, Iterable
 from functools import cache
 from pathlib import PurePosixPath
 from typing import Any
+from urllib.parse import unquote
 
 import yaml
 
 from .faults import ConfigFault, Unusable, header_fault
 from .ghcli import (
     ALL,
+    FILE,
     FILES,
-    forget_written,
+    file_target,
+    forgets,
     gh,
     gh_json,
     is_missing_resource,
@@ -45,8 +49,14 @@ from .repos import default_branch
 # parser says `read_once=False` (`migrate`, which waits on other runs): a run that only
 # ever sees its own writes is the one this is right for. The e2e harness is one long
 # process reading what remote runs write, and never turns it on.
+#
+# A read forgotten by a write is not thrown away when its answer says which blob it was: a
+# file's Contents-API ETag IS its blob sha, so the next read of it asks `If-None-Match` and
+# an unchanged file comes back as a 304, which GitHub does not count against the budget.
 _reads: dict[str, dict[tuple[str, ...], tuple[int, str]]] | None = None
 _blobs: dict[tuple[str, ...], tuple[int, str]] | None = None
+_stale: dict[tuple[str, tuple[str, ...]], tuple[str, tuple[int, str]]] = {}
+_NOT_MODIFIED = "HTTP 304"
 
 
 def read_once(on: bool) -> None:
@@ -54,35 +64,135 @@ def read_once(on: bool) -> None:
     between tests."""
     global _reads, _blobs
     _reads, _blobs = ({}, {}) if on else (None, None)
+    _stale.clear()
 
 
-def _read(org: str, repo: str, *args: str) -> tuple[int, str]:
-    """`gh(*args)` for a read of `org/repo`, through the memo when it is on."""
+def _read(
+    org: str, repo: str, *args: str, reader: Callable | None = None
+) -> tuple[int, str]:
+    """`gh(*args)` for a read of `org/repo`, through the memo when it is on. `reader` is
+    the caller's own `gh`, for a module whose tests stub the name it imported."""
+    gh_ = reader or gh
     if _reads is None:
-        return gh(*args)
+        return gh_(*args)
     # The owner and repo are not case-sensitive on GitHub; the path inside the repo is.
     prefix = f"repos/{org}/{repo}"
     key = tuple(a.replace(prefix, prefix.casefold(), 1) for a in args)
-    return _held(_reads.setdefault(f"{org}/{repo}".casefold(), {}), args, key)
-
-
-def _held(
-    held: dict[tuple[str, ...], tuple[int, str]],
-    args: tuple[str, ...],
-    key: tuple[str, ...] | None = None,
-) -> tuple[int, str]:
-    key = key or args
+    held = _reads.setdefault(f"{org}/{repo}".casefold(), {})
     if key in held:
         return held[key]
-    code, out = gh(*args)
+    etag, before = _stale.pop((f"{org}/{repo}".casefold(), key), ("", None))
+    if etag:
+        code, out = _conditional(gh_, args, etag)
+        if code != 0 and _NOT_MODIFIED in out:
+            held[key] = before
+            return before
+    else:
+        code, out = gh_(*args)
     if code == 0 or is_missing_resource(out) or "HTTP 409" in out:
         held[key] = (code, out)
     return code, out
 
 
+def _conditional(gh_: Callable, args: tuple[str, ...], etag: str) -> tuple[int, str]:
+    """A file read asked with `If-None-Match`, answered in the shape its `--jq` would have.
+
+    Asked WITHOUT the jq and with `--include`: gh runs `--jq` over a 304's empty body and
+    fails with "unexpected end of JSON input", printing nothing that says 304 - and that
+    phrase is a transient the retry ladder waits out. Unfiltered, a 304 is `gh: HTTP 304`
+    and a 200 is the headers, a blank line and the file's JSON, projected here."""
+    jq = args[args.index("--jq") + 1]
+    bare = [
+        a for i, a in enumerate(args) if a != "--jq" and args[i - 1 : i] != ("--jq",)
+    ]
+    code, out = gh_(*bare, "--include", "-H", f'If-None-Match: "{etag}"')
+    if code != 0:
+        return code, out
+    try:
+        body = json.loads(re.split(r"\r?\n\r?\n", out, maxsplit=1)[1])
+        sha, content = str(body["sha"]), str(body.get("content") or "")
+    except (IndexError, KeyError, TypeError, ValueError):
+        return gh_(*args)  # an answer this cannot read: ask it plainly
+    if jq == ".sha":
+        return 0, sha
+    return 0, content.strip() if jq == ".content" else f"{sha}\n{content.strip()}"
+
+
+def read_repo(
+    org: str, repo: str, *args: str, reader: Callable | None = None
+) -> tuple[int, str]:
+    """Any READ of `org/repo` - a commit listing, say - through the same per-run memo as
+    its files, and forgotten by the same writes (a push to it, a commit to it)."""
+    return _read(org, repo, *args, reader=reader)
+
+
+def _held(
+    held: dict[tuple[str, ...], tuple[int, str]], args: tuple[str, ...]
+) -> tuple[int, str]:
+    if args in held:
+        return held[args]
+    code, out = gh(*args)
+    if code == 0 or is_missing_resource(out) or "HTTP 409" in out:
+        held[args] = (code, out)
+    return code, out
+
+
+def _etag(key: tuple[str, ...], answer: tuple[int, str]) -> str:
+    """The blob sha a held file read answered with - its ETag - or "" for any read whose
+    answer does not carry one (a tree, a listing, a 404)."""
+    code, out = answer
+    if code != 0 or not any("/contents/" in a for a in key) or "--jq" not in key:
+        return ""
+    jq = key[key.index("--jq") + 1]
+    if jq == ".content":
+        return blob_sha(base64.b64decode(out)) if out.strip() else ""
+    if jq in (".sha", _SHA_THEN_CONTENT):
+        # A directory answers these too, with a listing: only a file has one sha.
+        sha = out.partition("\n")[0].strip()
+        return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else ""
+    return ""
+
+
+def _contents_path(key: tuple[str, ...], repo_key: str) -> str | None:
+    """The path inside the repo a held read asked the Contents API for, or None for a read
+    of anything else (a tree, a commit listing, the repo object)."""
+    prefix = f"repos/{repo_key}/contents"
+    for arg in key:
+        if arg.startswith(prefix) and arg[len(prefix) : len(prefix) + 1] in (
+            "",
+            "/",
+            "?",
+        ):
+            return unquote(arg[len(prefix) :].split("?")[0].strip("/"))
+    return None
+
+
+def _retire(repo_key: str, held: dict, key: tuple[str, ...]) -> None:
+    """Forget one held read, keeping its ETag for the next ask."""
+    answer = held.pop(key)
+    if etag := _etag(key, answer):
+        _stale[(repo_key, key)] = (etag, answer)
+
+
 def _forget(kind: str, targets: frozenset[str]) -> None:
-    if _reads is not None and kind in (FILES, ALL):
-        forget_written(_reads, targets)
+    if _reads is None:
+        return
+    if kind == FILE:
+        # One path was committed: that file, every directory listing above it, and every
+        # read that is not of a file (a tree, a commit listing) - nothing else.
+        for target in targets:
+            repo_key, path = file_target(target)
+            held = _reads.get(repo_key, {})
+            for key in list(held):
+                where = _contents_path(key, repo_key)
+                if where is None or where in ("", path) or path.startswith(f"{where}/"):
+                    _retire(repo_key, held, key)
+    elif kind in (FILES, ALL):
+        for repo_key in list(_reads):
+            if forgets(repo_key, targets):
+                held = _reads[repo_key]
+                for key in list(held):
+                    _retire(repo_key, held, key)
 
 
 on_write(_forget)
@@ -921,12 +1031,37 @@ def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | Non
     url = f"repos/{org}/{repo}/contents/{path}"
     if ref:
         url += f"?ref={ref}"
+    if (held := _peek(org, repo, "api", url, "--jq", _SHA_THEN_CONTENT)) is not None:
+        return held[0]  # this run already read the file with its sha
     code, out = _read(org, repo, "api", url, "--jq", ".content")
     if code != 0:
         if is_missing_resource(out):
             return None
         raise RuntimeError(f"could not read {org}/{repo}/{path}: {out[:200]}")
     return _decoded(out)
+
+
+def _peek(org: str, repo: str, *args: str) -> tuple[str, str] | None:
+    """`(decoded text, blob sha)` from a file read this run already holds under `args`
+    - either shape, since one answers the other - or None when it holds none."""
+    held = (_reads or {}).get(f"{org}/{repo}".casefold(), {})
+    prefix = f"repos/{org}/{repo}"
+    code, out = held.get(
+        tuple(a.replace(prefix, prefix.casefold(), 1) for a in args), (1, "")
+    )
+    if code != 0:
+        return None
+    if args[-1] == ".content":
+        sha, encoded = "", out
+    else:
+        sha, _, encoded = out.partition("\n")
+    if not encoded.strip():
+        # A file over 1 MB comes back with no content: nothing here says what it holds.
+        return None
+    return _decoded(encoded), sha or blob_sha(base64.b64decode(encoded))
+
+
+_SHA_THEN_CONTENT = r'"\(.sha)\n" + .content'
 
 
 def get_file_with_sha(
@@ -946,7 +1081,9 @@ def get_file_with_sha(
     url = f"repos/{org}/{repo}/contents/{path}"
     if ref:
         url += f"?ref={ref}"
-    code, out = _read(org, repo, "api", url, "--jq", r'"\(.sha)\n" + .content')
+    if (held := _peek(org, repo, "api", url, "--jq", ".content")) is not None:
+        return held  # this run already read the file; its sha is its blob's hash
+    code, out = _read(org, repo, "api", url, "--jq", _SHA_THEN_CONTENT)
     if code != 0:
         if is_missing_resource(out):
             return None

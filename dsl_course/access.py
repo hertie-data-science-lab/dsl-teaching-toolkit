@@ -114,6 +114,13 @@ def faculty_floor(
     return FACULTY_READ_ACCESS
 
 
+def holds(held: dict[str, str | None] | None, team: str, permission: str) -> bool:
+    """Whether `held` (`repo_team_permissions`) shows `team` at `permission` or above - so
+    a grant would change nothing (and a lower one would demote). False when unknown."""
+    have = (held or {}).get(team.casefold())
+    return bool(have) and _PERM_RANK[have] >= _PERM_RANK[permission]
+
+
 def grant_faculty(
     org: str,
     repo: str,
@@ -121,6 +128,7 @@ def grant_faculty(
     *,
     missing_is_note: bool = False,
     person: bool = False,
+    held: dict[str, str | None] | None = None,
 ) -> None:
     """Give the faculty teams `access` - COURSE_TEAM_ACCESS where they author,
     FACULTY_READ_ACCESS where the source of truth is elsewhere - on one repo, at the point
@@ -128,8 +136,13 @@ def grant_faculty(
 
     `missing_is_note` for the per-student hot path (every gradebook, every submission
     repo): a semester whose faculty teams are not there yet must not print two errors per
-    student, and `converge_faculty_access` repairs the grant on the next sweep."""
+    student, and `converge_faculty_access` repairs the grant on the next sweep.
+
+    `held` is the repo's team grants when the caller read them (`repo_team_permissions`):
+    a team already at `perm` or above is left alone rather than PUT again."""
     for team, perm in access.items():
+        if holds(held, team, perm):
+            continue
         grant_team_repo_access(
             org, team, repo, perm, missing_is_note=missing_is_note, person=person
         )
@@ -153,15 +166,20 @@ def grant_tagged_team_access(course_org: str, repo: str, tag: str) -> None:
 READ_TEAMS = (STUDENTS_TEAM, AUDITORS_TEAM)
 
 
-def grant_read_teams(semester_org: str, repo: str) -> None:
+def grant_read_teams(
+    semester_org: str, repo: str, held: dict[str, str | None] | None = None
+) -> None:
     """Give both semester role teams read on a released repo.
 
     Auditors see exactly what enrolled students see once it's released - the split is
     assignments and grades, not content - so every release grant covers both teams. A
     missing team is a note, not an error: an org can be released into before its teams
-    exist, and the next release (or Sync membership) fixes it."""
+    exist, and the next release (or Sync membership) fixes it. `held`: as `grant_faculty`."""
     for team in READ_TEAMS:
-        if grant_team_repo_access(
+        # EXACTLY read, not "read or above": the floor that never demotes is faculty's.
+        # A role team holding more than read is corrected by the PUT, as every release
+        # always did.
+        if (held or {}).get(team.casefold()) == "pull" or grant_team_repo_access(
             semester_org, team, repo, "pull", missing_is_note=True
         ):
             log_ok(f"{team} team -> read")
@@ -204,6 +222,29 @@ def team_repo_access(org: str, team: str) -> dict[str, str | None] | None:
             f"unparseable repo listing for {org}/{team}: {out[:200]}"
         ) from exc
     return {r["name"]: _strongest_permission(r["permissions"]) for r in rows}
+
+
+def repo_team_permissions(org: str, repo: str) -> dict[str, str | None] | None:
+    """`{team slug (casefolded): strongest permission}` on ONE repo, PUT vocabulary, off
+    one listing - or None when it could not be read, which callers answer by granting as
+    before. For a repo every tick visits (a release dest), where the grants it converges
+    are almost always already there."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"repos/{org}/{repo}/teams?per_page=100",
+        "--jq",
+        ".[] | {slug, permissions: (.permissions // {})}",
+    )
+    if code != 0:
+        return None
+    try:
+        rows = [json.loads(line) for line in out.splitlines() if line.strip()]
+    except json.JSONDecodeError:
+        return None
+    return {
+        str(r["slug"]).casefold(): _strongest_permission(r["permissions"]) for r in rows
+    }
 
 
 def repo_teams(org: str, repo: str) -> frozenset[str] | None:

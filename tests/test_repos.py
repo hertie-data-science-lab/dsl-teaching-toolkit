@@ -4,6 +4,8 @@ create actually means."""
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 
 import pytest
 
@@ -507,3 +509,85 @@ def test_a_topics_put_waits_out_a_locked_repo(monkeypatch):
     monkeypatch.setattr(repos, "gh", lambda *a, **k: next(answers))
     monkeypatch.setattr(repos.time, "sleep", lambda s: None)
     assert repos.set_repo_topics("Semester-f2026", "a1-ada", ["Assignment"]) is True
+
+
+def test_the_collaborator_query_keeps_only_repos_it_listed_whole(monkeypatch):
+    # One GraphQL page answers every repo; a repo it could not list in full (no answer, or
+    # more than a page of collaborators) is left for its caller to read itself.
+    rows = "\n".join(
+        [
+            "grades-ada\t1\tAda-L:READ",
+            "assignment-1-bo\t0\t",
+            "busy\t150\t" + ",".join(f"u{i}:WRITE" for i in range(100)),
+            "hidden\t-1\t",
+        ]
+    )
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, rows))
+    held = repos.direct_collaborators_by_repo("Org")
+    assert held == {"grades-ada": {"ada-l": "READ"}, "assignment-1-bo": {}}
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "HTTP 502"))
+    assert repos.direct_collaborators_by_repo("Org") is None
+
+
+# One page of the query's answer as GitHub's GraphQL API sends it: the jq the query is
+# projected with runs over it here, as `gh --jq` runs it over the real one.
+_GRAPHQL_PAGE = {
+    "data": {
+        "organization": {
+            "repositories": {
+                "pageInfo": {"hasNextPage": False, "endCursor": "Y3Vyc29y"},
+                "nodes": [
+                    {
+                        "name": "grades-Ada-L",
+                        "collaborators": {
+                            "totalCount": 1,
+                            "edges": [
+                                {"permission": "READ", "node": {"login": "Ada-L"}}
+                            ],
+                        },
+                    },
+                    {
+                        "name": "assignment-1-bo",
+                        "collaborators": {
+                            "totalCount": 1,
+                            "edges": [
+                                {"permission": "MAINTAIN", "node": {"login": "bo"}}
+                            ],
+                        },
+                    },
+                    {
+                        "name": ".github",
+                        "collaborators": {"totalCount": 0, "edges": []},
+                    },
+                    {"name": "hidden", "collaborators": None},
+                ],
+            }
+        }
+    }
+}
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="needs the jq binary")
+def test_the_collaborator_query_reads_githubs_own_answer(monkeypatch):
+    projected = subprocess.run(
+        ["jq", "-r", repos.COLLABORATORS_JQ],
+        input=json.dumps(_GRAPHQL_PAGE),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, projected.strip()))
+    assert repos.direct_collaborators_by_repo("Org") == {
+        "grades-ada-l": {"ada-l": "READ"},
+        "assignment-1-bo": {"bo": "MAINTAIN"},
+        ".github": {},
+    }
+
+
+def test_is_collaborator_answers_from_the_query_without_a_read(monkeypatch):
+    monkeypatch.setattr(
+        repos, "gh", lambda *a, **k: pytest.fail("a listed repo is not read again")
+    )
+    held = {"grades-ada": {"ada-l": "READ"}}
+    assert repos.is_collaborator("Org", "Grades-Ada", "ADA-L", held=held) is True
+    assert repos.is_collaborator("Org", "grades-ada", "bo", held=held) is False

@@ -17,6 +17,7 @@ filesystem transport of the same rule.
 
 from __future__ import annotations
 
+import copy
 import json
 from datetime import datetime, timezone
 
@@ -36,8 +37,8 @@ from .course import (
 )
 from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
-from .ghcli import gh
-from .log import log, log_err, log_ok
+from .ghcli import ALL, EVERYTHING, FILE, FILES, META, gh, on_write
+from .log import log, log_err, log_ok, on_cli_start
 from .materials import is_materials_repo
 from .repos import default_branch, repo_exists, repo_is_archived, repo_missing
 
@@ -169,6 +170,34 @@ def _has_infra_topic(repo: dict) -> bool:
     return bool(set(repo.get("topics") or []) & INFRA_TOPICS)
 
 
+# One listing per org per CLI run, like `gh_contents`' reads and OFF outside one: a
+# nightly refresh walked the course org's listing nine times over. Forgotten by every write
+# that can change a row - a repo made, renamed, pushed to or deleted, or one of its
+# settings or topics (`ghcli.written`: FILES, FILE, META). Handed out as a copy, because
+# callers write into the rows they are given (`listing_row`).
+_listings: dict[str, list[dict]] | None = None
+
+
+def hold_listings(on: bool) -> None:
+    """Turn the per-run listing memo on (empty) or off. `tests/conftest.py` turns it off
+    between tests."""
+    global _listings
+    _listings = {} if on else None
+
+
+def _forget_listings(kind: str, targets: frozenset[str]) -> None:
+    if _listings is None or kind not in (FILES, FILE, META, ALL):
+        return
+    orgs = {t.split("/", 1)[0] for t in targets}
+    for org in list(_listings):
+        if EVERYTHING in orgs or org in orgs:
+            del _listings[org]
+
+
+on_write(_forget_listings)
+on_cli_start(lambda parser: hold_listings(parser.read_once))
+
+
 def list_org_repos(org: str) -> list[dict]:
     """Every repo in `org`, fully paginated - the one repo listing every discovery
     helper here goes through.
@@ -189,6 +218,8 @@ def list_org_repos(org: str) -> list[dict]:
     every caller reads "no repos" as "nothing to do" (refresh converges zero repos and
     reports success, profile_readme misfiles a semester org as a course org).
     """
+    if _listings is not None and org.casefold() in _listings:
+        return copy.deepcopy(_listings[org.casefold()])
     code, out = gh(
         "api",
         "--paginate",
@@ -200,9 +231,12 @@ def list_org_repos(org: str) -> list[dict]:
     if code != 0:
         raise RuntimeError(f"could not list repos in {org}: {out[:200]}")
     try:
-        return [json.loads(line) for line in out.splitlines() if line.strip()]
+        rows = [json.loads(line) for line in out.splitlines() if line.strip()]
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"unparseable repo listing for {org}: {out[:200]}") from exc
+    if _listings is not None:
+        _listings[org.casefold()] = copy.deepcopy(rows)
+    return rows
 
 
 def listing_by_name(org: str) -> dict[str, dict] | None:

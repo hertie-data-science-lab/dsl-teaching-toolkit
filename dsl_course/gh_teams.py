@@ -11,7 +11,13 @@ import time
 from collections.abc import Iterable
 from functools import cache, lru_cache
 
-from .ghcli import gh, is_already_exists, is_missing_resource
+from .ghcli import (
+    UNKNOWN_LOGIN,
+    gh,
+    is_already_exists,
+    is_missing_resource,
+    start_budget,
+)
 from .log import log, log_err, log_ok, log_person, log_skip
 
 # GitHub usernames: 1-39 chars, ASCII alphanumerics or single hyphens, no leading/
@@ -289,6 +295,19 @@ def org_membership_state(org: str, login: str) -> str | None:
     return out if code == 0 and out else None
 
 
+def org_member_logins(org: str) -> frozenset[str] | None:
+    """Every ACTIVE member of `org`, casefolded, off one listing (a page per hundred) - or
+    None when it could not be read. A pending invitee is not in it."""
+    code, out = gh(
+        "api", f"orgs/{org}/members?per_page=100", "--paginate", "--jq", ".[].login"
+    )
+    if code != 0:
+        return None
+    return frozenset(
+        line.strip().casefold() for line in out.splitlines() if line.strip()
+    )
+
+
 def set_org_membership(org: str, login: str, role: str = "member") -> bool:
     """Ensure `login` belongs to `org` (invites if needed). Idempotent.
 
@@ -436,7 +455,11 @@ def remove_team_member(org: str, team_slug: str, login: str) -> bool:
 
 @lru_cache(maxsize=1)
 def acting_login() -> str | None:
-    """Login of the token `gh` is currently authenticated as (the bot, in CI)."""
+    """Login of the token `gh` is currently authenticated as (the bot, in CI) - off the
+    budget line's `GET /user` when this is a CLI run, which has already asked."""
+    start = start_budget()
+    if start is not None and start.login != UNKNOWN_LOGIN:
+        return start.login
     code, out = gh("api", "user", "--jq", ".login")
     return out.strip() if code == 0 and out.strip() else None
 

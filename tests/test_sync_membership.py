@@ -43,7 +43,7 @@ def gradebooks(monkeypatch):
     monkeypatch.setattr(
         sync_membership,
         "ensure_gradebooks",
-        lambda org, dry_run=False, existing=None, budget_minutes=None: (
+        lambda org, dry_run=False, existing=None, budget_minutes=None, **k: (
             calls.append((org, existing, budget_minutes)) or 0
         ),
     )
@@ -59,6 +59,8 @@ def listed(monkeypatch):
         "listing_by_name",
         lambda org: {f"{org}-welcome": {"name": f"{org}-welcome"}},
     )
+    # And its one GraphQL query of every repo's direct collaborators.
+    monkeypatch.setattr(sync_membership, "direct_collaborators_by_repo", lambda org: {})
 
 
 def test_every_live_semesters_sync_provisions_its_gradebooks(monkeypatch, gradebooks):

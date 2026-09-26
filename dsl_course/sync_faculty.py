@@ -43,7 +43,7 @@ from typing import NamedTuple
 
 import yaml
 
-from .access import grant_team_repo_access
+from .access import grant_team_repo_access, holds, team_repo_access
 from .central import MissingCentralRef, resolve_central_ref
 from .course import (
     CONFIG_REPO,
@@ -765,7 +765,13 @@ def sync_semester_instructors(
             # membership would all fail against a non-existent team (triple-counting the
             # one root failure and firing doomed API calls). Report it once and stop here.
             return errors + 1
+        # Hourly, for grants that are almost always there already: ONE listing of what
+        # the team holds (unreadable, or a team made a moment ago: grant them all).
+        held = None if outcome == CREATED else team_repo_access(course_org, team)
+        held = {name.casefold(): perm for name, perm in (held or {}).items()}
         for repo in _tag_repos(content_repos, assignments, tag):
+            if holds({team.casefold(): held.get(repo.casefold())}, team, "push"):
+                continue
             if not grant_team_repo_access(course_org, team, repo, "push"):
                 errors += 1
     # A team made a moment ago is not read back: GitHub's REST API 404s a new team for up

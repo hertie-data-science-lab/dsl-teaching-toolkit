@@ -36,7 +36,12 @@ from pathlib import Path
 from typing import NamedTuple
 
 from . import pulls, site
-from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_read_teams
+from .access import (
+    COURSE_TEAM_ACCESS,
+    grant_faculty,
+    grant_read_teams,
+    repo_team_permissions,
+)
 from .course import (
     FACULTY_ONLY_HEADING,
     INSTRUCTORS_TEAM,
@@ -295,7 +300,10 @@ def _prepare_dest(semester_org: str, repo: str, root: Path) -> Dest | None:
         private=True,
         description="Released lectures, labs, readings, & other materials",
     )
-    grant_read_teams(semester_org, repo)
+    # Visited on every tick, where the dest almost always holds every grant below
+    # already: ONE listing of its teams says which of them would change nothing.
+    held = repo_team_permissions(semester_org, repo)
+    grant_read_teams(semester_org, repo, held)
     # Write, because an edit made here is now DURABLE: the release lands on `upstream`
     # and is merged in, so a correction typed into the semester repo survives the next tick
     # instead of being copied over. It was read for exactly as long as it was not.
@@ -304,7 +312,9 @@ def _prepare_dest(semester_org: str, repo: str, root: Path) -> Dest | None:
     # only when somebody carries it back. The floor (`access.faculty_floor`) stays at
     # read: the sweep never demotes, and this grant runs on every release, so the two
     # agree.
-    grant_faculty(semester_org, repo, COURSE_TEAM_ACCESS, missing_is_note=True)
+    grant_faculty(
+        semester_org, repo, COURSE_TEAM_ACCESS, missing_is_note=True, held=held
+    )
     # Students are told to fork the materials and work in their own copy, and a PRIVATE
     # repo is forkable only if BOTH its org and it say so. Converged on every release,
     # not only at creation: the dests that predate this need it too.
