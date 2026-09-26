@@ -576,6 +576,13 @@ export class GitHubClient {
     return res.text();
   }
 
+  /** Open an issue as the signed-in person. No labels: GitHub drops them for an author without push. */
+  async createIssue(owner: string, repo: string, title: string, body: string): Promise<GhIssue> {
+    const r = await this.send<GhIssue>('POST', `/repos/${owner}/${repo}/issues`, { title, body });
+    if (!r) throw new Error('GitHub returned no issue');
+    return r;
+  }
+
   /** A repo's issues matching `query` (`labels=...&state=all&creator=...`), newest first, one page. */
   async listIssues(owner: string, repo: string, query: string): Promise<GhIssue[]> {
     return (await this.getOrNull<GhIssue[]>(`/repos/${owner}/${repo}/issues?${query}&per_page=30`)) ?? [];

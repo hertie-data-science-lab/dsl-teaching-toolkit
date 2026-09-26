@@ -148,13 +148,12 @@ Things whose *literal spelling* is depended on from outside Python:
   faculty's patterns gone, and whatever they withheld shipping again on a green run. The
   price is that its wording cannot be improved in a repo that already has it.
 - **`course.PUBLISH_FILE`** (`publish.yml`) is the other filename faculty type into a
-  materials repo, and **`site.SITE_FILES_DIR`** (`files/`) is where the semester site serves
-  what it names, at `files/<semester-repo>/<path>`. Both are spelt outside Python: the
-  filename in every course's repo, the served path in every link the sync has ever written
-  and in the URL a student has bookmarked. `files/` cannot become `<repo>/` - `/materials/`
-  is the All Materials page's own permalink. Seeded CREATE-ONLY and INSTRUCTOR-OWNED, and
-  no workflow writes it after creation: a refresh that rewrote one would either unpublish a
-  semester's decks or publish what faculty had just withdrawn, on a green run.
+  materials repo. It selects what the public website publishes; until slice E rebuilds that
+  site, only the console's preview reads it (its rule, `materials.hosted_paths`, is exported
+  in `console/schemas/materials.json`). The
+  semester site no longer hosts anything (decision 0011 rule 5: the site is a calendar, and
+  the sync removes its old `files/` copies). Seeded CREATE-ONLY and
+  INSTRUCTOR-OWNED, and no workflow writes it after creation.
 - **`course.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
   and the dest's DEFAULT branch is what students, the website and `propagate` read. The
   release commits onto `upstream` and merges it into the default one; a conflict aborts the
@@ -367,6 +366,19 @@ semester's and the course's; the single-semester run of each of the four semeste
 targets (scheduler, Sync membership, Send enrolment codes, Sync site) rewrites that semester's;
 every Console run rewrites its semester's and the course's (`status.write_after_op`). It records
 the git shas of its inputs, never a timestamp, so an unchanged render makes no commit.
+
+`.system/student-status.json` (`dsl.student-status/1`, `student_status`) is written by the same
+`status.write`, for a live semester, into the SEMESTER org's public `.github`: what the student
+console reads instead of the site. It is public, so its shape is an allow-list, closed at every
+level (`console/schemas/student-status.schema.json`, `tests/test_student_status.py`): no roster,
+marks, handles, enrol codes or team membership (a team is its name, headcount and cap), an
+email only where `show_email: true`, a brief and shape note only once handed out, and no
+assignment with `show_on_site: false`. A key added to it is added to the allow-list first.
+
+The join workflows route a Join issue on its form's label OR on a hidden first line
+(`course.JOIN_COURSE_MARKER`, `JOIN_TEAM_MARKER`, exported in `names.json`): the console opens
+the issue through the API, where GitHub drops the label for an author without push. Both
+spellings are frozen - the workflows, the forms' notes and the console carry them.
 
 A course website is wholly the toolkit's: `scaffold_site` creates `<org>.github.io` EMPTY and
 seeds only its Pages build, then every sync writes `templates/site/` (SYSTEM-OWNED) and seeds
@@ -809,6 +821,7 @@ Promote.
 | course `.github/.github/.last-refresh`, `.github/.github/.missing-cohorts` | `.github/.system/last-refresh`, `.github/.system/missing-semesters` | course org |
 | materials `MAINTAINING.md`, `SYLLABUS.md.sample`, `SYLLABUS.sessions.md` | `.system/MAINTAINING.md`, `.system/SYLLABUS.md.sample`, `.system/SYLLABUS.sessions.md`; a whole-repo release skips `.system/` | every `course-materials-*` repo |
 | a `course-materials-*` name as the mark of a materials repo | the `dsl-materials` topic (the name stays the scaffold's default) | course org; the course step "materials topic" adds it |
+| semester site Assignments, All Materials and Your Profile tabs, assignment pages, hosted copies under `files/`, team lists and member digests | none: the site is a public calendar (decision 0011 rule 5); the student console reads `student-status.json` | the site sync removes them (`site_repo.retired_sections`) |
 | semester site rows keyed by the `NN_` folder ordinal; the `readings` section | one row per shown `releases:` entry, of its kind, numbered by `number:`, else the label, else position; untitled readings attached to the next lecture (`schedule_plan.site_rows`, decision 0013); unplanned kind folders as undated tab rows; tabs per kind; the pinned syllabus by `materials.yml` declaration, else the old root-file rule | every semester site, on its next sync |
 | semester topic `dsl-cohort` on an ARCHIVED semester | kept for ever: archived semesters are never migrated, and every sweep skips them (`discovery.semester_is_live`, `seed.refresh`) | - |
 | console op ids `cohort.check`, `cohort.preview_automation`, `cohort.archive`, `cohort.bootstrap`; op scope `cohort` | `semester.*`; scope `semester` | `console/schemas/ops.json` |

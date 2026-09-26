@@ -1,5 +1,7 @@
 # SYSTEM-OWNED - do not edit. This form's field ids are a contract with .github/workflows/team-formation.yml,
 # which parses them; both are re-pushed by every bootstrap and nightly refresh.
+# The student console opens the same issue through the API, with this form's body under a
+# hidden first line, `<!-- dsl:join-team -->`, which routes it in place of the label.
 name: Join team
 description: Join or form a team for a group assignment
 title: "Join team"
@@ -8,9 +10,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        The teams that already exist, and how much room each has left, are listed on the assignment's page on the semester site.
+        The teams that already exist, and how much room each has left, are listed in the student console, under Join.
 
-        To **join** one, choose *Join an existing team* and type its name exactly as that page spells it. To **start** one, choose *Create a new team* and pick a name nobody is using yet.
+        To **join** one, choose *Join an existing team* and type its name exactly as the console spells it. To **start** one, choose *Create a new team* and pick a name nobody is using yet.
 
         Already in a team? Joining or creating another moves you out of your current one while team formation is open.
   # dsl:assignment-field:start - this semester's open assignments are spliced in here as a

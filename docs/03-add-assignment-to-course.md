@@ -183,7 +183,7 @@ reads that file, so the assignment grades as if it declared nothing at all.
 | `submit_via` | `assignment_repo` (default) | One private repo per student or team. The cutoff, the receipts and the late window apply. |
 | | `external` | Handed in off GitHub. **No repo is created.** Nothing is collected, nothing is timed, and the grading sheet has no `info:` block. |
 | | `shared_dropbox_repo` | **One private repo for the whole semester**, `<slug>-submissions`, with a folder per student or team inside it. The cutoff and the late window apply per folder; there is no Submission receipts issue. |
-| `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** button on the assignment's page and its due row. Without one the page says to read the brief. |
+| `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** link in the student console and on its due row. Without one the console says to read the brief. |
 | `visibility` | `private` (default) | Only the student and the instructors can read their repo. |
 | | `public` | Every student's repo is world-readable from hand-out - portfolio work such as a hackathon. |
 | | `student_choice` | Created **private**, with the student (or every member of a team) as its **admin**. After the grading cutoff they may publish it themselves from the repo's Settings; before it, the scheduler puts any published repo back to private. |

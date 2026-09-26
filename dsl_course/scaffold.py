@@ -717,16 +717,14 @@ _PUBLISH_STUB = f"""\
 # INSTRUCTOR-OWNED - yours. Written once when this repo was scaffolded, and never
 # rewritten by the toolkit, so anything you put here stays.
 #
-# What the semester site hosts PUBLICLY, so a rendered deck opens in a browser instead of
-# showing as source on GitHub. Same syntax as .gitignore, relative to this repo, also
-# where a release renames a path with semester_dest_path. Anything unmatched stays
-# exactly as it is today: enrolled students open it on GitHub. A deck's
-# <name>_files/, media/, libs/ and images/ folders follow it. Unlike .gitignore, a negated
-# folder ("!labs/sub/") excludes its whole subtree. solution/, tests/, grading files and
-# .env are never copied whatever is written here. Applies to every semester of this course. Edit,
-# then press Sync site (or wait for the next release / daily sync) - a file that does not
-# parse stops the sync and is reported, rather than quietly publishing nothing. Full rules:
-# https://github.com/{CENTRAL}/blob/main/docs/11-configure-cohort-site.md
+# What the public website may publish, so a rendered deck opens in a browser instead of
+# showing as source on GitHub. Not used yet: the toolkit records this selection until the
+# public website is rebuilt. Same syntax as .gitignore, relative to this repo. Anything
+# unmatched stays private: enrolled students open it on GitHub. A deck's <name>_files/,
+# media/, libs/ and images/ folders follow it. Unlike .gitignore, a negated folder
+# ("!labs/sub/") excludes its whole subtree. solution/, tests/, grading files and .env are
+# never published whatever is written here. Applies to every semester of this course.
+# Full rules: https://github.com/{CENTRAL}/blob/main/docs/02-add-materials-to-course.md
 public:
 {{patterns}}
 """
@@ -1128,7 +1126,7 @@ def scaffold_materials(
             RELEASEIGNORE: _RELEASEIGNORE_STUB.encode(),
         }
         # The other half of the same question: `.releaseignore` says what leaves this
-        # repo at all, `publish.yml` what the semester site then hosts in the open -
+        # repo at all, `publish.yml` what the public website may publish -
         # written for the folders the skeleton actually has.
         folders = {path.split("/")[0] for path in user_files if "/" in path}
         user_files[PUBLISH_FILE] = _publish_stub(
@@ -1694,8 +1692,8 @@ def main() -> int:
         dest="public_dirs",
         choices=PUBLIC_DIRS,
         default=NOTHING_PUBLIC,
-        help="Which folders the semester site may host publicly, so they render in a "
-        "browser. Seeds publish.yml; never written over a repo that has one.",
+        help="Which folders the public website may publish, so they render in a browser. "
+        "Seeds publish.yml; never written over a repo that has one.",
     )
     pm.add_argument(
         "--public-types",

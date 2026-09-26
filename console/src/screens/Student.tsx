@@ -1,7 +1,7 @@
 // The student shell's screens (decision 0011 rule 2): This week (with the course's About
 // block), Schedule, Assignments, Marks, Materials, Set up, Join and Instructors of one
 // semester, and This week across every semester on Home. The semester's shared facts come
-// through `StudentData` (the public site today, `student-status.json` after WP-D4); the
+// through `StudentData` (the engine's public `student-status.json`, else the site); the
 // student's own repos, team, role, receipts and marks come from GitHub with their own token
 // (`model/mine.ts`). In an instructor's Student view (rule 7) the same screens render with the
 // instructor's own identity and never read anyone's repos or marks. An auditor sees the
@@ -16,7 +16,7 @@ import { semesterName, type Semester } from '../model/discovery';
 import { dayKey, fmtDay, fmtTime, fmtWhen, sortKey } from '../model/format';
 import { gradebookUrl, isMarked, knownAuditor, patchLines, patchNotes, readAllReceipts, readMine, repoUrl, type Gradebook, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
 import { lastVisit, markVisit } from '../model/prefs';
-import { IMG_HOSTS, MY_STATE_WORD, STUDENT_CHOICE, SiteSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
+import { IMG_HOSTS, MY_STATE_WORD, STUDENT_CHOICE, StatusFileSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
 import { weekItems, type WeekItem } from '../model/week';
 import { STUDENT_SCREENS, studentHref } from '../router';
 import { CheckLine, Crumbs, Loading, Md, ghUrl } from '../ui/bits';
@@ -52,7 +52,7 @@ export const forgetStudentData = (client: GitHubClient) => sources.delete(client
 export function studentData(client: GitHubClient): StudentData {
   let s = sources.get(client);
   if (!s) {
-    s = new SiteSource(client);
+    s = new StatusFileSource(client);
     sources.set(client, s);
   }
   return s;
@@ -358,9 +358,11 @@ export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; 
               const st = a && !mine?.auditor ? myState(a, isMarked(mine?.gradebook ?? null, a.slug), now, tz) : null;
               const yours = a && mine ? mine.units[a.slug] : undefined;
               const files = r.links.filter((l) => !r.readings.includes(l));
+              // A kind the console has no class for (a policy kind: readings, drop-in) takes its policy colours.
+              const k = ROW_CLASS[r.kind] ? undefined : facts.kinds?.[r.kind];
               out.push(
-                <li class={`trow ${ROW_CLASS[r.kind] ?? 'evt'}${yours?.repo ? ' mine' : ''}`}>
-                  <span class="k">{ROW_WORD[r.kind] ?? r.kind}</span>
+                <li class={`trow ${ROW_CLASS[r.kind] ?? 'evt'}${yours?.repo ? ' mine' : ''}`} style={k?.background ? { background: k.background } : undefined}>
+                  <span class="k" style={k?.colour ? { color: k.colour } : undefined}>{ROW_WORD[r.kind] ?? k?.label.toLowerCase() ?? r.kind}</span>
                   <span class="d">{fmtDay(r.when, tz, year)}{!r.allDay && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}</span> : null}{r.tbc ? <span class="tbc">TBC</span> : null}</span>
                   <span class="ttl">
                     <b>{r.title}</b>{r.subtitle ? `: ${r.subtitle}` : ''}

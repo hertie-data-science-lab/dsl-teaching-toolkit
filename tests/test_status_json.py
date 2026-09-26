@@ -21,6 +21,7 @@ from dsl_course import (
     schemas,
     status,
     status_json,
+    student_status,
     sync_faculty,
 )
 from dsl_course.faults import ConfigFault, FaultKind, header_fault
@@ -666,10 +667,10 @@ def test_semester_weeks_before_during_and_after_the_semester():
 # ---------------------------------------------------------------------------- writer
 
 
-def _stub_write(monkeypatch, doc: dict, results=(True,)):
+def _stub_write(monkeypatch, doc: dict, results=(True,), student: dict | None = None):
     puts: list[tuple] = []
     answers = iter(results)
-    monkeypatch.setattr(status, "_document", lambda course, semester: doc)
+    monkeypatch.setattr(status, "_documents", lambda course, semester: (doc, student))
     monkeypatch.setattr(
         status,
         "put_file",
@@ -696,6 +697,24 @@ def test_write_puts_the_course_file_into_dot_github(monkeypatch):
     assert [(o, r, p) for o, r, p, _ in puts] == [
         (COURSE, ".github", ".system/status.json")
     ]
+
+
+def test_write_puts_the_student_file_into_the_semester_dot_github(monkeypatch):
+    doc, student = _render(), {"schema": "dsl.student-status/1"}
+    puts = _stub_write(monkeypatch, doc, results=(True, True), student=student)
+    assert status.write(COURSE, SEMESTER) == 0
+    assert [(o, r, p) for o, r, p, _ in puts] == [
+        (SEMESTER, "semester-config", ".system/status.json"),
+        (SEMESTER, ".github", ".system/student-status.json"),
+    ]
+    assert puts[1][3] == student_status.dumps(student)
+
+
+def test_a_student_file_that_did_not_land_is_an_error(monkeypatch):
+    student = {"schema": "dsl.student-status/1"}
+    puts = _stub_write(monkeypatch, _render(), (True, False, False), student)
+    assert status.write(COURSE, SEMESTER) == 1
+    assert len(puts) == 3
 
 
 def test_write_tries_twice_for_the_dispatchers_race(monkeypatch):
@@ -1201,7 +1220,7 @@ def test_a_failed_refresh_names_no_repo(monkeypatch, capsys):
     def boom(course, semester):
         raise RuntimeError("gh: Not Found (repos/x/assignment-3-octocat)")
 
-    monkeypatch.setattr(status, "_document", boom)
+    monkeypatch.setattr(status, "_documents", boom)
     assert status.refresh(COURSE, SEMESTER) == 1
     out = capsys.readouterr()
     assert "octocat" not in out.out + out.err
@@ -1216,9 +1235,9 @@ def test_write_reads_the_roster_as_it_is_now(monkeypatch):
 
     def document(course, semester):
         seen.append(roster._roster_text(semester))
-        return _render()
+        return _render(), None
 
-    monkeypatch.setattr(status, "_document", document)
+    monkeypatch.setattr(status, "_documents", document)
     monkeypatch.setattr(status, "put_file", lambda *a, **k: True)
     status.write(COURSE, SEMESTER)
     assert seen == ["after the send"]

@@ -76,6 +76,8 @@ institution:
   name: Hertie School
   url: https://hertie-school.org/en/datasciencelab
   dsl_org_url: https://github.com/hertie-data-science-lab
+  # The student and instructor console; a semester site's banner links a reader there.
+  console_url: https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/
   address: |
     Data Science Lab
     Hertie School

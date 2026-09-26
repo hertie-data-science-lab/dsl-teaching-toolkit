@@ -1,6 +1,14 @@
 # Configure the semester website
 
 Every semester has an auto-deployed site at `<semester-org>.github.io`, regenerated from the org's config files.
+It is a **public calendar**: the schedule by kind, your home text and announcements, and a banner
+linking the semester in the student console. Briefs, teams, materials, receipts and marks are in
+the console; nothing about a student is on the site.
+
+The console reads `.system/student-status.json` in the semester org's `.github`, which the
+engine rewrites with every status refresh. It is public too, so it carries only what the site
+could show: the schedule, the assignments' dates, rules and (once handed out) briefs, teams as
+name and headcount, the instructor cards, the home text, announcements and the materials paths.
 
 You never edit what the site shows - you edit the file it reads, and it re-syncs itself.
 
@@ -18,9 +26,7 @@ You never edit what the site shows - you edit the file it reads, and it re-syncs
 | Materials links | *nothing to set* | the row appears as soon as `schedule.yml` names the session, marked "not released yet"; the links fill in as you [release](08-release-materials-to-cohort.md) |
 | A session's name + blurb | semester `semester-config/schedule.yml` ([07](07-schedule-releases.md)) | `title`, `details` on the `releases:` entry - the Hertie syllabus's session title and learning objectives. `details` may run to several paragraphs, and shows in the schedule's Details column as well as on the session's tab |
 | Readings on the **Readings** tab | course materials repo | drop the readings into `readings/NN_.../` and **every file is listed and linked automatically** for enrolled students - nothing to write. `READINGS.md` (or `.txt`/`.bib`) beside them is OPTIONAL, for what a file cannot say: a URL, pointers for what to focus on, or clean citation-style metadata. It is published as written (this site is public, so it never hosts a reading itself directly, rather links to the GH-hosted files (with their permission restrictions enforced there))|
-| The **All Materials** tab | *nothing to set* | every file released to the semester, grouped by section and nested exactly as its repo has it - a folder opens in the page itself, at any depth, rather than only counting its contents. The only page not keyed on a session ordinal, so a released `SYLLABUS.md` or a flat `datasets/` appears here rather than on a session tab. A released syllabus is *also* pinned on the home page (found by name at the repo root, in any format) |
-| Rendered decks (an HTML deck opening in the browser instead of showing as source) | course materials repo `publish.yml` | patterns, `.gitignore` syntax, of what the site may host publicly - seeded by the **New materials repo** form and yours to edit afterwards. They are matched against the path in the materials repo, even where a release renamed it with `semester_dest_path`. A matched `<name>.html` brings its `<name>_files/` bundle and any `media/`, `libs/` or `images/` folder beside it; the file's name then opens the hosted copy, with `source` and `render` buttons beside it, and everything unmatched is unchanged. `solution/`, `tests/`, grading files and `.env` are never hosted. Remove a pattern and the copy goes on the next sync (the site repo's git history keeps the old bytes - purge by hand) |
-| Open files in your local copy (a file link opening in a student's own fork or clone) | *nothing to set* | every file row carries `source` and, where the site hosts a rendered copy, `render`. A student who works through the site's **Your Profile** tab - handle, fork, clone, folders, editor - gets `online` and `local` beside those two on every row; on each assignment page they also get their own repo by name, with Edit online and Edit locally, under which sits the clone command that `Edit locally` needs. The profile is saved in that student's own browser and sent nowhere, so nobody, faculty included, can see it |
+| The syllabus link on the home page | *nothing to set* | a released syllabus is pinned (the file `materials.yml` declares, else `SYLLABUS.md`, else a root file named like one) |
 | Which files each session links | course org `.github/dsl-course.yml` | *nothing to set* by default: a session lists its root files plus one link per subfolder, so a rendered deck lists the deck and not its assets. `site_link_extensions: [pdf, html]` narrows it further. Everything you release ships either way |
 
 ## What never to touch
@@ -34,10 +40,9 @@ commit still holds the change, to be copied back out and made at the source.
 |---|---|
 | `_lectures/`, `_assignments/`, `_events/` | each directory is **deleted and rebuilt** every sync - a file you drop in here vanishes |
 | `_data/people.yml` | overwritten from `semester-config/instructors.yml` |
-| `lectures.md`, `labs.md`, `readings.md`, `materials.md`, `assignments.md`, `profile.md` | front-matter stubs pointing at the layouts below - generated wrappers, so put your own words in `index.md` |
+| `lectures.md`, `labs.md`, `readings.md` (a tab per kind) | front-matter stubs pointing at the layouts below - generated wrappers, so put your own words in `index.md`. The old `assignments.md`, `materials.md` and `profile.md` stubs and the `files/` copies are removed by the sync |
 | `_data/nav.yml` | the tab bar - generated, so a new tab reaches sites that already exist. Add a page of your own as a file and link it from `index.md` |
-| `_data/materials.yml` | the All Materials index, rebuilt from what each semester repo actually holds |
-| `files/<repo>/` | the public copies of whatever `publish.yml` names - **deleted and rebuilt** per repo every sync |
+| `_data/materials.yml`, `_data/console.yml` | the pinned syllabus, and the banner's link to the console |
 | `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders - shipped from `templates/site/` in the toolkit, so a rendering change reaches every course site at once |
 | `.github/workflows/deploy.yml` | the Pages build - shipped from `templates/site/` too |
 | `_config.yml` keys `course_name`, `course_code`, `course_semester`, `course_description`, `github_org` | overwritten from the sources in the table above |

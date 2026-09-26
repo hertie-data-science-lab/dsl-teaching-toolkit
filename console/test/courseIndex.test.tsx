@@ -107,7 +107,7 @@ describe('index screens', () => {
     expect(t).toContain(MAT);
     expect(t).toContain('Ready');
     expect(t).toContain('Fall 2026');
-    expect(t).toContain('Some files hosted on the student site.');
+    expect(t).toContain('Some files selected for the public website.');
     expect(t).toContain('Last change');
     expect(t).toContain('New materials');
     expect(t).toContain('lecture-code-f2026');
@@ -150,7 +150,7 @@ describe('materials settings file tree', () => {
   it('badges every file, flags the rule that matches nothing and links each file to its editor', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
     const t = text(<MaterialsScreen {...cp({ entry: MAT })} />);
-    expect(t).toContain('hosted on the student site');
+    expect(t).toContain('for the public website');
     expect(t).toContain('withheld');
     expect(t).toContain('released to students');
     expect(t).toContain('nothing-here/ matches no file');
@@ -235,9 +235,10 @@ describe('materials settings: syllabus file and folder kinds', () => {
     );
     expect(writeHolds('syllabus: a.pdf\nkinds:\n  quiz: exam\n', { syllabus: '', kinds: {} })).toBe('');
   });
-  it('the public website does not claim to follow publish.yml', () => {
+  it('the public website says publish.yml is not used yet', () => {
     const t = text(<WebsiteScreen {...cp()} />);
     expect(t).not.toContain('Public patterns');
-    expect(t).toContain('not a materials repo’s publish.yml');
+    expect(t).toContain('follows the settings here for now');
+    expect(t).toContain('until then it is only recorded');
   });
 });

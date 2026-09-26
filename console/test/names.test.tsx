@@ -57,7 +57,7 @@ const RETIRED: [string, RegExp][] = [
 
 describe('names', () => {
   it('has exactly the keys the engine exports', () => {
-    expect(Object.keys(NAMES).sort()).toEqual(['assignments_file', 'config_repo', 'instructors_file', 'join_repo', 'records', 'registry_file', 'system_dir']);
+    expect(Object.keys(NAMES).sort()).toEqual(['assignments_file', 'config_repo', 'instructors_file', 'join_markers', 'join_repo', 'records', 'registry_file', 'system_dir']);
     expect(NAMES.config_repo).toBe('semester-config');
     expect(NAMES.records.status.startsWith(`${NAMES.system_dir}/`)).toBe(true);
   });

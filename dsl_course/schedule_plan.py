@@ -10,12 +10,12 @@ touches GitHub or renders anything - `site` turns rows into pages, `syllabus` in
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from . import schedule
-from .materials import DEFAULT_KIND, infer_kind
+from .materials import DEFAULT_KIND, DEFAULT_SYLLABUS, Declared, infer_kind
 
 # A source repo -> its `materials.yml` folder aliases. The caller reads them; the plan
 # stays pure.
@@ -160,3 +160,58 @@ def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
             number = r.number or label_number(r.key) or position[r.kind]
         out.append(SiteRow(r, number, attached.get(r.key, [])))
     return out
+
+
+def declared_syllabus(
+    sched: schedule.Schedule,
+    live_repos: Collection[str],
+    tree: Callable[[str], Collection[str]],
+    declaration: Callable[[str], Declared],
+) -> tuple[str, str] | None:
+    """`(repo, path)` of the syllabus released to this semester, or None.
+
+    Decision 0013 item 5, in order:
+    1. each source repo's declared syllabus (`materials.yml` `syllabus:`, default
+       `SYLLABUS.md`), followed through the copy that ships it (that file, a folder
+       holding it, the whole repo) to where it landed;
+    2. the same file at its own path in a released repo (a copy made off the plan);
+    3. when no repo declares one: a root file whose name contains `syllab`, an exact
+       `syllabus.*` stem first.
+    `tree(repo)` is a released repo's blob paths; `declaration(source repo)` its
+    `materials.yml`. The site pins the answer on its home page; the student status names
+    it."""
+    declared: dict[str, None] = {}
+    any_declared = False
+    for release in sched.releases:
+        for d in release.deploy:
+            decl = declaration(d.course_source_repo)
+            declared[decl.syllabus] = None
+            any_declared = any_declared or decl.declared
+            if d.semester_dest_repo not in live_repos:
+                continue
+            src, dest = d.course_source_path.strip("/"), deploy_dest(d)
+            if src == decl.syllabus:
+                path = dest
+            elif not src or decl.syllabus.startswith(f"{src}/"):
+                path = f"{dest}/{decl.syllabus[len(src) :].lstrip('/')}".strip("/")
+            else:
+                continue
+            if path in tree(d.semester_dest_repo):
+                return d.semester_dest_repo, path
+    declared.setdefault(DEFAULT_SYLLABUS, None)
+    for repo in sorted(live_repos):
+        blobs = tree(repo)
+        for path in declared:
+            if path in blobs:
+                return repo, path
+    if any_declared:
+        return None
+    fallback = None
+    for repo in sorted(live_repos):
+        for path in tree(repo):
+            if "/" in path or "syllab" not in path.lower():
+                continue
+            if path.rsplit(".", 1)[0].lower() == "syllabus":
+                return repo, path
+            fallback = fallback or (repo, path)
+    return fallback

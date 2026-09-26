@@ -253,7 +253,7 @@ def test_the_contract_examples_validate():
 
 def test_the_example_course_file_validates():
     # The demo course's dsl-course.yml has this shape: dated instructor cards and a
-    # course-level TA list, both of which the site reads (`site_repo._people_from_meta`).
+    # course-level TA list, both of which the site reads (`site_repo.people_cards`).
     example = ROOT / "example-course" / "course-org" / "dsl-course.yml"
     meta = yaml.safe_load(example.read_text())
     assert meta["people"]["teaching_assistants"]
@@ -274,8 +274,13 @@ def test_names_json_is_the_engines_own_names():
     names = schemas.names_json()
     assert set(names) == {
         "config_repo", "join_repo", "system_dir", "instructors_file",
-        "assignments_file", "registry_file", "records",
+        "assignments_file", "registry_file", "records", "join_markers",
     }  # fmt: skip
+    assert names["join_markers"] == {
+        "join_course": course.JOIN_COURSE_MARKER,
+        "join_team": course.JOIN_TEAM_MARKER,
+    }
+    assert names["records"]["student_status"] == ".system/student-status.json"
     assert (names["config_repo"], names["join_repo"]) == (
         course.CONFIG_REPO,
         course.JOIN_REPO,

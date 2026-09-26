@@ -247,7 +247,7 @@ export function WebsiteScreen(p: CourseProps) {
         <div class="actions"><OpButtons def={def} /></div>
       </div>
       <Help title="What goes public" doc="reference/actions-reference.md">
-        <p>The public website follows the settings here, not a materials repo’s publish.yml, which says only what the student site hosts. Withheld files never appear. The first publish saves these settings; a daily update keeps the site current.</p>
+        <p>The public website follows the settings here for now. A materials repo’s publish.yml selects files for it once it is rebuilt; until then it is only recorded. Withheld files never appear. The first publish saves these settings; a daily update keeps the site current.</p>
       </Help>
       <div class="grid-2">
         <section class="panel section">
@@ -277,7 +277,7 @@ function Unmatched({ rules, total, loading, partial }: { rules: string[]; total:
   ) : <p class="footnote">Every rule matches at least one file.</p>;
 }
 
-const PUBLISH_STUB = '# INSTRUCTOR-OWNED - yours. What the semester site hosts PUBLICLY; same syntax as .gitignore.\npublic:\n';
+const PUBLISH_STUB = '# INSTRUCTOR-OWNED - yours. What the public website may publish; same syntax as .gitignore.\npublic:\n';
 const MATERIALS_STUB = '# INSTRUCTOR-OWNED - yours. What the folder names cannot say: the syllabus file and folder kinds.\n';
 const validMaterials = validator(materialsSchema);
 
@@ -353,7 +353,7 @@ export function MaterialsScreen(p: CourseProps) {
     const y = new YamlText(pubFile.kind === 'ready' ? pubFile.text : PUBLISH_STUB);
     if (y.errors.length) return;
     y.assign(['public'], pubLines.length ? pubLines : []);
-    if (await runPub({ owner: course.org, repo, path: PUBLISH_FILE }, y.text, pubFile.kind === 'ready' ? pubFile.sha : null, { message: 'materials: edit what the student site hosts, from the Instructor Console', statusRepo: [course.org, COURSE_REPO] })) setPub(null);
+    if (await runPub({ owner: course.org, repo, path: PUBLISH_FILE }, y.text, pubFile.kind === 'ready' ? pubFile.sha : null, { message: 'materials: edit what the public website may publish, from the Instructor Console', statusRepo: [course.org, COURSE_REPO] })) setPub(null);
   };
   const setKind = (folder: string, kind: string) => {
     const next = { ...cur.kinds };
@@ -382,7 +382,7 @@ export function MaterialsScreen(p: CourseProps) {
         <div class="actions"><a class="btn quiet" href={`https://github.com/${course.org}/${repo}`} target="_blank" rel="noopener">Open on GitHub <Ext /></a></div>
       </div>
       <Help title="Public and withheld" doc="02-add-materials-to-course.md">
-        <p>Materials live here privately until a scheduled release copies them to a semester. Files matching the withheld patterns never reach students. Files matching the hosted patterns are also hosted openly on the student site, so a deck opens in a browser; the public website has its own settings. Both use the same pattern syntax as .gitignore, written for the paths in this repo.</p>
+        <p>Materials live here privately until a scheduled release copies them to a semester. Files matching the withheld patterns never reach students. Files matching the public patterns are selected for the public website, so a deck opens in a browser there; until that site is rebuilt the selection is only recorded. Both use the same pattern syntax as .gitignore, written for the paths in this repo.</p>
       </Help>
       <div class="stack">
         <section class="panel section">
@@ -423,12 +423,12 @@ export function MaterialsScreen(p: CourseProps) {
           <Lives org={course.org} repo={repo} path={MATERIALS_FILE} />
         </section>
         <section class="panel section">
-          <h2>Hosted on the student site</h2>
+          <h2>For the public website</h2>
           <div class="pattern-grid">
             <div class="field">
-              <label for="pub-pat">Hosted patterns</label>
-              <textarea class="code" id="pub-pat" placeholder="Nothing hosted" onInput={(e) => setPub((e.target as HTMLTextAreaElement).value)}>{pub ?? pubText}</textarea>
-              <p class="hint">One pattern per line, for the paths in this repo. Empty means nothing is hosted.</p>
+              <label for="pub-pat">Public patterns</label>
+              <textarea class="code" id="pub-pat" placeholder="Nothing public" onInput={(e) => setPub((e.target as HTMLTextAreaElement).value)}>{pub ?? pubText}</textarea>
+              <p class="hint">One pattern per line, for the paths in this repo. Empty means nothing is public.</p>
               {pubY?.errors.length ? <CheckLine cls="bad">publish.yml does not parse ({pubY.errors[0]}); fix it with Edit the file.</CheckLine> : null}
             </div>
             <div class="field"><span class="label">Rules</span><Unmatched rules={badged.unmatched.public} total={badged.rules.public} loading={tree.kind === 'loading'} partial={partial} /></div>
@@ -451,7 +451,7 @@ export function MaterialsScreen(p: CourseProps) {
         </section>
         <section class="panel section">
           <h2>Files</h2>
-          <p class="footnote">What happens to each file at a release, from the rules above as you type them, by the engine’s own rule. Withheld wins over hosted. A hosted deck brings its <code>_files/</code> folder and any {BUNDLE_WORDS} folder beside it; solutions, tests, grading_config.yml and .env files are never hosted.</p>
+          <p class="footnote">What happens to each file at a release, from the rules above as you type them, by the engine’s own rule. Withheld wins over public. A public deck brings its <code>_files/</code> folder and any {BUNDLE_WORDS} folder beside it; solutions, tests, grading_config.yml and .env files are never public.</p>
           {partial ? <CheckLine cls="bad">GitHub returned only part of this repo’s file list; badges may be incomplete.</CheckLine> : null}
           {tree.kind === 'loading' ? <Loading what="Reading the repo" /> : tree.kind === 'absent' ? <p class="footnote">Could not read the repo’s files.</p> : <FileTree files={files} badges={badged.badges} org={course.org} repo={repo} branch={branch} kinds={Object.fromEntries(kinds.map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} />}
         </section>

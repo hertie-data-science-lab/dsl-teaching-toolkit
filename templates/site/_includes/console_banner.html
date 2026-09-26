@@ -1,0 +1,13 @@
+{%- comment -%}
+SYSTEM-OWNED - do not edit. Written by the DSL course sync from templates/site/ in the
+toolkit; every sync rewrites it.
+{%- endcomment -%}
+{%- comment -%}
+The semester site is a public calendar (decision 0011 rule 5). Everything else a student
+has - the briefs, teams, materials, receipts and marks - is in the student console, which
+`_data/console.yml` (site.py, off the institution policy) links to this semester's screens.
+No link, no banner: the open-courseware site has none.
+{%- endcomment -%}
+{%- if site.data.console and site.data.console.url -%}
+<p class="console-banner"><a href="{{ site.data.console.url }}"><strong>Open this semester in the student console</strong></a>: assignments and their briefs, your repos, teams, materials and marks.</p>
+{%- endif -%}

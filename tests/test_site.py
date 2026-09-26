@@ -16,9 +16,7 @@ import pytest
 import yaml
 
 from dsl_course import (
-    course,
     discovery,
-    ghcli,
     grades,
     materials,
     schedule_plan,
@@ -37,7 +35,6 @@ from dsl_course.schedule import (
 )
 from dsl_course.setting_readers import read_settings
 from dsl_course.site_repo import Link
-from tests.conftest import BareOrigins
 
 UTC = ZoneInfo("UTC")
 
@@ -73,10 +70,6 @@ def _noacting_login(monkeypatch):
     to `gh` (green on an authenticated dev box, red in tokenless CI). None excludes
     nobody, which is what every test here but the bot-card one wants."""
     monkeypatch.setattr(site_repo, "acting_login", lambda: None)
-
-
-def _sched(releases: list[Release]) -> Schedule:
-    return Schedule(releases=releases)
 
 
 def test_event_entry_renders_a_display_only_schedule_row():
@@ -330,7 +323,7 @@ def test_an_unhanded_out_assignment_is_a_placeholder(monkeypatch):
     assert "**Assignment 1 is not yet released**" in out
 
 
-def test_a_passed_handout_inlines_the_brief(monkeypatch):
+def test_a_passed_handout_is_out_on_the_calendar(monkeypatch):
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Assignment 1\nThe brief."
     )
@@ -342,11 +335,12 @@ def test_a_passed_handout_inlines_the_brief(monkeypatch):
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
         now=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),  # the moment itself is released
     )
-    assert "The brief." in out
-    assert "unreleased: true" not in out
+    # Out, and the site says so - but the brief is the student console's (0011 rule 5).
+    assert "handout_pending" not in out
+    assert "The brief." not in out
 
 
-def test_a_manual_handout_releases_the_brief_with_no_date_pinned(monkeypatch):
+def test_a_manual_handout_is_out_with_no_date_pinned(monkeypatch):
     # The manual button's documented mode pins no handout_datetime at all, so the plan
     # cannot say this went out - the frozen semester template repo it creates is what says
     # so. Gating on the plan alone published these briefs from the day the template
@@ -361,8 +355,8 @@ def test_a_manual_handout_releases_the_brief_with_no_date_pinned(monkeypatch):
         date(2026, 11, 10),
         handed_out=frozenset({"assignment-2"}),
     )
-    assert "The brief." in out
-    assert "unreleased: true" not in out
+    assert "handout_pending" not in out
+    assert "The brief." not in out
 
 
 def test_an_assignment_with_no_handout_on_record_withholds_its_brief(monkeypatch):
@@ -495,23 +489,14 @@ FORMING = datetime(2026, 9, 30, 12, 0, tzinfo=BERLIN)
 SHUT = datetime(2026, 10, 21, 12, 0, tzinfo=BERLIN)
 
 
-def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) -> str:
-    """One assignment's page, off the `grading_config.yml` text `config` and a plan that
+def _team_entry(monkeypatch, config: str, *, now: datetime, **kw) -> str:
+    """One assignment's rows, off the `grading_config.yml` text `config` and a plan that
     hands it out on 22 September and freezes it on 20 October - so `now` alone decides
-    which side of the team-formation window the page is rendered on.
-
-    `teams_csv` is the semester's private teams.csv, as text, so the table of teams the page
-    prints goes through the real parser the rest of the toolkit reads that file with - or a
-    reader of its own, for the page rendered against a file that could not be read."""
+    which side of the team-formation window they are rendered on."""
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Group project\nThe brief."
     )
     monkeypatch.setattr(site, "load_grading_spec", lambda *a, **k: _spec(config))
-    monkeypatch.setattr(
-        site.teams,
-        "_teams_text",
-        teams_csv if callable(teams_csv) else lambda org: teams_csv or None,
-    )
     sched = Schedule(
         assignments={
             "assignment-3": AssignmentEntry(
@@ -549,8 +534,7 @@ def test_an_assignment_waiting_on_its_teams_asks_for_one_instead(monkeypatch):
     # student pressed "Open the submission repo", got an empty list, and the page said
     # nothing at all about the one thing they could do about it.
     out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=FORMING)
-    # The brief stays out. It is what a team would be formed OVER.
-    assert "The brief." in out
+    # Out, and so asking for a team.
     assert "handout_pending" not in out
     # The address STAYS, at both levels. Hiding it for the length of the window would
     # punish the students who acted first: a team formed on day one owns its repo, and
@@ -562,63 +546,19 @@ def test_an_assignment_waiting_on_its_teams_asks_for_one_instead(monkeypatch):
         'team_join_url: "https://github.com/Semester-f2026/join/issues/new/choose"'
         in out
     )
-    # The cap the Join-team form enforces, and the day it stops accepting - the same date
-    # the lock file gives that form's refusal to name, SPOKEN as the mail and the refusal
-    # speak it (`grades.spoken_day`).
-    assert 'team_join_cap: "4"' in out
+    # The day it stops accepting - the same date the lock file gives that form's refusal to
+    # name, SPOKEN as the mail and the refusal speak it (`grades.spoken_day`).
     assert 'team_join_closes: "20th Oct"' in out
 
 
-def test_the_teams_that_exist_are_listed_beside_the_invitation(monkeypatch):
-    # The decision the callout asks for - start a team, or join one - cannot be taken
-    # without knowing what is already there, and teams.csv is private. Names and counts, so
-    # the page answers it without publishing who is in which team.
-    out = _team_entry(
-        monkeypatch,
-        SELF_SELECT_GROUP,
-        now=FORMING,
-        teams_csv=(
-            "assignment,team,github_handle\n"
-            "assignment-3,team-alpha,ada-l\n"
-            "assignment-3,team-alpha,bo-b\n"
-            "assignment-3,team-bravo,cy-c\n"
-        ),
-    )
-    assert "teams:\n" in out
-    assert '  - name: "team-alpha"\n    members: 2\n    cap: 4\n' in out
-    assert '  - name: "team-bravo"\n    members: 1\n    cap: 4\n' in out
-
-
-def test_no_handle_from_teams_csv_reaches_the_public_page(monkeypatch):
-    # The semester site is PUBLIC. A team name is student-chosen and public by construction;
-    # who is in it is not, and neither is the `<slug>-<handle>` repo it would name.
-    out = _team_entry(
-        monkeypatch,
-        SELF_SELECT_GROUP,
-        now=FORMING,
-        teams_csv="assignment,team,github_handle\nassignment-3,team-alpha,ada-l\n",
-    )
-    assert "ada-l" not in out
-
-
-def test_a_window_with_no_teams_yet_prints_no_table(monkeypatch):
-    # Day one, which is most of what this page is for: the invitation goes out and there is
-    # nothing to list. `teams:` is its own presence test, so the layout renders no empty
-    # table rather than a heading over nothing.
+def test_the_calendar_lists_no_team(monkeypatch):
+    # The site is public: the teams so far (names and headcounts) are the student
+    # console's, and nothing about a member - not even a salted digest - is written here.
+    # The site reads no teams.csv at all, so the guard in conftest would refuse the read.
     out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=FORMING)
-    assert "team_join_url" in out and "teams:" not in out
-
-
-def test_a_teams_csv_that_cannot_be_read_still_renders_the_page(monkeypatch, capsys):
-    # teams.csv is student-written and lives behind an API. Neither a broken header nor a
-    # rate limit may take down the render of a semester's whole website - the callout is the
-    # part that matters.
-    def boom(org):
-        raise RuntimeError("API rate limit exceeded")
-
-    out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=FORMING, teams_csv=boom)
-    assert "team_join_url" in out and "teams:" not in out
-    assert "rate limit" in capsys.readouterr().err
+    assert "team_join_url" in out
+    for key in ("teams:", "members", "team_salt"):
+        assert key not in out
 
 
 def test_the_invitation_goes_when_the_window_does(monkeypatch):
@@ -729,7 +669,7 @@ def test_a_pending_external_assignment_offers_nowhere_to_submit_yet(monkeypatch)
     )
     assert out.count('submit_shape: "external"') == 2
     assert "submit_url" not in out
-    assert "is not yet released** - the brief appears here when it is." in out
+    assert out.endswith("_**Assignment 1 is not yet released**._\n")
 
 
 def test_a_public_assignment_says_so_at_both_levels(monkeypatch):
@@ -829,137 +769,18 @@ def test_an_external_assignments_shape_names_no_visibility(monkeypatch):
     assert "visibility" not in out
 
 
-@pytest.mark.parametrize(
-    ("config", "rule"),
-    [
-        (
-            "late_window_days: 7\nlate_penalty_per_day: 10%\n",
-            "10% per day, up to 7 days",
-        ),
-        ("late_window_days: 7\n", "accepted up to 7 days late"),
-        ("late_window_days: 0\n", "not accepted after the deadline"),
-        ("", "10% per day, up to 10 days"),
-    ],
-)
-def test_the_page_carries_the_late_rule_the_assignment_declares(
-    monkeypatch, config, rule
-):
-    # The rule is the assignment's own (`grading_config.yml`), so the page prints what
-    # this assignment's own cutoff will actually do - `course.late_rule`, the same
-    # sentence wherever the toolkit spells the rule rather than the date. A file that
-    # declares neither setting is graded by the Hertie standard and the page says so;
-    # `late_window_days: 0` is the assignment that takes nothing after the deadline.
-    out = _entry_for(monkeypatch, config, handed_out=frozenset({"assignment-1"}))
-    assert f'late_rule: "{rule}"' in out
-
-
-def test_an_assignment_handed_in_off_github_carries_no_late_rule(monkeypatch):
-    # Nothing is TIMED there: no repo is created, so no commit is pinned, no day is
-    # counted and no penalty is ever applied (`course.collects_commits`). The key is the
-    # theme's gate, so writing one would put a rule about a deadline this toolkit does not
-    # hold on the page - and the brief is what says what the hand-in service does.
+def test_the_rules_and_notes_are_the_consoles_not_the_calendars(monkeypatch):
+    # The late rule, the cutoff sentence, the shape note and the points were the
+    # assignment PAGE's, and there is no page (decision 0011 rule 5): the student console
+    # reads them from student-status.json.
     out = _entry_for(
         monkeypatch,
-        "submit_via: external\nlate_window_days: 7\nlate_penalty_per_day: 10%\n",
+        "visibility: public\nlate_window_days: 7\nquestions:\n  Q1: 15\n",
         handed_out=frozenset({"assignment-1"}),
     )
-    assert "late_rule" not in out
-
-
-def test_the_late_rule_is_the_pages_alone_and_not_the_due_rows(monkeypatch):
-    # The due row is a glance at WHEN and WHERE; the rule qualifies an answer the row does
-    # not give, and the page's callout is where that answer is.
-    out = _entry_for(
-        monkeypatch,
-        "late_window_days: 7\nlate_penalty_per_day: 10%\n",
-        handed_out=frozenset({"assignment-1"}),
-    )
-    assert out.count("late_rule:") == 1
-    assert "late_rule" not in out.split("due_event:")[1]
-
-
-def test_every_shape_that_hands_out_a_repo_carries_its_note_on_the_page_alone(
-    monkeypatch,
-):
-    # The aside the layout prints under the brief - one text per shape, off
-    # `course.SHAPE_NOTES`, so the page and the repo's own About line say the same words.
-    # The PAGE alone, like the late rule: the due row is a glance at when and where.
-    for config, shape in (
-        ("", "assignment-repo-private"),
-        ("visibility: public\n", "assignment-repo-public"),
-        ("visibility: student_choice\n", "assignment-repo-student-choice"),
-        ("submit_via: shared_dropbox_repo\n", "shared-dropbox-repo"),
-    ):
-        out = _entry_for(monkeypatch, config, handed_out=frozenset({"assignment-1"}))
-        assert f'shape_note: "{course.shape_note(shape)}"\n' in out
-        assert out.count("shape_note:") == 1
-        assert "shape_note" not in out.split("due_event:")[1]
-
-
-def test_a_pending_assignment_carries_no_shape_note_yet(monkeypatch):
-    # The box would otherwise sit above the "not handed out yet" line, warning about a repo
-    # that does not exist.
-    out = _entry_for(monkeypatch, "visibility: public\n", handed_out=frozenset())
-    assert "shape_note" not in out
-
-
-def test_a_shape_that_hands_out_no_repo_carries_no_note(monkeypatch):
-    # `external` is the one shape left without a note: the work is handed in somewhere
-    # else, so there is no repo for a sentence about who can read it to be about.
-    out = _entry_for(
-        monkeypatch, "submit_via: external\n", handed_out=frozenset({"assignment-1"})
-    )
-    assert "shape_note" not in out
-
-
-def test_the_cutoff_sentence_is_the_pages_alone_and_never_the_external_ones(
-    monkeypatch,
-):
-    # What is marked, in the words the repo's own About line uses (`course.CUTOFF_SENTENCE`
-    # - one text, because a student reads the two minutes apart). Gated like the late rule:
-    # `external` pins no commit, so there is no `main` for a cutoff to be read off.
-    out = _entry_for(monkeypatch, "", handed_out=frozenset({"assignment-1"}))
-    assert f'cutoff_sentence: "{course.CUTOFF_SENTENCE}"\n' in out
-    assert out.count("cutoff_sentence:") == 1
-    assert "cutoff_sentence" not in out.split("due_event:")[1]
-    off_github = _entry_for(
-        monkeypatch, "submit_via: external\n", handed_out=frozenset({"assignment-1"})
-    )
-    assert "cutoff_sentence" not in off_github
-
-
-def test_the_page_carries_the_total_the_questions_add_up_to(monkeypatch):
-    # What the assignment is out of is the assignment's own (`questions:` in
-    # grading_config.yml), summed by the one helper the gradebook sums it with
-    # (`grades.total_points`) - so the page and a student's gradebook cannot print two
-    # different totals. The page alone, like the late rule: the due row is a glance at
-    # WHEN and WHERE.
-    out = _entry_for(
-        monkeypatch,
-        "questions:\n  Q1: 15\n  Q2: 10\n",
-        handed_out=frozenset({"assignment-1"}),
-    )
-    assert 'max_points: "25"' in out
-    assert out.count("max_points:") == 1
-    assert "max_points" not in out.split("due_event:")[1]
-
-
-@pytest.mark.parametrize(
-    "config",
-    [
-        # No `questions:` at all: the assignment declares no maxima, so there is no total.
-        "",
-        # Declared, but not as numbers - a course may mark `Q1` against a rubric. Nothing
-        # adds up, and a page that printed "Worth points" would be worse than no line.
-        "questions:\n  Q1: see rubric\n  Q2: 10\n",
-    ],
-)
-def test_an_assignment_that_declares_no_total_carries_no_points_line(
-    monkeypatch, config
-):
-    # The key's presence is the theme's gate, so an absent key is an absent line.
-    out = _entry_for(monkeypatch, config, handed_out=frozenset({"assignment-1"}))
-    assert "max_points" not in out
+    for key in ("late_rule", "cutoff_sentence", "shape_note", "max_points", "raw %}"):
+        assert key not in out
+    assert out.endswith("---\n\n")
 
 
 def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):
@@ -1035,8 +856,7 @@ def test_an_early_manual_release_beats_a_pin_still_in_the_future(monkeypatch):
         handed_out=frozenset({"assignment-1"}),
         now=datetime(2026, 10, 10, tzinfo=BERLIN),
     )
-    assert "The brief." in out
-    assert "unreleased: true" not in out
+    assert "handout_pending" not in out
 
 
 def test_handed_out_keys_on_the_semester_dest_repo_not_the_slug(monkeypatch):
@@ -1056,7 +876,7 @@ def test_handed_out_keys_on_the_semester_dest_repo_not_the_slug(monkeypatch):
     )
     args = ("Course", "Semester-f2026", "assignment-1-f2026", date(2026, 10, 13))
     found = ("assignment-1", sched.assignments["assignment-1"])
-    assert "The brief." in site._assignment_entry(
+    assert "handout_pending" not in site._assignment_entry(
         *args, found=found, handed_out=frozenset({"homework-1"})
     )
     # the slug is NOT the name it was frozen under, so it must not open the gate
@@ -1754,22 +1574,6 @@ def test_links_block_survives_a_backslash_in_a_filename():
     assert "notes" in parsed["links"][0]["name"]
 
 
-def test_assignment_readme_body_is_fenced_as_liquid_raw(monkeypatch):
-    # A `{% ... %}`/`{{ ... }}` in a README would run as Liquid and a malformed tag fails
-    # the build; the inlined body is fenced.
-    monkeypatch.setattr(
-        site, "get_file_content", lambda *a, **k: "# A1\nUse {{ x }} in your code"
-    )
-    out = site._assignment_entry(
-        "Course",
-        "Semester-f2026",
-        "assignment-1-f2026",
-        date(2026, 11, 10),
-        handed_out=frozenset({"assignment-1"}),  # the README is only inlined once out
-    )
-    assert "{% raw %}" in out and "{% endraw %}" in out
-
-
 # --------------------------------------------- tz-aware display (fix 8)
 
 
@@ -1918,324 +1722,6 @@ def test_a_dispatch_naming_a_closed_out_semester_syncs_nothing(monkeypatch):
         ["site", "sync", "--course-org", "Course", "--semester-org", "Semester-A"],
     )
     assert site.main() == 0
-
-
-# ---------------------------------------------------- public copies of published files
-# What a semester site hosts itself, so an HTML deck renders in a browser instead of showing
-# as source on GitHub. `_mirror_public` is the ONE decision: it says which paths it copied,
-# and every renderer links a hosted copy only for a path it names - so a page cannot offer
-# a rendered copy that a size cap, a denylist or a failed clone stopped being made.
-
-
-@pytest.fixture(autouse=True)
-def _fresh_publish_policy():
-    """The policy memo lives for one sync run, and a test is a run."""
-    site._publish_policy.cache_clear()
-    yield
-    site._publish_policy.cache_clear()
-
-
-@pytest.fixture
-def origins(tmp_path, monkeypatch) -> BareOrigins:
-    """Semester repos as bare repos on disk, with `gh repo clone` reaching them."""
-    world = BareOrigins(tmp_path / "world")
-    monkeypatch.setattr(ghcli, "gh", world.clone_only)
-    return world
-
-
-def _policy(*patterns: str) -> dict[str, tuple]:
-    """Patterns of a source repo released whole into `materials`."""
-    return {"materials": (materials.Feed(patterns, (("", ""),)),)}
-
-
-def _mirror(monkeypatch, origins, tmp_path, tree: dict[str, str], policies):
-    """Mirror a faked semester repo into a site checkout; return (hosted, what it serves).
-
-    Called twice by the tests that are about a SECOND sync: the semester repo is seeded on
-    the first call only and the site checkout is reused, which is the state a re-sync
-    actually runs against."""
-    if tree and "main" not in origins.refs("materials"):
-        origins.commit("materials", tree)
-    monkeypatch.setattr(
-        site, "_repo_tree", lambda org, repo: ("main", tuple(sorted(tree)))
-    )
-    site_wd = tmp_path / "site"
-    hosted = site._mirror_public(site_wd, "Semester-f2026", policies)
-    served = site_wd / site.SITE_FILES_DIR
-    return hosted, sorted(
-        p.relative_to(served).as_posix() for p in served.rglob("*") if p.is_file()
-    )
-
-
-def _one_link(monkeypatch, path, hosted):
-    monkeypatch.setattr(site, "_repo_tree", cache(lambda org, repo: ("main", (path,))))
-    deploy = Deploy("cm", "lectures/01_a", "materials", None)
-    return site._landed("Semester-f2026", deploy, frozenset(), hosted, False).links[0]
-
-
-def test_a_published_file_is_linked_to_the_hosted_copy_and_to_its_source(monkeypatch):
-    # The row a published deck renders as: the NAME opens the site's own copy, `url` is
-    # still the file on GitHub so the template can offer `[source]` beside it.
-    path = "lectures/01_a/slides.html"
-    link = _one_link(monkeypatch, path, {"materials": frozenset({path})})
-    assert link.url == (
-        "https://github.com/Semester-f2026/materials/blob/main/lectures/01_a/slides.html"
-    )
-    assert link.view_url == (
-        "https://semester-f2026.github.io/files/materials/lectures/01_a/slides.html"
-    )
-
-
-@pytest.mark.parametrize(
-    ("path", "linked"),
-    [
-        ("lectures/01_a/slides.html", True),
-        ("lectures/01_a/slides.pdf", True),
-        # Copied, but GitHub already renders it - a second copy would only be a second
-        # place for it to go stale, so the row is left exactly as it was.
-        ("lectures/01_a/lab.ipynb", False),
-    ],
-)
-def test_only_a_format_a_browser_renders_is_linked_to_its_copy(
-    monkeypatch, path, linked
-):
-    link = _one_link(monkeypatch, path, {"materials": frozenset({path})})
-    assert bool(link.view_url) is linked
-
-
-def test_a_file_that_was_not_copied_is_never_linked_to_a_copy(monkeypatch):
-    # The whole point of reading what the mirror DID: a deck dropped for its size, or
-    # left behind by a clone that failed, must render as today's row rather than as a 404.
-    assert _one_link(monkeypatch, "lectures/01_a/slides.html", {}).view_url == ""
-
-
-def test_a_course_that_publishes_nothing_writes_the_front_matter_it_always_did():
-    # The golden: every semester site alive today publishes nothing, and its rows must come
-    # out byte for byte as they did before any of this existed.
-    block = site_repo.links_block(
-        [("lectures", [Link("slides.pdf", "https://github.com/o/r/blob/main/s.pdf")])]
-    )
-    assert block == (
-        "links:\n"
-        "    - url: https://github.com/o/r/blob/main/s.pdf\n"
-        '      name: "slides.pdf"\n'
-        '      section: "lecture"'
-    )
-
-
-def test_a_published_decks_bundle_follows_it(monkeypatch, origins, tmp_path):
-    # A Quarto deck is one deliverable plus a `<stem>_files/` directory its renderer
-    # invented. Copied without it, the deck loads with no figures and no styles - and no
-    # faculty member should have to write a pattern for a folder they did not name.
-    tree = {
-        "lectures/01_a/slides.html": "deck",
-        "lectures/01_a/slides_files/figure/plot.svg": "<svg/>",
-        "lectures/01_a/notes.md": "notes",
-    }
-    hosted, served = _mirror(
-        monkeypatch, origins, tmp_path, tree, _policy("lectures/**/*.html")
-    )
-    assert served == [
-        "materials/lectures/01_a/slides.html",
-        "materials/lectures/01_a/slides_files/figure/plot.svg",
-    ]
-    assert hosted["materials"] == frozenset(
-        {"lectures/01_a/slides.html", "lectures/01_a/slides_files/figure/plot.svg"}
-    )
-
-
-def test_a_denylisted_path_is_never_copied_however_wide_the_pattern(
-    monkeypatch, origins, tmp_path
-):
-    # `everything x all files` is a real answer on the form, and it must not be able to
-    # put a solution, a hidden test or a `.env` on a public site.
-    tree = {
-        "lectures/01_a/slides.html": "deck",
-        "lectures/01_a/solution/answers.pdf": "answers",
-        "tests/test_hidden.py": "assert True\n",
-        ".env": "KEY=example",
-        "lectures/01_a/.DS_Store": "junk",
-    }
-    _hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, _policy("**"))
-    assert served == ["materials/lectures/01_a/slides.html"]
-
-
-def test_removing_a_pattern_removes_the_copy(monkeypatch, origins, tmp_path):
-    # Unpublishing is deleting the pattern: the mirror is rebuilt every sync, so what is
-    # no longer matched stops being served.
-    tree = {"lectures/01_a/slides.html": "deck", "labs/01_a/lab.html": "lab"}
-    _hosted, served = _mirror(
-        monkeypatch, origins, tmp_path, tree, _policy("**/*.html")
-    )
-    assert served == [
-        "materials/labs/01_a/lab.html",
-        "materials/lectures/01_a/slides.html",
-    ]
-    _hosted, served = _mirror(
-        monkeypatch, origins, tmp_path, tree, _policy("lectures/**/*.html")
-    )
-    assert served == ["materials/lectures/01_a/slides.html"]
-    # And declaring nothing public takes the whole mirror with it - without a clone, since
-    # nothing has to be read to know it.
-    monkeypatch.setattr(site, "clone", _never_cloned)
-    hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, {"materials": ()})
-    assert (hosted, served) == ({}, [])
-
-
-def _never_cloned(*_a, **_k):
-    raise AssertionError("cloned a repo with nothing declared public")
-
-
-def test_a_course_with_no_publish_file_is_never_cloned(monkeypatch, origins, tmp_path):
-    # The cost of this feature on a course that does not use it has to be zero: no clone,
-    # no copy, no directory.
-    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
-    monkeypatch.setattr(site, "clone", _never_cloned)
-    policies = site._publish_policies("Course-Org", _one_deploy(), ["materials"])
-    assert policies == {
-        "materials": (materials.Feed((), (("lectures/01_a", "lectures/01_a"),)),)
-    }
-    assert _mirror(monkeypatch, origins, tmp_path, {}, policies) == ({}, [])
-
-
-def _one_deploy() -> Schedule:
-    return Schedule(
-        releases=[
-            Release(
-                "s1",
-                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
-                deploy=[Deploy("course-materials-f2026", "lectures/01_a", "materials")],
-            )
-        ]
-    )
-
-
-def test_a_policy_that_does_not_parse_stops_the_sync(monkeypatch):
-    # Syntactically a bad indent is indistinguishable from "nothing public", and reading
-    # it that way would unpublish a whole course's decks over a typo - on a green run,
-    # since the rest of the site syncs fine. So it fails loudly, like instructors.yml: nothing
-    # is republished and nothing is wiped.
-    def boom(*_a):
-        raise yaml.YAMLError("mapping values are not allowed here")
-
-    monkeypatch.setattr(site, "yaml_file", boom)
-    with pytest.raises(yaml.YAMLError):
-        site._publish_policies("Course-Org", _one_deploy(), ["materials"])
-
-    monkeypatch.setattr(site, "yaml_file", lambda *a: {"public": "lectures/**"})
-    with pytest.raises(ValueError, match="must be a list of patterns"):
-        site._publish_policies("Course-Org", _one_deploy(), ["materials"])
-
-
-def test_a_file_github_would_refuse_is_skipped_rather_than_failing_the_sync(
-    monkeypatch, origins, tmp_path, capsys
-):
-    # One 200 MB recording in a materials repo would otherwise fail the site's own push
-    # and take the whole semester site offline - for a file that is still on GitHub.
-    monkeypatch.setattr(site, "_MAX_PUBLIC_FILE_BYTES", 8)
-    tree = {"lectures/01_a/recording.pdf": "x" * 64, "lectures/01_a/slides.html": "d"}
-    hosted, served = _mirror(
-        monkeypatch, origins, tmp_path, tree, _policy("lectures/**")
-    )
-    assert served == ["materials/lectures/01_a/slides.html"]
-    assert "recording.pdf" not in hosted["materials"]
-    out = capsys.readouterr()
-    assert "recording.pdf" in out.err and "::warning::" in out.err
-
-
-def test_a_clone_that_failed_leaves_the_last_syncs_copies_standing(
-    monkeypatch, origins, tmp_path, capsys
-):
-    # Delete-and-rebuild, in that order and only after the clone: a site republished with
-    # every rendered deck missing because one clone failed is the worse outage.
-    tree = {"lectures/01_a/slides.html": "deck"}
-    policy = _policy("lectures/**/*.html")
-    _hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, policy)
-    assert served == ["materials/lectures/01_a/slides.html"]
-    monkeypatch.setattr(site, "clone", lambda *a, **k: False)
-    hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, policy)
-    # The copies stand, and nothing links them: a stale file nobody points at beats a
-    # page full of dead links.
-    assert served == ["materials/lectures/01_a/slides.html"] and hosted == {}
-    assert "could not clone" in capsys.readouterr().err
-
-
-def test_the_policy_is_read_from_the_source_repo_the_plan_names(monkeypatch):
-    # Course-level, in the repo faculty actually edit - keyed on the semester DESTINATION,
-    # which is the repo whose files the site links and whose bytes get copied.
-    asked: list[tuple[str, str, str]] = []
-
-    def yaml_file(org, repo, path):
-        asked.append((org, repo, path))
-        return {"public": ["lectures/**/*.html"]}
-
-    monkeypatch.setattr(site, "yaml_file", yaml_file)
-    sched = _one_deploy()
-    sched.releases[0].deploy.append(Deploy("course-code-f2026", "src", "code"))
-    policies = site._publish_policies("Course-Org", sched, ["materials"])
-    # The `code` destination is not one of this semester's content repos, so it is not asked
-    # about at all.
-    assert asked == [("Course-Org", "course-materials-f2026", "publish.yml")]
-    assert policies["materials"] == (
-        materials.Feed(("lectures/**/*.html",), (("lectures/01_a", "lectures/01_a"),)),
-    )
-
-
-def test_a_renamed_copy_is_hosted_by_the_pattern_written_for_its_source(
-    monkeypatch, origins, tmp_path
-):
-    # The instructor writes `publish.yml` against their own repo, as the console previews
-    # it. A release that renames `lectures/01_a` to `week-1` in the semester still hosts
-    # the deck, and a pattern written for the SEMESTER's name no longer matches.
-    monkeypatch.setattr(
-        site, "yaml_file", lambda *a: {"public": ["lectures/**/*.html"]}
-    )
-    sched = Schedule(
-        releases=[
-            Release(
-                "s1",
-                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
-                deploy=[
-                    Deploy(
-                        "course-materials-f2026", "lectures/01_a", "materials", "week-1"
-                    )
-                ],
-            )
-        ]
-    )
-    policies = site._publish_policies("Course-Org", sched, ["materials"])
-    tree = {"week-1/slides.html": "deck", "week-1/slides_files/a.css": "css"}
-    hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, policies)
-    assert served == [
-        "materials/week-1/slides.html",
-        "materials/week-1/slides_files/a.css",
-    ]
-    assert hosted["materials"] == frozenset(tree)
-
-
-def test_a_repo_with_no_publish_file_still_owns_the_folder_it_lands_in(monkeypatch):
-    # The review's case: the code repo has no publish.yml, and its files under the
-    # materials repo's `lectures/` must not be hosted by the materials repo's patterns.
-    monkeypatch.setattr(
-        site,
-        "yaml_file",
-        lambda org, repo, path: {"public": ["lectures/**"]} if repo == "cm" else {},
-    )
-    sched = Schedule(
-        releases=[
-            Release(
-                "s1",
-                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
-                deploy=[
-                    Deploy("cm", "lectures", "materials"),
-                    Deploy("dldemo", "", "materials", "lectures/05/code"),
-                ],
-            )
-        ]
-    )
-    feeds = site._publish_policies("Course-Org", sched, ["materials"])["materials"]
-    paths = ("lectures/05/slides.pdf", "lectures/05/code/serving.py")
-    assert materials.hosted_copy(paths, feeds) == {"lectures/05/slides.pdf"}
 
 
 def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(
@@ -2546,17 +2032,6 @@ def test_the_archive_row_can_be_renamed_and_marked_provisional():
     assert "date: 2027-02-16T09:00:00" in out
 
 
-def test_a_team_member_is_published_as_a_salted_digest_of_their_handle():
-    # The page's script hashes its reader's saved handle the same way to recognise their
-    # team, so this vector is the contract between the two sides: sha256 of
-    # `<semester org>:<handle, lower-cased>`, hex.
-    vector = "49565f39eed5ad0a289c5291fa1b3540c44ccd9205c0c78550ca21ab1d328dc8"
-    assert site.member_digest("Cohort-f2026", "ada-l") == vector
-    assert site.member_digest("Cohort-f2026", "Ada-L") == vector
-    # Salted with the org: the same student is a different digest in another semester.
-    assert site.member_digest("Semester-s2027", "ada-l") != vector
-
-
 # ------------------------------------------------------------ rows from schedule entries
 # A row is a `releases:` entry: dated, named and kinded by the entry, linking whatever its
 # copies landed. The three layouts real courses have must all render without loss.
@@ -2616,7 +2091,6 @@ def _layout(monkeypatch, name: str) -> tuple[dict[str, dict], tuple[str, ...]]:
         "S",
         schedule_plan.planned_rows(sched),
         frozenset(),
-        {},
         frozenset({"materials"}),
     )
     return {name: _front(text) for name, text in out.items()}, tree

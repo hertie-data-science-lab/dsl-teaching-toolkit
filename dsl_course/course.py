@@ -36,6 +36,11 @@ OLD_CONFIG_REPO = "classroom-config"
 # builds it); the ones sent before decision 0010 name `welcome`, which GitHub redirects here
 # for as long as no repo takes that name again.
 JOIN_REPO = "join"
+# The hidden first line of a Join issue the student console opens through the API. GitHub
+# drops a form's routing label on an issue created that way by an account without push, so
+# each join workflow runs on its marker as well as on the label the web form still applies.
+JOIN_COURSE_MARKER = "<!-- dsl:join-course -->"
+JOIN_TEAM_MARKER = "<!-- dsl:join-team -->"
 OLD_JOIN_REPO = "welcome"
 RETIRED_REPO_NAMES = frozenset({OLD_CONFIG_REPO, OLD_JOIN_REPO})
 # The per-student gradebook repo: grades-<handle> (grades.py creates them, discovery reads

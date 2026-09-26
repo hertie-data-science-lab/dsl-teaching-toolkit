@@ -1713,6 +1713,7 @@ def team_lock_text(entries: dict[str, tuple[str, int, str, str, str]]) -> str:
 # The shape `team_lock_text` writes, read back: a two-space key, four-space scalars under
 # it. Every scalar, in one scan, so a second Python caller wanting a different one of them
 # needs no second scanner 250 lines from the writer.
+_LOCK_COMMENT_RE = re.compile(r"(^|\s)#.*$")
 _LOCK_KEY_RE = re.compile(r"^ {2}([\w.-]+):$")
 _LOCK_SCALAR_RE = re.compile(r"^ {4}([\w.-]+):\s*(.*)$")
 
@@ -1731,7 +1732,9 @@ def parse_team_lock(text: str) -> dict[str, dict[str, str]]:
     entries: dict[str, dict[str, str]] = {}
     current: dict[str, str] | None = None
     for raw in text.splitlines():
-        line = raw.split("#", 1)[0].rstrip()
+        # A comment is a `#` at the start or after a space, as in YAML: the page URL
+        # carries a `#join` fragment.
+        line = _LOCK_COMMENT_RE.sub("", raw).rstrip()
         found = _LOCK_KEY_RE.match(line)
         if found:
             current = entries.setdefault(found.group(1), {})

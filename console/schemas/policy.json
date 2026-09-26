@@ -17,6 +17,7 @@
   },
   "institution": {
     "address": "Data Science Lab\nHertie School\nFriedrichstra\u00dfe 180\n10117 Berlin, Germany\n",
+    "console_url": "https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/",
     "dsl_org_url": "https://github.com/hertie-data-science-lab",
     "name": "Hertie School",
     "url": "https://hertie-school.org/en/datasciencelab"

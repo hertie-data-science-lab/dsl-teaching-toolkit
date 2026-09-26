@@ -32,14 +32,16 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
       - a `publish.yml` 
       >It also seeds the two run-from-repo Release workflows (Release materials, Release assignment). 
    - `public_dirs` / `public_types` (optional) fill in that `publish.yml`: which folders,
-     and which file types out of them, the semester site may **host publicly** so they open
-     rendered in a browser instead of showing as source on GitHub. Both default to
-     publishing nothing. "lectures" and "readings" mean the folders of that kind (the
+     and which file types out of them, the **public website** may publish, so they open
+     rendered in a browser instead of showing as source on GitHub. Both default to publishing nothing.
+     "lectures" and "readings" mean the folders of that kind (the
      folder names below), not folders of that name. Everything unmatched stays private
      to enrolled students, exactly as today; `solution/`, `tests/`, grading files and
      `.env` are never hosted whatever you write. Unlike `.gitignore`, a negated folder
      (`!labs/sub/`) excludes its whole subtree. Edit `publish.yml` afterwards - no workflow rewrites it, and it applies to
-     every semester of this course ([11](11-configure-cohort-site.md)).
+     every semester of this course. It is not used yet: the toolkit records the selection
+     until the public website is rebuilt. The semester site is a calendar and hosts nothing
+     ([11](11-configure-cohort-site.md)).
    - `copy_from` (optional) starts the new repo as an existing materials repo instead
      of as the skeleton - every branch, every file, the whole history. Your content arrives
      as you left it; only `.system/` and the workflows are
@@ -70,7 +72,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    *NB: a session folder is released whole, subfolders included ([11](11-configure-cohort-site.md)).*
 
-   *NB: material no schedule entry names (a manual release, a flat `datasets/`) appears on the semester site's **All Materials** tab.*
+   *NB: material no schedule entry names (a manual release, a flat `datasets/`) appears in the student console's **Materials**.*
 
    *NB: this repo stays the source of truth, but a release is now a MERGE - so a fix typed into the semester's copy survives, and **Propagate semester edits** offers it back here as a pull request ([08](08-release-materials-to-cohort.md#carrying-semester-edits-back)).*
 

@@ -1,0 +1,410 @@
+{
+  "schema": "dsl.student-status/1",
+  "semester": "hertie-dsl-demo-f2026",
+  "course_name": "Deep Learning",
+  "term_label": "Fall 2026",
+  "timezone": "Europe/Berlin",
+  "archive_datetime": "2027-01-31",
+  "home_markdown": "# Deep Learning\n\nWelcome.",
+  "syllabus": {
+    "repo": "materials",
+    "path": "SYLLABUS.md"
+  },
+  "kinds": {
+    "lecture": {
+      "label": "Lecture",
+      "colour": "#a94442",
+      "background": "#f2dede"
+    },
+    "lab": {
+      "label": "Lab",
+      "colour": "#3c763d",
+      "background": "#dff0d8"
+    },
+    "readings": {
+      "label": "Readings",
+      "colour": "#2b6a60",
+      "background": "#dcefec"
+    },
+    "exam": {
+      "label": "Exam",
+      "colour": "#5a5f66",
+      "background": "#f0f1f2"
+    },
+    "assignment": {
+      "label": "Assignment",
+      "colour": "#31708f",
+      "background": "#d9edf7"
+    },
+    "term": {
+      "label": "Semester",
+      "colour": "#59468f",
+      "background": "#e5dcf0"
+    },
+    "archive": {
+      "label": "Archive",
+      "colour": "#7d6230",
+      "background": "#fbf2d5"
+    },
+    "drop-in": {
+      "label": "Drop-in",
+      "colour": "#8f4a1c",
+      "background": "#fbe3d6"
+    },
+    "other": {
+      "label": "Event",
+      "colour": "#7d6230",
+      "background": "#fbf2d5"
+    }
+  },
+  "rows": [
+    {
+      "id": "term-start",
+      "kind": "term_date",
+      "number": null,
+      "when": "2026-09-07",
+      "all_day": true,
+      "title": "Semester starts",
+      "subtitle": "",
+      "details": "",
+      "assignment": null,
+      "released": true,
+      "tbc": false,
+      "off_schedule": false,
+      "links": [],
+      "readings": [],
+      "reading_list": "",
+      "readings_pending": false
+    },
+    {
+      "id": "lecture_01",
+      "kind": "lecture",
+      "number": 1,
+      "when": "2026-09-08T10:00:00+02:00",
+      "all_day": false,
+      "title": "Lecture 1",
+      "subtitle": "Intro",
+      "details": "",
+      "assignment": null,
+      "released": true,
+      "tbc": false,
+      "off_schedule": false,
+      "links": [
+        {
+          "name": "slides.pdf",
+          "repo": "materials",
+          "path": "lectures/01_intro/slides.pdf",
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/HEAD/lectures/01_intro/slides.pdf"
+        },
+        {
+          "name": "code/ (2 files)",
+          "repo": "materials",
+          "path": "lectures/01_intro/code",
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/tree/HEAD/lectures/01_intro/code"
+        },
+        {
+          "name": "paper.pdf",
+          "repo": "materials",
+          "path": "readings/01_intro/paper.pdf",
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/HEAD/readings/01_intro/paper.pdf"
+        }
+      ],
+      "readings": [
+        {
+          "name": "paper.pdf",
+          "repo": "materials",
+          "path": "readings/01_intro/paper.pdf",
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/HEAD/readings/01_intro/paper.pdf"
+        }
+      ],
+      "reading_list": "### Read\n\nChapter 1.",
+      "readings_pending": false
+    },
+    {
+      "id": "assignment-1:handout",
+      "kind": "assignment",
+      "number": null,
+      "when": "2026-09-15T10:00:00+02:00",
+      "all_day": false,
+      "title": "Assignment 1",
+      "subtitle": "",
+      "details": "",
+      "assignment": "assignment-1",
+      "released": true,
+      "tbc": false,
+      "off_schedule": false,
+      "links": [],
+      "readings": [],
+      "reading_list": "",
+      "readings_pending": false
+    },
+    {
+      "id": "assignment-2-project:handout",
+      "kind": "assignment",
+      "number": null,
+      "when": "2026-09-20T10:00:00+02:00",
+      "all_day": false,
+      "title": "Assignment 2 Project",
+      "subtitle": "",
+      "details": "",
+      "assignment": "assignment-2-project",
+      "released": true,
+      "tbc": false,
+      "off_schedule": false,
+      "links": [],
+      "readings": [],
+      "reading_list": "",
+      "readings_pending": false
+    },
+    {
+      "id": "assignment-1:due",
+      "kind": "due",
+      "number": null,
+      "when": "2026-09-27T23:59:00+02:00",
+      "all_day": false,
+      "title": "Assignment 1",
+      "subtitle": "",
+      "details": "",
+      "assignment": "assignment-1",
+      "released": true,
+      "tbc": false,
+      "off_schedule": false,
+      "links": [],
+      "readings": [],
+      "reading_list": "",
+      "readings_pending": false
+    },
+    {
+      "id": "lecture_02",
+      "kind": "lecture",
+      "number": 2,
+      "when": "2026-09-30T10:00:00+02:00",
+      "all_day": false,
+      "title": "Lecture 2",
+      "subtitle": "",
+      "details": "",
+      "assignment": null,
+      "released": false,
+      "tbc": false,
+      "off_schedule": false,
+      "links": [],
+      "readings": [],
+      "reading_list": "",
+      "readings_pending": false
+    },
+    {
+      "id": "assignment-3:handout",
+      "kind": "assignment",
+      "number": null,
+      "when": "2026-10-20T10:00:00+02:00",
+      "all_day": false,
+      "title": "Assignment 3",
+      "subtitle": "",
+      "details": "",
+      "assignment": "assignment-3",
+      "released": true,
+      "tbc": false,
+      "off_schedule": false,
+      "links": [],
+      "readings": [],
+      "reading_list": "",
+      "readings_pending": false
+    },
+    {
+      "id": "midterm",
+      "kind": "exam",
+      "number": null,
+      "when": "2026-10-28T09:00:00+01:00",
+      "all_day": false,
+      "title": "Midterm",
+      "subtitle": "",
+      "details": "",
+      "assignment": null,
+      "released": true,
+      "tbc": false,
+      "off_schedule": false,
+      "links": [],
+      "readings": [],
+      "reading_list": "",
+      "readings_pending": false
+    },
+    {
+      "id": "assignment-2-project:due",
+      "kind": "due",
+      "number": null,
+      "when": "2026-10-30T23:59:00+01:00",
+      "all_day": false,
+      "title": "Assignment 2 Project",
+      "subtitle": "",
+      "details": "",
+      "assignment": "assignment-2-project",
+      "released": true,
+      "tbc": false,
+      "off_schedule": false,
+      "links": [],
+      "readings": [],
+      "reading_list": "",
+      "readings_pending": false
+    },
+    {
+      "id": "assignment-3:due",
+      "kind": "due",
+      "number": null,
+      "when": "2026-11-01T23:59:00+01:00",
+      "all_day": false,
+      "title": "Assignment 3",
+      "subtitle": "",
+      "details": "",
+      "assignment": "assignment-3",
+      "released": true,
+      "tbc": false,
+      "off_schedule": false,
+      "links": [],
+      "readings": [],
+      "reading_list": "",
+      "readings_pending": false
+    },
+    {
+      "id": "term-end",
+      "kind": "term_date",
+      "number": null,
+      "when": "2026-12-18",
+      "all_day": true,
+      "title": "Semester ends",
+      "subtitle": "",
+      "details": "",
+      "assignment": null,
+      "released": true,
+      "tbc": false,
+      "off_schedule": false,
+      "links": [],
+      "readings": [],
+      "reading_list": "",
+      "readings_pending": false
+    }
+  ],
+  "assignments": [
+    {
+      "slug": "assignment-1",
+      "title": "Assignment 1",
+      "subtitle": "Linear regression",
+      "handout_datetime": "2026-09-15T10:00:00+02:00",
+      "due_datetime": "2026-09-27T23:59:00+02:00",
+      "grading_cutoff_datetime": "2026-10-07T23:59:00+02:00",
+      "late_rule": "10% per day, up to 10 days",
+      "cutoff_sentence": "What is on main at the late cutoff is what is marked.",
+      "submit_via": "assignment_repo",
+      "shape": "assignment-repo-private",
+      "shape_note": "NB: this repo is private - only you and the instructors can read it.",
+      "private_repo": true,
+      "submit_url": "",
+      "group": false,
+      "team_formation": null,
+      "teams": [],
+      "solution_datetime": null,
+      "max_points": null,
+      "handed_out": true,
+      "brief": "Fit a line.",
+      "tbc": false
+    },
+    {
+      "slug": "assignment-2-project",
+      "title": "Assignment 2 Project",
+      "subtitle": "Project",
+      "handout_datetime": "2026-09-20T10:00:00+02:00",
+      "due_datetime": "2026-10-30T23:59:00+01:00",
+      "grading_cutoff_datetime": "2026-11-09T23:59:00+01:00",
+      "late_rule": "10% per day, up to 10 days",
+      "cutoff_sentence": "What is on main at the late cutoff is what is marked.",
+      "submit_via": "assignment_repo",
+      "shape": "assignment-repo-private",
+      "shape_note": "NB: this repo is private - only you and the instructors can read it.",
+      "private_repo": true,
+      "submit_url": "",
+      "group": true,
+      "team_formation": {
+        "closes_datetime": "2026-11-09T23:59:00+01:00",
+        "max_team_size": 3
+      },
+      "teams": [
+        {
+          "name": "red-team",
+          "members": 2,
+          "cap": 3
+        }
+      ],
+      "solution_datetime": null,
+      "max_points": 10,
+      "handed_out": true,
+      "brief": "Build it.",
+      "tbc": false
+    },
+    {
+      "slug": "assignment-3",
+      "title": "Assignment 3",
+      "subtitle": "",
+      "handout_datetime": "2026-10-20T10:00:00+02:00",
+      "due_datetime": "2026-11-01T23:59:00+01:00",
+      "grading_cutoff_datetime": "2026-11-11T23:59:00+01:00",
+      "late_rule": "10% per day, up to 10 days",
+      "cutoff_sentence": "What is on main at the late cutoff is what is marked.",
+      "submit_via": "assignment_repo",
+      "shape": "assignment-repo-private",
+      "shape_note": "",
+      "private_repo": true,
+      "submit_url": "",
+      "group": false,
+      "team_formation": null,
+      "teams": [],
+      "solution_datetime": null,
+      "max_points": null,
+      "handed_out": false,
+      "brief": "",
+      "tbc": false
+    }
+  ],
+  "instructors": [
+    {
+      "name": "Prof X",
+      "title": "Professor",
+      "webpage": "https://example.org/x",
+      "picture": "https://hertie-dsl-demo-f2026.github.io/_images/pp/x.jpg",
+      "role": "instructor",
+      "email": "shown@hertie-school.org"
+    },
+    {
+      "name": "Tee A",
+      "title": "",
+      "webpage": "",
+      "picture": "",
+      "role": "teaching_assistant",
+      "email": ""
+    }
+  ],
+  "late_policy": [
+    "10% per day, up to 10 days"
+  ],
+  "materials_repos": [
+    "materials"
+  ],
+  "materials_index": [
+    {
+      "repo": "materials",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/code/a.py",
+        "lectures/01_intro/code/b.py",
+        "lectures/01_intro/slides.pdf",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf"
+      ]
+    }
+  ],
+  "announcements": [
+    {
+      "when": "2026-09-20",
+      "title": "Room change",
+      "details": "B1"
+    }
+  ]
+}

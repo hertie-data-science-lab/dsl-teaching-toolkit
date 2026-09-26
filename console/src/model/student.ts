@@ -1,11 +1,11 @@
 // What a student's screens know about a semester that is the same for every student: the
 // schedule rows with their kinds and readings, the assignments' dates, rules, briefs and
 // team lists (names and headcounts only), the instructors' cards, the home text and
-// announcements, the archive date. It comes through ONE interface, `StudentData`, because its source will
-// change: today it is the public site repo's generated files (`SiteSource`); once the engine
-// writes `.github/.system/student-status.json` (WP-D4), a source reading that one file
-// replaces it and no screen changes. The semester's own `status.json` is private
-// (the semester's config repo), so a student can never read it.
+// announcements, the archive date. It comes through ONE interface, `StudentData`. The source
+// is the engine's public `.github/.system/student-status.json` in the semester org
+// (`StatusFileSource`); a semester whose engine has not written one yet falls back to the
+// public site repo's generated files (`SiteSource`). The semester's own `status.json` is
+// private (the semester's config repo), so a student can never read it.
 //
 // A student's own facts (their repos, team, receipts, gradebook) do not come from here:
 // they come from GitHub directly, with the student's token (`model/mine.ts`).
@@ -14,6 +14,7 @@ import { parse } from 'yaml';
 import type { DirEntry, GitHubClient } from '../github/client';
 import { addDays, str } from './format';
 import { DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from './policy';
+import { COURSE_REPO, STUDENT_STATUS_PATH } from './names';
 
 /** One row of the semester calendar. `when` is wall-clock time in the semester's timezone ("2026-09-22T10:00:00") or a full ISO instant. */
 export interface ScheduleRow {
@@ -136,6 +137,14 @@ export interface SemesterFacts {
   announcements: Announcement[];
   /** The released syllabus, pinned; null when none has been released. */
   syllabus: FileLink | null;
+  /** The institution's row kinds (label and colours), when the source carries them. */
+  kinds?: Record<string, RowKind>;
+}
+
+export interface RowKind {
+  label: string;
+  colour: string;
+  background: string;
 }
 
 /** Where a student's screens get the semester's shared facts. */
@@ -450,6 +459,136 @@ export class SiteSource implements StudentData {
       announcements,
       syllabus: syllabus ? { name: sp ? (sp.path.split('/').pop() ?? sp.path) : 'Syllabus', url: syllabus, ...(sp ?? {}) } : null,
     };
+  }
+}
+
+// --------------------------------------------------------------------------- the status file
+
+/** `student-status.json` (`dsl.student-status/1`), as the engine writes it (`dsl_course/student_status.py`). */
+export const STUDENT_STATUS_SCHEMA = 'dsl.student-status/1';
+
+type Obj = Record<string, unknown>;
+const arr = (v: unknown): Obj[] => (Array.isArray(v) ? (v as Obj[]) : []);
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+function linkOf(l: Obj): FileLink {
+  return { name: str(l.name), repo: str(l.repo) || undefined, path: str(l.path) || undefined, url: str(l.url) };
+}
+
+/** The status file as the screens' model. Readings are the same objects as the row's links they repeat, so a screen that shows the rest of the files can tell them apart. */
+export function factsFromStatus(doc: Obj): SemesterFacts {
+  const rows: ScheduleRow[] = arr(doc.rows).filter((r) => r.when && r.off_schedule !== true).map((r) => {
+    const links = arr(r.links).map(linkOf);
+    const readings = arr(r.readings).map((x) => links.find((l) => l.repo === str(x.repo) && l.path === str(x.path)) ?? linkOf(x));
+    return {
+      id: str(r.id),
+      kind: str(r.kind),
+      when: str(r.when),
+      allDay: r.all_day === true,
+      title: str(r.title),
+      subtitle: str(r.subtitle),
+      details: str(r.details),
+      assignment: r.assignment ? str(r.assignment) : undefined,
+      released: r.released === true,
+      links,
+      tbc: r.tbc === true,
+      readings,
+      readingList: str(r.reading_list).trim(),
+      readingsPending: r.readings_pending === true,
+    };
+  });
+  const assignments: SemesterAssignment[] = arr(doc.assignments).map((a) => {
+    const tf = a.team_formation as Obj | null | undefined;
+    const via = str(a.submit_via);
+    const cap = tf ? num(tf.max_team_size) : null;
+    return {
+      slug: str(a.slug),
+      title: str(a.title),
+      subtitle: str(a.subtitle),
+      handout: a.handout_datetime ? str(a.handout_datetime) : null,
+      due: a.due_datetime ? str(a.due_datetime) : null,
+      lateCutoff: a.grading_cutoff_datetime ? str(a.grading_cutoff_datetime) : null,
+      lateRule: str(a.late_rule),
+      cutoffSentence: str(a.cutoff_sentence),
+      submitVia: via === 'assignment_repo' || via === 'shared_dropbox_repo' || via === 'external' ? via : '',
+      privateRepo: a.private_repo === true,
+      submitUrl: str(a.submit_url),
+      group: a.group === true,
+      teamFormation: tf ? { closes: str(tf.closes_datetime), cap } : null,
+      solutionShown: a.solution_datetime ? str(a.solution_datetime) : null,
+      maxPoints: num(a.max_points) === null ? '' : String(a.max_points),
+      handedOut: a.handed_out === true,
+      brief: str(a.brief),
+      shape: str(a.shape),
+      shapeNote: str(a.shape_note),
+      tbc: a.tbc === true,
+      teams: arr(a.teams).map((t) => ({ name: str(t.name), members: num(t.members) ?? 0, cap: num(t.cap) ?? cap })).filter((t) => t.name),
+    };
+  });
+  const syl = doc.syllabus as Obj | null | undefined;
+  const syllabusPath = syl ? str(syl.path) : '';
+  const kinds: Record<string, RowKind> = {};
+  for (const [k, v] of Object.entries((doc.kinds as Record<string, Obj> | undefined) ?? {})) kinds[k] = { label: str(v.label), colour: str(v.colour), background: str(v.background) };
+  const org = str(doc.semester);
+  return {
+    courseName: str(doc.course_name),
+    timezone: str(doc.timezone) || DEFAULT_TIMEZONE,
+    rows,
+    assignments,
+    instructors: arr(doc.instructors).map((c) => ({
+      name: str(c.name), title: str(c.title), webpage: str(c.webpage), picture: str(c.picture),
+      role: c.role === 'teaching_assistant' ? 'teaching_assistant' as const : 'instructor' as const, email: str(c.email),
+    })).filter((c) => c.name),
+    archive: doc.archive_datetime ? str(doc.archive_datetime) : null,
+    latePolicy: (Array.isArray(doc.late_policy) ? doc.late_policy : []).map(str).filter(Boolean),
+    materialsRepos: (Array.isArray(doc.materials_repos) ? doc.materials_repos : []).map(str).filter(Boolean),
+    homeMarkdown: str(doc.home_markdown),
+    announcements: arr(doc.announcements).map((a) => ({ when: str(a.when), title: str(a.title), details: str(a.details) })).sort((a, b) => instant(b.when) - instant(a.when)),
+    syllabus: syl && syllabusPath ? { name: syllabusPath.split('/').pop() ?? syllabusPath, repo: str(syl.repo), path: syllabusPath, url: `https://github.com/${org}/${str(syl.repo)}/blob/HEAD/${syllabusPath}` } : null,
+    kinds,
+  };
+}
+
+/**
+ * The engine's public file for students, `<org>/.github/.system/student-status.json`: one read,
+ * ETag'd. A semester whose engine has not written it yet is read from its site (`SiteSource`),
+ * which also serves the site-hosted instructor pictures.
+ */
+export class StatusFileSource implements StudentData {
+  private memo = new Map<string, { at: number; p: Promise<SemesterFacts | null> }>();
+  private readonly site: SiteSource;
+
+  constructor(
+    private readonly client: GitHubClient,
+    private readonly clock: () => number = Date.now,
+  ) {
+    this.site = new SiteSource(client, clock);
+  }
+
+  picture(org: string, url: string): Promise<string> {
+    return this.site.picture(org, url);
+  }
+
+  facts(org: string): Promise<SemesterFacts | null> {
+    const key = org.toLowerCase();
+    const hit = this.memo.get(key);
+    if (hit && this.clock() - hit.at < FRESH_MS) return hit.p;
+    const p = this.read(org);
+    this.memo.set(key, { at: this.clock(), p });
+    p.catch(() => this.memo.delete(key));
+    return p;
+  }
+
+  private async read(org: string): Promise<SemesterFacts | null> {
+    const file = await this.client.getContents(org, COURSE_REPO, STUDENT_STATUS_PATH);
+    let doc: Obj | null = null;
+    try {
+      doc = file ? (JSON.parse(file.text) as Obj) : null;
+    } catch {
+      doc = null;
+    }
+    if (!doc || doc.schema !== STUDENT_STATUS_SCHEMA) return this.site.facts(org);
+    return factsFromStatus(doc);
   }
 }
 

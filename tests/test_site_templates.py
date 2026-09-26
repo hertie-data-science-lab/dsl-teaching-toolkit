@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import course, ghcli, public_site, site, site_repo
+from dsl_course import ghcli, public_site, site, site_repo
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "site"
 
@@ -57,8 +57,7 @@ _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
 _DATA_KEY = re.compile(r"\bsite\.data\.([A-Za-z0-9_.]+)")
 # `page.x`, `entry.x`, `event.x` and `include.<anything>.x` all name a field on a document
-# the sync generated - a collection entry, or (for `include.entry` inside
-# materials_entry.html) a node of the All Materials tree.
+# the sync generated - a collection entry.
 _DOC_KEY = re.compile(
     r"\b(?:page|entry|event)\.([A-Za-z0-9_.]+)|\binclude\.[A-Za-z0-9_]+\.([A-Za-z0-9_.]+)"
 )
@@ -148,30 +147,11 @@ def site_data(generated) -> dict:
     return data
 
 
-def _tree_nodes(nodes: list[dict]) -> list[dict]:
-    """Every node of the All Materials tree, flat.
-
-    Flat, and its fields read unprefixed, because `include.entry` IS one node at whatever
-    depth the recursion has reached - so a key only a leaf carries (`view_url`, on a file
-    the site hosts its own copy of) is read exactly the way one every level carries is."""
-    return [
-        n for node in nodes for n in [node, *_tree_nodes(node.get("entries") or [])]
-    ]
-
-
 @pytest.fixture(scope="module")
-def written_fields(documents, generated) -> set[str]:
-    """Every field a template may legitimately read off a document.
-
-    The union of the collection entries' front matter and the All Materials tree's nodes,
-    because `include.entry` means a collection entry in session_entry.html and a tree node
-    in materials_entry.html - one namespace either way as far as an extracted key can
-    tell."""
-    fields = {p for doc in documents for p in _field_paths(doc)}
-    index = yaml.safe_load(generated["files"]["_data/materials.yml"])
-    return fields | {
-        key for node in _tree_nodes(index.get("sections") or []) for key in node
-    }
+def written_fields(documents) -> set[str]:
+    """Every field a template may legitimately read off a document: the collection
+    entries' front matter."""
+    return {p for doc in documents for p in _field_paths(doc)}
 
 
 def _templates() -> dict[str, str]:
@@ -467,15 +447,8 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "submit_url",
         "submit_host",
         "due_event",
-        "cutoff_sentence",
-        "late_rule",
-        "max_points",
-        "shape_note",
         "team_join_url",
-        "team_join_cap",
         "team_join_closes",
-        "team_salt",
-        "teams",
     ],
 )
 def test_every_flag_the_sync_writes_is_read_by_a_template(flag, written_fields):
@@ -492,208 +465,6 @@ def test_every_flag_the_sync_writes_is_read_by_a_template(flag, written_fields):
     assert flag in read, f"nothing renders {flag}"
 
 
-def test_an_external_assignments_page_has_no_repo_for_a_profile_to_rewrite(generated):
-    # `open_in.html` rewrites every `data-dsl-repo` on a page to the reader's OWN repo
-    # name, off `page.repo_name`. An external assignment has neither - so the page carries
-    # no repo at all, at either level, and there is nothing for a profile to substitute
-    # into. The due row is a sub-hash that cannot see its parent's fields, hence both.
-    page = _front_matter(generated["collections"]["_assignments"]["03-assignment-3.md"])
-    assert page["submit_shape"] == "external"
-    assert "repo_name" not in page and "repo_url" not in page
-    assert page["submit_host"] == "moodle.example.edu"
-    assert page["due_event"]["submit_shape"] == "external"
-    assert "repo_name" not in page["due_event"]
-
-
-def _external_arm(text: str, opens: str, closes: str) -> str:
-    """The branch a template takes for an assignment handed in off GitHub.
-
-    Textual, because the offline suite has no Liquid engine: the arm is what sits between
-    the `if` that selects it and the next branch, and what may never be in it is a word."""
-    after = text.split(opens, 1)
-    assert len(after) == 2, f"the external branch `{opens}` is gone"
-    arm = after[1].split(closes, 1)
-    assert len(arm) == 2, f"the branch after `{opens}` is gone"
-    return arm[0]
-
-
-def test_an_external_assignment_is_never_told_to_push(generated):
-    # The page and the due row both printed "Submit by pushing to `main` in <repo>" off
-    # `repo_url` alone, so a Moodle semester was told to push to a repo that does not exist.
-    # Nor may either arm claim no repository was created: a semester handed out before this
-    # shipped has the repos it was given, and the page would deny them.
-    layout = _liquid_templates()["_layouts/assignment.html"]
-    due_row = _liquid_templates()["_includes/schedule_row_due.html"]
-    arms = [
-        _external_arm(
-            layout,
-            '{% if page.submit_shape == "external" %}',
-            "{% elsif page.repo_url %}",
-        ),
-        _external_arm(
-            due_row,
-            '{%- if include.event.submit_shape == "external" -%}',
-            "{%- elsif include.event.repo_name -%}",
-        ),
-    ]
-    for arm in arms:
-        assert "push" not in arm.lower(), arm
-        assert "no repository" not in arm.lower(), arm
-    # And the front matter carries nothing for a profile to rewrite into a repo name.
-    page = _front_matter(generated["collections"]["_assignments"]["03-assignment-3.md"])
-    assert "repo_name" not in page and "repo_url" not in page
-
-
-_NOT_EXTERNAL = '{% unless page.submit_shape == "external" %}'
-
-
-def _gated_on_not_external(text: str) -> list[str]:
-    """Every block the layout renders only for an assignment that has a repo.
-
-    Textual, like `_external_arm`: the offline suite has no Liquid engine, so a gate is
-    what sits between its `unless` and the `endunless` that closes it."""
-    return [
-        part.split("{% endunless %}", 1)[0] for part in text.split(_NOT_EXTERNAL)[1:]
-    ]
-
-
-def test_an_external_assignments_page_carries_no_repo_shaped_furniture(generated):
-    # `open_in.html` is the "open files in your local copy - set up" strip: it rewrites
-    # repo shapes to the reader's own, and this page has none to rewrite.
-    block = "{% include open_in.html %}"
-    gated = _gated_on_not_external(_liquid_templates()["_layouts/assignment.html"])
-    assert any(block in part for part in gated), block
-    # ...and the fixture really does generate one of these pages for it to matter on.
-    page = _front_matter(generated["collections"]["_assignments"]["03-assignment-3.md"])
-    assert page["submit_shape"] == "external"
-
-
-def test_the_assignments_name_is_the_heading_and_its_identifier_the_kicker(generated):
-    # The page used to head itself "Assignment 5" and print the assignment's own name
-    # underneath at 1.15em, so the one line a student is looking for was the smaller of
-    # the two. The identifier stays - it is what ties the page to its schedule row - as a
-    # small line above the h1.
-    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
-    flat = " ".join(layout.split())
-    assert '<p class="post-kicker">{{ page.title }}</p>' in flat
-    assert '<h1 class="post-title">{{ page.subtitle }}</h1>' in flat
-    # A pending assignment has no name to show - the README it comes from is embargoed -
-    # so there the identifier is still the heading.
-    assert '{% else %} <h1 class="post-title">{{ page.title }}</h1>' in flat
-    assert "post-subtitle" not in layout
-    page = _front_matter(generated["collections"]["_assignments"]["01-assignment-1.md"])
-    assert page["title"] == "Assignment 1"
-    assert page["subtitle"] == "Predicting rainfall from station data"
-    pending = _front_matter(
-        generated["collections"]["_assignments"]["02-assignment-2.md"]
-    )
-    assert "subtitle" not in pending
-
-
-def test_the_deadline_is_bold_under_the_release_date_and_printed_once():
-    # The deadline is what the page is opened for, so it sits with the release date at the
-    # top rather than in a "Due Date:" line further down - and it is printed ONCE: the
-    # same date in two places is two places to correct.
-    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
-    flat = " ".join(layout.split())
-    assert (
-        '<p class="post-meta post-due"><strong>Due {{ page.due_event.date | date: "%A" }} '
-        "{{ page.due_event.date | date: site.dateformat }} "
-        '{{ page.due_event.date | date: "%H:%M" }}</strong></p>' in flat
-    )
-    assert "Due Date:" not in flat
-    assert flat.count("page.due_event.date") == 3  # weekday, date, time - one line
-
-
-def test_what_the_assignment_is_worth_sits_under_the_deadline(generated):
-    # One fact, one place: the total is the sum of the `questions:` maxima in the
-    # assignment's own grading_config.yml (`grades.total_points`, the same total the
-    # gradebook prints beside a score), so nobody types it into the brief. It reads under
-    # the deadline, which is where the other two meta lines are.
-    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
-    flat = " ".join(layout.split())
-    line = '{% if page.max_points %} <p class="post-meta">Worth {{ page.max_points }} points</p> {% endif %}'
-    assert flat.count(line) == 1
-    assert flat.index("post-due") < flat.index("page.max_points")
-    assert flat.index("page.max_points") < flat.index("</header>")
-    # An assignment that declares numeric maxima carries the total; one that declares
-    # none carries no key, so the line never prints.
-    page = _front_matter(generated["collections"]["_assignments"]["01-assignment-1.md"])
-    assert page["max_points"] == "25"
-    assert "max_points" not in page["due_event"]
-    off_github = _front_matter(
-        generated["collections"]["_assignments"]["03-assignment-3.md"]
-    )
-    assert "max_points" not in off_github
-
-
-def test_the_page_says_where_the_work_goes_exactly_once():
-    # The callout is the one place. The same two routes were repeated as a grey line under
-    # the whole brief, which is how the page came to answer "where do I hand in?" twice
-    # and, once the two were reworded apart, differently.
-    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
-    flat = " ".join(layout.split())
-    assert flat.count("page.repo_url") == 2  # the arm's own `elsif`, and its one button
-    assert "Submit by pushing" not in flat and "Hand in at" not in flat
-    # The arm's own `if`, its button, and the "See the brief" that stands in for an
-    # address the assignment never named.
-    assert flat.count("page.submit_url") == 3
-
-
-def test_a_timed_assignment_carries_the_late_rule_and_an_external_one_carries_none(
-    generated,
-):
-    # What happens after the deadline belongs with the deadline's own answer, so it closes
-    # the callout paragraph - off `late_rule`, which site.py writes for a shape that
-    # collects commits and for no other. `external` creates no repo, pins no commit and
-    # counts no day (`course.collects_commits`), so a rule quoted there would describe a
-    # deadline this toolkit does not hold.
-    layout = _liquid_templates()["_layouts/assignment.html"]
-    flat = " ".join(_strip_comments(layout).split())
-    sentence = "{% if page.late_rule %}Late work: {{ page.late_rule }}.{% endif %}"
-    assert flat.count(sentence) == 1
-    repo_arm = _external_arm(layout, "{% elsif page.repo_url %}", "{% endunless %}")
-    assert "page.late_rule" in repo_arm
-    external = _external_arm(
-        layout,
-        '{% if page.submit_shape == "external" %}',
-        "{% elsif page.repo_url %}",
-    )
-    assert "late_rule" not in external
-    timed = _front_matter(
-        generated["collections"]["_assignments"]["01-assignment-1.md"]
-    )
-    assert timed["late_rule"] == "10% per day, up to 7 days"
-    off_github = _front_matter(
-        generated["collections"]["_assignments"]["03-assignment-3.md"]
-    )
-    assert "late_rule" not in off_github
-
-
-def test_every_repo_arm_closes_with_the_cutoff_and_the_late_rule_in_that_order(
-    generated,
-):
-    # What is marked, then what being late costs - after the route sentence and outside
-    # the `case`, so the three repo arms share one copy of each. The words are in Python
-    # (`course.CUTOFF_SENTENCE`), because the repo's own About line says the same thing.
-    layout = _liquid_templates()["_layouts/assignment.html"]
-    repo_arm = _external_arm(layout, "{% elsif page.repo_url %}", "{% endunless %}")
-    flat = " ".join(_strip_comments(repo_arm).split())
-    cutoff = "{% if page.cutoff_sentence %}{{ page.cutoff_sentence }}{% endif %}"
-    assert flat.count(cutoff) == 1
-    assert flat.index("{% endcase %}") < flat.index(cutoff)
-    assert flat.index(cutoff) < flat.index("Late work:")
-    assert course.CUTOFF_SENTENCE not in flat
-    # And the sentence itself reaches the page for every shape with a repo.
-    for rel in ("01-assignment-1.md", "04-assignment-4.md", "07-assignment-7.md"):
-        page = _front_matter(generated["collections"]["_assignments"][rel])
-        assert page["cutoff_sentence"] == course.CUTOFF_SENTENCE
-    off_github = _front_matter(
-        generated["collections"]["_assignments"]["03-assignment-3.md"]
-    )
-    assert "cutoff_sentence" not in off_github
-
-
 def test_no_site_carries_a_late_policy_of_its_own_any_more():
     # The seeded `_data/late_policy.yml` was INSTRUCTOR-OWNED prose ("8 free late days")
     # beside a rule the toolkit actually enforces from each assignment's own
@@ -704,188 +475,6 @@ def test_no_site_carries_a_late_policy_of_its_own_any_more():
     assert not [rel for rel in site_repo.seed_templates() if "late_policy" in rel]
     for rel, text in _templates().items():
         assert "late_policy" not in text, rel
-
-
-def test_a_pending_assignment_gets_no_callout_at_all(generated):
-    # The callout answers "where does the work go, now?", and for an assignment still to
-    # come there is no brief to read and no address to go to. The layout gates the whole
-    # block rather than each arm, so this holds for every shape.
-    layout = _liquid_templates()["_layouts/assignment.html"]
-    # To the LAST `endunless`, not the first: the external arm has an `unless` of its own
-    # for the sentence that stands in for an address it was never given, and the gate is
-    # the outermost of the two.
-    gated = layout.split("{% unless page.handout_pending %}", 1)[1].rsplit(
-        "{% endunless %}", 1
-    )[0]
-    assert "Handed in outside GitHub" in gated
-    assert "Open the submission repo" in gated
-    pending = _front_matter(
-        generated["collections"]["_assignments"]["05-assignment-5.md"]
-    )
-    assert pending["handout_pending"] is True
-
-
-def test_no_arm_of_the_callout_says_where_the_marks_land(generated):
-    # Four of the five arms carried a sentence about the gradebook, in four wordings of
-    # one fact - and the page a student opens to find out what to DO is not where they go
-    # looking for a mark. The gradebook says what it is itself, on every row it carries.
-    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
-    flat = " ".join(layout.split()).lower()
-    for phrase in ("grade and feedback", "gradebook", "arrive in your", "not here"):
-        assert phrase not in flat, phrase
-
-
-def test_the_route_callout_reads_the_same_for_every_repo_shape(generated):
-    # The callout answers ROUTE and nothing else, and every per-unit shape's route is the
-    # same route: clone, commit, push to `main`. So the `case` is down to the two arms
-    # that genuinely differ - the drop box, whose address is a folder in one named repo,
-    # and `public`, whose repo may not be called private. Everything else that used to
-    # branch here is now the shape note at the foot of the page.
-    layout = _liquid_templates()["_layouts/assignment.html"]
-    repo_arm = _external_arm(layout, "{% elsif page.repo_url %}", "{% endunless %}")
-    flat = " ".join(_strip_comments(repo_arm).split())
-    # One button line for every shape that has a repo, so the `data-dsl-repo-url`
-    # contract is written once and cannot drift.
-    assert repo_arm.count("data-dsl-repo-url") == 1
-    assert flat.count("{% when ") == 2
-    assert '{% when "shared-dropbox-repo" %}' in flat
-    assert '{% when "assignment-repo-public" %}' in flat
-    # student_choice and private both fall to the `else`, which is the sentence in full.
-    assert '{% when "assignment-repo-student-choice" %}' not in layout
-    assert (
-        "{% else %} Your work goes in your private repo "
-        "<code data-dsl-repo>{{ page.repo_name | escape }}</code>. Clone it, commit "
-        "as you go, and push to <code>main</code> - that push is your submission."
-        in flat
-    )
-    # public reads the same, minus the one word that would be false.
-    assert (
-        '{% when "assignment-repo-public" %} Your work goes in your repo '
-        "<code data-dsl-repo>{{ page.repo_name | escape }}</code>. Clone it, commit "
-        "as you go, and push to <code>main</code> - that push is your submission."
-        in flat
-    )
-    # The drop box keeps its own route half and nothing else.
-    shared = flat.split('{% when "shared-dropbox-repo" %}')[1].split("{% when ")[0]
-    assert shared.strip() == (
-        "Push your work into the <code>{{ page.submit_path | escape }}</code> folder of "
-        "<code>{{ page.repo_name | escape }}</code> - that push is your submission."
-    )
-
-
-def test_the_external_callout_says_only_where_the_work_is_handed_in(generated):
-    # An address if the assignment named one, the brief if it did not. Nothing else: there
-    # is no repo to describe and no thread to point at.
-    layout = _liquid_templates()["_layouts/assignment.html"]
-    arm = _external_arm(
-        layout,
-        '{% if page.submit_shape == "external" %}',
-        "{% elsif page.repo_url %}",
-    )
-    flat = " ".join(_strip_comments(arm).split())
-    assert (
-        "<p>Handed in outside GitHub."
-        "{% unless page.submit_url %} See the brief.{% endunless %}</p>" in flat
-    )
-    assert "Submit on {{ page.submit_host }}" in flat
-    # And nothing about a repo, a push or a mark.
-    for word in ("repo", "gradebook", "feedback"):
-        assert word not in flat.lower(), word
-
-
-def test_the_shape_note_is_the_one_place_a_repos_catch_is_named(generated):
-    # Three shapes hand out a repo with something unusual about it. Each says so once, in
-    # one box, from one text in Python (`course.SHAPE_NOTES`) - so the page and the repo's
-    # own About line cannot come to word it differently.
-    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
-    flat = " ".join(layout.split())
-    assert (
-        '{% if page.shape_note %} <div class="shape-note">'
-        "<em>{{ page.shape_note | escape }}</em></div> {% endif %}" in flat
-    )
-    # Under the brief, which is what makes it an aside to the assignment rather than a
-    # second instruction stapled to the route.
-    assert flat.index("</article>") < flat.index("page.shape_note")
-    # The layout holds none of the words, so there is nothing here to drift.
-    for note in course.SHAPE_NOTES.values():
-        for sentence in note.split(". "):
-            assert sentence not in flat, sentence
-
-
-@pytest.mark.parametrize(
-    ("rel", "shape", "opening"),
-    [
-        ("01-assignment-1.md", "assignment-repo-private", "NB: this repo is private -"),
-        ("04-assignment-4.md", "assignment-repo-public", "NB: this repo is public"),
-        (
-            "06-assignment-6.md",
-            "assignment-repo-student-choice",
-            "NB: this repo is private-by-default",
-        ),
-        (
-            "07-assignment-7.md",
-            "shared-dropbox-repo",
-            "NB: everyone in the semester can read the whole repo",
-        ),
-    ],
-)
-def test_every_shape_that_hands_out_a_repo_carries_its_note(
-    generated, rel, shape, opening
-):
-    page = _front_matter(generated["collections"]["_assignments"][rel])
-    assert page["submit_shape"] == shape
-    assert page["due_event"]["submit_shape"] == shape
-    assert page["shape_note"] == course.shape_note(shape)
-    assert page["shape_note"].startswith(opening)
-    # The PAGE alone: the due row is a glance at when and where, and a warning there would
-    # be read on the schedule about every assignment at once.
-    assert "shape_note" not in page["due_event"]
-
-
-def test_a_shape_that_hands_out_no_repo_carries_no_note(generated):
-    # `external` hands the work in somewhere else, so there is no repo for a box about who
-    # can read it to be about. The one shape left without one.
-    page = _front_matter(generated["collections"]["_assignments"]["03-assignment-3.md"])
-    assert page["submit_shape"] == "external"
-    assert "shape_note" not in page
-
-
-def test_a_public_assignments_page_warns_before_the_first_push(generated):
-    # The one thing that has to be read BEFORE a student pushes: the repo is
-    # world-readable from hand-out, so "commit nothing you would not publish" belongs on
-    # the page and not left to whoever wrote the brief.
-    page = _front_matter(generated["collections"]["_assignments"]["04-assignment-4.md"])
-    assert page["repo_name"] == "assignment-4-<your-handle>"
-    assert page["repo_name_is_shape"] is True
-    assert "anyone on the internet can read it" in page["shape_note"]
-    assert "commit nothing you would not publish" in page["shape_note"]
-
-
-def test_a_student_choice_page_says_when_the_repo_may_be_published(generated):
-    # The student is an admin of this repo, so the note has to say what they may do and
-    # WHEN: a page that said only "you may make it public" has a student publishing the
-    # work on day one, with the marking still to come.
-    page = _front_matter(generated["collections"]["_assignments"]["06-assignment-6.md"])
-    assert page["repo_name"] == "assignment-6-<your-handle>"
-    note = page["shape_note"]
-    assert "you are its admin" in note
-    assert (
-        "after the late cutoff you may make it public from Settings > Danger zone"
-        in note
-    )
-    # And the due row says at a glance that the flag is the student's.
-    due_row = _liquid_templates()["_includes/schedule_row_due.html"]
-    assert '"assignment-repo-student-choice" %} (yours to publish)' in due_row
-
-
-def test_a_pending_external_assignments_page_offers_nowhere_to_go(generated):
-    # Pending AND external: the brief is embargoed until hand-out, so there is no repo to
-    # name and not yet an address to name either - the page must say only that.
-    page = _front_matter(generated["collections"]["_assignments"]["05-assignment-5.md"])
-    assert page["handout_pending"] is True
-    assert page["submit_shape"] == "external"
-    assert not {"repo_name", "repo_url", "submit_url"} & set(page)
-    assert not {"repo_name", "submit_url"} & set(page["due_event"])
 
 
 # ---------------------------------------------------------------------------
@@ -1043,13 +632,12 @@ def test_a_retired_path_leaves_the_site_repo_and_the_rest_stays(monkeypatch):
 # The hosted copy of a published file
 # ---------------------------------------------------------------------------
 
-# The three pages that show a file link - a session row, the Updates box, the All
-# Materials tree. All three go through one include, which is what stops the same file
+# The two places that show a file link - a session row and the Updates box. Both go
+# through one include, which is what stops the same file
 # opening rendered on one page and as source on another.
 _LINK_TEMPLATES = (
     "_includes/session_entry.html",
     "_includes/lecture_links.html",
-    "_includes/materials_entry.html",
 )
 
 _VIEW_BRANCH = re.compile(
@@ -1110,8 +698,7 @@ def test_the_updates_box_takes_the_inline_shape_of_the_source_link():
         not in link.split("{% if include.inline %}")[1].split("{% else %}")[0]
     )
     # The lists that bracket nothing keep the bracketed one.
-    for rel in ("_includes/session_entry.html", "_includes/materials_entry.html"):
-        assert "inline" not in _strip_comments(_templates()[rel])
+    assert "inline" not in _strip_comments(_templates()["_includes/session_entry.html"])
 
 
 def test_the_shared_link_include_adds_no_whitespace_of_its_own():
@@ -1124,519 +711,52 @@ def test_the_shared_link_include_adds_no_whitespace_of_its_own():
     assert "-%}\n<a" in body
 
 
-def test_the_fixture_site_holds_both_shapes_of_file_row(generated):
-    # The fixture is what CI builds with Jekyll, so it has to exercise the branch: one
-    # published file with a hosted copy, one without. With only one shape, a template that
-    # rendered the other wrong would build green.
-    session = _front_matter(generated["collections"]["_lectures"]["session-01.md"])
-    hosted = {link["name"]: link.get("view_url") for link in session["links"]}
-    assert hosted["slides.html"].startswith("https://")
-    assert hosted["slides.pdf"] is None
-
-
-def test_the_hosted_copy_is_served_from_the_path_the_link_names(tmp_path):
-    # The two halves of publishing, against each other: the mirror writes `files/<repo>/
-    # <path>` and the link says `https://<site>/files/<repo>/<path>`. They are built by
-    # different code and a mismatch is a 404 on a live site.
-    build_fixture.build(tmp_path)
-    index = yaml.safe_load(
-        (tmp_path / "_data" / "materials.yml").read_text(encoding="utf-8")
-    )
-    served = [
-        p.relative_to(tmp_path).as_posix()
-        for p in (tmp_path / "files").rglob("*")
-        if p.is_file()
-    ]
-    assert served
-    for node in _tree_nodes(index["sections"]):
-        if node.get("view_url"):
-            assert node["view_url"].split(".github.io/")[1] in served
-
-
 # ---------------------------------------------------------------------------
-# Opening a file in the student's own copy (_includes/open_in.html)
-# ---------------------------------------------------------------------------
-
-# The pages that LIST released files, plus the two that name a student's own repo. The
-# Updates box and the schedule table show file links too and are deliberately left out (a
-# sentence and a timetable, not a list), and /profile/ takes the include for its own
-# buttons rather than for the set-up line.
-_OPEN_IN_LAYOUTS = frozenset(
-    {
-        "_layouts/kind.html",
-        "_layouts/lectures.html",
-        "_layouts/labs.html",
-        "_layouts/readings.html",
-        "_layouts/materials.html",
-        "_layouts/assignment.html",
-        "_layouts/home.html",
-        "_layouts/profile.html",
-    }
-)
-
-
-def _open_in() -> str:
-    return _templates()["_includes/open_in.html"]
-
-
-def test_the_open_in_control_is_included_once_by_every_page_that_lists_files():
-    # Once: the include carries the site's only script, which guards itself but would
-    # otherwise be parsed twice. And by every one of them: a page that lists files without
-    # it is a page where the profile a student filled in silently does nothing.
-    included = {
-        rel
-        for rel, text in _liquid_templates().items()
-        if "include open_in.html" in _strip_comments(text)
-    }
-    assert included == _OPEN_IN_LAYOUTS
-    for rel in included:
-        assert _strip_comments(_templates()[rel]).count("include open_in.html") == 1, (
-            rel
-        )
-
-
-def test_the_control_takes_what_it_needs_from_data_attributes():
-    # Never from the rendered prose: an assignment page's repo SHAPE is front matter, and
-    # reading it out of the sentence that happens to print it would break the day that
-    # sentence is reworded.
-    body = _strip_comments(_open_in())
-    assert 'data-org="{{ site.github_org }}"' in body
-    assert 'data-repo-name="{{ page.repo_name | escape }}"' in body
-
-
-def test_the_control_parses_the_url_shape_the_sync_writes():
-    # THE contract between dsl_course/site.py and the script: `_gh_url` writes the link,
-    # the script reads it back off the rendered page. A change to either alone turns every
-    # control on every semester site off, silently.
-    literal = re.search(r"var SOURCE = /(.+?)/;", _open_in()).group(1)
-    pattern = re.compile(literal.replace("\\/", "/"))
-    url = site._gh_url(
-        "semester-f2026", "materials", "main", "blob", "labs/01/lab one.ipynb"
-    )
-    m = pattern.match(url)
-    assert m, url
-    assert m.groups() == (
-        "semester-f2026",
-        "materials",
-        "blob",
-        "main",
-        "labs/01/lab%20one.ipynb",
-    )
-    # A directory link is the same shape with `tree`, and is offered too - "local" opens
-    # the folder.
-    tree = site._gh_url("semester-f2026", "materials", "main", "tree", "labs/01")
-    assert pattern.match(tree).group(3) == "tree"
-    # Another org's repo is left alone by the script; the shape still has to parse for the
-    # comparison to happen at all.
-    assert pattern.match("https://example.invalid/a/b/blob/main/c") is None
-
-
-def test_only_one_file_knows_where_the_settings_are_stored():
-    # Two files, one browser: /profile/ writes the settings and the control reads them
-    # back, so a key spelt twice is a profile that fills in and quietly does nothing. The
-    # page names FIELDS and goes through the include, which owns the keys.
-    keys = re.search(r"var KEYS = \{(.+?)\};", _open_in(), re.DOTALL).group(1)
-    for key in (
-        "dsl.handle",
-        "dsl.folder.materials",
-        "dsl.folder.assignments",
-        "dsl.editor",
-        "dsl.forked",
-    ):
-        assert f'"{key}"' in keys, key
-    assert '"dsl.' not in _templates()["_layouts/profile.html"]
-
-
-# --- H
-@pytest.mark.parametrize("cls", ["callout-submit", "btn"])
-def test_a_class_the_control_hooks_onto_is_one_a_shipped_layout_renders(cls):
-    # `.callout-submit a.btn` is how the script finds an assignment's repo button - not
-    # `.callout a.btn`, which on a page inside a team-formation window is step 1's "Join
-    # team" button. No rule in _sass/_course.scss styles `callout-submit`, so nothing else
-    # would notice the layout spelling it differently.
-    assert ".callout-submit a.btn" in _open_in()
-    assert cls in _classes(_templates()["_layouts/assignment.html"]), cls
-
-
-# ---------------------------------------------------------------------------
-# Your Profile (_layouts/profile.html)
+# A public calendar (decision 0011 rule 5)
 # ---------------------------------------------------------------------------
 
 
-def _profile() -> str:
-    return _templates()["_layouts/profile.html"]
+def test_the_calendar_ships_no_page_of_the_retired_sections():
+    # The assignment page (and its hashed-handle team recognition), Your Profile, the All
+    # Materials tree and the open-in control are the student console's now.
+    for rel in site_repo.RETIRED_TEMPLATES:
+        assert rel not in _templates()
+    for text in _liquid_templates().values():
+        assert "/profile/" not in _strip_comments(text)
+        assert "members_sha256" not in text and "team_salt" not in text
 
 
-def test_the_profile_page_is_four_numbered_steps_in_the_order_they_happen():
-    # Details, fork, clone, open. The order is the point: each step's button needs what
-    # the one before it produced, and a page that offered all four at once is how a
-    # student came to clone a fork that did not exist yet.
-    body = _strip_comments(_profile())
-    numbers = re.findall(r'<span class="profile-step-num">(\d)</span>', body)
-    assert numbers == ["1", "2", "3", "4"]
-    titles = re.findall(r"</span>\s*([^<]+?)</h2>", body)
-    assert titles == [
-        "Your details",
-        "Fork the materials repo",
-        "Clone your fork",
-        "Open it in your editor",
-    ]
-
-
-def test_the_folder_fields_default_to_one_folder_per_repo_under_this_semester():
-    # The path a student is most likely to want, spelt out rather than described: the
-    # clone itself, not the folder it sits in. `localUrl` accepts either - a folder that
-    # already ends in the repo name does not get it twice - so the placeholder can be the
-    # more useful of the two. It sits under a folder named for the semester org, so a
-    # student on two courses is not steered into cloning two `materials` into one place.
-    body = _strip_comments(_profile())
-    placeholders = dict(
-        re.findall(r'id="dsl-(materials|assignments)"[^>]*?placeholder="([^"]+)"', body)
-    )
-    assert placeholders["materials"].endswith(
-        "/repositories/{{ site.github_org }}/materials"
-    )
-    assert placeholders["assignments"].endswith(
-        "/repositories/{{ site.github_org }}/assignments"
-    )
-
-
-def test_the_folder_examples_are_respelt_for_the_readers_platform():
-    # The placeholders ship as macOS spells a home folder; the script swaps that prefix for
-    # the Windows or Linux one where the browser can name the platform, and turns the
-    # separators round for Windows. A Windows student shown `/Users/j.doe/...` typed it in
-    # verbatim and got a path no editor could open.
-    body = _strip_comments(_profile())
-    placeholders = re.findall(
-        r'id="dsl-(?:materials|assignments)"[^>]*?placeholder="([^"]+)"', body
-    )
-    assert all(p.startswith("/Users/j.doe/Documents/") for p in placeholders)
-    assert 'var MAC_HOME = "/Users/j.doe/Documents";' in body
-    assert 'win: "C:\\\\Users\\\\j.doe\\\\Documents"' in body
-    assert 'linux: "/home/j.doe"' in body
-    ready = body.split("api.ready(function () {")[1]
-    assert "examples.materials = localExample(examples.materials);" in ready
-    assert "examples.assignments = localExample(examples.assignments);" in ready
-
-
-def test_nothing_is_stored_until_save_is_pressed():
-    # Typing is not saving: a half-typed path that enabled a button would open the wrong
-    # folder and read as the page's fault. `refresh` runs on every keystroke and must
-    # therefore write nothing - the only writers are the click handlers.
-    body = _strip_comments(_profile())
-    refresh = body.split("function refresh() {")[1].split("\n  }")[0]
-    assert "api.save" not in refresh
-    # And the readout under each field comes from storage, not from the boxes.
-    assert "api.stored" in body
-
-
-def test_every_field_carries_its_own_save_and_its_own_saved_line():
-    # One Save per field, beside its own box, with what it stored directly underneath -
-    # rather than one button at the end of the step for four unrelated settings.
-    body = _strip_comments(_profile())
-    saves = re.findall(r'data-save="(\w+)"', body)
-    assert saves == ["handle", "materials", "assignments", "editor"]
-    for name in saves:
-        assert f'id="dsl-saved-{name}"' in body, name
-    # Each Save is a button in the same red family as the step buttons, sized down.
-    assert body.count('class="btn btn--field"') == len(saves)
-
-
-def test_the_boxes_hold_an_editable_value_and_save_leaves_it_there():
-    # The box is seeded with the saved value, or the example until there is one, so a
-    # student edits `j.doe` into their own name instead of retyping a path over a grey
-    # hint that goes at the first keystroke. Save keeps what it stored in the box; an
-    # empty box or the untouched example saves nothing; `clear` is the way back to unset
-    # and puts the example back.
-    body = _strip_comments(_profile())
-    ready = body.split("api.ready(function () {")[1]
+def test_the_banner_is_on_home_schedule_and_every_kind_tab(generated):
+    for rel in ("_layouts/home.html", "_layouts/schedule.html", "_layouts/kind.html"):
+        assert "{% include console_banner.html %}" in _templates()[rel]
+    banner = _strip_comments(_templates()["_includes/console_banner.html"])
+    assert "site.data.console.url" in banner
     assert (
-        "box(FIELDS[i]).value = api.stored(FIELDS[i]) || examples[FIELDS[i]]" in ready
+        "?semester=hertie-dsl-fixture-f2026#week"
+        in generated["files"]["_data/console.yml"]
     )
-    save = body.split("function save(name) {")[1].split("\n  }")[0]
-    assert (
-        "if (!value || (value === examples[name] && !api.stored(name))) { return; }"
-        in save
-    )
-    assert 'box(name).value = ""' not in save
-    assert 'setAttribute("placeholder"' not in body
-    assert '"clear"' in body
-    assert "if (box(name)) { box(name).value = examples[name]; }" in body
 
 
-def test_the_folder_boxes_run_the_width_of_the_page():
-    # An absolute path with the semester org in it does not fit a 26em box; only the handle
-    # box, which holds a username, stays capped.
-    scss = _templates()["_sass/_course.scss"]
-    entry = scss.split(".profile-entry {")[1].split("}")[0]
-    assert "max-width" not in entry
-    text_input = scss.split('input[type="text"] {')[1].split("}")[0]
-    assert "max-width" not in text_input
-    assert "#dsl-handle," in scss
+def test_an_assignment_entry_is_rows_and_no_page(generated):
+    # Its collection is data only, so Jekyll writes no /assignments/<n>/ page, and nothing
+    # the sync writes is left for a page to render.
+    assert "assignments:\n    output: false" in site_repo._COLLECTIONS_BLOCK
+    for text in generated["collections"]["_assignments"].values():
+        fm = _front_matter(text)
+        for key in (
+            "late_rule",
+            "cutoff_sentence",
+            "shape_note",
+            "max_points",
+            "teams",
+        ):
+            assert key not in fm
+    row = _strip_comments(_templates()["_includes/schedule_row_assignment.html"])
+    assert "include.event.url" not in row
 
 
-def test_the_clone_button_waits_for_the_fork():
-    # Cloning a fork that does not exist is the one failure with no useful message at the
-    # other end - the editor just reports a repository it cannot find. The flag is this
-    # browser's own; the page cannot ask GitHub without sending the reader's handle
-    # somewhere, so a student who forked elsewhere says so by hand.
-    body = _strip_comments(_profile())
-    clone = body.split('link(el("dsl-clone"),')[1].split(";")[0]
-    assert "forked" in clone and "me.handle" in clone
-    assert 'el("dsl-forked").addEventListener' in body
-
-
-def test_step_three_names_the_folder_the_clone_dialog_should_be_pointed_at():
-    # No clone URL can carry a destination - `vscode://vscode.git/clone` takes a url and a
-    # ref, and the git extension hands the dialog no parent path - so the page names the
-    # folder instead. Without it a student takes whatever folder the dialog opens at, and
-    # step 4 and every `local` button then point at a clone that is not there.
-    body = _strip_comments(_profile())
-    assert 'id="dsl-clone-parent"' in body
-    refresh = body.split("function refresh() {")[1].split("\n  }")[0]
-    assert "api.cloneParent(me.materials, repo)" in refresh
-    # Only once there is a folder to name and a clone about to be made.
-    assert 'show("dsl-clone-where", !!parent && !!me.handle && !!forked);' in refresh
-    # The rule lives beside the one it inverts: a saved folder that already names the repo
-    # is where the clone GOES, so the dialog wants the folder above it - and a folder that
-    # does not is the dialog's answer as it stands.
-    helper = _strip_comments(_open_in()).split("function cloneParent(folder, repo) {")[
-        1
-    ]
-    helper = helper.split("\n  }")[0]
-    assert "trimmed.slice(cut + 1) !== repo" in helper
-    assert "cloneParent: cloneParent," in _strip_comments(_open_in())
-
-
-def test_step_three_also_prints_the_command_that_needs_no_dialog():
-    # The page cannot RUN anything - no browser API executes a shell command - but the line
-    # it prints clones into the exact folder, which no dialog and no URL can be told. It is
-    # also the only clone a student whose editor is not VS Code is offered at all.
-    body = _strip_comments(_profile())
-    assert 'id="dsl-clone-cmd"' in body
-    refresh = body.split("function refresh() {")[1].split("\n  }")[0]
-    assert "api.cloneCommand(me.handle, repo, me.materials)" in refresh
-    assert 'show("dsl-clone-cmd", !!parent && !!me.handle && !!forked);' in refresh
-    # Built once, not per keystroke: `refresh` runs on every one, and a block rebuilt each
-    # time would hang a fresh Copy listener on every one.
-    assert 'var cmd = api.commandBlock().querySelector("code");' in body
-    assert "api.commandBlock()" not in refresh
-
-
-def test_the_clone_command_targets_the_repo_folder_itself():
-    # One segment further down than the dialog hint: the dialog is given the folder the
-    # clone goes INTO, `git clone` the folder it becomes. Both off the same saved path.
-    body = _strip_comments(_open_in())
-    path = body.split("function localPath(folder, repo) {")[1].split("\n  }")[0]
-    assert "cloneParent(folder, repo)" in path
-    cmd = body.split("function cloneCommand(owner, repo, folder) {")[1].split("\n  }")[
-        0
-    ]
-    assert "localPath(folder, repo)" in cmd
-    # Quoted, because nothing stops a space in a home folder - and double quotes are what
-    # bash, zsh, PowerShell and cmd all honour.
-    assert cmd.count("'\"'") == 1 and '.git "' in cmd
-
-
-def test_copy_falls_back_to_a_selection_and_never_leaves_a_dead_button():
-    # `navigator.clipboard` is the whole of it on an https Pages site; the selection trick
-    # covers the rest. Either way the command stays on the page to select by hand, and the
-    # button says which happened rather than silently doing nothing.
-    body = _strip_comments(_open_in())
-    copy = body.split("function copy(text, btn) {")[1].split("\n  }")[0]
-    assert "navigator.clipboard.writeText" in copy
-    assert "selectCopy(text)" in copy
-    assert '"Copied"' in copy and '"Copy failed"' in copy
-    # Copy reads the block's own <code>, so a refilled block cannot copy the old command.
-    block = body.split("function commandBlock() {")[1].split("\n  }")[0]
-    assert "copy(code.textContent, btn)" in block
-
-
-def test_a_custom_scheme_link_never_opens_a_new_tab():
-    # `target=_blank` on a `vscode://` link hands the URL to the handler and leaves an
-    # empty tab behind for the reader to close. One helper decides, so every button that
-    # can carry either kind of URL gets the same answer.
-    body = _strip_comments(_templates()["_includes/open_in.html"])
-    helper = body.split("function newTab(a, href) {")[1].split("\n  }")[0]
-    assert "/^https?:/i" in helper
-    assert 'a.setAttribute("target", "_blank")' in helper
-    assert 'a.removeAttribute("target")' in helper
-
-
-def test_the_profile_tab_is_lifted_out_of_the_nav_by_its_permalink():
-    # The header is the theme's, so the tab bar is where the toolkit can reach the tab
-    # from - by the page it points at, never by its place in the row, which the next tab
-    # added would take.
-    scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
-    rule = 'li:has(> a[href$="/profile/"])'
-    assert rule in scss
-    lifted = scss.split(rule)[1].split("\n}")[0]
-    assert "position: absolute" in lifted
-    # And put back in the flow where the nav collapses behind the burger.
-    assert "position: static" in lifted
-
-
-def test_a_students_own_repo_replaces_the_shape_wherever_a_page_prints_it():
-    # A page is public and identical for everyone, so it prints `assignment-1-<your-handle>`
-    # and points at the org's filtered repo list. Once the browser knows the handle both can
-    # be exact - and both are MARKED in the layout, never matched on the sentence around
-    # them, because those sentences get reworded.
-    body = _strip_comments(_open_in())
-    assert "[data-dsl-repo]" in body and "[data-dsl-repo-url]" in body
-    page = _strip_comments(_templates()["_layouts/assignment.html"])
-    # The `shared` sentence names a REAL repo and not a shape: there is a single drop box
-    # for the whole semester, so there is nothing in that name to substitute a handle into
-    # and rewriting it would point every reader at a repo that does not exist. It carries
-    # no `data-dsl-repo` of its own; the two the arm SHARES with every other shape - the
-    # button and the closing line - are written under `repo_name_is_shape`, which site.py
-    # writes for a per-unit repo and for nothing else. (The drop box's own markers, which
-    # name the repo rather than reshape it, are on the callout - see the test below.)
-    shared = page.split('{% when "shared-dropbox-repo" %}')[1].split("{% when ")[0]
-    assert "{{ page.repo_name | escape }}" in shared
-    assert "data-dsl-repo" not in shared
-    page = page.replace(shared, "")
-    assert 'href="{{ page.repo_url }}"' in page
-    # Every one of the rest, marked or gated on the flag - not a count that drifts: an
-    # unmarked span goes on saying `<your-handle>` on a page where every other mention of
-    # the repo is the real name.
-    named = re.findall(r"<code([^>]*)>\{\{ page\.repo_name \| escape \}\}", page)
-    assert named and all("data-dsl-repo" in attrs for attrs in named), named
-    linked = re.findall(r'<a([^>]*)href="\{\{ page\.repo_url \}\}"', page)
-    assert linked and all("data-dsl-repo-url" in attrs for attrs in linked), linked
-    # A GROUP assignment is named for the team, which no browser can know, so it is left
-    # exactly as rendered.
-    own = body.split("function ownShape(shape, handle) {")[1].split("\n  }")[0]
-    assert '"<your-handle>"' in own
-
-
-def test_the_assignment_page_offers_two_edits_and_no_clone_button():
-    # Edit online, edit locally - beside the solid button for the repo on GitHub that the
-    # page already carried. No Clone: it worked for VS Code alone, could not be told where
-    # to put the repo, and a student who accepted the folder its dialog opened at broke
-    # `Edit locally` next to it. The clone is a command under the buttons instead.
-    body = _strip_comments(_open_in())
-    block = body.split("function decorateAssignment(root, me) {")[1].split("\n  }")[0]
-    assert "vscode://vscode.git/clone" not in block
-    offers = block.split("var offers = [")[1].split("];")[0]
-    labels = re.findall(r'"(Edit online|Edit locally|Clone)"', offers)
-    assert labels == ["Edit online", "Edit locally"]
-
-
-def test_the_clone_command_is_tied_to_the_button_it_is_needed_for():
-    # `Edit locally` opens a folder only a clone puts there, and the page cannot know
-    # whether one was made - so it says so rather than leaving a student to find out by
-    # pressing it. No local button, nothing for the clone to be a prerequisite of.
-    body = _strip_comments(_open_in())
-    block = body.split("function decorateAssignment(root, me) {")[1].split("\n  }")[0]
-    assert "if (offers[1][0]) {" in block
-    assert "cloneCommand(org, repo, me.assignments)" in block
-    note = 'NB: "Edit locally" requires you to have run the following clone command:'
-    assert "under(line('" + note + "'));" in block
-
-
-def test_the_callout_keeps_the_brief_last():
-    # Buttons, the note about them, then the callout's own sentence - which belongs to the
-    # brief and is nobody's to move. Each block goes under the last rather than at the end
-    # of the callout, which is how the command came to sit below the prose it explains.
-    block = _strip_comments(_open_in()).split(
-        "function decorateAssignment(root, me) {"
-    )[1]
-    block = block.split("\n  }")[0]
-    assert "row.parentNode.insertBefore(node, row.nextSibling);" in block
-    assert "row = node;" in block
-    # Never onto the callout itself, which is what put the command below the prose.
-    assert "parentNode.appendChild" not in block
-    # Air under the command, so the brief's sentence does not read as part of it.
-    scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
-    cmd = scss.split(".cmd {")[1].split("}")[0]
-    assert "margin: 0.3em 0 1em 0;" in cmd
-    # Quiet: the clone lines are small and grey, so the brief's own sentence stays the
-    # black, full-size thing in the callout. Not `@extend %quiet-note` - that sizes the
-    # block too, and the `code` inside sizes itself off it.
-    assert "color: $grey-color-dark;" in cmd
-    assert "@extend %quiet-note;" not in cmd
-    where = scss.split(".callout .open-in-where {")[1].split("}")[0]
-    assert "@extend %quiet-note;" in where
-
-
-def test_an_assignment_waiting_on_its_teams_invites_one_instead(generated):
-    # The pin publishes the brief of a self-select group assignment while its handout is
-    # still parked on "no teams", so the page carried a button onto the org's repo list
-    # filtered to an assignment that had provisioned nothing, and said nothing about the
-    # one thing a student could do about it. The invitation is what was missing.
-    page = _front_matter(generated["collections"]["_assignments"]["08-assignment-8.md"])
-    assert "handout_pending" not in page
-    # The address stays at both levels: a team that formed on day one owns its repo, and
-    # GitHub filters that listing by what the reader can see. The invitation beside it is
-    # what explains an empty one.
-    assert page["repo_url"] and page["due_event"]["repo_url"]
-    assert page["team_join_url"] == (
-        "https://github.com/hertie-dsl-fixture-f2026/join/issues/new/choose"
-    )
-    assert page["team_join_cap"] == "4"
-    # Already spoken (`grades.spoken_day`), so it is printed as it stands - the same
-    # spelling the mail and the Join-team form's refusal use for the same day.
-    # The late cutoff: the due date (24 Nov) plus the institution's 10-day window.
-    assert page["team_join_closes"] == "4th Dec"
-    # The layout renders the whole block off the key's presence - no second flag, and
-    # nothing to render for an assignment that has no window open.
-    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
-    arm = layout.split("{% if page.team_join_url %}")[1].split("</section>")[0]
-    flat = " ".join(arm.split())
-    assert 'href="{{ page.team_join_url }}"' in flat
-    assert "{{ page.team_join_cap }}" in flat
-    assert "{{ page.team_join_closes }}" in flat
-    # A team is the only thing being asked for. Whether anybody may hand in on their own,
-    # and how few a team may be, are not this page's to answer - the Join-team form holds
-    # the rules it enforces, and a sentence here would be a second copy of them.
-    for phrase in ("alone", "on your own", "solo", "at least", "minimum"):
-        assert phrase not in flat.lower(), phrase
-
-
-def test_the_teams_that_exist_are_shown_under_the_invitation(generated):
-    # "Start a team or join one" is not a decision a student can take without knowing what
-    # is already there, and teams.csv is private to the teaching team. The table answers it
-    # in NAMES AND COUNTS - this site is public, and who is in a team is not.
-    page = _front_matter(generated["collections"]["_assignments"]["08-assignment-8.md"])
-    teams = {t["name"]: t for t in page["teams"]}
-    assert [(t["name"], t["members"], t["cap"]) for t in page["teams"]] == [
-        ("team-alpha", 2, 4),
-        ("team-bravo", 4, 4),
-    ]
-    # No readable handle, only the salted digests the page's script recognises its reader
-    # by - and each team's own repo, named as the handout names it.
-    org = "hertie-dsl-fixture-f2026"
-    assert page["team_salt"] == org
-    assert teams["team-alpha"]["members_sha256"] == [
-        site.member_digest(org, "ada-l"),
-        site.member_digest(org, "bo-b"),
-    ]
-    assert "ada-l" not in generated["collections"]["_assignments"]["08-assignment-8.md"]
-    assert teams["team-alpha"]["repo_url"] == (
-        f"https://github.com/{org}/assignment-8-team-alpha"
-    )
-    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
-    arm = layout.split("{% if page.team_join_url %}")[1].split("</section>")[0]
-    flat = " ".join(arm.split())
-    # One row per team, and the free seats computed rather than written - the sync writes
-    # the two counts, so the page cannot print a number that disagrees with the cap the
-    # Join-team form enforces.
-    assert "{% for team in page.teams %}" in flat
-    # Styled by its own class: the theme styles no bare table, and its header lays itself
-    # out with one, so a rule for `table` would reach the header too.
-    assert '<table class="team-table">' in flat
-    assert ".team-table {" in _templates()["_sass/_course.scss"]
-    assert "{% assign left = team.cap | minus: team.members %}" in flat
-    assert "{{ team.name }}" in flat and "full" in flat
-    # This page is the one list: it says how to type a name, and what an empty one means.
-    assert "type its name exactly as the table spells it" in flat
-    assert "No teams yet" in flat
-
-
-def test_the_schedule_row_names_the_same_day_as_the_page(generated):
-    # The Details cell is one line beside the brief's link, and it takes the date and the
-    # address from the same two keys the Assignments tab's callout does - so the schedule
-    # cannot come to name a different closing day from the page it links to.
+def test_the_schedule_row_names_the_day_teams_close(generated):
+    # The Details cell's one call to action: form a team, by this day.
     row = _strip_comments(_liquid_templates()["_includes/schedule_row_assignment.html"])
     assert "include.event.team_join_url" in row
     # Off-site, so it leaves in a new tab like every other link on this site that does.
@@ -1645,96 +765,6 @@ def test_the_schedule_row_names_the_same_day_as_the_page(generated):
         in row
     )
     assert "{{ include.event.team_join_closes }}" in row
-    # The brief is still linked: the assignment is out, and this is a line BESIDE that,
-    # not the stand-in a pending row renders.
-    assert "{{ include.event.content }}" in row
-
-
-def test_a_shared_page_names_the_drop_box_and_the_folder(generated):
-    page = _front_matter(generated["collections"]["_assignments"]["07-assignment-7.md"])
-    assert page["submit_shape"] == "shared-dropbox-repo"
-    assert page["due_event"]["submit_shape"] == "shared-dropbox-repo"
-    # A REAL repo, not a shape - and the folder beside it, which is what is the reader's.
-    assert page["repo_name"] == "assignment-7-submissions"
-    # And NOT a shape: nothing on this page is rewritten to the reader's own repo.
-    assert "repo_name_is_shape" not in page
-    assert "repo_name_is_shape" not in page["due_event"]
-    assert page["submit_path"] == "<your-handle>/"
-    assert page["repo_url"].endswith("/assignment-7-submissions")
-    layout = _liquid_templates()["_layouts/assignment.html"]
-    flat = " ".join(layout.split())
-    assert (
-        "Push your work into the <code>{{ page.submit_path | escape }}</code> folder"
-        in flat
-    )
-    # Who else can read it is the shape note's half, under the brief, not the callout's.
-    assert "everyone in the semester can read the whole repo" in page["shape_note"]
-    # And the due row says at a glance that the reader's own work goes in a folder.
-    due_row = _liquid_templates()["_includes/schedule_row_due.html"]
-    assert (
-        '"shared-dropbox-repo" %} ({{ include.event.submit_path | escape }} folder)'
-        in due_row
-    )
-
-
-def test_a_shared_page_s_repo_name_is_never_rewritten_per_reader(generated):
-    # Two fences, and both have to hold. The layout marks no NAME on this page for
-    # open_in.html to rewrite - the drop box's markers hand its real name over as a fact,
-    # and it is the FOLDER beside it that is the reader's - and open_in.html would not
-    # rewrite the name anyway: the shape it substitutes a handle into has to CONTAIN
-    # `<your-handle>`, and a real repo name does not. Rewriting would point every reader at
-    # a repo that does not exist.
-    page = generated["collections"]["_assignments"]["07-assignment-7.md"]
-    assert "data-dsl-repo" not in _strip_comments(page)
-    own = _strip_comments(_open_in()).split("function ownShape(shape, handle) {")[1]
-    assert 'shape.indexOf("<your-handle>") < 0' in own.split("\n  }")[0]
-
-
-def test_a_shared_page_s_edit_buttons_open_the_readers_own_folder(generated):
-    # The drop box was the one shape whose page offered no `Edit online` / `Edit locally`
-    # at all: the strip builds both off a repo the reader owns, and here the repo is the
-    # whole semester's. What is theirs is a folder in it, so the layout hands the strip the
-    # REAL name as a fact and the folder as a shape, and only the shape is substituted.
-    layout = _strip_comments(_templates()["_layouts/assignment.html"])
-    marked = layout.split("{% elsif page.repo_url %}")[1].split("{% endunless %}")[0]
-    # On the drop box's callout and nowhere else. Gated on `submit_path`, that shape's key
-    # and no other's, so the key's presence is the test rather than a second `case` to keep
-    # in step with the first.
-    div = [ln for ln in marked.splitlines() if 'class="callout callout-submit"' in ln]
-    assert len(div) == 1, div
-    assert "{% if page.submit_path %}" in div[0]
-    # Both halves on the one element, or the strip reads a name off a page that wrote no
-    # folder to go with it.
-    assert 'data-dsl-dropbox="{{ page.repo_name | escape }}"' in div[0]
-    assert 'data-dsl-dropbox-path="{{ page.submit_path | escape }}"' in div[0]
-    # And nothing else on the page carries them.
-    assert layout.count("data-dsl-dropbox") == 2
-    body = _strip_comments(_open_in())
-    block = body.split("function decorateAssignment(root, me) {")[1].split("\n  }")[0]
-    assert 'document.querySelector("[data-dsl-dropbox]")' in block
-    # The name is taken exactly as written; the FOLDER is the half that goes through the
-    # substitution, which is what leaves a group drop box (`<your-team>/`) alone.
-    assert 'repo = box.getAttribute("data-dsl-dropbox");' in block
-    assert 'ownShape(box.getAttribute("data-dsl-dropbox-path"), me.handle)' in block
-    # So there is nothing to re-point either: the layout marks no shape on that page.
-    assert "if (!path) { resolveRepo(org, repo); }" in block
-    # Both buttons carry the folder, and a per-unit page's empty `path` leaves both calls
-    # exactly what they were.
-    assert 'var path = "";' in block
-    offers = block.split("var offers = [")[1].split("];")[0]
-    assert "onlineUrl(org, repo, onlineTail(path))" in offers
-    assert "localUrl(me.editor, me.assignments, repo, path)" in offers
-    # github.dev takes github.com's own path for a folder, and no attribute on the page
-    # carries a branch - `main` is the branch every repo this toolkit hands out is on.
-    tail = body.split("function onlineTail(path) {")[1].split("\n  }")[0]
-    assert '"/tree/main/" + out.join("/")' in tail
-    assert 'return out.length ? "/tree/main/"' in tail
-    # The clone command is the drop box's own, into the folder the profile names.
-    assert "cloneCommand(org, repo, me.assignments)" in block
-    # The page the fixture proves this against: a real repo name and a folder shape.
-    page = _front_matter(generated["collections"]["_assignments"]["07-assignment-7.md"])
-    assert page["repo_name"] == "assignment-7-submissions"
-    assert page["submit_path"] == "<your-handle>/"
 
 
 # ---------------------------------------------------------------------------
@@ -1855,27 +885,3 @@ def test_the_term_date_row_names_its_kind_and_not_its_entry():
     _, _, rest = body.partition('data-label="Event">')
     cell, _, _ = rest.partition("</div>")
     assert cell.strip() == "Semester"
-
-
-def test_the_team_steps_come_first_and_number_the_submission_box(generated):
-    # Forming a team comes BEFORE opening its repo, so the page numbers them in that order,
-    # in Your Profile's visual language - and only while a window is open.
-    layout = _strip_comments(_templates()["_layouts/assignment.html"])
-    assert layout.index('id="dsl-team-steps"') < layout.index(
-        "Open the submission repo"
-    )
-    assert layout.count('<span class="profile-step-num">1</span> Form your team') == 1
-    assert '<span class="profile-step-num">2</span> Open your submission repo' in layout
-    # Step 2's heading reaches both submission arms through one capture, set only inside
-    # the window's `if` - so a page with no window renders the box as it always did.
-    assert layout.count("{{ step_two }}") == 2
-    forming = generated["collections"]["_assignments"]
-    assert "team_join_url" in forming["08-assignment-8.md"]
-    assert "team_join_url" not in forming["07-assignment-7.md"]
-    # The one membership seam, reading the handle through open_in.html's accessor.
-    assert "function inTeam(key, row)" in layout
-    assert 'profile.stored("handle")' in layout
-    assert 'crypto.subtle.digest("SHA-256"' in layout
-    scss = _templates()["_sass/_course.scss"]
-    # Shared with Your Profile rather than copied: top level, not under `.profile-steps`.
-    assert "\n.profile-step-num {" in scss

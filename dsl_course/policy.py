@@ -108,6 +108,7 @@ SCHEMA = {
                 "url": {"type": "string"},
                 "address": {"type": "string"},
                 "dsl_org_url": {"type": "string"},
+                "console_url": {"type": "string"},
             },
             "required": ["name", "url", "address", "dsl_org_url"],
             "additionalProperties": False,
@@ -225,6 +226,13 @@ def defaults() -> dict:
 def kinds() -> list[dict]:
     """The row kinds, in display order: `key`, `label`, `colour`, `background`, `system`."""
     return load()["kinds"]
+
+
+def console_link(semester_org: str, screen: str = "week") -> str:
+    """One semester's screen in the student console (`institution.console_url`), or "" when
+    the institution runs no console."""
+    url = load()["institution"].get("console_url") or ""
+    return f"{url}?semester={semester_org}#{screen}" if url else ""
 
 
 def content_kinds() -> tuple[str, ...]:

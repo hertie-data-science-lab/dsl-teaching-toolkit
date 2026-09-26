@@ -29,7 +29,7 @@ function Node({ n, badges, org, repo, branch, depth, kinds }: { n: TreeNode; bad
         <summary>
           <span class="ft-name">{n.name}/</span>
           {depth === 0 && kinds[n.name] ? <span class="chip">{kinds[n.name]}</span> : null}
-          {c.public ? <span class="chip ok">{c.public} hosted</span> : null}
+          {c.public ? <span class="chip ok">{c.public} public</span> : null}
           {c.withheld ? <span class="chip amber">{c.withheld} withheld</span> : null}
         </summary>
         <ul>{n.children.map((x) => <Node n={x} badges={badges} org={org} repo={repo} branch={branch} depth={depth + 1} kinds={kinds} />)}</ul>

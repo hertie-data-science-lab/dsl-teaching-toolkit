@@ -71,16 +71,16 @@ jobs:
           fi
 
       - name: Check the pages that can fail by rendering nothing
-        # The recursive All Materials index and the schedule both empty themselves rather
-        # than erroring, so assert a leaf from the fixture's deepest level and one row of
-        # each kind actually reached the HTML. "Handed in outside GitHub" is the fixture's
+        # The schedule empties itself rather than erroring, so assert one row of each kind
+        # actually reached the HTML. "Handed in outside GitHub" is the fixture's
         # `submit_via: external` assignment, whose wording is one half of an `{% if %}` -
-        # a branch that renders nothing is the same silent failure.
+        # a branch that renders nothing is the same silent failure - and the banner is
+        # behind one too.
         run: |
           cd "$RUNNER_TEMP/build"
           missing=0
           for needle in \
-            "further-notes.pdf" "Handed in outside GitHub" \
+            "Handed in outside GitHub" "Open this semester in the student console" \
             "table-row-lecture" "table-row-lab" "table-row-assignment" \
             "table-row-due" "table-row-exam" "table-row-special_event" \
             "table-row-term_date" "table-row-drop-in"; do
@@ -96,90 +96,20 @@ jobs:
           done
           exit $missing
 
-      - name: Check a published file renders from the site and an unpublished one does not
-        # Publishing has two halves built by different code - the mirror that copies the
-        # bytes and the front matter that links them - and a mismatch is a 404 on a live
-        # site. The fixture publishes session 1's `slides.html` (with its `slides_files/`
-        # bundle) and not the `slides.pdf` beside it, so one page carries both row shapes.
+      - name: Check the calendar builds none of the retired sections
+        # A semester site is a public calendar (decision 0011 rule 5): no assignment
+        # pages, no Your Profile, no All Materials tree, no hosted copies.
         run: |
           cd "$RUNNER_TEMP/build"
           missing=0
-          for f in \
-            files/course-materials/lectures/01_week-1/slides.html \
-            files/course-materials/lectures/01_week-1/slides_files/figure/plot.svg; do
-            if [ ! -f "$f" ]; then
-              echo "::error::$f was never copied into the site"
-              missing=1
+          for gone in assignments profile materials files; do
+            if [ -e "$gone" ]; then
+              echo "::error::/$gone/ was built"; missing=1
             fi
           done
-          if ! grep -rq 'href="[^"]*/files/course-materials/lectures/01_week-1/slides\.html"' .; then
-            echo "::error::slides.html is published but no page links its hosted copy"
-            missing=1
+          if grep -rq --include='*.html' 'members_sha256\|/profile/' .; then
+            echo "::error::a retired section reached the build"; missing=1
           fi
-          if ! grep -rq 'slides\.html</a> <span class="file-btns">.*github\.com.*>source</a>.*>render</a>' .; then
-            echo "::error::slides.html has no source and render buttons beside it"
-            missing=1
-          fi
-          if ! grep -q 'slides\.html</a>.*· <a[^>]*github\.com[^>]*>source</a></span>\]' index.html; then
-            echo "::error::the Updates box does not carry the inline source link"
-            missing=1
-          fi
-          # The unpublished file beside it: `source`, because every file has a home on
-          # GitHub, and no `render`, because this site hosts no copy of it to draw.
-          if ! grep -rq 'slides\.pdf</a> <span class="file-btns">.*>source</a></span>' .; then
-            echo "::error::slides.pdf carries no source button"
-            missing=1
-          fi
-          if grep -rq 'slides\.pdf</a>.*>render</a>' .; then
-            echo "::error::slides.pdf is not published but offers a rendered copy"
-            missing=1
-          fi
-          # Every button in the row leaves the page, so every one of them leaves in a new
-          # tab. `local` is the exception and is added by script, not here.
-          if grep -rho '<a class="file-btn"[^>]*>' . | grep -v 'target="_blank"'; then
-            echo "::error::a file-row button was rendered without target=_blank"
-            missing=1
-          fi
-          exit $missing
-
-      - name: Check the open-in-your-own-copy control ships
-        # There is no JS runtime in this job, so what is checked here is what Liquid
-        # RENDERED: the page the tab points at exists, the set-up line reaches a file list
-        # and an assignment, and the assignment's repo shape reaches the script as a data
-        # attribute rather than as prose. The Liquid-error check above covers the script's
-        # own markup.
-        run: |
-          cd "$RUNNER_TEMP/build"
-          missing=0
-          grep -q 'id="dsl-profile"' profile/index.html || {
-            echo "::error::/profile/ built without its form"; missing=1; }
-          for step in 1 2 3 4; do
-            grep -q "profile-step-num\">$step<" profile/index.html || {
-              echo "::error::/profile/ built without step $step"; missing=1; }
-          done
-          for field in handle materials assignments editor; do
-            grep -q "data-save=\"$field\"" profile/index.html || {
-              echo "::error::/profile/ built without a Save for $field"; missing=1; }
-            grep -q "id=\"dsl-saved-$field\"" profile/index.html || {
-              echo "::error::/profile/ built without a saved line for $field"; missing=1; }
-          done
-          # Every place the assignment page prints the repo shape is marked for the script.
-          for f in assignments/01-assignment-1.html; do
-            test "$(grep -c 'code data-dsl-repo' "$f")" -gt 0 || {
-              echo "::error::$f does not mark the repo shape"; missing=1; }
-            test "$(grep -c 'data-dsl-repo-url' "$f")" -gt 0 || {
-              echo "::error::$f does not mark the repo link"; missing=1; }
-          done
-          for f in lectures/index.html assignments/01-assignment-1.html; do
-            grep -q "Open files in your local copy" "$f" || {
-              echo "::error::$f carries no set-up line"; missing=1; }
-          done
-          if grep -q "Open files in your local copy" profile/index.html; then
-            echo "::error::/profile/ offers to send the reader to /profile/"
-            missing=1
-          fi
-          grep -q 'data-repo-name="assignment-1-&lt;your-handle&gt;"' assignments/01-assignment-1.html || {
-            echo "::error::the assignment page does not hand the script its repo shape"; missing=1; }
           exit $missing
 
       - name: Check the Updates box announces only what released

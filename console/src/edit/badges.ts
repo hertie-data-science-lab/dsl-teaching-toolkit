@@ -1,6 +1,6 @@
 // What happens to each file of a materials repo, from its `publish.yml` public patterns and
-// its root `.releaseignore`: withheld files never reach students (and so are never hosted),
-// files matching a public pattern are also hosted openly on the student site, the rest are
+// its root `.releaseignore`: withheld files never reach students (and so are never public),
+// files matching a public pattern are selected for the public website, the rest are
 // released to students only. Both lists use gitignore syntax (`./glob`).
 //
 // The engine's rule, `materials.hosted_paths`, with its lists read from
@@ -15,7 +15,7 @@ import { compile, matchRules, type Rule } from './glob';
 export type Badge = 'public' | 'withheld' | 'released' | 'never_public';
 
 export const BADGE_WORD: Record<Badge, string> = {
-  public: 'hosted on the student site', withheld: 'withheld', released: 'released to students', never_public: 'released to students, never hosted',
+  public: 'for the public website', withheld: 'withheld', released: 'released to students', never_public: 'released to students, never public',
 };
 
 /** An fnmatch pattern (`.env.*`) as a whole-name regex. */

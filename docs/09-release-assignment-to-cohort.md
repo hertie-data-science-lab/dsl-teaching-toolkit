@@ -69,7 +69,7 @@ like any other, and a student who onboards later is granted push on the next tic
 world-readable - portfolio work such as a hackathon. There is then **no Submission receipts issue**
 (a hand-in time is a fact about a student, and it does not go where the internet can read
 it; the marks were never going here anyway), and the
-assignment's page on the semester site - and the repo's own About line - says the repo is
+student console - and the repo's own About line - says the repo is
 public before they push anything into it.
 
 No **model solution** is pushed into these repos, whatever
@@ -93,7 +93,7 @@ No model solution is pushed into these repos either, for the same reason: the st
 publish the repo the day after the cutoff, and the answers would go with it.
 
 Until the assignment's **grading cutoff** the scheduler puts any of these repos back to
-private on its next tick, and the assignment's page on the semester site says so. After the
+private on its next tick, and the student console says so. After the
 cutoff nothing touches the flag again: the repo is theirs to publish.
 
 One-time setup on the semester org, by hand (these are web-only settings - no API sets them):
@@ -139,7 +139,7 @@ Which of the two an assignment uses is the semester's - `team_formation` in `sem
 
 **The window** runs from the assignment's `handout_datetime` to its late cutoff (the due date plus `late_window_days`): a team minted after the snapshot has nothing left to hand in. Before the hand-out the form says formation is not open yet and when it will run; after the cutoff it says the day it closed. Move either date and the window moves. An assignment with no `handout_datetime` on record has no window at all - but **Release assignment** writes that moment into `schedule.yml` itself, so a hand-fired hand-out opens one too. While it is open, the form's Assignment field is a drop-down of exactly the assignments a student may act on - and it moves with the window: the same tick that opens or shuts one rewrites the form, as does a push to `schedule.yml`.
 
-**The team list is the assignment's page on the semester site.** `teams.csv` is private, so a student cannot see what to join. While the window is open, that page carries a **Form your team** callout - the cap, the closing day, a link to the form, and a table of the teams that exist with the places each has left (**names and counts only**, because the site is public) - and its schedule row carries the same prompt in one line. The mail, the form's header and the form's refusals all link that page. A push to `teams.csv` fires a site sync, so the table follows each join within minutes. The submission address stays beside it rather than in its place: a team that formed on day one owns its repo already. All of it goes when the window shuts.
+**The team list is the student console's Join screen.** `teams.csv` is private, so a student cannot see what to join. While the window is open, the console lists the teams that exist with the places each has left (**names and counts only**, read from the public `student-status.json`), and a Pick fills in the request; the site's schedule row carries a **Form your team** prompt with the closing day. The mail, the form's header and the form's refusals all link the console. A push to `teams.csv` fires a site sync, which rewrites `student-status.json`, so the list follows each join within minutes. All of it goes when the window shuts.
 
 **The students are emailed** - the only mail the toolkit sends off a clock rather than off something you did. When the window opens, every enrolled, onboarded student with no team for that assignment gets one plain message, addressed to them by name and naming the assignment as the site does (`Assignment 3: Project`): the cap, the day formation closes, the link to the form and the link to the assignment's page. Anyone still without a team 48 hours before it shuts gets one more, and a student who onboards mid-window is asked on the next tick. Nothing goes out between 23:00 and 07:00 in the semester's timezone - the message waits for the morning, while the lock, the form and the site still turn at the window's own minute - nothing is said twice (`.system/team-formation/mailed.csv` in `semester-config` is the record), and a semester whose course org has no `GRAPH_*` mail secrets is sent nothing and has nothing recorded against it. It does not say whether working alone is allowed - that is yours to tell them.
 
