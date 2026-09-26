@@ -84,7 +84,9 @@ def test_one_run_stops_at_its_deadline_and_says_how_many_are_left(monkeypatch, c
     monkeypatch.setattr(
         grades,
         "provision_one",
-        lambda org, handle, existing=None: made.append(handle) or "ok",
+        lambda org, handle, existing=None, collaborators=None: (
+            made.append(handle) or "ok"
+        ),
     )
     assert grades.ensure_gradebooks("SEMESTER", budget_minutes=2) == 0
     assert made == ["s0", "s1"]
@@ -107,7 +109,9 @@ def test_the_deadline_does_not_stop_a_run_that_is_keeping_up(monkeypatch, capsys
     monkeypatch.setattr(
         grades,
         "provision_one",
-        lambda org, handle, existing=None: made.append(handle) or "skipped",
+        lambda org, handle, existing=None, collaborators=None: (
+            made.append(handle) or "skipped"
+        ),
     )
     assert grades.ensure_gradebooks("SEMESTER") == 0
     assert len(made) == 200
@@ -3096,3 +3100,26 @@ def test_the_lock_keeps_the_fragment_of_the_join_screen_url():
         grades.parse_team_lock(text + "# a comment\n")["a"]["team_formation_page"]
         == page
     )
+
+
+def test_a_gradebook_whose_student_already_reads_it_is_not_granted_again(monkeypatch):
+    # The nightly sync visits every gradebook; the GraphQL listing says who is already a
+    # read collaborator, so the PUT is made only for the rest: a pending invite (not
+    # listed) and a student who holds MORE than read, which the PUT puts back.
+    added = []
+    monkeypatch.setattr(
+        grades,
+        "add_collaborator",
+        lambda org, repo, handle, **k: added.append(handle) or True,
+    )
+    monkeypatch.setattr(grades, "_tag_gradebook", lambda *a, **k: None)
+    handles = ("ada", "bo", "cy")
+    existing = {f"grades-{h}": {"name": f"grades-{h}"} for h in handles}
+    held = {
+        "grades-ada": {"ada": "READ"},
+        "grades-bo": {},
+        "grades-cy": {"cy": "WRITE"},
+    }
+    for handle in handles:
+        assert grades.provision_one("S", handle, existing, held) == "skipped"
+    assert added == ["bo", "cy"]

@@ -54,6 +54,7 @@ from .gh_contents import read_error
 from .gh_teams import acting_login, membership_changes, reset_membership_changes
 from .grades import ensure_gradebooks, sync_team_lock
 from .log import CLIParser, Summary, add_preview_flag, log_err, log_ok, plural
+from .repos import direct_collaborators_by_repo
 from .welcome import refresh_join_team_form
 
 # What a semester's hand-edited config can be wrong in a way this sync cannot act on: a CSV
@@ -169,8 +170,15 @@ def sync(
             # the gradebooks need. None is "we could not look", and each of them answers
             # it for itself.
             existing = listing_by_name(org)
+            # And ONE GraphQL query for every repo's direct collaborators, which the
+            # prune and the gradebooks each asked per repo (None: they still do).
+            collaborators = direct_collaborators_by_repo(org)
             errors += sync_roster.sync(
-                org, prune=True, dry_run=dry_run, existing=existing
+                org,
+                prune=True,
+                dry_run=dry_run,
+                existing=existing,
+                collaborators=collaborators,
             )
             errors += sync_teams.sync(org, prune=True, dry_run=dry_run)
             errors += sync_faculty.sync_semester_instructors(
@@ -201,6 +209,7 @@ def sync(
                 dry_run=dry_run,
                 existing=existing,
                 budget_minutes=GRADEBOOK_BUDGET_MINUTES,
+                collaborators=collaborators,
             )
         except _CONTENT_FAULT as exc:
             # A file faculty have to fix, not a run that broke. This semester is skipped -

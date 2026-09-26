@@ -3275,7 +3275,10 @@ def _tag_gradebook(semester_org: str, repo: str, have: set[str]) -> None:
 
 
 def provision_one(
-    semester_org: str, handle: str, existing: dict[str, dict] | None = None
+    semester_org: str,
+    handle: str,
+    existing: dict[str, dict] | None = None,
+    collaborators: dict[str, dict[str, str]] | None = None,
 ) -> str:
     """Ensure a private grades-<handle> repo exists with the student as read collaborator.
 
@@ -3332,6 +3335,13 @@ def provision_one(
             missing_is_note=True,
             person=True,
         )
+    held = (collaborators or {}).get(repo.casefold()) or {}
+    if existed and held.get(handle.casefold()) == "READ":
+        # Already the gradebook's read collaborator (`repos.direct_collaborators_by_repo`):
+        # the PUT would change nothing, and the nightly sync used to make it per student.
+        # Held at anything else - more than read included - the PUT puts it back to read.
+        log_person(f"  [ok]   + @{handle} (read)")
+        return "skipped"
     if add_collaborator(semester_org, repo, handle, permission="pull", person=True):
         log_person(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"
@@ -3346,6 +3356,7 @@ def ensure_gradebooks(
     dry_run: bool = False,
     existing: dict[str, dict] | None = None,
     budget_minutes: float | None = None,
+    collaborators: dict[str, dict[str, str]] | None = None,
 ) -> int:
     """Provision one private gradebook repo per onboarded enrolled student. Idempotent.
 
@@ -3411,7 +3422,7 @@ def ensure_gradebooks(
             # student after this one is deferred by the same clock.
             deferred = len(onboarded) - done
             break
-        status = provision_one(semester_org, s.github_handle, existing)
+        status = provision_one(semester_org, s.github_handle, existing, collaborators)
         results[status] = results.get(status, 0) + 1
     if dry_run:
         return 0

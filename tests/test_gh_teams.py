@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import gh_teams
+from dsl_course import gh_teams, ghcli
 
 
 def test_get_org_owners_distinguishes_no_owners_from_an_unreadable_list(monkeypatch):
@@ -533,3 +533,18 @@ def test_a_just_created_team_is_reconciled_without_reading_it(monkeypatch):
     assert errors == 0
     assert added == ["alice", "bob"]
     assert removed == []  # the creator GitHub auto-added is never pruned
+
+
+def test_a_cli_run_knows_its_own_login_from_the_budget_read(monkeypatch):
+    # The start-of-run GET /user already named the account; asking again is a call.
+    monkeypatch.setattr(
+        ghcli, "_start_budget", ghcli.Budget("the-bot", 5000, 4000, 1000, 0)
+    )
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: pytest.fail("asked again"))
+    monkeypatch.setattr(ghcli, "gh", lambda *a, **k: pytest.fail("asked again"))
+    gh_teams.acting_login.cache_clear()
+    ghcli.bot_login.cache_clear()
+    assert gh_teams.acting_login() == "the-bot"
+    assert ghcli.bot_login() == "the-bot"
+    gh_teams.acting_login.cache_clear()
+    ghcli.bot_login.cache_clear()

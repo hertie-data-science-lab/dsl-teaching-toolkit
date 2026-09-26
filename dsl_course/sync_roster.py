@@ -29,7 +29,7 @@ import sys
 from . import roster, teams
 from .course import AUDITORS_TEAM, STUDENTS_TEAM, submission_repo, submission_suffix
 from .discovery import classify_repos, list_org_repos
-from .gh_teams import reconcile_team_members, set_org_membership
+from .gh_teams import org_member_logins, reconcile_team_members, set_org_membership
 from .log import CLIParser, add_preview_flag, log_err, log_ok, log_person, log_step
 from .repos import (
     cancel_invitation,
@@ -77,7 +77,11 @@ def submission_repo_suffixes(repos: list[dict]) -> list[tuple[str, str]]:
 
 
 def revoke_repo_grants(
-    semester_org: str, repo: str, login: str, dry_run: bool = False
+    semester_org: str,
+    repo: str,
+    login: str,
+    dry_run: bool = False,
+    collaborators: dict[str, dict[str, str]] | None = None,
 ) -> tuple[int, int]:
     """Take back `login`'s DIRECT grant on `semester_org/repo`, and any invitation to it they
     have not accepted. Returns `(withdrawn, errors)`.
@@ -99,7 +103,9 @@ def revoke_repo_grants(
     left exactly as it is."""
     withdrawn = 0
     errors = 0
-    present = is_collaborator(semester_org, repo, login, person=True)
+    present = is_collaborator(
+        semester_org, repo, login, person=True, held=collaborators
+    )
     if present is None:  # unreadable - never guess, in either direction
         return 0, 1
     if present:
@@ -134,6 +140,7 @@ def revoke_offboarded_access(
     on_roster: set[str],
     dry_run: bool = False,
     existing: dict[str, dict] | None = None,
+    collaborators: dict[str, dict[str, str]] | None = None,
 ) -> int:
     """Revoke the collaborator grant an off-boarded student still holds on the submission
     repos named after them. Returns the error count.
@@ -175,7 +182,7 @@ def revoke_offboarded_access(
     revoked = 0
     for repo, suffix in stale:
         withdrawn, failed = revoke_repo_grants(
-            semester_org, repo, suffix, dry_run=dry_run
+            semester_org, repo, suffix, dry_run=dry_run, collaborators=collaborators
         )
         revoked += withdrawn
         errors += failed
@@ -195,12 +202,15 @@ def sync(
     prune: bool = False,
     dry_run: bool = False,
     existing: dict[str, dict] | None = None,
+    collaborators: dict[str, dict[str, str]] | None = None,
 ) -> int:
     """Reconcile the semester's role teams and, with `prune`, its off-boarded access.
 
     `existing` is the semester's repos keyed by name when the CALLER already holds a listing
     (the nightly Sync membership takes one for this and the gradebooks alike); None means
-    take one here, and only the prune half needs it at all."""
+    take one here, and only the prune half needs it at all. `collaborators` is the same
+    caller's `repos.direct_collaborators_by_repo`, which answers the prune's "is this
+    handle still a collaborator?" without a read per repo."""
     students = roster.load(semester_org)
     if students is None:
         # An ABSENT students.csv, which `load` has already logged. A file faculty have to
@@ -225,11 +235,18 @@ def sync(
     )
 
     errors = 0
+    # Who is a member already, off ONE listing, rather than a membership read per student
+    # per run: this runs hourly, and after the first week nearly everyone is. Unreadable,
+    # and every handle is asked about as before.
+    asking = not dry_run and any(wanted.values())
+    members = org_member_logins(semester_org) if asking else None
     for team, rows in wanted.items():
         handles = {s.github_handle for s in rows}
         for handle in sorted(handles):
             if dry_run:
                 log_person(f"    PREVIEW enrol: {handle} -> org member")
+            elif members is not None and handle.casefold() in members:
+                log_person(f"  [skip] org membership {handle} (active)")
             elif not set_org_membership(semester_org, handle, role="member"):
                 errors += 1
         # Team membership via the shared reconcile so pruning inherits its guard:
@@ -252,6 +269,7 @@ def sync(
             {s.github_handle.casefold() for rows in wanted.values() for s in rows},
             dry_run=dry_run,
             existing=existing,
+            collaborators=collaborators,
         )
     return errors
 

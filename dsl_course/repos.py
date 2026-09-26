@@ -877,8 +877,65 @@ def _direct_logins(
     return [line.strip() for line in out.splitlines() if line.strip()], out
 
 
+# One GraphQL page per hundred repos: every repo of an org with its DIRECT collaborators.
+# GraphQL has a budget of its own, apart from the 5,000 REST calls an hour every workflow
+# shares, and this one question used to cost a REST listing per repo.
+_COLLABORATORS_QUERY = """query($org: String!, $endCursor: String) {
+  organization(login: $org) {
+    repositories(first: 100, after: $endCursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes { name collaborators(affiliation: DIRECT, first: 100) {
+        totalCount edges { permission node { login } } } }
+    }
+  }
+}"""
+
+
+# One page of the query, projected by `gh --jq` into a tab-separated row per repo.
+COLLABORATORS_JQ = (
+    ".data.organization.repositories.nodes[] | [.name, "
+    "((.collaborators.totalCount // -1) | tostring), "
+    '((.collaborators.edges // []) | map("\\(.node.login):\\(.permission)") | join(","))]'
+    " | @tsv"
+)
+
+
+def direct_collaborators_by_repo(org: str) -> dict[str, dict[str, str]] | None:
+    """`{repo: {login: permission}}` (names casefolded; GraphQL's READ, TRIAGE, WRITE,
+    MAINTAIN, ADMIN) of every repo in `org` whose DIRECT collaborators GraphQL listed in
+    full, or None when the query failed. A repo it could not list whole (no answer, or more
+    than a hundred) is left out, and its caller reads it itself. Like the REST listing's
+    `affiliation=direct`, it holds no pending invitee."""
+    code, out = gh(
+        "api",
+        "graphql",
+        "--paginate",
+        "-f",
+        f"query={_COLLABORATORS_QUERY}",
+        "-f",
+        f"org={org}",
+        "--jq",
+        COLLABORATORS_JQ,
+    )
+    if code != 0:
+        return None
+    held = {}
+    for line in out.splitlines():
+        name, count, pairs = (line.split("\t") + ["", ""])[:3]
+        found = dict(p.rpartition(":")[::2] for p in pairs.split(",") if ":" in p)
+        found = {login.casefold(): perm for login, perm in found.items()}
+        if name and count.isdigit() and int(count) == len(found):
+            held[name.casefold()] = found
+    return held
+
+
 def is_collaborator(
-    org: str, repo: str, login: str, *, person: bool = False
+    org: str,
+    repo: str,
+    login: str,
+    *,
+    person: bool = False,
+    held: dict[str, dict[str, str]] | None = None,
 ) -> bool | None:
     """Whether `login` holds a DIRECT collaborator grant on `org/repo`.
 
@@ -891,7 +948,12 @@ def is_collaborator(
 
     None means the answer could not be read. Kept distinct from False on purpose: the
     caller is about to REVOKE access, and a rate limit or a network drop must never read
-    as "not a collaborator, nothing to do" - nor, worse, be acted on either way."""
+    as "not a collaborator, nothing to do" - nor, worse, be acted on either way.
+
+    `held` is `direct_collaborators_by_repo(org)` when the caller took it: a repo listed
+    there is answered from it, with no read."""
+    if held is not None and repo.casefold() in held:
+        return login.casefold() in held[repo.casefold()]
     logins, out = _direct_logins(
         org, repo, "collaborators?affiliation=direct&per_page=100", ".[].login"
     )
