@@ -5,18 +5,22 @@ fault or a connection that never got the request there), and the shared 404 test
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
 import subprocess
+import sys
 import time
 from collections import deque
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import cache
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
-from .log import log_err
+from .log import CLIParser, log_err, on_cli_start, plural
 
 RATE_LIMIT_MARKERS = (
     "secondary rate limit",
@@ -527,3 +531,127 @@ def bot_token(what: str) -> str | None:
     else:
         log_err(f"DSL_BOT_TOKEN not set - cannot set {what}.")
     return None
+
+
+# ------------------------------------------------------------ the API budget line
+
+# One user account (`DSL_BOT_TOKEN`) runs every workflow in every course org, against ONE
+# budget of 5,000 REST calls an hour - and nobody can read its counters from outside,
+# because the token is an org secret. So every engine CLI run says, at its start and its
+# end, what the account had left and what the run cost: the numbers the next run's
+# failure would otherwise leave nobody able to explain.
+#
+# The source is the `X-RateLimit-*` HEADERS of `GET /user`, not `GET /rate_limit`: on
+# 2026-09-26 `/rate_limit` answered `used=0, remaining=5000` with a reset that moved to
+# an hour from now on every call, while `/user`'s headers counted up (4, 5, 6) against a
+# fixed reset - the real window.
+BUDGET_WARN_BELOW = 1000
+BUDGET_STOP_BELOW = 100
+
+_RATE_HEADER = re.compile(
+    r"^x-ratelimit-(limit|remaining|used|reset):\s*(\d+)\s*$", re.I | re.M
+)
+_LOGIN = re.compile(r'"login"\s*:\s*"([^"]+)"')
+
+# Named at module level so a test can hold the end line rather than register a real one.
+_at_exit = atexit.register
+
+
+@dataclass(frozen=True)
+class Budget:
+    """The account's REST budget as one response's headers told it."""
+
+    login: str
+    limit: int
+    remaining: int
+    used: int
+    reset: int  # epoch seconds
+
+    @property
+    def resets(self) -> str:
+        return datetime.fromtimestamp(self.reset, UTC).strftime("%H:%M")
+
+
+def parse_budget(out: str) -> Budget | None:
+    """The budget out of `gh api --include` output, or None when a header is missing.
+
+    Read whatever the exit code: a 403 for an exhausted budget still carries the headers,
+    and that is the answer that matters most. `\r` is tolerated at a line's end."""
+    found = {k.lower(): int(v) for k, v in _RATE_HEADER.findall(out)}
+    if set(found) != {"limit", "remaining", "used", "reset"}:
+        return None
+    login = _LOGIN.search(out)
+    return Budget(
+        login.group(1) if login else "this token",
+        found["limit"],
+        found["remaining"],
+        found["used"],
+        found["reset"],
+    )
+
+
+def read_budget() -> Budget | None:
+    """One `GET /user`, for its headers. None when there is no token (or no `gh`).
+
+    No retries: on an exhausted budget the rate-limit ladder would spend three and a half
+    minutes waiting for an answer that is already in hand."""
+    try:
+        _, out = gh("api", "--include", "--method", "GET", "user", retries=0)
+    except OSError:
+        return None
+    return parse_budget(out)
+
+
+def budget_start_line(start: Budget) -> str:
+    tag = "  [warn]" if start.remaining < BUDGET_WARN_BELOW else "  [budget]"
+    return (
+        f"{tag} GitHub API as {start.login}: {start.remaining} of {start.limit} left "
+        f"this hour, resets {start.resets}Z"
+    )
+
+
+def budget_end_line(start: Budget, end: Budget) -> str:
+    """What the run cost: the account's `used` between the two reads, less the end
+    read itself. Other runs on the same account in the meantime count too.
+
+    Across a reset the old window's share is lost, so the count is a floor."""
+    if end.reset == start.reset:
+        cost = plural(max(end.used - start.used - 1, 0), "call")
+    else:
+        cost = f"at least {plural(max(end.used - 1, 0), 'call')} (the hour reset during the run)"
+    return (
+        f"  [budget] this run used {cost}; {end.remaining} left, resets {end.resets}Z"
+    )
+
+
+def _budget_at_end(start: Budget) -> None:
+    end = read_budget()
+    if end is not None:
+        print(budget_end_line(start, end), file=sys.stderr, flush=True)
+
+
+def budget_at_start(stop: bool = True) -> None:
+    """The start line, and the end line registered for exit - or, below
+    BUDGET_STOP_BELOW and with `stop`, the run stopped before it spends the last of the
+    budget and fails half-way for a cause it could have named. Nothing at all without a
+    token.
+
+    stderr, because some CLIs' stdout is read by the workflow (`list_orgs`, `scheduler`)."""
+    start = read_budget()
+    if start is None:
+        return
+    if stop and start.remaining < BUDGET_STOP_BELOW:
+        log_err(
+            f"GitHub API budget exhausted: {start.remaining} of {start.limit} left, "
+            f"resets {start.resets}Z - this run stops before it starts"
+        )
+        sys.exit(1)
+    print(budget_start_line(start), file=sys.stderr, flush=True)
+    _at_exit(_budget_at_end, start)
+
+
+def _budget_hook(parser: CLIParser) -> None:
+    budget_at_start(stop=parser.budget_stop)
+
+
+on_cli_start(_budget_hook)

@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Callable
 
 from .faults import not_migrated_text
 
@@ -162,12 +163,44 @@ OLD_FLAGS = {
 }
 
 
-class CLIParser(argparse.ArgumentParser):
-    """Every CLI's parser: no abbreviations, and old flags refused as NOT_MIGRATED."""
+# What runs once per process, after the first command line that parses (see CLIParser).
+# `ghcli` registers the API budget line here: this module cannot import it (ghcli logs
+# through this one), and a process that never imports ghcli makes no GitHub call anyway.
+# A hook is handed the parser, so a CLI can declare how it wants to be treated.
+_start_hooks: list[Callable[[CLIParser], None]] = []
+_cli_started = False
 
-    def __init__(self, *args, **kwargs) -> None:
+
+def on_cli_start(hook: Callable[[CLIParser], None]) -> None:
+    """Run `hook(parser)` once, when this process's first CLI command line has parsed."""
+    _start_hooks.append(hook)
+
+
+def _run_start_hooks(parser: CLIParser) -> None:
+    global _cli_started
+    if _cli_started:
+        return
+    _cli_started = True
+    for hook in _start_hooks:
+        hook(parser)
+
+
+class CLIParser(argparse.ArgumentParser):
+    """Every CLI's parser: no abbreviations, old flags refused as NOT_MIGRATED, and the
+    start-of-run hooks (`on_cli_start`) run once the command line has parsed.
+
+    After the whole parse (`parse_args`, which a subcommand's parser never reaches), so
+    `--help` and a usage error exit before any hook runs; once per process, so a CLI the
+    Console runs in-process does not repeat them.
+
+    `budget_stop=False` is for a CLI that only MAILS (`notify`): it prints the API budget
+    line but is never stopped by a low budget, because its mail needs none and it is what
+    reports the failure a low budget causes."""
+
+    def __init__(self, *args, budget_stop: bool = True, **kwargs) -> None:
         kwargs.setdefault("allow_abbrev", False)
         super().__init__(*args, **kwargs)
+        self.budget_stop = budget_stop
 
     def _known_flags(self) -> set[str]:
         flags = set(self._option_string_actions)
@@ -189,3 +222,8 @@ class CLIParser(argparse.ArgumentParser):
             if flag in OLD_FLAGS and flag not in known:
                 self.error(not_migrated_text(flag, OLD_FLAGS[flag]))
         return super().parse_known_args(args, namespace)
+
+    def parse_args(self, args=None, namespace=None):
+        parsed = super().parse_args(args, namespace)
+        _run_start_hooks(self)
+        return parsed

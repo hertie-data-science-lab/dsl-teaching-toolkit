@@ -1194,7 +1194,9 @@ def notify_run_failed(course_org: str, workflow: str, run_url: str, tail: str) -
 
 
 def main() -> int:
-    parser = CLIParser(description=__doc__)
+    # `budget_stop=False`: the mail goes through Graph and needs no GitHub budget, and a
+    # failed run is exactly when the budget may be gone - the mail is how it is heard of.
+    parser = CLIParser(description=__doc__, budget_stop=False)
     # A subcommand rather than a flag: `--run-failed` was `required=True` and
     # `store_true`, which is a switch that can only ever be on - and a second mail here
     # would have had to be a second such switch, mutually exclusive with the first.

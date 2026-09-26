@@ -979,3 +979,18 @@ Coding agents work only in worktrees under the scratchpad, never the live checko
 Every org is on GitHub Free. A **public** `.github` repo gets unlimited minutes, which is why the
 control panel is public; private repos draw on the free allowance. Usage per org:
 `gh api organizations/{org}/settings/billing/usage`.
+
+## API budget
+
+`DSL_BOT_TOKEN` is one user account shared by every course org, so every workflow in the
+estate draws on one budget of 5,000 REST calls an hour. Every CLI that imports `ghcli` prints,
+on stderr, `[budget] GitHub API as <login>: <remaining> of <limit> left this hour, resets
+<HH:MM>Z` when it starts and `[budget] this run used <n> calls; ...` when it ends
+(`ghcli.budget_at_start`, run from `CLIParser.parse_args`). That includes offline ones
+(`schemas`, `derive`, `syllabus`, `source_digest --title` in validate-schedule.yml). `<n>`
+counts every call on the account meanwhile, other runs' included. Below 1,000 left the start
+line is `[warn]`; below 100 the run stops before its first call with `[err] GitHub API budget
+exhausted` and exits non-zero - except `notify`, whose parser says `budget_stop=False`: its
+mail needs no GitHub budget and reports the failure. The numbers are the `X-RateLimit-*`
+headers of `GET /user`; `GET /rate_limit` is not truthful for this (it reported `used=0`
+against a live window). No token, no line.
