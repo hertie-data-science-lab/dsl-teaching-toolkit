@@ -96,7 +96,7 @@ from .gh_contents import (
     refuse_clashes,
     repo_blob_shas,
 )
-from .ghcli import gh, git
+from .ghcli import forget_all, gh, git
 from .grades import (
     GRADING_FILE,
     TEAM_LOCK_PATH,
@@ -1135,6 +1135,7 @@ def _listing(org: str) -> dict[str, dict]:
 
 def _forget() -> None:
     _LISTINGS.clear()
+    forget_all()  # and any read-once memo, should this CLI ever opt in to one
 
 
 def _topics(listing: dict[str, dict]) -> set[str]:
@@ -1507,6 +1508,15 @@ def settle(
     within TICK_MARGIN seconds before a tick (it waits past the tick instead). False, the
     runs named, when they are still going at the end. Only a real run waits: a preview
     writes nothing."""
+    try:
+        return _settle(targets, before_switch)
+    finally:
+        # The runs just waited on may have written anything: nothing read before the
+        # wait may be answered from memory after it.
+        forget_all()
+
+
+def _settle(targets: Callable[[], list[tuple[str, str]]], before_switch: bool) -> bool:
     deadline = clock() + QUIET_WAIT
     while True:
         left = next_tick(clock())
@@ -3450,7 +3460,9 @@ def _warn_drift(course: str, ref: str) -> None:
 
 
 def main() -> int:
-    parser = CLIParser(description=__doc__)
+    # Every read live: a migration plans, waits for other runs to finish (`settle`), then
+    # writes on top of what they wrote.
+    parser = CLIParser(description=__doc__, read_once=False)
     parser.add_argument(
         "org",
         help="The course org or semester org to migrate (the course org with --hold, "

@@ -4,7 +4,9 @@ six hours."""
 
 from __future__ import annotations
 
+import subprocess
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -545,3 +547,86 @@ def test_a_graphql_mutation_is_refused_because_it_names_no_org(monkeypatch, ran)
     with pytest.raises(RuntimeError, match="no org at all"):
         ghcli.gh("api", "graphql", "-f", "query=mutation { addStar }")
     assert ran == []
+
+
+# ------------------------------------------------------ what a write makes stale
+
+FILES, ISSUES = ghcli.FILES, ghcli.ISSUES
+
+
+@pytest.mark.parametrize(
+    ("argv", "kind", "targets"),
+    [
+        (("api", "--method", "PUT", "repos/O/R/contents/a.yml"), FILES, {"o/r"}),
+        (("api", "--method", "POST", "repos/o/r/git/trees"), FILES, {"o/r"}),
+        (("api", "--method", "PUT", "repos/o/r/pulls/3/merge"), FILES, {"o/r"}),
+        (("api", "--method", "POST", "orgs/o/repos", "-f", "name=x"), FILES, {"o"}),
+        (
+            ("api", "--method", "POST", "repos/t/tmpl/generate", "-f", "owner=O"),
+            FILES,
+            {"o"},
+        ),
+        # a rename: the NEW name's absence was a definite answer too
+        (("api", "--method", "PATCH", "repos/o/old", "-f", "name=new"), FILES, {"o"}),
+        (("api", "--method", "DELETE", "repos/o/r"), FILES, {"o"}),
+        (("repo", "create", "o/r", "--private"), FILES, {"o"}),
+        (("pr", "merge", "3", "--repo", "o/r"), FILES, {"o/r"}),
+        (("issue", "close", "7", "--repo", "O/R"), ISSUES, {"o/r"}),
+        (("api", "--method", "POST", "repos/o/r/issues/7/comments"), ISSUES, {"o/r"}),
+        (("api", "graphql", "-f", "query=mutation { x }"), ghcli.ALL, {"*"}),
+    ],
+)
+def test_a_write_names_what_it_may_have_changed(argv, kind, targets):
+    assert ghcli.written(argv) == (kind, frozenset(targets))
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("api", "--method", "PUT", "orgs/o/teams/t/memberships/u"),
+        ("api", "--method", "PUT", "repos/o/r/collaborators/u"),
+        ("api", "--method", "PUT", "repos/o/r/topics"),
+        ("api", "--method", "PUT", "repos/o/r/actions/permissions"),
+        ("api", "--method", "POST", "repos/o/.github/dispatches"),
+        ("secret", "set", "X", "--org", "o"),
+        ("label", "create", "x", "--repo", "o/r"),
+    ],
+)
+def test_a_write_that_changes_no_file_and_no_issue_forgets_nothing(argv):
+    assert ghcli.written(argv)[0] is None
+
+
+def test_forgetting_drops_the_repo_the_org_or_everything():
+    held = {"o/a": 1, "o/b": 2, "p/c": 3}
+    ghcli.forget_written(held, frozenset({"o/a"}))
+    assert set(held) == {"o/b", "p/c"}
+    ghcli.forget_written(held, frozenset({"o"}))
+    assert set(held) == {"p/c"}
+    ghcli.forget_written(held, frozenset({ghcli.EVERYTHING}))
+    assert held == {}
+
+
+def _gh_exits(monkeypatch, code: int) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=code, stdout="", stderr="HTTP 422"),
+    )
+
+
+def test_every_write_is_reported_even_one_that_failed(monkeypatch):
+    # A failed write can still have landed; a read is never reported.
+    heard = []
+    monkeypatch.setattr(ghcli, "_write_listeners", [lambda k, t: heard.append((k, t))])
+    _gh_exits(monkeypatch, 1)
+    ghcli.gh("api", "--method", "PUT", "repos/o/r/contents/a", retries=0)
+    ghcli.gh("api", "repos/o/r/contents/a", retries=0)
+    assert heard == [(ghcli.FILES, frozenset({"o/r"}))]
+
+
+def test_a_push_reports_the_repo_its_remote_names(monkeypatch, ran):
+    heard = []
+    monkeypatch.setattr(ghcli, "_write_listeners", [lambda k, t: heard.append((k, t))])
+    ran.replies["remote get-url"] = "https://x-access-token:***@github.com/O/Mat.git\n"
+    ghcli.git("-C", "/tmp/wd", "push", "-q", "origin", "HEAD")
+    assert heard == [(ghcli.FILES, frozenset({"o/mat"}))]

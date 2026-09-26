@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
@@ -77,9 +78,25 @@ def _run_gh(
 
     Retries on GitHub secondary rate limits, on a subprocess timeout, and - for a
     NON-mutating call only - on a transient GitHub fault (see TRANSIENT_MARKERS), with
-    exponential backoff."""
+    exponential backoff.
+
+    A write tells the `on_write` listeners what it may have changed, whatever its outcome:
+    a failed write can still have landed, and a refused one is re-read before a retry."""
     _check_gh_allowlist(args)
     _pace_writes(args)
+    if not _is_mutating(args):
+        return _run_gh_ladder(args, stdin, retries)
+    try:
+        return _run_gh_ladder(args, stdin, retries)
+    finally:
+        kind, targets = written(args)
+        if kind:
+            _wrote(kind, targets)
+
+
+def _run_gh_ladder(
+    args: tuple[str, ...], stdin: str | None, retries: int
+) -> tuple[int, str, str]:
     delay = 30
     for attempt in range(retries + 1):
         try:
@@ -233,6 +250,108 @@ def _pace_writes(args: tuple[str, ...]) -> None:
         _sleep(60 - (at - _write_times[0]))
 
 
+# ------------------------------------------------------ what a write makes stale
+
+# A process reads each file, tree and issue listing once (`gh_contents`, `issues`) and must
+# then hear about every write that could change what it holds. Every write goes through
+# `_run_gh` or `git push`, so the news is sent from there rather than from each writer.
+#
+# Two kinds, so a write clears only what it can change: FILES (a file, a tree, a branch, a
+# repo made, renamed or deleted) and ISSUES (an issue opened, edited, commented on or
+# closed). Every other write - teams, collaborators, invitations, topics, secrets, Actions
+# settings, dispatches - changes neither, and a tick makes dozens of them.
+FILES = "files"
+ISSUES = "issues"
+ALL = "all"  # both kinds: `forget_all`, and a write this module cannot read
+EVERYTHING = "*"  # the target of a write that names no repo it could be pinned to
+WriteListener = Callable[[str, frozenset[str]], None]
+_write_listeners: list[WriteListener] = []
+_API_REPO = re.compile(r"^repos/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)(/.*)?$")
+_REMOTE_REPO = re.compile(
+    r"github\.com[:/]([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$"
+)
+_REPO_VERBS = frozenset({"create", "edit", "delete", "rename", "fork", "archive"})
+
+
+def on_write(listener: WriteListener) -> None:
+    """Call `listener(kind, targets)` after every write this process makes that can change
+    files or issues (`written`)."""
+    _write_listeners.append(listener)
+
+
+def _wrote(kind: str, targets: frozenset[str]) -> None:
+    for listener in _write_listeners:
+        listener(kind, targets)
+
+
+def forget_all() -> None:
+    """Tell every listener to drop everything it holds: for a caller that has WAITED on
+    other runs (`migrate.settle`), whose writes this process never saw."""
+    _wrote(ALL, frozenset({EVERYTHING}))
+
+
+def _target(org: str, repo: str = "") -> frozenset[str]:
+    return frozenset({f"{org}/{repo}".casefold() if repo else org.casefold()})
+
+
+def written(args: tuple[str, ...]) -> tuple[str | None, frozenset[str]]:
+    """What a `gh` write may have changed: `(kind, targets)`, or `(None, ...)` for a write
+    that changes no file and no issue. A target is `org/repo` (casefolded: GitHub's names
+    are not case-sensitive) where the write can only touch that repo, the bare `org` where
+    it makes, renames or deletes a repo there, and EVERYTHING where it cannot be told."""
+    flat = _split_flags(args)
+    words = [a for a in flat if not a.startswith("-")]
+    value = {f: v for f, v in pairwise(flat) if f in ("-R", "--repo")}
+    named = value.get("-R") or value.get("--repo") or ""
+    named = named or next((w for w in words[2:] if _NAME_WITH_OWNER.match(w)), "")
+    command = words[0] if words else ""
+    verb = words[1] if len(words) > 1 else ""
+    if command == "api":
+        if verb == "graphql":
+            return ALL, frozenset({EVERYTHING})
+        path = next((w for w in words[1:] if w.startswith(("repos/", "orgs/"))), "")
+        if match := _API_REPO.match(path.split("?")[0]):
+            org, repo, rest = match.group(1), match.group(2), match.group(3) or ""
+            if rest.startswith(("/contents/", "/git/")) or rest.endswith("/merge"):
+                return FILES, _target(org, repo)
+            if rest == "/generate":
+                owner = next(
+                    (m.group(1) for w in flat if (m := _OWNER_FIELD.match(w))), org
+                )
+                return FILES, _target(owner)
+            if rest == "":  # the repo object itself: a rename, an archive, a delete
+                return FILES, _target(org)
+            if rest.startswith("/issues"):
+                return ISSUES, _target(org, repo)
+            return None, frozenset()
+        if match := re.match(r"^orgs/([A-Za-z0-9._-]+)/repos$", path.split("?")[0]):
+            return FILES, _target(match.group(1))
+        return None, frozenset()
+    if command == "issue":
+        org, _, repo = named.partition("/")
+        return ISSUES, _target(org, repo) if repo else frozenset({EVERYTHING})
+    if (command == "repo" and verb in _REPO_VERBS) or (command, verb) == (
+        "pr",
+        "merge",
+    ):
+        org, _, repo = named.partition("/")
+        if not org:
+            return FILES, frozenset({EVERYTHING})
+        return FILES, _target(org, repo) if command == "pr" else _target(org)
+    return None, frozenset()
+
+
+def forget_written(held: dict[str, Any], targets: frozenset[str]) -> None:
+    """Drop from `held` (keyed by casefolded `org/repo`) every entry a write to `targets`
+    may have changed."""
+    if EVERYTHING in targets:
+        held.clear()
+        return
+    for key in list(held):
+        if key in targets or key.split("/", 1)[0] in targets:
+            del held[key]
+
+
 # --------------------------------------------------------- the opt-in org allowlist
 
 # An OPT-IN blast-radius fence for the live end-to-end run (tests/e2e), which drives real
@@ -327,8 +446,8 @@ def _git_subcommand(args: tuple[str, ...]) -> str:
     return ""
 
 
-def _push_owner(args: tuple[str, ...], cwd: str | None) -> str:
-    """The org a `git push` would land in, or "" if it cannot be told.
+def _push_remote(args: tuple[str, ...], cwd: str | None) -> str:
+    """The URL a `git push` would land at, or "" if it cannot be told.
 
     The remote is nearly always the name `origin`, so the URL has to be resolved out of the
     working copy - through `git` itself, which recurses no further because `remote get-url`
@@ -343,8 +462,19 @@ def _push_owner(args: tuple[str, ...], cwd: str | None) -> str:
         code, remote = git("remote", "get-url", remote, cwd=where)
         if code != 0:
             return ""
-    match = _REMOTE_OWNER.search(remote)
+    return remote
+
+
+def _push_owner(args: tuple[str, ...], cwd: str | None) -> str:
+    """The org a `git push` would land in, or "" if it cannot be told."""
+    match = _REMOTE_OWNER.search(_push_remote(args, cwd))
     return match.group(1) if match else ""
+
+
+def _pushed(args: tuple[str, ...], cwd: str | None) -> frozenset[str]:
+    """The repo a `git push` landed in, or EVERYTHING when its remote cannot be read."""
+    match = _REMOTE_REPO.search(_push_remote(args, cwd))
+    return _target(match.group(1), match.group(2)) if match else frozenset({EVERYTHING})
 
 
 def _check_push_allowlist(args: tuple[str, ...], cwd: str | None) -> None:
@@ -433,6 +563,8 @@ def git(*args: str, cwd: str | None = None) -> tuple[int, str]:
 
     A `push` raises when `DSL_ORG_ALLOWLIST` is set and the remote is outside it."""
     _check_push_allowlist(args, cwd)
+    # A push names its repo only through the working copy's remote, read before it runs.
+    pushed = _pushed(args, cwd) if _git_subcommand(args) == "push" else None
     try:
         result = subprocess.run(
             ["git"] + list(args),
@@ -444,6 +576,9 @@ def git(*args: str, cwd: str | None = None) -> tuple[int, str]:
         )
     except subprocess.TimeoutExpired:
         return 1, f"git: timed out after {GIT_TIMEOUT_SECONDS}s"
+    finally:
+        if pushed is not None:
+            _wrote(FILES, pushed)
     return result.returncode, (result.stdout + result.stderr).strip()
 
 
