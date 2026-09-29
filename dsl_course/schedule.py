@@ -407,7 +407,10 @@ class AssignmentEntry:
     # When to push the template's `solution/` folder into every provisioned repo - the
     # scheduled twin of Release assignment's `include_solution` tick. Deliberately NOT
     # defaulted to the due date: a solution released the moment submissions close is a
-    # gift to anyone who pushes late, so faculty name the moment or it never fires.
+    # gift to anyone who pushes late, so faculty name the moment or it never fires. It
+    # may not fall before the grading cutoff: the parser refuses one before
+    # `grading_datetime` (else the due date), and the scheduler holds one inside the
+    # template's late window until the window closes.
     # None = release the solution by hand, or not at all.
     solution_datetime: datetime | None = None
     # The line each of this entry's keys is written on - see `Deploy.lines`.
@@ -1143,6 +1146,19 @@ def _parse_assignments(
             "that setting is ignored",
             lines,
         )
+        grading = _flagged_datetime(
+            entry,
+            "grading_datetime",
+            tz,
+            drops,
+            where,
+            "grading falls back to the end of the late window - the due date plus "
+            "the template's `late_window_days`, and the due date itself when it "
+            "declares none. The submission snapshot freezes and the autograder fires "
+            "then, not when this says",
+            lines,
+            end_of_day=True,
+        )
         handout = _flagged_datetime(
             entry,
             "handout_datetime",
@@ -1195,6 +1211,19 @@ def _parse_assignments(
                 lines,
             )
             solution = None
+        elif solution is not None and solution < (grading or due):
+            # A solution out before the cutoff is read by everyone still handing in. This
+            # file knows the cutoff only as far as `grading_datetime`, else the due date;
+            # a template's late window beyond that is held by the scheduler instead
+            # (`scheduler._solution_due`), which can read it.
+            drops.note(
+                where,
+                "solution_datetime",
+                f"{solution_before_cutoff(str(slug), solution, grading or due)} - "
+                "refused, so the solution now waits for a human",
+                lines,
+            )
+            solution = None
         out[str(slug)] = AssignmentEntry(
             due_datetime=due,
             course_source_repo=source_repo,
@@ -1214,19 +1243,7 @@ def _parse_assignments(
                 "this assignment's schedule rows are shown on the site anyway",
                 lines,
             ),
-            grading_datetime=_flagged_datetime(
-                entry,
-                "grading_datetime",
-                tz,
-                drops,
-                where,
-                "grading falls back to the end of the late window - the due date plus "
-                "the template's `late_window_days`, and the due date itself when it "
-                "declares none. The submission snapshot freezes and the autograder fires "
-                "then, not when this says",
-                lines,
-                end_of_day=True,
-            ),
+            grading_datetime=grading,
             handout_datetime=handout,
             solution_datetime=solution,
             lines=lines,
@@ -1634,6 +1651,17 @@ def grading_datetime_at(sched: Schedule, slug: str) -> datetime | None:
     if entry.grading_datetime is not None:
         return entry.grading_datetime
     return entry.due_datetime
+
+
+def solution_before_cutoff(slug: str, solution: datetime, cutoff: datetime) -> str:
+    """What is wrong with a `solution_datetime` earlier than the grading cutoff, in the
+    words every surface uses: the schedule check refusing it, and the scheduler holding
+    it."""
+    return (
+        f"the solution for {slug} is set to go out on {solution:%Y-%m-%d %H:%M}, before "
+        f"its grading cutoff on {cutoff:%Y-%m-%d %H:%M}. Students can still hand in "
+        f"until the cutoff, so the solution must go out on or after it"
+    )
 
 
 def grading_datetime_iso(sched: Schedule, slug: str) -> str | None:

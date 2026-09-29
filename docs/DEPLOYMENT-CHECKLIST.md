@@ -348,7 +348,7 @@ assignments:
 | `handout_datetime` | no* | - | when repos are provisioned, automatic. *Required for the schedule to release it. If you hand out via the **Release assignment** workflow instead, the workflow records the release moment here for you |
 | `grading_datetime` | no | `due_datetime` + `late_window_days` | snapshot freezes + autograder fires (once) |
 | `course_source_repo` | **yes** | - (entry dropped without it) | the course-org repo this hands out from. A name that does not exist is reported loudly |
-| `solution_datetime` | no | never | pushes the template's `solution/` into every provisioned repo. Must be after `handout_datetime` |
+| `solution_datetime` | no | never | pushes the template's `solution/` into every provisioned repo. Must be after `handout_datetime`, and no earlier than the grading cutoff |
 | `cohort_dest_repo` | no | the slug | the cohort-side name: student/team repos (`<name>-<handle>`), the frozen cohort template, the teams.csv key, snapshots and grades |
 
 Timing only. `type:` and `max_team_size:` are no longer accepted here - they live in the assignment's own `grading_config.yml` on the course template's `solution` branch, and **Validate schedule** flags them here by name.
@@ -453,7 +453,7 @@ fully read goes red and opens an issue naming the bad entry.
 | `event_datetime:` missing/unparseable | that `releases:`/`events:` entry is dropped |
 | `due_datetime:` missing/unparseable | the whole `assignments:` entry is dropped - no grading pin, no site date |
 | `deploy` missing `course_source_repo`/`course_source_path` | that copy is dropped |
-| `solution_datetime:` malformed, or not after `handout_datetime` | dropped - the solution waits for a human |
+| `solution_datetime:` malformed, not after `handout_datetime`, or before the grading cutoff | dropped - the solution waits for a human (inside the template's late window: held until the cutoff) |
 | `handout_datetime:` unparseable | kept, but nothing is ever handed out |
 | `grading_datetime:` unparseable | kept - grading falls back to the end of the late window (`due_datetime` plus the template's `late_window_days`; the due date itself with no window) |
 | `deploy_datetime:` unparseable | kept - that copy ships at the `event_datetime` |
