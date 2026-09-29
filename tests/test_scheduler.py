@@ -2450,6 +2450,68 @@ def test_a_solution_datetime_without_a_handout_never_synthesises_a_release(monke
     )
 
 
+def test_a_solution_inside_the_late_window_is_held_until_the_cutoff(monkeypatch):
+    # A late window changed after `load` refused nothing (or one it could not read) must
+    # not let the answer out while students are still handing in. Held per assignment, off
+    # each one's own window - and the hand out it rides on keeps firing meanwhile.
+    _WINDOWS.update({"assignment-1": 7, "assignment-2": 0})
+    monkeypatch.setattr(
+        scheduler,
+        "_assignment_template",
+        lambda org, slug, entry: entry.course_source_repo,
+    )
+    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
+    sched = Schedule(
+        assignments={
+            slug: AssignmentEntry(
+                course_source_repo=f"{slug}-f2026",
+                due_datetime=datetime(2026, 10, 13, 23, 59, tzinfo=BERLIN),
+                handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+                solution_datetime=datetime(2026, 10, 16, 9, 0, tzinfo=BERLIN),
+            )
+            for slug in ("assignment-1", "assignment-2")
+        }
+    )
+    sched.org = "Sem-f2026"
+
+    def solutions(now):
+        releases = scheduler._handout_releases("Course-Org", "Sem-f2026", sched, now)
+        assert len(scheduler.due_releases(releases, now)) == 2  # both hand outs fire
+        return {r.assignment_slug: r.assignment_solution for r in releases}
+
+    assert solutions(datetime(2026, 10, 17, tzinfo=BERLIN)) == {
+        "assignment-1": False,
+        "assignment-2": True,
+    }
+    assert (
+        solutions(datetime(2026, 10, 20, 23, 0, tzinfo=BERLIN))["assignment-1"] is False
+    )
+    assert (
+        solutions(datetime(2026, 10, 21, 0, 0, tzinfo=BERLIN))["assignment-1"] is True
+    )
+
+
+def test_a_solution_whose_cutoff_cannot_be_read_is_held(monkeypatch):
+    def unreadable(sched, slug):
+        raise Unusable("assignments.yml is not YAML")
+
+    monkeypatch.setattr(scheduler, "grading_cutoff_datetime", unreadable)
+    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
+    sched = Schedule(
+        assignments={
+            "assignment-1": AssignmentEntry(
+                course_source_repo="a-f2026",
+                due_datetime=datetime(2026, 10, 13, 23, 59, tzinfo=BERLIN),
+                handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+                solution_datetime=datetime(2026, 10, 16, 9, 0, tzinfo=BERLIN),
+            )
+        }
+    )
+    assert not scheduler._solution_due(
+        "Sem-f2026", sched, "assignment-1", datetime(2027, 1, 1, tzinfo=BERLIN)
+    )
+
+
 def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
     # due_releases documents event_datetime order, and the plan is sorted at parse time -
     # but the synthesised handouts are appended afterwards, so without a re-sort a

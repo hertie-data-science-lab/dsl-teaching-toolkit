@@ -633,14 +633,35 @@ def _run_releases(
 
 
 def _solution_due(
-    semester_org: str, slug: str, entry: schedule.AssignmentEntry, now: datetime
+    semester_org: str, sched: schedule.Schedule, slug: str, now: datetime
 ) -> bool:
     """Whether this tick should push the model solution for `slug`.
 
     The datetime check is cheap and comes first, so the fire-once read is paid only by an
     assignment whose solution moment has actually arrived - not by every assignment on
-    every tick."""
+    every tick.
+
+    HELD until the late cutoff has passed, whatever the date says. `schedule.load` refuses
+    an early date, but a late window changed after that read, or a cascade it could not
+    read, would otherwise let the answer out while students are still handing in. A cutoff
+    that cannot be read holds too. Only the solution waits: the hand out still fires."""
+    entry = sched.assignments[slug]
     if entry.solution_datetime is None or entry.solution_datetime > now:
+        return False
+    try:
+        cutoff = grading_cutoff_datetime(sched, slug)
+    except Exception as exc:
+        log_err(
+            f"could not work out {slug}'s late cutoff ({type(exc).__name__}): {exc}"
+        )
+        cutoff = None
+    if cutoff is None or cutoff > now:
+        reason = (
+            schedule.solution_before_cutoff(slug, entry.solution_datetime, cutoff)
+            if cutoff is not None
+            else "its late cutoff could not be worked out."
+        )
+        log(f"  [hold] solution {slug} - {reason}")
         return False
     return not solution_released(semester_org, schedule.semester_name(slug, entry))
 
@@ -685,7 +706,7 @@ def _handout_releases(
                 when=entry.handout_datetime,
                 assignment=template,
                 assignment_slug=slug,
-                assignment_solution=_solution_due(semester_org, slug, entry, now),
+                assignment_solution=_solution_due(semester_org, sched, slug, now),
             )
         )
     return out
