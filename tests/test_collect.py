@@ -1103,7 +1103,7 @@ def test_the_handout_commit_is_not_a_submission(monkeypatch):
     # pushed still has a commit dated at the handout. Pinning it recorded them as having
     # submitted, on time, and posted them a receipt saying so.
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, _handout()))
-    assert collect._snapshot_sha("Cohort", "assignment-1-anna", "2026-10-13") == (
+    assert collect._snapshot_sha("Semester", "assignment-1-anna", "2026-10-13") == (
         collect.Pin()
     )
 
@@ -1117,7 +1117,7 @@ def test_the_solution_commit_is_walked_past_to_the_students_own(monkeypatch):
         collect, "gh", lambda *a, **k: (0, f"{_solution()}\n{own}\n{_handout()}")
     )
     assert collect._snapshot_sha(
-        "Cohort", "assignment-1-anna", "2026-10-13"
+        "Semester", "assignment-1-anna", "2026-10-13"
     ) == collect.Pin(OTHER_SHA, "2026-10-09T08:00:00Z", past_toolkit=True)
 
 
@@ -1125,7 +1125,7 @@ def test_a_correction_is_walked_past_to_the_students_own(monkeypatch):
     own = _commits_line(sha=OTHER_SHA, committed="2026-10-09T08:00:00Z")
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, f"{_correction()}\n{own}"))
     assert collect._snapshot_sha(
-        "Cohort", "assignment-1-anna", "2026-10-13"
+        "Semester", "assignment-1-anna", "2026-10-13"
     ) == collect.Pin(OTHER_SHA, "2026-10-09T08:00:00Z", past_toolkit=True)
 
 
@@ -1135,7 +1135,7 @@ def test_a_repo_with_only_toolkit_commits_has_nothing_submitted(monkeypatch):
     monkeypatch.setattr(
         collect, "gh", lambda *a, **k: (0, f"{_solution()}\n{_handout(OTHER_SHA)}")
     )
-    assert collect._snapshot_sha("Cohort", "assignment-1-anna", "2026-10-13") == (
+    assert collect._snapshot_sha("Semester", "assignment-1-anna", "2026-10-13") == (
         collect.Pin()
     )
 
@@ -1155,7 +1155,9 @@ def test_a_repo_with_only_toolkit_commits_has_nothing_submitted(monkeypatch):
 def test_a_toolkit_commit_the_student_rewrote_is_their_submission(monkeypatch, amended):
     # Their work is IN that commit. Walking past it recorded them as submitting nothing.
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, f"{amended}\n{_handout()}"))
-    assert collect._snapshot_sha("Cohort", "assignment-1-anna", "2026-10-13").sha == SHA
+    assert (
+        collect._snapshot_sha("Semester", "assignment-1-anna", "2026-10-13").sha == SHA
+    )
 
 
 def test_a_toolkit_commit_in_a_drop_box_folder_is_not_an_outsider(monkeypatch):
@@ -1164,7 +1166,7 @@ def test_a_toolkit_commit_in_a_drop_box_folder_is_not_an_outsider(monkeypatch):
     own = _commits_line(sha=OTHER_SHA)
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, f"{_correction()}\n{own}"))
     pin = collect._snapshot_sha(
-        "Cohort",
+        "Semester",
         "dropbox",
         "2026-10-13",
         path="anna-adams",
@@ -1179,7 +1181,7 @@ def test_an_unreadable_bot_identity_defers_the_freeze(monkeypatch):
     # so the snapshot is abandoned and the next tick asks again.
     monkeypatch.setattr(collect, "bot_login", lambda: "")
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, _handout()))
-    assert collect._snapshot_sha("Cohort", "assignment-1-anna", "2026-10-13") is None
+    assert collect._snapshot_sha("Semester", "assignment-1-anna", "2026-10-13") is None
 
 
 def test_snapshot_sha_flags_a_commit_dated_after_the_freeze(monkeypatch, capsys):
@@ -1485,7 +1487,7 @@ def test_the_toolkits_own_pushes_never_time_a_students_work(monkeypatch):
             ),
         ),
     )
-    activity = collect._push_activity("Cohort", "assignment-1-anna")
+    activity = collect._push_activity("Semester", "assignment-1-anna")
     assert activity == [(OTHER_SHA, "2026-10-09T08:05:00Z")]
     assert collect.push_time_for(activity, "c" * 40, "2026-10-10T08:00:00Z") == ""
 
@@ -1497,7 +1499,7 @@ def test_push_records_are_not_read_without_the_toolkits_own_login(monkeypatch):
     monkeypatch.setattr(
         collect, "gh", lambda *a, **k: (0, f"{SHA}\t2026-10-12T07:00:00Z\t{BOT}\n")
     )
-    assert collect._push_activity("Cohort", "assignment-1-anna") is None
+    assert collect._push_activity("Semester", "assignment-1-anna") is None
 
 
 def test_snapshot_assignment_never_overwrites_an_existing_snapshot(monkeypatch):
@@ -4004,7 +4006,7 @@ def test_the_freeze_never_calls_a_pin_under_the_solution_suspect(monkeypatch):
     )
     assert (
         collect.snapshot_assignment(
-            "Cohort",
+            "Semester",
             "assignment-1",
             "2026-10-15T23:59:59+02:00",
             is_group=False,
@@ -4056,7 +4058,7 @@ def test_the_solution_push_never_makes_an_on_time_submission_suspect(monkeypatch
     )
     assert collect.sync_sheet(
         "Course",
-        "Cohort",
+        "Semester",
         _sched(),
         "assignment-1",
         "assignment-1",
