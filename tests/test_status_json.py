@@ -224,14 +224,13 @@ def _course(**over) -> status_json.CourseFacts:
             ".github/workflows/scheduled-release.yml": "beef",
         },
         registry=[SEMESTER],
-        materials=[
-            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus", True)
-        ],
+        materials=[status_json.MaterialsFacts("course-materials-f2026", "# Syllabus")],
         templates=[
             status_json.TemplateFacts("assignment-2-f2026", "# Regression"),
             status_json.TemplateFacts("assignment-3-f2026", "# Trees"),
         ],
         public_site=True,
+        website_on=True,
     )
     for key, value in over.items():
         setattr(facts, key, value)
@@ -437,7 +436,7 @@ def test_an_undeclared_kind_is_inferred_through_the_repos_aliases_and_says_so():
 
 
 def test_a_materials_repo_by_its_old_name_only_is_not_migrated():
-    old = status_json.MaterialsFacts("course-materials-f2025", "# S", True, topic=False)
+    old = status_json.MaterialsFacts("course-materials-f2025", "# S", topic=False)
     doc = _render(_course(materials=[old]))
     assert doc["course"]["materials"] == [
         {"repo": "course-materials-f2025", "state": "problem"}
@@ -461,7 +460,7 @@ def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
     )
     monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(
-        status_json, "get_file_content", lambda org, repo, path, ref="": "public: []"
+        status_json, "get_file_content", lambda org, repo, path, ref="": None
     )
     present = {"E1282_syllabus.pdf": "5ha"}
     monkeypatch.setattr(status_json, "repo_path_shas", lambda org, repo, b: present)
@@ -858,7 +857,6 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
             CONTRACT_EXAMPLE["operations"][0]
         ),
         (COURSE, "course-materials-f2026", "SYLLABUS.md"): "# Syllabus",
-        (COURSE, "course-materials-f2026", "publish.yml"): "public: lectures\n",
         (COURSE, "assignment-2-f2026", "README.md"): "# Regression",
         (COURSE, "assignment-2-f2026", "grading_config.yml"): "autograde: sometimes\n",
         (SEMESTER, f"{SEMESTER}.github.io", "index.md"): "# Welcome",
@@ -888,6 +886,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     for module in (status_json, schedule, grades):
         monkeypatch.setattr(module, "get_file_content", content)
     monkeypatch.setattr(status_json, "read_materials", lambda org, repo: Declared())
+    monkeypatch.setattr(status_json, "read_opencourse", lambda org: None)
     schedule._schedule_text.cache_clear()
     monkeypatch.setattr(status_json, "list_org_repos", lambda org: listings[org])
     monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
@@ -1169,9 +1168,9 @@ def test_a_stage_that_is_not_done_says_why():
     course = _course(
         materials=[
             status_json.MaterialsFacts(
-                "course-materials-f2025", "<!-- dsl-stub: syllabus -->", True
+                "course-materials-f2025", "<!-- dsl-stub: syllabus -->"
             ),
-            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus", True),
+            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus"),
         ]
     )
     doc = _render(course, _semester(people=ta_only))
@@ -1214,10 +1213,27 @@ def test_the_archive_stage_says_when():
 
 
 def test_the_course_file_carries_its_whys_too():
-    course = _course(public_site=False)
+    course = _course(website_on=False)
     public = status_json.render_course_file(course, NOW)
     assert public["course"]["stage_why"] == {
-        "C6": "There is no public website; it is optional."
+        "C6": "The public website is off; it is optional."
+    }
+
+
+def test_a_website_turned_on_but_never_published_is_not_done_yet():
+    # C6 reads opencourse.yml: a site repo left from an older publish is not "published"
+    # while the file says off, and an enabled file waits for its first publish.
+    on = status_json.render_course_file(_course(public_site=False), NOW)
+    assert on["course"]["stage_why"] == {
+        "C6": "The public website is on but not published yet."
+    }
+    off = status_json.render_course_file(_course(website_on=False), NOW)
+    assert off["course"]["stages"]["C6"] != "done"
+    broken = status_json.render_course_file(
+        _course(website_on=False, website_unusable=True), NOW
+    )
+    assert broken["course"]["stage_why"] == {
+        "C6": "The public website settings file does not parse."
     }
 
 

@@ -61,7 +61,6 @@ from .course import (
     INSTRUCTORS_TEAM,
     JOIN_REPO,
     MATERIALS_REPO_PREFIX,
-    PUBLISH_FILE,
     SELF_SELECT,
     SOLUTION_BRANCH,
     active_today,
@@ -94,6 +93,7 @@ from .materials import (
     is_materials_repo,
 )
 from .materials import read as read_materials
+from .opencourse import read as read_opencourse
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
 from .repos import default_branch
@@ -156,7 +156,6 @@ class MaterialsFacts:
 
     repo: str
     syllabus: str | None = None
-    has_publish: bool = False
     syllabus_path: str = DEFAULT_SYLLABUS
     # False for a `course-materials-*` repo without the `dsl-materials` topic yet.
     topic: bool = True
@@ -176,6 +175,10 @@ class CourseFacts:
     materials: list[MaterialsFacts] = field(default_factory=list)
     templates: list[TemplateFacts] = field(default_factory=list)
     public_site: bool = False
+    # `opencourse.yml` says `enabled: true` (and parses).
+    website_on: bool = False
+    # `opencourse.yml` is there but does not parse or validate.
+    website_unusable: bool = False
 
 
 @dataclass
@@ -643,10 +646,10 @@ def _syllabus_written(m: MaterialsFacts) -> bool:
 
 def materials_state(m: MaterialsFacts) -> str:
     """C4, per repo: `problem` until the migration gives it the topic; `ready` once its
-    declared syllabus is written and publish.yml is there."""
+    declared syllabus is written."""
     if not m.topic:
         return PROBLEM
-    return "ready" if _syllabus_written(m) and m.has_publish else TODO
+    return "ready" if _syllabus_written(m) else TODO
 
 
 def materials_problem(m: MaterialsFacts, org: str) -> dict:
@@ -706,7 +709,7 @@ def render_course(
     - C3 dsl-course.yml names the course, its code and description, and one course admin;
     - C4 at least one materials repo, every one of them `ready`;
     - C5 at least one template, every one of them `ready`;
-    - C6 the public website repo exists.
+    - C6 `opencourse.yml` turns the public website on and its repo exists.
     `ready` is C1-C5 done: nothing on the course side would stop a semester."""
     problems = [problem_from_fault(f, facts.org, now) for f in facts.faults]
     problems += [
@@ -748,9 +751,7 @@ def _materials_why(m: MaterialsFacts) -> str:
         return f"{m.repo} is not migrated yet (no {MATERIALS_TOPIC} topic)"
     if m.syllabus is None:
         return f"{m.repo} has no {m.syllabus_path} yet"
-    if not _syllabus_written(m):
-        return f"{m.repo}'s {m.syllabus_path} is still the placeholder"
-    return f"{m.repo} has no {PUBLISH_FILE} yet"
+    return f"{m.repo}'s {m.syllabus_path} is still the placeholder"
 
 
 def _first_of(what: str, reasons: list[str]) -> str:
@@ -798,8 +799,12 @@ def course_checks(facts: CourseFacts) -> dict[str, str | None]:
             out["C5"] = _first_of("assignment templates", pending)
         elif any(template_state(t) != "ready" for t in facts.templates):
             out["C5"] = "An assignment template has settings that need fixing."
-    if not facts.public_site:
-        out["C6"] = "There is no public website; it is optional."
+    if facts.website_unusable:
+        out["C6"] = "The public website settings file does not parse."
+    elif not facts.website_on:
+        out["C6"] = "The public website is off; it is optional."
+    elif not facts.public_site:
+        out["C6"] = "The public website is on but not published yet."
     return out
 
 
@@ -1368,7 +1373,7 @@ def _declaration(org: str, repo: str) -> Declared:
 
 def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
     """A materials repo's C4 facts: its declared syllabus (markdown read, anything else
-    only looked for) and whether it has a publish.yml."""
+    only looked for)."""
     path = _declaration(course_org, repo).syllabus
     if path.lower().endswith((".md", ".markdown")):
         syllabus = get_file_content(course_org, repo, path)
@@ -1377,12 +1382,7 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
             course_org, repo, default_branch(course_org, repo, fallback="main")
         )
         syllabus = "" if path in (tree or {}) else None
-    return MaterialsFacts(
-        repo,
-        syllabus,
-        get_file_content(course_org, repo, PUBLISH_FILE) is not None,
-        path,
-    )
+    return MaterialsFacts(repo, syllabus, path)
 
 
 def gather_course(course_org: str) -> CourseFacts:
@@ -1422,6 +1422,12 @@ def gather_course(course_org: str) -> CourseFacts:
                 )
             facts.templates.append(t)
     facts.public_site = pages_repo(course_org) in listing
+    try:
+        oc = read_opencourse(course_org)
+    except Unusable:
+        oc = None
+        facts.website_unusable = True
+    facts.website_on = bool(oc and oc.enabled)
     return facts
 
 

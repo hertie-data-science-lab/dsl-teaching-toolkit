@@ -1,95 +1,107 @@
-// What happens to each file of a materials repo, from its `publish.yml` public patterns and
-// its root `.releaseignore`: withheld files never reach students (and so are never public),
-// files matching a public pattern are selected for the public website, the rest are
-// released to students only. Both lists use gitignore syntax (`./glob`).
+// What a withhold list does to each file of a repo, and how a click on the tree edits it.
+// One widget serves `.releaseignore` (withheld from students), `opencourse.yml`'s `withhold`
+// (kept off the public website) and the import picker (decision 0016).
 //
-// The engine's rule, `materials.hosted_paths`, with its lists read from
-// `schemas/materials.json`: never-material names are never copied out at all (withheld);
-// denylisted paths are released but never hosted, whatever a pattern says; a hosted deck
-// also hosts its `<stem>_files/` and the asset folders beside it. The same file carries
-// cases the engine answered, and the tests hold this function to them.
+// The rule is the engine's (`releaseignore`): gitignore syntax, the last matching line wins,
+// and a withheld folder is never walked, so nothing inside it can be re-included. The cases in
+// `schemas/materials.json` were answered by the engine and the tests hold this file to them.
+// Never-material names (`.DS_Store`, `.gitkeep`) and the list file itself never leave the repo.
 
 import rules from '../../schemas/materials.json';
-import { compile, matchRules, type Rule } from './glob';
+import { compile, compileAll, matchRules, withheldBy, type Rule } from './glob';
 
-export type Badge = 'public' | 'withheld' | 'released' | 'never_public';
+export type Badge = 'withheld' | 'released';
 
-export const BADGE_WORD: Record<Badge, string> = {
-  public: 'for the public website', withheld: 'withheld', released: 'released to students', never_public: 'released to students, never public',
-};
-
-/** An fnmatch pattern (`.env.*`) as a whole-name regex. */
+/** `repos.PUBLICATION_DENYLIST` as whole-name regexes, matched per path component. */
 const fnmatch = (p: string) => new RegExp(`^${p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
-/** `repos.PUBLICATION_DENYLIST`, matched per path component, case-insensitively. */
 const DENYLIST = rules.denylist.map(fnmatch);
 /** `repos.NEVER_MATERIAL`, matched per path component, case-insensitively. */
 const NEVER_MATERIAL = new Set(rules.never_material.map((x) => x.toLowerCase()));
 
 const parts = (path: string) => path.split('/').filter(Boolean).map((x) => x.toLowerCase());
-export const neverMaterial = (path: string) => parts(path).some((x) => NEVER_MATERIAL.has(x));
+export const neverMaterial = (path: string) => parts(path).some((x) => NEVER_MATERIAL.has(x) || x === '.releaseignore');
+/** Never published whatever a list says: solutions, tests, grading files, `.env`. */
 export const denylisted = (path: string) => parts(path).some((x) => DENYLIST.some((re) => re.test(x)));
-const publishable = (path: string) => !denylisted(path) && !neverMaterial(path);
-const isDeck = (path: string) => {
-  const name = path.slice(path.lastIndexOf('/') + 1);
-  return name.includes('.') && rules.deck_extensions.includes(name.slice(name.lastIndexOf('.') + 1).toLowerCase());
-};
 
-/** `materials.bundle_prefixes`: the folders a deck's assets sit in, beside it. */
-export function bundlePrefixes(deck: string): string[] {
-  const folder = deck.includes('/') ? `${deck.slice(0, deck.lastIndexOf('/'))}/` : '';
-  return [`${deck.slice(0, deck.lastIndexOf('.'))}_files/`, ...rules.bundle_dirs.map((d) => `${folder}${d}/`)];
-}
-
-/** `materials.publish_lines`: a negated folder (`!labs/sub/`) excludes its whole subtree, whatever matched before. */
-export function publishLines(lines: string[]): string[] {
-  return lines.map((line) => {
-    const body = line.trim();
-    if (!body.startsWith('!') || !body.endsWith('/') || !body.replace(/[!/]/g, '')) return line;
-    const folder = body.slice(1).replace(/\/+$/, '');
-    return folder.replace(/^\/+/, '').includes('/') ? `!${folder}/**` : `!**/${folder}/**`;
-  });
-}
-
-/** `materials.hosted_paths`: the paths the public patterns host, bundles included. */
-export function hostedPaths(files: string[], publicLines: string[]): Set<string> {
-  const pub = publishLines(publicLines).map(compile).filter((r): r is Rule => r !== null);
-  const open = new Set(files.filter((f) => publishable(f) && matchRules(pub, f)));
-  for (const deck of [...open].filter(isDeck)) {
-    const prefixes = bundlePrefixes(deck);
-    for (const f of files) if (prefixes.some((x) => f.startsWith(x)) && publishable(f)) open.add(f);
-  }
-  return open;
+/** The paths a pattern list withholds, by the engine's rule (the tests hold it to the engine's cases). */
+export function withheldPaths(files: string[], lines: string[]): string[] {
+  const rs = compileAll(lines);
+  return files.filter((f) => withheldBy(rs, f) !== null);
 }
 
 export interface Badged {
   badges: Record<string, Badge>;
-  /** Pattern lines that match no file, per list, as written. */
-  unmatched: { public: string[]; withheld: string[] };
-  /** How many rules each list has, comments and blank lines aside. */
-  rules: { public: number; withheld: number };
+  /** Pattern lines that match no file or folder, as written. */
+  unmatched: string[];
+  /** How many rules the list has, comments and blank lines aside. */
+  rules: number;
 }
 
-function rulesOf(lines: string[]): { line: string; rule: Rule }[] {
-  return lines.flatMap((line) => {
-    const rule = compile(line);
-    return rule ? [{ line: line.trim(), rule }] : [];
-  });
-}
-
-function unmatched(rules: { line: string; rule: Rule }[], files: string[]): string[] {
-  return rules.filter(({ rule }) => !files.some((f) => matchRules([{ ...rule, neg: false }], f))).map((r) => r.line);
-}
-
-/** Each file's badge, and the rules that match nothing. */
-export function badgeFiles(files: string[], publicLines: string[], withheldLines: string[]): Badged {
-  const pub = rulesOf(publicLines), ign = rulesOf(withheldLines);
-  const ignRules = ign.map((r) => r.rule);
-  const open = hostedPaths(files, publicLines);
+/** Each file's badge from one list, and the rules that match nothing. */
+export function badgeFiles(files: string[], lines: string[]): Badged {
+  const rs = compileAll(lines);
   const badges: Record<string, Badge> = {};
-  for (const f of files)
-    badges[f] = neverMaterial(f) || matchRules(ignRules, f) ? 'withheld' : open.has(f) ? 'public' : denylisted(f) ? 'never_public' : 'released';
-  return { badges, unmatched: { public: unmatched(pub, files), withheld: unmatched(ign, files) }, rules: { public: pub.length, withheld: ign.length } };
+  for (const f of files) badges[f] = neverMaterial(f) || withheldBy(rs, f) ? 'withheld' : 'released';
+  const unmatched = rs.filter((r) => !files.some((f) => matchRules([{ ...r, neg: false }], f))).map((r) => r.line);
+  return { badges, unmatched, rules: rs.length };
 }
+
+/**
+ * The line that names exactly this file or folder: anchored at the root, a folder with its `/`,
+ * and every character a pattern reads specially escaped (`[ ] * ? \\`, and a leading `!` or `#`),
+ * so `a[b]/notes.pdf` withholds that file and not `ab/notes.pdf`.
+ */
+export function exactLine(path: string, isDir: boolean): string {
+  const escaped = path.replace(/[[\]*?\\]/g, '\\$&').replace(/^[!#]/, '\\$&');
+  return `${path.includes('/') ? '' : '/'}${escaped}${isDir ? '/' : ''}`;
+}
+
+/** A line's pattern with the anchor dropped, for comparing spellings of one path's line. */
+const bare = (line: string) => line.trim().replace(/^\//, '');
+
+/** Whether a list line names exactly this path (`/x`, `x`, and for a folder `x/`). */
+const names = (line: string, path: string, isDir: boolean) => bare(line) === bare(exactLine(path, isDir));
+
+/** Where a path stands in a list: its own line, re-included by its own `!` line, withheld by a broader rule, or neither. */
+export type Standing =
+  | { kind: 'own' }
+  | { kind: 'included' }
+  | { kind: 'broader'; rule: string; at: string; legal: boolean }
+  | { kind: 'released' };
+
+export function standing(rs: Rule[], lines: string[], path: string, isDir: boolean): Standing {
+  const live = lines.filter((l) => compile(l));
+  if (live.some((l) => !l.trim().startsWith('!') && names(l, path, isDir))) return { kind: 'own' };
+  if (live.some((l) => l.trim().startsWith('!') && names(l.trim().slice(1), path, isDir))) return { kind: 'included' };
+  const w = withheldBy(rs, path, isDir);
+  if (!w) return { kind: 'released' };
+  return { kind: 'broader', rule: w.rule.line, at: w.at, legal: w.at === path };
+}
+
+/**
+ * A click: the list after it, or why it cannot change: the path sits inside a withheld folder
+ * (`at` is that folder), or it is a folder a `/**` rule withholds, which also covers everything
+ * inside it so no `!` line can release its files (`at` is the folder itself).
+ */
+export type Toggled = { lines: string[] } | { blocked: { rule: string; at: string } };
+
+/**
+ * Toggle one path: its own line goes (so does its own `!` line); a path nothing withholds gets
+ * its exact line; one a broader rule withholds gets `!line` when git allows re-inclusion, and
+ * otherwise nothing changes and the caller says which folder rule to remove.
+ */
+export function toggle(lines: string[], path: string, isDir: boolean): Toggled {
+  const s = standing(compileAll(lines), lines, path, isDir);
+  const line = exactLine(path, isDir);
+  if (s.kind === 'own') return { lines: lines.filter((l) => !(compile(l) && !l.trim().startsWith('!') && names(l, path, isDir))) };
+  if (s.kind === 'included') return { lines: lines.filter((l) => !(compile(l) && l.trim().startsWith('!') && names(l.trim().slice(1), path, isDir))) };
+  if (s.kind === 'released') return { lines: append(lines, line) };
+  if (!s.legal || (isDir && /(^|\/)\*\*$/.test(s.rule.trim()))) return { blocked: { rule: s.rule, at: s.at } };
+  return { lines: append(lines, `!${line}`) };
+}
+
+/** `lines` with `line` last (the last match wins), in place of a trailing blank line. */
+const append = (lines: string[], line: string) => [...(lines.length && !lines[lines.length - 1].trim() ? lines.slice(0, -1) : lines), line];
 
 export interface TreeNode {
   name: string;

@@ -39,6 +39,7 @@ from dsl_course import (
     gh_contents,
     gh_teams,
     grades,
+    opencourse,
     readings,
     roster,
     scaffold,
@@ -727,12 +728,23 @@ def test_course_dsl_course_yml_is_never_rewritten(fake, monkeypatch):
         "org: My-Course-E1\npeople:\n  course_admins:\n    - github_handle: alice\n"
     )
     fake.files[(".github", "dsl-course.yml")] = edited
+    fake.files[(".github", "opencourse.yml")] = "enabled: true\nsource_repo: m\n"
 
     bc.create_profile_repo("My-Course-E1", "Deep Learning", "E1")
 
     assert fake.files[(".github", "dsl-course.yml")] == edited
     assert fake.writes == []
-    assert fake.skips == [".github/dsl-course.yml"]
+    assert fake.skips == [".github/dsl-course.yml", ".github/opencourse.yml"]
+
+
+def test_a_new_course_gets_its_public_website_settings_seeded_off(fake, monkeypatch):
+    # INSTRUCTOR-OWNED and create-only like dsl-course.yml: nothing is public until
+    # someone turns it on (decision 0016).
+    monkeypatch.setattr(bc, "set_repo_topics", lambda *a, **k: True)
+    bc.create_profile_repo("My-Course-E1", "Deep Learning", "E1")
+    seeded = fake.files[(".github", "opencourse.yml")]
+    assert seeded.startswith("# INSTRUCTOR-OWNED")
+    assert opencourse.parse(yaml.safe_load(seeded)) == opencourse.OpenCourse()
 
 
 def test_rerun_retires_the_pre_rename_issue_forms(fake):
@@ -1867,10 +1879,10 @@ def _profile_repo_run(monkeypatch, *, seeded=True, topics=True):
 def test_an_unseeded_course_ssot_reds_the_bootstrap(monkeypatch, capsys):
     # No dsl-course.yml means no faculty SSOT and no course identity for the site, but
     # its write used to be unchecked under an unconditional "initialised" line.
-    assert _profile_repo_run(monkeypatch, seeded=False) == 1
+    assert _profile_repo_run(monkeypatch, seeded=False) == 2
     out = capsys.readouterr()
     assert "profile repo initialised" not in out.out
-    assert "dsl-course.yml" in out.err
+    assert "dsl-course.yml" in out.err and "opencourse.yml" in out.err
 
 
 def test_an_untagged_github_repo_reds_the_bootstrap(monkeypatch):

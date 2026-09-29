@@ -275,7 +275,7 @@ const FILES: Record<string, string> = {
     [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'type: group\n',
     [`${COHORT_ORG}/semester-config/assignments.yml`]: 'assignments:\n  assignment-3:\n    max_team_size: 3\n',
     [`${COURSE_ORG}/.github/dsl-course.yml`]: '# INSTRUCTOR-OWNED\norg: hertie-dsl-demo-course-e1234\ncourse_name: Machine Learning\ncourse_code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\nassignment_defaults:\n  late_window_days: 10\n  late_penalty_per_day: 10%\n',
-    [`${COURSE_ORG}/course-materials-f2026/publish.yml`]: 'public:\n  - "lectures/**/*.html"\n',
+    [`${COURSE_ORG}/.github/opencourse.yml`]: '# INSTRUCTOR-OWNED\nenabled: true   # false: nothing is published\nsource_repo: course-materials-f2026\nreadings_mode: reading-list\ninclude_lectures: true\nwithhold:\n  - "labs/"\n',
     [`${COURSE_ORG}/course-materials-f2026/.releaseignore`]: 'solutions/\n',
 };
 const TREES = { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html', 'labs/01/solutions/a.py'] };
@@ -338,22 +338,27 @@ describe('editing screens', () => {
     expect(out).toContain('Defaults for this course’s assignments');
     expect(out).not.toContain('Semester defaults'); // the engine reads none from dsl-course.yml
   });
-  it('materials settings previews what is public and what is withheld', () => {
+  it('materials settings previews what is withheld, and nothing about the public website', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
-    expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ok">for the public website<\/span>/);
-    expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">withheld<\/span>/);
+    expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
+    expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">withheld<\/span><span class="footnote">withheld by <code>solutions\/<\/code><\/span>/);
     expect(out).toContain('Write the session list');
+    expect(out).not.toContain('public website');
   });
-  it('materials settings says when no file matches', () => {
-    const none = new StaticFiles({ [`${COURSE_ORG}/course-materials-f2026/publish.yml`]: 'public: []\n' }, {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html'] });
+  it('materials settings releases every file when nothing is withheld', () => {
+    const none = new StaticFiles({}, {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html'] });
     const out = html(<MaterialsScreen {...cp} files={none} entry="course-materials-f2026" />);
     expect(out).toMatch(/<span class="ft-name">SYLLABUS.md<\/span><span class="chip ">released to students<\/span>/);
-    expect(out).not.toContain("for the public website</span><a");
+    expect(out).toContain('aria-label="Withhold SYLLABUS.md"');
     expect(out).not.toContain('class="file-list"');
   });
-  it('the public website asks for the confirmation the engine’s missing preview needs', () => {
+  it('the public website edits opencourse.yml and asks for the confirmation the engine’s missing preview needs', () => {
     const out = html(<WebsiteScreen {...cp} />);
     expect(out).toContain('Publish public website');
     expect(out).toContain('Source materials');
+    expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">kept off<\/span>/);
+    expect(out).toContain('Keep the website updated');
+    expect(out).toContain('Lives in hertie-dsl-demo-course-e1234/.github/opencourse.yml');
+    expect(out).toContain('href="#details"');
   });
 });

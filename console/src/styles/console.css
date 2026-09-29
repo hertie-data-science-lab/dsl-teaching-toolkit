@@ -223,6 +223,15 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .file-tree .ft-file { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .file-tree .ft-name { font-family: var(--font-code); font-size: 12.5px; overflow-wrap: anywhere; }
 .file-tree .ft-file .textlink { font-size: 12px; margin-left: auto; }
+.file-tree .ft-toggle { min-height: 0; padding: 1px 8px; font-size: 12px; }
+.file-tree .ft-file .ft-toggle { margin-left: auto; }
+.file-tree .ft-file .ft-toggle + .textlink { margin-left: 0; }
+.file-tree .ft-tick { margin: 0; }
+.file-tree .ft-note { flex-basis: 100%; font-size: 12.5px; color: var(--amber-ink); }
+.file-tree + .pattern-grid { margin-top: 12px; }
+table.kinds { max-width: 720px; }
+table.kinds td:first-child { white-space: nowrap; }
+table.kinds td select { min-width: 180px; }
 .unmatched { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; color: var(--bad-ink); }
 
 /* home */

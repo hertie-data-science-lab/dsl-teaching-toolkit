@@ -27,10 +27,6 @@ from ..course import (
     COURSE_ADMIN_TEAM,
     COURSE_DEFAULT_CHOICE,
     INSTRUCTORS_TEAM,
-    NOTHING_PUBLIC,
-    PUBLIC_DIRS,
-    PUBLIC_HTML_PDF,
-    PUBLIC_TYPES,
     SOLUTION_NOW,
     SOLUTION_WARNING,
     STARTER_FORMATS,
@@ -60,7 +56,6 @@ HANDLE_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
 FORMATS_PATTERN = (
     rf"^(?:none|(?:{'|'.join(STARTER_FORMATS)})(?:,(?:{'|'.join(STARTER_FORMATS)}))*)$"
 )
-READINGS_MODES = ("reading-list", "actual-readings", "none")
 
 
 @dataclass(frozen=True)
@@ -300,18 +295,7 @@ def _teardown(request: Request) -> list[str]:
 
 
 def _publish(request: Request) -> list[str]:
-    argv = [
-        "public-sync",
-        "--course-org",
-        request.course_org,
-        "--source-repo",
-        _a(request, "source_repo"),
-        "--readings-mode",
-        _a(request, "readings_mode", "reading-list"),
-    ]
-    if not _a(request, "include_lectures", True):
-        argv.append("--no-include-lectures")
-    return argv
+    return ["public-sync", "--course-org", request.course_org]
 
 
 def _derive(request: Request) -> list[str]:
@@ -338,10 +322,6 @@ def _new_materials(request: Request) -> list[str]:
         request.course_org,
         "--semester",
         _a(request, "semester"),
-        "--public-dirs",
-        _a(request, "public_dirs", NOTHING_PUBLIC),
-        "--public-types",
-        _a(request, "public_types", PUBLIC_HTML_PDF),
     ]
     if _a(request, "copy_from"):
         argv += ["--copy-from", _a(request, "copy_from")]
@@ -649,17 +629,8 @@ _OPS = (
         runs_as=DISPATCH,
         scope=COURSE,
         required_team=INSTRUCTORS_TEAM,
-        args_schema=_args(
-            {
-                "source_repo": _string(
-                    REPO_PATTERN, "Materials repo; replaces the live public site"
-                ),
-                "readings_mode": _enum(READINGS_MODES),
-                "include_lectures": _boolean("Publish lecture files"),
-            },
-            required=("source_repo",),
-        ),
-        help="Publish the public website from a materials repo.",
+        args_schema=_args(),
+        help="Publish the public website as its settings (opencourse.yml) say.",
         done_text="Public website updated.",
         doc="docs/reference/actions-reference.md",
         module="site",
@@ -707,8 +678,6 @@ _OPS = (
             {
                 "semester": _string(SEMESTER_PATTERN, "Semester, e.g. f2026"),
                 "copy_from": _string(REPO_PATTERN, "Materials repo to copy forward"),
-                "public_dirs": {**_enum(PUBLIC_DIRS), "default": NOTHING_PUBLIC},
-                "public_types": {**_enum(PUBLIC_TYPES), "default": PUBLIC_HTML_PDF},
             },
             required=("semester",),
         ),

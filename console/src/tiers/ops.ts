@@ -47,9 +47,16 @@ export const RETURN_MARKS_ALWAYS = [
   { label: 'Update the registrar export', note: 'always' },
 ];
 
-export function publishWebsite(repos: string[]): Tiers {
+/** `siteExists`: the website was published before, so turning it off leaves that version up. */
+export const WEBSITE_OFF_LIVE = 'Off: the site stays as last published and no longer updates.';
+
+export function publishWebsite(repos: string[], siteExists = false): Tiers {
   return {
-    source_repo: { tier: 'ask', label: 'Source materials', widget: 'select', reason: 'Publishing replaces the live public site, if there is one.', defaultLabel: 'default: newest', options: repos.map((r) => opt(r, r)) },
+    enabled: {
+      tier: 'ask', label: 'Keep the website updated', widget: 'checkbox', default: false,
+      reason: siteExists ? WEBSITE_OFF_LIVE : 'Off: nothing is published.',
+    },
+    source_repo: { tier: 'ask', label: 'Source materials', widget: 'select', reason: 'The website is built from this repo. Publishing replaces the live site.', options: repos.map((r) => opt(r, r)) },
     readings_mode: {
       tier: 'default', label: 'Readings', widget: 'select', default: 'reading-list', defaultLabel: 'default: reading list', reason: 'Publishing the readings themselves needs their licences.',
       options: [opt('reading-list', 'Reading list only'), opt('actual-readings', 'The readings themselves'), opt('none', 'None')],

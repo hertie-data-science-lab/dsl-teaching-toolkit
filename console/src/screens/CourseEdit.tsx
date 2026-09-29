@@ -1,36 +1,35 @@
-// Course-side editors: S3 Course details (dsl-course.yml), S20 Public website, S19
-// Materials repo settings (publish.yml, .releaseignore).
+// Course-side editors: S3 Course details (dsl-course.yml), S20 Public website
+// (opencourse.yml), S19 Materials repo settings (materials.yml, .releaseignore).
 
 import { useState } from 'preact/hooks';
 import courseSchema from '../../schemas/dsl_course.schema.json';
 import materialsSchema from '../../schemas/materials.schema.json';
-import materialsRules from '../../schemas/materials.json';
+import opencourseSchema from '../../schemas/opencourse.schema.json';
 import { useEnv, type Env } from '../env';
-import { badgeFiles } from '../edit/badges';
+import { badgeFiles, denylisted, neverMaterial } from '../edit/badges';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, compact, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { KIND_LABEL } from '../model/format';
-import { CONTENT_KINDS, DEFAULT_SYLLABUS, MATERIALS_FILE, NOTHING_DECLARED, PUBLISH_FILE, inferKind, readDeclared } from '../model/materialsRules';
+import { CONTENT_KINDS, DEFAULT_SYLLABUS, MATERIALS_FILE, NOTHING_DECLARED, inferKind, readDeclared } from '../model/materialsRules';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { ABOUT, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
-import { publishWebsite as publishTiers } from '../tiers/ops';
+import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
 import { CheckLine, Crumbs, EditFile, Lives, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
-import { FileTree } from '../ui/FileTree';
+import { PatternTree } from '../ui/PatternTree';
 import { Check, Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { courseView, CourseHeaderActions } from './Course';
 import type { CourseProps } from './types';
-import { COURSE_REPO } from '../model/names';
+import { COURSE_REPO, OPENCOURSE_FILE } from '../model/names';
 
 const validCourse = validator(courseSchema);
-const BUNDLE_WORDS = materialsRules.bundle_dirs.map((d) => `${d}/`).join(', ');
 
 export function courseScope(p: Pick<CourseProps, 'course'>): Scope {
   return { courseOrg: p.course.org, where: p.course.name };
@@ -224,43 +223,6 @@ export function DetailsScreen(p: CourseProps) {
 
 // --------------------------------------------------------------------------- public website
 
-export function WebsiteScreen(p: CourseProps) {
-  const { course } = p;
-  const v = courseView(p);
-  const repos = (v.course?.materials ?? []).map((m) => m.repo);
-  const published = v.course?.stages?.C6 === 'done';
-  const [values, setValues] = useState<Values>({ source_repo: repos[0], readings_mode: 'reading-list', include_lectures: true });
-  const tiers = publishTiers(repos);
-  const src = String(values.source_repo ?? repos[0] ?? '');
-  const def = publishWebsite(courseScope(p), repos, { source_repo: src, readings_mode: values.readings_mode as string, include_lectures: values.include_lectures !== false }, published);
-  return (
-    <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Public website' }]} />
-      <div class="page-head">
-        <div>
-          <h1>Public website <Hint doc="reference/actions-reference.md">The public website follows the settings here for now: a materials repo’s publish.yml selects its files once the site is rebuilt, and until then it is only recorded. Withheld files never appear, and a daily update keeps the site current.</Hint></h1>
-          <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : 'Not published'}</span>{published ? 'Updates daily.' : 'Optional: an open version of your materials for anyone.'}</p>
-        </div>
-        <div class="actions"><OpButtons def={def} /></div>
-      </div>
-      <div class="grid-2">
-        <section class="panel section">
-          <h2>Settings</h2>
-          {repos.length ? <SchemaForm id="ws" schema={null} tiers={tiers} values={values} onChange={setValues} /> : <p class="footnote">No materials repo yet: create one first.</p>}
-        </section>
-        <section class="panel section">
-          <h2>State</h2>
-          <dl class="kv">
-            <dt>Address</dt><dd>{published ? <a href={`https://${course.org}.github.io`} target="_blank" rel="noopener">{course.org}.github.io <Ext /></a> : `${course.org}.github.io`}</dd>
-          </dl>
-        </section>
-      </div>
-    </>
-  );
-}
-
-// --------------------------------------------------------------------------- materials repo settings
-
 /** Beside a rule list: the rules that match no file, or that every rule matches one. */
 function Unmatched({ rules, total, loading, partial }: { rules: string[]; total: number; loading: boolean; partial: boolean }) {
   if (loading) return <Loading />;
@@ -271,7 +233,167 @@ function Unmatched({ rules, total, loading, partial }: { rules: string[]; total:
   ) : <p class="footnote">Every rule matches at least one file.</p>;
 }
 
-const PUBLISH_STUB = '# INSTRUCTOR-OWNED - yours. What the public website may publish; same syntax as .gitignore.\npublic:\n';
+/** A pattern list as the textarea shows it, and back: one line each, blank lines dropped at the ends. */
+const linesOf = (text: string) => text.split('\n');
+const textOf = (lines: string[]) => lines.join('\n');
+
+/** The withhold tree over a repo, with the pattern box beneath it (two-way) and the rules that match nothing. */
+function WithholdEditor({ id, label, files, text, onText, loading, partial, org, repo, branch, kinds, withheldWord, releasedWord, fixed }: {
+  id: string; label: string; files: string[]; text: string; onText: (t: string) => void; loading: boolean; partial: boolean;
+  org: string; repo: string; branch: string | null; kinds?: Record<string, string>; withheldWord: string; releasedWord: string; fixed?: (path: string) => string | null;
+}) {
+  const b = badgeFiles(files, linesOf(text));
+  return (
+    <>
+      {partial ? <CheckLine cls="bad">GitHub returned only part of this repo’s file list; badges may be incomplete.</CheckLine> : null}
+      {loading ? <Loading what="Reading the repo" /> : (
+        <PatternTree files={files} patterns={linesOf(text)} onChange={(l) => onText(textOf(l))} org={org} repo={repo} branch={branch} kinds={kinds} withheldWord={withheldWord} releasedWord={releasedWord} fixed={fixed} />
+      )}
+      <div class="pattern-grid">
+        <div class="field">
+          <label for={id}>{label}</label>
+          <textarea class="code" id={id} onInput={(e) => onText((e.target as HTMLTextAreaElement).value)} value={text} />
+          <p class="hint">One pattern per line, as in .gitignore. Clicking the tree writes them here.</p>
+        </div>
+        <div class="field"><span class="label">Rules</span><Unmatched rules={b.unmatched} total={b.rules} loading={loading} partial={partial} /></div>
+      </div>
+    </>
+  );
+}
+
+export interface Website {
+  enabled: boolean;
+  source_repo: string;
+  readings_mode: string;
+  include_lectures: boolean;
+  /** The withhold list as the textarea shows it. */
+  withhold: string;
+}
+
+/** `opencourse.yml`'s settings with the engine's defaults (`opencourse.parse`) filled in. */
+export function websiteOf(doc: Record<string, unknown>): Website {
+  return {
+    enabled: doc.enabled === true,
+    source_repo: String(doc.source_repo ?? ''),
+    readings_mode: String(doc.readings_mode ?? 'reading-list'),
+    include_lectures: doc.include_lectures !== false,
+    withhold: Array.isArray(doc.withhold) ? doc.withhold.map(String).join('\n') : '',
+  };
+}
+
+const OPENCOURSE_STUB = '# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.\n# The public website. Edit it on the console’s Public website tab, or here.\n';
+const validWebsite = validator(opencourseSchema);
+
+/** `opencourse.yml` after `after`, key by key, or why it would not be valid. */
+export function websiteFileAfter(text: string | null, before: Website, after: Website): { text: string } | { error: string } {
+  const y = new YamlText(text ?? OPENCOURSE_STUB);
+  if (y.errors.length) return { error: `${OPENCOURSE_FILE} does not parse; fix it with Edit the file.` };
+  const val = (w: Website) => ({ ...w, withhold: w.withhold.split('\n').map((l) => l.trim()).filter(Boolean) });
+  const b = val(before), a = val(after);
+  for (const k of Object.keys(a) as (keyof Website)[]) if (!deepEqual(b[k], a[k]) || text === null) y.assign([k], a[k] === '' ? null : a[k]);
+  if (a.enabled && !a.source_repo) return { error: 'Choose the source materials before turning the website on.' };
+  return validWebsite(y.toJS()) ? { text: y.text } : { error: invalidText(OPENCOURSE_FILE, validWebsite) };
+}
+
+/**
+ * The newest materials repo by its semester tag (`workflows_render._newest_materials`): spring
+ * before autumn within a year. The status lists repos by name, oldest first, so its first one is
+ * never the default. Without a dated repo, the first one.
+ */
+export function newestRepo(repos: string[]): string | undefined {
+  const key = (r: string) => {
+    const m = /-([fswu])(\d{4})$/.exec(r);
+    return m ? Number(m[2]) * 2 + (m[1] === 'f' ? 1 : 0) : -1;
+  };
+  return repos.reduce<string | undefined>((best, r) => (best === undefined || key(r) > key(best) ? r : best), undefined);
+}
+
+/** A course fact the website shows, read-only here: its value, or that it is not set. */
+function Fact({ label, value }: { label: string; value: unknown }) {
+  const v = typeof value === 'string' ? value.trim() : value ? JSON.stringify(value) : '';
+  return <><dt>{label}</dt><dd>{v || <span class="footnote">Not set</span>}</dd></>;
+}
+
+export function WebsiteScreen(p: CourseProps) {
+  const { course } = p;
+  const env = useEnv();
+  const v = courseView(p);
+  const repos = (v.course?.materials ?? []).map((m) => m.repo);
+  const published = v.course?.stages?.C6 === 'done';
+  const file = p.files.file(course.org, COURSE_REPO, OPENCOURSE_FILE);
+  const y = file.kind === 'ready' ? new YamlText(file.text) : null;
+  const before = websiteOf(y && !y.errors.length ? obj(y.toJS()) : {});
+  const [draft, setDraft] = useState<Website | null>(null);
+  const [save, runSave, setSave] = useSave(env);
+  const d = draft ?? before;
+  const set = (patch: Partial<Website>) => {
+    setDraft({ ...d, ...patch });
+    if (save.kind !== 'busy') setSave({ kind: 'idle' });
+  };
+  const meta = p.files.file(course.org, COURSE_REPO, 'dsl-course.yml');
+  const my = meta.kind === 'ready' ? new YamlText(meta.text) : null;
+  const facts = my && !my.errors.length ? obj(my.toJS()) : {};
+  const src = d.source_repo || newestRepo(repos) || '';
+  const tree = p.files.tree(course.org, src);
+  const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir).map((x) => x.path) : [];
+  const gh = p.files.repos(course.org);
+  const siteExists = gh.kind === 'ready' && gh.repos.some((r) => r.name.toLowerCase() === `${course.org}.github.io`.toLowerCase());
+  const branch = (gh.kind === 'ready' ? gh.repos.find((r) => r.name === src)?.default_branch : undefined) ?? null;
+  const doSave = async () => {
+    if (y?.errors.length) return;
+    if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
+    const out = websiteFileAfter(file.kind === 'ready' ? file.text : null, before, { ...d, source_repo: d.source_repo || (d.enabled ? src : '') });
+    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
+    if (await runSave({ owner: course.org, repo: COURSE_REPO, path: OPENCOURSE_FILE }, out.text, file.kind === 'ready' ? file.sha : null, { message: 'course: edit the public website settings, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setDraft(null);
+  };
+  const values: Values = { enabled: d.enabled, source_repo: src, readings_mode: d.readings_mode, include_lectures: d.include_lectures };
+  const onForm = (nv: Values) => set({ enabled: nv.enabled === true, source_repo: String(nv.source_repo ?? ''), readings_mode: String(nv.readings_mode ?? 'reading-list'), include_lectures: nv.include_lectures !== false });
+  return (
+    <>
+      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Public website' }]} />
+      <div class="page-head">
+        <div>
+          <h1>Public website <Hint doc="reference/actions-reference.md">An open version of one materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h1>
+          <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : siteExists && !before.enabled ? 'Off' : 'Not published'}</span>{published ? 'Updates daily.' : siteExists && !before.enabled ? WEBSITE_OFF_LIVE : 'Optional: an open version of your materials for anyone.'}</p>
+        </div>
+        <div class="actions"><OpButtons def={publishWebsite(courseScope(p), published)} /></div>
+      </div>
+      {file.kind === 'loading' ? <Loading what={`Reading ${OPENCOURSE_FILE}`} /> : null}
+      {y?.errors.length ? <CheckLine cls="bad">{OPENCOURSE_FILE} does not parse ({y.errors[0]}); fix it with Edit the file.</CheckLine> : null}
+      <div class="grid-2">
+        <section class="panel section">
+          <h2>Settings</h2>
+          {repos.length ? <SchemaForm id="ws" schema={null} tiers={publishTiers(repos, siteExists)} values={values} onChange={onForm} /> : <p class="footnote">No materials repo yet: create one first.</p>}
+          {before.enabled ? null : <p class="footnote">The website is off: Publish refuses until it is on and saved.</p>}
+        </section>
+        <section class="panel section">
+          <h2>About the course</h2>
+          <dl class="kv">
+            <dt>Address</dt><dd>{published ? <a href={`https://${course.org}.github.io`} target="_blank" rel="noopener">{course.org}.github.io <Ext /></a> : `${course.org}.github.io`}</dd>
+            <Fact label="Description" value={facts.course_description} />
+            <Fact label="Contact" value={facts.contact} />
+            <Fact label="Licence" value={facts.licence} />
+          </dl>
+          <p class="footnote"><a href="#details">Change these in Course details</a></p>
+        </section>
+      </div>
+      {src ? (
+        <section class="panel section">
+          <h2>Kept off the website <Hint label="About keeping files off the website">Click a file or folder to keep it off the public website; click again to put it back. Files withheld from students, solutions, tests and grading files never appear anyway.</Hint></h2>
+          <WithholdEditor id="ws-withhold" label="Kept-off patterns" files={files} text={d.withhold} onText={(t) => set({ withhold: t })} loading={tree.kind === 'loading'} partial={tree.kind === 'ready' && tree.truncated}
+            org={course.org} repo={src} branch={branch} withheldWord="kept off" releasedWord="public" fixed={(f) => (neverMaterial(f) || denylisted(f) ? 'never public' : null)} />
+        </section>
+      ) : null}
+      <section class="panel section">
+        <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false || !!y?.errors.length} file={{ org: course.org, repo: COURSE_REPO, path: OPENCOURSE_FILE }} />
+        <Lives org={course.org} repo={COURSE_REPO} path={OPENCOURSE_FILE} />
+      </section>
+    </>
+  );
+}
+
+// --------------------------------------------------------------------------- materials repo settings
+
 const MATERIALS_STUB = '# INSTRUCTOR-OWNED - yours. What the folder names cannot say: the syllabus file and folder kinds.\n';
 const validMaterials = validator(materialsSchema);
 
@@ -316,52 +438,38 @@ export function MaterialsScreen(p: CourseProps) {
   const m = v.course?.materials?.find((x) => x.repo === repo);
   const tree = p.files.tree(course.org, repo);
   const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir).map((x) => x.path) : [];
-  const pubFile = p.files.file(course.org, repo, PUBLISH_FILE);
   const ignFile = p.files.file(course.org, repo, '.releaseignore');
   const matFile = p.files.file(course.org, repo, MATERIALS_FILE);
   const declared = matFile.kind === 'loading' ? NOTHING_DECLARED : readDeclared(matFile.kind === 'ready' ? matFile.text : null);
-  const baseHolds: Holds = { syllabus: declared?.declared ? declared.syllabus : '', kinds: declared?.kinds ?? {} };
-  const [holds, setHolds] = useState<Holds | null>(null);
-  const [matSave, runMat, setMatSave] = useSave(env);
-  const cur = holds ?? baseHolds;
+  const baseSyl = declared?.declared ? declared.syllabus : '';
+  const baseKinds = declared?.kinds ?? {};
+  const [syl, setSyl] = useState<string | null>(null);
+  const [kindsDraft, setKindsDraft] = useState<Record<string, string> | null>(null);
+  const [sylSave, runSyl, setSylSave] = useSave(env);
+  const [kindSave, runKind, setKindSave] = useSave(env);
+  const curKinds = kindsDraft ?? baseKinds;
   const folders = tree.kind === 'ready' ? tree.paths.filter((x) => x.dir && !x.path.includes('/') && !x.path.startsWith('.')).map((x) => x.path) : [];
-  const kinds = folderKinds(folders, cur.kinds);
-  const syllabus = cur.syllabus.trim() || DEFAULT_SYLLABUS;
-  const pubY = pubFile.kind === 'ready' ? new YamlText(pubFile.text) : null;
-  const pubList = pubY && !pubY.errors.length ? obj(pubY.toJS()).public : null;
-  const pubText = Array.isArray(pubList) ? pubList.map(String).join('\n') : '';
+  const kinds = folderKinds(folders, curKinds);
+  const syllabus = (syl ?? baseSyl).trim() || DEFAULT_SYLLABUS;
+  const sylFile = p.files.file(course.org, repo, syllabus);
   const ignText = ignFile.kind === 'ready' ? ignFile.text : '';
-  const [pub, setPub] = useState<string | null>(null);
   const [ign, setIgn] = useState<string | null>(null);
-  const [pubSave, runPub] = useSave(env);
   const [ignSave, runIgn] = useSave(env);
-  const pubLines = (pub ?? pubText).split('\n').map((l) => l.trim()).filter(Boolean);
-  const ignLines = (ign ?? ignText).split('\n');
   const scope = newestScope(p);
-  const badged = badgeFiles(files, pubLines, ignLines);
   const repos = p.files.repos(course.org);
   const branch = (repos.kind === 'ready' ? repos.repos.find((r) => r.name === repo)?.default_branch : undefined) ?? null;
   const partial = tree.kind === 'ready' && tree.truncated;
-  const savePub = async () => {
-    if (pub === null) return;
-    const y = new YamlText(pubFile.kind === 'ready' ? pubFile.text : PUBLISH_STUB);
-    if (y.errors.length) return;
-    y.assign(['public'], pubLines.length ? pubLines : []);
-    if (await runPub({ owner: course.org, repo, path: PUBLISH_FILE }, y.text, pubFile.kind === 'ready' ? pubFile.sha : null, { message: 'materials: edit what the public website may publish, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setPub(null);
-  };
   const setKind = (folder: string, kind: string) => {
-    const next = { ...cur.kinds };
+    const next = { ...curKinds };
     delete next[folder.toLowerCase()];
     if (kind) next[folder.toLowerCase()] = kind;
-    setHolds({ ...cur, kinds: next });
+    setKindsDraft(next);
   };
-  const saveMat = async () => {
-    if (holds === null) return;
-    const text = writeHolds(matFile.kind === 'ready' ? matFile.text : null, holds);
+  const saveMat = async (h: Holds, run: typeof runSyl, setState: typeof setSylSave, done: () => void) => {
+    const text = writeHolds(matFile.kind === 'ready' ? matFile.text : null, h);
     if (text === null) return;
-    const y = new YamlText(text);
-    if (!validMaterials(y.toJS() ?? {})) return setMatSave({ kind: 'bad', text: invalidText(MATERIALS_FILE, validMaterials) });
-    if (await runMat({ owner: course.org, repo, path: MATERIALS_FILE }, text, matFile.kind === 'ready' ? matFile.sha : null, { message: 'materials: edit the syllabus file and folder kinds, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setHolds(null);
+    if (!validMaterials(new YamlText(text).toJS() ?? {})) return setState({ kind: 'bad', text: invalidText(MATERIALS_FILE, validMaterials) });
+    if (await run({ owner: course.org, repo, path: MATERIALS_FILE }, text, matFile.kind === 'ready' ? matFile.sha : null, { message: 'materials: edit the syllabus file and folder kinds, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) done();
   };
   const saveIgn = async () => {
     if (ign === null) return;
@@ -372,14 +480,22 @@ export function MaterialsScreen(p: CourseProps) {
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Materials', href: '#materials' }, { t: repo }]} />
       <div class="page-head">
-        <div><h1>{repo} <Hint doc="02-add-materials-to-course.md">Files matching the withheld patterns never reach students; files matching the public patterns are selected for the public website. Both use .gitignore pattern syntax, for the paths in this repo.</Hint></h1><p class="lede">Materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
+        <div><h1>{repo} <Hint doc="02-add-materials-to-course.md">Materials stay here, private to instructors, until a scheduled release copies them to a semester. Files withheld here never reach students.</Hint></h1><p class="lede">Materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
         <div class="actions"><OpenButton org={course.org} repo={repo} quiet /></div>
       </div>
       <div class="stack">
         <section class="panel section">
           <h2>Syllabus</h2>
-          {m ? (m.state === 'ready' ? <div class="check-line ok"><Check /><span>Written.</span></div> : pubFile.kind === 'ready' ? <CheckLine cls="bad">Still the template text. Students would see the placeholder at the first release.</CheckLine> : <p class="footnote">Not ready yet.</p>) : <p class="footnote">Not checked yet.</p>}
+          {m ? (m.state === 'ready' ? <div class="check-line ok"><Check /><span>Written.</span></div> : sylFile.kind === 'ready' ? <CheckLine cls="bad">Still the template text. Students would see the placeholder at the first release.</CheckLine> : sylFile.kind === 'absent' ? <CheckLine cls="bad">There is no {syllabus} yet.</CheckLine> : <p class="footnote">Not ready yet.</p>) : <p class="footnote">Not checked yet.</p>}
           <div class="actions"><EditFile org={course.org} repo={repo} path={syllabus} /></div>
+          <div class="field">
+            <label for="m-syl">Syllabus file <span class="default">default: {DEFAULT_SYLLABUS}</span></label>
+            <input type="text" id="m-syl" list="m-syl-files" placeholder={DEFAULT_SYLLABUS} value={syl ?? baseSyl} onInput={(e) => setSyl((e.target as HTMLInputElement).value)} />
+            <datalist id="m-syl-files">{files.filter((f) => !f.includes('/')).map((f) => <option value={f} />)}</datalist>
+            <p class="hint">The file the student site pins as the syllabus, at the repo’s top level.</p>
+          </div>
+          {declared === null ? <CheckLine cls="bad">{MATERIALS_FILE} does not parse; fix it with Edit the file.</CheckLine> : null}
+          <SaveBar state={sylSave} onSave={() => void saveMat({ syllabus: syl ?? baseSyl, kinds: baseKinds }, runSyl, setSylSave, () => setSyl(null))} small disabled={syl === null || syl === baseSyl || declared === null} file={{ org: course.org, repo, path: MATERIALS_FILE }} />
           {scope ? (
             <>
               <p class="footnote">Builds a paste-ready ‘Course sessions and readings’ block from the semester schedule and its readings entries. Write saves it as <code>SYLLABUS.sessions.md</code> in this repo; <code>{syllabus}</code> is yours and is never touched.</p>
@@ -388,63 +504,36 @@ export function MaterialsScreen(p: CourseProps) {
           ) : null}
         </section>
         <section class="panel section">
-          <h2>Syllabus file and folder kinds</h2>
-          <div class="field">
-            <label for="m-syl">Syllabus file <span class="default">default: {DEFAULT_SYLLABUS}</span></label>
-            <input type="text" id="m-syl" list="m-syl-files" placeholder={DEFAULT_SYLLABUS} value={cur.syllabus} onInput={(e) => setHolds({ ...cur, syllabus: (e.target as HTMLInputElement).value })} />
-            <datalist id="m-syl-files">{files.filter((f) => !f.includes('/')).map((f) => <option value={f} />)}</datalist>
-            <p class="hint">The file the student site pins as the syllabus, at the repo’s top level.</p>
-          </div>
-          <p class="footnote">A release entry that names no kind takes the kind of the top folder it lands in.</p>
+          <h2>Folder kinds <Hint label="About folder kinds">A release that names no kind takes the kind of the top folder its files land in. A folder named lectures, labs, readings or similar is that kind; anything else counts as a lecture unless you change it here.</Hint></h2>
           {tree.kind === 'loading' ? <Loading /> : kinds.length ? (
-            <ul class="kinds">
-              {kinds.map((k) => (
-                <li>
-                  <code>{k.folder}/</code> <span class="chip">{KIND_LABEL[k.kind] ?? k.kind}</span> <span class="footnote">{FROM_WORD[k.from]}</span>
-                  <label class="inline"> This folder is: <select aria-label={`Kind of ${k.folder}`} onChange={(e) => setKind(k.folder, (e.target as HTMLSelectElement).value)}>
-                    <option value="" selected={k.from !== 'declared'}>{resetLabel(k.folder)}</option>
-                    {CONTENT_KINDS.map((x) => <option value={x} selected={k.from === 'declared' && k.kind === x}>{KIND_LABEL[x] ?? x}</option>)}
-                  </select></label>
-                </li>
-              ))}
-            </ul>
+            <table class="grid kinds">
+              <thead><tr><th>Folder</th><th>Kind, and why</th><th>Change</th></tr></thead>
+              <tbody>
+                {kinds.map((k) => (
+                  <tr>
+                    <td><code>{k.folder}/</code></td>
+                    <td><span class="chip">{KIND_LABEL[k.kind] ?? k.kind}</span> <span class="footnote">{FROM_WORD[k.from]}</span></td>
+                    <td><select aria-label={`Kind of ${k.folder}`} onChange={(e) => setKind(k.folder, (e.target as HTMLSelectElement).value)}>
+                      <option value="" selected={k.from !== 'declared'}>{resetLabel(k.folder)}</option>
+                      {CONTENT_KINDS.map((x) => <option value={x} selected={k.from === 'declared' && k.kind === x}>{KIND_LABEL[x] ?? x}</option>)}
+                    </select></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           ) : <p class="footnote">No folders yet.</p>}
-          {declared === null ? <CheckLine cls="bad">{MATERIALS_FILE} does not parse; fix it with Edit the file.</CheckLine> : null}
-          <SaveBar state={matSave} onSave={() => void saveMat()} small disabled={holds === null || deepEqual(holds, baseHolds) || declared === null} file={{ org: course.org, repo, path: MATERIALS_FILE }} />
+          <SaveBar state={kindSave} onSave={() => void saveMat({ syllabus: baseSyl, kinds: curKinds }, runKind, setKindSave, () => setKindsDraft(null))} small disabled={kindsDraft === null || deepEqual(kindsDraft, baseKinds) || declared === null} file={{ org: course.org, repo, path: MATERIALS_FILE }} />
           <Lives org={course.org} repo={repo} path={MATERIALS_FILE} />
         </section>
         <section class="panel section">
-          <h2>For the public website</h2>
-          <div class="pattern-grid">
-            <div class="field">
-              <label for="pub-pat">Public patterns</label>
-              <textarea class="code" id="pub-pat" placeholder="Nothing public" onInput={(e) => setPub((e.target as HTMLTextAreaElement).value)}>{pub ?? pubText}</textarea>
-              <p class="hint">One pattern per line, for the paths in this repo. Empty means nothing is public.</p>
-              {pubY?.errors.length ? <CheckLine cls="bad">publish.yml does not parse ({pubY.errors[0]}); fix it with Edit the file.</CheckLine> : null}
-            </div>
-            <div class="field"><span class="label">Rules</span><Unmatched rules={badged.unmatched.public} total={badged.rules.public} loading={tree.kind === 'loading'} partial={partial} /></div>
-          </div>
-          <SaveBar state={pubSave} onSave={() => void savePub()} small disabled={pub === null || pub === pubText || !!pubY?.errors.length} file={{ org: course.org, repo, path: PUBLISH_FILE }} />
-          <Lives org={course.org} repo={repo} path={PUBLISH_FILE} />
-        </section>
-        <section class="panel section">
-          <h2>Withheld from students</h2>
-          <div class="pattern-grid">
-            <div class="field">
-              <label for="ign-pat">Withheld patterns</label>
-              <textarea class="code" id="ign-pat" onInput={(e) => setIgn((e.target as HTMLTextAreaElement).value)}>{ign ?? ignText}</textarea>
-              <p class="hint">A release that needs a withheld file is reported as a problem. This preview reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
-            </div>
-            <div class="field"><span class="label">Rules</span><Unmatched rules={badged.unmatched.withheld} total={badged.rules.withheld} loading={tree.kind === 'loading'} partial={partial} /></div>
-          </div>
+          <h2>Withheld from students <Hint label="About withheld files">Withheld files and folders are never copied to a semester, so students never see them. Click one in the tree to withhold it; click again to release it.</Hint></h2>
+          {tree.kind === 'absent' ? <p class="footnote">Could not read the repo’s files.</p> : (
+            <WithholdEditor id="ign-pat" label="Withheld patterns" files={files} text={ign ?? ignText} onText={setIgn} loading={tree.kind === 'loading'} partial={partial}
+              org={course.org} repo={repo} branch={branch} kinds={Object.fromEntries(kinds.map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} withheldWord="withheld" releasedWord="released to students" />
+          )}
+          <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
           <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ign === null || ign === ignText} file={{ org: course.org, repo, path: '.releaseignore' }} />
           <Lives org={course.org} repo={repo} path=".releaseignore" />
-        </section>
-        <section class="panel section">
-          <h2>Files</h2>
-          <p class="footnote">What happens to each file at a release, from the rules above as you type them, by the engine’s own rule. Withheld wins over public. A public deck brings its <code>_files/</code> folder and any {BUNDLE_WORDS} folder beside it; solutions, tests, grading_config.yml and .env files are never public.</p>
-          {partial ? <CheckLine cls="bad">GitHub returned only part of this repo’s file list; badges may be incomplete.</CheckLine> : null}
-          {tree.kind === 'loading' ? <Loading what="Reading the repo" /> : tree.kind === 'absent' ? <p class="footnote">Could not read the repo’s files.</p> : <FileTree files={files} badges={badged.badges} org={course.org} repo={repo} branch={branch} kinds={Object.fromEntries(kinds.map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} />}
         </section>
       </div>
     </>

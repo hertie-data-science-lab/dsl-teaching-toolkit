@@ -1,22 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import rules from '../schemas/materials.json';
-import { badgeFiles, hostedPaths } from '../src/edit/badges';
+import { badgeFiles, withheldPaths } from '../src/edit/badges';
 import { aliasKind, inferKind, landingSection, readDeclared } from '../src/model/materialsRules';
 
-describe('the publish.yml rule', () => {
-  // The engine answered each case (`materials.hosted_paths`); the console must agree.
+describe('the withhold rule', () => {
+  // The engine answered each case (`releaseignore`, git's rule); the console must agree.
   for (const c of rules.cases)
     it(`agrees with the engine: ${c.name}`, () => {
-      expect([...hostedPaths(c.paths, c.public)].sort()).toEqual(c.hosted);
+      expect(withheldPaths(c.paths, c.patterns).sort()).toEqual(c.withheld);
     });
 
   it('reads an escaped bracket as itself', () => {
-    expect([...hostedPaths(['a[b]/x.pdf', 'ab/x.pdf'], ['a\\[b]/*'])]).toEqual(['a[b]/x.pdf']);
+    expect(withheldPaths(['a[b]/x.pdf', 'ab/x.pdf'], ['a\\[b]/*'])).toEqual(['a[b]/x.pdf']);
   });
 
-  it('badges a withheld file withheld, whatever publishes it', () => {
-    const b = badgeFiles(['lectures/a.html', 'lectures/a_files/x.js'], ['**'], ['lectures/a.html']).badges;
-    expect(b).toEqual({ 'lectures/a.html': 'withheld', 'lectures/a_files/x.js': 'public' });
+  it('badges never-material names and the list file withheld, whatever the list says', () => {
+    const b = badgeFiles(['l/.gitkeep', 'l/.DS_Store', '.releaseignore', 'l/a.md'], ['!l/.gitkeep']).badges;
+    expect(b).toEqual({ 'l/.gitkeep': 'withheld', 'l/.DS_Store': 'withheld', '.releaseignore': 'withheld', 'l/a.md': 'released' });
   });
 });
 

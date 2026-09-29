@@ -24,7 +24,6 @@ import json
 import sys
 import tempfile
 import time
-from collections.abc import Iterable
 from pathlib import Path
 
 from . import settings
@@ -38,16 +37,7 @@ from .course import (
     MAINTAINING_FILE,
     MATERIALS_REPO_PREFIX,
     NO_STARTER,
-    NOTHING_PUBLIC,
     PROPOSAL_BRANCH_PREFIX,
-    PUBLIC_ALL_FILES,
-    PUBLIC_DIRS,
-    PUBLIC_EXCEPT_READINGS,
-    PUBLIC_HTML,
-    PUBLIC_HTML_PDF,
-    PUBLIC_LECTURES,
-    PUBLIC_TYPES,
-    PUBLISH_FILE,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
     STARTER_FORMATS,
@@ -68,7 +58,7 @@ from .discovery import central_ref_for, discover_assignments, discover_semesters
 from .gh_contents import put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import CLIParser, log, log_err, log_ok, log_skip, log_step
-from .materials import MATERIALS_TOPIC, alias_kind
+from .materials import MATERIALS_TOPIC
 from .readings import READING_OVERLAY_FILE
 from .releaseignore import RELEASEIGNORE
 from .repos import (
@@ -702,79 +692,6 @@ _RELEASEIGNORE_STUB = f"""\
 # https://github.com/{CENTRAL}/blob/main/docs/08-release-materials-to-cohort.md
 """
 
-# The example lines the publish list carries whatever was answered - one narrowing, one
-# withholding - so the two moves faculty actually make are written out rather than
-# described. Commented, always: they name paths this course may not have.
-PUBLISH_EXAMPLES = (
-    '  # - "labs/**/*.pdf"',
-    '  # - "!lectures/09_*/**"      # keep one session private',
-)
-
-# Every pattern is QUOTED, including the ones faculty are shown. `**/*.html` opens with
-# `*`, which YAML reads as an alias and refuses, and `"!readings/**"` opens with `!`, a
-# tag - so an unquoted list is a file the site cannot read at all.
-PUBLISH_HEADER = f"""\
-# INSTRUCTOR-OWNED - yours. Written once when this repo was scaffolded, and never
-# rewritten by the toolkit, so anything you put here stays.
-#
-# What the public website may publish, so a rendered deck opens in a browser instead of
-# showing as source on GitHub. Not used yet: the toolkit records this selection until the
-# public website is rebuilt. Same syntax as .gitignore, relative to this repo. Anything
-# unmatched stays private: enrolled students open it on GitHub. A deck's <name>_files/,
-# media/, libs/ and images/ folders follow it. Unlike .gitignore, a negated folder
-# ("!labs/sub/") excludes its whole subtree. solution/, tests/, grading files and .env are
-# never published whatever is written here. Applies to every semester of this course.
-# Full rules: https://github.com/{CENTRAL}/blob/main/docs/02-add-materials-to-course.md
-"""
-_PUBLISH_STUB = PUBLISH_HEADER + "public:\n{patterns}\n"
-
-
-def publish_patterns(dirs: str, types: str, folders: Iterable[str]) -> list[str]:
-    """The `public:` patterns the two New materials repo answers mean, for a repo whose
-    top-level folders are `folders`.
-
-    Two axes because the pair faculty actually have in mind is "which of my folders" and
-    "how much of them": a deck is worth rendering and the readings under it are the
-    licensed material, so the directories answer carries `everything except readings` and
-    the types answer defaults to the two formats a browser opens by itself. "Lectures" and
-    "readings" are KINDS: the folders the alias table (`materials.alias_kind`) names so,
-    never a literal folder name.
-
-    `(nothing public)` is no patterns at all rather than a pattern matching nothing: the
-    seeded file then withholds by saying nothing, the way `.releaseignore` does, and a
-    course that never answers the question publishes nothing."""
-    kinds = {folder: alias_kind(folder) for folder in sorted(set(folders))}
-    if dirs == NOTHING_PUBLIC:
-        return []
-    if dirs == PUBLIC_LECTURES:
-        roots = [f"{f}/**" for f, kind in kinds.items() if kind == "lecture"]
-    else:
-        roots = ["**"]
-    if types == PUBLIC_ALL_FILES:
-        patterns = roots
-    else:
-        exts = ["html"] if types == PUBLIC_HTML else ["html", "pdf"]
-        patterns = [f"{root}/*.{ext}" for root in roots for ext in exts]
-    if dirs == PUBLIC_EXCEPT_READINGS:
-        # Last, because the last matching pattern wins - a `!` written above the pattern
-        # it is meant to carve out of does nothing at all.
-        patterns += [f"!{f}/**" for f, kind in kinds.items() if kind == "readings"]
-    return patterns
-
-
-def _publish_stub(dirs: str, types: str, folders: Iterable[str]) -> str:
-    """The seeded `publish.yml` for one pair of answers - the chosen patterns live, the
-    examples below them commented out.
-
-    A course that answered `(nothing public)` gets the same file with every line a
-    comment, for the reason `_RELEASEIGNORE_STUB` is seeded inert: it exists to be FOUND,
-    and a file nobody knows about is one nobody uses."""
-    chosen = [f'  - "{p}"' for p in publish_patterns(dirs, types, folders)]
-    examples = list(PUBLISH_EXAMPLES)
-    if not chosen:
-        examples.insert(0, '  # - "lectures/**/*.html"')
-    return _PUBLISH_STUB.format(patterns="\n".join(chosen + examples))
-
 
 def _actions_table(org: str) -> str:
     # The course org's `.github` Actions tab hosts the workflows that operate this course.
@@ -1071,8 +988,6 @@ def scaffold_materials(
     org: str,
     tag: str,
     copy_from: str = "",
-    public_dirs: str = NOTHING_PUBLIC,
-    public_types: str = PUBLIC_HTML_PDF,
 ) -> int:
     repo = f"{MATERIALS_REPO_PREFIX}{tag}"
     log_step(f"Scaffolding {org}/{repo}")
@@ -1124,13 +1039,6 @@ def scaffold_materials(
             "labs/01_session-1/.gitkeep": b"",
             RELEASEIGNORE: _RELEASEIGNORE_STUB.encode(),
         }
-        # The other half of the same question: `.releaseignore` says what leaves this
-        # repo at all, `publish.yml` what the public website may publish -
-        # written for the folders the skeleton actually has.
-        folders = {path.split("/")[0] for path in user_files if "/" in path}
-        user_files[PUBLISH_FILE] = _publish_stub(
-            public_dirs, public_types, folders
-        ).encode()
         # One commit for the skeleton: they all carried the same subject anyway, so
         # writing them one at a time opened a repo faculty then author by hand with a
         # column of identical `init: materials skeleton` lines.
@@ -1683,24 +1591,6 @@ def main() -> int:
         "history are copied into the new repo, and only the SYSTEM-owned files are "
         "rewritten. Omit it for the fresh skeleton.",
     )
-    # Refused by argparse rather than by a parser of our own: the answers come from a
-    # `type: choice` dropdown, so anything else is a hand-typed CLI run, and `choices=`
-    # already says which words exist.
-    pm.add_argument(
-        "--public-dirs",
-        dest="public_dirs",
-        choices=PUBLIC_DIRS,
-        default=NOTHING_PUBLIC,
-        help="Which folders the public website may publish, so they render in a browser. "
-        "Seeds publish.yml; never written over a repo that has one.",
-    )
-    pm.add_argument(
-        "--public-types",
-        dest="public_types",
-        choices=PUBLIC_TYPES,
-        default=PUBLIC_HTML_PDF,
-        help="Which file types out of those folders.",
-    )
     pa = sub.add_parser("assignment")
     pa.add_argument("--org", required=True)
     pa.add_argument("--number", required=True)
@@ -1793,13 +1683,7 @@ def main() -> int:
     # an Actions log a one-line error beats a traceback.
     try:
         if args.cmd == "materials":
-            return scaffold_materials(
-                args.org,
-                args.semester,
-                args.copy_from,
-                args.public_dirs,
-                args.public_types,
-            )
+            return scaffold_materials(args.org, args.semester, args.copy_from)
         if args.cmd == "site":
             return scaffold_site(args.org)
         return scaffold_assignment(

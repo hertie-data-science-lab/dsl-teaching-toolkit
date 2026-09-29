@@ -18,8 +18,7 @@ Both hand their plan to `site_repo`, which applies it; pushing the site repo red
 Usage:
     python3 -m dsl_course.site sync --course-org TEST-HERTIE-COURSE \\
         --semester-org TEST-HERTIE-SEMESTER-f2026
-    python3 -m dsl_course.site public-sync --course-org TEST-HERTIE-COURSE \\
-        --source-repo course-materials-f2026 --readings-mode reading-list
+    python3 -m dsl_course.site public-sync --course-org TEST-HERTIE-COURSE [--daily]
 """
 
 from __future__ import annotations
@@ -66,7 +65,7 @@ from .gh_contents import get_file_content, repo_tree
 from .grades import load_grading_spec, spoken_day
 from .log import CLIParser, log_err, log_step
 from .materials import read as read_materials
-from .public_site import resync_public_site, sync_public_site
+from .public_site import publish as publish_public_site
 from .readings import demote_headings, is_reading_overlay
 from .repos import (
     default_branch,
@@ -82,7 +81,6 @@ from .schedule_plan import (
     site_rows,
 )
 from .site_repo import (
-    PUBLISH_CONFIG,
     Link,
     SitePlan,
     block,
@@ -1193,18 +1191,10 @@ def main() -> int:
     pp = sub.add_parser("public-sync")
     pp.add_argument("--course-org", required=True)
     pp.add_argument(
-        "--source-repo",
-        default=None,
-        help="Course materials repo to publish; omit to re-sync from the settings the "
-        f"last publish persisted in the site repo ({PUBLISH_CONFIG})",
-    )
-    pp.add_argument(
-        "--readings-mode",
-        choices=["reading-list", "actual-readings", "none"],
-        default="reading-list",
-    )
-    pp.add_argument(
-        "--no-include-lectures", action="store_true", help="Skip lecture files"
+        "--daily",
+        action="store_true",
+        help="The daily update: a course whose opencourse.yml is absent or off is a "
+        "quiet no-op rather than a refusal",
     )
     args = parser.parse_args()
     if args.cmd != "public-sync" and not (args.all_semesters or args.semester_org):
@@ -1216,14 +1206,7 @@ def main() -> int:
     # error beats a traceback either way, and the run still goes red.
     try:
         if args.cmd == "public-sync":
-            if not args.source_repo:
-                return resync_public_site(args.course_org)
-            return sync_public_site(
-                args.course_org,
-                args.source_repo,
-                args.readings_mode,
-                include_lectures=not args.no_include_lectures,
-            )
+            return publish_public_site(args.course_org, daily=args.daily)
         if args.all_semesters:
             rc = 0
             for semester in live_semesters(args.course_org):

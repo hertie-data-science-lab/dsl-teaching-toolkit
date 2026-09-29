@@ -78,9 +78,10 @@ def test_op_arg_enums_are_the_engine_constants():
     assert create["type"]["enum"] == list(course.ASSIGNMENT_TYPES)
     # New assignment asks nothing a semester decides.
     assert not set(create) & set(settings.RUN_KEYS)
+    # publish.yml is retired: New materials repo asks nothing about publishing.
     materials = REGISTRY["materials.create"].args_schema["properties"]
-    assert materials["public_dirs"]["enum"] == list(course.PUBLIC_DIRS)
-    assert materials["public_types"]["enum"] == list(course.PUBLIC_TYPES)
+    assert set(materials) == {"semester", "copy_from"}
+    assert REGISTRY["course.publish_website"].args_schema["properties"] == {}
 
 
 @pytest.mark.parametrize("name", sorted(REGISTRY))
@@ -275,6 +276,7 @@ def test_names_json_is_the_engines_own_names():
     assert set(names) == {
         "config_repo", "join_repo", "system_dir", "instructors_file",
         "assignments_file", "registry_file", "records", "join_markers",
+        "opencourse_file",
     }  # fmt: skip
     assert names["join_markers"] == {
         "join_course": course.JOIN_COURSE_MARKER,
