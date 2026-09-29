@@ -109,6 +109,15 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
     expect(html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files: later })} />)).not.toContain('before its late cutoff');
   });
 
+  it('says a solution set before the late cutoff is held until it', () => {
+    const held: Assignment = { ...solo, state: 'late_window', grading_cutoff_datetime: '2026-10-02T23:59:00+02:00', solution_shown: '2026-09-30T09:00:00+02:00', solution_held_until: '2026-10-02T23:59:00+02:00' };
+    const loaded: Loaded = { kind: 'ready', status: { ...status, assignments: [held] }, sha: 's', stale: [] };
+    expect(html(<AssignmentsScreen {...props({ loaded })} />)).toContain('; solution held until then');
+    const marking: Assignment = { ...held, state: 'marking' };
+    const out = html(<AssignmentsScreen {...props({ loaded: { ...loaded, status: { ...status, assignments: [marking] } } })} />);
+    expect(out).toContain('Solution shown Fri 2 Oct');
+  });
+
   it('opens the field of a setting this assignment sets, with Use the default', () => {
     const files = filesWith({ [`${COHORT_ORG}/semester-config/assignments.yml`]: `${ASSIGNMENTS}assignments:\n  assignment-2:\n    visibility: public\n` });
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files })} />);
