@@ -168,13 +168,13 @@ describe('course nav and overview', () => {
   });
   it('shows course problems only, then each cohort with its count', () => {
     const t = text(<CourseScreen {...cp({ loaded: ready })} />);
-    expect(t).toContain('Course problems');
+    expect(t).toContain('Problems');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).not.toContain('Everything automatic will happen on time');
     expect(t).toContain('Fall 2025');
     expect(t).toContain('2 problems');
     const none = text(<CourseScreen {...cp({ loaded: { kind: 'ready', status: { ...STATUS, problems: [] }, sha: 's', stale: [] } })} />);
-    expect(none).toContain('No course problems.');
+    expect(none).toContain('No problems.');
   });
 });
 

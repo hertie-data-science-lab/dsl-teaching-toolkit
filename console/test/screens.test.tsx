@@ -12,7 +12,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { CohortScreen } from '../src/screens/Cohort';
-import { CourseScreen, TemplateScreen } from '../src/screens/Course';
+import { CourseScreen, SetupList, TemplateScreen, readyWords, semesterChip } from '../src/screens/Course';
 import { HomeScreen, ReadonlyScreen, SignInScreen } from '../src/screens/Home';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
@@ -340,7 +340,11 @@ describe('S2 course and S17 template', () => {
   const cp = { course, loaded: { kind: 'absent' } as Loaded, cohortStates: { [COHORT_ORG]: ready }, files, now: NOW };
   it('shows problems, templates, materials, details and cohorts', () => {
     const t = text(<CourseScreen {...cp} />);
-    expect(t).toContain('Not ready for a new semester');
+    // C1-C3 are done; the template's problem is what holds the course back.
+    expect(t).toContain('Not ready: a problem below needs fixing.');
+    expect(t).not.toMatch(/\b0 (setup steps|problems)/);
+    expect(t).toContain('Setup steps are things still to do. Problems are things that broke.');
+    expect(t).toContain('Students get only what a semester releases or hands out');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).toContain('assignment-3-f2026');
     expect(t).toContain('course-materials-f2026');
@@ -348,6 +352,46 @@ describe('S2 course and S17 template', () => {
     expect(t).toContain('up to 5, ');
     expect(t).not.toContain('this course’s default');
     expect(t).toContain('Fall 2026');
+  });
+  const base = STATUS.course!;
+  const withWhy = {
+    ...base,
+    stages: { C1: 'done', C2: 'done', C3: 'todo', C4: 'todo', C5: 'blocked', C6: 'todo' },
+    stage_why: {
+      C3: 'Course details have no description yet.',
+      C4: 'There is no materials repo yet.',
+      C5: 'Waiting for the course to be set up.',
+      C6: 'There is no public website; it is optional.',
+    },
+    materials: [],
+    templates: [],
+    ready: false,
+  } as typeof base;
+  it('renders the setup checklist from stage_why: ticks, the why and one link each', () => {
+    const out = html(<SetupList course={withWhy} />);
+    expect((out.match(/class="done"/g) ?? []).length).toBe(2);
+    expect((out.match(/class="open"/g) ?? []).length).toBe(4);
+    expect(out).toContain('Course details have no description yet.');
+    expect(out).toContain('href="#details"');
+    expect(out).toContain(`href="?course=${COURSE_ORG}#new-materials"`);
+    expect(out).toContain(`href="?course=${COURSE_ORG}#new-assignment-1"`);
+    expect(out).toContain('href="#website"');
+    expect((out.match(/<span class="s-need">required<\/span>/g) ?? []).length).toBe(3);
+    expect(out).toContain('<span class="s-need">optional</span>');
+    // Done lines carry no link and no sentence.
+    expect(out).not.toContain('Open on GitHub');
+  });
+  it('says how many required steps are left, never a problem count', () => {
+    expect(readyWords(withWhy)).toBe('Not ready: 1 setup step left.');
+    expect(readyWords({ ...withWhy, stages: { ...withWhy.stages, C1: 'todo', C2: 'blocked' } })).toBe('Not ready: 3 setup steps left.');
+    expect(readyWords({ ...withWhy, ready: true })).toBe('Ready for a new semester.');
+    expect(readyWords(base)).toBe('Not ready: a problem below needs fixing.');
+  });
+  it('reads a semester as live, ended but not archived, or archived', () => {
+    const sem = STATUS.semester!;
+    expect(text(<>{semesterChip(sem)}</>).trim()).toBe('Live');
+    expect(text(<>{semesterChip({ ...sem, ended: true })}</>).trim()).toBe('Ended, not archived');
+    expect(text(<>{semesterChip({ ...sem, live: false, ended: false })}</>).trim()).toBe('Archived');
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3" />);
