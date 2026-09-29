@@ -2057,12 +2057,15 @@ def main() -> int:
         if phases["release"]:
             _preflight_course(args.course_org, now, args.preview)
         # The bot's pending org invitations, before the listing so a course with no semester
-        # yet still accepts them: setting up a new course or semester waits on this. Never
+        # yet still accepts them: setting up a new course or semester waits on this. A
+        # semester the wizard has registered here but not yet set up is one of them. Never
         # red - an invitation that cannot be accepted is not this course's release failing,
         # and every course org would file its failure issue for it at once.
         if phases["release"] and not args.preview:
             try:
-                invitations.accept_pending()
+                invitations.accept_pending(
+                    args.course_org, discovery.discover_semesters(args.course_org)
+                )
             except Exception as exc:
                 log_err(f"could not accept the bot's org invitations: {exc}")
         semesters = _registered_semesters(args.course_org)

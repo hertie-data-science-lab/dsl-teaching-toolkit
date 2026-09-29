@@ -85,3 +85,29 @@ def test_a_registry_that_cannot_be_read_accepts_nothing(monkeypatch):
     with pytest.raises(RuntimeError, match="orgs.yml"):
         invitations.accept_pending()
     assert calls == []
+
+
+def test_a_registered_courses_own_semester_is_accepted(monkeypatch):
+    # The course's admins vouch for its semesters: the wizard lists the org in the
+    # course's semesters.yml before the bot is invited.
+    calls = _stub_gh(monkeypatch, "hertie-new-s2027\n")
+    assert invitations.accept_pending(
+        "Hertie-New-E1234", ["hertie-new-f2026", "Hertie-New-S2027"]
+    ) == ["hertie-new-s2027"]
+    assert len(calls) == 2
+
+
+def test_an_org_named_like_a_semester_but_listed_nowhere_is_left_pending(
+    monkeypatch, capsys
+):
+    calls = _stub_gh(monkeypatch, "hertie-new-s2027\n")
+    assert invitations.accept_pending("hertie-new-e1234", ["hertie-new-f2026"]) == []
+    assert len(calls) == 1
+    assert "hertie-new-s2027 left pending: not registered" in capsys.readouterr().out
+
+
+def test_an_unregistered_course_cannot_vouch_for_semesters(monkeypatch):
+    # Its semesters.yml is anyone's to write, like the topic.
+    calls = _stub_gh(monkeypatch, "stranger-s2027\n")
+    assert invitations.accept_pending("stranger-e1", ["stranger-s2027"]) == []
+    assert len(calls) == 1

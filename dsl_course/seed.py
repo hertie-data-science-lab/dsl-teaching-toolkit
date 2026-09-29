@@ -50,6 +50,7 @@ from .course import (
     semester_of,
 )
 from .discovery import (
+    being_set_up,
     carries_old_semester_topic,
     central_ref_for,
     discover_assignment_repos,
@@ -218,7 +219,14 @@ def _live_semesters(course_org: str) -> tuple[list[str], int]:
             log(f"  [warn] could not probe {semester}, treating it as live: {exc}")
             gone = False
         if not gone:
-            live.append(semester)
+            if being_set_up(semester):
+                # Registered by the New semester wizard, not yet bootstrapped: nothing to
+                # refresh there, and nothing to prune either.
+                log(
+                    f"  [skip] {semester} (being set up - Bootstrap semester has not run)"
+                )
+            else:
+                live.append(semester)
             continue
         first_seen = previous.get(semester.casefold(), "")
         try:

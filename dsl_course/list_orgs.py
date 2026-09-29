@@ -214,14 +214,20 @@ AWAITING_TITLE = "Course orgs awaiting registration"
 def awaiting_registration() -> list[dict]:
     """Every org that looks like a course the registry does not name, with why: it has
     invited the bot (a new course, before its set-up) or its `.github` carries the course
-    topic. A tagged org whose metadata points at a course is a semester, not a course."""
+    topic. A tagged org whose metadata points at a course is a semester, not a course, and
+    a semester a registered course's `semesters.yml` lists is never awaiting anyone."""
     registered = org_registry.course_orgs()
+    # A semester a registered course lists is vouched for: the course's own scheduler pass
+    # accepts its invitation, so it waits on nobody here.
+    known = registered | {
+        s.casefold() for course in registered for s in discover_semesters(course)
+    }
     found: dict[str, dict] = {}
     for org in invitations.pending_orgs():
-        if org.casefold() not in registered:
+        if org.casefold() not in known:
             found.setdefault(org.casefold(), {"org": org, "why": "invited the bot"})
     for org in _tagged_orgs(COURSE_HUB_TOPIC):
-        if org.casefold() in registered or org.casefold() in found:
+        if org.casefold() in known or org.casefold() in found:
             continue
         meta = _metadata_or_none(org)
         if not (meta or {}).get("course"):

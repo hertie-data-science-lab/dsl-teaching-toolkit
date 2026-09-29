@@ -439,8 +439,13 @@ read like `policy.yml`: from the checkout of the ref the run is on. A `dsl-cours
 is anyone's to set, and the tier fan-out writes `DSL_BOT_TOKEN` into every org it refreshes,
 so the topic alone is never enough: `list_orgs` skips a tagged org the registry does not
 name (one log line each), and the bot accepts an invitation only from a registered org.
-Semester orgs are not listed; each course's `semesters.yml` registers its own. A registry
-that is missing or does not parse raises.
+Semester orgs are not listed; each course's `semesters.yml` registers its own, and a
+registered course's admins vouch for them. The New semester wizard lists the new org there
+(a plain entry, the registry's only shape) as soon as the org exists, so the course's own
+scheduler pass accepts the bot's invitation to it. Until Bootstrap semester has run - it finds
+the entry and carries on - the org has no `semester-config` and no `dsl-semester` topic, and
+every sweep skips it as being set up (`discovery.being_set_up`) rather than failing on it.
+A registry that is missing or does not parse raises.
 
 To add a course: check who asked, add its org, merge. The bot accepts its waiting invitation
 on the next scheduler tick in any course org on that ref (so a new real course waits for the

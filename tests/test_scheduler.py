@@ -119,9 +119,11 @@ def cadence_calls(monkeypatch):
 @pytest.fixture(autouse=True)
 def accepted(monkeypatch):
     """Stub the bot's invitation pass (real gh I/O) and count the calls to it."""
-    calls: list[int] = []
+    calls: list[tuple] = []
     monkeypatch.setattr(
-        scheduler.invitations, "accept_pending", lambda: calls.append(1) or []
+        scheduler.invitations,
+        "accept_pending",
+        lambda *args: calls.append(args) or [],
     )
     return calls
 
@@ -4955,7 +4957,19 @@ def test_a_real_pass_accepts_the_bots_invitations_even_with_no_semester(
     monkeypatch.setattr(scheduler.discovery, "discover_semesters", lambda org: [])
     _all_semesters_argv(monkeypatch)
     assert scheduler.main() == 0
-    assert accepted == [1]
+    assert accepted == [("Course-Org", [])]
+
+
+def test_the_pass_hands_its_own_registry_to_the_invitation_pass(monkeypatch, accepted):
+    # A semester the New semester wizard has listed but Bootstrap has not set up yet is
+    # skipped by every sweep - and is exactly the org whose invitation is waiting.
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_semesters", lambda org: ["Course-f2027"]
+    )
+    monkeypatch.setattr(scheduler.discovery, "semester_is_live", lambda org: False)
+    _all_semesters_argv(monkeypatch)
+    scheduler.main()
+    assert accepted == [("Course-Org", ["Course-f2027"])]
 
 
 def test_a_preview_or_the_grading_job_never_accepts(monkeypatch, accepted):

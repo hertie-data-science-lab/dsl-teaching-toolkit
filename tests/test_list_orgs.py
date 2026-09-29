@@ -379,7 +379,15 @@ def test_awaiting_registration_lists_invitations_and_tagged_courses(monkeypatch)
         list_orgs.org_registry, "course_orgs", lambda: frozenset({"trunk"})
     )
     monkeypatch.setattr(
-        list_orgs.invitations, "pending_orgs", lambda: ["Trunk", "New-Course"]
+        list_orgs.invitations,
+        "pending_orgs",
+        lambda: ["Trunk", "New-Course", "Trunk-S2027"],
+    )
+    # A semester a registered course lists waits on nobody: its course's pass accepts it.
+    monkeypatch.setattr(
+        list_orgs,
+        "discover_semesters",
+        lambda org: ["trunk-s2027"] if org == "trunk" else [],
     )
     monkeypatch.setattr(
         list_orgs, "_tagged_orgs", lambda topic: ["Trunk", "Tagged", "Old-f2025"]

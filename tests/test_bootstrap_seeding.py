@@ -935,6 +935,7 @@ def _stub_refresh(
     # so org_exists True + an unarchived semester-config = present and live, proceed.
     monkeypatch.setattr(seed, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(seed, "org_exists", lambda org: True)
+    monkeypatch.setattr(seed, "being_set_up", lambda org: False)
     monkeypatch.setattr(seed, "unregister_semester", lambda course, semester: True)
     store = {seed.MISSES_PATH: "".join(f"{m}\n" for m in prior_misses)}
     monkeypatch.setattr(
@@ -2031,3 +2032,24 @@ def test_refresh_sweeps_every_org_off_one_listing(monkeypatch):
     assert [forks for _, forks in tightened] == [False, True, True]
     assert listings == swept
     assert rendered == [("Course-Org", 1), ("Semester-f2026", 1), ("Semester-s2027", 1)]
+
+
+def test_refresh_skips_a_semester_the_wizard_listed_before_its_set_up(
+    monkeypatch, capsys
+):
+    # Listed so the bot can join it, not bootstrapped yet: nothing to refresh, nothing to
+    # prune, and no failure - the set-up run will write everything.
+    refreshed: list[str] = []
+    _stub_refresh(
+        monkeypatch,
+        join_failures=lambda org, *a: refreshed.append(org) or 0,
+    )
+    monkeypatch.setattr(seed, "being_set_up", lambda org: org == "Semester-s2027")
+    pruned: list = []
+    monkeypatch.setattr(
+        seed, "unregister_semester", lambda course, semester: pruned.append(semester)
+    )
+    assert seed.refresh("Course-Org") == 0
+    assert "Semester-s2027" not in refreshed
+    assert pruned == []
+    assert "[skip] Semester-s2027 (being set up" in capsys.readouterr().out
