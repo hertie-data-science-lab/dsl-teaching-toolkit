@@ -1089,8 +1089,8 @@ def proposed_entries(
 ) -> str:
     """The `releases:` block for `folders` (`(semester repo, folder, kind, landed, course
     repo)`), in date order (an undated one last, `tbc`), each label `<kind>-NN` from the
-    folder's number (else its name), never one `taken`. A readings entry has no title, so
-    it attaches to its lecture (decision 0013 item 3)."""
+    folder's number (else its name), never one `taken`. A readings entry has no title; its
+    label's number joins it to its lecture (decision 0013 item 3)."""
     taken = set(taken)
     rows = []
     for repo, folder, kind, landed, source in sorted(

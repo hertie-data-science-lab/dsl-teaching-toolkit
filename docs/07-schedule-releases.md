@@ -72,7 +72,7 @@ A week's readings often go out ahead of the lecture. Give them their own entry w
         course_source_path: readings/04_week-4
 ```
 
-A readings entry with no `title:`, silent or not, belongs to the first shown lecture on or after its date: that lecture's row links the readings and inlines the reading list, the Readings tab lists it under the lecture's name, and until the files land the Readings tab says they are still to come. A readings entry with a `title:` is a row of its own, and a silent one (no number) is on the Readings tab only.
+A readings entry with a number - its `number:`, else its label's (`readings-4`) - belongs to the lecture with that number, silent or not, whatever its date: that lecture's row links the readings and inlines the reading list, the Readings tab lists it under the lecture's name, and until the files land the Readings tab says they are still to come. Any other readings entry, or one whose number no shown lecture has, is a row of its own; a silent one is on the Readings tab only, unnumbered.
 
 Any other silent entry (setup files, a quiz solution) is no row: its files are in the student console's Materials, and the lectures around it keep their numbers. One that lands only root files (a `course-intro` shipping `SYLLABUS.md`) is a course document, pinned on the home page.
 

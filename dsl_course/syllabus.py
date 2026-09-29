@@ -15,8 +15,8 @@ the course team pastes what they want.
 Readings are read from the COURSE org's source repos, not from what has been released: a
 syllabus is written before the term starts, when nothing has shipped yet. Sessions, their
 numbers and the readings under each are the website's own rows
-(`schedule_plan.site_rows`): an untitled readings entry, from any repo, sits under the
-first lecture on or after its date; any other readings entry closes the list under
+(`schedule_plan.site_rows`): a numbered readings entry, from any repo, sits under the
+lecture with its number; any other readings entry closes the list under
 "Further readings".
 
 `--course-source-repo` names the materials repo the block is written into
