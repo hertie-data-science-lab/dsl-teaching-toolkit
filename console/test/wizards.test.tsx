@@ -245,7 +245,7 @@ describe('live checks against GitHub', () => {
     const got = await checkOrg(client(invited), org);
     expect(got.id).toBe(42);
     expect(got.checks[1].ok).toBe(false);
-    expect(got.checks[1].hint).toBe('Invited. The bot accepts within 15 minutes.');
+    expect(got.checks[1].hint).toBe('Invited. The DSL team registers new courses; the bot then joins by itself.');
     const fine = new FakeGitHub().on('GET', `/orgs/${org}`, { login: org }).on('GET', `/orgs/${org}/memberships/hertie-dsl-bot`, { state: 'active', role: 'admin' });
     expect(await oks(fine)).toEqual([true, true]);
     const hidden = new FakeGitHub().on('GET', `/orgs/${org}`, { login: org }).on('GET', `/orgs/${org}/memberships/hertie-dsl-bot`, () => json({ message: 'Must be an owner' }, 403));
@@ -292,14 +292,14 @@ describe('live checks against GitHub', () => {
 
   it('renders the three links, the name and the bot handle to copy, and no Check button', () => {
     const org = 'hertie-deep-learning-e2345';
-    const check = { id: 42, checks: [{ text: 'a', ok: true }, { text: 'b', ok: false }, { text: 'c', ok: false, hint: 'Invited. The bot accepts within 15 minutes.' }] };
+    const check = { id: 42, checks: [{ text: 'a', ok: true }, { text: 'b', ok: false }, { text: 'c', ok: false, hint: 'Invited. The DSL team registers new courses; the bot then joins by itself.' }] };
     const html = render(<OrgSteps org={org} check={check} busy={false} run={() => {}} back="#new-course-1" slug="dsl-teaching-toolkit" />);
     expect(html).toContain('href="https://github.com/account/organizations/new?plan=free"');
     expect(html).toContain('href="https://github.com/apps/dsl-teaching-toolkit/installations/new/permissions?target_id=42"');
     expect(html).toContain(`href="https://github.com/orgs/${org}/people"`);
     expect(html).toContain(`<code>${org}</code>`);
     expect(html).toContain('<code>hertie-dsl-bot</code>');
-    expect(html).toContain('Invited. The bot accepts within 15 minutes.');
+    expect(html).toContain('Invited. The DSL team registers new courses; the bot then joins by itself.');
     expect(html).toContain('Check again');
     expect(html).not.toContain('proposed');
     // Before the org exists there is nothing to install on or invite to.
@@ -327,7 +327,7 @@ describe('the wizard screens', () => {
     const out = render(<NewCourseScreen files={new StaticFiles()} step={3} />);
     expect(out).toContain('Step 1 of 3');
     expect(out).toContain('Three things on GitHub');
-    expect(out).toContain('GitHub lets only a person do these three things.');
+    expect(out).toContain('GitHub lets only a person do these three things. Everything after them is automatic.');
     expect(out).toContain('https://github.com/account/organizations/new?plan=free');
     expect(out).toContain('Invite hertie-dsl-bot as an Owner');
     expect(out).not.toContain('Today: invite');

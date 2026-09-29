@@ -76,7 +76,7 @@ async function checkBot(client: GitHubClient, org: string, text: string): Promis
   }
   return m === undefined ? { text, ok: null, hint: `Only an owner of ${org} can see its members’ roles. Sign in as an owner.` }
     : m === null ? { text, ok: false }
-    : m.state !== 'active' ? { text, ok: false, hint: 'Invited. The bot accepts within 15 minutes.' }
+    : m.state !== 'active' ? { text, ok: false, hint: 'Invited. The DSL team registers new courses; the bot then joins by itself.' }
     : m.role !== 'admin' ? { text, ok: false, hint: `${BOT} is a member, not an Owner. Make it an Owner on the People page.` }
     : { text, ok: true };
 }

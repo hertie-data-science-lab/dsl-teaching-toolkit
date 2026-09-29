@@ -58,6 +58,24 @@ describe('usePoll', () => {
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
+  it('skips while the page is hidden, and checks again when it becomes visible', async () => {
+    let hidden = false;
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+    try {
+      const fn = vi.fn(async () => no);
+      await mount(<Step fn={fn} />);
+      hidden = true;
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      await tick(POLL_MS * 3);
+      expect(fn).toHaveBeenCalledTimes(1);
+      hidden = false;
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      expect(fn).toHaveBeenCalledTimes(2);
+    } finally {
+      delete (document as { hidden?: boolean }).hidden;
+    }
+  });
+
   it('stops when the step is left', async () => {
     const fn = vi.fn(async () => no);
     await mount(<Step fn={fn} />);

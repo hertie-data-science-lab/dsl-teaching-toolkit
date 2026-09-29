@@ -290,7 +290,7 @@ export function createState({ auth, client }: AppDeps) {
   // Back from installing the console app: drop GitHub's two parameters and reopen the wizard's
   // first step, before anything reads the URL. Discovery then runs as on any load, and finds
   // the installation.
-  const back = typeof location !== 'undefined' ? installReturn(location.search, takeInstallReturn) : null;
+  const back = typeof location !== 'undefined' ? installReturn(location.search, () => takeInstallReturn()) : null;
   if (back) history.replaceState(null, '', `${location.pathname}${back}`);
   const search = signal(typeof location !== 'undefined' ? location.search : '');
   const st = {

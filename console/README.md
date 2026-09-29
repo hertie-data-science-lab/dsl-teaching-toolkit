@@ -57,7 +57,8 @@ The first step of New course and New semester lists the three things only a pers
 GitHub, each with a tick that appears by itself (the step re-checks every 10 seconds and when
 the window regains focus, until all pass): create the org, install the console app on it,
 and invite `hertie-dsl-bot` as an Owner. The bot accepts the invitation itself, on the
-scheduler's next quarter-hourly run in any course org (`dsl_course/invitations.py`). Whether
+scheduler's next quarter-hourly run in any course org, once the maintainers have added the org
+to `orgs.yml` (`dsl_course/invitations.py`; maintainers.md, "The course org registry"). Whether
 the app is installed can only be seen from an App sign-in; with a token the line says so and
 does not hold the step back.
 

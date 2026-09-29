@@ -105,7 +105,7 @@ function Copy({ text }: { text: string }) {
 export function OrgWhy({ doc }: { doc: string }) {
   return (
     <Hint label="Why these three" doc={doc}>
-      GitHub lets only a person do these three things. The app lets this console work in the org, and the bot runs its automation. Everything after them is automatic.
+      GitHub lets only a person do these three things. Everything after them is automatic.
     </Hint>
   );
 }
@@ -120,7 +120,7 @@ export function OrgSteps({ org, check, busy, run, back, slug = APP_SLUG }: { org
   const exists = check?.checks[0]?.ok === true;
   const id = check?.id ?? null;
   const rows: { label: string; href?: string; here?: boolean; copy?: string; sub?: string }[] = [
-    { label: 'Create the org', href: NEW_ORG_URL, copy: org, sub: 'Free plan; the business account is hertie-data-science-lab.' },
+    { label: 'Create the org', href: NEW_ORG_URL, copy: org, sub: 'Free plan; choose a business or institution and enter hertie-data-science-lab.' },
     ...(slug ? [{ label: 'Install the console app', href: exists ? installUrl(slug, id) : undefined, here: true }] : []),
     { label: `Invite ${BOT} as an Owner`, href: exists ? peopleUrl(org) : undefined, copy: BOT },
   ];
