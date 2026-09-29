@@ -267,6 +267,9 @@ def status_schema() -> dict:
             "key": nullable,
             "label": nullable,
             "timezone": _str(),
+            # `semester_start` / `semester_end` from schedule.yml; null while unset.
+            "start": nullable,
+            "end": nullable,
             "week": {"type": ["integer", "null"]},
             "weeks": {"type": ["integer", "null"]},
             "live": {"type": "boolean"},
@@ -286,6 +289,8 @@ def status_schema() -> dict:
             "text": _str(),
             "stops": _str(),
             "fix": fix,
+            # When the fault bites (ISO); absent for a fault no date pins.
+            "when": _str(),
         },
         ("id", "scope", "stage", "text"),
     )

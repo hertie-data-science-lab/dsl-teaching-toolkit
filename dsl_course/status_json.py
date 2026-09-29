@@ -558,7 +558,7 @@ def problem_from_fault(fault: ConfigFault, org: str, now: datetime) -> dict:
         }
     elif fault.ref and fault.ref != "main":
         fix["ref"] = fault.ref
-    return {
+    problem = {
         "id": f"{filed.kind}:{_slugify(entry)}:{code}",
         "scope": filed.scope,
         "stage": filed.stage,
@@ -566,6 +566,11 @@ def problem_from_fault(fault: ConfigFault, org: str, now: datetime) -> dict:
         "stops": stops,
         "fix": fix,
     }
+    # The instant the fault bites (a release, a hand-out, a late cutoff): the week the
+    # console's strip counts it under. Absent for a fault no date pins.
+    if fault.fires is not None:
+        problem["when"] = fault.fires.isoformat()
+    return problem
 
 
 def _unique_ids(problems: list[dict]) -> list[dict]:
@@ -1295,6 +1300,8 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "key": tag,
             "label": semester_label(tag),
             "timezone": sched.timezone,
+            "start": _iso(sched.semester_start),
+            "end": _iso(sched.semester_end),
             "week": week,
             "weeks": weeks,
             "live": not facts.archived,

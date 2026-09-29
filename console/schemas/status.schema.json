@@ -473,6 +473,9 @@
           },
           "text": {
             "type": "string"
+          },
+          "when": {
+            "type": "string"
           }
         },
         "required": [
@@ -598,6 +601,12 @@
             "null"
           ]
         },
+        "end": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "key": {
           "type": [
             "string",
@@ -633,6 +642,12 @@
             "type": "string"
           },
           "type": "object"
+        },
+        "start": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "timezone": {
           "type": "string"

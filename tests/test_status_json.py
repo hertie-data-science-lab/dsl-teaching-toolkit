@@ -680,6 +680,42 @@ def test_semester_weeks_before_during_and_after_the_semester():
     assert status_json.semester_weeks(None, end, date(2026, 9, 7)) == (None, None)
 
 
+def test_the_semester_block_carries_its_start_and_end():
+    semester = _render()["semester"]
+    assert (semester["start"], semester["end"]) == ("2026-09-07", "2026-12-18")
+    bare = _render(semester=_semester(sched=_sched("timezone: Europe/Berlin\n")))
+    assert (bare["semester"]["start"], bare["semester"]["end"]) == (None, None)
+
+
+def test_a_problem_is_dated_by_the_moment_it_bites_and_a_roster_one_is_not(
+    monkeypatch,
+):
+    # The real source check: the materials repo lacks lectures/05_trees, and the
+    # assignment-3 template is absent. The strip counts each under its week.
+    trees = {"lectures", "lectures/03_trees", "lectures/03_trees/notes.md"}
+    paths = {"course-materials-f2026": trees}
+    monkeypatch.setattr(
+        schedule, "source_repo_paths", lambda org, repo: paths.get(repo, set())
+    )
+    sources = schedule.source_faults(_sched(), COURSE)
+    template, _ = grades.grading_spec_faults(
+        "assignment-3",
+        "assignment-3-f2026",
+        COURSE,
+        "a: [\n",
+        datetime(2026, 11, 11, 23, 59, tzinfo=BERLIN),
+    )
+    roster_fault = header_fault("students.csv", ["github_handle"])
+    when = {
+        (p["stage"], p["fix"]["entry"]): p.get("when")
+        for p in _problems([*sources, *template, roster_fault])
+    }
+    assert when[("K4", "s5")] == "2026-10-08T10:00:00+02:00"  # the release
+    assert when[("K4", "assignment-3")] == "2026-10-20T10:00:00+02:00"  # hand out
+    assert when[("C5", "assignment-3")] == "2026-11-11T23:59:00+01:00"  # late cutoff
+    assert when[("K5", None)] is None  # the roster's header: no date pins it
+
+
 # ---------------------------------------------------------------------------- writer
 
 
