@@ -1,5 +1,5 @@
-// `.gitignore` pattern matching, for the match previews of `.releaseignore` and
-// `publish.yml` (both use gitignore's syntax; the last matching pattern wins, `!` re-includes).
+// `.gitignore` pattern matching, for the previews of `.releaseignore` and `opencourse.yml`'s
+// `withhold` (both use gitignore's syntax; the last matching pattern wins, `!` re-includes).
 // The preview reads the repo's root file only; nested `.releaseignore` files still apply
 // when the engine copies.
 
@@ -7,6 +7,8 @@ export interface Rule {
   re: RegExp;
   neg: boolean;
   dirOnly: boolean;
+  /** The pattern line as written, trimmed. */
+  line: string;
 }
 
 function toRegex(glob: string): string {
@@ -45,7 +47,7 @@ export function compile(line: string): Rule | null {
   const anchored = p.includes('/');
   p = p.replace(/^\//, '');
   const body = toRegex(p);
-  return { re: new RegExp(anchored ? `^${body}$` : `^(?:.*/)?${body}$`), neg, dirOnly };
+  return { re: new RegExp(anchored ? `^${body}$` : `^(?:.*/)?${body}$`), neg, dirOnly, line: line.trim() };
 }
 
 function hits(r: Rule, path: string, isDir: boolean): boolean {
@@ -74,4 +76,27 @@ export function matchRules(rules: Rule[], path: string, isDir = false): boolean 
 /** Whether `path` matches the pattern list, gitignore style: the last matching line decides. */
 export function matches(lines: string[], path: string, isDir = false): boolean {
   return matchRules(compileAll(lines), path, isDir);
+}
+
+/** The rule that decides `path` itself (not its folders), gitignore style: the last one matching it, or null. */
+export function deciding(rules: Rule[], path: string, isDir: boolean): Rule | null {
+  let hit: Rule | null = null;
+  for (const r of rules) if ((!r.dirOnly || isDir) && r.re.test(path)) hit = r;
+  return hit;
+}
+
+/**
+ * Git's own rule, as the engine applies it (`releaseignore.Ignore.excludes`): each folder on the
+ * way down is judged first, and a withheld folder is never walked, so nothing inside it can be
+ * re-included. The rule that withholds `path` and where it matched (`path` itself or a folder
+ * above it), or null.
+ */
+export function withheldBy(rules: Rule[], path: string, isDir = false): { rule: Rule; at: string } | null {
+  const parts = path.split('/').filter(Boolean);
+  for (let i = 1; i <= parts.length; i++) {
+    const at = parts.slice(0, i).join('/');
+    const r = deciding(rules, at, i < parts.length || isDir);
+    if (r && !r.neg) return { rule: r, at };
+  }
+  return null;
 }
