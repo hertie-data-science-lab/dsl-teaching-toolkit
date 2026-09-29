@@ -58,7 +58,9 @@ GitHub, each with a tick that appears by itself (the step re-checks every 10 sec
 the window regains focus, until all pass): create the org, install the console app on it,
 and invite `hertie-dsl-bot` as an Owner. The bot accepts the invitation itself, on the
 scheduler's next quarter-hourly run in any course org, once the maintainers have added the org
-to `orgs.yml` (`dsl_course/invitations.py`; maintainers.md, "The course org registry"). Whether
+to `orgs.yml` (`dsl_course/invitations.py`; maintainers.md, "The course org registry"). New
+semester lists the semester's org in the course's `semesters.yml` as soon as it exists, which
+is enough: the course's own run accepts the bot's invitation to it. Whether
 the app is installed can only be seen from an App sign-in; with a token the line says so and
 does not hold the step back.
 

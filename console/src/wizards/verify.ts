@@ -37,7 +37,11 @@ export interface OrgCheck {
  * Whether the app is installed can only be told from an App token; any other token gets a
  * line that says so and does not block.
  */
-export async function checkOrg(client: GitHubClient, org: string, opts: { kind?: TokenKind; slug?: string } = {}): Promise<OrgCheck> {
+/** What the bot line says while its invitation waits: a new course waits for the DSL team, a semester of a registered course only for the next automatic run. */
+export const BOT_PENDING_COURSE = 'Invited. The DSL team registers new courses; the bot then joins by itself.';
+export const BOT_PENDING_SEMESTER = 'Invited. The bot joins within 15 minutes.';
+
+export async function checkOrg(client: GitHubClient, org: string, opts: { kind?: TokenKind; slug?: string; pending?: string } = {}): Promise<OrgCheck> {
   const slug = opts.slug ?? APP_SLUG;
   const appText = `The console app is installed on ${org}`;
   const botText = `${BOT} can manage it`;
@@ -53,7 +57,7 @@ export async function checkOrg(client: GitHubClient, org: string, opts: { kind?:
   const first: Check = { text: `The org ${org} exists`, ok: exists, hint: exists === null ? 'GitHub did not answer; checking again.' : undefined };
   const later = 'Checked once the org exists.';
   if (!exists) return { id, checks: [first, ...(slug ? [{ text: appText, ok: false, hint: later }] : []), { text: botText, ok: false, hint: later }] };
-  const [app, bot] = await Promise.all([slug ? checkApp(client, org, appText, opts.kind) : null, checkBot(client, org, botText)]);
+  const [app, bot] = await Promise.all([slug ? checkApp(client, org, appText, opts.kind) : null, checkBot(client, org, botText, opts.pending ?? BOT_PENDING_COURSE)]);
   return { id, checks: [first, ...(app ? [app] : []), bot] };
 }
 
@@ -67,7 +71,7 @@ async function checkApp(client: GitHubClient, org: string, text: string, kind: T
   }
 }
 
-async function checkBot(client: GitHubClient, org: string, text: string): Promise<Check> {
+async function checkBot(client: GitHubClient, org: string, text: string, pending: string): Promise<Check> {
   let m: { state: string; role: string } | null | undefined;
   try {
     m = await client.getOrgMembership(org, BOT);
@@ -76,7 +80,7 @@ async function checkBot(client: GitHubClient, org: string, text: string): Promis
   }
   return m === undefined ? { text, ok: null, hint: `Only an owner of ${org} can see its members’ roles. Sign in as an owner.` }
     : m === null ? { text, ok: false }
-    : m.state !== 'active' ? { text, ok: false, hint: 'Invited. The DSL team registers new courses; the bot then joins by itself.' }
+    : m.state !== 'active' ? { text, ok: false, hint: pending }
     : m.role !== 'admin' ? { text, ok: false, hint: `${BOT} is a member, not an Owner. Make it an Owner on the People page.` }
     : { text, ok: true };
 }

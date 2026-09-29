@@ -7,7 +7,7 @@
 // student of a semester org.
 
 import { parse } from 'yaml';
-import type { GhRepo, GitHubClient } from '../github/client';
+import type { Author, GhRepo, GitHubClient } from '../github/client';
 import { str } from './format';
 import { SEMESTER_TOPIC } from './migration';
 import { CONFIG_REPO, COURSE_REPO, POINTER_PATH, REGISTRY_FILE } from './names';
@@ -56,6 +56,22 @@ export function parseRegistry(text: string | null | undefined): string[] {
   }
   const list = data && typeof data === 'object' && !Array.isArray(data) ? (data as { semesters?: unknown }).semesters : data;
   return Array.isArray(list) ? list.filter((c): c is string => typeof c === 'string' && c.length > 0) : [];
+}
+
+/**
+ * List `semester` in its course's registry, as Bootstrap semester would (`registry: add
+ * semester`, the same sorted `semesters:` shape), before the set-up has run: the course's
+ * admins vouch for it, which is what lets the bot join it by itself. Bootstrap semester later
+ * finds it listed and carries on; until then the engine's sweeps skip it as being set up.
+ * 'present' when it was already listed.
+ */
+export async function registerSemester(client: GitHubClient, courseOrg: string, semester: string, author: Author): Promise<'present' | 'written'> {
+  const file = await client.getContents(courseOrg, COURSE_REPO, REGISTRY_PATH);
+  const listed = parseRegistry(file?.text);
+  if (listed.some((o) => o.toLowerCase() === semester.toLowerCase())) return 'present';
+  const text = `semesters:\n${[...listed, semester].sort().map((o) => `- ${o}\n`).join('')}`;
+  await client.putContents({ owner: courseOrg, repo: COURSE_REPO, path: REGISTRY_PATH, text, sha: file?.sha ?? null, message: `registry: add semester ${semester}, from the DSL Teaching Console`, author });
+  return 'written';
 }
 
 /** The course `org` is, reading its `.github` repo unless the caller already has it; null when it is not a course. */
