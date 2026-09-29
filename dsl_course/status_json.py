@@ -62,6 +62,7 @@ from .course import (
     JOIN_REPO,
     MATERIALS_REPO_PREFIX,
     PUBLISH_FILE,
+    SELF_SELECT,
     SOLUTION_BRANCH,
     active_today,
     assignment_slug,
@@ -866,7 +867,8 @@ def assignment_state(
     late_window between the due date and the cutoff; before the due date, open once any
     copy is handed out. A group assignment past its hand-out moment with no copy yet is
     teams_forming while students choose their own teams, blocked while the teaching team
-    has to assign them; declared before any of that."""
+    has to assign them; declared before any of that. Which of the two is the EFFECTIVE
+    `team_formation` (the cascade's, `self_select` unless somebody declared `assigned`)."""
     if returned:
         return "returned"
     if cutoff is not None and now >= cutoff:
@@ -876,7 +878,11 @@ def assignment_state(
     if units > 0:
         return "open"
     if spec.is_group and entry.handout_datetime and now >= entry.handout_datetime:
-        return "teams_forming" if spec.team_formation == "self_select" else "blocked"
+        return (
+            "teams_forming"
+            if spec.team_formation_resolved == SELF_SELECT
+            else "blocked"
+        )
     return "declared"
 
 

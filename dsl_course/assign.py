@@ -74,9 +74,9 @@ from .collect import (
     sync_sheet,
 )
 from .course import (
-    ASSIGNED,
     CONFIG_REPO,
     CUTOFF_SENTENCE,
+    SELF_SELECT,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
     SOLUTION_NOW,
@@ -1799,9 +1799,9 @@ def provision_all(
             # need different words: telling a course whose teams the teaching team
             # allocates to wait for students to self-select points them at a form that
             # refuses every request (see templates/join/team-formation.yml).
-            # The RAW declaration, not `team_formation_resolved`: a template that
-            # declares nothing self-selects.
-            self_select = gspec.team_formation != ASSIGNED
+            # The EFFECTIVE value, off the settings cascade like every other reader's:
+            # an assignment nobody declared `assigned` for self-selects.
+            self_select = gspec.team_formation_resolved == SELF_SELECT
             # THE HANDOUT MOMENT IS NOW, whatever the CSV says. The brief is what hands
             # out; the repos follow each team as it forms, which is the whole point of the
             # rolling provisioning below - so the moment belongs on record here and not
