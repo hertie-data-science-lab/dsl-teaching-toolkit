@@ -35,6 +35,7 @@ from tests.conftest import ROSTER_HEADER
 
 SHA = "a" * 40
 OTHER_SHA = "b" * 40
+BOT = "dsl-bot-app"
 
 
 @pytest.fixture(autouse=True)
@@ -51,6 +52,14 @@ def _grading_deps_present(monkeypatch):
     monkeypatch.setattr(collect.importlib.util, "find_spec", lambda name: object())
     yield
     _clear_dep_caches()
+
+
+@pytest.fixture(autouse=True)
+def _bot_login(monkeypatch):
+    """The token's own login, answered without asking GitHub. The freeze asks it of every
+    commit it walks and every push record it reads; a test about an unreadable identity
+    re-patches it in its own body and wins."""
+    monkeypatch.setattr(collect, "bot_login", lambda: BOT)
 
 
 def _clear_dep_caches() -> None:
@@ -609,15 +618,16 @@ def test_an_unparseable_deadline_still_raises_rather_than_matching_nothing():
 
 def _git_stub(rev_list_sha: str = "", sha_in_clone: bool = True):
     """A fake `git` recording its calls: `cat-file -e` answers whether the snapshot sha is
-    in the clone, `rev-list` answers the date-based fallback."""
+    in the clone, `log` answers the date-based fallback with one student commit."""
     calls: list[tuple[str, ...]] = []
 
     def fake_git(*args, **kwargs):
         calls.append(args)
         if "cat-file" in args:
             return (0 if sha_in_clone else 1, "")
-        if "rev-list" in args:
-            return (0, rev_list_sha) if rev_list_sha else (1, "")
+        if "log" in args:
+            row = f"{rev_list_sha}\tanna\tanna@uni.edu\tanna\tanna@uni.edu"
+            return (0, row if rev_list_sha else "")
         return (0, "")
 
     return fake_git, calls
@@ -629,7 +639,7 @@ def test_pin_commit_prefers_the_snapshot_sha_and_never_looks_at_dates(monkeypatc
     assert collect._pin_commit(Path("/repo"), "2026-10-15T23:59:59+02:00", SHA) == SHA
     assert any("checkout" in c and SHA in c for c in calls)
     # the whole point: the client-supplied committer date is never consulted
-    assert not any("rev-list" in c for c in calls)
+    assert not any("log" in c for c in calls)
 
 
 def test_pin_commit_blank_snapshot_is_a_recorded_non_submission(monkeypatch):
@@ -650,7 +660,7 @@ def test_pin_commit_fails_when_the_snapshot_sha_is_gone_after_a_rewrite(monkeypa
     monkeypatch.setattr(collect, "git", fake_git)
     assert collect._pin_commit(Path("/repo"), "2026-10-15T23:59", SHA) is None
     assert any("fetch" in c for c in calls)  # tried to recover the frozen commit
-    assert not any("rev-list" in c for c in calls)  # never the date fallback
+    assert not any("log" in c for c in calls)  # never the date fallback
 
 
 def test_pin_commit_recovers_the_snapshot_sha_via_fetch(monkeypatch):
@@ -684,6 +694,66 @@ def test_pin_commit_no_commit_at_all_is_none(monkeypatch):
     fake_git, _calls = _git_stub(rev_list_sha="")
     monkeypatch.setattr(collect, "git", fake_git)
     assert collect._pin_commit(Path("/repo"), "2026-10-13") is None
+
+
+def _commit(repo: Path, message: str, date: str, author: str, committer: str) -> str:
+    """One real commit in `repo`, `author`/`committer` as "name <email>"."""
+    (repo / "work.txt").write_text(message)
+    a_name, a_email = author.rstrip(">").split(" <")
+    c_name, c_email = committer.rstrip(">").split(" <")
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": a_name,
+        "GIT_AUTHOR_EMAIL": a_email,
+        "GIT_COMMITTER_NAME": c_name,
+        "GIT_COMMITTER_EMAIL": c_email,
+        "GIT_AUTHOR_DATE": date,
+        "GIT_COMMITTER_DATE": date,
+    }
+    for argv in (["add", "-A"], ["commit", "-q", "--no-verify", "-m", message]):
+        subprocess.run(["git", "-C", str(repo), *argv], env=env, check=True)
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def test_pin_commit_without_a_snapshot_walks_past_the_toolkits_commits(tmp_path):
+    # The fallback took the newest commit by date, so the solution pushed on top of the
+    # student's work in the late window was what got graded. A real clone: the handout
+    # as `/generate` makes it, the student's work, then the solution and a correction.
+    repo = tmp_path / "sub"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    bot_api = f"{BOT} <bot@example.org>"
+    _commit(
+        repo,
+        "Initial commit",
+        "2026-10-01T08:00:00Z",
+        bot_api,
+        f"GitHub <{collect.GITHUB_COMMITTER_EMAIL}>",
+    )
+    own = _commit(
+        repo, "my work", "2026-10-09T08:00:00Z", "anna <a@u.edu>", "anna <a@u.edu>"
+    )
+    bot_git = f"dsl-bot <{collect.BOT_EMAIL}>"
+    _commit(repo, "add solution", "2026-10-11T08:00:00Z", bot_git, bot_git)
+    _commit(repo, "fix: README.md", "2026-10-12T08:00:00Z", bot_api, bot_api)
+    assert collect._pin_commit(repo, "2026-10-13") == own
+
+
+def test_pin_commit_without_a_snapshot_finds_nothing_under_only_the_handout(tmp_path):
+    repo = tmp_path / "sub"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    _commit(
+        repo,
+        "Initial commit",
+        "2026-10-01T08:00:00Z",
+        f"{BOT} <bot@example.org>",
+        f"GitHub <{collect.GITHUB_COMMITTER_EMAIL}>",
+    )
+    assert collect._pin_commit(repo, "2026-10-13") is None
 
 
 # -------------------------------------------------------- notebook -> importable script
@@ -959,17 +1029,38 @@ def test_a_duplicated_unit_is_reported_without_naming_anyone(monkeypatch, capsys
 def _commits_line(
     sha: str = SHA,
     committed: str = "2026-10-12T08:00:00Z",
-    parents: int = 1,
     author: str = "anna-adams",
     email: str = "anna@uni.edu",
     committer: str = "",
+    committer_email: str = "anna@uni.edu",
 ) -> str:
     """One row of what `_COMMIT_FIELDS` asks the commits API for. Defaults describe a
-    student's push ON TOP of the handout - the ordinary submission.
+    student's own push - the ordinary submission.
 
     `committer` is the second login GitHub answers with, and it is blank in most of these
     rows because the author's is the one that normally answers."""
-    return "\t".join([sha, committed, str(parents), author, email, committer])
+    return f"{sha}\t{committed}\t{author}\t{email}\t{committer}\t{committer_email}"
+
+
+# The toolkit's three commits as the commits API really answers them (read off the demo
+# cohort): `/generate`'s handout is the bot account's, committed by GitHub; `push_solution`
+# is a git push under `BOT_EMAIL`, linked to no account; a correction is an API commit
+# the bot account both wrote and committed.
+BOT_ADDRESS = "bot@example.org"
+
+
+def _handout(sha: str = "c" * 40, committed: str = "2026-10-01T08:00:00Z") -> str:
+    return _commits_line(
+        sha, committed, BOT, BOT_ADDRESS, "web-flow", collect.GITHUB_COMMITTER_EMAIL
+    )
+
+
+def _solution(sha: str = SHA, committed: str = "2026-10-12T07:00:00Z") -> str:
+    return _commits_line(sha, committed, "", collect.BOT_EMAIL, "", collect.BOT_EMAIL)
+
+
+def _correction(sha: str = SHA, committed: str = "2026-10-12T07:00:00Z") -> str:
+    return _commits_line(sha, committed, BOT, BOT_ADDRESS, BOT, BOT_ADDRESS)
 
 
 @pytest.mark.parametrize(
@@ -994,7 +1085,7 @@ def test_snapshot_sha_maps_api_outcomes(monkeypatch, response, expected):
     )
 
 
-def test_snapshot_sha_asks_the_api_for_one_commit_before_a_utc_cutoff(monkeypatch):
+def test_snapshot_sha_asks_the_api_for_a_page_before_a_utc_cutoff(monkeypatch):
     seen: list[tuple[str, ...]] = []
     monkeypatch.setattr(
         collect, "gh", lambda *a, **k: seen.append(a) or (0, _commits_line())
@@ -1002,72 +1093,95 @@ def test_snapshot_sha_asks_the_api_for_one_commit_before_a_utc_cutoff(monkeypatc
     collect._snapshot_sha("Semester", "assignment-1-anna", "2026-10-15T23:59:59+02:00")
     args = seen[0]
     assert "repos/Semester/assignment-1-anna/commits" in args
-    assert "until=2026-10-15T21:59:59Z" in args and "per_page=1" in args
+    # A page, not one commit: the newest commit may be the toolkit's, and the student's
+    # own work is under it.
+    assert "until=2026-10-15T21:59:59Z" in args and "per_page=100" in args
 
 
 def test_the_handout_commit_is_not_a_submission(monkeypatch):
     # `/generate` copies the template into every student repo, so a student who never
     # pushed still has a commit dated at the handout. Pinning it recorded them as having
     # submitted, on time, and posted them a receipt saying so.
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, _handout()))
+    assert collect._snapshot_sha("Semester", "assignment-1-anna", "2026-10-13") == (
+        collect.Pin()
+    )
+
+
+def test_the_solution_commit_is_walked_past_to_the_students_own(monkeypatch):
+    # `solution_datetime` before the cutoff lands the toolkit's "add solution" commit
+    # INSIDE the late window, on top of the student's work. Pinned, it timed every
+    # student's submission by the solution push - days late - and graded the solution.
+    own = _commits_line(sha=OTHER_SHA, committed="2026-10-09T08:00:00Z")
     monkeypatch.setattr(
-        collect,
-        "gh",
-        lambda *a, **k: (
-            0,
-            _commits_line(parents=0, author="dsl-bot-app", email=collect.BOT_EMAIL),
-        ),
+        collect, "gh", lambda *a, **k: (0, f"{_solution()}\n{own}\n{_handout()}")
+    )
+    assert collect._snapshot_sha(
+        "Semester", "assignment-1-anna", "2026-10-13"
+    ) == collect.Pin(OTHER_SHA, "2026-10-09T08:00:00Z", past_toolkit=True)
+
+
+def test_a_correction_is_walked_past_to_the_students_own(monkeypatch):
+    own = _commits_line(sha=OTHER_SHA, committed="2026-10-09T08:00:00Z")
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, f"{_correction()}\n{own}"))
+    assert collect._snapshot_sha(
+        "Semester", "assignment-1-anna", "2026-10-13"
+    ) == collect.Pin(OTHER_SHA, "2026-10-09T08:00:00Z", past_toolkit=True)
+
+
+def test_a_repo_with_only_toolkit_commits_has_nothing_submitted(monkeypatch):
+    # The handout and the solution on top of it, and nothing of the student's: before,
+    # the solution commit was pinned and they were recorded as having submitted it.
+    monkeypatch.setattr(
+        collect, "gh", lambda *a, **k: (0, f"{_solution()}\n{_handout(OTHER_SHA)}")
     )
     assert collect._snapshot_sha("Semester", "assignment-1-anna", "2026-10-13") == (
         collect.Pin()
     )
 
 
-def test_a_handout_commit_is_recognised_by_the_tokens_own_login(monkeypatch):
-    # A commit the API made carries no git identity to match on - only the login of the
-    # account the call was made with, which is asked for once per process.
-    monkeypatch.setattr(collect, "bot_login", lambda: "dsl-bot-app")
-    monkeypatch.setattr(
-        collect,
-        "gh",
-        lambda *a, **k: (0, _commits_line(parents=0, author="dsl-bot-app", email="")),
+@pytest.mark.parametrize(
+    "amended",
+    [
+        # `git commit --amend` on the handout: its author stays the bot account's.
+        _commits_line(author=BOT, email=BOT_ADDRESS, committer="anna-adams"),
+        # ... on the solution: its author stays `BOT_EMAIL`, linked to nobody.
+        _commits_line(author="", email=collect.BOT_EMAIL, committer="anna-adams"),
+        # ... from a laptop whose address GitHub cannot link either.
+        _commits_line(author="", email=collect.BOT_EMAIL, committer_email="me@home"),
+    ],
+    ids=["handout", "solution", "unlinked"],
+)
+def test_a_toolkit_commit_the_student_rewrote_is_their_submission(monkeypatch, amended):
+    # Their work is IN that commit. Walking past it recorded them as submitting nothing.
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, f"{amended}\n{_handout()}"))
+    assert (
+        collect._snapshot_sha("Semester", "assignment-1-anna", "2026-10-13").sha == SHA
     )
-    assert collect._snapshot_sha("Semester", "assignment-1-anna", "2026-10-13") == (
-        collect.Pin()
+
+
+def test_a_toolkit_commit_in_a_drop_box_folder_is_not_an_outsider(monkeypatch):
+    # A correction the toolkit pushed into a unit's folder is not a classmate's hand on
+    # it, so the pin is the unit's own commit and carries no note.
+    own = _commits_line(sha=OTHER_SHA)
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, f"{_correction()}\n{own}"))
+    pin = collect._snapshot_sha(
+        "Semester",
+        "dropbox",
+        "2026-10-13",
+        path="anna-adams",
+        members=["anna-adams"],
     )
+    assert (pin.sha, pin.note) == (OTHER_SHA, "")
 
 
-def test_a_students_commit_on_top_of_the_handout_is_a_submission(monkeypatch):
-    # The ordinary case: one parent, so it is not the repo's first commit whoever made it.
-    monkeypatch.setattr(
-        collect,
-        "gh",
-        lambda *a, **k: (0, _commits_line(parents=1, email=collect.BOT_EMAIL)),
-    )
-    assert collect._snapshot_sha(
-        "Semester", "assignment-1-anna", "2026-10-13"
-    ) == collect.Pin(SHA, "2026-10-12T08:00:00Z")
-
-
-def test_a_student_authored_root_commit_is_a_submission(monkeypatch):
-    # They force-pushed over the handout, which is theirs to do. Both halves of the test
-    # are required: root ALONE would throw their work away.
-    monkeypatch.setattr(collect, "bot_login", lambda: "dsl-bot-app")
-    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, _commits_line(parents=0)))
-    assert collect._snapshot_sha(
-        "Semester", "assignment-1-anna", "2026-10-13"
-    ) == collect.Pin(SHA, "2026-10-12T08:00:00Z")
-
-
-def test_an_unreadable_bot_identity_never_discards_a_submission(monkeypatch):
-    # "" from `bot_login` means the identity could not be read. Nothing is claimed on it:
-    # a transient there must not turn a student's work into "no submission recorded".
+def test_an_unreadable_bot_identity_defers_the_freeze(monkeypatch):
+    # "" from `bot_login` means the identity could not be read. Guessing either way is
+    # written down for good - the handout as a submission, or a student's work as none -
+    # so the snapshot is abandoned and the next tick asks again.
     monkeypatch.setattr(collect, "bot_login", lambda: "")
-    monkeypatch.setattr(
-        collect, "gh", lambda *a, **k: (0, _commits_line(parents=0, email=""))
-    )
-    assert collect._snapshot_sha(
-        "Semester", "assignment-1-anna", "2026-10-13"
-    ) == collect.Pin(SHA, "2026-10-12T08:00:00Z")
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, _handout()))
+    assert collect._snapshot_sha("Semester", "assignment-1-anna", "2026-10-13") is None
 
 
 def test_snapshot_sha_flags_a_commit_dated_after_the_freeze(monkeypatch, capsys):
@@ -1356,6 +1470,36 @@ def test_a_repo_with_no_submission_is_asked_for_no_push_records(monkeypatch):
         "Semester", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
     )
     assert written
+
+
+def test_the_toolkits_own_pushes_never_time_a_students_work(monkeypatch):
+    # The solution push is a push record like any other. Left in, the "earliest push at
+    # or after the commit" rung timed a student whose own push GitHub did not return by
+    # the solution push, days later.
+    monkeypatch.setattr(
+        collect,
+        "gh",
+        lambda *a, **k: (
+            0,
+            (
+                f"{SHA}\t2026-10-12T07:00:00Z\t{BOT}\n"
+                f"{OTHER_SHA}\t2026-10-09T08:05:00Z\tanna-adams\n"
+            ),
+        ),
+    )
+    activity = collect._push_activity("Semester", "assignment-1-anna")
+    assert activity == [(OTHER_SHA, "2026-10-09T08:05:00Z")]
+    assert collect.push_time_for(activity, "c" * 40, "2026-10-10T08:00:00Z") == ""
+
+
+def test_push_records_are_not_read_without_the_toolkits_own_login(monkeypatch):
+    # Kept, the solution push would time the student's work; dropped on a guess, theirs
+    # might be. Either is written down for good, so the freeze waits a tick instead.
+    monkeypatch.setattr(collect, "bot_login", lambda: "")
+    monkeypatch.setattr(
+        collect, "gh", lambda *a, **k: (0, f"{SHA}\t2026-10-12T07:00:00Z\t{BOT}\n")
+    )
+    assert collect._push_activity("Semester", "assignment-1-anna") is None
 
 
 def test_snapshot_assignment_never_overwrites_an_existing_snapshot(monkeypatch):
@@ -3848,6 +3992,33 @@ def test_the_snapshot_records_a_delivery_the_server_contradicts(monkeypatch, cap
     assert "anna" not in out  # a tag, never the handle
 
 
+def test_the_freeze_never_calls_a_pin_under_the_solution_suspect(monkeypatch):
+    # No push record matched, and the repo's last push is the solution's: the rung that
+    # reads `pushed_at` would accuse the student of the toolkit's push.
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {
+            "assignment-1-anna": collect.Pin(
+                SHA, "2026-10-15T21:40:00Z", past_toolkit=True
+            )
+        },
+        pushed={"assignment-1-anna": "2026-10-16T08:00:00Z"},
+    )
+    assert (
+        collect.snapshot_assignment(
+            "Semester",
+            "assignment-1",
+            "2026-10-15T23:59:59+02:00",
+            is_group=False,
+            tz="Europe/Berlin",
+        )
+        is collect.SnapshotResult.WRITTEN
+    )
+    ((_path, text),) = written
+    row = collect.parse_snapshot_rows(text)["assignment-1-anna"]
+    assert row.submitted_source == collect.SUBMITTED_SOURCE_COMMIT
+
+
 def test_the_sheet_carries_the_note_for_a_contradicted_submission(monkeypatch):
     # A grader marking late work has to see it before they act on `days_late: 0`.
     written = _sheet_env(
@@ -3870,6 +4041,34 @@ def test_the_sheet_carries_the_note_for_a_contradicted_submission(monkeypatch):
     info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info["submitted_note"] == collect.SUSPECT_NOTE
     assert info["days_late"] == "0"  # the arithmetic still says what it says
+
+
+def test_the_solution_push_never_makes_an_on_time_submission_suspect(monkeypatch):
+    # The repo's last push is the toolkit's solution, after the due date, over a commit
+    # made before it. That contradicts nothing the student did.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        pins={
+            "assignment-1-ada-l": collect.Pin(
+                SHA, "2026-10-04T20:00:00Z", past_toolkit=True
+            )
+        },
+        pushed={"assignment-1-ada-l": "2026-10-06T09:00:00Z"},
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Semester",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 6, tzinfo=BERLIN),
+    ).written
+    ((_path, text),) = written
+    info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
+    assert info.get("submitted_note") != collect.SUSPECT_NOTE
 
 
 def test_the_freeze_reads_the_note_back_off_the_snapshot(monkeypatch):
