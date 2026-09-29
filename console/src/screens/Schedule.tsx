@@ -29,7 +29,7 @@ import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, type Layers } from '../model/cascade';
 import { parse } from 'yaml';
-import { RunRows, applicableKeys, assignmentsAfterSchedule, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
+import { RunRows, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
 import { CONTENT_KINDS, DEFAULT_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
@@ -275,7 +275,7 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: Ready
           <F id="e-solon" k="solutionOn" d={d} set={set} t={{ tier: 'default', label: 'Show the solution', widget: 'checkbox', defaultLabel: 'default: off' }} />
           {d.solutionOn ? (
             <div class="cond"><div class="row-2">
-              <F id="e-sol" k="solutionDate" d={d} set={set} error={errors.solution} t={{ tier: 'conditional', label: 'Solution shown on', widget: 'date', reason: 'Must be after the hand out.' }} />
+              <F id="e-sol" k="solutionDate" d={d} set={set} error={errors.solution} t={{ tier: 'conditional', label: 'Solution shown on', widget: 'date', reason: 'After the hand out, and not before the late cutoff.' }} />
               <F id="e-solt" k="solutionTime" d={d} set={set} t={{ tier: 'conditional', label: 'At', widget: 'time' }} />
             </div></div>
           ) : null}
@@ -390,7 +390,6 @@ function View(p: ReadyProps) {
     for (const [k, d] of Object.entries(drafts)) if (d.kind === 'assignments') all[k === 'new' ? '#new' : k] = d.template;
     return Object.values(all).filter((t) => t === tpl).length;
   };
-  const errorsOf = (d: Draft) => draftErrors(d, { templateUsers });
   // A new entry's run settings, only those its template has (teams only for a team assignment).
   const newRunFor = (d: Draft | undefined): Values => {
     if (!d || d.kind !== 'assignments') return {};
@@ -398,6 +397,17 @@ function View(p: ReadyProps) {
     const keys: string[] = applicableKeys(cfg, cfg.type === 'group');
     return Object.fromEntries(Object.entries(newRun).filter(([k]) => keys.includes(k)));
   };
+  // An assignment draft's late cutoff, off the cascade as the form resolves it (a new entry's
+  // own run settings first). No stated window is none: the due date.
+  const cutoffFor = (d: Draft): string | null => {
+    if (d.kind !== 'assignments') return null;
+    const af = assignmentsFile(p.files, p.cohort.org);
+    const isNew = !d.id;
+    const layers = semesterLayers(p, af && af !== 'loading' ? af.doc : {}, isNew ? '' : d.id);
+    const days = resolve('late_window_days', isNew ? { ...layers, assignment: usableBlock(newRunFor(d)) } : layers).value;
+    return cutoffOf(d.dueDate, d.dueTime, typeof days === 'number' ? days : 0);
+  };
+  const errorsOf = (d: Draft) => draftErrors(d, { templateUsers }, cutoffFor(d));
   const newRunErrors = (d: Draft): Record<string, string> => {
     if (d.kind !== 'assignments') return {};
     const cfg = d.template ? gradingConfig(p, d.template) : {};

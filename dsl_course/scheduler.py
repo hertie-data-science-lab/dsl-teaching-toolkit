@@ -633,16 +633,58 @@ def _run_releases(
 
 
 def _solution_due(
-    semester_org: str, slug: str, entry: schedule.AssignmentEntry, now: datetime
+    semester_org: str, sched: schedule.Schedule, slug: str, now: datetime
 ) -> bool:
     """Whether this tick should push the model solution for `slug`.
 
     The datetime check is cheap and comes first, so the fire-once read is paid only by an
     assignment whose solution moment has actually arrived - not by every assignment on
-    every tick."""
+    every tick.
+
+    HELD until the late cutoff has passed, whatever the date says, and released on the
+    first tick after it. A date is refused only when it is saved; one in a file anyway (a
+    hand edit, a late window changed after the date was set) is held here, never dropped,
+    and `_held_solution_faults` names the line to move. A cutoff that cannot be known
+    (`schedule.solution_cutoff`) holds too. Only the solution waits: the hand out still
+    fires."""
+    entry = sched.assignments[slug]
     if entry.solution_datetime is None or entry.solution_datetime > now:
         return False
+    cutoff = schedule.solution_cutoff(sched, slug)
+    if cutoff is None or cutoff > now:
+        reason = (
+            schedule.solution_before_cutoff(slug, entry.solution_datetime, cutoff)
+            if cutoff is not None
+            else "its late cutoff could not be worked out."
+        )
+        log(f"  [hold] solution {slug} - {reason}")
+        return False
     return not solution_released(semester_org, schedule.semester_name(slug, entry))
+
+
+def _held_solution_faults(sched: schedule.Schedule, now: datetime) -> list[ConfigFault]:
+    """A WARNING on each `solution_datetime` the scheduler is holding, or will hold: set
+    before its late cutoff. It goes into the schedule.yml digest at the line to move, so
+    the date gets fixed rather than quietly running late. Nothing once the cutoff has
+    passed: the solution has then gone out."""
+    out = []
+    for slug, entry in sched.assignments.items():
+        cutoff = schedule.solution_held_until(sched, slug)
+        if cutoff is None or cutoff <= now:
+            continue
+        out.append(
+            ConfigFault(
+                f"assignments.{slug}",
+                f"{schedule.solution_before_cutoff(slug, entry.solution_datetime, cutoff)}"
+                " Held: the solution is shown at the late cutoff instead.",
+                fires=entry.solution_datetime,
+                field="solution_datetime",
+                lineno=entry.lines.get("solution_datetime"),
+                file=schedule.SCHEDULE_PATH,
+                ceiling=Severity.WARNING,
+            )
+        )
+    return out
 
 
 def _handout_releases(
@@ -685,7 +727,7 @@ def _handout_releases(
                 when=entry.handout_datetime,
                 assignment=template,
                 assignment_slug=slug,
-                assignment_solution=_solution_due(semester_org, slug, entry, now),
+                assignment_solution=_solution_due(semester_org, sched, slug, now),
             )
         )
     return out
@@ -1628,7 +1670,9 @@ def _release_phase(
         sched,
         now,
         dry_run,
-        None if window_faults is None else [*window_faults, *marks_faults],
+        None
+        if window_faults is None
+        else [*window_faults, *marks_faults, *_held_solution_faults(sched, now)],
     )
     # The same treatment for every other file faculty edit by hand: a roster nobody can be
     # enrolled from, a instructors.yml entry that grants nothing, a teams.csv row that will not

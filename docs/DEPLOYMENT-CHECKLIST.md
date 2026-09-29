@@ -359,7 +359,7 @@ assignments:
 | `handout_datetime` | no* | - | when repos are provisioned, automatic. *Required for the schedule to release it. If you hand out via the **Release assignment** workflow instead, the workflow records the release moment here for you |
 | `marks_return_datetime` | no | - | marks go back automatically once every unit is marked. Internal unless `show_on_site: true` |
 | `course_source_repo` | **yes** | - (entry dropped without it) | the course-org repo this hands out from. A name that does not exist is reported loudly |
-| `solution_datetime` | no | never | pushes the template's `solution/` into every provisioned repo. Must be after `handout_datetime` |
+| `solution_datetime` | no | never | pushes the template's `solution/` into every provisioned repo. Must be after `handout_datetime`, and no earlier than the late cutoff |
 
 Timing only. The late cutoff is `due_datetime` plus `late_window_days`, computed. How the semester runs each assignment - late rule, teams, visibility, submit link, `semester_dest_repo` - is `semester-config/assignments.yml` ([07](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment)); its title and shape are the template's `grading_config.yml`.
 
@@ -460,6 +460,7 @@ fully read goes red and opens an issue naming the bad entry.
 | `due_datetime:` missing/unparseable | the whole `assignments:` entry is dropped - no grading pin, no site date |
 | `deploy` missing `course_source_repo`/`course_source_path` | that copy is dropped |
 | `solution_datetime:` malformed, or not after `handout_datetime` | dropped - the solution waits for a human |
+| `solution_datetime:` before the late cutoff | refused by the check on push; at run time held and shown at the cutoff, with a digest warning |
 | `handout_datetime:` unparseable | kept, but nothing is ever handed out |
 | `title:`, `grading_datetime:`, `semester_dest_repo:` on an assignment | NOT_MIGRATED - the entry is dropped until the migration moves them |
 | `deploy_datetime:` unparseable | kept - that copy ships at the `event_datetime` |

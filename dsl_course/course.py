@@ -379,6 +379,15 @@ SOLUTION_WARNING = (
     "Pushes the model answer and rubric into every student's repo. This is not returning "
     "marks, and cannot be undone for reuse."
 )
+# A `solution_datetime` before the late cutoff, refused by the schedule check and the
+# console's form and held by the scheduler: every surface says it in these words
+# (`schedule.solution_before_cutoff`, `labels.json`). `{solution}` and `{cutoff}` are
+# `YYYY-MM-DD HH:MM`.
+SOLUTION_BEFORE_CUTOFF = (
+    "The solution for {slug} is set to be shown on {solution}, before its late cutoff on "
+    "{cutoff}. Students can still hand in until the late cutoff, so the solution must be "
+    "shown on or after it."
+)
 CUTOFF_SENTENCE = "What is on main at the late cutoff is what is marked."
 # GitHub's cap on a repo description. The About line is `<slug> - submission repo. ` plus
 # the cutoff sentence plus the note, so a note that grew past this would be TRUNCATED by

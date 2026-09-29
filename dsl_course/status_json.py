@@ -971,6 +971,10 @@ def render_assignments(
                 "due": _iso(entry.due_datetime),
                 "grading_cutoff_datetime": _iso(cutoff),
                 "solution_shown": _iso(solution),
+                # Set before the late cutoff: the scheduler holds it until then.
+                "solution_held_until": _iso(
+                    schedule.solution_held_until(facts.sched, slug)
+                ),
                 "units": units,
                 "submissions": submitted,
                 "teams": len(teams.teams_for(facts.teams, slug))

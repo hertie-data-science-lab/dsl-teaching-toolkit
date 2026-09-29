@@ -99,6 +99,25 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
     expect(out).not.toContain('Link to where they submit');
   });
 
+  it('marks a solution shown before the late cutoff, so the form will not save it', () => {
+    const early = SCHEDULE.replace('    due_datetime: 2026-09-27T23:59\n', '    due_datetime: 2026-09-27T23:59\n    solution_datetime: 2026-09-30T09:00\n');
+    const files = filesWith({ [`${COHORT_ORG}/semester-config/schedule.yml`]: early });
+    const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files })} />);
+    expect(out).toContain('The solution for assignment-2 is set to be shown on 2026-09-30 09:00, before its late cutoff on 2026-10-02 23:59.');
+    // after the cutoff: nothing to fix
+    const later = filesWith({ [`${COHORT_ORG}/semester-config/schedule.yml`]: early.replace('2026-09-30T09:00', '2026-10-03T09:00') });
+    expect(html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files: later })} />)).not.toContain('before its late cutoff');
+  });
+
+  it('says a solution set before the late cutoff is held until it', () => {
+    const held: Assignment = { ...solo, state: 'late_window', grading_cutoff_datetime: '2026-10-02T23:59:00+02:00', solution_shown: '2026-09-30T09:00:00+02:00', solution_held_until: '2026-10-02T23:59:00+02:00' };
+    const loaded: Loaded = { kind: 'ready', status: { ...status, assignments: [held] }, sha: 's', stale: [] };
+    expect(html(<AssignmentsScreen {...props({ loaded })} />)).toContain('; solution held until then');
+    const marking: Assignment = { ...held, state: 'marking' };
+    const out = html(<AssignmentsScreen {...props({ loaded: { ...loaded, status: { ...status, assignments: [marking] } } })} />);
+    expect(out).toContain('Solution shown Fri 2 Oct');
+  });
+
   it('opens the field of a setting this assignment sets, with Use the default', () => {
     const files = filesWith({ [`${COHORT_ORG}/semester-config/assignments.yml`]: `${ASSIGNMENTS}assignments:\n  assignment-2:\n    visibility: public\n` });
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files })} />);

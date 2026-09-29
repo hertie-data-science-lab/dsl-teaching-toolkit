@@ -14,6 +14,7 @@ import { StaticFiles } from '../src/model/files';
 import { penaltyRate } from '../src/model/policy';
 import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
 import { blankDraft, draftErrors, freshId, readDraft, writeDraft, type ArchiveDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { cutoffOf } from '../src/screens/RunSettings';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
@@ -140,6 +141,19 @@ describe('the schedule entry sheet model', () => {
     expect(e.solution).toBe('Must be after the hand out.');
     // The repo name is assignments.yml's now: nothing here asks for it.
     expect(e.semesterRepo).toBeUndefined();
+  });
+
+  it('refuses a solution shown before the late cutoff, in the engine’s words', () => {
+    const a = { ...blankDraft('handout', { repo: '' }), id: 'assignment-1', template: 'assignment-1-f2026', handoutDate: '2026-09-15', dueDate: '2026-10-13', dueTime: '', solutionOn: true, solutionDate: '2026-10-16', solutionTime: '09:00' };
+    // due + 5 days, a bare due date closing at the end of its day, as the engine reads it
+    expect(draftErrors(a as never, undefined, cutoffOf('2026-10-13', '', 5)).solution).toBe(
+      'The solution for assignment-1 is set to be shown on 2026-10-16 09:00, before its late cutoff on 2026-10-18 23:59. Students can still hand in until the late cutoff, so the solution must be shown on or after it.',
+    );
+    // on or after the cutoff, or with no late window past the date: saved
+    expect(draftErrors({ ...a, solutionDate: '2026-10-18', solutionTime: '23:59' } as never, undefined, cutoffOf('2026-10-13', '23:59', 5))).toEqual({});
+    expect(draftErrors(a as never, undefined, cutoffOf('2026-10-13', '', 2))).toEqual({});
+    // a new entry is named by its template
+    expect(draftErrors({ ...a, id: '' } as never, undefined, cutoffOf('2026-10-13', '', 5)).solution).toMatch(/^The solution for assignment-1 is/);
   });
 
   it('leaves a retired key an unmigrated entry still carries exactly as it is', () => {

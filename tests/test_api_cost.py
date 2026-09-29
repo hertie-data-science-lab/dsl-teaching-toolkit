@@ -70,13 +70,17 @@ def _sha(text: str) -> str:
 
 
 def _schedule() -> str:
-    """The demo's release plan, with two assignments on the same term."""
+    """The demo's release plan, with two assignments on the same term, the second with a
+    solution date."""
     text = (FIXTURES / "demo-schedule.yml").read_text()
     blocks = "".join(
         f"  {slug}:\n"
         f"    course_source_repo: {slug}-f2026\n"
         f"    handout_datetime: 2026-09-{8 + 7 * i:02d}T10:00\n"
         f"    due_datetime: 2026-09-{15 + 7 * i:02d}T23:59\n"
+        # The second with a solution date still held at NOW (inside its late window), so
+        # every ceiling covers what the scheduler and the status pay to hold it.
+        + ("    solution_datetime: 2026-09-24T09:00\n" if i == 1 else "")
         for i, slug in enumerate(ASSIGNMENTS)
     )
     return f"{text}\nassignments:\n{blocks}"
@@ -528,7 +532,23 @@ def test_a_preview_tick_stays_under_its_ceiling(github, monkeypatch):
     _tick(monkeypatch)
     assert len(github.calls) <= 40
     assert _reads_twice(github.calls) == []
-    assert len(github.did("issue", "list")) == 1
+    # The open issues are listed once. The fixture's held solution is a schedule.yml
+    # fault, so the digest also searches its closed issue once, to reopen rather than
+    # file anew - a search, not a second listing.
+    assert (
+        len(
+            github.did(
+                "issue",
+                "list",
+                "--repo",
+                f"{SEMESTER}/semester-config",
+                "--state",
+                "open",
+            )
+        )
+        == 1
+    )
+    assert len(github.did("issue", "list")) == 2
 
 
 def test_a_membership_sync_stays_under_its_ceiling(github, monkeypatch):

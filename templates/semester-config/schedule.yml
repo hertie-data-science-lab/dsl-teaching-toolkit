@@ -98,7 +98,7 @@
 #     course_source_repo:           # REQUIRED - the course-org repo it hands out from
 #     handout_datetime:             # technically OPTIONAL, but REQUIRED for a scheduled handout - omit it if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
 #     due_datetime:                 # REQUIRED - a bare date without time -> end of that day (23:59:59). The late cutoff is this plus `late_window_days` (assignments.yml): the snapshot freezes and the autograder fires then
-#     solution_datetime:            # OPTIONAL - NO default: if empty, the solution only ever goes out by hand ("Release assignment" with solution_datetime: now). Pushes the model answer and rubric (the template's `solution/` folder) into every student/team repo: not the same as returning marks, and it cannot be undone for reuse. Must be AFTER handout_datetime, and needs it set
+#     solution_datetime:            # OPTIONAL - NO default: if empty, the solution only ever goes out by hand ("Release assignment" with solution_datetime: now). Pushes the model answer and rubric (the template's `solution/` folder) into every student/team repo: not the same as returning marks, and it cannot be undone for reuse. Must be AFTER handout_datetime, and needs it set. Not before the late cutoff (due + late_window_days)
 #     marks_return_datetime:        # OPTIONAL - marks go back automatically at this moment once every unit is marked (until then, a problem says how many are not). Internal: shown on the site only with `show_on_site: true` written above
 #
 #   This file is TIMING ONLY. How this semester runs each assignment - late window and

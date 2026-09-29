@@ -99,6 +99,7 @@ from . import policy, settings
 from .course import (
     ASSIGNMENTS_FILE,
     CONFIG_REPO,
+    SOLUTION_BEFORE_CUTOFF,
     SOLUTION_WARNING,
     assignment_slug,
     coerce_date,
@@ -405,7 +406,10 @@ class AssignmentEntry:
     # When to push the template's `solution/` folder into every provisioned repo - the
     # scheduled twin of Release assignment's `solution_datetime: now`. Deliberately NOT
     # defaulted to the due date: a solution released the moment submissions close is a
-    # gift to anyone who pushes late, so faculty name the moment or it never fires.
+    # gift to anyone who pushes late, so faculty name the moment or it never fires. Never
+    # before the late cutoff: refused when it is saved (the console's form, `--file`
+    # validation), and held by the scheduler until the cutoff has passed when a file
+    # carries one anyway (`solution_cutoff`).
     # None = release the solution by hand, or not at all.
     solution_datetime: datetime | None = None
     # When automation returns the marks (`scheduler`): only once every unit is marked, and
@@ -1633,6 +1637,77 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
     )
 
 
+def solution_before_cutoff(slug: str, solution: datetime, cutoff: datetime) -> str:
+    """`course.SOLUTION_BEFORE_CUTOFF` for one assignment: the words the schedule check,
+    the scheduler and the console all use."""
+    return SOLUTION_BEFORE_CUTOFF.format(
+        slug=slug,
+        solution=f"{solution:%Y-%m-%d %H:%M}",
+        cutoff=f"{cutoff:%Y-%m-%d %H:%M}",
+    )
+
+
+def solution_cutoff(sched: Schedule, slug: str) -> datetime | None:
+    """The late cutoff a scheduled solution waits for, or None when it cannot be known -
+    and then the solution waits too.
+
+    `grading_cutoff_datetime` with no fallback: a semester whose course pointer names no
+    course, or a cascade that cannot be read, would otherwise resolve to the institution's
+    window and could let the answer out while the course's own window is still open."""
+    try:
+        if sched.org and not settings.course_org_for_semester(sched.org):
+            return None
+        return grading_cutoff_datetime(sched, slug)
+    except Exception:
+        return None
+
+
+def solution_held_until(sched: Schedule, slug: str) -> datetime | None:
+    """The cutoff this assignment's scheduled solution is held until: set, and before it.
+    None when nothing is held, or the cutoff cannot be known."""
+    entry = sched.assignments.get(slug)
+    if entry is None or entry.solution_datetime is None:
+        return None
+    cutoff = solution_cutoff(sched, slug)
+    return cutoff if cutoff is not None and entry.solution_datetime < cutoff else None
+
+
+def refuse_early_solutions(sched: Schedule, instance: settings.Instance) -> None:
+    """At SAVE time only (`load_file`, the schedule check on a push): refuse every
+    `solution_datetime` before its late cutoff as this file and the `assignments.yml`
+    beside it state it. A window neither states is the course's or the institution's,
+    which offline cannot be read, so it counts as none - the due date, the earliest the
+    cutoff can be - and nothing is refused that the full cascade would keep.
+
+    At RUN time the scheduler holds such a date instead (`solution_cutoff`). Here the date
+    is dropped to None and reported as every other refusal is: a `dropped` line, so
+    `--validate` fails, and a fault."""
+    for slug, entry in sched.assignments.items():
+        if entry.solution_datetime is None:
+            continue
+        days, _ = settings.resolve(
+            "late_window_days", settings.instance_layers(instance, slug)
+        )
+        cutoff = entry.due_datetime + timedelta(days=int(days or 0))
+        if entry.solution_datetime >= cutoff:
+            continue
+        what = (
+            f"{solution_before_cutoff(slug, entry.solution_datetime, cutoff)} Refused, "
+            f"so the solution now waits for a human"
+        )
+        sched.dropped.append(f"assignments.{slug}.solution_datetime: {what}")
+        sched.faults.append(
+            ConfigFault(
+                f"assignments.{slug}",
+                what,
+                file=SCHEDULE_PATH,
+                field="solution_datetime",
+                lineno=line_of(entry.lines, "solution_datetime"),
+            )
+        )
+        entry.solution_datetime = None
+
+
 def _instance_report(
     instance: settings.Instance, meta: dict, kept: dict, drops: Drops
 ) -> list[str]:
@@ -2039,7 +2114,9 @@ def load_file(path: str) -> tuple[Schedule | None, str | None]:
         return None, f"{path} is valid YAML but not a mapping - it needs top-level keys"
     beside = p.with_name(ASSIGNMENTS_FILE)
     instance = settings.parse_instance(beside.read_text() if beside.is_file() else None)
-    return parse(meta, instance), None
+    sched = parse(meta, instance)
+    refuse_early_solutions(sched, instance)
+    return sched, None
 
 
 @cache

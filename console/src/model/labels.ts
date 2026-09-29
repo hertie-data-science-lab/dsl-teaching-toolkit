@@ -11,10 +11,15 @@ export interface Label {
 
 type Vocab = 'formats' | 'submit_via' | 'visibility' | 'team_formation';
 
-const L = labels as unknown as Record<Vocab, Record<string, Label>> & { solution_warning: string };
+const L = labels as unknown as Record<Vocab, Record<string, Label>> & { solution_warning: string; solution_before_cutoff: string };
 
 /** What a solution date does, in the hand-out's words (`course.SOLUTION_WARNING`). */
 export const SOLUTION_WARNING = L.solution_warning;
+
+/** A solution date before the late cutoff, in the engine's words (`course.SOLUTION_BEFORE_CUTOFF`). */
+export function solutionBeforeCutoff(slug: string, solution: string, cutoff: string): string {
+  return L.solution_before_cutoff.replace('{slug}', slug).replace('{solution}', solution).replace('{cutoff}', cutoff);
+}
 
 /** The label of `value` in `vocab`, or the value itself when the engine has none. */
 export function labelOf(vocab: Vocab, value: string): string {

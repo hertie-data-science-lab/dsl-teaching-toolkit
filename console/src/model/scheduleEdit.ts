@@ -5,6 +5,7 @@
 
 import { obj, type YamlText } from '../edit/yamlText';
 import { kebab } from './format';
+import { solutionBeforeCutoff } from './labels';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO } from './policy';
 
 export type Block = 'releases' | 'assignments' | 'events';
@@ -260,8 +261,17 @@ export function blankDraft(type: string, defaults: { repo: string }): ReleaseDra
   return { kind: 'releases', ...common, type, date: '', time: '10:00', deploys: [{ repo: defaults.repo, folder: '', dest: '', path: '', diff: false, atDate: '', atTime: '' }] };
 }
 
-/** What is wrong with a draft, by field; empty when it can be saved. */
-export function draftErrors(d: Draft, _others?: { templateUsers: (template: string) => number }): Record<string, string> {
+/** A sheet moment as the engine reads it, sortable: a bare day at its start, or (a due date) its end. */
+function moment(when: string, endOfDay = false): string {
+  if (when.length === 10) return `${when}T${endOfDay ? '23:59:59' : '00:00:00'}`;
+  return when.length === 16 ? `${when}:00` : when;
+}
+
+/**
+ * What is wrong with a draft, by field; empty when it can be saved. `cutoff` is an assignment's
+ * late cutoff as `cutoffOf` gives it: a solution shown before it is refused, as the engine does.
+ */
+export function draftErrors(d: Draft, _others?: { templateUsers: (template: string) => number }, cutoff?: string | null): Record<string, string> {
   const e: Record<string, string> = {};
   if (d.kind === 'releases') {
     if (!d.date) e.date = 'When is needed.';
@@ -280,6 +290,10 @@ export function draftErrors(d: Draft, _others?: { templateUsers: (template: stri
     const sol = joinWhen(d.solutionDate, d.solutionTime);
     if (d.solutionOn && !d.manual && !sol) e.solution = 'Give the date the solution is shown.';
     if (d.solutionOn && sol && h && sol <= h) e.solution = 'Must be after the hand out.';
+    else if (d.solutionOn && sol && cutoff && moment(sol) < moment(cutoff, true)) {
+      const shown = (m: string) => m.slice(0, 16).replace('T', ' ');
+      e.solution = solutionBeforeCutoff(d.id || slugOfTemplate(d.template), shown(moment(sol)), shown(moment(cutoff, true)));
+    }
   } else if (d.kind === 'events') {
     if (!d.title.trim()) e.title = 'A title is needed; the student site shows only this.';
   } else if (d.kind === 'semester') {

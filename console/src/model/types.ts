@@ -79,6 +79,8 @@ export interface Assignment {
   due: string | null;
   grading_cutoff_datetime: string | null;
   solution_shown: string | null;
+  /** Set before the late cutoff: the engine holds the solution until then (the cutoff). */
+  solution_held_until?: string | null;
   units: number;
   submissions: number;
   teams: number | null;

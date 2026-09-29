@@ -23,10 +23,12 @@ function nextDate(a: Assignment, tz: string, year: number): string {
     case 'open':
       return `Due ${fmtWhen(a.due, tz, year)}`;
     case 'late_window':
-      return `Late work until ${fmtWhen(a.grading_cutoff_datetime, tz, year)}`;
+      return `Late work until ${fmtWhen(a.grading_cutoff_datetime, tz, year)}${a.solution_held_until ? '; solution held until then' : ''}`;
     case 'marking':
-    case 'returned':
-      return a.solution_shown ? `Solution shown ${fmtDay(a.solution_shown, tz, year)}` : '';
+    case 'returned': {
+      const shown = a.solution_held_until ?? a.solution_shown;
+      return shown ? `Solution shown ${fmtDay(shown, tz, year)}` : '';
+    }
     default:
       return a.handout ? `Hands out ${fmtWhen(a.handout, tz, year)}` : 'Hand out by hand';
   }
