@@ -545,19 +545,29 @@ def _with_solution(solution: str, **more) -> dict:
     }
 
 
-def test_a_solution_datetime_at_or_after_the_cutoff_is_kept():
+def _validated(tmp_path, meta: dict, assignments_yml: str | None = None):
+    """`meta` as the schedule check on a push reads it: `--file`, offline."""
+    (tmp_path / "schedule.yml").write_text(yaml.safe_dump(meta))
+    if assignments_yml is not None:
+        (tmp_path / "assignments.yml").write_text(assignments_yml)
+    sched, error = schedule.load_file(str(tmp_path / "schedule.yml"))
+    assert error is None
+    return sched
+
+
+def test_a_solution_datetime_at_or_after_the_cutoff_is_kept(tmp_path):
     # With no window stated in the file the cutoff it can see is the due date - and a bare
     # due date closes at the END of that day.
     for good in ("2026-10-13T23:59:59", "2026-10-14T09:00"):
-        sched = parse(_with_solution(good))
+        sched = _validated(tmp_path, _with_solution(good))
         assert sched.assignments["assignment-1"].solution_datetime is not None, good
         assert not sched.dropped, good
 
 
-def test_a_solution_datetime_before_the_cutoff_is_refused_and_nothing_else_is():
-    # Out before the late cutoff, the answer is read by everyone still handing in. Refused
-    # in words faculty can act on, naming the assignment and both dates - and ONLY the
-    # solution: the entry, its hand out and the rest of the plan run as written.
+def test_saving_a_solution_before_the_cutoff_is_refused_and_nothing_else_is(tmp_path):
+    # Out before the late cutoff, the answer is read by everyone still handing in. The
+    # schedule check refuses it in words faculty can act on, naming the assignment and both
+    # dates - and ONLY the solution: the entry, its hand out and the rest of the plan stand.
     meta = _with_solution(
         "2026-10-10T09:00",
         **{
@@ -575,7 +585,7 @@ def test_a_solution_datetime_before_the_cutoff_is_refused_and_nothing_else_is():
             "deploy": [{"course_source_repo": "cm", "course_source_path": "l/01"}],
         }
     }
-    sched = parse(meta)
+    sched = _validated(tmp_path, meta)
     (line,) = sched.dropped
     assert line == (
         "assignments.assignment-1.solution_datetime: The solution for assignment-1 is "
@@ -596,7 +606,7 @@ def test_a_solution_datetime_before_the_cutoff_is_refused_and_nothing_else_is():
     assert [r.label for r in sched.releases] == ["lecture_01"]
 
 
-def test_the_late_window_assignments_yml_states_moves_the_cutoff_per_assignment():
+def test_the_check_reads_the_window_assignments_yml_states_per_assignment(tmp_path):
     # A per-assignment deviation: a1 takes 5 late days, a2 the semester's 0. The same
     # solution date is inside a1's window and after a2's cutoff.
     meta = _with_solution(
@@ -610,18 +620,20 @@ def test_the_late_window_assignments_yml_states_moves_the_cutoff_per_assignment(
             }
         },
     )
-    instance = _instance(
+    sched = _validated(
+        tmp_path,
+        meta,
         "defaults:\n  late_window_days: 0\n"
-        "assignments:\n  assignment-1:\n    late_window_days: 5\n"
+        "assignments:\n  assignment-1:\n    late_window_days: 5\n",
     )
-    sched = parse(meta, instance)
     assert sched.assignments["assignment-1"].solution_datetime is None
     assert "before its late cutoff on 2026-10-18 23:59" in sched.dropped[0]
     assert sched.assignments["assignment-2"].solution_datetime is not None
 
 
-def test_load_refuses_a_solution_inside_the_course_s_late_window(monkeypatch):
-    # The course layer is out of the file's sight; `load` reads the whole cascade.
+def test_a_run_keeps_an_early_solution_and_holds_it_until_the_cutoff(monkeypatch):
+    # At RUN time nothing is dropped: `load` keeps the date as written, and the cutoff it is
+    # held until comes from the whole cascade - here the course's 5-day window.
     text = yaml.safe_dump(_with_solution("2026-10-16T09:00"))
     monkeypatch.setattr(schedule, "get_file_content", lambda org, repo, path: text)
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "Course")
@@ -631,31 +643,41 @@ def test_load_refuses_a_solution_inside_the_course_s_late_window(monkeypatch):
         lambda org: {"assignment_defaults": {"late_window_days": 5}},
     )
     sched = schedule.load("Sem-f2026")
-    assert sched.assignments["assignment-1"].solution_datetime is None
-    assert any(
-        "before its late cutoff on 2026-10-18 23:59" in f.what for f in sched.faults
+    assert sched.assignments["assignment-1"].solution_datetime == datetime(
+        2026, 10, 16, 9, 0, tzinfo=BERLIN
     )
-    # 3 days after the due date is past a 2-day window: kept
+    assert not sched.dropped
+    held = schedule.solution_held_until(sched, "assignment-1")
+    assert held == datetime(2026, 10, 18, 23, 59, 59, tzinfo=BERLIN)
+    # past a 2-day window, nothing is held
     settings.course_defaults.cache_clear()
     monkeypatch.setattr(
         settings,
         "org_meta",
         lambda org: {"assignment_defaults": {"late_window_days": 2}},
     )
-    assert schedule.load("Sem-f2026").assignments["assignment-1"].solution_datetime
+    assert schedule.solution_held_until(sched, "assignment-1") is None
 
 
-def test_load_file_reads_the_window_beside_it(tmp_path):
-    (tmp_path / "schedule.yml").write_text(
-        yaml.safe_dump(_with_solution("2026-10-16T09:00"))
+def test_an_unknowable_cutoff_is_never_the_institution_s(monkeypatch):
+    # No course pointer, or a cascade read that fails: the cutoff is unknown - never the
+    # institution's window - so the scheduler holds rather than guessing.
+    sched = parse(_with_solution("2026-10-30T09:00"))
+    sched.org = "Sem-f2026"
+    monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
+    assert schedule.solution_cutoff(sched, "assignment-1") is None
+
+    def unreadable(org):
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setattr(settings, "course_org_for_semester", unreadable)
+    assert schedule.solution_cutoff(sched, "assignment-1") is None
+    monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "Course")
+    monkeypatch.setattr(settings, "org_meta", lambda org: {})
+    # read: the institution's 10 days is now the course's answer too
+    assert schedule.solution_cutoff(sched, "assignment-1") == datetime(
+        2026, 10, 23, 23, 59, 59, tzinfo=BERLIN
     )
-    (tmp_path / "assignments.yml").write_text(
-        "assignments:\n  assignment-1:\n    late_window_days: 7\n"
-    )
-    sched, error = schedule.load_file(str(tmp_path / "schedule.yml"))
-    assert error is None
-    assert sched.assignments["assignment-1"].solution_datetime is None
-    assert "before its late cutoff on 2026-10-20 23:59" in sched.dropped[0]
 
 
 def test_an_unparseable_solution_datetime_is_flagged_with_what_it_costs():

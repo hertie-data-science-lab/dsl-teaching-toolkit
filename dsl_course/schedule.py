@@ -86,7 +86,6 @@ import json
 import os
 import re
 import sys
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from functools import cache
@@ -408,8 +407,9 @@ class AssignmentEntry:
     # scheduled twin of Release assignment's `solution_datetime: now`. Deliberately NOT
     # defaulted to the due date: a solution released the moment submissions close is a
     # gift to anyone who pushes late, so faculty name the moment or it never fires. Never
-    # before the late cutoff: `parse` and `load` refuse one (`refuse_early_solutions`),
-    # and the scheduler holds any that slips past until the cutoff has gone by.
+    # before the late cutoff: refused when it is saved (the console's form, `--file`
+    # validation), and held by the scheduler until the cutoff has passed when a file
+    # carries one anyway (`solution_cutoff`).
     # None = release the solution by hand, or not at all.
     solution_datetime: datetime | None = None
     # When automation returns the marks (`scheduler`): only once every unit is marked, and
@@ -1617,7 +1617,7 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
     term_cost = "the site synthesises semester dates, shifting every session row"
     semester_start = _flagged_date(meta, "semester_start", drops, "", term_cost)
     semester_end = _flagged_date(meta, "semester_end", drops, "", term_cost)
-    sched = Schedule(
+    return Schedule(
         timezone=str(tz_name or DEFAULT_TZ),
         releases=_parse_releases(meta.get("releases"), tz, drops),
         # `01/09/2026` coerces to None exactly like an absent key, and the site then
@@ -1636,17 +1636,6 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
         faults=drops.faults,
     )
 
-    def cutoff(slug: str) -> datetime:
-        # As far as this file and its assignments.yml can tell: a window neither states is
-        # the course's or the institution's, which `load` reads, so here it counts as
-        # none - the due date, the earliest the cutoff can be.
-        stack = settings.instance_layers(instance, slug)
-        days, _ = settings.resolve("late_window_days", stack)
-        return sched.assignments[slug].due_datetime + timedelta(days=int(days or 0))
-
-    refuse_early_solutions(sched, cutoff)
-    return sched
-
 
 def solution_before_cutoff(slug: str, solution: datetime, cutoff: datetime) -> str:
     """`course.SOLUTION_BEFORE_CUTOFF` for one assignment: the words the schedule check,
@@ -1658,19 +1647,49 @@ def solution_before_cutoff(slug: str, solution: datetime, cutoff: datetime) -> s
     )
 
 
-def refuse_early_solutions(
-    sched: Schedule, cutoff_of: Callable[[str], datetime | None]
-) -> None:
-    """Refuse every `solution_datetime` before its assignment's late cutoff, as
-    `cutoff_of` knows it (None = not known, nothing refused).
+def solution_cutoff(sched: Schedule, slug: str) -> datetime | None:
+    """The late cutoff a scheduled solution waits for, or None when it cannot be known -
+    and then the solution waits too.
 
-    Out before the cutoff, the model answer is read by everyone still handing in. The date
-    is dropped to None, the documented "omit it", so the solution waits for a human; the
-    entry and the rest of the plan run exactly as written. Reported as every other
-    refusal is: a `dropped` line for the schedule check and a fault for the digest."""
+    `grading_cutoff_datetime` with no fallback: a semester whose course pointer names no
+    course, or a cascade that cannot be read, would otherwise resolve to the institution's
+    window and could let the answer out while the course's own window is still open."""
+    try:
+        if sched.org and not settings.course_org_for_semester(sched.org):
+            return None
+        return grading_cutoff_datetime(sched, slug)
+    except Exception:
+        return None
+
+
+def solution_held_until(sched: Schedule, slug: str) -> datetime | None:
+    """The cutoff this assignment's scheduled solution is held until: set, and before it.
+    None when nothing is held, or the cutoff cannot be known."""
+    entry = sched.assignments.get(slug)
+    if entry is None or entry.solution_datetime is None:
+        return None
+    cutoff = solution_cutoff(sched, slug)
+    return cutoff if cutoff is not None and entry.solution_datetime < cutoff else None
+
+
+def refuse_early_solutions(sched: Schedule, instance: settings.Instance) -> None:
+    """At SAVE time only (`load_file`, the schedule check on a push): refuse every
+    `solution_datetime` before its late cutoff as this file and the `assignments.yml`
+    beside it state it. A window neither states is the course's or the institution's,
+    which offline cannot be read, so it counts as none - the due date, the earliest the
+    cutoff can be - and nothing is refused that the full cascade would keep.
+
+    At RUN time the scheduler holds such a date instead (`solution_cutoff`). Here the date
+    is dropped to None and reported as every other refusal is: a `dropped` line, so
+    `--validate` fails, and a fault."""
     for slug, entry in sched.assignments.items():
-        cutoff = cutoff_of(slug) if entry.solution_datetime is not None else None
-        if cutoff is None or entry.solution_datetime >= cutoff:
+        if entry.solution_datetime is None:
+            continue
+        days, _ = settings.resolve(
+            "late_window_days", settings.instance_layers(instance, slug)
+        )
+        cutoff = entry.due_datetime + timedelta(days=int(days or 0))
+        if entry.solution_datetime >= cutoff:
             continue
         what = (
             f"{solution_before_cutoff(slug, entry.solution_datetime, cutoff)} Refused, "
@@ -2056,16 +2075,6 @@ def load(semester_org: str) -> Schedule:
     sched = parse(meta if isinstance(meta, dict) else {}, instance)
     sched.org = semester_org
     sched.instance_unparseable = instance.unparseable
-
-    def cutoff(slug: str) -> datetime | None:
-        # The whole cascade, now the semester is known. A course that cannot be read
-        # refuses nothing more here: the scheduler holds on the same read.
-        try:
-            return grading_cutoff_datetime(sched, slug)
-        except Exception:
-            return None
-
-    refuse_early_solutions(sched, cutoff)
     sched.unparseable = bool(unparseable)
     sched.faults.extend(unparseable)
     if sched.dropped:
@@ -2105,7 +2114,9 @@ def load_file(path: str) -> tuple[Schedule | None, str | None]:
         return None, f"{path} is valid YAML but not a mapping - it needs top-level keys"
     beside = p.with_name(ASSIGNMENTS_FILE)
     instance = settings.parse_instance(beside.read_text() if beside.is_file() else None)
-    return parse(meta, instance), None
+    sched = parse(meta, instance)
+    refuse_early_solutions(sched, instance)
+    return sched, None
 
 
 @cache

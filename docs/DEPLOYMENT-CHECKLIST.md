@@ -459,7 +459,8 @@ fully read goes red and opens an issue naming the bad entry.
 | `event_datetime:` missing/unparseable | that `releases:`/`events:` entry is dropped |
 | `due_datetime:` missing/unparseable | the whole `assignments:` entry is dropped - no grading pin, no site date |
 | `deploy` missing `course_source_repo`/`course_source_path` | that copy is dropped |
-| `solution_datetime:` malformed, not after `handout_datetime`, or before the late cutoff | dropped - the solution waits for a human |
+| `solution_datetime:` malformed, or not after `handout_datetime` | dropped - the solution waits for a human |
+| `solution_datetime:` before the late cutoff | refused by the check on push; at run time held and shown at the cutoff, with a digest warning |
 | `handout_datetime:` unparseable | kept, but nothing is ever handed out |
 | `title:`, `grading_datetime:`, `semester_dest_repo:` on an assignment | NOT_MIGRATED - the entry is dropped until the migration moves them |
 | `deploy_datetime:` unparseable | kept - that copy ships at the `event_datetime` |
