@@ -27,10 +27,6 @@ from ..course import (
     COURSE_ADMIN_TEAM,
     COURSE_DEFAULT_CHOICE,
     INSTRUCTORS_TEAM,
-    NOTHING_PUBLIC,
-    PUBLIC_DIRS,
-    PUBLIC_HTML_PDF,
-    PUBLIC_TYPES,
     SOLUTION_NOW,
     SOLUTION_WARNING,
     STARTER_FORMATS,
@@ -326,10 +322,6 @@ def _new_materials(request: Request) -> list[str]:
         request.course_org,
         "--semester",
         _a(request, "semester"),
-        "--public-dirs",
-        _a(request, "public_dirs", NOTHING_PUBLIC),
-        "--public-types",
-        _a(request, "public_types", PUBLIC_HTML_PDF),
     ]
     if _a(request, "copy_from"):
         argv += ["--copy-from", _a(request, "copy_from")]
@@ -686,8 +678,6 @@ _OPS = (
             {
                 "semester": _string(SEMESTER_PATTERN, "Semester, e.g. f2026"),
                 "copy_from": _string(REPO_PATTERN, "Materials repo to copy forward"),
-                "public_dirs": {**_enum(PUBLIC_DIRS), "default": NOTHING_PUBLIC},
-                "public_types": {**_enum(PUBLIC_TYPES), "default": PUBLIC_HTML_PDF},
             },
             required=("semester",),
         ),

@@ -33,10 +33,6 @@ from .course import (
     COURSE_DEFAULT_CHOICE,
     MIGRATE_DRIVER,
     NO_STARTER,
-    NOTHING_PUBLIC,
-    PUBLIC_DIRS,
-    PUBLIC_HTML_PDF,
-    PUBLIC_TYPES,
     SANDBOX_USER,
     SCOPED_RUN_TITLE,
     SOLUTION_NOW,
@@ -1833,12 +1829,7 @@ def render_new_materials(materials: list[str] | None = None) -> str:
 
     `materials` is the course's materials repos (the `dsl-materials` topic): only those
     can be copied forward into another materials repo. The dropdown is repopulated by the
-    nightly refresh, like every other one.
-
-    The two publishing dropdowns seed `publish.yml` and nothing else - the file is the
-    definition afterwards, and no workflow rewrites it. They default to publishing nothing,
-    because the one answer that cannot be taken back is the one that puts bytes on a public
-    site: a course that never touches them is exactly today's course."""
+    nightly refresh, like every other one."""
     materials = list(materials or [])
     return f"""name: New materials repo
 
@@ -1847,13 +1838,6 @@ def render_new_materials(materials: list[str] | None = None) -> str:
 # one year to the next. Only the toolkit's own files are rewritten afterwards; yours
 # arrive exactly as you left them. Leave it on the first option for a fresh starter.
 # The dropdown is refreshed by the 'Refresh actions' workflow.
-#
-# The last two boxes write the new repo's `publish.yml` - what the public website may
-# publish, so an HTML deck opens rendered in a browser instead of showing as source on
-# GitHub. Not used yet: the toolkit records the selection until the public website is
-# rebuilt. Everything else stays private. They seed the file and nothing
-# more: edit it in the repo afterwards, and no workflow rewrites it. A copied repo brings
-# its own, so they are ignored on `copy_from`.
 
 on:
   workflow_dispatch:
@@ -1862,8 +1846,6 @@ on:
         description: "Semester, e.g. f2026 or s2026 - creates course-materials-<semester>"
         required: true
 {_copy_from_input(f"Materials repo to copy forward - {_FRESH_STARTER} is the empty skeleton", materials)}
-{_choice_input("public_dirs", "For the public website: which folders. Everything else stays private to enrolled students", list(PUBLIC_DIRS), NOTHING_PUBLIC, required=False)}
-{_choice_input("public_types", "For the public website: which file types out of those folders", list(PUBLIC_TYPES), PUBLIC_HTML_PDF, required=False)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1874,12 +1856,9 @@ on:
           ORG: ${{{{ github.repository_owner }}}}
           SEMESTER: ${{{{ inputs.semester }}}}
           COPY_FROM: ${{{{ inputs.copy_from }}}}
-          PUBLIC_DIRS: ${{{{ inputs.public_dirs }}}}
-          PUBLIC_TYPES: ${{{{ inputs.public_types }}}}
         run: |
           gh auth setup-git
-          args=(--org "$ORG" --semester "$SEMESTER" \\
-            --public-dirs "$PUBLIC_DIRS" --public-types "$PUBLIC_TYPES")
+          args=(--org "$ORG" --semester "$SEMESTER")
           [ "$COPY_FROM" = "{_FRESH_STARTER}" ] && COPY_FROM=""
           [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
           python3 -m dsl_course.scaffold materials "${{args[@]}}"

@@ -29,19 +29,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
       - `.system/MAINTAINING.md` (your operating notes) and `.system/SYLLABUS.md.sample`, 
       - a placeholder `SYLLABUS.md` 
       - a commented-out `.releaseignore` 
-      - a `publish.yml` 
       >It also seeds the two run-from-repo Release workflows (Release materials, Release assignment). 
-   - `public_dirs` / `public_types` (optional) fill in that `publish.yml`: which folders,
-     and which file types out of them, the **public website** may publish, so they open
-     rendered in a browser instead of showing as source on GitHub. Both default to publishing nothing.
-     "lectures" and "readings" mean the folders of that kind (the
-     folder names below), not folders of that name. Everything unmatched stays private
-     to enrolled students, exactly as today; `solution/`, `tests/`, grading files and
-     `.env` are never hosted whatever you write. Unlike `.gitignore`, a negated folder
-     (`!labs/sub/`) excludes its whole subtree. Edit `publish.yml` afterwards - no workflow rewrites it, and it applies to
-     every semester of this course. It is not used yet: the toolkit records the selection
-     until the public website is rebuilt. The semester site is a calendar and hosts nothing
-     ([11](11-configure-cohort-site.md)).
    - `copy_from` (optional) starts the new repo as an existing materials repo instead
      of as the skeleton - every branch, every file, the whole history. Your content arrives
      as you left it; only `.system/` and the workflows are

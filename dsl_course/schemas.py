@@ -19,7 +19,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import materials, opencourse, policy, records, student_status
+from . import materials, opencourse, policy, records, releaseignore, student_status
 from .central import TIERS
 from .course import (
     ASSIGNMENT_TYPES,
@@ -32,7 +32,6 @@ from .course import (
     JOIN_REPO,
     JOIN_TEAM_MARKER,
     LABELS,
-    PUBLISH_FILE,
     SOLUTION_BEFORE_CUTOFF,
     SOLUTION_WARNING,
     SUBMIT_VIA,
@@ -615,8 +614,9 @@ def names_json() -> dict:
     }
 
 
-# The cases `materials_json` answers with the engine's own `hosted_paths`: the console's
-# Files badges are tested against them, so the two cannot disagree unnoticed.
+# The cases `materials_json` answers with the engine's own withhold rule
+# (`releaseignore`): the console's pattern tree is tested against them, so the two cannot
+# disagree unnoticed.
 _TREE = (
     "SYLLABUS.md",
     "lectures/01_intro/slides.html",
@@ -638,47 +638,59 @@ _TREE = (
     ".env.local",
     "a[b]/notes.pdf",
 )
-PUBLISH_CASES = (
+WITHHOLD_CASES = (
     ("nothing declared", ()),
-    ("decks carry their bundles", ("lectures/**/*.html",)),
-    ("decks in any case", ("*.html", "*.HTML")),
-    ("everything but readings", ("**/*.html", "**/*.pdf", "!readings/**")),
-    ("a session carved out", ("lectures/**", "!lectures/09_*/**")),
-    ("everything", ("**",)),
-    ("a folder, unanchored", ("data/",)),
-    ("a folder, then a file re-included", ("labs/", "!labs/01_intro/lab.pdf")),
+    ("a folder", ("labs/",)),
+    ("a folder, anchored", ("/labs/",)),
+    ("a folder's contents", ("lectures/**",)),
+    ("a file type anywhere", ("*.pdf",)),
+    (
+        "a folder re-included, its files still matched",
+        ("lectures/**", "!lectures/09_*/"),
+    ),
+    ("a file re-included", ("*.pdf", "!labs/01_intro/lab.pdf")),
+    (
+        "a file inside a withheld folder stays withheld",
+        ("labs/", "!labs/01_intro/lab.pdf"),
+    ),
     ("anchored at the root", ("/SYLLABUS.md", "/lab.pdf")),
     ("one character and a class", ("labs/0?_intro/*.pdf", "lectures/0[12]_*/*.pdf")),
     ("comments and blanks", ("# a note", "", "readings/**/*.md")),
-    ("a folder excluded with a trailing slash", ("labs/**", "!labs/01_intro/data/")),
-    ("an unanchored folder excluded", ("**", "!data/")),
+    ("a folder, unanchored", ("data/",)),
     ("an escaped bracket", ("a\\[b]/*",)),
 )
 
 
+def withheld_paths(paths: tuple[str, ...], lines: tuple[str, ...]) -> list[str]:
+    """Which of `paths` a root `.releaseignore` of `lines` withholds, by the engine's own
+    rule (`releaseignore.listed`: git's, pruning included)."""
+    dirs = {
+        "/".join(p.split("/")[:i]) for p in paths for i in range(1, p.count("/") + 1)
+    }
+    ignore = releaseignore.listed(lines)
+    return sorted(p for p in paths if ignore.excludes(p, lambda rel: rel in dirs))
+
+
 def materials_json() -> dict:
-    """The materials-repo rules the console applies itself: the topic, the files, the
-    folder -> kind aliases, and the `publish.yml` rule (`materials.hosted_paths`) as the
-    lists it reads plus cases answered by the engine."""
+    """The materials-repo rules the console applies itself: the topic, the file, the
+    folder -> kind aliases, the names never released or never published, and the withhold
+    rule as cases answered by the engine."""
     return {
         "topic": materials.MATERIALS_TOPIC,
         "file": materials.MATERIALS_FILE,
-        "publish_file": PUBLISH_FILE,
         "default_syllabus": materials.DEFAULT_SYLLABUS,
         "default_kind": materials.DEFAULT_KIND,
         "aliases": materials.BUILTIN_ALIASES,
         "denylist": list(PUBLICATION_DENYLIST),
         "never_material": sorted(NEVER_MATERIAL),
-        "deck_extensions": list(materials.DECK_EXTENSIONS),
-        "bundle_dirs": list(materials.BUNDLE_DIRS),
         "cases": [
             {
                 "name": name,
                 "paths": list(_TREE),
-                "public": list(public),
-                "hosted": sorted(materials.hosted_paths(_TREE, public)),
+                "patterns": list(lines),
+                "withheld": withheld_paths(_TREE, lines),
             }
-            for name, public in PUBLISH_CASES
+            for name, lines in WITHHOLD_CASES
         ],
     }
 

@@ -191,14 +191,15 @@ a first visit, mostly free 304s after).
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
   `students.csv`, `instructors.yml`, a template's `grading_config.yml`, the site's `index.md`.
 - Materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and last
-  changes; a materials repo's recursive tree, badged from `publish.yml` and `.releaseignore`.
+  changes; a materials repo's recursive tree, badged from its `.releaseignore`.
 
 ## What it changes
 
 - Files, as the signed-in user, with a sha-conditional write (a file that moved on since it
   was read is refused, never overwritten): `schedule.yml`, `instructors.yml`, `students.csv`,
   `teams.csv`, `grading_sheets/<slug>.yml`, `.github/dsl-course.yml`, a template's
-  `grading_config.yml` (on `solution`), a materials repo's `publish.yml` and `.releaseignore`,
+  `grading_config.yml` (on `solution`), a materials repo's `materials.yml` and `.releaseignore`,
+  the course's `.github/opencourse.yml` (the public website),
   the site's `index.md` and `_announcements/`. YAML is edited in place (`src/edit/yamlText.ts`):
   only the changed values' bytes move, so comments and their columns survive. After a write the
   console follows the commit's checks and says what they found.

@@ -126,8 +126,9 @@ uncomment or add to it.
 Its syntax is **exactly `.gitignore`'s** - patterns, `**`, character classes, `!` to
 re-include, `/` to anchor or to mean a directory, `#` comments.
 
-It applies to every copy out of the repo it sits in: the semester release, the public course
-site and the assignment handout.
+It applies to every copy out of the repo it sits in: the semester release, the public
+website and the assignment handout. The public website can withhold more on top, in the
+course's `.github/opencourse.yml` (`withhold:`, the same syntax).
 
 What that means in practice:
 

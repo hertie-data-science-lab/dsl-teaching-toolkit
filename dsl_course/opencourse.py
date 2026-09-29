@@ -86,8 +86,10 @@ def read(org: str) -> OpenCourse | None:
     return None if data is None else parse(data, where)
 
 
-def seed_text(oc: OpenCourse = OpenCourse()) -> str:
-    """The seeded file, with `oc`'s values live and every key explained once."""
+def seed_text(oc: OpenCourse | None = None) -> str:
+    """The seeded file, with `oc`'s values (default: off) live and every key explained
+    once."""
+    oc = oc or OpenCourse()
     withhold = (
         "withhold:\n" + "".join(f'  - "{p}"\n' for p in oc.withhold)
         if oc.withhold

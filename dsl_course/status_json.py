@@ -61,7 +61,6 @@ from .course import (
     INSTRUCTORS_TEAM,
     JOIN_REPO,
     MATERIALS_REPO_PREFIX,
-    PUBLISH_FILE,
     SELF_SELECT,
     SOLUTION_BRANCH,
     active_today,
@@ -157,7 +156,6 @@ class MaterialsFacts:
 
     repo: str
     syllabus: str | None = None
-    has_publish: bool = False
     syllabus_path: str = DEFAULT_SYLLABUS
     # False for a `course-materials-*` repo without the `dsl-materials` topic yet.
     topic: bool = True
@@ -646,10 +644,10 @@ def _syllabus_written(m: MaterialsFacts) -> bool:
 
 def materials_state(m: MaterialsFacts) -> str:
     """C4, per repo: `problem` until the migration gives it the topic; `ready` once its
-    declared syllabus is written and publish.yml is there."""
+    declared syllabus is written."""
     if not m.topic:
         return PROBLEM
-    return "ready" if _syllabus_written(m) and m.has_publish else TODO
+    return "ready" if _syllabus_written(m) else TODO
 
 
 def materials_problem(m: MaterialsFacts, org: str) -> dict:
@@ -751,9 +749,7 @@ def _materials_why(m: MaterialsFacts) -> str:
         return f"{m.repo} is not migrated yet (no {MATERIALS_TOPIC} topic)"
     if m.syllabus is None:
         return f"{m.repo} has no {m.syllabus_path} yet"
-    if not _syllabus_written(m):
-        return f"{m.repo}'s {m.syllabus_path} is still the placeholder"
-    return f"{m.repo} has no {PUBLISH_FILE} yet"
+    return f"{m.repo}'s {m.syllabus_path} is still the placeholder"
 
 
 def _first_of(what: str, reasons: list[str]) -> str:
@@ -1373,7 +1369,7 @@ def _declaration(org: str, repo: str) -> Declared:
 
 def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
     """A materials repo's C4 facts: its declared syllabus (markdown read, anything else
-    only looked for) and whether it has a publish.yml."""
+    only looked for)."""
     path = _declaration(course_org, repo).syllabus
     if path.lower().endswith((".md", ".markdown")):
         syllabus = get_file_content(course_org, repo, path)
@@ -1382,12 +1378,7 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
             course_org, repo, default_branch(course_org, repo, fallback="main")
         )
         syllabus = "" if path in (tree or {}) else None
-    return MaterialsFacts(
-        repo,
-        syllabus,
-        get_file_content(course_org, repo, PUBLISH_FILE) is not None,
-        path,
-    )
+    return MaterialsFacts(repo, syllabus, path)
 
 
 def gather_course(course_org: str) -> CourseFacts:

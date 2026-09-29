@@ -224,9 +224,7 @@ def _course(**over) -> status_json.CourseFacts:
             ".github/workflows/scheduled-release.yml": "beef",
         },
         registry=[SEMESTER],
-        materials=[
-            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus", True)
-        ],
+        materials=[status_json.MaterialsFacts("course-materials-f2026", "# Syllabus")],
         templates=[
             status_json.TemplateFacts("assignment-2-f2026", "# Regression"),
             status_json.TemplateFacts("assignment-3-f2026", "# Trees"),
@@ -438,7 +436,7 @@ def test_an_undeclared_kind_is_inferred_through_the_repos_aliases_and_says_so():
 
 
 def test_a_materials_repo_by_its_old_name_only_is_not_migrated():
-    old = status_json.MaterialsFacts("course-materials-f2025", "# S", True, topic=False)
+    old = status_json.MaterialsFacts("course-materials-f2025", "# S", topic=False)
     doc = _render(_course(materials=[old]))
     assert doc["course"]["materials"] == [
         {"repo": "course-materials-f2025", "state": "problem"}
@@ -462,7 +460,7 @@ def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
     )
     monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(
-        status_json, "get_file_content", lambda org, repo, path, ref="": "public: []"
+        status_json, "get_file_content", lambda org, repo, path, ref="": None
     )
     present = {"E1282_syllabus.pdf": "5ha"}
     monkeypatch.setattr(status_json, "repo_path_shas", lambda org, repo, b: present)
@@ -859,7 +857,6 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
             CONTRACT_EXAMPLE["operations"][0]
         ),
         (COURSE, "course-materials-f2026", "SYLLABUS.md"): "# Syllabus",
-        (COURSE, "course-materials-f2026", "publish.yml"): "public: lectures\n",
         (COURSE, "assignment-2-f2026", "README.md"): "# Regression",
         (COURSE, "assignment-2-f2026", "grading_config.yml"): "autograde: sometimes\n",
         (SEMESTER, f"{SEMESTER}.github.io", "index.md"): "# Welcome",
@@ -1171,9 +1168,9 @@ def test_a_stage_that_is_not_done_says_why():
     course = _course(
         materials=[
             status_json.MaterialsFacts(
-                "course-materials-f2025", "<!-- dsl-stub: syllabus -->", True
+                "course-materials-f2025", "<!-- dsl-stub: syllabus -->"
             ),
-            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus", True),
+            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus"),
         ]
     )
     doc = _render(course, _semester(people=ta_only))
