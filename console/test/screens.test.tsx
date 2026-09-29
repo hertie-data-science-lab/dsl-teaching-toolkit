@@ -91,7 +91,8 @@ describe('S0 sign in', () => {
     const auth = new ConsoleAuth(new PatAuth({ store: null }), null);
     const t = text(<SignInScreen auth={auth} onSignedIn={() => {}} />);
     expect(t).toContain('GitHub token');
-    expect(t).not.toContain('Sign in with GitHub');
+    expect(t).toContain('Sign in with GitHub. The console can see and change only what your GitHub account can.');
+    expect(html(<SignInScreen auth={auth} onSignedIn={() => {}} />)).not.toContain('>Sign in with GitHub</button>');
     expect(t).toMatch(/repo .*workflow/);
     expect(t).toContain('fine-grained token');
     expect(t).toContain('without a sign-in relay');
@@ -146,12 +147,12 @@ describe('S4 cohort overview', () => {
     expect(t).toMatch(/Checked \d+ min ago/);
     expect(t).toContain('Released Session 3: 7 files to materials.');
   });
-  it('has Check now and More in the header, with the More items live', () => {
-    expect(out).toMatch(/<button class="btn" type="button">Check now<\/button>/);
+  it('has Re-check and More in the header, with the More items live', () => {
+    expect(out).toMatch(/<button class="btn" type="button">Re-check<\/button>/);
     expect(t).toContain('Preview the next automatic run');
     expect(t).toContain('Keep for future semesters');
     expect(out).not.toMatch(/role="menuitem" disabled/);
-    expect(t).toContain('What happens here');
+    expect(t).toContain('This week lists what happens without you');
   });
   it('flags a stale status', () => {
     expect(text(<CohortScreen {...props({ loaded: { ...ready, stale: ['schedule.yml'] } as Loaded })} />)).toContain('schedule.yml changed since this semester was last checked');
@@ -159,7 +160,7 @@ describe('S4 cohort overview', () => {
   it('shows Status not computed yet when the file is absent', () => {
     const a = html(<CohortScreen {...props({ loaded: { kind: 'absent' } })} />);
     expect(a).toContain('Status not computed yet');
-    expect(a).toMatch(/<button class="btn" type="button">Check now/);
+    expect(a).toMatch(/<button class="btn" type="button">Re-check/);
   });
 });
 
@@ -342,7 +343,9 @@ describe('S2 course and S17 template', () => {
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).toContain('assignment-3-f2026');
     expect(t).toContain('course-materials-f2026');
-    expect(t).toContain('10 days at 10% a day this course’s default');
+    expect(t).toContain('10 days at 10% a day, this course');
+    expect(t).toContain('up to 5, ');
+    expect(t).not.toContain('this course’s default');
     expect(t).toContain('Fall 2026');
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {

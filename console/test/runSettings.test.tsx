@@ -1,6 +1,9 @@
+// @vitest-environment happy-dom
 // WP-B4: how a semester runs its assignments (the Overview form, the semester's defaults, the
 // schedule's new entry), the marks grid by team, student and question, and the wizards.
 
+import { render as mount } from 'preact';
+import { act } from 'preact/test-utils';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import type { Course } from '../src/model/discovery';
@@ -146,13 +149,66 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
 });
 
 describe('the semester’s defaults', () => {
-  it('sit at the top of the Assignments index, each field over the course’s or the institution’s value', () => {
+  it('are one line below the Assignments list; Change opens the form as a modal, Escape closes it', async () => {
     const out = html(<AssignmentsScreen {...props()} />);
-    expect(out).toContain('Defaults for this semester’s assignments');
-    expect(out).toContain('value="5"');
-    expect(out).toContain('this course’s default: up to 4');
-    expect(out).toContain('institution default: Students form their own');
-    expect(out).toContain('Change the course’s defaults');
+    expect(out).toContain('Defaults: 5 days, 5%, teams of 4.');
+    expect(out.indexOf('Defaults: 5 days')).toBeGreaterThan(out.indexOf('</table>'));
+    expect(out).not.toContain('role="dialog"');
+
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    await act(() => mount(<AssignmentsScreen {...props()} />, root));
+    const change = [...root.querySelectorAll('button')].find((b) => b.textContent === 'Change')!;
+    change.focus();
+    await act(() => change.click());
+    const dialog = root.querySelector('[role="dialog"]')!;
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.textContent).toContain('Defaults for this semester’s assignments');
+    expect(dialog.querySelector<HTMLInputElement>('#sd-late_window_days')!.value).toBe('5');
+    expect(dialog.textContent).toContain('this course’s default: up to 4');
+    expect(dialog.textContent).toContain('institution default: Students form their own');
+    expect(dialog.textContent).toContain('Change the course’s defaults');
+    expect(document.activeElement).toBe(dialog);
+
+    await act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
+    expect(root.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(change);
+
+    // An unsaved edit survives closing; a drag that ends on the scrim does not close it.
+    await act(() => change.click());
+    await act(() => {
+      const days = root.querySelector<HTMLInputElement>('#sd-late_window_days')!;
+      days.value = '7';
+      days.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const scrim = root.querySelector<HTMLElement>('.modal-scrim')!;
+    await act(() => {
+      root.querySelector('#sd-late_window_days')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      scrim.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(root.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(() => {
+      scrim.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      scrim.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(root.querySelector('[role="dialog"]')).toBeNull();
+    await act(() => change.click());
+    expect(root.querySelector<HTMLInputElement>('#sd-late_window_days')!.value).toBe('7');
+
+    // Tab from the last control wraps to the first; Shift+Tab from the first wraps to the last.
+    const all = [...root.querySelector('[role="dialog"]')!.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input, select')];
+    all[all.length - 1].focus();
+    await act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', cancelable: true })); });
+    expect(document.activeElement).toBe(all[0]);
+    await act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, cancelable: true })); });
+    expect(document.activeElement).toBe(all[all.length - 1]);
+    mount(null, root);
+    root.remove();
+  });
+
+  it('print the penalty as a percentage however the file writes it', () => {
+    const out = html(<AssignmentsScreen {...props({ files: filesWith({ [`${COHORT_ORG}/semester-config/assignments.yml`]: 'defaults:\n  late_window_days: 3\n  late_penalty_per_day: 0.05\n' }) })} />);
+    expect(out).toContain('Defaults: 3 days, 5%, teams of 4.');
   });
 
   it('are asked once in New semester, as an optional card', () => {
@@ -187,7 +243,7 @@ describe('the marks grid: teams > students > questions', () => {
     expect(out).toContain('aria-expanded="false" aria-label="Show feedback per question for carla-c"');
     expect(out).not.toContain('Feedback on Q1 for carla-c');
     // The penalty is the semester's, not a literal.
-    expect(out).toContain('The penalty is 5% of the total per late day.');
+    expect(out).toContain('late penalties (5% of the total per late day)');
   });
 
   it('reads a renamed entry’s mark sheet by its semester-side name', () => {

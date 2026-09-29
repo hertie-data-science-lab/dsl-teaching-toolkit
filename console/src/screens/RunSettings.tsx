@@ -4,7 +4,8 @@
 // Every run setting shows its effective value and where it comes from; a save writes only
 // the keys the instructor set.
 
-import { useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import scheduleSchema from '../../schemas/schedule.schema.json';
 import { useEnv } from '../env';
 import { invalidText, saveSteps, useSave, type SaveState, type Step } from '../edit/save';
@@ -12,7 +13,7 @@ import { YamlText, compact, deepEqual, obj, type Path } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import {
   REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
-  validAssignments, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
+  validAssignments, valueWord, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
 } from '../model/cascade';
 import { addDays, fmtWhen } from '../model/format';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
@@ -20,6 +21,8 @@ import { draftErrors, readDraft, writeDraft, type AssignmentDraft } from '../mod
 import { SOLUTION_WARNING } from '../model/labels';
 import type { Assignment } from '../model/types';
 import { validator } from '../model/validate';
+import { penaltyRate } from '../model/policy';
+import { round } from '../model/marks';
 import { RUN_LABEL, lateError, runTier, runTiers } from '../tiers/runSettings';
 import type { FieldTier, Values } from '../tiers/types';
 import { CheckLine, Lives, Loading } from '../ui/bits';
@@ -53,14 +56,77 @@ const toValues = (b: Block): Values => Object.fromEntries(Object.entries(b).map(
 
 // ------------------------------------------------------------------ the semester's defaults
 
-/** "Defaults for this semester's assignments": assignments.yml `defaults:`, over the course's and the institution's. */
+/** "Defaults: 5 days, 5%, teams of 4." from the effective semester defaults. */
+export function defaultsLine(layers: Layers): string {
+  const days = resolve('late_window_days', layers, 'semester').value;
+  const pen = resolve('late_penalty_per_day', layers, 'semester').value;
+  const size = resolve('max_team_size', layers, 'semester').value;
+  const rate = penaltyRate(pen);
+  const late = typeof days === 'number' && days >= 1 ? [valueWord('late_window_days', days), rate ? `${round(rate * 100)}%` : 'no penalty'] : ['no late work'];
+  return `Defaults: ${[...late, ...(size ? [`teams of ${String(size)}`] : [])].join(', ')}.`;
+}
+
+/** The semester's defaults as one line below the Assignments list; Change opens the form as a modal. */
 export function SemesterDefaults({ p }: { p: ReadyProps }) {
-  const env = useEnv();
   const f = assignmentsFile(p.files, p.cohort.org);
+  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Values | null>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  if (f === 'loading') return <Loading what={`Reading ${ASSIGNMENTS_FILE}`} />;
+  if (f === null) return <CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}.</CheckLine>;
+  const close = () => {
+    setOpen(false);
+    opener.current?.focus();
+  };
+  return (
+    <>
+      <p class="defaults-line" id="semester-defaults">
+        {defaultsLine(semesterLayers(p, f.doc))}{' '}
+        <button class="textlink" type="button" ref={opener} aria-haspopup="dialog" onClick={() => setOpen(true)}>Change</button>
+      </p>
+      {open ? <Modal title="Defaults for this semester’s assignments" onClose={close}><DefaultsForm p={p} f={f} draft={draft} setDraft={setDraft} /></Modal> : null}
+    </>
+  );
+}
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** A modal dialog: Escape and a click on the scrim close it; focus moves in and Tab stays inside. */
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
+  const box = useRef<HTMLDivElement>(null);
+  const downOnScrim = useRef(false);
+  useEffect(() => {
+    box.current?.focus();
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') return onClose();
+      if (e.key !== 'Tab' || !box.current) return;
+      const all = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (!all.length) return;
+      const first = all[0], last = all[all.length - 1], at = document.activeElement;
+      if (e.shiftKey && (at === first || at === box.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (at === last || !box.current.contains(at))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, []);
+  return (
+    <div class="modal-scrim" onMouseDown={(e) => (downOnScrim.current = e.target === e.currentTarget)} onClick={(e) => downOnScrim.current && e.target === e.currentTarget && onClose()}>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex={-1} ref={box}>
+        <div class="entry-head"><h2 id="modal-title">{title}</h2><button class="x" type="button" aria-label="Close" onClick={onClose}>&times;</button></div>
+        <div class="entry-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; draft: Values | null; setDraft: (v: Values | null) => void }) {
+  const env = useEnv();
   const [save, runSave, setSave] = useSave(env);
-  if (f === 'loading') return <section class="panel section"><h2>Defaults for this semester’s assignments</h2><Loading what={`Reading ${ASSIGNMENTS_FILE}`} /></section>;
-  if (f === null) return <section class="panel section"><h2>Defaults for this semester’s assignments</h2><CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}.</CheckLine></section>;
   const layers = semesterLayers(p, f.doc);
   const tiers = runTiers((k) => resolve(k, layers, 'course'));
   const before = toValues(rawBlock(f.doc, ['defaults']));
@@ -73,12 +139,11 @@ export function SemesterDefaults({ p }: { p: ReadyProps }) {
     const y = new YamlText(f.text);
     writeBlock(y, ['defaults'], before, cur, RUN_KEYS);
     if (!validAssignments(y.toJS() ?? {})) return setSave({ kind: 'bad', text: invalidText(ASSIGNMENTS_FILE, validAssignments) });
-    if (await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, y.text, f.sha, { message: 'assignments: edit the semester’s defaults, from the Instructor Console', statusRepo: [p.cohort.org, CONFIG_REPO] })) setDraft(null);
+    if (await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, y.text, f.sha, { message: 'assignments: edit the semester’s defaults, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] })) setDraft(null);
   };
   return (
-    <section class="panel section" id="semester-defaults">
-      <div class="section-head"><h2>Defaults for this semester’s assignments</h2><a class="textlink" href={`?course=${p.course.org}#details`}>Change the course’s defaults</a></div>
-      <p class="footnote">Every assignment this semester runs on these unless its own page says otherwise. Left empty, the value in grey applies: the course’s default, else the institution’s.</p>
+    <>
+      <p class="footnote">Every assignment this semester runs on these unless its own page says otherwise. Left empty, the value in grey applies: the course’s default, else the institution’s. <a class="textlink" href={`?course=${p.course.org}#details`}>Change the course’s defaults</a></p>
       {f.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({f.error}); fix it with Edit the file.</CheckLine> : (
         <>
           <SchemaForm id="sd" schema={null} tiers={tiers} values={cur} onChange={(v) => { setDraft(v); setSave({ kind: 'idle' }); }} />
@@ -86,7 +151,7 @@ export function SemesterDefaults({ p }: { p: ReadyProps }) {
         </>
       )}
       <Lives org={p.cohort.org} repo={CONFIG_REPO} path={ASSIGNMENTS_FILE} />
-    </section>
+    </>
   );
 }
 
@@ -284,14 +349,14 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
       const y = new YamlText(sf.text);
       writeDraft(y, { ...d, solutionOn: d.solutionOn && !solutionOff }, sf.doc);
       if (!validSchedule(y.toJS())) return setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
-      first = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: y.text, sha: sf.sha, opts: { message: `schedule: edit ${a.slug}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
+      first = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: y.text, sha: sf.sha, opts: { message: `schedule: edit ${a.slug}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
     }
     if (dirtyR) {
       if (!afOk) return setSave({ kind: 'bad', text: `Not saved: ${ASSIGNMENTS_FILE} could not be read, so nothing was written.` });
       const y = new YamlText(af!.text);
       writeBlock(y, path, beforeRun, r, [...RUN_KEYS, 'semester_dest_repo']);
       if (!validAssignments(y.toJS() ?? {})) return setSave({ kind: 'bad', text: invalidText(ASSIGNMENTS_FILE, validAssignments) });
-      second = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text: y.text, sha: af!.sha, opts: { message: `assignments: edit ${a.slug}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
+      second = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text: y.text, sha: af!.sha, opts: { message: `assignments: edit ${a.slug}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
     }
     if (await saveSteps(env, setSave, first, second, 'Dates saved; run settings not saved', () => setTiming(null))) setRun(null);
   };

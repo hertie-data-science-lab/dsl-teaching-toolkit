@@ -4,7 +4,8 @@
 
 import type { ComponentChildren } from 'preact';
 import { Prop } from '../ui/bits';
-import { Alert, Check as CheckIcon, Ext } from '../ui/icons';
+import { Hint } from '../ui/Hint';
+import { Alert, Check as CheckIcon, Ext, Fail } from '../ui/icons';
 import { BOT } from './model';
 import type { Check, Live } from './verify';
 
@@ -48,8 +49,8 @@ export function StepCard({ ctx, of, title, children, back, foot, note }: { ctx?:
       </div>
       <div class="wstep-body">{children}</div>
       <div class="wstep-foot">
-        <span>{back}</span>
-        <span class="actions"><span class="footnote">You can leave and come back.</span>{foot}</span>
+        <span class="actions">{back}<span class="footnote">You can leave and come back.</span></span>
+        <span class="actions">{foot}</span>
       </div>
     </section>
   );
@@ -69,10 +70,10 @@ export function Checks({ list, busy, pending }: { list: Check[] | null; busy?: b
   return (
     <ul class="checks" aria-live="polite">
       {items.map((c) => {
-        const st = c.ok === true ? 'ok' : busy ? 'busy' : 'no';
+        const st = c.ok === true ? 'ok' : busy ? 'busy' : c.ok === false ? 'no' : c.ok === null ? 'warn' : 'todo';
         return (
           <li>
-            <span class={`ck ${st}`}>{st === 'ok' ? <CheckIcon /> : null}</span>
+            <span class={`ck ${st}`}>{st === 'ok' ? <CheckIcon /> : st === 'no' ? <Fail /> : null}</span>
             <span>{c.text}{c.ok === null ? ' (could not tell)' : ''}{c.hint && c.ok !== true ? <span class="footnote" style="display:block">{c.hint}</span> : null}</span>
           </li>
         );
@@ -82,12 +83,15 @@ export function Checks({ list, busy, pending }: { list: Check[] | null; busy?: b
 }
 
 /** Org step: "Create the org on GitHub, install the app, then I check". */
-export function OrgLinks({ org }: { org: string }) {
+export function OrgLinks({ org, doc }: { org: string; doc: string }) {
   return (
     <div class="ext-links">
-      <a href="https://github.com/account/organizations/new?plan=free" target="_blank" rel="noopener">
-        <span class="n">1</span>Create the org on GitHub <Ext /><span>Use the name above; the free plan is enough</span>
-      </a>
+      <div class="lbl-row">
+        <a href="https://github.com/account/organizations/new?plan=free" target="_blank" rel="noopener">
+          <span class="n">1</span>Create the org on GitHub <Ext /><span>Use the name above; the free plan is enough</span>
+        </a>
+        <Hint label="How to create the org" doc={doc}>Choose the free plan, type the org name exactly as above, and pick a business account owned by hertie-data-science-lab. Then come back here and press Check.</Hint>
+      </div>
       <a href={`https://github.com/orgs/${org}/people`} target="_blank" rel="noopener">
         <span class="n">2</span>Install the console app on it <Ext /><Prop /><span>Today: invite {BOT} as an Owner</span>
       </a>

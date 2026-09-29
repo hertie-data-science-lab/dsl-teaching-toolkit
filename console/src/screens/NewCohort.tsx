@@ -10,7 +10,8 @@ import { parseSchedule } from '../model/schedule';
 import { bootstrapCohort } from '../ops/defs';
 import type { Values } from '../tiers/types';
 import { cohortOrg as cohortOrgTiers } from '../tiers/wizard';
-import { Crumbs, Help } from '../ui/bits';
+import { Crumbs } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { useDraft } from '../wizards/drafts';
 import { cohortOrgName, cohortTerms, openAt, TERM_RE, termLabel } from '../wizards/model';
 import { allOk, checkCohortSetUp, checkOrg, useLive, type Check } from '../wizards/verify';
@@ -90,7 +91,7 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
           const edited = v.org !== org ? String(v.org ?? '') : d.org;
           set({ term: t, org: edited && edited !== derived && t === term ? edited : undefined });
         }} />
-        <OrgLinks org={org} />
+        <OrgLinks org={org} doc="04-new-cohort-org.md" />
         <LiveChecks live={{ value: orgChecks, busy: orgLive.busy, run: orgLive.run }} pending={[`The org ${org} exists`, 'hertie-dsl-bot can manage it']} />
       </>
     );
@@ -145,10 +146,7 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
   return (
     <>
       <Crumbs items={[{ t: course.name, href: `${q}#course` }, { t: 'New semester' }]} />
-      <div class="page-head"><div><h1>New semester: {label}</h1></div></div>
-      <Help title="What a semester is" doc="04-new-semester-org.md">
-        <p>One org per semester. Students join this org, never the course. It gets its own student site, join form and schedule.</p>
-      </Help>
+      <div class="page-head"><div><h1>New semester: {label} <Hint doc="04-new-cohort-org.md">One org per semester: students join it, never the course. It gets its own student site, join form and schedule.</Hint></h1></div></div>
       <div class="wizard">
         <Rail steps={STEPS} cur={step} done={done} heading="Two steps, then three editors" base="new-semester-" query={q} />
         <StepCard ctx={`For ${course.name}`} of={`Step ${step} of 3`} title={title} back={backBtn} foot={foot}>{body}</StepCard>

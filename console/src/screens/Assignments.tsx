@@ -10,7 +10,8 @@ import { collect, handout, returnMarks, updateCopies, type AsgRef } from '../ops
 import { OpButtons, OpOpen } from '../ops/Panel';
 import { useEffect } from 'preact/hooks';
 import { replaceHash, tabHref, type AssignmentTab } from '../router';
-import { Crumbs, Help, ProblemCards } from '../ui/bits';
+import { Crumbs, ProblemCards } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { asgSummary } from './Cohort';
 import { MarksTab, TeamsTab } from './Marking';
 import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
@@ -59,17 +60,13 @@ function Index(p: ReadyProps) {
       <Crumbs items={cohortCrumbs(p, 'Assignments')} />
       <div class="page-head">
         <div>
-          <h1>Assignments</h1>
+          <h1>Assignments <Hint doc="09-release-assignment-to-cohort.md">An assignment opens at hand out, has a late window after the due date, then is marked and returned; dates live in the schedule. This semester’s defaults are below the list.</Hint></h1>
           <p class="lede">
             {list.length === 1 ? 'One' : list.length} this semester.{open ? ` ${open === 1 ? 'One is' : `${open} are`} open.` : ''}{marking ? ` ${marking === 1 ? 'One is' : `${marking} are`} being marked.` : ''}
           </p>
         </div>
         <div class="actions"><a class="btn" href={`?course=${p.course.org}#new-assignment-1`}>New assignment</a></div>
       </div>
-      <Help title="How assignments move" doc="09-release-assignment-to-cohort.md">
-        <p>Declared, then open at hand out, then the late window after the due date, then marking, then returned. Dates live in the schedule; how this semester runs each assignment (teams, late work, who sees each repo) lives in assignments.yml, with the defaults below; what the task is lives on the assignment template.</p>
-      </Help>
-      <div style="margin-bottom:18px"><SemesterDefaults p={p} /></div>
       <div class="table-wrap">
         <table class="grid" style="min-width:960px">
           <thead><tr><th>Assignment</th><th>State</th><th>Next date</th><th>Progress</th><th>Teams</th><th>Marked</th><th>Returned</th><th>Problem</th></tr></thead>
@@ -95,6 +92,7 @@ function Index(p: ReadyProps) {
           </tbody>
         </table>
       </div>
+      <SemesterDefaults p={p} />
     </>
   );
 }
@@ -189,20 +187,14 @@ function Overview(p: TabProps) {
   return (
     <>
       <div class="page-head">
-        <div><h1>{assignmentTitle(a)}</h1><p class="lede">{lede}</p></div>
+        <div><h1>{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">{a.state === 'open' || a.state === 'late_window'
+            ? 'Students push to their own repo until the due date. Late work is accepted with the penalty until the late cutoff.'
+            : a.state === 'marking' ? 'Marks and feedback go to students; your private notes do not. Return marks previews first.'
+            : a.state === 'teams_forming' ? 'Students form teams on the Join screen until late work closes, and you can assign the rest. Students without a team get no repo.'
+            : a.state === 'blocked' ? 'Assign this assignment’s teams on the Teams tab; each team gets its repo once saved. Students without a team get none.'
+            : 'Hands out at the scheduled time, or now. Preview never changes anything students see.'}</Hint></h1><p class="lede">{lede}</p></div>
       </div>
       {p.tabs}
-      <Help title="What happens now" doc="10-grade-and-return-assignments.md">
-        <p>
-          {a.state === 'open' || a.state === 'late_window'
-            ? 'Students push to their own repo until the due date. Late work is accepted with the penalty until late work closes.'
-            : a.state === 'marking' ? 'Marks and feedback go to students; notes you keep for yourself do not. Return marks previews first.'
-            : a.state === 'teams_forming' ? 'Students form teams on the Join screen of the student console until late work closes; you can assign the rest. Each team gets its repo as it forms; students without a team get none.'
-            : a.state === 'blocked' ? 'You assign this assignment’s teams on the Teams tab; each team gets its repo once it is saved. Students without a team get none.'
-            : 'Hands out at the scheduled time, or now.'}
-        </p>
-        <p>Preview never changes anything students see.</p>
-      </Help>
       <div class="stack">
         <section class="panel" aria-label="State">
           <ol class="lifeline" aria-label="Assignment state">

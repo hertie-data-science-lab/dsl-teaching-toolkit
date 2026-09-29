@@ -19,7 +19,8 @@ import { ABOUT, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
 import { publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
-import { CheckLine, Crumbs, EditFile, Help, Lives, Loading } from '../ui/bits';
+import { CheckLine, Crumbs, EditFile, Lives, Loading } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { FileTree } from '../ui/FileTree';
 import { Check, Ext } from '../ui/icons';
@@ -172,7 +173,7 @@ export function DetailsScreen(p: CourseProps) {
     if ('error' in out) return setSave({ kind: 'bad', text: out.error });
     const missing = await missingAdmin(env, before.admins, after.admins);
     if (missing) return setSave({ kind: 'bad', text: `There is no GitHub account called ${missing}.` });
-    if (await runSave({ owner: course.org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, file.sha, { message: 'course: edit the course details, from the Instructor Console', statusRepo: [course.org, COURSE_REPO] })) {
+    if (await runSave({ owner: course.org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, file.sha, { message: 'course: edit the course details, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) {
       setDraft(null);
     }
   };
@@ -180,13 +181,9 @@ export function DetailsScreen(p: CourseProps) {
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Course details' }]} />
       <div class="page-head">
-        <div><h1>Course details</h1><p class="lede">What every semester’s student site shows about the course, and the course’s defaults.</p></div>
+        <div><h1>Course details <Hint doc="01-new-course-org.md">Every semester of the course starts from these settings. Each semester and each assignment can set its own defaults.</Hint></h1><p class="lede">What every semester’s student site shows about the course, and the course’s defaults.</p></div>
         <CourseHeaderActions course={course} ready={ready} />
       </div>
-      <Help title="Course admins and defaults" doc="01-setup-course-org.md">
-        <p>Course admins keep every button for this course across years. They can differ from a given semester’s instructors, who are set per semester under Instructors.</p>
-        <p>These are the course’s defaults. Left empty, the institution’s value in grey applies. Each semester can set its own, and each assignment its own.</p>
-      </Help>
       {file.kind === 'loading' ? <Loading what="Reading dsl-course.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no dsl-course.yml in {course.org}/.github.</CheckLine> : null}
       {y?.errors.length ? <CheckLine cls="bad">dsl-course.yml does not parse ({y.errors[0]}); fix it with Edit the file.</CheckLine> : null}
@@ -199,12 +196,11 @@ export function DetailsScreen(p: CourseProps) {
               <dl class="kv"><dt>Org</dt><dd>{course.org} <span class="footnote">cannot be renamed here</span></dd><dt>Engine version</dt><dd>{String(meta.central_ref ?? 'release')} <span class="footnote">set by the lab</span></dd></dl>
             </div>
             <div class="form-section">
-              <h3>Course admins</h3>
-              <p class="footnote">Course admins keep every button for this course across years. They can differ from a given semester’s instructors, who are set per semester under Instructors.</p>
+              <h3>Course admins <Hint label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, in every semester. Instructors and teaching assistants are set for each semester under Instructors, and change only that semester and the course’s materials and assignment templates.</Hint></h3>
               <AdminRows admins={d.admins} id="cda" onChange={(admins) => set({ admins })} />
             </div>
             <div class="form-section">
-              <h3>Defaults for this course’s assignments</h3>
+              <h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3>
               <SchemaForm id="cdx" schema={null} tiers={courseDefaultTiers()} values={d.defaults} onChange={(v) => set({ defaults: v })} />
             </div>
             <div class="form-section">
@@ -242,14 +238,11 @@ export function WebsiteScreen(p: CourseProps) {
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Public website' }]} />
       <div class="page-head">
         <div>
-          <h1>Public website</h1>
+          <h1>Public website <Hint doc="reference/actions-reference.md">The public website follows the settings here for now: a materials repo’s publish.yml selects its files once the site is rebuilt, and until then it is only recorded. Withheld files never appear, and a daily update keeps the site current.</Hint></h1>
           <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : 'Not published'}</span>{published ? 'Updates daily.' : 'Optional: an open version of your materials for anyone.'}</p>
         </div>
         <div class="actions"><OpButtons def={def} /></div>
       </div>
-      <Help title="What goes public" doc="reference/actions-reference.md">
-        <p>The public website follows the settings here for now. A materials repo’s publish.yml selects files for it once it is rebuilt; until then it is only recorded. Withheld files never appear. The first publish saves these settings; a daily update keeps the site current.</p>
-      </Help>
       <div class="grid-2">
         <section class="panel section">
           <h2>Settings</h2>
@@ -354,7 +347,7 @@ export function MaterialsScreen(p: CourseProps) {
     const y = new YamlText(pubFile.kind === 'ready' ? pubFile.text : PUBLISH_STUB);
     if (y.errors.length) return;
     y.assign(['public'], pubLines.length ? pubLines : []);
-    if (await runPub({ owner: course.org, repo, path: PUBLISH_FILE }, y.text, pubFile.kind === 'ready' ? pubFile.sha : null, { message: 'materials: edit what the public website may publish, from the Instructor Console', statusRepo: [course.org, COURSE_REPO] })) setPub(null);
+    if (await runPub({ owner: course.org, repo, path: PUBLISH_FILE }, y.text, pubFile.kind === 'ready' ? pubFile.sha : null, { message: 'materials: edit what the public website may publish, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setPub(null);
   };
   const setKind = (folder: string, kind: string) => {
     const next = { ...cur.kinds };
@@ -368,23 +361,20 @@ export function MaterialsScreen(p: CourseProps) {
     if (text === null) return;
     const y = new YamlText(text);
     if (!validMaterials(y.toJS() ?? {})) return setMatSave({ kind: 'bad', text: invalidText(MATERIALS_FILE, validMaterials) });
-    if (await runMat({ owner: course.org, repo, path: MATERIALS_FILE }, text, matFile.kind === 'ready' ? matFile.sha : null, { message: 'materials: edit the syllabus file and folder kinds, from the Instructor Console', statusRepo: [course.org, COURSE_REPO] })) setHolds(null);
+    if (await runMat({ owner: course.org, repo, path: MATERIALS_FILE }, text, matFile.kind === 'ready' ? matFile.sha : null, { message: 'materials: edit the syllabus file and folder kinds, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setHolds(null);
   };
   const saveIgn = async () => {
     if (ign === null) return;
     const text = ign.endsWith('\n') || !ign ? ign : `${ign}\n`;
-    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, text, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the Instructor Console', statusRepo: [course.org, COURSE_REPO] })) setIgn(null);
+    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, text, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setIgn(null);
   };
   return (
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Materials', href: '#materials' }, { t: repo }]} />
       <div class="page-head">
-        <div><h1>{repo}</h1><p class="lede">Materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
+        <div><h1>{repo} <Hint doc="02-add-materials-to-course.md">Files matching the withheld patterns never reach students; files matching the public patterns are selected for the public website. Both use .gitignore pattern syntax, for the paths in this repo.</Hint></h1><p class="lede">Materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
         <div class="actions"><OpenButton org={course.org} repo={repo} quiet /></div>
       </div>
-      <Help title="Public and withheld" doc="02-add-materials-to-course.md">
-        <p>Materials live here privately until a scheduled release copies them to a semester. Files matching the withheld patterns never reach students. Files matching the public patterns are selected for the public website, so a deck opens in a browser there; until that site is rebuilt the selection is only recorded. Both use the same pattern syntax as .gitignore, written for the paths in this repo.</p>
-      </Help>
       <div class="stack">
         <section class="panel section">
           <h2>Syllabus</h2>

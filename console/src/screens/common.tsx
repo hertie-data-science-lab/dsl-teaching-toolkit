@@ -16,7 +16,7 @@ import type { CohortProps, ReadyProps } from './types';
 
 export { cohortName };
 
-export const CHECK_NOW_SOON = 'Sign in to check now.';
+export const CHECK_NOW_SOON = 'Sign in to re-check.';
 
 export const tzOf = (s: Status) => s.semester?.timezone ?? DEFAULT_TIMEZONE;
 export const yearOf = (now: number, tz: string) => zoned(new Date(now).toISOString(), tz).y;
@@ -53,9 +53,9 @@ export function cohortScope(p: Pick<CohortProps, 'course' | 'cohort'>): Scope {
   return { courseOrg: p.course.org, cohortOrg: p.cohort.org, where: p.cohort.termLabel };
 }
 
-/** Check now: refresh the status and re-run every check (semester.check). */
+/** Re-check: refresh the status and re-run every check (semester.check). */
 export function CheckNow({ small, p, label }: { small?: boolean; p?: Pick<CohortProps, 'course' | 'cohort'>; label?: string }) {
-  if (!p) return <Soon label="Check now" cls={small ? 'btn small' : 'btn'} title={CHECK_NOW_SOON} />;
+  if (!p) return <Soon label="Re-check" cls={small ? 'btn small' : 'btn'} title={CHECK_NOW_SOON} />;
   return <OpButtons def={checkNow(cohortScope(p))} small={small} label={label} />;
 }
 
@@ -112,7 +112,7 @@ export function StaleNote({ stale }: { stale: string[] }) {
   const files = stale.map((s) => s.replace(/^course\//, '')).join(', ');
   return (
     <p class="note" style="margin-bottom:18px">
-      <b>Not yet checked.</b> {files} changed since this semester was last checked, so what you see may be out of date. Check now brings it up to date.
+      <b>Not yet checked.</b> {files} changed since this semester was last checked, so what you see may be out of date. Re-check brings it up to date.
     </p>
   );
 }
@@ -132,7 +132,7 @@ export function NotComputed({ title, crumbs, p }: { title: string; crumbs: { t: 
       <section class="panel section stub">
         <h2>Status not computed yet</h2>
         <p>This semester has not been checked since it moved to the console's engine, so there is no status to show: no problems list, no semester strip, no counts.</p>
-        <p>Check now computes it. Automation also computes it at the next nightly refresh.</p>
+        <p>Re-check computes it. Automation also computes it at the next nightly refresh.</p>
       </section>
     </>
   );

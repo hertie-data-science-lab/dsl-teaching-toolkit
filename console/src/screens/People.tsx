@@ -11,7 +11,8 @@ import { ROLE_WORD, ROSTER_HEADER, parseInstructors, type Person } from '../mode
 import { checkAccess, sendCodes } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import { PERSON, displayOnly } from '../tiers/people';
-import { CheckLine, Crumbs, EditFile, Help, Lives, Loading, ProblemCards } from '../ui/bits';
+import { CheckLine, Crumbs, EditFile, Lives, Loading, ProblemCards } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { SaveBar, SaveLine } from '../ui/edit';
 import { Lock } from '../ui/icons';
 import { StudentCounts } from './Cohort';
@@ -69,7 +70,7 @@ function Students(p: ReadyProps) {
     if (badEmail.length) return setSave({ kind: 'bad', text: `${badEmail.length} row${badEmail.length > 1 ? 's have' : ' has'} an email that is not an address; no code can be sent to it.` });
     const rows = current.filter((r) => r.hertie_email || r.name);
     const text = writeTable({ header: table.header, rows });
-    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv' }, text, file.sha, { message: `roster: ${replacement ? `replace from ${replacement.name}` : `${nEdits} change${nEdits > 1 ? 's' : ''}`}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
+    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv' }, text, file.sha, { message: `roster: ${replacement ? `replace from ${replacement.name}` : `${nEdits} change${nEdits > 1 ? 's' : ''}`}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
     if (ok) {
       setEdits({});
       setAdded([]);
@@ -91,16 +92,12 @@ function Students(p: ReadyProps) {
     <>
       <Crumbs items={cohortCrumbs(p, 'Students')} />
       <div class="page-head">
-        <div><h1>Students</h1><p class="lede">{s.rows} on the roster. {s.codes_sent} codes sent; {s.joined} joined.</p></div>
+        <div><h1>Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown.</Hint></h1><p class="lede">{s.rows} on the roster. {s.codes_sent} codes sent; {s.joined} joined.</p></div>
         <div class="actions">
           <button class="btn quiet" type="button" aria-expanded={upload.open} onClick={() => setUpload({ ...upload, open: !upload.open })}>Replace from CSV</button>
           <OpButtons def={sendCodes(scope, waiting)} label="Send new codes to students who have not joined" />
         </div>
       </div>
-      <Help title="How joining works" doc="06-enrol-students-to-cohort.md">
-        <p>Adding a row emails that student a code. They redeem it on the semester’s join form; you see them turn green here.</p>
-        <p>You edit email, name and role. The system columns are written when a student joins; the code itself is never shown.</p>
-      </Help>
       <div class="stack">
         <div class="panel"><StudentCounts status={status} /></div>
         {problems.length ? <ProblemCards list={problems} /> : null}
@@ -239,7 +236,7 @@ function Instructors(p: ReadyProps) {
     if (!y || file.kind !== 'ready') return false;
     const t = new YamlText(file.text);
     mutate(t);
-    return runSave(target, t.text, file.sha, { message: `instructors: ${what}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
+    return runSave(target, t.text, file.sha, { message: `instructors: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
   };
   const saveForm = async () => {
     if (!editing || !env) return;
@@ -277,18 +274,14 @@ function Instructors(p: ReadyProps) {
       <Crumbs items={cohortCrumbs(p, 'Instructors')} />
       <div class="page-head">
         <div>
-          <h1>Instructors</h1>
-          <p class="lede">{ins} instructor{ins === 1 ? '' : 's'} and {tas} teaching assistant{tas === 1 ? '' : 's'}.{st && !st.synced ? ' GitHub access does not match this list yet.' : ''}</p>
+          <h1>Instructors <Hint doc="05-manage-teaching-team.md">Handles here get the instructor buttons for this semester, and emails here get the problem emails. Check instructor access makes GitHub match this list; it never removes access.</Hint></h1>
+          <p class="lede">{ins} instructor{ins === 1 ? '' : 's'} and {tas} teaching assistant{tas === 1 ? '' : 's'}.{st && !st.synced ? ' GitHub access does not match this list yet.' : ''}{admins.length ? ` Course admins (${admins.join(', ')}) also have access; they are set on Course details.` : ''}</p>
         </div>
         <div class="actions">
           <OpOpen def={checkAccess(scope)} cls="btn outline" label="Check instructor access" />
           <button class="btn" type="button" disabled={!y} onClick={() => { setEditing({ idx: 'new', values: { role: 'instructor' } }); setSave({ kind: 'idle' }); }}>Add a person</button>
         </div>
       </div>
-      <Help title="Who is an instructor" doc="05-manage-teaching-team.md">
-        <p>Handles here get the instructor buttons for this semester; emails here get the problem emails. Check instructor access makes GitHub match this list; it never removes access.</p>
-        {admins.length ? <p>Course admins ({admins.join(', ')}) have access to every semester of the course; they are set on Course details.</p> : null}
-      </Help>
       <div class="stack">
         {file.kind === 'loading' ? <Loading what={`Reading ${INSTRUCTORS_FILE}`} /> : null}
         {file.kind === 'absent' ? <p class="footnote">There is no {INSTRUCTORS_FILE} yet.</p> : null}

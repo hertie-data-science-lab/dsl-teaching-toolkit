@@ -7,7 +7,8 @@ import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { createMaterials } from '../ops/defs';
 import type { Values } from '../tiers/types';
 import { newMaterials } from '../tiers/wizard';
-import { Crumbs, EditFile, Help } from '../ui/bits';
+import { Crumbs, EditFile } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { useDraft } from '../wizards/drafts';
 import { contentTerms, materialsArgs, materialsRepo } from '../wizards/model';
 import { allOk, checkFree, checkRepoExists, useLive, type Check } from '../wizards/verify';
@@ -44,10 +45,7 @@ export function NewMaterialsScreen(p: CourseProps) {
   return (
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Materials', href: '#materials' }, { t: 'New materials' }]} />
-      <div class="page-head"><div><h1>New materials</h1><p class="lede">One repo of lectures, labs and readings, kept private until releases copy it to a semester.</p></div></div>
-      <Help title="Materials repos" doc="02-add-materials-to-course.md">
-        <p>Materials are usually per semester. Each semester’s repo is named after its semester, so the semester that uses it is clear.</p>
-      </Help>
+      <div class="page-head"><div><h1>New materials <Hint doc="02-add-materials-to-course.md">Materials are usually per semester. Each semester’s repo is named after it, so the semester that uses it is clear.</Hint></h1><p class="lede">One repo of lectures, labs and readings, kept private until releases copy it to a semester.</p></div></div>
       <div class="panel">
         <div class="form" style="max-width:640px">
           <p class="footnote ctx">For {course.name}</p>

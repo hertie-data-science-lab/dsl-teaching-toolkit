@@ -17,7 +17,8 @@ import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import { formatWord, formatsList, toConfig } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { assignmentMarking, assignmentWhat, assignmentWork } from '../tiers/wizard';
-import { Crumbs, Help } from '../ui/bits';
+import { Crumbs } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { SaveLine } from '../ui/edit';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
@@ -135,7 +136,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     if (text === null) return set({ extrasSaved: repo });
     const y = new YamlText(text);
     if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', gradingValid) });
-    if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, text, tplNow.config.sha, { message: 'template: settings from the New assignment wizard, from the Instructor Console', statusRepo: [course.org, COURSE_REPO] }))
+    if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, text, tplNow.config.sha, { message: 'template: settings from the New assignment wizard, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] }))
       set({ extrasSaved: repo });
   };
 
@@ -228,10 +229,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   return (
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates', href: '#templates' }, { t: 'New assignment' }]} />
-      <div class="page-head"><div><h1>New assignment</h1></div></div>
-      <Help title="What an assignment template is" doc="03-add-assignment-to-course.md">
-        <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch. Everything here has a default and can be changed later on the template’s settings.</p>
-      </Help>
+      <div class="page-head"><div><h1>New assignment <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. Everything here can be changed later in the template’s settings.</Hint></h1></div></div>
       <div class="wizard">
         <Rail steps={STEPS} cur={step} done={done} heading="Three questions, then a check" base="new-assignment-" />
         <StepCard ctx={`For ${course.name}`} of={step < 4 ? `Question ${step} of 3` : 'The check'} title={heading} back={back} foot={foot}>{body}</StepCard>

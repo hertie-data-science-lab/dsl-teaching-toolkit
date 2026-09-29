@@ -10,14 +10,15 @@ import { assignmentIdent } from '../model/format';
 import { checkNow, derive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
-import { courseBlock, effectiveWord, institutionLayer, lateWord, resolve, type Layers } from '../model/cascade';
+import { courseBlock, institutionLayer, lateWord, resolve, valueWord, type Layers } from '../model/cascade';
 import { DEFAULT_FORMATS } from '../model/policy';
 import { formatsList, fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
 import type { CourseStatus, Problem } from '../model/types';
 import { validator } from '../model/validate';
-import { CheckLine, Crumbs, Help, Legend, Lives, Loading, ProblemCards, Probs, Rail, Soon, ghUrl } from '../ui/bits';
+import { CheckLine, Crumbs, Legend, Lives, Loading, ProblemCards, Probs, Rail, Soon, ghUrl } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { Check, Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { formatError } from '../wizards/model';
@@ -50,7 +51,7 @@ export function CourseHeaderActions({ course, ready }: { course: CourseProps['co
     <div class="actions">
       <a class={ready ? 'btn' : 'btn quiet'} href={`?course=${course.org}#new-semester-1`}>New semester</a>
       <a class="btn outline" href="#website">Publish website</a>
-      {newestScope({ course }) ? <OpButtons def={{ ...checkNow(newestScope({ course })!), where: course.name }} /> : <Soon label="Check now" title="Check now runs on a semester; this course has none yet." />}
+      {newestScope({ course }) ? <OpButtons def={{ ...checkNow(newestScope({ course })!), where: course.name }} /> : <Soon label="Re-check" title="Re-check runs on a semester; this course has none yet." />}
       <a class="btn quiet" href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
     </div>
   );
@@ -60,6 +61,9 @@ export function CourseHeaderActions({ course, ready }: { course: CourseProps['co
 export function courseLayers(p: Pick<CourseProps, 'course' | 'files'>): Layers {
   return { assignment: {}, semester: {}, course: courseBlock(p.files, p.course.org, p.course.meta), institution: institutionLayer() };
 }
+
+/** Where a course-level default comes from, in plain words. */
+const whose = (s: string) => (s === 'course' ? 'this course' : 'institution');
 
 export function CourseScreen(p: CourseProps) {
   const [showSetup, setShowSetup] = useState(false);
@@ -75,7 +79,7 @@ export function CourseScreen(p: CourseProps) {
       <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: course.name }]} />
       <div class="page-head">
         <div>
-          <h1>{course.name}</h1>
+          <h1>{course.name} <Hint doc="02-add-materials-to-course.md">Materials are staged here privately until a release copies them in whole or in part to a semester. Selected materials can also be published on the course’s optional public website.</Hint></h1>
           <p class="lede">
             {!v.computed ? <span>Status not computed yet.</span> : ready ? <span>Ready for a new semester.</span> : <span class="amber">Not ready for a new semester: {v.problems.length === 1 ? 'one problem' : `${v.problems.length} problems`} would stop a semester.</span>}
             {v.computed ? <button class="textlink" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>{showSetup ? 'Hide setup' : 'Show setup'}</button> : null}
@@ -84,17 +88,13 @@ export function CourseScreen(p: CourseProps) {
         <CourseHeaderActions course={course} ready={ready} />
       </div>
       {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
-      <Help title="What lives in a course" doc="02-add-materials-to-course.md">
-        <p>Materials live here privately until a scheduled release copies them to a semester. Some folders can be withheld from students, and some selected for the public website.</p>
-        <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch.</p>
-      </Help>
       <div class="stack">
         {showSetup && v.course ? (
           <section class="panel section"><div class="section-head"><h2>Setup</h2><Legend /></div><Rail scope="course" stages={v.course.stages} problems={v.problems} /></section>
         ) : null}
         <div class="grid-2">
           <section class="panel section">
-            <div class="problems-head"><h2>Course problems</h2><span class="footnote">They also appear on every semester they will affect.</span></div>
+            <div class="problems-head"><h2>Course problems <Hint label="About course problems">They also appear on every semester they will affect.</Hint></h2></div>
             {!v.computed ? <p class="footnote">Status not computed yet.</p> : v.problems.length ? <ProblemCards list={v.problems} /> : <div class="no-problems"><Check /><span>No course problems.</span></div>}
           </section>
           <section class="panel section">
@@ -157,8 +157,8 @@ export function CourseScreen(p: CourseProps) {
               <dt>Name</dt><dd>{course.name}</dd>
               <dt>Code</dt><dd>{course.code || 'not set'}</dd>
               <dt>Admins</dt><dd>{course.admins.join(', ') || 'none'}</dd>
-              <dt>Late work</dt><dd>{lateWord(lateDays.value, latePen.value)} <span class="footnote">{lateDays.source === 'course' ? 'this course’s default' : 'institution default'}</span></dd>
-              <dt>Max team size</dt><dd>{effectiveWord('max_team_size', team)}</dd>
+              <dt>Late work <Hint label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>
+              <dt>Max team size</dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
             </dl>
             <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
           </section>
@@ -258,7 +258,7 @@ export function TemplateScreen(p: CourseProps) {
     for (const k of Object.keys({ ...was, ...now })) if (!deepEqual(was[k], now[k])) y.assign([k], now[k]);
     if (qdraft !== null && !deepEqual(qdraft, baseQ)) y.assign(['questions'], questionsValue(qdraft, cfg.questions));
     if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', gradingValid) });
-    if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `template: edit the settings, from the Instructor Console`, statusRepo: [course.org, COURSE_REPO] })) {
+    if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `template: edit the settings, from the DSL Teaching Console`, statusRepo: [course.org, COURSE_REPO] })) {
       setValues(null);
       setQdraft(null);
     }
@@ -267,13 +267,9 @@ export function TemplateScreen(p: CourseProps) {
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates', href: '#templates' }, { t: assignmentIdent(slug) }]} />
       <div class="page-head">
-        <div><h1>{assignmentIdent(slug)}{title ? `: ${title}` : ''}</h1><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
+        <div><h1>{assignmentIdent(slug)}{title ? `: ${title}` : ''} <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. These settings apply to every semester, and after hand out they reach students only through Update every copy.</Hint></h1><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
         <div class="actions"><span class={`chip ${problems.length ? 'bad' : 'ok'}`}>{problems.length ? 'Has a problem' : 'Ready'}</span><OpenButton org={course.org} repo={repo} /></div>
       </div>
-      <Help title="What these settings do" doc="03-add-assignment-to-course.md">
-        <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch. These settings apply to every semester that uses the template; after hand out they reach students only through Update every copy.</p>
-        <p>How a semester runs it (teams, late work, who sees each repo, the submit link) is set on that semester’s assignment page.</p>
-      </Help>
       {problems.length ? <div style="margin-bottom:18px"><ProblemCards list={problems} /></div> : null}
       {file.kind === 'loading' ? <Loading what="Reading grading_config.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no grading_config.yml on the solution branch of {repo}.</CheckLine> : null}

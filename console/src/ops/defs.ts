@@ -16,9 +16,9 @@ const base = (s: Scope, op: string, key: string) => ({ op, key, courseOrg: s.cou
 
 export function checkNow(s: Scope): OpDef {
   return {
-    ...base(s, 'semester.check', 'cohort'), name: 'Check now', title: 'Every check', where: s.where,
+    ...base(s, 'semester.check', 'cohort'), name: 'Re-check', title: 'Every check', where: s.where,
     intro: 'Re-reads every file and re-runs every check now instead of at the next automatic check.',
-    verb: 'Check now', running: 'Checking everything', cancel: 'Stop', args: {},
+    verb: 'Re-check', running: 'Checking everything', cancel: 'Stop', args: {},
   };
 }
 
