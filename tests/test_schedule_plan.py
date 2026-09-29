@@ -201,27 +201,84 @@ def test_a_silent_entry_is_no_row_and_renumbers_nothing():
     assert _shown(schedule_plan.site_rows(rows)) == [("a", 1, []), ("b", 2, [])]
 
 
-def test_untitled_readings_attach_to_the_next_shown_lecture():
+def test_numbered_readings_join_the_lecture_with_that_number_whatever_the_date():
     rows = _rows(
         [
-            Release("r1", _at(1), [Deploy("cm", "readings/01")], show_on_site=False),
-            Release("l1", _at(3), [Deploy("cm", "lectures/01")]),
+            Release("lecture-1", _at(3), [Deploy("cm", "lectures/01")]),
+            Release("intro", _at(10), [Deploy("cm", "lectures/02")], number=2),
+            # After its lecture, by label; before its lecture, silent, by `number:`.
+            Release("readings_01", _at(5), [Deploy("cm", "readings/01")]),
             Release(
-                "r2",
-                _at(4),
+                "pack",
+                _at(1),
                 [Deploy("cm", "readings/02")],
-                title="Attention, further",
+                number=2,
                 show_on_site=False,
             ),
-            Release("r3", _at(9), [Deploy("cm", "readings/03")]),
         ]
     )
-    # A titled one is its own (unnumbered, off-schedule) row; one no lecture follows is
-    # its own numbered row.
     assert _shown(schedule_plan.site_rows(rows)) == [
-        ("l1", 1, ["r1"]),
-        ("r2", None, []),
-        ("r3", 3, []),
+        ("lecture-1", 1, ["readings_01"]),
+        ("intro", 2, ["pack"]),
+    ]
+
+
+def test_unnumbered_untitled_readings_are_their_own_row():
+    # Dated a day before a lecture: no date inference, it stays its own row.
+    rows = _rows(
+        [
+            Release("week-reading", _at(2), [Deploy("cm", "readings/a")]),
+            Release("lecture-1", _at(3), [Deploy("cm", "lectures/01")]),
+            Release("extra", _at(4), [Deploy("cm", "readings/b")], show_on_site=False),
+        ]
+    )
+    # Shown: a numbered row of the Readings kind; silent: unnumbered, off the Schedule.
+    assert _shown(schedule_plan.site_rows(rows)) == [
+        ("week-reading", 1, []),
+        ("lecture-1", 1, []),
+        ("extra", None, []),
+    ]
+
+
+def test_titled_readings_are_their_own_row():
+    rows = _rows(
+        [
+            Release("lecture-1", _at(3), [Deploy("cm", "lectures/01")]),
+            Release(
+                "further",
+                _at(3, 12),
+                [Deploy("cm", "readings/x")],
+                title="Attention, further",
+            ),
+        ]
+    )
+    assert _shown(schedule_plan.site_rows(rows)) == [
+        ("lecture-1", 1, []),
+        ("further", 1, []),
+    ]
+
+
+def test_readings_numbered_for_a_lecture_that_does_not_exist_are_their_own_row():
+    # No lecture 7, and a silent lecture carries no number to join.
+    rows = _rows(
+        [
+            Release("lecture-1", _at(3), [Deploy("cm", "lectures/01")]),
+            Release(
+                "lecture-2", _at(4), [Deploy("cm", "lectures/02")], show_on_site=False
+            ),
+            Release("readings-07", _at(5), [Deploy("cm", "readings/07")]),
+            Release(
+                "readings-02",
+                _at(6),
+                [Deploy("cm", "readings/02")],
+                show_on_site=False,
+            ),
+        ]
+    )
+    assert _shown(schedule_plan.site_rows(rows)) == [
+        ("lecture-1", 1, []),
+        ("readings-07", 7, []),
+        ("readings-02", None, []),
     ]
 
 
