@@ -272,6 +272,8 @@ def status_schema() -> dict:
             "week": {"type": ["integer", "null"]},
             "weeks": {"type": ["integer", "null"]},
             "live": {"type": "boolean"},
+            # Past `semester_end` and not archived yet.
+            "ended": {"type": "boolean"},
             "app_installed": unknown,
             "stages": stages,
             "stage_why": stage_why,

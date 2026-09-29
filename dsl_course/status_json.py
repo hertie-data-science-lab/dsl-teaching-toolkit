@@ -696,6 +696,17 @@ def course_admin_count(meta: dict) -> int:
     )
 
 
+# The course stages a new semester needs done (decision 0019); C4-C6 are listed, optional.
+REQUIRED_COURSE_STAGES = COURSE_STAGES[:3]
+
+
+def course_ready(stages: dict[str, str], problems: list[dict]) -> bool:
+    """Ready for a new semester: C1-C3 done and no course-scope problem standing."""
+    return all(stages[s] == DONE for s in REQUIRED_COURSE_STAGES) and not any(
+        p["scope"] == "course" for p in problems
+    )
+
+
 def render_course(
     facts: CourseFacts, now: datetime, rolled_up: list[dict] = ()
 ) -> tuple[dict, list[dict]]:
@@ -710,7 +721,8 @@ def render_course(
     - C4 at least one materials repo, every one of them `ready`;
     - C5 at least one template, every one of them `ready`;
     - C6 `opencourse.yml` turns the public website on and its repo exists.
-    `ready` is C1-C5 done: nothing on the course side would stop a semester."""
+    `ready` (decision 0019) is C1-C3 done and no course-scope problem standing: a new
+    semester can start. Materials, templates and the website are listed but optional."""
     problems = [problem_from_fault(f, facts.org, now) for f in facts.faults]
     problems += [
         materials_problem(m, facts.org) for m in facts.materials if not m.topic
@@ -729,7 +741,7 @@ def render_course(
         "app_installed": app_installed(),
         "stages": stages,
         "stage_why": stage_why(stages, todo, standing),
-        "ready": all(stages[s] == DONE for s in COURSE_STAGES[:5]),
+        "ready": course_ready(stages, standing),
         "materials": [
             {"repo": m.repo, "state": materials_state(m)} for m in facts.materials
         ],
@@ -1322,6 +1334,10 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "week": week,
             "weeks": weeks,
             "live": not facts.archived,
+            # Its end has passed and it is not archived yet: "ended, not archived".
+            "ended": not facts.archived
+            and sched.semester_end is not None
+            and sched.semester_end < today,
             "app_installed": app_installed(),
             "stages": stages,
             "stage_why": stage_why(stages, todo, problems),
