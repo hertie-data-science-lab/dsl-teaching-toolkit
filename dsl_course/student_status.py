@@ -596,7 +596,12 @@ def render_assignments(
                 if forming
                 else None,
                 "teams": rooms,
-                "solution_datetime": _iso(entry.solution_datetime),
+                # When it is actually shown: a date before the late cutoff is held
+                # until the cutoff (`scheduler._solution_due`).
+                "solution_datetime": _iso(
+                    schedule.solution_held_until(facts.sched, key)
+                    or entry.solution_datetime
+                ),
                 "max_points": _number(grades.total_points(spec)),
                 "handed_out": out_now,
                 "brief": brief,

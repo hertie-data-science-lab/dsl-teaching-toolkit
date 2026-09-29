@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -303,6 +303,22 @@ def test_the_engine_says_the_cutoff_and_the_timezone():
     (a1,) = [a for a in _render()["assignments"] if a["slug"] == "assignment-1"]
     assert a1["grading_cutoff_datetime"].startswith("2026-10-07T23:59")
     assert _render()["timezone"] == "Europe/Berlin"
+
+
+def test_a_solution_set_before_the_cutoff_shows_the_cutoff_it_is_held_until():
+    # Students see when the answer actually appears: the scheduler holds an early date
+    # until the late cutoff, so that is the moment, not the date in the file.
+    facts = _facts()
+    entry = facts.sched.assignments["assignment-1"]
+    entry.solution_datetime = entry.due_datetime + timedelta(days=3)
+    doc = student_status.render(_course(), facts, _extra(facts), NOW)
+    (a1,) = [a for a in doc["assignments"] if a["slug"] == "assignment-1"]
+    assert a1["solution_datetime"].startswith("2026-10-07T23:59")
+    # after the cutoff, the date as written
+    entry.solution_datetime = entry.due_datetime + timedelta(days=12)
+    doc = student_status.render(_course(), facts, _extra(facts), NOW)
+    (a1,) = [a for a in doc["assignments"] if a["slug"] == "assignment-1"]
+    assert a1["solution_datetime"].startswith("2026-10-09T23:59")
 
 
 def test_the_archive_date_is_there_whatever_show_on_site_says():

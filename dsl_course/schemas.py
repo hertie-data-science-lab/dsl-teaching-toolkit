@@ -332,6 +332,7 @@ def status_schema() -> dict:
             "due": nullable,
             "grading_cutoff_datetime": nullable,
             "solution_shown": nullable,
+            "solution_held_until": nullable,
             "units": {"type": ["integer", "null"]},
             "submissions": {"type": ["integer", "null"]},
             "teams": {"type": ["integer", "null"]},

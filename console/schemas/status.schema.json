@@ -207,6 +207,12 @@
           "slug": {
             "type": "string"
           },
+          "solution_held_until": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "solution_shown": {
             "type": [
               "string",

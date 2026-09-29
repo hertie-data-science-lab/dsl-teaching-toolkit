@@ -1188,6 +1188,21 @@ def _client_state(row: dict, now: datetime) -> str:
     return "late_window" if now >= due else "open"
 
 
+def test_a_held_solution_says_the_cutoff_it_is_held_until():
+    sched = _sched(
+        SCHEDULE.replace(
+            "    due_datetime: 2026-09-27T23:59\n",
+            "    due_datetime: 2026-09-27T23:59\n    solution_datetime: 2026-09-30T09:00\n",
+        )
+    )
+    (a2, a3) = status_json.render_assignments(_semester(sched=sched), [], NOW)
+    assert a2["solution_shown"] == "2026-09-30T09:00:00+02:00"
+    # the institution's 10 days: held until the late cutoff, not dropped
+    assert a2["solution_held_until"] == a2["grading_cutoff_datetime"]
+    assert a2["solution_held_until"].startswith("2026-10-07T23:59")
+    assert a3["solution_held_until"] is None
+
+
 def test_every_assignment_and_release_carries_the_moments_the_console_needs():
     doc = _render(*_contract_scenario())
     for row in doc["assignments"]:
