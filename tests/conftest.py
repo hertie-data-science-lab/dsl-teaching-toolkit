@@ -503,7 +503,7 @@ def workflow_inputs(rendered: str) -> dict:
     with `on:`). Accept either so the test asserts real structure, not the quirk."""
     doc = yaml.safe_load(rendered)
     trigger = doc.get("on", doc.get(True))
-    return trigger["workflow_dispatch"].get("inputs") or {}
+    return (trigger["workflow_dispatch"] or {}).get("inputs") or {}
 
 
 def workflow_jobs(rendered: str) -> dict:

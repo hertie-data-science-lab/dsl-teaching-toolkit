@@ -695,12 +695,12 @@ rewritten per run, so several years can coexist.
   (`actual-readings`). `none` skips readings. A published `labs/` section renders as its own
   `type: lab` row beside the session row. Lectures, labs + readings only - no assignments, no
   exam rows. Its `_data/people.yml` comes from the course org's `people:` block, TAs excluded.
-- **Opt-in, then automatic.** The first run scaffolds the site; every run records its settings
-  in `_publish-config.yml` at the site root (`_`-prefixed so Jekyll ignores it) and a daily cron
-  re-syncs from them, so materials edits reach the public site without another click. **Delete
-  `_publish-config.yml` to stop the automatic refresh.** The cron is a no-op wherever nobody has
-  published, and releases/refresh never touch it - a public site exists only once someone runs
-  the action.
+- **One declaration.** The course's `.github/opencourse.yml` (INSTRUCTOR-OWNED, seeded
+  `enabled: false`; `opencourse`) names the source repo, the readings mode, whether lectures
+  publish and a `withhold` list (`.releaseignore` syntax, on top of the repo's own). The
+  action takes no inputs and a daily cron re-publishes from the file, so materials edits reach
+  the public site without another click; `enabled: false` stops both (the cron quietly, the
+  action with a sentence). Releases/refresh never touch it.
 
 ## Bot lifecycle - setup & rotation
 

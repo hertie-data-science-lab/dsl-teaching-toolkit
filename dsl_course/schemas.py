@@ -19,7 +19,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import materials, policy, records, student_status
+from . import materials, opencourse, policy, records, student_status
 from .central import TIERS
 from .course import (
     ASSIGNMENT_TYPES,
@@ -603,6 +603,7 @@ def names_json() -> dict:
         "join_repo": JOIN_REPO,
         "system_dir": records.SYSTEM_DIR,
         "instructors_file": INSTRUCTORS_FILE,
+        "opencourse_file": opencourse.OPENCOURSE_FILE,
         "assignments_file": ASSIGNMENTS_FILE,
         "registry_file": SEMESTERS_PATH,
         "records": {kind: records.path(kind) for kind in records.RECORDS},
@@ -682,6 +683,11 @@ def materials_json() -> dict:
     }
 
 
+def opencourse_schema() -> dict:
+    """The course's `opencourse.yml`: the public website's settings (`opencourse.parse`)."""
+    return _doc(f".github/{opencourse.OPENCOURSE_FILE}", dict(opencourse.SCHEMA))
+
+
 def labels_json() -> dict:
     """The words the console shows for the engine's values (`course.LABELS`) and the
     solution warning every surface offering `solution_datetime: now` carries, and the
@@ -714,6 +720,7 @@ def all_schemas() -> dict[str, dict]:
         "assignments.schema.json": assignments_schema(),
         "dsl_course.schema.json": dsl_course_schema(),
         "materials.schema.json": materials_schema(),
+        "opencourse.schema.json": opencourse_schema(),
         # The semester's PUBLIC student file, closed at every level (its allow-list).
         "student-status.schema.json": _doc(
             "student-status.json", student_status.json_schema()

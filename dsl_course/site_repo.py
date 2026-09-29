@@ -28,8 +28,8 @@ from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import Summary, log, log_err, log_ok, log_step, plural
 from .repos import repo_exists, repo_is_archived
 
-# The settings of the last manual publish, committed into the site repo so the daily cron
-# can re-sync unattended. Leading `_`, so Jekyll ignores it rather than serving it.
+# RETIRED (decision 0016): the settings an older publish committed into the site repo.
+# `opencourse.yml` holds them now; every publish deletes this, the migration reads it.
 PUBLISH_CONFIG = "_publish-config.yml"
 
 # The shared Jekyll theme, and the ref every generated site pins it at.

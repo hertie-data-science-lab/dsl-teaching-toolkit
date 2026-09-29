@@ -94,6 +94,7 @@ from .materials import (
     is_materials_repo,
 )
 from .materials import read as read_materials
+from .opencourse import read as read_opencourse
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
 from .repos import default_branch
@@ -176,6 +177,8 @@ class CourseFacts:
     materials: list[MaterialsFacts] = field(default_factory=list)
     templates: list[TemplateFacts] = field(default_factory=list)
     public_site: bool = False
+    # `opencourse.yml` says `enabled: true` (and parses).
+    website_on: bool = False
 
 
 @dataclass
@@ -706,7 +709,7 @@ def render_course(
     - C3 dsl-course.yml names the course, its code and description, and one course admin;
     - C4 at least one materials repo, every one of them `ready`;
     - C5 at least one template, every one of them `ready`;
-    - C6 the public website repo exists.
+    - C6 `opencourse.yml` turns the public website on and its repo exists.
     `ready` is C1-C5 done: nothing on the course side would stop a semester."""
     problems = [problem_from_fault(f, facts.org, now) for f in facts.faults]
     problems += [
@@ -798,8 +801,10 @@ def course_checks(facts: CourseFacts) -> dict[str, str | None]:
             out["C5"] = _first_of("assignment templates", pending)
         elif any(template_state(t) != "ready" for t in facts.templates):
             out["C5"] = "An assignment template has settings that need fixing."
-    if not facts.public_site:
-        out["C6"] = "There is no public website; it is optional."
+    if not facts.website_on:
+        out["C6"] = "The public website is off; it is optional."
+    elif not facts.public_site:
+        out["C6"] = "The public website is on but not published yet."
     return out
 
 
@@ -1422,6 +1427,11 @@ def gather_course(course_org: str) -> CourseFacts:
                 )
             facts.templates.append(t)
     facts.public_site = pages_repo(course_org) in listing
+    try:
+        oc = read_opencourse(course_org)
+    except Unusable:
+        oc = None  # the publish names the fault; the status only says "off"
+    facts.website_on = bool(oc and oc.enabled)
     return facts
 
 

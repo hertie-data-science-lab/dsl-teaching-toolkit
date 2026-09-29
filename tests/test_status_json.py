@@ -232,6 +232,7 @@ def _course(**over) -> status_json.CourseFacts:
             status_json.TemplateFacts("assignment-3-f2026", "# Trees"),
         ],
         public_site=True,
+        website_on=True,
     )
     for key, value in over.items():
         setattr(facts, key, value)
@@ -888,6 +889,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     for module in (status_json, schedule, grades):
         monkeypatch.setattr(module, "get_file_content", content)
     monkeypatch.setattr(status_json, "read_materials", lambda org, repo: Declared())
+    monkeypatch.setattr(status_json, "read_opencourse", lambda org: None)
     schedule._schedule_text.cache_clear()
     monkeypatch.setattr(status_json, "list_org_repos", lambda org: listings[org])
     monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
@@ -1214,11 +1216,22 @@ def test_the_archive_stage_says_when():
 
 
 def test_the_course_file_carries_its_whys_too():
-    course = _course(public_site=False)
+    course = _course(website_on=False)
     public = status_json.render_course_file(course, NOW)
     assert public["course"]["stage_why"] == {
-        "C6": "There is no public website; it is optional."
+        "C6": "The public website is off; it is optional."
     }
+
+
+def test_a_website_turned_on_but_never_published_is_not_done_yet():
+    # C6 reads opencourse.yml: a site repo left from an older publish is not "published"
+    # while the file says off, and an enabled file waits for its first publish.
+    on = status_json.render_course_file(_course(public_site=False), NOW)
+    assert on["course"]["stage_why"] == {
+        "C6": "The public website is on but not published yet."
+    }
+    off = status_json.render_course_file(_course(website_on=False), NOW)
+    assert off["course"]["stages"]["C6"] != "done"
 
 
 # ------------------------------------------------------------------ dates for the console's clock

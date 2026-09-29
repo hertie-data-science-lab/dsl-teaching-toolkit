@@ -50,6 +50,8 @@ from .gh_contents import put_file, put_files, seed_if_absent
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
 from .log import CLIParser, log, log_err, log_ok, log_step
+from .opencourse import OPENCOURSE_FILE
+from .opencourse import seed_text as opencourse_seed
 from .profile_readme import update_profile_readme
 from .repos import create_repo, repo_exists, repo_is_private, set_repo_topics
 from .welcome import (
@@ -480,6 +482,17 @@ def create_profile_repo(
         ):
             failures += 1
             log_err(f"could not seed {org}/.github/dsl-course.yml (the faculty SSOT)")
+        # The public website's settings, INSTRUCTOR-OWNED like dsl-course.yml: seeded
+        # off, so nothing is public until someone turns it on.
+        if not seed_if_absent(
+            org,
+            ".github",
+            OPENCOURSE_FILE,
+            opencourse_seed().encode(),
+            "init: public website settings (off)",
+        ):
+            failures += 1
+            log_err(f"could not seed {org}/.github/{OPENCOURSE_FILE}")
 
     if not set_repo_topics(org, ".github", _profile_topics(is_semester, course_code)):
         failures += 1

@@ -398,7 +398,7 @@ layers above its own:
 | 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
-| 5 and up | `access` (team permissions and the faculty floor), `materials` (the `materials.yml` escape hatch and the kind aliases), `schedule_plan` (the rows a plan declares, one per release entry), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
+| 5 and up | `access` (team permissions and the faculty floor), `materials` (the `materials.yml` escape hatch and the kind aliases), `opencourse` (the public website's `opencourse.yml`), `schedule_plan` (the rows a plan declares, one per release entry), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
 
 Two placements are not where they read: `access` sits above `discovery`, because the
 faculty floor is computed from what discovery finds, and `site_repo` above `scaffold` and

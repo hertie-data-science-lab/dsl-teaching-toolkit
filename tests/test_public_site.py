@@ -1,4 +1,5 @@
-"""public_site.sync_public_site over a real (temp-filesystem) source repo.
+"""public_site.sync_public_site over a real (temp-filesystem) source repo, and the
+`opencourse.yml` switch in front of it (`public_site.publish`).
 
 The public open-courseware site must publish whatever sections the materials repo
 actually HAS - session discovery is generic across every top-level section, so a course
@@ -14,14 +15,19 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 from dsl_course import gh_contents, ghcli, public_site, site, site_repo
+from dsl_course.faults import Unusable
+from dsl_course.opencourse import OpenCourse
 from tests.conftest import entry_links
 
 COURSE = "Course-Org"
 SOURCE = "course-materials-f2026"
 SERVED = f"public-materials/{SOURCE}"
+
+
+def _oc(**kwargs) -> OpenCourse:
+    return OpenCourse(enabled=True, source_repo=SOURCE, **kwargs)
 
 
 def _seed_source(root: Path) -> None:
@@ -75,14 +81,17 @@ def _install_fakes(monkeypatch) -> dict[str, str]:
             dest.mkdir(parents=True, exist_ok=True)
             if spec == f"{COURSE}/{SOURCE}":
                 _seed_source(dest)
-            else:  # the site repo, as the template leaves it
+            else:  # the site repo, with the settings file an older publish left
                 (dest / "_config.yml").write_text(
                     'course_name: "x"\ncourse_code: "y"\ncourse_semester: "z"\n'
                 )
+                (dest / site_repo.PUBLISH_CONFIG).write_text(f"source_repo: {SOURCE}\n")
             return (0, "")
         return (0, "")
 
     def fake_git(*args):
+        if "rm" in args:
+            (Path(args[1]) / args[-1]).unlink(missing_ok=True)
         if "add" in args:
             wd = Path(args[1])
             committed.clear()
@@ -95,17 +104,14 @@ def _install_fakes(monkeypatch) -> dict[str, str]:
             )
         return (0, "")
 
-    # `gh` and `repo_exists` are read from both namespaces: `public_site` clones the SOURCE
-    # repo and `resync_public_site` looks the site repo up, while the site-repo mechanics
-    # next door do the rest.
+    # `public_site` clones the SOURCE repo, while the site-repo mechanics next door do
+    # the rest.
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(site_repo, "gh", fake_gh)
     monkeypatch.setattr(site_repo, "git", fake_git)
-    monkeypatch.setattr(public_site, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: False)
     monkeypatch.setattr(site_repo, "acting_login", lambda: None)
-    monkeypatch.setattr(public_site, "get_file_content", lambda *a, **k: "")
     # site_repo.yaml_file now reads via gh_contents.load_yaml_config, which resolves
     # get_file_content in the UTILS namespace - stub it there too, or the real gh
     # runs (green on an authenticated dev box, red in tokenless CI).
@@ -119,7 +125,7 @@ def published(monkeypatch):
     committed = _install_fakes(monkeypatch)
 
     def run(**kwargs) -> dict[str, str]:
-        assert public_site.sync_public_site(COURSE, SOURCE, **kwargs) == 0
+        assert public_site.sync_public_site(COURSE, _oc(**kwargs)) == 0
         return dict(committed)
 
     return run
@@ -201,64 +207,97 @@ def test_an_archived_site_repo_is_a_quiet_skip_not_a_daily_failure(monkeypatch, 
     # and only the push 403s, so the nightly Sync site run failed on it every single day.
     committed = _install_fakes(monkeypatch)
     monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: True)
-    assert public_site.sync_public_site(COURSE, SOURCE, "actual-readings") == 0
+    assert (
+        public_site.sync_public_site(COURSE, _oc(readings_mode="actual-readings")) == 0
+    )
     assert not committed  # nothing was even cloned
     assert "is archived" in capsys.readouterr().out
 
 
 def test_nothing_to_publish_at_all_is_an_error():
     # No file sections and no readings - refuse before touching a single repo.
-    assert (
-        public_site.sync_public_site(COURSE, SOURCE, "none", include_lectures=False)
-        == 1
-    )
+    oc = _oc(readings_mode="none", include_lectures=False)
+    assert public_site.sync_public_site(COURSE, oc) == 1
 
 
-def test_publish_persists_its_settings_in_the_site_repo(published):
-    cfg = yaml.safe_load(
-        published(readings_mode="actual-readings")[site_repo.PUBLISH_CONFIG]
-    )
-    assert cfg == {
-        "source_repo": SOURCE,
-        "readings_mode": "actual-readings",
-        "include_lectures": True,
-    }
-    assert site_repo.PUBLISH_CONFIG.startswith("_")  # so Jekyll ignores it
+def test_a_publish_deletes_the_settings_file_an_older_publish_left(published):
+    # opencourse.yml holds the settings now (decision 0016); the old file goes.
+    files = published(readings_mode="actual-readings")
+    assert site_repo.PUBLISH_CONFIG not in files
+    assert "_config.yml" in files
 
 
-def test_cron_resync_repeats_the_last_publishs_settings(monkeypatch):
-    # Round-trip: publish once with non-default settings, then re-sync with NO arguments
-    # (the cron path) and get byte-identical output - the modes came from the site repo.
-    committed = _install_fakes(monkeypatch)
-    assert public_site.sync_public_site(COURSE, SOURCE, "actual-readings") == 0
-    persisted = dict(committed)
+def test_withhold_keeps_its_paths_off_the_site(published):
+    # opencourse.yml's own list, on top of the repo's .releaseignore: anchored at the
+    # clone root like it, while the copies are session folders deep inside.
+    files = published(readings_mode="actual-readings", withhold=("labs/02_*/",))
+    assert f"{SERVED}/session-1/labs/lab.ipynb" in files
+    assert f"{SERVED}/session-2/labs/lab.ipynb" not in files
+    assert "_lectures/lab-02.md" not in files  # nothing left to show: no page
 
+
+def test_withhold_holds_in_reading_list_mode_too(published):
+    # Naming a file IS publishing it in this mode, which never copies anything.
+    page = published(readings_mode="reading-list", withhold=("*.pdf",))[
+        "_lectures/session-01.md"
+    ]
+    assert "Smith 2020" in page
+    assert "paper" not in page
+
+
+def _publish_with(monkeypatch, oc: OpenCourse | None | Exception) -> list[OpenCourse]:
+    """Stub the file and the build; return the declarations the build was handed."""
+    built: list[OpenCourse] = []
+
+    def read(org: str) -> OpenCourse | None:
+        if isinstance(oc, Exception):
+            raise oc
+        return oc
+
+    monkeypatch.setattr(public_site, "read_opencourse", read)
     monkeypatch.setattr(
-        public_site, "get_file_content", lambda org, repo, path: persisted.get(path, "")
+        public_site, "sync_public_site", lambda org, x: built.append(x) or 0
     )
-    committed.clear()
-    assert public_site.resync_public_site(COURSE) == 0
-    assert dict(committed) == persisted
+    return built
 
 
-def test_cron_is_a_quiet_noop_when_the_course_never_published(monkeypatch):
-    # This cron ships in every course org's .github; most never opt in. Never a failure.
-    monkeypatch.setattr(public_site, "sync_public_site", lambda *a, **k: 1)
-    monkeypatch.setattr(public_site, "get_file_content", lambda *a, **k: None)
+@pytest.mark.parametrize("oc", [None, OpenCourse()], ids=["absent", "off"])
+def test_an_off_website_is_refused_when_asked_and_quiet_daily(monkeypatch, oc):
+    built = _publish_with(monkeypatch, oc)
+    asked = public_site.publish(COURSE)
+    assert asked == 1
+    assert asked.reasons[0]["code"] == "WEBSITE_OFF"
+    assert "Public website" in asked.text
+    daily = public_site.publish(COURSE, daily=True)
+    assert daily == 0 and daily.conclusion == "nothing_to_do"
+    assert built == []
 
-    monkeypatch.setattr(public_site, "repo_exists", lambda org, name: False)
-    assert public_site.resync_public_site(COURSE) == 0  # no site repo at all
 
-    monkeypatch.setattr(public_site, "repo_exists", lambda org, name: True)
-    assert public_site.resync_public_site(COURSE) == 0  # site, but nothing persisted
+def test_an_enabled_website_publishes_what_the_file_declares(monkeypatch):
+    oc = _oc(readings_mode="none", withhold=("labs/",))
+    built = _publish_with(monkeypatch, oc)
+    assert public_site.publish(COURSE) == 0
+    assert public_site.publish(COURSE, daily=True) == 0
+    assert built == [oc, oc]
 
 
-def test_public_sync_cli_without_source_repo_is_the_resync_path(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["site", "public-sync", "--course-org", COURSE])
-    seen: list[str] = []
-    monkeypatch.setattr(site, "resync_public_site", lambda org: seen.append(org) or 0)
+def test_a_file_that_does_not_parse_stops_the_publish(monkeypatch):
+    built = _publish_with(monkeypatch, Unusable("enabled: must be boolean"))
+    out = public_site.publish(COURSE, daily=True)
+    assert out == 1 and "enabled: must be boolean" in out.text
+    assert built == []
+
+
+@pytest.mark.parametrize(("extra", "daily"), [([], False), (["--daily"], True)])
+def test_the_public_sync_cli_passes_the_daily_switch(monkeypatch, extra, daily):
+    argv = ["site", "public-sync", "--course-org", COURSE, *extra]
+    monkeypatch.setattr(sys, "argv", argv)
+    seen: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        site, "publish_public_site", lambda org, daily: seen.append((org, daily)) or 0
+    )
     assert site.main() == 0
-    assert seen == [COURSE]
+    assert seen == [(COURSE, daily)]
 
 
 def test_the_public_site_never_publishes_what_sits_beside_the_material(published):

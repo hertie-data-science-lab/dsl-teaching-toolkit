@@ -56,7 +56,7 @@ Full flow: [Grade and return assignments](../10-grade-and-return-assignments.md)
 
 | Action | Effect |
 | --- | --- |
-| **Publish course website** | Build/refresh a **public** `<course-org>.github.io` sharing this course's lectures + readings. Pick a `source_repo`; `readings_mode` = `reading-list` (citations only, default), `actual-readings` (host the files) or `none`. The first run opts in and records its settings in `_publish-config.yml`; a daily cron re-syncs from them - delete that file to stop. |
+| **Publish course website** | Build/refresh a **public** `<course-org>.github.io` sharing one materials repo's lectures + readings, as the course's `.github/opencourse.yml` says (edit it on the console's Public website tab): `enabled`, `source_repo`, `readings_mode` = `reading-list` (citations only, default), `actual-readings` (host the files) or `none`, `include_lectures`, and `withhold` (paths kept off the site, `.releaseignore` syntax). No inputs; a daily cron re-publishes from the file. `enabled: false` (the default) stops both. |
 
 ## Why did I get this email?
 

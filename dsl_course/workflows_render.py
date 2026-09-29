@@ -2136,54 +2136,25 @@ on:
 {_CRON_NOTICE}"""
 
 
-def render_publish_site(
-    source_repos: list[str], materials: list[str] | None = None
-) -> str:
-    """Build/refresh the PUBLIC course site <course-org>.github.io (open courseware).
+def render_publish_site() -> str:
+    """Build/refresh the PUBLIC course site <course-org>.github.io (open courseware), as
+    the course's `.github/opencourse.yml` declares it.
 
-    Opt-in: the first (manual) run scaffolds the site and persists its settings into the
-    site repo; a daily cron then re-syncs from those settings, so a materials edit reaches
-    the public site without another click. Hosts the chosen materials repo's lecture files
-    in the public site (the source repos are private, so links would 404); readings are a
-    text-only list or hosted files. The cron is a no-op for the (many) course orgs that
-    never publish. Separate from the per-semester student-gated sites; releases never touch
-    it."""
-    # A run REPLACES what the site serves, so the default must be the repo the site was
-    # published from - the latest materials repo. `_newest` alone picked the
-    # alphabetically last option of the newest year (`lecture-code-f2026`), and a faculty
-    # member clicking Run with the defaults wiped a live site's materials.
-    default = _newest_materials(source_repos, materials) or next(
-        iter([*(materials or []), *source_repos]), None
-    )
+    No inputs: the file says what to publish, so a manual run and the daily cron do the
+    same thing. The manual run refuses a course whose file is absent or off; the cron is
+    a quiet no-op there (most course orgs never publish). Separate from the per-semester
+    student-gated sites; releases never touch it."""
     return f"""name: Publish course website
 
-# Build/refresh the PUBLIC course site <course-org>.github.io (open courseware). The
-# course materials repos are private, so this HOSTS the chosen repo's lecture files in
-# the site (links would otherwise 404). Readings: 'reading-list' shows citations as text
-# only; 'actual-readings' also hosts + links the files (you carry the copyright
-# responsibility); 'none' skips them. Opt-in - the first manual run scaffolds the site and
-# persists its settings into it; the daily cron then re-syncs from those settings (and does
-# nothing at all for a course org that never published a site).
+# Build/refresh the PUBLIC course site <course-org>.github.io (open courseware) from
+# opencourse.yml in this repo: which materials repo, readings mode, lecture files and
+# what to withhold. Edit that file (or the console's Public website tab), then run this;
+# the daily cron re-publishes from it, and does nothing while it says enabled: false.
 
 on:
   schedule:
     - cron: "58 5 * * *"
   workflow_dispatch:
-    inputs:
-{_choice_input("source_repo", "Materials repo to publish - the site is REBUILT from it; defaults to the latest materials repo", source_repos, default)}
-      readings_mode:
-        description: "Readings: reading-list (citations) / actual-readings (files) / none"
-        required: true
-        type: choice
-        default: reading-list
-        options:
-          - reading-list
-          - actual-readings
-          - none
-      include_lectures:
-        description: "Publish lecture files (the point of the site)"
-        type: boolean
-        default: true
 
 {_concurrency("publish-course-website")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -2192,18 +2163,12 @@ on:
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE_ORG: ${{{{ github.repository_owner }}}}
-          SOURCE_REPO: ${{{{ inputs.source_repo }}}}
-          READINGS_MODE: ${{{{ inputs.readings_mode }}}}
-          INC_LEC: ${{{{ inputs.include_lectures }}}}
         run: |
           gh auth setup-git
-          args=(--course-org "$COURSE_ORG" --source-repo "$SOURCE_REPO" --readings-mode "$READINGS_MODE")
-          [ "$INC_LEC" = "false" ] && args+=(--no-include-lectures)
-          python3 -m dsl_course.site public-sync "${{args[@]}}"
+          python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG"
 {_CRON_CLOSE}
   resync:
-    # The daily catch-up: no inputs, so public-sync re-runs the settings the last manual
-    # publish persisted in the site repo. No site / no persisted settings -> quiet no-op.
+    # The daily catch-up: the same publish, quiet when opencourse.yml is absent or off.
     # Cron has no actor, so this path skips the check-team gate (as Sync site does).
     if: github.event_name == 'schedule'
 {_ungated_preamble()}      - name: Re-sync course website
@@ -2212,5 +2177,5 @@ on:
           COURSE_ORG: ${{{{ github.repository_owner }}}}
         run: |
           gh auth setup-git
-          python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG"{_TEE_RUN_LOG}
+          python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG" --daily{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""

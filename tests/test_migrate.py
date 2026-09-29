@@ -2217,7 +2217,7 @@ def test_the_ticks_cover_every_rendered_cron():
         workflows_render.render_refresh(),
         workflows_render.render_sync_membership(["S"]),
         workflows_render.render_sync_site(["S"]),
-        workflows_render.render_publish_site(["course-materials-x"]),
+        workflows_render.render_publish_site(),
         *(p.read_text() for p in Path(migrate.ROOT, "templates").rglob("*.yml")),
     ]
     crons = [cron for text in rendered for cron in re.findall(r'cron: "([^"]+)"', text)]
