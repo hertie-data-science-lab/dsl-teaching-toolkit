@@ -1,11 +1,12 @@
 // S1 Home (Your courses: every course and semester, ordered by what needs you; Your
 // semesters: the semesters the person is a student of), S0 Sign in, and the read-only view.
 
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ConsoleAuth } from '../auth/console';
 import { FINE_GRAINED_SETTINGS_URL, NEW_FINE_GRAINED_URL, NEW_TOKEN_URL } from '../auth/pat';
 import type { GhUser } from '../github/client';
-import { cohortName, invitationUrl, semesterName, type Course, type CohortRef, type Semester, type TokenKind } from '../model/discovery';
+import { useEnv } from '../env';
+import { cohortName, invitationUrl, semesterName, type Course, type CohortRef, type Invitation, type Semester, type TokenKind } from '../model/discovery';
 import { fmtWhen } from '../model/format';
 import { hiddenSemesters, saveHiddenSemesters } from '../model/prefs';
 import type { Loaded } from '../model/status';
@@ -81,23 +82,59 @@ function semesterCard(s: Semester): Card {
   };
 }
 
-/** Semesters that invited the person: they appear once the invitation is accepted on GitHub. */
-export function InvitedGroup({ invited }: { invited: Semester[] }) {
-  if (!invited.length) return null;
+const article = (role: string) => (/^[aeiou]/.test(role) ? `an ${role}` : `a ${role}`);
+
+/**
+ * The person's pending org invitations, at the top of Home and of a semester's student
+ * screens: GitHub shows the org to no one who has not accepted. A classic token accepts in
+ * the console; the App and a fine-grained token cannot (it takes Members: write, decision
+ * 0002), so they, and a refused accept, go to GitHub's accept page, and the list is read
+ * again when the person comes back to this tab.
+ */
+export function Invitations({ invited, kind }: { invited: Invitation[]; kind?: TokenKind }) {
+  const env = useEnv();
+  const [state, setState] = useState<Record<string, 'accepting' | 'accepted' | 'refused'>>({});
+  const away = useRef(false);
+  useEffect(() => {
+    const back = () => {
+      if (!away.current) return;
+      away.current = false;
+      void env?.rediscover?.();
+    };
+    window.addEventListener('focus', back);
+    return () => window.removeEventListener('focus', back);
+  }, [env]);
+  const shown = invited.filter((i) => state[i.org] !== 'accepted');
+  if (!shown.length) return null;
+  const accept = async (org: string) => {
+    if (!env) return;
+    setState((s) => ({ ...s, [org]: 'accepting' }));
+    try {
+      await env.client.acceptInvitation(org);
+    } catch {
+      setState((s) => ({ ...s, [org]: 'refused' }));
+      return;
+    }
+    setState((s) => ({ ...s, [org]: 'accepted' }));
+    await env.rediscover?.();
+  };
   return (
-    <section class="section" aria-labelledby="h-invited">
-      <h2 id="h-invited">Invited</h2>
-      <ul class="cohort-list">
-        {invited.map((s) => (
-          <li>
-            <a class="cohort-card" href={invitationUrl(s.org)} target="_blank" rel="noopener">
-              <span class="cc-name">{semesterName(s)}<span>You are invited; accept on GitHub to join</span></span>
-              <span class="cc-week" />
-              <span class="chip amber">Invited</span>
-              <span class="cc-next"><span>Accept the invitation <Ext /></span></span>
-            </a>
-          </li>
-        ))}
+    <section class="panel section invitations" aria-labelledby="h-invited">
+      <h2 id="h-invited">{shown.length > 1 ? 'Invitations' : 'Invitation'}</h2>
+      <ul>
+        {shown.map((i) => {
+          const st = state[i.org];
+          return (
+            <li>
+              <span>You have been invited to <b>{i.name}</b>{i.role ? ` as ${article(i.role)}` : ''}.{st === 'refused' ? ' GitHub did not let the console accept it; accept it on GitHub instead.' : ''}</span>
+              {kind === 'classic' && st !== 'refused' ? (
+                <button class="btn small" type="button" disabled={st === 'accepting' || !env} onClick={() => void accept(i.org)}>{st === 'accepting' ? 'Accepting…' : 'Accept'}</button>
+              ) : (
+                <a class="btn small" href={invitationUrl(i.org)} target="_blank" rel="noopener" onClick={() => (away.current = true)}>Accept on GitHub <Ext /></a>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
@@ -149,13 +186,14 @@ function NothingFound({ kind }: { kind?: TokenKind }) {
 
 export function HomeScreen({ courses, semesters = [], invited = [], kind, cohortStates, user, now }: HomeProps) {
   const [hidden, setHidden] = useState(() => hiddenSemesters(user.login));
-  if (!courses.length && (semesters.length || invited.length)) {
+  // An invitation whose role cannot be told is most likely a student's.
+  if (!courses.length && (semesters.length || (invited.length && invited.every((i) => i.role === null)))) {
     return (
       <>
         <Crumbs items={[{ t: 'Your semesters' }]} />
         <div class="page-head"><div><h1>Your semesters</h1><p class="lede">Every semester you are a student of; archived ones stay here as history</p></div></div>
         <div class="stack">
-          <InvitedGroup invited={invited} />
+          <Invitations invited={invited} kind={kind} />
           <StudentWeekHome semesters={semesters.filter((x) => !hidden.has(x.org))} now={now} />
           {semesters.length ? <SemestersGroup semesters={semesters} login={user.login} lead hidden={hidden} setHidden={setHidden} /> : null}
           <JoinStart />
@@ -174,6 +212,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
         <div><h1>Your courses</h1><p class="lede">All courses past &amp; present; ordered by what needs your attention</p></div>
         <div class="actions"><a class="btn" href="#new-course-1">New course</a></div>
       </div>
+      <Invitations invited={invited} kind={kind} />
       <Help title="What am I looking at?" doc="01-new-course-org.md">
         <p>A course holds your materials and assignment templates for every semester. Each semester runs in its own org, which students join. What you can change follows GitHub: the console only offers what your account can do.</p>
       </Help>
@@ -201,7 +240,6 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
               </ul>
             </section>
           ) : null}
-          <InvitedGroup invited={invited} />
           {semesters.length ? <SemestersGroup semesters={semesters} login={user.login} lead={false} hidden={hidden} setHidden={setHidden} /> : null}
         </div>
       )}

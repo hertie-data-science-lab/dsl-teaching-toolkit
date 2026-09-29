@@ -347,6 +347,14 @@ export class GitHubClient {
     return this.listPages<OrgMembership>('/user/memberships/orgs?state=pending');
   }
 
+  /**
+   * Accept `org`'s pending invitation. Works with a classic token; a GitHub App or
+   * fine-grained token needs Members: write for it, which the console's App never has.
+   */
+  async acceptInvitation(org: string): Promise<void> {
+    await this.send('PATCH', `/user/memberships/orgs/${encodeURIComponent(org)}`, { state: 'active' });
+  }
+
   /** The accounts of the App installations the user's App token can see, every page (GitHub App tokens only). */
   async listInstallationAccounts(): Promise<{ login: string; type: string }[]> {
     const list = await this.listPages<{ account?: { login?: string; type?: string } | null }>('/user/installations', (p) => (p as { installations: [] }).installations ?? []);

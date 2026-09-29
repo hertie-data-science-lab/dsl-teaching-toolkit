@@ -99,9 +99,12 @@ Each screen reads with the student's own account:
 Every screen also reads the person's role: `GET /orgs/{org}/teams/auditors/memberships/{login}`
 (the team is secret, but a member may read their own membership). An **auditor** sees the
 materials and the schedule and a note saying what auditing means; nothing offers them a repo,
-a team or marks. On Home, a semester that has **invited** the person (`GET
-/user/memberships/orgs?state=pending`, classic and App sign-in) shows as Invited with GitHub's
-accept link; a fine-grained token cannot list invitations. If the role cannot be read, the screens say so and
+a team or marks. At the top of Home and of the student screens, every course or semester that
+has **invited** the person (`GET /user/memberships/orgs?state=pending`, classic and App
+sign-in; a fine-grained token cannot list invitations) shows with Accept. A classic token
+accepts in the console (`PATCH /user/memberships/orgs/{org}`); the App cannot, as that needs
+Members: write (decision 0002), so it, and a refused accept, link to GitHub's accept page and
+read the list again when the tab regains focus. If the role cannot be read, the screens say so and
 promise no repo, team or marks; an auditor's nav omits Marks and Join.
 
 The visit time behind "new since your last visit" is stored only after that semester's
