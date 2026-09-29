@@ -1,5 +1,5 @@
 import type { GhUser } from '../github/client';
-import type { Course, CohortRef, Semester, TokenKind } from '../model/discovery';
+import type { Course, CohortRef, Invitation, Semester, TokenKind } from '../model/discovery';
 import type { Files } from '../model/files';
 import type { Heartbeat } from '../model/heartbeat';
 import type { Loaded } from '../model/status';
@@ -41,8 +41,8 @@ export interface HomeProps {
   courses: Course[];
   /** The semesters the person is a student of ("Your semesters"). */
   semesters?: Semester[];
-  /** Semesters that invited the person, who has not accepted yet. */
-  invited?: Semester[];
+  /** Course and semester orgs that invited the person, who has not accepted yet. */
+  invited?: Invitation[];
   kind?: TokenKind;
   cohortStates: Record<string, Loaded>;
   now: number;

@@ -24,7 +24,7 @@ import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseScreen, TemplateScreen } from './screens/Course';
 import { MaterialsIndexScreen, TemplatesIndexScreen } from './screens/CourseIndex';
-import { HomeScreen, ReadonlyScreen, SignInScreen } from './screens/Home';
+import { HomeScreen, Invitations, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { InstructorsScreen, StudentsScreen } from './screens/People';
 import { ReleaseScreen, ScheduleScreen } from './screens/Schedule';
 import { OperationsScreen, SiteScreen } from './screens/Site';
@@ -162,6 +162,7 @@ export function App({ state: s }: { state: AppState }) {
             <StudentNav courses={courses} cohortStates={{}} semesters={semesters} semester={stu.semester} current={key} />
           </aside>
           <main id="view" tabindex={-1}>
+            {estate.invited?.length ? <Invitations invited={estate.invited} kind={estate.kind} /> : null}
             <ScreenBoundary key={s.search.value + s.hash.value}><StudentScreen semester={stu.semester} screen={key} studentView={stu.studentView} entry={route.entry} now={s.now.value} /></ScreenBoundary>
           </main>
         </div>

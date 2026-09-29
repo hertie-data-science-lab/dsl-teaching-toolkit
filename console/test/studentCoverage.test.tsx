@@ -16,7 +16,7 @@ import { ArchivedSemester, AboutView, AssignmentsView, AuditorNote, InstructorsV
 import { AskedList, JoinScreen, TeamList, joinTeamUrl } from '../src/screens/StudentJoin';
 import { ReadingsView, materialHref } from '../src/screens/StudentMaterials';
 import { SetupView, cloneCommand, forkOf, joinPath, vscodeFolder } from '../src/screens/StudentSetup';
-import { InvitedGroup } from '../src/screens/Home';
+import { Invitations } from '../src/screens/Home';
 import { GhMd } from '../src/ui/rendered';
 import { FakeGitHub, fileBody, json } from './fake';
 import { StudentNav } from '../src/ui/shell';
@@ -338,7 +338,7 @@ describe('8. the pending invitation', () => {
   it('shows the semester as Invited, not as a member’s', async () => {
     const e = await discoverEstate(client(gh()), { kind: 'classic', login: LOGIN });
     expect(e.semesters).toEqual([]);
-    expect(e.invited?.map((s) => [s.org, s.courseName, s.termLabel])).toEqual([[ORG, 'Deep Learning', 'Fall 2026']]);
+    expect(e.invited).toEqual([{ org: ORG, name: 'Deep Learning, Fall 2026', role: null }]);
     const quiet = new FakeGitHub();
     expect(await pendingOrgs(client(quiet), 'fine-grained')).toEqual([]);
     expect(quiet.seen).toEqual([]);
@@ -346,9 +346,9 @@ describe('8. the pending invitation', () => {
 
   it('links to GitHub’s accept page on Home and under Your requests', async () => {
     const e = await discoverEstate(client(gh()), { kind: 'classic', login: LOGIN });
-    const home = render(<InvitedGroup invited={e.invited!} />);
+    const home = render(<Invitations invited={e.invited!} kind="app" />);
     expect(home).toContain(`href="${invitationUrl(ORG)}"`);
-    expect(home).toContain('Invited');
+    expect(home).toContain('Accept on GitHub');
     const issue = { number: 3, title: 'Join course', state: 'closed', html_url: 'https://github.com/i/3', created_at: '2026-09-24T10:00:00Z', comments: 0, labels: [{ name: 'onboarding' }, { name: 'onboarded' }] };
     expect(render(<AskedList asked={[{ issue, reply: null }]} org={ORG} invitePending />)).toContain(`href="https://github.com/orgs/${ORG}/invitation"`);
     expect(render(<AskedList asked={[{ issue, reply: null }]} org={ORG} />)).not.toContain('/invitation');
