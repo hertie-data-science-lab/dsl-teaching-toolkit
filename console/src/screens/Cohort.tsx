@@ -361,8 +361,7 @@ function Overview(p: ReadyProps) {
         ) : null}
         <section class="panel section">
           <div class="section-head">
-            {/* TODO(R1): Hint "Pick one or more weeks to show only what falls in them. A red number counts that week's problems." */}
-            <h2>Semester</h2>
+            <h2>Semester <Hint label="About the weeks">Pick one or more weeks to show only what falls in them. A red number counts that week's problems.</Hint></h2>
             <span class="wk-filters" role="group" aria-label="Show weeks">
               <button type="button" class="toggle" aria-pressed={isThisWeek} onClick={() => setSelected(thisWeek)}>This week</button>
               <button type="button" class="toggle" aria-pressed={!selected.length} onClick={() => setSelected([])}>All weeks</button>
