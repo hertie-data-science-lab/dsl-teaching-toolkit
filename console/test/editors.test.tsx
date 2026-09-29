@@ -7,11 +7,13 @@ import { describe, expect, it } from 'vitest';
 import SEEDED from '../../templates/semester-config/schedule.yml?raw';
 import { EnvCtx, type Env } from '../src/env';
 import { CONFLICT, saveText, type SaveState } from '../src/edit/save';
-import { YamlText } from '../src/edit/yamlText';
+import { YamlText, obj } from '../src/edit/yamlText';
+import { fieldErrors } from '../src/forms/Form';
+import { COURSE_FACTS } from '../src/tiers/course';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
-import { penaltyRate } from '../src/model/policy';
+import { POLICY, penaltyRate } from '../src/model/policy';
 import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
 import { blankDraft, draftErrors, freshId, readDraft, writeDraft, type ArchiveDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
@@ -22,7 +24,7 @@ import * as defs from '../src/ops/defs';
 import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
 import { ArchiveScreen } from '../src/screens/Archive';
-import { DetailsScreen, MaterialsScreen, WebsiteScreen } from '../src/screens/CourseEdit';
+import { DetailsScreen, MaterialsScreen, WebsiteScreen, courseFileAfter, detailsOf } from '../src/screens/CourseEdit';
 import { AssignmentScreen } from '../src/screens/Assignments';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
@@ -338,6 +340,26 @@ describe('editing screens', () => {
     expect(out).toContain('Defaults for this course’s assignments');
     expect(out).not.toContain('Semester defaults'); // the engine reads none from dsl-course.yml
   });
+  it('course details asks for the contact and licence, with the institution’s in grey', () => {
+    const out = html(<DetailsScreen {...cp} />);
+    expect(out).toContain(`placeholder="${POLICY.contact}"`);
+    expect(out).toContain(`institution default: ${POLICY.licences[0].name}`);
+    expect(out).toContain(`<option value="${POLICY.licences[1].name}"`);
+    // The website's switch lives on its own tab: shown here, read only.
+    expect(out).toMatch(/<dt>Public website<\/dt><dd>Off\. <a class="textlink" href="#website">Manage<\/a>/);
+    expect(out).toContain('href="#website">Manage</a>');
+  });
+  it('writes a contact and a licence into dsl-course.yml and a file without them still saves', () => {
+    const src = 'course_name: ML\ncourse_code: E1\n';
+    const meta = obj(new YamlText(src).toJS());
+    const before = detailsOf(meta);
+    const out = courseFileAfter(src, before, { ...before, about: { ...before.about, contact: 'ml@x.edu', licence: 'CC BY 4.0' } }, meta);
+    expect('text' in out && out.text).toContain('contact: ml@x.edu\nlicence: CC BY 4.0');
+    const same = courseFileAfter(src, before, { ...before, about: { ...before.about, course_code: 'E2' } }, meta);
+    expect('text' in same && same.text).toBe('course_name: ML\ncourse_code: E2\n');
+    expect(fieldErrors(null, COURSE_FACTS, { contact: 'not-an-email' }).contact).toBe('Write an email address.');
+  });
+  it('materials settings previews what is public and what is withheld', () => {
   it('materials settings previews what is withheld, and nothing about the public website', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);

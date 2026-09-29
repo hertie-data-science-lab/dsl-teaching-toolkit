@@ -10,6 +10,8 @@ course_code: {course_code}
 #   # force-pushes, for looking at a feature before it merges - the demo course and nothing
 #   # else.) Semesters inherit this; setting it in a semester's own file does nothing.
 # course_description: One or two sentences, on ONE line - the blurb on every semester site.
+# contact: course@example.edu   # OPTIONAL: the public website's contact; unset = the lab's
+# licence: CC BY 4.0            # OPTIONAL: one of policy.yml's licences; unset = its first
 # site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the SEMESTER sites, link ONLY
 #   # these file types. Default (unset): each session's root files, plus one link per
 #   # subfolder - so a rendered deck lists the deck, not its hundreds of assets. Either way

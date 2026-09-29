@@ -262,6 +262,17 @@ def test_the_example_course_file_validates():
     assert validate(meta, schemas.dsl_course_schema()) == []
 
 
+def test_contact_and_licence_are_optional_course_facts():
+    # Forward-only course metadata: a file without them is valid, one with them too.
+    schema = schemas.dsl_course_schema()
+    base = {"course_name": "ML", "course_code": "E1"}
+    assert validate(base, schema) == []
+    assert (
+        validate({**base, "contact": "ml@x.edu", "licence": "CC BY 4.0"}, schema) == []
+    )
+    assert validate({**base, "contact": "not an email"}, schema) != []
+
+
 def test_the_validator_catches_what_the_schemas_forbid():
     bad = {**CONTRACT_OUTCOME, "conclusion": "maybe", "extra": 1}
     problems = validate(bad, schemas.outcome_schema())

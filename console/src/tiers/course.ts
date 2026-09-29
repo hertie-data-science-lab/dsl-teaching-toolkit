@@ -5,7 +5,7 @@
 
 import { COURSE_RUN_KEYS, institutionLayer, resolve, SOURCES, type Layers } from '../model/cascade';
 import { labelOf } from '../model/labels';
-import { DEFAULT_FORMATS, DEFAULT_TIMEZONE, SUBMIT_VIA_DEFAULT } from '../model/policy';
+import { DEFAULT_FORMATS, DEFAULT_TIMEZONE, POLICY, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import { FORMATS, SUBMIT, formatWord } from './grading';
 import { runTiers } from './runSettings';
 import type { Tiers } from './types';
@@ -19,6 +19,20 @@ export const ABOUT: Tiers = {
   course_name: { tier: 'ask', label: 'Course name', reason: 'Appears on every semester’s student site.' },
   course_code: { tier: 'ask', label: 'Course code', reason: 'Upper case here; lower case in the org name.' },
   course_description: { tier: 'default', label: 'Description', widget: 'markdown', reason: 'One paragraph. Students see it on every semester’s student site home page.' },
+};
+
+const LICENCE = POLICY.licences[0].name;
+
+/** Course facts the public website shows (decision 0019); each falls back to the institution's, shown grey. */
+export const COURSE_FACTS: Tiers = {
+  contact: {
+    tier: 'default', label: 'Contact email', widget: 'email', placeholder: POLICY.contact, defaultLabel: `institution default: ${POLICY.contact}`,
+    check: (v) => (v && !/^[^@\s]+@[^@\s]+$/.test(String(v)) ? 'Write an email address.' : null),
+  },
+  licence: {
+    tier: 'default', label: 'Licence', widget: 'select', defaultLabel: `institution default: ${LICENCE}`,
+    options: [opt('', `Default (${LICENCE})`), ...POLICY.licences.slice(1).map((l) => opt(l.name, l.name))],
+  },
 };
 
 

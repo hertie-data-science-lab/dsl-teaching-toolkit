@@ -106,6 +106,10 @@ COURSE_TOP_KEYS = (
     "central_ref",
     "course_description",
     "site_link_extensions",
+    # Course facts the public website shows (decision 0019). Optional: a course without
+    # them falls back to the institution's `policy.contact` and first licence.
+    "contact",
+    "licence",
 )
 # The assignment_defaults keys New assignment reads as the course's defaults for the
 # questions it asks (contracts section 6); optional, beside COURSE_DEFAULT_KEYS.
@@ -572,6 +576,8 @@ def dsl_course_schema() -> dict:
         {
             "central_ref": central_ref,
             "site_link_extensions": {"type": "array", "items": _str()},
+            # The pattern `policy.contact` is held to.
+            "contact": {"type": "string", "pattern": r"^[^@\s]+@[^@\s]+$"},
         },
     )
     top |= {

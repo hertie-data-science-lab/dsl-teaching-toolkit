@@ -15,7 +15,7 @@ import { CONTENT_KINDS, DEFAULT_SYLLABUS, MATERIALS_FILE, NOTHING_DECLARED, infe
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { ABOUT, courseDefaultTiers } from '../tiers/course';
+import { ABOUT, COURSE_FACTS, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
@@ -60,7 +60,7 @@ export function detailsOf(meta: Record<string, unknown>) {
   });
   const links = Array.isArray(meta.site_link_extensions) ? meta.site_link_extensions.map(String).join(', ') : typeof meta.site_link_extensions === 'string' ? meta.site_link_extensions : '';
   return {
-    about: compact({ course_name: meta.course_name, course_code: meta.course_code, course_description: meta.course_description }),
+    about: compact({ course_name: meta.course_name, course_code: meta.course_code, course_description: meta.course_description, contact: meta.contact, licence: meta.licence }),
     defaults: compact({ ...ad, formats: formatsList(ad.formats)[0] }),
     admins,
     links,
@@ -157,12 +157,13 @@ export function DetailsScreen(p: CourseProps) {
   const meta = y && !y.errors.length ? obj(y.toJS()) : {};
   const before = detailsOf(meta);
   const d = draft ?? before;
-  const ready = courseView(p).course?.ready ?? false;
+  const cv = courseView(p).course;
+  const ready = cv?.ready ?? false;
   const set = (patch: Partial<Details>) => {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
-  const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, courseDefaultTiers(), d.defaults) };
+  const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, COURSE_FACTS, d.about), ...fieldErrors(null, courseDefaultTiers(), d.defaults) };
   const doSave = async () => {
     if (!y || file.kind !== 'ready') return;
     if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
@@ -192,7 +193,12 @@ export function DetailsScreen(p: CourseProps) {
             <div class="form-section">
               <h3>About the course</h3>
               <SchemaForm id="cd" schema={null} tiers={ABOUT} values={d.about} onChange={(v) => set({ about: v })} />
-              <dl class="kv"><dt>Org</dt><dd>{course.org} <span class="footnote">cannot be renamed here</span></dd><dt>Engine version</dt><dd>{String(meta.central_ref ?? 'release')} <span class="footnote">set by the lab</span></dd></dl>
+              <SchemaForm id="cdf" schema={null} tiers={COURSE_FACTS} values={d.about} onChange={(v) => set({ about: v })} />
+              <dl class="kv">
+                <dt>Org</dt><dd>{course.org} <span class="footnote">cannot be renamed here</span></dd>
+                <dt>Engine version</dt><dd>{String(meta.central_ref ?? 'release')} <span class="footnote">set by the lab</span></dd>
+                <dt>Public website</dt><dd>{cv?.stages?.C6 === 'done' ? 'On' : 'Off'}. <a class="textlink" href="#website">Manage</a></dd>
+              </dl>
             </div>
             <div class="form-section">
               <h3>Course admins <Hint label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, in every semester. Instructors and teaching assistants are set for each semester under Instructors, and change only that semester and the course’s materials and assignment templates.</Hint></h3>
