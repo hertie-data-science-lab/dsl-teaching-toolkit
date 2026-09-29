@@ -11,7 +11,8 @@ import { fmtWhen } from '../model/format';
 import { hiddenSemesters, saveHiddenSemesters } from '../model/prefs';
 import type { Loaded } from '../model/status';
 import { studentHref } from '../router';
-import { Crumbs, Help, Probs, ghUrl } from '../ui/bits';
+import { Crumbs, Probs, ghUrl } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { StudentWeekHome } from './Student';
 import { JoinStart } from './StudentJoin';
@@ -39,7 +40,7 @@ function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, user: GhUse
     return { ...base, sub, week: '', status: <span class="chip">read only</span>, next: [['', 'Problems and dates need write access']], ro: true, past: false, urgency: -1 };
   if (!l || l.kind === 'loading') return { ...base, sub, week: '…', status: <span class="chip">Reading</span>, next: [], ro: false, past: false, urgency: 0 };
   if (l.kind !== 'ready')
-    return { ...base, sub, week: '', status: <span class="chip">{l.kind === 'absent' ? 'Not computed yet' : 'Unreadable'}</span>, next: [['', l.kind === 'absent' ? 'Open it and press Check now.' : 'The status file could not be read.']], ro: false, past: false, urgency: 0 };
+    return { ...base, sub, week: '', status: <span class="chip">{l.kind === 'absent' ? 'Not computed yet' : 'Unreadable'}</span>, next: [['', l.kind === 'absent' ? 'Open it and press Re-check.' : 'The status file could not be read.']], ro: false, past: false, urgency: 0 };
   const s = l.status, tz = s.semester?.timezone, n = (s.problems ?? []).length;
   const past = s.semester?.live === false;
   return {
@@ -209,13 +210,10 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
     <>
       <Crumbs items={[{ t: 'All courses' }]} />
       <div class="page-head">
-        <div><h1>Your courses</h1><p class="lede">All courses past &amp; present; ordered by what needs your attention</p></div>
+        <div><h1>Your courses <Hint doc="01-new-course-org.md">A course holds your materials and assignment templates for every semester; each semester runs in its own org, which students join. The console offers only what your GitHub account can do.</Hint></h1><p class="lede">All courses past &amp; present; ordered by what needs your attention</p></div>
         <div class="actions"><a class="btn" href="#new-course-1">New course</a></div>
       </div>
       <Invitations invited={invited} kind={kind} />
-      <Help title="What am I looking at?" doc="01-new-course-org.md">
-        <p>A course holds your materials and assignment templates for every semester. Each semester runs in its own org, which students join. What you can change follows GitHub: the console only offers what your account can do.</p>
-      </Help>
       {!courses.length ? (
         <NothingFound kind={kind} />
       ) : (
@@ -290,7 +288,7 @@ export function SignInScreen({ auth, onSignedIn }: { auth: ConsoleAuth; onSigned
   const problem = error ? <div class="invalid-msg"><span /><span>{error}</span></div> : null;
   return (
     <div class="signin">
-      <div class="page-head" style="margin-bottom:0"><div><h1>Sign in</h1><p class="lede">The console works with your GitHub account: it can change exactly what you can change on GitHub, and nothing else.</p></div></div>
+      <div class="page-head" style="margin-bottom:0"><div><h1>Sign in to the DSL Teaching Console</h1><p class="lede">Sign in with GitHub. The console can see and change only what your GitHub account can.</p></div></div>
       {who ? (
         <section class="panel section">
           <div class="who-card"><img src={who.avatar_url} alt="" /><div><b>{who.name || who.login}</b><div class="footnote">Signed in as {who.login}</div></div></div>

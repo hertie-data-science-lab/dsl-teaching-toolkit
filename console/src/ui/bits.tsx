@@ -1,4 +1,4 @@
-// The mockup's shared pieces: help, crumbs, problem cards, the stage rail, footnotes.
+// The mockup's shared pieces: crumbs, problem cards, the stage rail, footnotes.
 
 import type { ComponentChildren } from 'preact';
 import { COHORT_STAGES, COURSE_STAGES, PROBLEM_AREA, STAGE_WORD, md, opLabel, ago } from '../model/format';
@@ -20,20 +20,6 @@ export function editUrl(org: string, repo: string, path: string, branch = 'main'
 /** One workflow run of `repo` (`owner/name`). */
 export function runUrl(repo: string, runId: number): string {
   return `https://github.com/${repo}/actions/runs/${runId}`;
-}
-
-export function Help({ title, doc, children }: { title: string; doc?: string; children: ComponentChildren }) {
-  return (
-    <details class="help">
-      <summary>{title}</summary>
-      <div class="help-body">
-        {children}
-        <p>
-          <a href={doc ? `${DOCS}${doc}` : DOCS} target="_blank" rel="noopener">Learn more</a>
-        </p>
-      </div>
-    </details>
-  );
 }
 
 export function Crumbs({ items }: { items: { t: string; href?: string }[] }) {

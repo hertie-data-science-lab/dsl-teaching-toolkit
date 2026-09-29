@@ -12,7 +12,8 @@ import type { Outcome } from '../model/types';
 import { outcomePath } from '../ops/adapter';
 import { updateSite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { CheckLine, Crumbs, Help, Lives, Loading, OpsList } from '../ui/bits';
+import { CheckLine, Crumbs, Lives, Loading, OpsList } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { Ext } from '../ui/icons';
 import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
@@ -55,7 +56,7 @@ function Announcement({ p, repo, path, sha }: { p: ReadyProps; repo: string; pat
       <span class="r-sub">{a ? a.text : path.replace(/^_announcements\//, '').replace(/\.md$/, '')}</span>
       <span class="r-side">
         {save.kind !== 'idle' ? <CheckLine cls={save.kind === 'busy' ? 'busy' : save.kind}>{save.text}</CheckLine> : null}
-        <button class="btn small quiet" type="button" disabled={save.kind === 'busy'} onClick={() => void runSave({ owner: p.cohort.org, repo, path }, null, f.kind === 'ready' ? f.sha : sha, { message: `site: remove the announcement ${path}, from the Instructor Console` })}>Remove</button>
+        <button class="btn small quiet" type="button" disabled={save.kind === 'busy'} onClick={() => void runSave({ owner: p.cohort.org, repo, path }, null, f.kind === 'ready' ? f.sha : sha, { message: `site: remove the announcement ${path}, from the DSL Teaching Console` })}>Remove</button>
       </span>
     </li>
   );
@@ -81,12 +82,12 @@ function Site(p: ReadyProps) {
   const saveHome = async () => {
     if (home.kind !== 'ready' || body === null) return;
     const front = FRONT.exec(home.text)?.[0] ?? '';
-    if (await runHome({ owner: p.cohort.org, repo, path: 'index.md' }, `${front}${body.endsWith('\n') ? body : `${body}\n`}`, home.sha, { message: 'site: edit the home text, from the Instructor Console' })) setBody(null);
+    if (await runHome({ owner: p.cohort.org, repo, path: 'index.md' }, `${front}${body.endsWith('\n') ? body : `${body}\n`}`, home.sha, { message: 'site: edit the home text, from the DSL Teaching Console' })) setBody(null);
   };
   const addAnn = async () => {
     if (!newAnn.text.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(newAnn.date)) return setAnnSave({ kind: 'bad', text: 'Give the date and the text.' });
     const f = announcementFile(newAnn.date, newAnn.text.trim());
-    if (await runAnn({ owner: p.cohort.org, repo, path: f.path }, f.content, null, { message: 'site: add an announcement, from the Instructor Console' })) {
+    if (await runAnn({ owner: p.cohort.org, repo, path: f.path }, f.content, null, { message: 'site: add an announcement, from the DSL Teaching Console' })) {
       setNewAnn({ date: todayOf(now, tz), text: '' });
     }
   };
@@ -94,15 +95,12 @@ function Site(p: ReadyProps) {
     <>
       <Crumbs items={cohortCrumbs(p, 'Site')} />
       <div class="page-head">
-        <div><h1>Student site</h1><p class="lede">Students’ single page for the semester. Almost everything on it comes from the schedule, instructors and materials.</p></div>
+        <div><h1>Student site <Hint doc="11-configure-cohort-site.md">The home text and announcements are yours. The schedule, lectures, assignments and instructors pages are rewritten on every update.</Hint></h1><p class="lede">Students’ single page for the semester. Almost everything on it comes from the schedule, instructors and materials.</p></div>
         <div class="actions">
           <OpButtons def={updateSite(cohortScope(p))} verbCls="btn outline" />
           <a class="btn quiet" href={url} target="_blank" rel="noopener">Open the student site <Ext /></a>
         </div>
       </div>
-      <Help title="What you edit here" doc="11-configure-cohort-site.md">
-        <p>The home text and announcements are yours. The schedule, lectures, assignments and instructors pages are generated and rewritten on every update.</p>
-      </Help>
       <div class="stack">
         <section class="panel section">
           <h2>Last update</h2>
@@ -183,11 +181,8 @@ function Operations(p: ReadyProps) {
     <>
       <Crumbs items={cohortCrumbs(p, 'All operations')} />
       <div class="page-head">
-        <div><h1>All operations</h1><p class="lede">Everything automation and you have done in {p.cohort.termLabel}, newest first. Outcomes stay here after the panel closes.</p></div>
+        <div><h1>All operations <Hint doc="reference/actions-reference.md">Each line says what happened and how many. Open Details for the reasons behind a count and the run on GitHub.</Hint></h1><p class="lede">Everything automation and you have done in {p.cohort.termLabel}, newest first. Outcomes stay here after the panel closes.</p></div>
       </div>
-      <Help title="Reading an outcome" doc="reference/actions-reference.md">
-        <p>Each line says what happened and how many. Open Details for the reason codes behind a count, and the run on GitHub.</p>
-      </Help>
       <section class="panel"><OpsList list={ops} now={p.now} full runRepo={`${p.course.org}/.github`} outcomes={outcomes} /></section>
     </>
   );

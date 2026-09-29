@@ -19,7 +19,8 @@ import { keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, sched
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
 import { TIMEZONES } from '../tiers/course';
-import { Crumbs, EditFile, Help, Lives, Md, ProblemCards, ghUrl } from '../ui/bits';
+import { Crumbs, EditFile, Lives, Md, ProblemCards, ghUrl } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { Check } from '../ui/icons';
 import { NOTHING_TO_RELEASE, releaseRef } from './Cohort';
@@ -450,11 +451,11 @@ function View(p: ReadyProps) {
       const text = assignmentsAfterSchedule(af, newAsg ? { key: newAsg, run } : null, gone);
       if (text !== null) {
         if (!validAssignments(parse(text) ?? {})) return setSave({ kind: 'bad', text: invalidText(ASSIGNMENTS_FILE, validAssignments) });
-        second = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text, sha: af.sha, opts: { message: `assignments: ${newAsg ? `add ${newAsg}` : `remove ${gone.join(', ')}`}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
+        second = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text, sha: af.sha, opts: { message: `assignments: ${newAsg ? `add ${newAsg}` : `remove ${gone.join(', ')}`}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
       }
     }
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${Object.keys(removed).join(', ')}` : `${dirty} changes`;
-    const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: y.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
+    const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: y.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
     // Once the schedule is written its drafts are gone, whatever happens to assignments.yml:
     // a retry must not add the entry a second time.
     await saveSteps(env, setSave, first, second, newAsg ? 'Entry saved without its run settings' : 'Entry removed, but its block is still in assignments.yml', () => {
@@ -579,14 +580,11 @@ function View(p: ReadyProps) {
       <Crumbs items={cohortCrumbs(p, 'Schedule')} />
       <div class="page-head">
         <div>
-          <h1>Schedule</h1>
+          <h1>Schedule <Hint doc="07-schedule-releases.md">The schedule drives everything automatic: releases, hand outs, collection and the student site’s calendar. Dates are in the semester’s timezone.</Hint></h1>
           <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {skipped ? `${skipped === 1 ? 'One release' : `${skipped} releases`} will be skipped as it stands.` : 'Every release has its folder.'}</p>
         </div>
         <div class="actions"><CheckNow p={p} label="Check" /><a class="btn outline" href="#schedule-new">Add entry</a></div>
       </div>
-      <Help title="How the schedule works" doc="07-schedule-releases.md">
-        <p>The schedule drives everything automatic: releases, hand outs, collection, the student site’s calendar. Dates are in the semester’s timezone. The Details column shows exactly what students see.</p>
-      </Help>
       <p class="site-note" style="margin-bottom:12px">
         Every row here reads <b>Identifier</b>: Name. The student site shows the same two parts on two lines, the bold identifier then the name, with no colon; exams and events show only the bold title. Whether the site should switch to one line is a theme decision.
       </p>
@@ -669,20 +667,15 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
       <Crumbs items={cohortCrumbs(p, ident, [{ t: 'Schedule', href: '#schedule' }])} />
       <div class="page-head">
         <div>
-          <h1><b>{ident}</b>: {rel.title}</h1>
+          <h1><b>{ident}</b>: {rel.title} <Hint doc="08-release-materials-to-cohort.md">{st === 'released'
+            ? 'Edits students should see: push to the semester copy, or release again after fixing the course copy. Edits future semesters should keep: keep for future semesters.'
+            : st === 'will_be_skipped' ? 'Automation will skip this until the folder exists.'
+            : st === 'late' ? 'Reason codes tell you whether the source, the schedule or the scheduler was at fault.'
+            : 'Nothing to do; it goes out at the scheduled time. You can release it early.'}</Hint></h1>
           <p class="lede"><span class={`chip ${st === 'will_be_skipped' ? 'bad' : st === 'released' ? 'ok' : ''}`}>{RELEASE_WORD[st]}</span>{fmtWhen(rel.when, tz, year)}</p>
         </div>
         <div class="actions"><a class="btn quiet" href={`#schedule-${rel.id}`}>Edit entry</a></div>
       </div>
-      <Help title="Releases" doc="08-release-materials-to-cohort.md">
-        <p>
-          {st === 'released'
-            ? 'Edits students should see: push to the semester copy, or release again after fixing the course copy. Edits future semesters should keep: keep for future semesters.'
-            : st === 'will_be_skipped' ? 'Automation will skip this until the folder exists.'
-            : st === 'late' ? 'Reason codes tell you whether the source, the schedule or the scheduler was at fault.'
-            : 'Nothing to do; it goes out at the scheduled time. You can release it early.'}
-        </p>
-      </Help>
       <div class="grid-2">
         <section class="panel section">
           <h2>From and to</h2>

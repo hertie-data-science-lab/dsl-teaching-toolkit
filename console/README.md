@@ -1,4 +1,4 @@
-# Instructor Console
+# DSL Teaching Console
 
 A static web app (Vite + TypeScript + Preact) that shows an instructor their courses and
 semesters as the lifecycle model describes them, and a student their semesters, reading GitHub

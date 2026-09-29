@@ -131,12 +131,12 @@ export function App({ state: s }: { state: AppState }) {
   const courses = estate.courses;
   const semesters = studentSemesters(estate);
   const sel = parseSearch(s.search.value);
-  const title = s.mode.value === 'student' ? 'Student Console' : 'Instructor Console';
+  const title = s.mode.value === 'student' ? 'Student view' : 'Instructor view';
 
   if (sel.join) {
     return (
       <EnvCtx.Provider value={s.env(user)}>
-        <Topbar user={user} title="Student Console" navOpen={false} onMenu={() => {}} onSignOut={s.signOut} />
+        <Topbar user={user} title="Student view" navOpen={false} onMenu={() => {}} onSignOut={s.signOut} />
         <div class="shell" style="grid-template-columns:minmax(0,1fr)"><main id="view" tabindex={-1}><ScreenBoundary key={s.search.value}><JoinCourseScreen org={sel.join} /></ScreenBoundary></main></div>
         <Footer />
       </EnvCtx.Provider>

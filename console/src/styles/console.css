@@ -73,13 +73,19 @@ main { min-width: 0; }
 .menu-wrap { position: relative; }
 .menu-wrap .popmenu { left: auto; right: 0; top: calc(100% + 6px); width: 260px; }
 
-/* ================= help ================= */
-.help { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; margin-bottom: 20px; }
-.help summary { cursor: pointer; list-style: none; padding: 10px 14px; min-height: 40px; font-family: var(--font-display); font-weight: 600; font-size: 14px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
-.help summary::-webkit-details-marker { display: none; }
-.help summary::before, .fold > summary::before { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; margin-right: 2px; flex: none; }
-.help[open] summary::before, .fold[open] > summary::before { transform: rotate(45deg); }
-.help .help-body { padding: 0 14px 12px 31px; color: var(--ink-2); display: grid; gap: 6px; }
+/* ================= hint: the one help pattern, a ? with a popover ================= */
+.hint { position: relative; display: inline-flex; vertical-align: middle; margin-left: 6px; font-family: var(--font-body); font-weight: 400; font-size: 14px; line-height: 1.45; text-wrap: wrap; }
+.hint-btn { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--rule-strong); background: var(--surface); color: var(--ink-2); font-family: var(--font-display); font-weight: 700; font-size: 12px; line-height: 1; padding: 0; display: grid; place-items: center; cursor: help; }
+.hint:hover .hint-btn, .hint-btn:focus-visible { border-color: var(--ink-2); color: var(--ink); }
+.hint-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 35; width: max-content; max-width: min(320px, calc(100vw - 32px)); padding: 10px 12px; background: var(--surface); color: var(--ink-2); border: 1px solid var(--rule-strong); border-radius: 8px; box-shadow: var(--shadow); text-align: left; }
+.hint-pop[hidden] { display: none; }
+.hint-pop::before { content: ""; position: absolute; left: 0; right: 0; top: -9px; height: 9px; }
+.hint-pop.flip-x { right: auto; left: 0; }
+.hint-pop.flip-y { top: auto; bottom: calc(100% + 8px); }
+.hint-pop.flip-y::before { top: auto; bottom: -9px; }
+.lbl-row { display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
+.fold > summary::before { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; margin-right: 2px; flex: none; }
+.fold[open] > summary::before { transform: rotate(45deg); }
 .lives { font-size: 12.5px; color: var(--muted); }
 .lives a { color: var(--muted); }
 .lives a:hover { color: var(--link); }
@@ -518,9 +524,15 @@ input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-sof
 .checks .ck.ok svg { width: 9px; height: 9px; }
 .checks .ck.busy { border-color: var(--ink-2); border-top-color: transparent; animation: spin 0.8s linear infinite; }
 .checks .ck.no { border-color: var(--bad); }
+.checks .ck.warn { border-color: var(--amber); }
+.defaults-line { margin-top: 12px; font-size: 14px; color: var(--ink-2); }
+.modal-scrim { position: fixed; inset: 0; z-index: 45; background: color-mix(in srgb, var(--ink) 35%, transparent); display: grid; place-items: center; padding: 16px; }
+.modal { background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 12px; box-shadow: var(--shadow); width: min(720px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
+.modal:focus { outline: none; }
 .ext-links { display: grid; gap: 8px; }
 .ext-links a { display: flex; gap: 10px; align-items: center; padding: 10px 12px; min-height: 44px; border: 1px solid var(--rule); border-radius: 8px; color: var(--ink); text-decoration: none; font-weight: 600; }
 .ext-links a:hover { border-color: var(--ink-2); }
+.ext-links .lbl-row > a { flex: 1; }
 .ext-links a span { font-weight: 400; font-size: 13px; color: var(--muted); }
 .ext-links .n { width: 22px; height: 22px; border-radius: 50%; background: var(--sunk); display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 12px; flex: none; }
 .setup-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }

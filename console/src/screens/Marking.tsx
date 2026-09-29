@@ -17,7 +17,8 @@ import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { studentHref, tabHref } from '../router';
-import { CheckLine, Crumbs, Help, Lives, Loading } from '../ui/bits';
+import { CheckLine, Crumbs, Lives, Loading } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { Check, Lock } from '../ui/icons';
 import type { TabProps } from './Assignments';
@@ -72,7 +73,7 @@ export function MarksTab(p: TabProps) {
   const scope = cohortScope(p);
   const head = (
     <div class="page-head">
-      <div><h1>{assignmentTitle(a)}</h1><p class="lede">{a.marks.filled} of {a.marks.total} marked. Totals and late penalties are worked out for you.</p></div>
+      <div><h1>{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. {group ? 'A team’s marks and feedback reach every member once you return marks.' : 'Nothing reaches a student until you return marks.'}</Hint></h1><p class="lede">{a.marks.filled} of {a.marks.total} marked. {rate !== null ? `Totals and late penalties (${round(rate * 100)}% of the total per late day) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p></div>
       <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name)} /></div>
     </div>
   );
@@ -178,16 +179,12 @@ export function MarksTab(p: TabProps) {
   const doSave = async () => {
     const out = new YamlText(file.text);
     for (const [k, val] of Object.entries(edits)) out.assign(JSON.parse(k) as Path, val);
-    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path }, out.text, file.sha, { message: `marks: ${a.slug}, ${changed} ${sheet.group ? 'team' : 'student'}${changed === 1 ? '' : 's'}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
+    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path }, out.text, file.sha, { message: `marks: ${a.slug}, ${changed} ${sheet.group ? 'team' : 'student'}${changed === 1 ? '' : 's'}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
     if (ok) setEdits({});
   };
   return (
     <>
       {top}
-      <Help title="How marks work" doc="10-grade-and-return-assignments.md">
-        <p>Submission details come from the repos and cannot be edited. You enter {qs.length ? 'points per question, with optional feedback on each,' : 'one score'} feedback that students see, an adjustment, and private notes that are never shared. {rate !== null ? `The penalty is ${round(rate * 100)}% of the total per late day.` : 'No late penalty applies.'} Nothing reaches a student until you return marks.</p>
-        {sheet.group ? <p>A team’s marks and its feedback, overall and per question, reach every member; each member can get their own feedback and adjustment too.</p> : null}
-      </Help>
       {sheet.frozen ? <p class="note" style="margin-bottom:12px"><b>Frozen at the late cutoff.</b> The submission details no longer change; your marks and feedback are still yours to edit.</p> : null}
       <div class="table-wrap" style="max-height:620px;overflow:auto">
         <table class="grid marks">
@@ -282,7 +279,7 @@ export function TeamsTab(p: TabProps) {
     const mine = cur.teams.flatMap((t) => (t.members.length ? t.members : ['']).map((h) => ({ assignment: teamsKey, team: t.name, github_handle: h })));
     const header = table.header.length ? table.header : TEAMS_HEADER;
     const text = writeTable({ header, rows: [...others, ...mine.filter((r) => r.github_handle)] });
-    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv' }, text, file.kind === 'ready' ? file.sha : null, { message: `teams: ${teamsKey}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
+    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv' }, text, file.kind === 'ready' ? file.sha : null, { message: `teams: ${teamsKey}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
     if (ok) setDraft(null);
   };
   // As the engine's formation window: hand out to the late cutoff (due + the late window).
@@ -297,15 +294,12 @@ export function TeamsTab(p: TabProps) {
     <>
       <div class="page-head">
         <div>
-          <h1>{assignmentTitle(a)}</h1>
+          <h1>{assignmentTitle(a)} <Hint doc="09-release-assignment-to-cohort.md">Students form their own teams on the Join screen until the window closes; you can assign the rest here. Students without a team get no repo at hand out.</Hint></h1>
           <p class="lede">{joined.length - free.length} of {joined.length} joined students in {cur.teams.length} teams; {free.length} without a team.{notJoined ? ` ${notJoined} students have not joined yet and cannot be placed.` : ''}</p>
         </div>
         <div class="actions"><a class="btn outline" href={studentHref(p.cohort.org, 'join')}>Join screen, as students see it</a></div>
       </div>
       {p.tabs}
-      <Help title="How teams form" doc="09-release-assignment-to-cohort.md">
-        <p>Students form their own teams on the Join screen of the student console until the window closes; you can assign the rest here. Students without a team get no repo at hand out. Assign them here or they are left out.</p>
-      </Help>
       <div class="stack">
         <div class="grid-2">
           <section class="panel section">
@@ -420,13 +414,10 @@ function MarksOverview(p: ReadyProps) {
       <Crumbs items={cohortCrumbs(p, 'Marks')} />
       <div class="page-head">
         <div>
-          <h1>Marks</h1>
+          <h1>Marks <Hint doc="10-grade-and-return-assignments.md">This page only reads. Open an assignment to enter and return its marks.</Hint></h1>
           <p class="lede">{sheets.size ? `${returned} of ${list.length} assignment${list.length === 1 ? '' : 's'} returned; ${toMark} mark${toMark === 1 ? '' : 's'} still to enter.` : 'Where marking stands this semester, one row per assignment.'}</p>
         </div>
       </div>
-      <Help title="Where marks are entered" doc="10-grade-and-return-assignments.md">
-        <p>This page only reads. Open an assignment to enter its marks and return them to students.</p>
-      </Help>
       {dir.kind === 'loading' ? <Loading what="Reading the mark sheets" /> : dir.kind === 'error' ? (
         <CheckLine cls="bad">Could not list the mark sheets in {CONFIG_REPO}/{SHEETS}: {dir.message}</CheckLine>
       ) : !sheets.size ? (

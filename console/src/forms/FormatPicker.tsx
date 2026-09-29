@@ -4,6 +4,8 @@
 
 import { SOURCE_WORD } from '../model/cascade';
 import { DEFAULT_FORMATS } from '../model/policy';
+import { Hint } from '../ui/Hint';
+import { Invalid } from './Form';
 import { FORMATS, formatWord } from '../tiers/grading';
 import type { Values } from '../tiers/types';
 import { autogradeBlock, formatBlock, formatError, toggleFormat } from '../wizards/model';
@@ -36,14 +38,13 @@ export function FormatPicker({ v, set, id = 'na', fallback }: { v: Values; set: 
         })}
       </div>
       {offs.length ? <p class="off-why">{[...new Set(offs)].join(' ')}</p> : null}
-      {err ? <span class="invalid-msg"><span>{err}</span></span> : null}
+      {err ? <Invalid>{err}</Invalid> : null}
       {runnable.length > 1 ? (
         <div class="field">
-          <label for={`${id}-runnable`}>Runnable format <span class="default">the first one listed</span></label>
+          <span class="lbl-row"><label for={`${id}-runnable`}>Runnable format</label><Hint label="About the runnable format">With several formats, the first is what autograde runs and the completion check reads.</Hint></span>
           <select id={`${id}-runnable`} onChange={(e) => set({ ...v, formats: runnableFirst(formats, (e.target as HTMLSelectElement).value) })}>
             {runnable.map((f) => <option value={f} selected={formats[0] === f}>{formatWord(f)}</option>)}
           </select>
-          <p class="why">Automatic tests and the completion check read this one; the others are marked by hand.</p>
         </div>
       ) : null}
       <p class="why">Seeds the starter files and decides how markers see submissions. One mark sheet covers them all.</p>

@@ -3,7 +3,8 @@
 import { fmtDay } from '../model/format';
 import { archive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { Crumbs, Help } from '../ui/bits';
+import { Crumbs } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { Check } from '../ui/icons';
 import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -20,12 +21,9 @@ function Archive(p: ReadyProps) {
     <>
       <Crumbs items={cohortCrumbs(p, 'Archive')} />
       <div class="page-head">
-        <div><h1>Archive {t}</h1><p class="lede">{archived ? 'Archived: every repo is read-only.' : `Scheduled for ${when ?? 'never'}.`}</p></div>
+        <div><h1>Archive {t} <Hint doc="10-grade-and-return-assignments.md">Archiving makes every repo read-only. Students keep access and nothing is deleted.</Hint></h1><p class="lede">{archived ? 'Archived: every repo is read-only.' : `Scheduled for ${when ?? 'never'}.`}</p></div>
         <div class="actions">{archived ? null : <OpButtons def={archive(cohortScope(p), when, passed)} />}</div>
       </div>
-      <Help title="What archiving does" doc="10-grade-and-return-assignments.md">
-        <p>Archiving freezes every repo read-only. Students keep access. Nothing is deleted.</p>
-      </Help>
       <div class="grid-2">
         <section class="panel section">
           <h2>What happens</h2>

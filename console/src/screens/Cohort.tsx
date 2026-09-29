@@ -9,7 +9,8 @@ import type { Assignment, Status } from '../model/types';
 import { checkAccess, releaseEarly, type ReleaseRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { Release } from '../model/types';
-import { Crumbs, Help, Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
+import { Crumbs, Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { CheckNow, MoreMenu, WithStatus, cohortName, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
@@ -214,7 +215,7 @@ function Overview(p: ReadyProps) {
       <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: cohortName(p) }]} />
       <div class="page-head">
         <div>
-          <h1>{cohortName(p)}</h1>
+          <h1>{cohortName(p)} <Hint doc="07-schedule-releases.md">This week lists what happens without you; Problems lists what will not happen until you fix it. Re-check re-reads every file now; automation does it every 15 minutes.</Hint></h1>
           <p class="lede">
             {status.semester ? <span>Week {status.semester.week} of {status.semester.weeks}.</span> : null}
             {amber ? <span class="amber">Setup done, but {amber} {amber > 1 ? 'stages have a problem' : 'stage has a problem'}</span> : <span>Setup complete</span>}
@@ -224,10 +225,6 @@ function Overview(p: ReadyProps) {
         </div>
         <div class="actions"><Probs n={problems.length} /><CheckNow p={p} /><MoreMenu p={p} /></div>
       </div>
-      <Help title="What happens here" doc="07-schedule-releases.md">
-        <p>This week lists what will happen without you. Problems lists what will not happen until you fix it; each Fix opens the editor at the entry at fault.</p>
-        <p>Check now re-reads every file and re-runs every check; automation does the same every 15 minutes.</p>
-      </Help>
       <div class="stack">
         {showSetup ? (
           <section class="panel section">

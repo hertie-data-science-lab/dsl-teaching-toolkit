@@ -143,7 +143,7 @@ describe('an org on old names', () => {
     const out = render(<NotMigratedScreen what="semester" org={ORG} leftovers={[{ old: 'classroom-config', new: 'semester-config' }]} />);
     expect(out).toContain('This semester has not been migrated yet');
     expect(out).toContain('NOT_MIGRATED: `classroom-config` is the old name of `semester-config` - run the migration');
-    expect(out).not.toContain('Check now');
+    expect(out).not.toContain('Re-check');
   });
 });
 

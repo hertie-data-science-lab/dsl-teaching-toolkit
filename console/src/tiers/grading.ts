@@ -64,15 +64,15 @@ export function settingsTiers(): Tiers {
     title: { tier: 'default', label: 'Title', reason: 'Shown to students on the site and in their repo.' },
     type: {
       tier: 'ask', label: 'Alone or in teams', widget: 'radio', defaultLabel: 'default: alone', reason: 'This choice changes downstream options.',
-      options: [opt('individual', 'Alone', 'One repo per student. The default.'), opt('group', 'In teams', 'One repo per team; teams form before hand out.')],
+      options: [opt('individual', 'Alone', 'One repo per student.'), opt('group', 'In teams', 'One repo per team; teams form before hand out.')],
     },
     submit_via: {
       tier: 'default', label: 'Where students submit', widget: 'radio', default: SUBMIT_VIA_DEFAULT, defaultLabel: `default: ${labelOf('submit_via', SUBMIT_VIA_DEFAULT).toLowerCase()}`, reason: 'Decides what marking reads.',
-      options: SUBMIT.map(([v, l, s]) => opt(v, l, v === SUBMIT_VIA_DEFAULT ? `${s} The default.` : s)),
+      options: SUBMIT.map(([v, l, s]) => opt(v, l, s)),
     },
     autograde: {
       tier: 'default', label: 'Run automatic tests on submissions', widget: 'radio', default: 'false', defaultLabel: 'default: off',
-      options: [opt('true', 'On', 'Tests suggest a mark. Marker has final discretion.'), opt('false', 'Off', 'Marked purely by hand. The default')],
+      options: [opt('true', 'On', 'Tests suggest a mark. Marker has final discretion.'), opt('false', 'Off', 'Marked purely by hand.')],
       forced: (v) => (isDrop(v) ? { value: undefined, reason: 'A shared drop box holds every student’s work in one repo, so tests cannot run per student.' } : null),
       check: (x) => (x === undefined || x === 'true' || x === 'false' ? null : `The file says “${String(x)}”. Choose on or off.`),
     },
@@ -83,7 +83,7 @@ export function settingsTiers(): Tiers {
     completion_check: {
       tier: 'advanced', label: 'Completion check', widget: 'radio', default: 'auto',
       defaultLabel: 'default: auto (on for a notebook, off otherwise)', reason: 'Flags submissions with unanswered questions in the mark sheet. Reads the runnable format.',
-      options: [opt('auto', 'Auto', 'The default.'), opt('on', 'On'), opt('off', 'Off')],
+      options: [opt('auto', 'Auto'), opt('on', 'On'), opt('off', 'Off')],
       forced: (v) => (isDrop(v) ? { value: 'auto', reason: 'Off: not available for a shared drop box.' } : null),
     },
     grader_pdf: {

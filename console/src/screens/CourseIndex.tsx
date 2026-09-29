@@ -7,7 +7,8 @@ import type { Files } from '../model/files';
 import { ago, assignmentIdent, fmtDay } from '../model/format';
 import { DEFAULT_FORMATS } from '../model/policy';
 import { formatWord, formatsList } from '../tiers/grading';
-import { Crumbs, Help, Loading, ghUrl } from '../ui/bits';
+import { Crumbs, Loading, ghUrl } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { CourseHeaderActions, StateChip, courseView } from './Course';
@@ -69,12 +70,9 @@ export function MaterialsIndexScreen(p: CourseProps) {
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Materials' }]} />
       <div class="page-head">
-        <div><h1>Materials</h1><p class="lede">The course’s materials repos. A scheduled release copies their folders to a semester.</p></div>
+        <div><h1>Materials <Hint doc="02-add-materials-to-course.md">Materials live here privately until a scheduled release copies them to a semester. Some files can be withheld from students, and some selected for the public website.</Hint></h1><p class="lede">The course’s materials repos. A scheduled release copies their folders to a semester.</p></div>
         <CourseHeaderActions course={course} ready={v.course?.ready ?? false} />
       </div>
-      <Help title="What lives in a materials repo" doc="02-add-materials-to-course.md">
-        <p>Materials live here privately until a scheduled release copies them to a semester. Some files can be withheld from students, and some selected for the public website.</p>
-      </Help>
       <div class="stack">
         <section class="panel section">
           <div class="section-head"><h2>Materials repos</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New materials</a></div>

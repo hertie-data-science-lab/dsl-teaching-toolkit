@@ -11,7 +11,8 @@ import type { Files } from '../model/files';
 import { ABOUT, courseDefaultTiers } from '../tiers/course';
 import type { Values } from '../tiers/types';
 import { COURSE_ORG } from '../tiers/wizard';
-import { CheckLine, Crumbs, Help } from '../ui/bits';
+import { CheckLine, Crumbs } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { SaveLine } from '../ui/edit';
 import { CENTRAL_ACTIONS, runBootstrap, type CentralRun } from '../wizards/central';
 import { useDraft } from '../wizards/drafts';
@@ -56,7 +57,7 @@ export function ncDone(d: NcDraft, org: string, orgChecks: Check[] | null, setUp
 export function NewCourseScreen({ files, step: asked }: { files: Files; step?: number }) {
   const env = useEnv();
   const me = env?.user;
-  const [d, set, clear] = useDraft<NcDraft>('new-course', () => ({ admins: [{ github_handle: me?.login ?? '', email: me?.email ?? '', start: '', end: '' }] }));
+  const [d, set] = useDraft<NcDraft>('new-course', () => ({ admins: [{ github_handle: me?.login ?? '', email: me?.email ?? '', start: '', end: '' }] }));
   const org = ncOrg(d);
   const orgLive = useLive(env && org ? async () => ({ org, checks: await checkOrg(env.client, org) }) : null, [asked]);
   const setupLive = useLive(env && org ? async () => ({ org, checks: await checkCourseSetUp(env.client, org) }) : null, [org, asked]);
@@ -88,7 +89,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
       return false;
     }
     if (out.text === file.text) return true;
-    return runSave({ owner: org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, file.sha, { message: `course: ${what}, from the Instructor Console` });
+    return runSave({ owner: org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, file.sha, { message: `course: ${what}, from the DSL Teaching Console` });
   };
 
   const setUpCourse = async () => {
@@ -119,7 +120,6 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
         }} />
         <OrgLinks org={org} />
         <LiveChecks live={{ value: orgChecks, busy: orgLive.busy, run: orgLive.run }} pending={[`The org ${org} exists`, 'hertie-dsl-bot can manage it']} />
-        {d.course_name || d.orgVerified ? <div><button class="btn small quiet" type="button" onClick={clear}>Start a different course</button></div> : null}
       </>
     );
     foot = <button class="btn" type="button" disabled={!done[0] || Object.keys(errs).length > 0} onClick={() => { set({ orgVerified: org }); go(2); }}>Continue</button>;
@@ -133,8 +133,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
       <>
         <SchemaForm id="nc2" schema={null} tiers={ABOUT} values={about} onChange={(v) => set({ course_name: v.course_name as string, course_code: v.course_code as string, course_description: v.course_description as string })} />
         <div class="field">
-          <span class="label">Course admins <span class="default">default: you</span></span>
-          <p class="footnote">Course admins keep every button for this course across years. They can differ from a given semester’s instructors, who are set per semester under Instructors.</p>
+          <span class="label">Course admins <span class="default">default: you</span> <Hint label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, in every semester. Instructors and teaching assistants are set for each semester under Instructors, and change only that semester and the course’s materials and assignment templates.</Hint></span>
           <AdminRows admins={d.admins} id="nca" onChange={(admins) => set({ admins })} />
         </div>
         <dl class="kv"><dt>Org</dt><dd>{org}</dd><dt>Engine version</dt><dd>release <span class="footnote">set by the lab</span></dd><dt>Bot token</dt><dd>Set up for you</dd></dl>
@@ -170,8 +169,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     const errs = fieldErrors(null, courseDefaultTiers(), defaults);
     body = (
       <>
-        <p>These are the course’s defaults. Left empty, the institution’s value in grey applies. Each semester can set its own, and each assignment its own.</p>
-        <div class="form-section"><h3>Defaults for this course’s assignments</h3><SchemaForm id="ncx" schema={null} tiers={courseDefaultTiers()} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
+        <div class="form-section"><h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3><SchemaForm id="ncx" schema={null} tiers={courseDefaultTiers()} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
         <div class="form-section">
           <h3>Site links</h3>
           <div class="field">
@@ -203,7 +201,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     body = (
       <>
         <Checks list={[...(orgChecks ?? []), ...(setUp ?? []), ...summary]} busy={orgLive.busy || setupLive.busy} />
-        <ul class="checks"><li><span class="ck no" /><span>No materials yet</span></li><li><span class="ck no" /><span>No assignment templates yet</span></li></ul>
+        <ul class="checks"><li><span class="ck todo" /><span>No materials yet</span></li><li><span class="ck todo" /><span>No assignment templates yet</span></li></ul>
         <p>The course is set up. It is ready for a semester once it has materials and at least one assignment template.</p>
         <div class="actions">
           <a class="btn" href={`?course=${org}#new-materials`}>Add materials</a>
@@ -217,10 +215,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
   return (
     <>
       <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: 'New course' }]} />
-      <div class="page-head"><div><h1>New course</h1></div></div>
-      <Help title="What a course is" doc="01-new-course-org.md">
-        <p>A course holds your materials and assignment templates for every semester. You set it up once.</p>
-      </Help>
+      <div class="page-head"><div><h1>New course <Hint doc="01-new-course-org.md">A course holds your materials and assignment templates for every semester. You set it up once.</Hint></h1></div></div>
       <div class="wizard">
         <Rail steps={STEPS} cur={step} done={done} heading="Three steps, then a check" base="new-course-" />
         <StepCard of={step < 4 ? `Step ${step} of 3` : 'The check'} title={title} back={back} foot={foot}>{body}</StepCard>

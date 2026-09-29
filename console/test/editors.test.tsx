@@ -64,7 +64,7 @@ describe('saving a file', () => {
     const env = saveEnv(gh);
     await env.statuses.reload(COHORT_ORG, 'semester-config');
     const seen: SaveState[] = [];
-    const ok = await saveText(env, T, 'releases: {}\n', 'old-sha', { message: 'schedule: edit s5, from the Instructor Console', statusRepo: [COHORT_ORG, 'semester-config'] }, (s) => seen.push(s));
+    const ok = await saveText(env, T, 'releases: {}\n', 'old-sha', { message: 'schedule: edit s5, from the DSL Teaching Console', statusRepo: [COHORT_ORG, 'semester-config'] }, (s) => seen.push(s));
     expect(ok).toBe(true);
     const put = gh.seen.find((x) => x.method === 'PUT')!.body as Record<string, unknown>;
     expect(put.sha).toBe('old-sha');
@@ -300,7 +300,7 @@ describe('editing screens', () => {
   });
   it('teams shows the window, the team size from assignments.yml and who has no team', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams' })} />);
-    expect(out).toContain('<h1>Assignment 3: Group project</h1>');
+    expect(out).toContain('<h1>Assignment 3: Group project <span class="hint">');
     expect(out).toContain('2 of 3 joined students in 1 teams; 1 without a team.');
     expect(out).toContain('team-alpha<span>2 of 3</span>');
     expect(out).toContain('Carla Cohen');
@@ -308,7 +308,7 @@ describe('editing screens', () => {
   });
   it('marks computes the total with the penalty and adjustment', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks' })} />);
-    expect(out).toContain('<h1>Assignment 2: Regression</h1>');
+    expect(out).toContain('<h1>Assignment 2: Regression <span class="hint">');
     expect(out).toContain('Total / 40');
     expect(out).toContain('−20%');
     expect(out).toContain('<td class="calc">28.2</td>');

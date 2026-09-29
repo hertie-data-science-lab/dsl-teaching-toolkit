@@ -49,11 +49,11 @@ export function HeaderLinks({ course, cohort }: { course?: Course; cohort?: Coho
   );
 }
 
-export function Topbar({ user, course, cohort, onSignOut, navOpen, onMenu, setup, title = 'Instructor Console' }: {
+export function Topbar({ user, course, cohort, onSignOut, navOpen, onMenu, setup, title }: {
   user: GhUser | null;
   /** Show the link to Your setup (the instructor screens). */
   setup?: boolean;
-  /** The app's name: Student Console in student mode. */
+  /** The view after sign-in: Instructor view or Student view. */
   title?: string;
   course?: Course;
   cohort?: CohortRef;
@@ -66,7 +66,7 @@ export function Topbar({ user, course, cohort, onSignOut, navOpen, onMenu, setup
     <header class="topbar">
       <div class="topbar-inner">
         {user ? <button class="pill-ghost menu-btn" type="button" aria-expanded={navOpen} aria-controls="sidenav-wrap" onClick={onMenu}>Menu</button> : null}
-        <a class="app-name" href="#home">{title} <small>Data Science Lab</small></a>
+        <a class="app-name" href="#home">{user ? title ?? 'Instructor view' : 'DSL Teaching Console'} <small>Data Science Lab</small></a>
         <nav class="hdr-links" aria-label="Open on the web"><HeaderLinks course={course} cohort={cohort} /></nav>
         <div class="topbar-right">
           {user ? (
@@ -89,7 +89,7 @@ export function Footer({ course, cohort }: { course?: Course; cohort?: CohortRef
   return (
     <footer class="site-footer">
       <div class="f-inner">
-        <div><h2>{course ? course.name : 'Instructor Console'}</h2><p>{cohort ? cohort.termLabel : course ? 'Course' : 'All courses'}</p></div>
+        <div><h2>{course ? course.name : 'DSL Teaching Console'}</h2><p>{cohort ? cohort.termLabel : course ? 'Course' : 'All courses'}</p></div>
         <div>
           <ul>
             <li><a href="https://github.com/hertie-data-science-lab" target="_blank" rel="noopener"><Gh />Hertie School Data Science Lab</a></li>

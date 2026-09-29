@@ -30,7 +30,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe('Home groups', () => {
   it('a student-only account lands on Your semesters, archived ones greyed, with no instructor actions', () => {
     const out = render(<HomeScreen courses={[]} semesters={[NLP, NLP_OLD]} cohortStates={{}} now={0} user={user} />);
-    expect(out).toContain('<h1>Your semesters</h1>');
+    expect(out).toContain('<h1>Your semesters');
     expect(out).not.toContain('New course');
     expect(out).not.toContain('Your courses');
     expect(out).toContain('Natural Language Processing, Fall 2026');
@@ -41,7 +41,7 @@ describe('Home groups', () => {
 
   it('a person with both roles sees Your courses, then Your semesters', () => {
     const out = render(<HomeScreen courses={[course]} semesters={[NLP]} cohortStates={{}} now={0} user={user} />);
-    expect(out).toContain('<h1>Your courses</h1>');
+    expect(out).toContain('<h1>Your courses <span class="hint">');
     expect(out.indexOf('Machine Learning, Fall 2026')).toBeLessThan(out.indexOf('Your semesters'));
     expect(out.indexOf('Your semesters')).toBeLessThan(out.indexOf('Natural Language Processing, Fall 2026'));
   });
