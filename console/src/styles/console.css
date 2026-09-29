@@ -180,7 +180,7 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .wk-timeline .week-h { font-size: 14px; margin: 0 0 6px; }
 .wk-empty { font-size: 12.5px; color: var(--muted); margin: 0; padding: 2px 0; border-top: 1px solid var(--rule); }
 .wk-group + .wk-group { margin-top: 12px; }
-.p-anytime { margin-top: 14px; }
+.p-anytime, .p-overdue + .problems { margin-top: 14px; }
 .wk .today { position: absolute; top: -1px; bottom: -1px; width: 2px; background: var(--ink); }
 .wk .today::before { content: "Today"; position: absolute; bottom: calc(100% + 3px); left: 50%; transform: translateX(-50%); font-family: var(--font-display); font-weight: 700; font-size: 11px; color: var(--ink); white-space: nowrap; }
 .strip-wrap { padding-top: 16px; }

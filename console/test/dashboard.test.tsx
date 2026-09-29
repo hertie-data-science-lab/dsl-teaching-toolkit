@@ -69,7 +69,7 @@ describe('term weeks', () => {
 
   it('group every week under All weeks, empty ones too, and out-of-term rows in their buckets', () => {
     const groups = weekGroups(rows, term, TZ, 'all');
-    expect(groups[0]).toMatchObject({ key: 'before', label: 'Before the term' });
+    expect(groups[0]).toMatchObject({ key: 'before', label: 'Before the semester' });
     expect(groups[0].rows.map((r) => r.entry)).toEqual(['orientation']);
     expect(groups.filter((g) => typeof g.key === 'number')).toHaveLength(15);
     expect(groups.find((g) => g.key === 4)!.rows).toEqual([]);
@@ -89,14 +89,17 @@ describe('term weeks', () => {
 describe('the header line', () => {
   it('reads semester, dates, week, exams and archive', () => {
     const s = { ...STATUS, semester: { ...STATUS.semester!, archive_date: '2027-01-12' } };
-    expect(headerLine(s, sched, rows, TZ)).toBe('Fall 2026, 7 Sep to 18 Dec. Week 3 of 15. Exams 22 Oct and 15 Dec. Archive 12 Jan 2027.');
+    expect(headerLine(s, sched, rows, TZ, 2026)).toBe('Fall 2026, 7 Sep to 18 Dec. Week 3 of 15. Exams 22 Oct and 15 Dec. Archive 12 Jan 2027.');
   });
 
-  it('says Starts before week 1 and leaves out what is not known, with no stray punctuation', () => {
+  it('says Starts before week 1 only without the range, and leaves out what is not known', () => {
     const s = { ...STATUS, semester: { ...STATUS.semester!, week: 0, archive_date: null } };
-    expect(headerLine(s, sched, [], TZ)).toBe('Fall 2026, 7 Sep to 18 Dec. Starts 7 Sep.');
-    const bare = { ...STATUS, semester: { ...STATUS.semester!, start: null, end: null, archive_date: null } };
-    expect(headerLine(bare, null, [], TZ)).toBe('Fall 2026. Week 3 of 15.');
+    expect(headerLine(s, sched, [], TZ, 2026)).toBe('Fall 2026, 7 Sep to 18 Dec.');
+    const open = { ...STATUS, semester: { ...STATUS.semester!, week: 0, end: null, archive_date: null } };
+    expect(headerLine(open, null, [], TZ, 2026)).toBe('Fall 2026. Starts 7 Sep.');
+    // No start date: the year is said against this year.
+    const bare = { ...STATUS, semester: { ...STATUS.semester!, start: null, end: null, archive_date: '2027-01-12' } };
+    expect(headerLine(bare, null, [], TZ, 2026)).toBe('Fall 2026. Week 3 of 15. Archive 12 Jan 2027.');
   });
 
   it('names a month once', () => {
@@ -115,11 +118,11 @@ afterEach(() => {
   host = null;
 });
 
-function mount() {
+function mount(status: Status = STATUS, now = NOW) {
   const files = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE });
   host = document.createElement('div');
   document.body.appendChild(host);
-  act(() => render(<CohortScreen course={course} cohort={cohort} loaded={{ kind: 'ready', status: STATUS, sha: 's', stale: [] }} files={files} now={NOW} heartbeat={null} />, host!));
+  act(() => render(<CohortScreen course={course} cohort={cohort} loaded={{ kind: 'ready', status, sha: 's', stale: [] }} files={files} now={now} heartbeat={null} />, host!));
   return host;
 }
 
@@ -159,12 +162,12 @@ describe('the Dashboard', () => {
     expect(listed).toContain('Trees and ensembles');
     expect(listed).toContain('37 of 48 submitted so far.');
     expect(listed).not.toContain('Midterm');
-    expect(listed).not.toContain('Before the term');
+    expect(listed).not.toContain('Before the semester');
     click(button(h, 'All weeks'));
     const all = h.querySelector('.grid-2 .panel')!.textContent!;
     expect(all).toContain('Midterm');
-    expect(all).toContain('Before the term');
-    expect(all).toContain('After the term');
+    expect(all).toContain('Before the semester');
+    expect(all).toContain('After the semester');
     click(cell(h, 3));
     click(cell(h, 3)); // off again: nothing selected is All weeks
     expect(button(h, 'All weeks').getAttribute('aria-pressed')).toBe('true');
@@ -193,5 +196,38 @@ describe('the Dashboard', () => {
     expect(tl.querySelector('input, select, textarea')).toBeNull();
     click(h.querySelector<HTMLButtonElement>('.wk-expand')!);
     expect(h.querySelector('.term-strip')).not.toBeNull();
+    expect(h.querySelector('.wk-expand')!.getAttribute('aria-label')).toBe('Show every week');
+  });
+
+  it('shows what is overdue under This week, and filters other weeks strictly', () => {
+    const late = { ...STATUS.problems![0], id: 'schedule:s2:SOURCE_MISSING', text: 'Session 2 was skipped.', when: '2026-09-17T10:00:00+02:00' };
+    const h = mount({ ...STATUS, problems: [late, ...STATUS.problems!] });
+    expect(h.querySelector('.p-overdue')!.textContent).toContain('Overdue');
+    expect(h.querySelector('.p-overdue')!.textContent).toContain('Session 2 was skipped.');
+    click(cell(h, 3));
+    click(cell(h, 4)); // week 4 alone: strict, so nothing overdue and nothing dated
+    expect(h.querySelector('.p-overdue')).toBeNull();
+    expect(h.textContent).toContain('No problems in week 4. 2 in other weeks.');
+    expect(h.textContent).toContain('Nothing scheduled in week 4.');
+    click(button(h, 'Show all weeks'));
+    expect(button(h, 'All weeks').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('never says no problems this week while the only ones are undated', () => {
+    const h = mount({ ...STATUS, problems: STATUS.problems!.filter((p) => !p.when) });
+    expect(h.textContent).not.toContain('No problems this week');
+    expect(h.querySelector('.p-anytime')).not.toBeNull();
+  });
+
+  it('selects week 1 before the semester and All weeks after it', () => {
+    const before = mount({ ...STATUS, semester: { ...STATUS.semester!, week: 0 } }, Date.parse('2026-09-01T10:00:00+02:00'));
+    expect(cell(before, 1).getAttribute('aria-pressed')).toBe('true');
+    expect(button(before, 'This week').getAttribute('aria-pressed')).toBe('true');
+    expect(before.textContent).not.toContain('Before the semester');
+    render(null, before);
+    before.remove();
+    const after = mount(STATUS, Date.parse('2027-01-20T10:00:00+01:00'));
+    expect(button(after, 'All weeks').getAttribute('aria-pressed')).toBe('true');
+    expect(after.textContent).toContain('After the semester');
   });
 });

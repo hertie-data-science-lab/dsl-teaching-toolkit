@@ -220,12 +220,11 @@ export function releaseIdent(r: Release, all: Release[]): string {
 }
 
 export const TYPE_CLASS: Record<string, string> = {
-  lecture: 'lec', lab: 'lab', readings: 'lec', handout: 'asg', hand_out: 'asg', due: 'asg', exam: 'exam',
+  lecture: 'lec', lab: 'lab', readings: 'lec', handout: 'asg', due: 'asg', exam: 'exam',
   special_event: 'evt', event: 'evt', term: 'term', archive: 'term', release: 'term',
 };
-// `hand_out` is status.json's spelling (`this_week[].kind`), `handout` the console's row type.
 export const TYPE_LABEL: Record<string, string> = {
-  lecture: 'lecture', lab: 'lab', readings: 'readings', handout: 'hand out', hand_out: 'hand out', due: 'due', exam: 'exam',
+  lecture: 'lecture', lab: 'lab', readings: 'readings', handout: 'hand out', due: 'due', exam: 'exam',
   special_event: 'event', event: 'event', term: 'semester', archive: 'archive', release: 'release',
 };
 

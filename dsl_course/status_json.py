@@ -506,9 +506,18 @@ def _source_sentences(fault: ConfigFault, now: datetime) -> tuple[str, str]:
     return text, stops
 
 
-def problem_from_fault(fault: ConfigFault, org: str, now: datetime) -> dict:
+def problem_from_fault(
+    fault: ConfigFault,
+    org: str,
+    now: datetime,
+    handouts: dict[str, datetime | None] | None = None,
+) -> dict:
     """One `problems[]` entry for one fault. `org` is where the fault's file is when the
     fault does not say otherwise (the semester, for everything in semester-config).
+
+    `when` is the instant the fault bites: the fault's own `fires` (a release, a hand-out),
+    except a template's, which bites at the hand-out that consumes the template -
+    `handouts`, by schedule key; undated without one.
 
     The fix pointer names the repo, path and line to edit and the console screen that
     edits it; a file on a branch other than `main` (a template's `solution`) says which."""
@@ -566,10 +575,10 @@ def problem_from_fault(fault: ConfigFault, org: str, now: datetime) -> dict:
         "stops": stops,
         "fix": fix,
     }
-    # The instant the fault bites (a release, a hand-out, a late cutoff): the week the
-    # console's strip counts it under. Absent for a fault no date pins.
-    if fault.fires is not None:
-        problem["when"] = fault.fires.isoformat()
+    # The week the console's strip counts it under. Absent for a fault no date pins.
+    when = (handouts or {}).get(entry) if filed.kind == "template" else fault.fires
+    if when is not None:
+        problem["when"] = when.isoformat()
     return problem
 
 
@@ -1263,9 +1272,12 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
         *facts.teams_faults,
         *facts.sheet_faults,
     ]
-    problems = [problem_from_fault(f, facts.org, now) for f in faults]
+    handouts = {k: a.handout_datetime for k, a in facts.sched.assignments.items()}
+    problems = [problem_from_fault(f, facts.org, now, handouts) for f in faults]
     problems += [problem_from_fault(f, course.org, now) for f in course.faults]
-    problems += [problem_from_fault(f, course.org, now) for f in facts.template_faults]
+    problems += [
+        problem_from_fault(f, course.org, now, handouts) for f in facts.template_faults
+    ]
     problems += _no_email_problem(facts.org, facts.people)
     problems += [
         materials_problem(m, course.org) for m in course.materials if not m.topic

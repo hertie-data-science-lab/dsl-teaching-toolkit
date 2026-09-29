@@ -1,9 +1,9 @@
 // Hash routes are the mockup's tokens (`#dashboard`, `#schedule-s5`, `#template-assignment-3`);
 // a problem's fix `{screen, entry}` is the route `#<screen>-<entry>`. An assignment's tabs
 // ride after a slash (`#assignment-assignment-2/marks`); the retired `#teams-<slug>` and
-// `#marks-<slug>` screens parse to those tabs, and the hashes decision 0012 renamed
-// (`#cohort`, `#staff`, `#new-cohort-<n>`, `#schedule-term`) to their new names, so old links
-// still land. Which course or semester the page is about rides in the query string
+// `#marks-<slug>` screens parse to those tabs, and the hashes decisions 0012 and 0015 renamed
+// (`#cohort`, `#staff`, `#new-cohort-<n>`, `#schedule-term`; `#semester` to `#dashboard`) to
+// their new names, so old links still land. Which course or semester the page is about rides in the query string
 // (`?cohort=<org>` or `?course=<org>`: `?semester=` is taken by the student screens), so a
 // link from a fault mail can name both. `?semester=<org>` opens that semester's student screens:
 // a student's own, or an instructor's Student view. `?join=<org>` opens the Join course form
