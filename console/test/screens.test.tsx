@@ -129,14 +129,14 @@ describe('S4 cohort overview', () => {
   const t = text(<CohortScreen {...props()} />);
   it('leads with the header, term strip, problems, this week and assignments', () => {
     expect(t).toContain('Machine Learning, Fall 2026');
-    expect(t).toContain('Week 3 of 15.');
+    expect(t).toContain('Fall 2026, 7 Sep to 18 Dec. Week 3 of 15. Exam 22 Oct. Archive 31 Jan 2027.');
     expect(t).toContain('Setup done, but 2 stages have a problem');
     expect(out).toContain('class="term-strip"');
     expect((out.match(/class="wk[ "]/g) ?? []).length).toBe(15);
     expect(out).toContain('wk now');
-    expect(t).toContain('Session 5 cites folder lectures/05_trees');
-    expect(t).toContain('The release on Thu 8 Oct will be skipped.');
-    expect(out).toContain('href="#schedule-s5"');
+    // This week on load: the s5 problem (week 5) is counted on its cell, not listed.
+    expect(t).not.toContain('Session 5 cites folder lectures/05_trees');
+    expect(out).toMatch(/aria-label="Week 5, from 5 Oct[^"]*; 1 problem"/);
     expect(out).toContain('href="#template-assignment-3"');
     expect(t).toContain('(course)');
     expect(t).toContain('Assignment 2: Regression');
@@ -152,7 +152,7 @@ describe('S4 cohort overview', () => {
     expect(t).toContain('Preview the next automatic run');
     expect(t).toContain('Keep for future semesters');
     expect(out).not.toMatch(/role="menuitem" disabled/);
-    expect(t).toContain('This week lists what happens without you');
+    expect(t).toContain('Pick weeks in the strip to show only those weeks.');
   });
   it('flags a stale status', () => {
     expect(text(<CohortScreen {...props({ loaded: { ...ready, stale: ['schedule.yml'] } as Loaded })} />)).toContain('schedule.yml changed since this semester was last checked');

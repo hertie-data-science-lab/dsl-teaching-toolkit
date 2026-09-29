@@ -81,6 +81,27 @@ export function fmtShort(iso: string, tz?: string): string {
   return `${z.d} ${MON[z.m - 1]}`;
 }
 
+/** "12 Jan", with the year only when it is not `refYear`: "12 Jan 2027". */
+export function fmtDate(iso: string, tz?: string, refYear?: number): string {
+  const z = zoned(iso, tz);
+  return `${fmtShort(iso, tz)}${refYear !== undefined && z.y !== refYear ? ` ${z.y}` : ''}`;
+}
+
+/** Days as a sentence names them, one month said once: "8 and 15 Dec", "30 Nov and 8 Dec". */
+export function fmtDays(isos: string[], tz?: string, refYear?: number): string {
+  const groups: { key: string; days: number[]; tail: string }[] = [];
+  for (const iso of [...isos].sort()) {
+    const z = zoned(iso, tz);
+    const key = `${z.y}-${z.m}`;
+    const g = groups[groups.length - 1];
+    if (g?.key === key) {
+      if (!g.days.includes(z.d)) g.days.push(z.d);
+    } else groups.push({ key, days: [z.d], tail: fmtDate(iso, tz, refYear).replace(/^\d+ /, '') });
+  }
+  const parts = groups.flatMap((g) => g.days.map((d, i) => (i === g.days.length - 1 ? `${d} ${g.tail}` : String(d))));
+  return parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
 export function dayKey(iso: string, tz?: string): string {
   const z = zoned(iso, tz);
   return `${z.y}-${String(z.m).padStart(2, '0')}-${String(z.d).padStart(2, '0')}`;
@@ -199,11 +220,12 @@ export function releaseIdent(r: Release, all: Release[]): string {
 }
 
 export const TYPE_CLASS: Record<string, string> = {
-  lecture: 'lec', lab: 'lab', readings: 'lec', handout: 'asg', due: 'asg', exam: 'exam',
+  lecture: 'lec', lab: 'lab', readings: 'lec', handout: 'asg', hand_out: 'asg', due: 'asg', exam: 'exam',
   special_event: 'evt', event: 'evt', term: 'term', archive: 'term', release: 'term',
 };
+// `hand_out` is status.json's spelling (`this_week[].kind`), `handout` the console's row type.
 export const TYPE_LABEL: Record<string, string> = {
-  lecture: 'lecture', lab: 'lab', readings: 'readings', handout: 'hand out', due: 'due', exam: 'exam',
+  lecture: 'lecture', lab: 'lab', readings: 'readings', handout: 'hand out', hand_out: 'hand out', due: 'due', exam: 'exam',
   special_event: 'event', event: 'event', term: 'semester', archive: 'archive', release: 'release',
 };
 
