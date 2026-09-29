@@ -194,7 +194,7 @@ function Overview(p: TabProps) {
           {a.state === 'open' || a.state === 'late_window'
             ? 'Students push to their own repo until the due date. Late work is accepted with the penalty until late work closes.'
             : a.state === 'marking' ? 'Marks and feedback go to students; notes you keep for yourself do not. Return marks previews first.'
-            : a.state === 'teams_forming' || a.state === 'blocked' ? 'Students form teams on the student site; you can assign the rest. Team-less students get their own repo at hand out.'
+            : a.state === 'teams_forming' || a.state === 'blocked' ? 'Students form teams on the Join screen of the student console; you can assign the rest. Team-less students get their own repo at hand out.'
             : 'Hands out at the scheduled time, or now.'}
         </p>
         <p>Preview never changes anything students see.</p>
@@ -221,7 +221,7 @@ function Overview(p: TabProps) {
             <div class="big">{big} <small>/ {bigOf}</small></div>
             <div class="meter"><i style={`width:${bigOf ? ((big / bigOf) * 100).toFixed(1) : 0}%;background:var(--asg-ink)`} /></div>
             <p class="footnote">
-              {cur === 2 || cur === 3 ? `${a.units - a.submissions} have not pushed since hand out.` : cur >= 4 ? `${a.marks.total - a.marks.filled} still to mark.` : group ? 'Teams form on the student site until hand out.' : 'Nothing handed out yet.'}
+              {cur === 2 || cur === 3 ? `${a.units - a.submissions} have not pushed since hand out.` : cur >= 4 ? `${a.marks.total - a.marks.filled} still to mark.` : group ? 'Teams form on the Join screen until hand out.' : 'Nothing handed out yet.'}
             </p>
           </section>
           <section class="panel section">
@@ -239,7 +239,7 @@ function Overview(p: TabProps) {
           <ul class="state-actions">
             {row(cur <= 1 ? 'now' : 'past', 'Declared', handedOut ? `Handed out ${fmtWhen(a.handout, tz, year)} to ${a.units} ${group ? 'teams' : 'students'}.` : 'Hands out at its time, or now.',
               handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><OpButtons def={handout(scope, ref)} small /></div>)}
-            {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the student site; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={tabHref(a.slug, 'teams')}>Open teams</a></div>) : null}
+            {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the Join screen of the student console; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={tabHref(a.slug, 'teams')}>Open teams</a></div>) : null}
             {row(cur === 2 || cur === 3 ? 'now' : cur > 3 ? 'past' : 'later', 'Open, late window',
               cur < 2 ? 'Opens after hand out.' : cur > 3 ? `Closed ${fmtDay(a.grading_cutoff_datetime, tz, year)}.` : 'Update every copy pushes an assignment template file to every student and posts a note on each Submission receipts issue. Collect now pulls the latest work.',
               cur === 2 || cur === 3 ? (
