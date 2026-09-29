@@ -2475,7 +2475,10 @@ def test_a_solution_whose_cutoff_cannot_be_read_is_held(monkeypatch):
 def test_a_held_solution_is_a_fault_on_its_schedule_line(monkeypatch):
     # Held quietly, the solution simply runs late; the digest says why, at the line to move.
     _windows(monkeypatch, {"a-f2026": 7, "b-f2026": 0})
-    (fault,) = scheduler._held_solution_faults("Course-Org", _late_window_plan())
+    plan = _late_window_plan()
+    (fault,) = scheduler._held_solution_faults(
+        "Course-Org", plan, datetime(2026, 10, 1, tzinfo=BERLIN)
+    )
     assert (fault.where, fault.field, fault.lineno, fault.file) == (
         "assignments.assignment-1",
         "solution_datetime",
@@ -2487,6 +2490,9 @@ def test_a_held_solution_is_a_fault_on_its_schedule_line(monkeypatch):
         "grading cutoff on 2026-10-20 23:59."
     )
     assert fault.what.endswith("held, so the solution goes out at the cutoff instead")
+    # past the cutoff nothing is held any more, so there is nothing to say
+    after = datetime(2026, 10, 21, tzinfo=BERLIN)
+    assert scheduler._held_solution_faults("Course-Org", plan, after) == []
 
 
 def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):

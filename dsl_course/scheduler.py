@@ -501,18 +501,18 @@ def _solution_due(
 
 
 def _held_solution_faults(
-    course_org: str, sched: schedule.Schedule
+    course_org: str, sched: schedule.Schedule, now: datetime
 ) -> list[ConfigFault]:
-    """A fault on each `solution_datetime` the scheduler will hold: set inside the
-    template's late window, which the parser cannot see. It goes into the schedule.yml
+    """A fault on each `solution_datetime` the scheduler is holding, or will: set inside
+    the template's late window, which the parser cannot see. It goes into the schedule.yml
     digest, beside the entries the parser refused, so the date gets moved rather than
-    quietly running late."""
+    quietly running late. Once the cutoff has passed nothing is held, and nothing said."""
     out = []
     for slug, entry in sched.assignments.items():
         if entry.solution_datetime is None:
             continue
         cutoff = _solution_cutoff(course_org, sched, slug)
-        if cutoff is None or entry.solution_datetime >= cutoff:
+        if cutoff is None or cutoff <= now or entry.solution_datetime >= cutoff:
             continue
         out.append(
             ConfigFault(
@@ -1480,7 +1480,9 @@ def _release_phase(
         sched,
         now,
         dry_run,
-        None if extra is None else extra + _held_solution_faults(course_org, sched),
+        None
+        if extra is None
+        else extra + _held_solution_faults(course_org, sched, now),
     )
     # The same treatment for every other file faculty edit by hand: a roster nobody can be
     # enrolled from, a people.yml entry that grants nothing, a teams.csv row that will not
