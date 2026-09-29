@@ -29,6 +29,7 @@ import { InstructorsScreen, StudentsScreen } from './screens/People';
 import { ReleaseScreen, ScheduleScreen } from './screens/Schedule';
 import { OperationsScreen, SiteScreen } from './screens/Site';
 import { HelpScreen } from './screens/Help';
+import { SetupScreen } from './screens/Setup';
 import { MarksOverviewScreen } from './screens/Marking';
 import { NewAssignmentScreen } from './screens/NewAssignment';
 import { NewCohortScreen } from './screens/NewCohort';
@@ -178,8 +179,8 @@ export function App({ state: s }: { state: AppState }) {
   // An org still on retired names gets one screen, before anything of it is read. Only the
   // orgs the page is about are checked: a semester only when one of its screens opens.
   const nav = s.search.value + s.hash.value;
-  const aboutCourse = !!ctx.course && screen !== 'home' && screen !== 'help' && wiz?.name !== 'new-course';
-  const semesterPage = !!ctx.cohort && !!ctx.course?.write && !wiz && screen !== 'home' && screen !== 'help' && !(screen in COURSE_SCREENS);
+  const aboutCourse = !!ctx.course && !['home', 'help', 'setup'].includes(screen) && wiz?.name !== 'new-course';
+  const semesterPage = !!ctx.cohort && !!ctx.course?.write && !wiz && !['home', 'help', 'setup'].includes(screen) && !(screen in COURSE_SCREENS);
   const courseLeft = aboutCourse ? s.leftovers('course', ctx.course!.org, nav) : [];
   const semLeft = semesterPage ? s.leftovers('semester', ctx.cohort!.org, nav) : [];
   const failed = courseLeft === 'failed' ? { what: 'course' as const, org: ctx.course!.org } : semLeft === 'failed' ? { what: 'semester' as const, org: ctx.cohort!.org } : null;
@@ -204,6 +205,8 @@ export function App({ state: s }: { state: AppState }) {
     body = <NewCourseScreen files={s.files} step={wiz.step} />;
   } else if (screen === 'help') {
     body = <HelpScreen />;
+  } else if (screen === 'setup') {
+    body = <SetupScreen org={ctx.course?.org} />;
   } else if (screen === 'home') {
     body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {
@@ -246,7 +249,7 @@ export function App({ state: s }: { state: AppState }) {
 
   return (
     <EnvCtx.Provider value={s.env(user)}>
-      <Topbar user={user} title={title} course={ctx.course} cohort={ctx.cohort} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} />
+      <Topbar user={user} title={title} course={ctx.course} cohort={ctx.cohort} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} setup />
       <div class="shell">
         <aside class="sidenav" id="sidenav-wrap" aria-label="Console navigation">
           <Sidenav courses={courses} semesters={semesters} course={ctx.course} cohort={ctx.cohort} cohortStates={cohortStates} current={navKey} problems={problems} />
