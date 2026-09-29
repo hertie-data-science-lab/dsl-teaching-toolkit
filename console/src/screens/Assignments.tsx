@@ -60,7 +60,7 @@ function Index(p: ReadyProps) {
       <Crumbs items={cohortCrumbs(p, 'Assignments')} />
       <div class="page-head">
         <div>
-          <h1>Assignments <Hint doc="09-release-assignment-to-cohort.md">An assignment opens at hand out, has a late window after the due date, then is marked and returned. Dates live in the schedule; teams and late work are set for each semester below.</Hint></h1>
+          <h1>Assignments <Hint doc="09-release-assignment-to-cohort.md">An assignment opens at hand out, has a late window after the due date, then is marked and returned; dates live in the schedule. This semester’s defaults are below the list.</Hint></h1>
           <p class="lede">
             {list.length === 1 ? 'One' : list.length} this semester.{open ? ` ${open === 1 ? 'One is' : `${open} are`} open.` : ''}{marking ? ` ${marking === 1 ? 'One is' : `${marking} are`} being marked.` : ''}
           </p>

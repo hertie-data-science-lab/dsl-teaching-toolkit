@@ -21,6 +21,8 @@ import { draftErrors, readDraft, writeDraft, type AssignmentDraft } from '../mod
 import { SOLUTION_WARNING } from '../model/labels';
 import type { Assignment } from '../model/types';
 import { validator } from '../model/validate';
+import { penaltyRate } from '../model/policy';
+import { round } from '../model/marks';
 import { RUN_LABEL, lateError, runTier, runTiers } from '../tiers/runSettings';
 import type { FieldTier, Values } from '../tiers/types';
 import { CheckLine, Lives, Loading } from '../ui/bits';
@@ -59,7 +61,8 @@ export function defaultsLine(layers: Layers): string {
   const days = resolve('late_window_days', layers, 'semester').value;
   const pen = resolve('late_penalty_per_day', layers, 'semester').value;
   const size = resolve('max_team_size', layers, 'semester').value;
-  const late = typeof days === 'number' && days >= 1 ? [valueWord('late_window_days', days), pen ? String(pen) : 'no penalty'] : ['no late work'];
+  const rate = penaltyRate(pen);
+  const late = typeof days === 'number' && days >= 1 ? [valueWord('late_window_days', days), rate ? `${round(rate * 100)}%` : 'no penalty'] : ['no late work'];
   return `Defaults: ${[...late, ...(size ? [`teams of ${String(size)}`] : [])].join(', ')}.`;
 }
 
@@ -67,6 +70,7 @@ export function defaultsLine(layers: Layers): string {
 export function SemesterDefaults({ p }: { p: ReadyProps }) {
   const f = assignmentsFile(p.files, p.cohort.org);
   const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<Values | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
   if (f === 'loading') return <Loading what={`Reading ${ASSIGNMENTS_FILE}`} />;
   if (f === null) return <CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}.</CheckLine>;
@@ -80,22 +84,38 @@ export function SemesterDefaults({ p }: { p: ReadyProps }) {
         {defaultsLine(semesterLayers(p, f.doc))}{' '}
         <button class="textlink" type="button" ref={opener} aria-haspopup="dialog" onClick={() => setOpen(true)}>Change</button>
       </p>
-      {open ? <Modal title="Defaults for this semester’s assignments" onClose={close}><DefaultsForm p={p} f={f} /></Modal> : null}
+      {open ? <Modal title="Defaults for this semester’s assignments" onClose={close}><DefaultsForm p={p} f={f} draft={draft} setDraft={setDraft} /></Modal> : null}
     </>
   );
 }
 
-/** A modal dialog: Escape and the scrim close it; focus moves in on open. */
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** A modal dialog: Escape and a click on the scrim close it; focus moves in and Tab stays inside. */
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
   const box = useRef<HTMLDivElement>(null);
+  const downOnScrim = useRef(false);
   useEffect(() => {
     box.current?.focus();
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', esc);
-    return () => document.removeEventListener('keydown', esc);
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') return onClose();
+      if (e.key !== 'Tab' || !box.current) return;
+      const all = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (!all.length) return;
+      const first = all[0], last = all[all.length - 1], at = document.activeElement;
+      if (e.shiftKey && (at === first || at === box.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (at === last || !box.current.contains(at))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
   }, []);
   return (
-    <div class="modal-scrim" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div class="modal-scrim" onMouseDown={(e) => (downOnScrim.current = e.target === e.currentTarget)} onClick={(e) => downOnScrim.current && e.target === e.currentTarget && onClose()}>
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex={-1} ref={box}>
         <div class="entry-head"><h2 id="modal-title">{title}</h2><button class="x" type="button" aria-label="Close" onClick={onClose}>&times;</button></div>
         <div class="entry-body">{children}</div>
@@ -104,9 +124,8 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
-function DefaultsForm({ p, f }: { p: ReadyProps; f: YamlFile }) {
+function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; draft: Values | null; setDraft: (v: Values | null) => void }) {
   const env = useEnv();
-  const [draft, setDraft] = useState<Values | null>(null);
   const [save, runSave, setSave] = useSave(env);
   const layers = semesterLayers(p, f.doc);
   const tiers = runTiers((k) => resolve(k, layers, 'course'));

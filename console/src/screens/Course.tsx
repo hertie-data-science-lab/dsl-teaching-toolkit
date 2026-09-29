@@ -62,6 +62,9 @@ export function courseLayers(p: Pick<CourseProps, 'course' | 'files'>): Layers {
   return { assignment: {}, semester: {}, course: courseBlock(p.files, p.course.org, p.course.meta), institution: institutionLayer() };
 }
 
+/** Where a course-level default comes from, in plain words. */
+const whose = (s: string) => (s === 'course' ? 'this course' : 'institution');
+
 export function CourseScreen(p: CourseProps) {
   const [showSetup, setShowSetup] = useState(false);
   const { course } = p;
@@ -154,8 +157,8 @@ export function CourseScreen(p: CourseProps) {
               <dt>Name</dt><dd>{course.name}</dd>
               <dt>Code</dt><dd>{course.code || 'not set'}</dd>
               <dt>Admins</dt><dd>{course.admins.join(', ') || 'none'}</dd>
-              <dt>Late work <Hint label="About this default">Sets the course’s default; each assignment can override.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}</dd>
-              <dt>Max team size <Hint label="About this default">Sets the course’s default; each assignment can override.</Hint></dt><dd>{valueWord('max_team_size', team.value)}</dd>
+              <dt>Late work <Hint label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>
+              <dt>Max team size</dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
             </dl>
             <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
           </section>

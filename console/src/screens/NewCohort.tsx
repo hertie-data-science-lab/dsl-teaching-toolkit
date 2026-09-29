@@ -91,7 +91,7 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
           const edited = v.org !== org ? String(v.org ?? '') : d.org;
           set({ term: t, org: edited && edited !== derived && t === term ? edited : undefined });
         }} />
-        <OrgLinks org={org} />
+        <OrgLinks org={org} doc="04-new-cohort-org.md" />
         <LiveChecks live={{ value: orgChecks, busy: orgLive.busy, run: orgLive.run }} pending={[`The org ${org} exists`, 'hertie-dsl-bot can manage it']} />
       </>
     );

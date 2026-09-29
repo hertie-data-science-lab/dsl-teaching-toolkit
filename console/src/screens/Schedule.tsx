@@ -316,7 +316,7 @@ function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Setter<Semest
       <details class="fold" open={!!d.tz && d.tz !== DEFAULT_TIMEZONE}>
         <summary>Advanced <span class={`cnt${d.tz && d.tz !== DEFAULT_TIMEZONE ? ' changed' : ''}`}>({d.tz && d.tz !== DEFAULT_TIMEZONE ? '1 changed' : 'none changed'})</span></summary>
         <div class="fold-body">
-          <F id="e-tz" k="tz" d={d} set={set} t={{ tier: 'advanced', label: 'Timezone', widget: 'select', defaultLabel: `institution default: ${DEFAULT_TIMEZONE}`, reason: 'Every date in this schedule is in this timezone.', options: [{ value: '', label: `${DEFAULT_TIMEZONE} (default)` }, ...[...new Set([...TIMEZONES, d.tz].filter(Boolean))].map((t) => ({ value: t, label: t }))] }} />
+          <F id="e-tz" k="tz" d={d} set={set} t={{ tier: 'advanced', label: 'Timezone', widget: 'select', reason: 'Every date in this schedule is in this timezone.', options: [{ value: '', label: `${DEFAULT_TIMEZONE} (default)` }, ...[...new Set([...TIMEZONES, d.tz].filter(Boolean))].map((t) => ({ value: t, label: t }))] }} />
         </div>
       </details>
     </>

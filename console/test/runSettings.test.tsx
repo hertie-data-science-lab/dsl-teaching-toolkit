@@ -173,8 +173,42 @@ describe('the semester’s defaults', () => {
     await act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
     expect(root.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(change);
+
+    // An unsaved edit survives closing; a drag that ends on the scrim does not close it.
+    await act(() => change.click());
+    await act(() => {
+      const days = root.querySelector<HTMLInputElement>('#sd-late_window_days')!;
+      days.value = '7';
+      days.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const scrim = root.querySelector<HTMLElement>('.modal-scrim')!;
+    await act(() => {
+      root.querySelector('#sd-late_window_days')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      scrim.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(root.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(() => {
+      scrim.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      scrim.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(root.querySelector('[role="dialog"]')).toBeNull();
+    await act(() => change.click());
+    expect(root.querySelector<HTMLInputElement>('#sd-late_window_days')!.value).toBe('7');
+
+    // Tab from the last control wraps to the first; Shift+Tab from the first wraps to the last.
+    const all = [...root.querySelector('[role="dialog"]')!.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input, select')];
+    all[all.length - 1].focus();
+    await act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', cancelable: true })); });
+    expect(document.activeElement).toBe(all[0]);
+    await act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, cancelable: true })); });
+    expect(document.activeElement).toBe(all[all.length - 1]);
     mount(null, root);
     root.remove();
+  });
+
+  it('print the penalty as a percentage however the file writes it', () => {
+    const out = html(<AssignmentsScreen {...props({ files: filesWith({ [`${COHORT_ORG}/semester-config/assignments.yml`]: 'defaults:\n  late_window_days: 3\n  late_penalty_per_day: 0.05\n' }) })} />);
+    expect(out).toContain('Defaults: 3 days, 5%, teams of 4.');
   });
 
   it('are asked once in New semester, as an optional card', () => {

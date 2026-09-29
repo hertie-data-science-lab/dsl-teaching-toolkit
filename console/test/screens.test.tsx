@@ -343,7 +343,8 @@ describe('S2 course and S17 template', () => {
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).toContain('assignment-3-f2026');
     expect(t).toContain('course-materials-f2026');
-    expect(t).toContain('Late work ? Sets the course’s default; each assignment can override. 10 days at 10% a day');
+    expect(t).toContain('10 days at 10% a day, this course');
+    expect(t).toContain('up to 5, ');
     expect(t).not.toContain('this course’s default');
     expect(t).toContain('Fall 2026');
   });

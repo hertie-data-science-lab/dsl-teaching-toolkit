@@ -49,6 +49,19 @@ describe('Hint', () => {
     expect(pop.hidden).toBe(true);
   });
 
+  it('stays open while hovered after focus leaves, and names the page', async () => {
+    const { btn, pop } = await mount();
+    expect(btn.getAttribute('aria-label')).toBe('About this page');
+    expect(pop.getAttribute('role')).toBeNull();
+    const wrap = root!.querySelector('.hint')!;
+    await act(() => btn.focus());
+    await act(() => { wrap.dispatchEvent(new MouseEvent('mouseenter')); });
+    await act(() => btn.blur());
+    expect(pop.hidden).toBe(false);
+    await act(() => { wrap.dispatchEvent(new MouseEvent('mouseleave')); });
+    expect(pop.hidden).toBe(true);
+  });
+
   it('stays open while focus moves to Learn more, and closes when focus leaves', async () => {
     const { btn, pop } = await mount();
     await act(() => btn.focus());

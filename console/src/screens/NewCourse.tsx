@@ -118,7 +118,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
           const edited = v.org !== org ? String(v.org ?? '') : d.org;
           set({ course_name: v.course_name as string | undefined, course_code: v.course_code as string | undefined, org: edited && edited !== derived ? edited : undefined });
         }} />
-        <OrgLinks org={org} />
+        <OrgLinks org={org} doc="01-new-course-org.md" />
         <LiveChecks live={{ value: orgChecks, busy: orgLive.busy, run: orgLive.run }} pending={[`The org ${org} exists`, 'hertie-dsl-bot can manage it']} />
       </>
     );
