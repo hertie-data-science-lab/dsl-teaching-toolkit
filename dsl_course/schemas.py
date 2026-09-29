@@ -33,6 +33,7 @@ from .course import (
     JOIN_TEAM_MARKER,
     LABELS,
     PUBLISH_FILE,
+    SOLUTION_BEFORE_CUTOFF,
     SOLUTION_WARNING,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
@@ -677,8 +678,13 @@ def materials_json() -> dict:
 
 def labels_json() -> dict:
     """The words the console shows for the engine's values (`course.LABELS`) and the
-    solution warning every surface offering `solution_datetime: now` carries."""
-    return {"solution_warning": SOLUTION_WARNING, **LABELS}
+    solution warning every surface offering `solution_datetime: now` carries, and the
+    refusal of a solution date before the late cutoff."""
+    return {
+        "solution_warning": SOLUTION_WARNING,
+        "solution_before_cutoff": SOLUTION_BEFORE_CUTOFF,
+        **LABELS,
+    }
 
 
 def all_schemas() -> dict[str, dict]:

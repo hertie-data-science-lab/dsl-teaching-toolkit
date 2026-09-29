@@ -25,6 +25,7 @@
       "label": "R Markdown"
     }
   },
+  "solution_before_cutoff": "The solution for {slug} is set to be shown on {solution}, before its late cutoff on {cutoff}. Students can still hand in until the late cutoff, so the solution must be shown on or after it.",
   "solution_warning": "Pushes the model answer and rubric into every student's repo. This is not returning marks, and cannot be undone for reuse.",
   "submit_via": {
     "assignment_repo": {

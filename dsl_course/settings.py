@@ -330,6 +330,15 @@ def layers(course_org: str, semester_org: str = "", slug: str = "") -> list[Laye
     ]
 
 
+def instance_layers(read: Instance, slug: str) -> list[Layer]:
+    """The two layers `assignments.yml` states for `slug`, off a file already read: what
+    a parse can resolve with no course and no policy in hand."""
+    return [
+        ("assignment", _usable(read.blocks.get(slug, {}))),
+        ("semester", _usable(read.defaults)),
+    ]
+
+
 def _usable(block: Mapping) -> dict:
     """A block without the values its readers refused (None, for every run key): a value
     nobody can use states nothing, and the next layer answers."""

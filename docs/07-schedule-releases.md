@@ -175,7 +175,7 @@ Each assignment's **dates**, keyed by a key you choose. `course_source_repo` nam
 | `course_source_repo` | **yes** | - | the course-org template one repo per student (or team) is generated from |
 | `handout_datetime` | no* | - | when repos are provisioned, automatically. *Omit it to hand out by hand |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
-| `solution_datetime` | no | - | when the model answer and rubric (the template's `solution/`) are pushed into every repo. Not the same as returning marks, and it cannot be undone for reuse. **No default**. Must be **after** `handout_datetime`, and needs it set |
+| `solution_datetime` | no | - | when the model answer and rubric (the template's `solution/`) are pushed into every repo. Not the same as returning marks, and it cannot be undone for reuse. **No default**. Must be **after** `handout_datetime` (and needs it set), and **no earlier than the late cutoff** |
 | `marks_return_datetime` | no | - | when this assignment's marks go back, automatically (a scoped **Distribute grades** run), once every unit is marked; until then a problem says how many are not. If some emails fail they are retried only by pressing Return marks again; if every one fails, the next tick tries again. Internal: to show a "Marks expected" row, write it as `{event_datetime: 2026-10-27, show_on_site: true}` |
 | `details` | no | - | a sentence in the Details column of **both** its rows (out and due) |
 | `show_on_site` | no | `true` | `false` and the site says nothing about this assignment. It still hands out, snapshots and grades |
@@ -406,7 +406,7 @@ Kept rather than dropped - the entry still runs on its documented fallback, and 
 
 An empty `deploy:` - the key written with nothing under it - is flagged too. It parses as "no copies", so the entry becomes a display-only row that ships nothing; if that is what you meant, delete the key (or write `deploy: []`) and the flag goes away.
 
-`solution_datetime` is the exception that is **dropped, not kept**: malformed, missing its `handout_datetime`, or not after it, the value is discarded and the model solution waits for a human. Honouring a bad one could ship the answers with the questions, and nothing undoes that.
+`solution_datetime` is the exception that is **dropped, not kept**: malformed, missing its `handout_datetime`, not after it, or before the late cutoff (due + `late_window_days`), the value is discarded and the model solution waits for a human. Honouring a bad one could ship the answers with the questions, and nothing undoes that.
 
 ## Timezones and bare dates
 
@@ -429,6 +429,8 @@ Each assignment's **late cutoff** is `due_datetime` plus its `late_window_days`.
 ### Releasing the model solution
 
 `solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the scheduled run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `solution_datetime: now` does by hand. Both are idempotent, so doing one after the other changes nothing. The push that first adds a `solution_datetime:` gets a notice on its commit saying so; a hand out with `now` (button or console) runs only straight after a preview of it by the same person.
+
+It must not fall before the late cutoff: students still handing in could read it. The schedule check and the console refuse such a date, and the scheduler holds any that gets past them (a late window changed afterwards, say) until the cutoff has passed. Only the solution waits; hand outs, releases and the freeze run as written.
 
 It needs `handout_datetime` set: the schedule can only push a solution into repos the schedule provisioned. If you hand out manually, release the solution manually too.
 
