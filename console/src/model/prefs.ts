@@ -3,7 +3,7 @@
 // the local folders the Set up screen writes its commands for, and an instructor's Your
 // setup (folder, editor, the Open button's last choice). Storage can be missing or refuse (a
 // private window, blocked site data); the console then shows every semester, calls nothing
-// new, and forgets the folders and the setup on reload.
+// new, forgets the folders on reload, and keeps Your setup in memory until reload.
 
 import { EDITORS, OPEN_CHOICES, type Editor, type OpenChoice, type Setup } from './open';
 
@@ -81,6 +81,7 @@ export const resetVisits = () => visits.clear();
 /** On sign-out: every visit time, remembered folder and Your setup of `login` in this browser, and this load's answers. */
 export function forgetStudentPrefs(login: string, store: PrefStore | null = localStore()): void {
   visits.clear();
+  kept.delete(login);
   try {
     if (!store?.key || store.length === undefined || !store.removeItem) return;
     const mine = [];
@@ -120,12 +121,14 @@ export function saveLocalPaths(login: string, paths: LocalPaths, store: PrefStor
 }
 
 const setupKey = (login: string) => `dsl-console-setup:${login}`;
+/** Your setup per login when storage refuses it: it then lasts until reload. */
+const kept = new Map<string, Setup>();
 
-/** `login`'s Your setup, or null when nothing is stored (or storage refuses). */
+/** `login`'s Your setup, or null when nothing is stored (and nothing kept since storage refused). */
 export function yourSetup(login: string, store: PrefStore | null = localStore()): Setup | null {
   try {
     const raw = store?.getItem(setupKey(login));
-    if (!raw) return null;
+    if (!raw) return kept.get(login) ?? null;
     const v = JSON.parse(raw) as Partial<Record<keyof Setup, unknown>>;
     const setup: Setup = {
       folder: typeof v.folder === 'string' ? v.folder : '',
@@ -135,15 +138,20 @@ export function yourSetup(login: string, store: PrefStore | null = localStore())
     if (OPEN_CHOICES.includes(v.lastOpen as OpenChoice)) setup.lastOpen = v.lastOpen as OpenChoice;
     return setup;
   } catch {
-    return null;
+    return kept.get(login) ?? null;
   }
 }
 
-export function saveYourSetup(login: string, setup: Setup, store: PrefStore | null = localStore()): void {
+/** Store `setup`; false when storage refused and it is kept only until reload. */
+export function saveYourSetup(login: string, setup: Setup, store: PrefStore | null = localStore()): boolean {
   try {
-    store?.setItem(setupKey(login), JSON.stringify(setup));
+    if (!store) throw new Error('no storage');
+    store.setItem(setupKey(login), JSON.stringify(setup));
+    kept.delete(login);
+    return true;
   } catch {
-    /* storage unavailable: the setup lasts until reload */
+    kept.set(login, setup);
+    return false;
   }
 }
 

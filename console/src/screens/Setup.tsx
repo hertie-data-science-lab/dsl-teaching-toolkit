@@ -21,19 +21,20 @@ export function SetupScreen({ org }: { org?: string }) {
   const login = env?.user.login ?? '';
   const [saved, setSaved] = useState<Setup | null>(() => yourSetup(login));
   const [draft, setDraft] = useState<Draft>(() => draftOf(saved));
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState<'stored' | 'kept' | null>(null);
   const example = folderExample(platformOf());
   const badScheme = draft.editor === 'other' && !schemeOk(draft.scheme);
   const change = (d: Partial<Draft>) => {
     setDraft({ ...draft, ...d });
-    setDone(false);
+    setDone(null);
   };
   const save = () => {
-    const next: Setup = { ...(saved?.lastOpen ? { lastOpen: saved.lastOpen } : {}), folder: draft.folder.trim(), editor: draft.editor };
+    // A new folder or editor makes the editor the Open button's default again.
+    const keepLast = saved?.lastOpen && saved.folder === draft.folder.trim() && saved.editor === draft.editor;
+    const next: Setup = { ...(keepLast ? { lastOpen: saved.lastOpen } : {}), folder: draft.folder.trim(), editor: draft.editor };
     if (draft.editor === 'other') next.scheme = draft.scheme.trim();
-    saveYourSetup(login, next);
+    setDone(saveYourSetup(login, next) ? 'stored' : 'kept');
     setSaved(next);
-    setDone(true);
   };
   const where = courseFolder(draft.folder || example, org ?? '');
   return (
@@ -69,7 +70,7 @@ export function SetupScreen({ org }: { org?: string }) {
           </fieldset>
           <div class="actions">
             <button class="btn" type="button" disabled={badScheme || (!!saved && same(draft, draftOf(saved)))} onClick={save}>Save your setup</button>
-            {done ? <span class="valid-msg" role="status">Saved.</span> : null}
+            {done === 'stored' ? <span class="valid-msg" role="status">Saved.</span> : done === 'kept' ? <span class="footnote" role="status">This browser does not keep it: it lasts until you reload.</span> : null}
           </div>
         </div>
       </section>

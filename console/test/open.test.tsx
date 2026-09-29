@@ -44,7 +44,11 @@ describe('Your setup in this browser', () => {
     expect(yourSetup(LOGIN, store)).toEqual({ folder: '', editor: 'vscode' });
     store.setItem(`dsl-console-setup:${LOGIN}`, '{not json');
     expect(yourSetup(LOGIN, store)).toBeNull();
-    expect(() => saveYourSetup(LOGIN, { folder: '/x', editor: 'vscode' }, refusing)).not.toThrow();
+    expect(yourSetup(LOGIN, refusing)).toBeNull();
+    // A refused write is kept until reload, and sign-out forgets it too.
+    expect(saveYourSetup(LOGIN, { folder: '/x', editor: 'vscode' }, refusing)).toBe(false);
+    expect(yourSetup(LOGIN, refusing)).toEqual({ folder: '/x', editor: 'vscode' });
+    forgetStudentPrefs(LOGIN, refusing);
     expect(yourSetup(LOGIN, refusing)).toBeNull();
   });
 });
@@ -147,7 +151,18 @@ describe('the Open button', () => {
     expect(document.activeElement?.textContent).toBe('Open on github.dev');
     await key(items()[1], 'End');
     expect(document.activeElement?.textContent).toBe('Set up a local folder');
-    expect(document.activeElement?.getAttribute('href')).toBe('#setup');
+    await key(items()[0], 'ArrowUp');
+    expect(document.activeElement?.textContent).toMatch(/^Copy the clone command/);
+    const desktop = items().find((i) => i.textContent === 'Open in GitHub Desktop')!;
+    await key(document.activeElement!, 'ArrowUp');
+    expect(document.activeElement).toBe(desktop);
+    desktop.addEventListener('click', (e) => e.preventDefault());
+    await act(() => desktop.click());
+    expect(q('[role="menu"]').hidden).toBe(true);
+    expect(document.activeElement).toBe(caret);
+    await key(caret, 'ArrowDown');
+    expect(document.activeElement).toBe(items()[0]);
+    expect(items().at(-1)!.getAttribute('href')).toBe('#setup');
     await key(items()[0], 'Escape');
     expect(q('[role="menu"]').hidden).toBe(true);
     expect(document.activeElement).toBe(caret);
@@ -160,7 +175,8 @@ describe('the Open button', () => {
     await act(() => dev.click());
     expect(yourSetup(LOGIN)?.lastOpen).toBe('githubdev');
     const mains = [...root!.querySelectorAll<HTMLAnchorElement>('.split-main')];
-    expect(mains.map((m) => m.textContent)).toEqual(['Open on github.dev', 'Open on github.dev']);
+    expect(mains.map((m) => m.textContent)).toEqual(['Open on github.dev', 'Open']);
+    expect(mains[1].getAttribute('aria-label')).toBe('Open on github.dev');
     expect(mains[1].getAttribute('href')).toBe(`https://github.dev/${ORG}/materials`);
     expect(mains[1].getAttribute('target')).toBe('_blank');
   });
@@ -172,7 +188,7 @@ describe('the Open button', () => {
     expect(main.textContent).toBe('Open in VS Code');
     expect(main.getAttribute('href')).toBe(`vscode://file/Users/a/repos/${ORG}/assignment-2-f2026`);
     expect(main.hasAttribute('target')).toBe(false);
-    expect(items().at(-1)!.textContent).toBe('Your setup');
+    expect(items().at(-1)!.textContent).toBe('Change your setup');
   });
 });
 
@@ -205,5 +221,17 @@ describe('the Your setup screen', () => {
     expect(root!.textContent).toContain('Stored: /Users/a/repos');
     expect(root!.textContent).toContain('Stored: another editor, zed://file/{path}');
     expect(save.disabled).toBe(true);
+  });
+
+  it('makes the editor the default again when the folder or editor changes', async () => {
+    rememberOpen(LOGIN, 'github');
+    await mount(<SetupScreen org={ORG} />);
+    const folder = q<HTMLInputElement>('#ys-folder');
+    await act(() => {
+      folder.value = '/Users/a/repos';
+      folder.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(() => [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Save your setup')!.click());
+    expect(yourSetup(LOGIN)).toEqual({ folder: '/Users/a/repos', editor: 'vscode' });
   });
 });

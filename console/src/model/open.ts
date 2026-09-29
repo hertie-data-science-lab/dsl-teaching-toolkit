@@ -34,6 +34,7 @@ export function joinPath(folder: string, name: string): string {
 }
 
 /** A local path as a URL path: forward slashes, no leading one, each segment encoded, a drive letter's colon kept. */
+// UNC paths (\\server\share) are not supported, as on the live site's profile.
 function urlPath(path: string): string {
   return path.replace(/\\/g, '/').split('/').filter(Boolean).map((s) => encodeURIComponent(s).replace(/%3A/gi, ':')).join('/');
 }

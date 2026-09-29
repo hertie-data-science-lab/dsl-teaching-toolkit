@@ -14,14 +14,10 @@ import { Ext } from './icons';
 
 /** Bumped when a choice is remembered, so every Open button on the page takes the new default. */
 const changed = signal(0);
-/** The last choice per login when storage refuses it: it then lasts until reload. */
-const kept = new Map<string, Setup>();
-
 function useSetup(login: string): [Setup | null, (item: OpenItem) => void] {
   void changed.value;
-  const setup = yourSetup(login) ?? kept.get(login) ?? null;
+  const setup = yourSetup(login);
   return [setup, (item) => {
-    kept.set(login, { ...(setup ?? { folder: '', editor: 'vscode' }), lastOpen: item.choice });
     rememberOpen(login, item.choice);
     changed.value++;
   }];
@@ -79,7 +75,8 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
   };
   const choose = (item: OpenItem) => {
     remember(item);
-    setOpen(false);
+    // From the menu, focus goes back to the arrow rather than to the page.
+    if (open) shut();
     if (item.copy) {
       void copyText(item.copy).then((ok) => {
         setNote(ok ? 'Copied' : 'Could not copy: select it below');
@@ -95,6 +92,10 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
       e.preventDefault();
       show('last');
     }
+  };
+  // Firefox toggles a button on Space's keyup as well: the keydown already opened it.
+  const onCaretKeyUp = (e: KeyboardEvent) => {
+    if (e.key === ' ') e.preventDefault();
   };
   const onMenuKey = (e: KeyboardEvent) => {
     const all = menuItems();
@@ -132,9 +133,9 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
   const folder = !!setup?.folder.trim();
   return (
     <div class={`split${small ? ' small' : ''}`} ref={wrap}>
-      {link(main, { class: `${cls} split-main` }, <>{note && main.copy ? note : main.label}{main.href && isWeb(main.href) ? <Ext /> : null}</>)}
+      {link(main, { class: `${cls} split-main`, ...(small ? { title: main.label, 'aria-label': main.label } : {}) }, <>{note && main.copy ? note : small ? 'Open' : main.label}{main.href && isWeb(main.href) ? <Ext /> : null}</>)}
       <button ref={caret} type="button" class={`${cls} split-caret`} aria-haspopup="menu" aria-expanded={open} aria-controls={id} aria-label={`More ways to open ${ref.repo}`}
-        onClick={() => (open ? setOpen(false) : show('first'))} onKeyDown={onCaretKey}>
+        onClick={() => (open ? setOpen(false) : show('first'))} onKeyDown={onCaretKey} onKeyUp={onCaretKeyUp}>
         <span class="caret" aria-hidden="true" />
       </button>
       <div class="popmenu open-menu" id={id} role="menu" aria-label={`Open ${ref.repo}`} hidden={!open} onKeyDown={onMenuKey}>
@@ -145,7 +146,7 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
         {local.map(entry)}
         <hr />
         <a href={SETUP_HREF} role="menuitem" tabIndex={-1} onClick={() => setOpen(false)}>
-          <span>{folder ? 'Your setup' : 'Set up a local folder'}</span>
+          <span>{folder ? 'Change your setup' : 'Set up a local folder'}</span>
         </a>
       </div>
       <span class="sr" role="status">{note ?? ''}</span>
