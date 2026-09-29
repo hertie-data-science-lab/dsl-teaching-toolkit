@@ -131,8 +131,8 @@ def planned_rows(
 
 @dataclass
 class SiteRow:
-    """One row the site shows: an entry, its number, and the untitled readings entries
-    that attach to it (a lecture's week's readings)."""
+    """One row the site shows: an entry, its number, and the numbered readings entries
+    that join it (a lecture's readings)."""
 
     row: PlannedRow
     number: int | None
@@ -142,29 +142,36 @@ class SiteRow:
 def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
     """The rows the site shows, in date order (decision 0013).
 
-    - An untitled `readings` entry attaches to the first SHOWN lecture on or after its
-      date; a titled one, or one no lecture follows, is its own row.
-    - A silent (`show_on_site: false`) entry is no row, unless it is readings: those are
-      rows of the Readings tab, unnumbered.
     - A shown row's number: the entry's `number:`, else its label's number, else its
-      position among the shown rows of its kind. The syllabus reads the same numbers."""
-    lectures = [r for r in rows if r.shown and r.kind == "lecture"]
+      position among the shown rows of its kind. The syllabus reads the same numbers.
+    - A `readings` entry with a number (`number:`, else its label's, `readings_03`)
+      joins the shown lecture with that number. Nothing is inferred from dates: any
+      other readings entry, or one whose number no lecture carries, is its own row.
+    - A silent (`show_on_site: false`) entry is no row, unless it is readings: an
+      unjoined one is a row of the Readings tab, unnumbered."""
+
+    def own_number(r: PlannedRow) -> int | None:
+        return r.number or label_number(r.key)
+
+    lecture_numbers: dict[int, str] = {}
+    position = 0
+    for r in rows:
+        if r.shown and r.kind == "lecture":
+            position += 1
+            lecture_numbers.setdefault(own_number(r) or position, r.key)
     attached: dict[str, list[PlannedRow]] = {}
     own = []
     for r in rows:
-        if r.kind == "readings" and not r.subtitle:
-            host = next((lec for lec in lectures if lec.when >= r.when), None)
-            if host is not None:
-                attached.setdefault(host.key, []).append(r)
-                continue
-        if r.shown or r.kind == "readings":
+        if r.kind == "readings" and (host := lecture_numbers.get(own_number(r))):
+            attached.setdefault(host, []).append(r)
+        elif r.shown or r.kind == "readings":
             own.append(r)
-    out, position = [], {}
+    out, counts = [], {}
     for r in own:
         number = None
         if r.shown:
-            position[r.kind] = position.get(r.kind, 0) + 1
-            number = r.number or label_number(r.key) or position[r.kind]
+            counts[r.kind] = counts.get(r.kind, 0) + 1
+            number = own_number(r) or counts[r.kind]
         out.append(SiteRow(r, number, attached.get(r.key, [])))
     return out
 

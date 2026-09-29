@@ -2122,7 +2122,7 @@ def test_the_demo_keeps_its_rows_numbers_and_reading_lists(monkeypatch):
         "Lab 9",
         "Lab 11",
     )
-    # The week's untitled readings sit on the lecture that follows them.
+    # Each `readings-0N` sits on lecture N.
     for n in (1, 2, 3, 4, 5, 8):
         row = rows[f"session-0{n}.md"]
         assert row["reading_list"].startswith("- from readings/0"), n
@@ -2188,10 +2188,10 @@ def test_a_repo_per_kind_layout_takes_its_kind_from_the_repo(monkeypatch, tmp_pa
         ]
     )
     rows = _rows(_plan(monkeypatch, tmp_path, sched, trees=trees))
+    # `readings-1` is readings (its repo says so), so it joins lecture 1.
     assert {r["title"]: [x["name"] for x in r["links"]] for r in rows.values()} == {
-        "Lecture 1": ["slides.pdf"],
+        "Lecture 1": ["slides.pdf", "paper.pdf"],
         "Lab 1": ["lab.ipynb"],
-        "Readings 1": ["paper.pdf"],
     }
 
 

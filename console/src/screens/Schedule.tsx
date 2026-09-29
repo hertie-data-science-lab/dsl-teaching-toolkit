@@ -145,7 +145,7 @@ function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDr
         <F id="e-type" k="type" d={d} set={set} t={{ tier: 'default', label: 'Kind', widget: 'select', defaultLabel: 'default: inferred from where it lands', reason: 'Sets the row’s tab, colour and name.', options: [{ value: '', label: `${KIND_LABEL[inferred] ?? inferred} (inferred)` }, ...kinds.map((k) => ({ value: k, label: KIND_LABEL[k] ?? k }))] }} />
         <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'from the folder name', reason: 'The name, shown after the identifier. Plain text.' }} />
       </div>
-      {(d.type || inferred) === 'readings' ? <p class="footnote">On the student site, untitled readings join the next lecture’s row; titled readings are their own row.</p> : null}
+      {(d.type || inferred) === 'readings' ? <p class="footnote">On the student site, numbered readings (readings-3, or number: 3) join that lecture’s row; other readings are their own row.</p> : null}
       <div class="row-2">
         <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: `Automation releases at this time, ${tz}.` }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time' }} />

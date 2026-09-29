@@ -2413,7 +2413,7 @@ def test_the_proposal_is_written_beside_the_schedule_never_into_it(
             for d in lab.deploy] == [
         ("course-materials-f2026", "labs/01_session-1", "materials")
     ]  # fmt: skip
-    # A readings entry has no title: it attaches to the lecture that follows it.
+    # A readings entry has no title; its label's number joins it to its lecture.
     assert by_label["readings-01"].title == ""
     rows = migrate.offplan_folders(
         [d for r in sched.releases for d in r.deploy],

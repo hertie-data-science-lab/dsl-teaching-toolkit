@@ -222,7 +222,7 @@ SCHEDULE = schedule.Schedule(
             "SYLLABUS.md",
             show_on_site=False,
         ),
-        # Silent untitled readings, a week ahead: attached to lecture 1 (its list inlined,
+        # Silent readings a week ahead, numbered 1: joins lecture 1 (its list inlined,
         # and lecture 1 listed on the Readings tab).
         _release(
             "readings-1",
