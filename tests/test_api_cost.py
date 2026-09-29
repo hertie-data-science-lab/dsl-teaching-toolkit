@@ -41,7 +41,6 @@ from dsl_course import (
     status,
     sync_membership,
 )
-
 from dsl_course.discovery import ASSIGNMENT_TEMPLATE_TOPIC
 
 FIXTURES = Path(__file__).parent / "fixtures" / "layouts"
@@ -113,7 +112,7 @@ class FakeGitHub:
         # `pushed`: students who pushed since the sheets last looked. `gone`: handles off
         # the roster whose submission repos are still in the org.
         self.students, self.pushed = students, pushed
-        roster = ",".join(("hertie_email", "name", "role", "github_handle"))
+        roster = "hertie_email,name,role,github_handle"
         self.files: dict[tuple[str, str, str], str] = {
             (
                 COURSE,
@@ -1034,7 +1033,7 @@ def test_what_a_settle_waited_through_is_read_fresh_and_written_fresh(
     before = gh_contents.get_file_content(*key)
     monkeypatch.setattr(migrate, "_alive", lambda targets: [])
     memo.files[key] = before + "# another run's commit\n"
-    assert migrate.settle(lambda: [], before_switch=False)
+    assert migrate.settle(list, before_switch=False)
     after = gh_contents.get_file_content(*key)
     assert after.endswith("# another run's commit\n")
     written = []
