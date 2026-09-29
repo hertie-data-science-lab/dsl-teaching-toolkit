@@ -125,14 +125,14 @@ describe('mode and the student shell', () => {
     const s = studentContext(both, parseSearch(`?semester=${cohort.org}`))!.semester;
     const out = render(<StudentScreen semester={s} screen="week" studentView />);
     expect(text(<StudentScreen semester={s} screen="week" studentView />)).toContain('Student view. What a student of Machine Learning, Fall 2026 sees, shown with your own account: no student’s repos or marks.');
-    expect(out).toContain(`href="?cohort=${cohort.org}#semester"`);
+    expect(out).toContain(`href="?cohort=${cohort.org}#dashboard"`);
   });
 
   it('the instructor nav offers Student view on a semester they teach', () => {
-    const nav = render(<Sidenav courses={[course]} semesters={[NLP]} course={course} cohort={cohort} cohortStates={{}} current="week" problems={0} />);
+    const nav = render(<Sidenav courses={[course]} semesters={[NLP]} course={course} cohort={cohort} cohortStates={{}} current="dashboard" problems={0} />);
     expect(nav).toContain(`href="?semester=${cohort.org}#week">Student view`);
     expect(nav).toContain(`href="?semester=${NLP.org}#week"`);
-    const ro = render(<Sidenav courses={[{ ...course, write: false }]} course={{ ...course, write: false }} cohort={cohort} cohortStates={{}} current="week" problems={0} />);
+    const ro = render(<Sidenav courses={[{ ...course, write: false }]} course={{ ...course, write: false }} cohort={cohort} cohortStates={{}} current="dashboard" problems={0} />);
     expect(ro).not.toContain('Student view');
   });
 });

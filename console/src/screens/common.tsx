@@ -178,7 +178,7 @@ export function WithStatus({
 
 export function cohortCrumbs(p: Pick<CohortProps, 'course' | 'cohort'>, page?: string, mid?: { t: string; href: string }[]) {
   return [
-    { t: cohortName(p), href: page ? '#semester' : undefined },
+    { t: cohortName(p), href: page ? '#dashboard' : undefined },
     ...(mid ?? []),
     ...(page ? [{ t: page }] : []),
   ];

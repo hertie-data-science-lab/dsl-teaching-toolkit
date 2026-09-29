@@ -33,7 +33,7 @@ interface Card {
 
 function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, user: GhUser): Card {
   const name = cohortName({ course, cohort: c });
-  const base = { key: c.org, name, href: `?cohort=${c.org}#semester` };
+  const base = { key: c.org, name, href: `?cohort=${c.org}#dashboard` };
   const who = course.admins.includes(user.login) ? 'you are a course admin' : 'you are an instructor';
   const sub = `${course.code ? `${course.code}; ` : ''}${course.write ? who : 'read only'}`;
   if (!course.write)

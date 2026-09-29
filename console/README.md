@@ -239,10 +239,10 @@ each record in it); read it rather than writing a literal.
 
 ## Routes
 
-Hash tokens as in the design mockup: `#semester`, `#schedule-s5`, `#assignment-<slug>`,
+Hash tokens as in the design mockup: `#dashboard`, `#schedule-s5`, `#assignment-<slug>`,
 `#release-<id>`, `#template-<slug>`, `#marks-<slug>`, `#teams-<slug>`, `#materials-<repo>`;
 the schedule editor also opens `#schedule-new`, `#schedule-semester` and `#schedule-archive`.
-The hashes decision 0012 renamed redirect: `#cohort` to `#semester`, `#staff` to
+Renamed hashes redirect: `#cohort` and `#semester` to `#dashboard`, `#staff` to
 `#instructors`, `#new-cohort-<n>` to `#new-semester-<n>`, `#schedule-term` to
 `#schedule-semester`.
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a

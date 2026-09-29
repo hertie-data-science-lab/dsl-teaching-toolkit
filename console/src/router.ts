@@ -1,4 +1,4 @@
-// Hash routes are the mockup's tokens (`#semester`, `#schedule-s5`, `#template-assignment-3`);
+// Hash routes are the mockup's tokens (`#dashboard`, `#schedule-s5`, `#template-assignment-3`);
 // a problem's fix `{screen, entry}` is the route `#<screen>-<entry>`. An assignment's tabs
 // ride after a slash (`#assignment-assignment-2/marks`); the retired `#teams-<slug>` and
 // `#marks-<slug>` screens parse to those tabs, and the hashes decision 0012 renamed
@@ -24,9 +24,9 @@ const TABS: AssignmentTab[] = ['overview', 'teams', 'marks'];
 
 const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'marks', 'teams', 'materials'];
 
-/** Hashes decision 0012 renamed, old -> new. */
+/** Hashes decisions 0012 and 0015 renamed, old -> new. */
 const RENAMED: [RegExp, string][] = [
-  [/^cohort$/, 'semester'],
+  [/^(cohort|semester)$/, 'dashboard'],
   [/^staff$/, 'instructors'],
   [/^new-cohort(-\d)?$/, 'new-semester$1'],
   [/^schedule-term$/, 'schedule-semester'],
@@ -100,7 +100,7 @@ export function parseSearch(search: string): Selection {
 
 /** Screens that need a semester, and the nav key each lights up. */
 export const COHORT_SCREENS: Record<string, string> = {
-  semester: 'week', schedule: 'schedule', release: 'schedule', assignments: 'assignments', assignment: 'assignments',
+  dashboard: 'dashboard', schedule: 'schedule', release: 'schedule', assignments: 'assignments', assignment: 'assignments',
   students: 'students', roster: 'students', marks: 'marks', instructors: 'instructors', site: 'site', operations: 'operations', archive: 'archive',
 };
 /** Screens about the course. */
@@ -142,10 +142,10 @@ export function resolveContext(courses: Course[], sel: Selection, route: Route):
   return first ? { course: first, cohort: first.cohorts[0] } : {};
 }
 
-/** Where sign-in lands: This week when there is exactly one writable course with a semester, else Home. */
+/** Where sign-in lands: Dashboard when there is exactly one writable course with a semester, else Home. */
 export function landing(courses: Course[]): string {
   const writable = courses.filter((c) => c.write && c.cohorts.length);
-  return writable.length === 1 ? 'semester' : 'home';
+  return writable.length === 1 ? 'dashboard' : 'home';
 }
 
 /** The student screens, in nav order, with their labels; `week` is where a semester opens. */

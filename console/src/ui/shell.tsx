@@ -164,7 +164,7 @@ function Switcher({ courses, course, cohort, cohortStates, semesters = [], semes
             <div class="submenu" hidden={sub !== c.org}>
               <a href={`?course=${c.org}#course`} class={`${c.write ? '' : 'ro'}${course?.org === c.org && !cohort ? ' cur' : ''}`}>Course overview</a>
               {c.cohorts.map((k) => (
-                <a href={`?cohort=${k.org}#semester`} class={`${c.write ? '' : 'ro'}${cohort?.org === k.org ? ' cur' : ''}`}>
+                <a href={`?cohort=${k.org}#dashboard`} class={`${c.write ? '' : 'ro'}${cohort?.org === k.org ? ' cur' : ''}`}>
                   {k.termLabel}<span class="pm-sub">{sw(cohortStates[k.org], c)}</span>
                 </a>
               ))}
@@ -195,7 +195,7 @@ export function cohortFlags(l: Loaded | undefined): { problems: number | null; a
 
 /**
  * The course nav's Semesters group: each semester by name with its problems count. No entry
- * carries aria-current: in a semester, This week above already marks the page.
+ * carries aria-current: in a semester, Dashboard above already marks the page.
  */
 function CohortsNav({ course, cohortStates }: { course: Course; cohortStates: Record<string, Loaded> }) {
   if (!course.cohorts.length) return null;
@@ -207,7 +207,7 @@ function CohortsNav({ course, cohortStates }: { course: Course; cohortStates: Re
           const f = cohortFlags(cohortStates[k.org]);
           return (
             <li>
-              <a href={`?cohort=${k.org}#semester`} class={f.archived ? 'archived' : undefined}>
+              <a href={`?cohort=${k.org}#dashboard`} class={f.archived ? 'archived' : undefined}>
                 <span>{k.termLabel}{f.archived ? <span class="n-soon"> archived</span> : null}</span>
                 {f.problems ? <span class="n-count" aria-label={`${f.problems} problems`}>{f.problems}</span> : null}
               </a>
@@ -237,7 +237,7 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
       {course && cohort && course.write ? (
         <>
           <ul>
-            {item('#semester', 'This week', 'week', problems ? <span class="n-count" aria-label={`${problems} problems`}>{problems}</span> : null)}
+            {item('#dashboard', 'Dashboard', 'dashboard', problems ? <span class="n-count" aria-label={`${problems} problems`}>{problems}</span> : null)}
             {item('#schedule', 'Schedule', 'schedule')}
             {item('#assignments', 'Assignments', 'assignments')}
             {item('#marks', 'Marks', 'marks')}

@@ -281,14 +281,14 @@ describe('screen error boundary', () => {
     const t = text(<ScreenBoundary><Boom /></ScreenBoundary>);
     expect(t).toContain('This screen hit an error');
     expect(t).toContain('kaboom');
-    expect(html(<ScreenBoundary><Boom /></ScreenBoundary>)).toContain('href="#semester"');
+    expect(html(<ScreenBoundary><Boom /></ScreenBoundary>)).toContain('href="#dashboard"');
   }));
-  it('links Home when This week itself threw, so the route key changes', () => withBoundaries(() => {
-    vi.stubGlobal('location', { hash: '#semester' });
+  it('links Home when the Dashboard itself threw, so the route key changes', () => withBoundaries(() => {
+    vi.stubGlobal('location', { hash: '#dashboard' });
     try {
       const out = html(<ScreenBoundary><Boom /></ScreenBoundary>);
       expect(out).toContain('href="#">Back to Home');
-      expect(out).not.toContain('href="#semester"');
+      expect(out).not.toContain('href="#dashboard"');
     } finally {
       vi.unstubAllGlobals();
     }
@@ -379,7 +379,7 @@ describe('read only and the shell', () => {
     expect(t).toContain('No roster, no marks, no buttons.');
   });
   it('puts the switcher, nav with the problem count and header links in the frame', () => {
-    const nav = html(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="week" problems={2} />);
+    const nav = html(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" problems={2} />);
     expect(nav).toContain('Machine Learning, Fall 2026');
     expect(nav).toContain('New semester of Machine Learning');
     expect(nav).toContain('class="n-count"');

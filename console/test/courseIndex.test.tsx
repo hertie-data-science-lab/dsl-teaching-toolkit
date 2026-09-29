@@ -179,11 +179,11 @@ describe('course nav and overview', () => {
     const nav = render(<Sidenav courses={[course]} course={course} cohortStates={{ [COHORT_ORG]: ready, [OLD_ORG]: archived }} current="course" problems={0} />);
     const t = nav.replace(/<[^>]+>/g, ' ');
     expect(t.indexOf('Public website')).toBeLessThan(t.indexOf('Semesters'));
-    expect(nav).toContain(`href="?cohort=${COHORT_ORG}#semester"`);
+    expect(nav).toContain(`href="?cohort=${COHORT_ORG}#dashboard"`);
     expect(nav).toMatch(/aria-label="2 problems">2</);
     expect(nav).toContain('class="archived"');
     expect(t).toContain('Assignment templates');
-    const inCohort = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="week" problems={2} />);
+    const inCohort = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" problems={2} />);
     expect(inCohort.match(/aria-current="page"/g)).toHaveLength(1);
   });
   it('shows the term, not the org, while a cohort status loads', () => {

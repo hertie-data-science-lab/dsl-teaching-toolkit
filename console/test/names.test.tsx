@@ -158,12 +158,13 @@ describe('the course default format', () => {
 
 describe('renamed routes', () => {
   it('redirects each old hash to its new name', () => {
-    expect(movedHash('#cohort')).toBe('#semester');
+    expect(movedHash('#cohort')).toBe('#dashboard');
+    expect(movedHash('#semester')).toBe('#dashboard');
     expect(movedHash('#staff')).toBe('#instructors');
     expect(movedHash('#new-cohort-2')).toBe('#new-semester-2');
     expect(movedHash('#new-cohort')).toBe('#new-semester');
     expect(movedHash('#schedule-term')).toBe('#schedule-semester');
-    expect(movedHash('#semester')).toBeNull();
+    expect(movedHash('#dashboard')).toBeNull();
     expect(hashOf(parseHash('#schedule-s5'))).toBe('#schedule-s5');
     expect(wizardOf(parseHash('#new-cohort-3').screen)).toEqual({ name: 'new-semester', step: 3 });
   });
