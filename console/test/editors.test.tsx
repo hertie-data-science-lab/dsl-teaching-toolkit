@@ -346,8 +346,11 @@ describe('editing screens', () => {
     expect(out).toContain(`institution default: ${POLICY.licences[0].name}`);
     expect(out).toContain(`<option value="${POLICY.licences[1].name}"`);
     // The website's switch lives on its own tab: shown here, read only.
-    expect(out).toMatch(/<dt>Public website<\/dt><dd>Off\. <a class="textlink" href="#website">Manage<\/a>/);
-    expect(out).toContain('href="#website">Manage</a>');
+    expect(out).toMatch(/<dt>Public website<\/dt><dd>On\. <a class="textlink" href="#website">Manage<\/a>/);
+    const off = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: false\n' }, {}, TREES);
+    expect(html(<DetailsScreen {...cp} files={off} />)).toContain('<dd>Off. <a');
+    const none = Object.fromEntries(Object.entries(FILES).filter(([k]) => !k.endsWith('opencourse.yml')));
+    expect(html(<DetailsScreen {...cp} files={new StaticFiles(none, {}, TREES)} />)).toContain('<dd>Off. <a');
   });
   it('writes a contact and a licence into dsl-course.yml and a file without them still saves', () => {
     const src = 'course_name: ML\ncourse_code: E1\n';
@@ -359,7 +362,6 @@ describe('editing screens', () => {
     expect('text' in same && same.text).toBe('course_name: ML\ncourse_code: E2\n');
     expect(fieldErrors(null, COURSE_FACTS, { contact: 'not-an-email' }).contact).toBe('Write an email address.');
   });
-  it('materials settings previews what is public and what is withheld', () => {
   it('materials settings previews what is withheld, and nothing about the public website', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);

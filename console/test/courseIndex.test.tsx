@@ -10,6 +10,7 @@ import { StaticFiles, type Files } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { CourseScreen } from '../src/screens/Course';
+import { HomeScreen } from '../src/screens/Home';
 import { MaterialsScreen, WebsiteScreen, folderKinds, resetLabel, writeHolds } from '../src/screens/CourseEdit';
 import { MaterialsIndexScreen, TemplatesIndexScreen, materialsSentence, otherRepos } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
@@ -175,6 +176,16 @@ describe('course nav and overview', () => {
     expect(t).toContain('2 problems');
     const none = text(<CourseScreen {...cp({ loaded: { kind: 'ready', status: { ...STATUS, problems: [] }, sha: 's', stale: [] } })} />);
     expect(none).toContain('No problems.');
+  });
+  it('a semester with no problems reads No problems, with no count badge, on the course page and Home', () => {
+    const row = render(<CourseScreen {...cp()} />).split('<li>').find((li) => li.includes('Fall 2025'))!;
+    expect(row).toContain('<span class="probs none">No problems</span>');
+    expect(row).not.toContain('count-badge');
+    const calm: Loaded = { kind: 'ready', status: { ...STATUS, problems: [] }, sha: 's', stale: [] };
+    const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
+    const home = render(<HomeScreen courses={[{ ...course, cohorts: [cohort] }]} semesters={[]} cohortStates={{ [COHORT_ORG]: calm }} now={0} user={user} />);
+    expect(home).toContain('<span class="probs none">No problems</span>');
+    expect(home).not.toContain('count-badge');
   });
 });
 

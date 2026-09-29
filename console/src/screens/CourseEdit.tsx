@@ -157,8 +157,11 @@ export function DetailsScreen(p: CourseProps) {
   const meta = y && !y.errors.length ? obj(y.toJS()) : {};
   const before = detailsOf(meta);
   const d = draft ?? before;
-  const cv = courseView(p).course;
-  const ready = cv?.ready ?? false;
+  const ready = courseView(p).course?.ready ?? false;
+  const site = p.files.file(course.org, COURSE_REPO, OPENCOURSE_FILE);
+  const siteYaml = site.kind === 'ready' ? new YamlText(site.text) : null;
+  // opencourse.yml's `enabled`; no file is off (`opencourse.parse`), one not loaded is not known.
+  const siteOn = site.kind === 'absent' ? 'Off.' : siteYaml && !siteYaml.errors.length ? (websiteOf(obj(siteYaml.toJS())).enabled ? 'On.' : 'Off.') : 'Not known yet.';
   const set = (patch: Partial<Details>) => {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
@@ -197,7 +200,7 @@ export function DetailsScreen(p: CourseProps) {
               <dl class="kv">
                 <dt>Org</dt><dd>{course.org} <span class="footnote">cannot be renamed here</span></dd>
                 <dt>Engine version</dt><dd>{String(meta.central_ref ?? 'release')} <span class="footnote">set by the lab</span></dd>
-                <dt>Public website</dt><dd>{cv?.stages?.C6 === 'done' ? 'On' : 'Off'}. <a class="textlink" href="#website">Manage</a></dd>
+                <dt>Public website</dt><dd>{siteOn} <a class="textlink" href="#website">Manage</a></dd>
               </dl>
             </div>
             <div class="form-section">

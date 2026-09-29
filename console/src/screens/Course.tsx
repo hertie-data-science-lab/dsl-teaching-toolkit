@@ -7,7 +7,7 @@ import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
-import { assignmentIdent } from '../model/format';
+import { STAGE_WORD, assignmentIdent } from '../model/format';
 import { checkNow, derive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
@@ -43,13 +43,13 @@ function problemsOf(p: CourseProps, cohortOrg: string): number | null {
 }
 
 /** The course's setup steps (C1-C6). The first three are what a new semester needs (decision 0019). */
-export const SETUP_STEPS: { id: string; name: string; need?: 'required' | 'optional' }[] = [
+export const SETUP_STEPS: { id: string; name: string; need?: 'required' }[] = [
   { id: 'C1', name: 'Course org read', need: 'required' },
   { id: 'C2', name: 'Course set up on GitHub', need: 'required' },
   { id: 'C3', name: 'Course details filled in', need: 'required' },
   { id: 'C4', name: 'First materials repo' },
   { id: 'C5', name: 'First assignment template' },
-  { id: 'C6', name: 'Public website', need: 'optional' },
+  { id: 'C6', name: 'Public website' },
 ];
 
 /** How many required setup steps are not done. */
@@ -64,16 +64,23 @@ export function readyWords(c: CourseStatus): string {
   return n ? `Not ready: ${n === 1 ? '1 setup step' : `${n} setup steps`} left.` : 'Not ready: a problem below needs fixing.';
 }
 
-/** Where an open setup step is done: one link. */
-function stepLink(id: string, c: CourseStatus): { href: string; label: string; ext?: boolean } {
+/** The step each one waits for (the engine's `PREREQUISITES`). */
+const WAITS_FOR: Record<string, string> = { C2: 'C1', C3: 'C2', C4: 'C2', C5: 'C2', C6: 'C4' };
+
+/** Where an open setup step is done: one link. A problem links to its card, so a fault is listed once;
+ * a blocked step links to where the step it waits for is done. */
+export function stepLink(id: string, c: CourseStatus): { href: string; label: string; ext?: boolean } {
   const org = c.org;
+  const state = c.stages[id];
+  if (state === 'problem') return { href: '#course-problems', label: 'See the problem' };
+  if (state === 'blocked' && WAITS_FOR[id]) return stepLink(WAITS_FOR[id], c);
   switch (id) {
     case 'C1': return { href: ghUrl(org), label: 'Open on GitHub', ext: true };
     case 'C2': return { href: ghUrl(org, COURSE_REPO), label: 'Open .github', ext: true };
     case 'C3': return { href: '#details', label: 'Edit course details' };
-    case 'C4': return c.materials?.length ? { href: '#materials', label: 'Materials' } : { href: `?course=${org}#new-materials`, label: 'New materials' };
-    case 'C5': return c.templates?.length ? { href: '#templates', label: 'Assignment templates' } : { href: `?course=${org}#new-assignment-1`, label: 'New assignment' };
-    default: return { href: '#website', label: 'Public website settings' };
+    case 'C4': return c.materials?.length ? { href: '#materials', label: 'Open materials' } : { href: `?course=${org}#new-materials`, label: 'New materials' };
+    case 'C5': return c.templates?.length ? { href: '#templates', label: 'Open templates' } : { href: `?course=${org}#new-assignment-1`, label: 'New assignment' };
+    default: return { href: '#website', label: 'Set up the public website' };
   }
 }
 
@@ -82,12 +89,13 @@ export function SetupList({ course }: { course: CourseStatus }) {
   return (
     <ul class="setup">
       {SETUP_STEPS.map((s) => {
-        const done = course.stages[s.id] === 'done';
+        const state = course.stages[s.id] ?? 'todo';
+        const done = state === 'done';
         const link = done ? null : stepLink(s.id, course);
         return (
           <li class={done ? 'done' : 'open'}>
             <span class="s-mark" aria-hidden="true">{done ? <Check /> : null}</span>
-            <span class="s-name">{s.name}{s.need ? <span class="s-need">{s.need}</span> : null}<span class="sr">{done ? ': done' : ': to do'}</span></span>
+            <span class="s-name">{s.name}{s.need ? <span class="s-need">{s.need}</span> : null}<span class="sr">: {STAGE_WORD[state]}</span></span>
             {link ? (
               <span class="s-why">
                 {course.stage_why?.[s.id] ?? 'Not done yet.'}{' '}

@@ -439,6 +439,8 @@ def test_a_course_problem_stops_ready_though_every_required_stage_is_done():
         (NOW, False, False),  # week 3
         (datetime(2026, 12, 19, 12, 0, tzinfo=UTC), False, True),  # past the end
         (datetime(2026, 12, 18, 12, 0, tzinfo=UTC), False, False),  # its last day
+        # 23:30 UTC on the 18th is already the 19th in Berlin, the semester's zone.
+        (datetime(2026, 12, 18, 23, 30, tzinfo=UTC), False, True),
         (datetime(2026, 12, 19, 12, 0, tzinfo=UTC), True, False),  # archived
     ],
 )
