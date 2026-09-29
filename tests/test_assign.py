@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import assign, collect, course, grades, workflows_place
+from dsl_course import assign, collect, course, grades, settings, workflows_place
 from dsl_course.schedule import Schedule
 from tests.conftest import ROSTER_HEADER, repo_row
 
@@ -1583,6 +1583,33 @@ def test_a_group_handout_with_no_teams_records_the_moment_it_went_out(
         "COURSE", "project-f2026", "SEMESTER", roster_path=path, scheduled=True
     ) == (0, False), "the wait itself must not change - no team, no repo"
     assert recorded == [("SEMESTER", "project")]
+
+
+def test_a_group_assignment_nobody_declared_a_formation_for_waits_on_students(
+    tmp_path, monkeypatch, capsys
+):
+    # Read through the real cascade, every layer silent: the institution's `self_select`
+    # answers, so the wait names the students and not the teaching team. The REAL read,
+    # not the file's autouse stub, off a template that says only `type: group`.
+    monkeypatch.setattr(assign, "load_grading_spec", grades.load_grading_spec)
+    monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
+    monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
+    monkeypatch.setattr(grades, "_grading_text", lambda org, template: "type: group\n")
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    monkeypatch.setattr(settings, "org_meta", lambda org: {})
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+
+    def run(**kw):
+        return assign.provision_all(
+            "COURSE", "project-f2026", "SEMESTER", roster_path=path, **kw
+        )
+
+    assert run(scheduled=True) == (0, False)
+    assert "the first team forms" in capsys.readouterr().out
+    assert run() == (1, False)
+    err = capsys.readouterr().err
+    assert "students self-select" in err and "team_formation: assigned" not in err
 
 
 def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(

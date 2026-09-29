@@ -2494,6 +2494,36 @@ def test_a_self_select_window_is_pending_then_open_then_closed(
     assert window(_CUTOFF) == "closed"  # the cutoff is not: the snapshot has frozen
 
 
+def test_a_group_assignment_nobody_declared_a_formation_for_self_selects(monkeypatch):
+    # Every student must be in a team, and forming them is the students' job: with no
+    # `team_formation` at any layer the institution's `self_select` answers, so the lock
+    # opens the window and the site's list asks for it. `assigned` only when declared.
+    sched = _sched(p="group-f2026", q="assigned-f2026", handout=_HANDOUT)
+    text = _lock(
+        monkeypatch,
+        sched,
+        {
+            "group-f2026": "type: group\n",
+            "assigned-f2026": "type: group\nteam_formation: assigned\n",
+        },
+        now=_HANDOUT,
+    )
+    lock = yaml.safe_load(text)["assignments"]
+    assert (lock["p"]["team_formation"], lock["p"]["team_formation_window"]) == (
+        "self_select",
+        "open",
+    )
+    assert (lock["q"]["team_formation"], lock["q"]["team_formation_window"]) == (
+        "assigned",
+        "none",
+    )
+    assert grades.self_select_keys("COURSE", sched) == ["p"]
+    spec = grades.load_grading_spec(
+        "COURSE", "group-f2026", semester_org=sched.org, slug="p"
+    )
+    assert dict(spec.sources)["team_formation"] == "institution"
+
+
 def test_a_self_select_assignment_nobody_has_dated_never_opens(monkeypatch):
     # `handout_datetime` unset = handed out by hand at a moment nobody wrote down, so
     # there is no hour from which "form your team now" would be true.

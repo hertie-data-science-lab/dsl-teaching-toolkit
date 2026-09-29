@@ -19,6 +19,7 @@ from dsl_course import (
     roster,
     schedule,
     schemas,
+    settings,
     status,
     status_json,
     student_status,
@@ -549,6 +550,21 @@ def test_a_group_assignment_with_no_copies_after_hand_out_is_forming_teams():
     doc = _render(semester=_semester(specs={"assignment-2": assigned}))
     row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
     assert row["state"] == "blocked"
+
+
+def test_a_group_assignment_nobody_declared_a_formation_for_is_forming_teams(
+    monkeypatch,
+):
+    # The spec as the engine reads it (the cascade, every layer empty): the institution's
+    # `self_select` answers, so the state is teams_forming, never blocked.
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    monkeypatch.setattr(settings, "org_meta", lambda org: {})
+    group = grades.with_run_settings(
+        grades.GradingSpec(type="group"), "COURSE", SEMESTER, "assignment-2"
+    )
+    doc = _render(semester=_semester(specs={"assignment-2": group}))
+    row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+    assert row["state"] == "teams_forming"
 
 
 def test_marks_are_counted_off_the_sheet_and_returned_once_every_unit_is():

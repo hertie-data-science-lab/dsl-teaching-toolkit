@@ -172,7 +172,7 @@ cron (~24h)** - run **Sync membership** by hand if you need it sooner. Runbook:
 Live example: [`example-course/semester-org/teams.csv`](../example-course/semester-org/teams.csv).
 
 `semester-config/teams.csv` - group membership, per assignment. It is populated in 2 ways:
-1. Students self-select via the `join` **Join team** issue - only where the assignment declares `team_formation: self_select`, only up to its `max_team_size` (default 5), and only between its `handout_datetime` and its grading pin; all three are read from the generated `semester-config/.system/assignments.lock.yml`,
+1. Students self-select via the `join` **Join team** issue - only where the assignment's `team_formation` is `self_select` (the default; `assigned` only where declared), only up to its `max_team_size` (default 5), and only between its `handout_datetime` and its grading pin; all three are read from the generated `semester-config/.system/assignments.lock.yml`,
 2. you edit it directly;
 either way a push materialises a GitHub team per group, and releasing a group assignment grants each team one shared repo.
 
