@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import yaml
 
-from .central import MissingCentralRef, resolve_central_ref
+from . import invitations, issues, org_registry
+from .central import CENTRAL, MissingCentralRef, resolve_central_ref
 from .course import (
     COURSE_CONFIG,
     COURSE_HUB_TOPIC,
@@ -99,7 +101,16 @@ def discover_course_orgs() -> list[dict]:
     and refreshes the rest.
     """
     orgs = []
+    registered = org_registry.course_orgs()
     for owner in _tagged_orgs(COURSE_HUB_TOPIC):
+        if owner.casefold() not in registered:
+            # The topic is anyone's to set: an org orgs.yml does not name is never
+            # refreshed, so the bot token is never written into it.
+            print(
+                f"  [skip] {owner}: tagged {COURSE_HUB_TOPIC} but not in orgs.yml",
+                file=sys.stderr,
+            )
+            continue
         meta = _metadata_or_none(owner)
         if meta and meta.get("course"):
             # A semester org's dsl-course.yml is a pointer back to its course org
@@ -196,6 +207,51 @@ def _pointer_or_none(semester_org: str) -> dict | None:
         return None
 
 
+# Picked once: `issues` finds the issue by this exact title, so a rename opens a second one.
+AWAITING_TITLE = "Course orgs awaiting registration"
+
+
+def awaiting_registration() -> list[dict]:
+    """Every org that looks like a course the registry does not name, with why: it has
+    invited the bot (a new course, before its set-up) or its `.github` carries the course
+    topic. A tagged org whose metadata points at a course is a semester, not a course."""
+    registered = org_registry.course_orgs()
+    found: dict[str, dict] = {}
+    for org in invitations.pending_orgs():
+        if org.casefold() not in registered:
+            found.setdefault(org.casefold(), {"org": org, "why": "invited the bot"})
+    for org in _tagged_orgs(COURSE_HUB_TOPIC):
+        if org.casefold() in registered or org.casefold() in found:
+            continue
+        meta = _metadata_or_none(org)
+        if not (meta or {}).get("course"):
+            found[org.casefold()] = {"org": org, "why": f"tagged {COURSE_HUB_TOPIC}"}
+    return sorted(found.values(), key=lambda o: o["org"].lower())
+
+
+def awaiting_body(orgs: list[dict]) -> str:
+    rows = "\n".join(
+        f"- [{o['org']}](https://github.com/{o['org']}) - {o['why']}" for o in orgs
+    )
+    return (
+        "These orgs look like new courses but are not in `orgs.yml`, so the bot does not "
+        "join them and they are never refreshed:\n\n"
+        f"{rows}\n\n"
+        "Check who asked for each one, then add it to `orgs.yml` by pull request. The bot "
+        "accepts a waiting invitation on the next automatic run. This issue is rewritten "
+        "daily by *Bot Token Canary* and closes itself when the list is empty."
+    )
+
+
+def file_awaiting(orgs: list[dict]) -> int:
+    """Keep the one issue in the toolkit repo in step with `orgs`; the error count."""
+    if not orgs:
+        return issues.close_issues_titled(
+            CENTRAL, AWAITING_TITLE, "Every course org is registered."
+        )
+    return issues.upsert_issue(CENTRAL, AWAITING_TITLE, awaiting_body(orgs)).errors
+
+
 def unreadable(orgs: list[dict], semesters: list[dict]) -> list[str]:
     """The orgs whose metadata this run could not read - see _metadata_or_none."""
     return sorted(o["org"] for o in [*orgs, *semesters] if not o["readable"])
@@ -277,7 +333,29 @@ def main() -> int:
         default="json",
         help="Output format when writing to stdout. Default: json.",
     )
+    parser.add_argument(
+        "--awaiting-registration",
+        action="store_true",
+        help="Print, as JSON, the orgs that look like courses but are not in orgs.yml "
+        "(needs the bot's token: it reads the bot's pending invitations).",
+    )
+    parser.add_argument(
+        "--file-awaiting",
+        metavar="JSON",
+        help="Open, update or close the toolkit repo's 'Course orgs awaiting "
+        "registration' issue from a file --awaiting-registration wrote.",
+    )
     args = parser.parse_args()
+
+    if args.file_awaiting:
+        return file_awaiting(json.loads(Path(args.file_awaiting).read_text()))
+    if args.awaiting_registration:
+        try:
+            print(json.dumps(awaiting_registration()))
+        except RuntimeError as exc:
+            log_err(str(exc))
+            return 1
+        return 0
 
     # Discovery is one `gh search repos` call per topic, and the markdown tree reads each
     # course's semester registry; if either fails there is no inventory. Both are inside the

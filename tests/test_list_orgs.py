@@ -11,7 +11,19 @@ import json
 import pytest
 import yaml
 
-from dsl_course import gh_contents, list_orgs, repos
+from dsl_course import gh_contents, issues, list_orgs, repos
+
+
+class _Everyone(frozenset):
+    """A registry that names every org: the tests below are about discovery, not it."""
+
+    def __contains__(self, org: object) -> bool:
+        return True
+
+
+@pytest.fixture(autouse=True)
+def registry(monkeypatch):
+    monkeypatch.setattr(list_orgs.org_registry, "course_orgs", _Everyone)
 
 
 def _contents(text: str):
@@ -341,3 +353,90 @@ def test_an_org_whose_declared_tier_is_junk_reports_no_tier(monkeypatch, capsys)
 
     assert [o["central_ref"] for o in list_orgs.discover_course_orgs()] == [None]
     assert "stagign" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------- the course org registry
+
+
+def test_a_tagged_org_the_registry_does_not_name_is_never_refreshed(
+    monkeypatch, capsys
+):
+    # The topic is anyone's to set, and the fan-out writes the bot token into every org it
+    # refreshes: an unregistered org must not even reach the inventory.
+    monkeypatch.setattr(
+        list_orgs.org_registry, "course_orgs", lambda: frozenset({"trunk"})
+    )
+    monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Trunk", "Stranger"])
+    monkeypatch.setattr(list_orgs, "org_meta", lambda org: {})
+    assert [o["org"] for o in list_orgs.discover_course_orgs()] == ["Trunk"]
+    err = capsys.readouterr().err
+    assert "[skip] Stranger: tagged dsl-course-hub but not in orgs.yml" in err
+    assert "Trunk" not in err
+
+
+def test_awaiting_registration_lists_invitations_and_tagged_courses(monkeypatch):
+    monkeypatch.setattr(
+        list_orgs.org_registry, "course_orgs", lambda: frozenset({"trunk"})
+    )
+    monkeypatch.setattr(
+        list_orgs.invitations, "pending_orgs", lambda: ["Trunk", "New-Course"]
+    )
+    monkeypatch.setattr(
+        list_orgs, "_tagged_orgs", lambda topic: ["Trunk", "Tagged", "Old-f2025"]
+    )
+    # A tagged org whose metadata points at a course is a semester, not a course.
+    monkeypatch.setattr(
+        list_orgs,
+        "org_meta",
+        lambda org: {"course": "Trunk"} if org == "Old-f2025" else {},
+    )
+    assert list_orgs.awaiting_registration() == [
+        {"org": "New-Course", "why": "invited the bot"},
+        {"org": "Tagged", "why": "tagged dsl-course-hub"},
+    ]
+
+
+def test_the_awaiting_issue_is_written_while_orgs_wait_and_closed_when_none(
+    monkeypatch,
+):
+    written, closed = [], []
+    monkeypatch.setattr(
+        issues,
+        "upsert_issue",
+        lambda repo, title, body: (
+            written.append((repo, title, body)) or issues.Upserted(0)
+        ),
+    )
+    monkeypatch.setattr(
+        issues,
+        "close_issues_titled",
+        lambda repo, title, comment=None: closed.append((repo, title)) or 0,
+    )
+    waiting = [{"org": "New-Course", "why": "invited the bot"}]
+    assert list_orgs.file_awaiting(waiting) == 0
+    repo, title, body = written[0]
+    assert (repo, title) == (list_orgs.CENTRAL, "Course orgs awaiting registration")
+    assert "- [New-Course](https://github.com/New-Course) - invited the bot" in body
+    assert list_orgs.file_awaiting([]) == 0
+    assert closed == [(list_orgs.CENTRAL, "Course orgs awaiting registration")]
+
+
+def test_the_awaiting_list_goes_through_a_file_between_the_two_tokens(
+    monkeypatch, capsys, tmp_path
+):
+    monkeypatch.setattr(
+        list_orgs,
+        "awaiting_registration",
+        lambda: [{"org": "New-Course", "why": "invited the bot"}],
+    )
+    monkeypatch.setattr("sys.argv", ["list_orgs", "--awaiting-registration"])
+    assert list_orgs.main() == 0
+    out = tmp_path / "awaiting.json"
+    out.write_text(capsys.readouterr().out)
+    filed = []
+    monkeypatch.setattr(
+        list_orgs, "file_awaiting", lambda orgs: filed.append(orgs) or 0
+    )
+    monkeypatch.setattr("sys.argv", ["list_orgs", "--file-awaiting", str(out)])
+    assert list_orgs.main() == 0
+    assert filed == [[{"org": "New-Course", "why": "invited the bot"}]]

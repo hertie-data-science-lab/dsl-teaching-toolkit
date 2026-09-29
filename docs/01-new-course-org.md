@@ -20,12 +20,13 @@ Set up once per course; it serves every future semester. Per-semester setup of t
    - select the free plan **[here](https://github.com/account/organizations/new?plan=free&ref_cta=Create%2520a%2520free%2520organization&ref_loc=cards&ref_page=%2Forganizations%2Fplan)** → *Create a new organization*. 
    - Name it **`hertie-<course-slug>-<code>`** - lowercase-kebab, no year (e.g. `hertie-dsl-demo-course-e1234`).
    - Select a business/institutional account, and enter `hertie-data-science-lab` into the text box.
+   - Install the console app on it: https://github.com/apps/<slug>/installations/new, choose the org, All repositories, Install.
 
 2. **Invite `hertie-dsl-bot` as Owner**: 
    - `https://github.com/orgs/<your-org>/people` → *Invite member* → `hertie-dsl-bot` 
    - Select role: **Owner**.
 
-   > **The bot accepts the invite by itself within 15 minutes.** Until it has, the *Bootstrap Course Org* run fails; run it again once the bot shows as an Owner.
+   > **The DSL team registers new courses; the bot then joins by itself.** Until it has, the *Bootstrap Course Org* run fails; run it again once the bot shows as an Owner.
 
 3. **Run [Bootstrap Course Org](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/bootstrap-org.yml)**
    - from the central DSL's [`dsl-teaching-toolkit` repo](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions) 

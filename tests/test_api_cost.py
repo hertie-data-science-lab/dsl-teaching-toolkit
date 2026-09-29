@@ -240,6 +240,8 @@ class FakeGitHub:
         parts = path.split("?")[0].split("/")
         if path == "user":
             return 0, "bot" if jq else '{"login": "bot"}'
+        if parts[:3] == ["user", "memberships", "orgs"]:
+            return 0, "" if jq else "[]"  # the bot holds no pending invitation
         if parts[0] == "orgs" and len(parts) == 2:
             return 0, parts[1] if jq else json.dumps({"login": parts[1]})
         if parts[0] == "orgs" and parts[2] == "repos":
@@ -601,7 +603,8 @@ OPERATIONS = {
     # the fixture has pushed since the handout; each student who has adds two commit
     # reads per assignment whose sheet is still open (`collect._provisional_pins`).
     "tick: list the semesters": (("scheduler", *_C, "--list-semesters"), 3, 0),
-    "tick: release (real)": ((*_TICK, "--no-preview"), 36, 0),
+    # Re-measured 2026-09-30 at 42, with the bot's pending-invitation read (one call).
+    "tick: release (real)": ((*_TICK, "--no-preview"), 42, 0),
     "tick: release (preview)": ((*_TICK, "--preview"), 31, 0),
     "tick: autograde leg": (
         ("scheduler", *_C, *_S, "--autograde-only", "--now", NOW, "--preview"),

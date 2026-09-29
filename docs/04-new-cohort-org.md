@@ -22,6 +22,7 @@ Live example of every file below: [`example-course/semester-org/`](../example-co
     - Named **`hertie-<course-slug>-<termtag>`**, termtag `fYYYY`/`sYYYY` - lowercase-kebab (e.g. `hertie-dsl-demo-f2026`). 
       - The `fYYYY`/`sYYYY` semester is necessary; it drives the semester label ("Fall 2026") and which year's `assignment-*` templates the site lists.
     - Select a business/institutional account, and enter `hertie-data-science-lab` into the text box.
+    - Install the console app on the new semester org: https://github.com/apps/<slug>/installations/new, choose the org, All repositories, Install.
 
 2. **Invite `hertie-dsl-bot` as Owner** (Org → People → Invite → role *Owner*).
 

@@ -702,10 +702,10 @@ def preflight(org: str) -> bool:
         log(
             f"\nThe bot must be an ACTIVE OWNER of {org} - creating the .github repo, role "
             f"teams, and org secret all require Owner. Fix by the matching case, then re-run:\n"
-            f"  - 'pending/admin'  -> @{bot} was invited and has not accepted yet; the "
-            f"next automatic run (every 15 minutes) accepts it\n"
-            f"  - 'not a member'   -> invite @{bot} to {org} as Owner; the next automatic "
-            f"run accepts it\n"
+            f"  - 'pending/admin'  -> @{bot} was invited. The DSL team registers new "
+            f"courses (orgs.yml); the bot then joins by itself\n"
+            f"  - 'not a member'   -> invite @{bot} to {org} as Owner; once the course "
+            f"is registered the bot joins by itself\n"
             f"  - 'active/member'  -> promote @{bot} to Owner in the org's People page\n"
         )
         return False

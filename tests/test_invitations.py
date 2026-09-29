@@ -6,6 +6,13 @@ import pytest
 
 from dsl_course import invitations
 
+REGISTERED = frozenset({"hertie-new-e1234", "hertie-new-f2026", "gone"})
+
+
+@pytest.fixture(autouse=True)
+def registry(monkeypatch):
+    monkeypatch.setattr(invitations.org_registry, "course_orgs", lambda: REGISTERED)
+
 
 def _stub_gh(monkeypatch, pending: str, fail: frozenset[str] = frozenset()):
     calls: list[tuple[str, ...]] = []
@@ -57,3 +64,24 @@ def test_a_listing_that_cannot_be_read_raises(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="pending invitations"):
         invitations.accept_pending()
+
+
+def test_an_org_the_registry_does_not_name_is_left_pending(monkeypatch, capsys):
+    # Anyone can invite the bot. Accepting would put it in an org the fan-out could then
+    # hand the bot token to; declining would stop a later registration from working.
+    calls = _stub_gh(monkeypatch, "Stranger-Org\nHertie-New-E1234\n")
+    assert invitations.accept_pending() == ["Hertie-New-E1234"]
+    assert [c[3] for c in calls[1:]] == ["user/memberships/orgs/Hertie-New-E1234"]
+    out = capsys.readouterr().out
+    assert "invitation from Stranger-Org left pending: not registered" in out
+
+
+def test_a_registry_that_cannot_be_read_accepts_nothing(monkeypatch):
+    def unreadable():
+        raise RuntimeError("could not read the course org registry orgs.yml")
+
+    monkeypatch.setattr(invitations.org_registry, "course_orgs", unreadable)
+    calls = _stub_gh(monkeypatch, "hertie-new-e1234\n")
+    with pytest.raises(RuntimeError, match="orgs.yml"):
+        invitations.accept_pending()
+    assert calls == []
