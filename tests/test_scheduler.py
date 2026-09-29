@@ -2450,17 +2450,7 @@ def test_a_solution_datetime_without_a_handout_never_synthesises_a_release(monke
     )
 
 
-def test_a_solution_inside_the_late_window_is_held_until_the_cutoff(monkeypatch):
-    # A late window changed after `load` refused nothing (or one it could not read) must
-    # not let the answer out while students are still handing in. Held per assignment, off
-    # each one's own window - and the hand out it rides on keeps firing meanwhile.
-    _WINDOWS.update({"assignment-1": 7, "assignment-2": 0})
-    monkeypatch.setattr(
-        scheduler,
-        "_assignment_template",
-        lambda org, slug, entry: entry.course_source_repo,
-    )
-    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
+def _early_solutions() -> Schedule:
     sched = Schedule(
         assignments={
             slug: AssignmentEntry(
@@ -2468,11 +2458,28 @@ def test_a_solution_inside_the_late_window_is_held_until_the_cutoff(monkeypatch)
                 due_datetime=datetime(2026, 10, 13, 23, 59, tzinfo=BERLIN),
                 handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
                 solution_datetime=datetime(2026, 10, 16, 9, 0, tzinfo=BERLIN),
+                lines={"solution_datetime": 7},
             )
             for slug in ("assignment-1", "assignment-2")
         }
     )
     sched.org = "Sem-f2026"
+    return sched
+
+
+def test_a_solution_inside_the_late_window_is_held_then_released(monkeypatch):
+    # A date in the file before the cutoff (a hand edit, a window changed after it was set)
+    # is never dropped at run time: HELD, per assignment off each one's own window, and
+    # released on the first tick after the cutoff. The hand out it rides on keeps firing.
+    _WINDOWS.update({"assignment-1": 7, "assignment-2": 0})
+    monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "Course")
+    monkeypatch.setattr(
+        scheduler,
+        "_assignment_template",
+        lambda org, slug, entry: entry.course_source_repo,
+    )
+    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
+    sched = _early_solutions()
 
     def solutions(now):
         releases = scheduler._handout_releases("Course-Org", "Sem-f2026", sched, now)
@@ -2491,25 +2498,45 @@ def test_a_solution_inside_the_late_window_is_held_until_the_cutoff(monkeypatch)
     )
 
 
-def test_a_solution_whose_cutoff_cannot_be_read_is_held(monkeypatch):
+def test_a_held_solution_is_a_warning_at_its_schedule_line(monkeypatch):
+    _WINDOWS.update({"assignment-1": 7, "assignment-2": 0})
+    monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "Course")
+    sched = _early_solutions()
+    (fault,) = scheduler._held_solution_faults(
+        sched, datetime(2026, 10, 1, tzinfo=BERLIN)
+    )
+    assert (fault.where, fault.field, fault.lineno, fault.file, fault.ceiling) == (
+        "assignments.assignment-1",
+        "solution_datetime",
+        7,
+        "schedule.yml",
+        faults_mod.Severity.WARNING,
+    )
+    assert fault.what == (
+        "The solution for assignment-1 is set to be shown on 2026-10-16 09:00, before its "
+        "late cutoff on 2026-10-20 23:59. Students can still hand in until the late "
+        "cutoff, so the solution must be shown on or after it. Held: the solution is "
+        "shown at the late cutoff instead."
+    )
+    # once the cutoff has passed the solution has gone out: nothing to say
+    after = datetime(2026, 10, 21, tzinfo=BERLIN)
+    assert scheduler._held_solution_faults(sched, after) == []
+
+
+def test_a_solution_whose_cutoff_cannot_be_known_is_held(monkeypatch):
+    # No course pointer, or a cascade that raises: never the institution's window.
+    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
+    sched = _early_solutions()
+    late = datetime(2027, 1, 1, tzinfo=BERLIN)
+    monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
+    assert not scheduler._solution_due("Sem-f2026", sched, "assignment-1", late)
+
     def unreadable(sched, slug):
         raise Unusable("assignments.yml is not YAML")
 
-    monkeypatch.setattr(scheduler, "grading_cutoff_datetime", unreadable)
-    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
-    sched = Schedule(
-        assignments={
-            "assignment-1": AssignmentEntry(
-                course_source_repo="a-f2026",
-                due_datetime=datetime(2026, 10, 13, 23, 59, tzinfo=BERLIN),
-                handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
-                solution_datetime=datetime(2026, 10, 16, 9, 0, tzinfo=BERLIN),
-            )
-        }
-    )
-    assert not scheduler._solution_due(
-        "Sem-f2026", sched, "assignment-1", datetime(2027, 1, 1, tzinfo=BERLIN)
-    )
+    monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "Course")
+    monkeypatch.setattr(schedule_mod, "grading_cutoff_datetime", unreadable)
+    assert not scheduler._solution_due("Sem-f2026", sched, "assignment-1", late)
 
 
 def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
