@@ -395,7 +395,7 @@ layers above its own:
 |---|---|
 | 0, nothing | `log`, `course` (the course vocabulary: config repo, semester key, session-folder rule, syllabus filenames, org topics), `readings`, `fs`, `releaseignore` (the `.releaseignore` rule) |
 | 1, the shell | `ghcli` (`gh`/`git`, timeouts, the 404 test) |
-| 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted) |
+| 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted), `invitations` (the bot accepts its own org invitations) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
 | 5 and up | `access` (team permissions and the faculty floor), `materials` (the `materials.yml` escape hatch and the kind aliases), `schedule_plan` (the rows a plan declares, one per release entry), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
@@ -648,6 +648,12 @@ hours. Everything either alarm says is bounded by the **100** runs the check fet
 armed only while a dispatch-driven run sits inside that window: a freshly bootstrapped or newly
 promoted org never alarms on its way in, and an org whose dispatcher died long enough ago to
 scroll out of the window re-disarms unless its driver-health issue is already open.
+
+Every real all-semesters release pass also accepts the bot's pending org invitations
+(`invitations.accept_pending`), before the semester listing so a course with no semester yet
+still does it. The bot is one account, so whichever course org ticks first accepts for every
+org being set up. A failure there is logged and never reds the run: it is not that course's
+release failing, and every course org would file its failure issue at once.
 
 **Break-glass.** If both drivers are down, or Actions itself is out, drive a course org from a
 laptop with a `repo`-scoped token: `GH_TOKEN=<token> python3 -m dsl_course.scheduler

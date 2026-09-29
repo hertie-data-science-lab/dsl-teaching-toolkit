@@ -25,7 +25,7 @@ Set up once per course; it serves every future semester. Per-semester setup of t
    - `https://github.com/orgs/<your-org>/people` → *Invite member* → `hertie-dsl-bot` 
    - Select role: **Owner**.
 
-   > ⚠️ **The bot must accept the invite before you can bootstrap.** Ask the DSL team (h.baker) to accept it - until they do, the *Bootstrap Course Org* run fails.
+   > **The bot accepts the invite by itself within 15 minutes.** Until it has, the *Bootstrap Course Org* run fails; run it again once the bot shows as an Owner.
 
 3. **Run [Bootstrap Course Org](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/bootstrap-org.yml)**
    - from the central DSL's [`dsl-teaching-toolkit` repo](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions) 
