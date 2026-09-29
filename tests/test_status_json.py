@@ -393,6 +393,75 @@ def test_the_contract_example_marks_k4_k5_and_c5_and_lists_three_problems():
     assert assignment["problem"] is True
 
 
+def _course_block(course: status_json.CourseFacts) -> dict:
+    return status_json.render_course_file(course, NOW)["course"]
+
+
+@pytest.mark.parametrize(
+    ("over", "ready"),
+    [
+        # C4-C6 are listed but optional: none of them stops a new semester.
+        ({"materials": [], "templates": [], "public_site": False}, True),
+        (
+            {"materials": [status_json.MaterialsFacts("course-materials-x", None)]},
+            True,
+        ),
+        # C1-C3 are required.
+        ({"github_paths": None}, False),
+        ({"github_paths": {"dsl-course.yml": "c0ffee"}}, False),
+        ({"meta": {"course_name": "Machine Learning"}}, False),
+    ],
+)
+def test_ready_is_c1_to_c3_done(over, ready):
+    block = _course_block(_course(**over))
+    assert block["ready"] is ready
+    if not ready:
+        assert any(block["stage_why"].get(s) for s in ("C1", "C2", "C3"))
+
+
+def test_a_course_problem_stops_ready_though_every_required_stage_is_done():
+    course = _course()
+    course.templates[1].faults = [_autograde_sometimes()]
+    block = _course_block(course)
+    assert {s: block["stages"][s] for s in ("C1", "C2", "C3")} == dict.fromkeys(
+        ("C1", "C2", "C3"), "done"
+    )
+    assert block["ready"] is False
+    # A migration problem on a materials repo is a course problem too.
+    unmigrated = status_json.MaterialsFacts("course-materials-x", "# S", True)
+    unmigrated.topic = False
+    assert _course_block(_course(materials=[unmigrated]))["ready"] is False
+
+
+@pytest.mark.parametrize(
+    ("now", "archived", "ended"),
+    [
+        (NOW, False, False),  # week 3
+        (datetime(2026, 12, 19, 12, 0, tzinfo=UTC), False, True),  # past the end
+        (datetime(2026, 12, 18, 12, 0, tzinfo=UTC), False, False),  # its last day
+        # 23:30 UTC on the 18th is already the 19th in Berlin, the semester's zone.
+        (datetime(2026, 12, 18, 23, 30, tzinfo=UTC), False, True),
+        (datetime(2026, 12, 19, 12, 0, tzinfo=UTC), True, False),  # archived
+    ],
+)
+def test_a_semester_past_its_end_and_not_archived_has_ended(now, archived, ended):
+    semester = _semester()
+    if archived:
+        semester.listing["semester-config"] = {
+            **semester.listing["semester-config"],
+            "archived": True,
+        }
+    doc = _render(semester=semester, now=now)
+    assert doc["semester"]["ended"] is ended
+    assert doc["semester"]["live"] is not archived
+
+
+def test_a_semester_with_no_end_date_has_not_ended():
+    sched = _sched(SCHEDULE.replace("semester_end: 2026-12-18\n", ""))
+    doc = _render(semester=_semester(sched=sched))
+    assert doc["semester"]["ended"] is False
+
+
 def test_two_faults_on_one_entry_are_two_problems():
     second = _missing_s5()
     second.path = "lectures/05_forests"

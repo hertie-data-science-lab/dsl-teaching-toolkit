@@ -151,7 +151,6 @@ main { min-width: 0; }
 .chip.evt { background: var(--evt-bg); color: var(--evt-ink); }
 .chip.term { background: var(--term-bg); color: var(--term-ink); }
 .count-badge { font-family: var(--font-display); font-weight: 700; font-size: 13px; min-width: 24px; height: 24px; padding: 0 8px; border-radius: 999px; background: var(--bad); color: #fff; display: inline-grid; place-items: center; }
-.count-badge.zero { background: var(--ok-soft); color: var(--ok); }
 .probs { display: inline-flex; gap: 8px; align-items: center; font-family: var(--font-display); font-weight: 600; font-size: 14px; color: var(--bad-ink); white-space: nowrap; }
 .probs.none { color: var(--ok); }
 
@@ -203,6 +202,20 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .problems-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .no-problems { display: flex; gap: 10px; align-items: center; padding: 12px 16px; background: var(--ok-soft); color: var(--ok); border-radius: 10px; font-weight: 600; }
 .no-problems svg { width: 14px; height: 14px; }
+
+/* Setup: a calm checklist, deliberately unlike the red problem cards beside it. */
+.setup { list-style: none; margin: 0; padding: 0; }
+.setup li { display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 10px; row-gap: 1px; padding: 7px 0; }
+.setup .s-mark { grid-row: 1 / span 2; width: 16px; height: 16px; margin-top: 3px; border-radius: 999px; display: grid; place-items: center; }
+.setup .s-mark svg { width: 10px; height: 10px; }
+.setup li.done .s-mark { background: var(--ok-soft); color: var(--ok); }
+.setup li.open .s-mark { border: 1.5px solid var(--idle); }
+.setup .s-name { font-weight: 600; }
+.setup li.open .s-name { color: var(--ink-2); }
+.setup .s-need { margin-left: 8px; font-weight: 400; font-size: 12px; color: var(--muted); }
+.setup .s-why { grid-column: 2; font-size: 13.5px; color: var(--muted); }
+.setup .s-why .textlink { min-height: 0; padding: 0 2px; }
+.page-note { color: var(--ink-2); font-size: 14px; margin: -6px 0 18px; max-width: 80ch; }
 
 /* ================= lists ================= */
 .rows { list-style: none; margin: 0; padding: 0; }

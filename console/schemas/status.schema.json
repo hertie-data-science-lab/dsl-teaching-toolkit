@@ -607,6 +607,9 @@
             "null"
           ]
         },
+        "ended": {
+          "type": "boolean"
+        },
         "key": {
           "type": [
             "string",
