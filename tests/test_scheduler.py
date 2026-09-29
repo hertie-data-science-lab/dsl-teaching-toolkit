@@ -2391,6 +2391,104 @@ def test_a_solution_datetime_without_a_handout_never_synthesises_a_release(monke
     assert scheduler._handout_releases("Course-Org", "Cohort-f2026", sched, WHEN) == []
 
 
+def _late_window_plan() -> Schedule:
+    # Two assignments on templates with different late windows (the per-assignment
+    # deviation): a1's solution falls inside ITS window, a2's after its own.
+    return Schedule(
+        assignments={
+            "assignment-1": AssignmentEntry(
+                course_source_repo="a-f2026",
+                due_datetime=datetime(2026, 10, 13, 23, 59, tzinfo=BERLIN),
+                handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+                solution_datetime=datetime(2026, 10, 16, 9, 0, tzinfo=BERLIN),
+                lines={"solution_datetime": 7},
+            ),
+            "assignment-2": AssignmentEntry(
+                course_source_repo="b-f2026",
+                due_datetime=datetime(2026, 10, 13, 23, 59, tzinfo=BERLIN),
+                handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+                solution_datetime=datetime(2026, 10, 16, 9, 0, tzinfo=BERLIN),
+            ),
+        }
+    )
+
+
+def _windows(monkeypatch, days: dict[str, int]) -> None:
+    monkeypatch.setattr(
+        scheduler,
+        "load_grading_spec",
+        lambda org, template: GradingSpec(late_window_days=days[template]),
+    )
+
+
+def test_a_solution_inside_the_late_window_is_held_until_the_cutoff(monkeypatch):
+    # The parser cannot see a template's late window, and a window lengthened after the
+    # solution date was set moves the cutoff past it. So the scheduler holds the push until
+    # the cutoff - per assignment, off each template's own window - and the handout the
+    # solution rides on keeps firing meanwhile.
+    _windows(monkeypatch, {"a-f2026": 7, "b-f2026": 0})
+    monkeypatch.setattr(
+        scheduler,
+        "_assignment_template",
+        lambda org, slug, entry: entry.course_source_repo,
+    )
+    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
+    sched = _late_window_plan()
+
+    def solutions(now):
+        releases = scheduler._handout_releases("Course-Org", "Cohort-f2026", sched, now)
+        # every handout is still due - only the solution waits
+        assert len(scheduler.due_releases(releases, now)) == 2
+        return {r.assignment_slug: r.assignment_solution for r in releases}
+
+    # past the solution date: a2 (no window) goes out, a1 (cutoff 20 Oct 23:59) is held
+    assert solutions(datetime(2026, 10, 17, tzinfo=BERLIN)) == {
+        "assignment-1": False,
+        "assignment-2": True,
+    }
+    assert (
+        solutions(datetime(2026, 10, 20, 23, 0, tzinfo=BERLIN))["assignment-1"] is False
+    )
+    # and goes out on the first tick after the cutoff
+    assert (
+        solutions(datetime(2026, 10, 21, 0, 0, tzinfo=BERLIN))["assignment-1"] is True
+    )
+
+
+def test_a_solution_whose_cutoff_cannot_be_read_is_held(monkeypatch):
+    # Not knowing the window is not knowing the cutoff: nothing goes out on a guess.
+    def unreadable(org, template):
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setattr(scheduler, "load_grading_spec", unreadable)
+    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
+    sched = _late_window_plan()
+    assert not scheduler._solution_due(
+        "Course-Org",
+        "Cohort-f2026",
+        sched,
+        "assignment-1",
+        datetime(2027, 1, 1, tzinfo=BERLIN),
+    )
+
+
+def test_a_held_solution_is_a_fault_on_its_schedule_line(monkeypatch):
+    # Held quietly, the solution simply runs late; the digest says why, at the line to move.
+    _windows(monkeypatch, {"a-f2026": 7, "b-f2026": 0})
+    (fault,) = scheduler._held_solution_faults("Course-Org", _late_window_plan())
+    assert (fault.where, fault.field, fault.lineno, fault.file) == (
+        "assignments.assignment-1",
+        "solution_datetime",
+        7,
+        "schedule.yml",
+    )
+    assert fault.what.startswith(
+        "the solution for assignment-1 is set to go out on 2026-10-16 09:00, before its "
+        "grading cutoff on 2026-10-20 23:59."
+    )
+    assert fault.what.endswith("held, so the solution goes out at the cutoff instead")
+
+
 def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
     # due_releases documents event_datetime order, and the plan is sorted at parse time -
     # but the synthesised handouts are appended afterwards, so without a re-sort a
