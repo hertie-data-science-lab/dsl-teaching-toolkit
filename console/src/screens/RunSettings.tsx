@@ -235,7 +235,7 @@ function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year }
           {d.solutionOn ? (
             <div class="cond">
               <p class="note">{SOLUTION_WARNING}</p>
-              <div class="row-2">{F('solutionDate', T('Solution shown on', 'date', { reason: 'Must be after the hand out.' }), errors.solution)}{F('solutionTime', T('At', 'time'))}</div>
+              <div class="row-2">{F('solutionDate', T('Solution shown on', 'date', { reason: 'After the hand out, and not before the late cutoff.' }), errors.solution)}{F('solutionTime', T('At', 'time'))}</div>
             </div>
           ) : null}
         </>
@@ -270,7 +270,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   const days = resolve('late_window_days', mine).value;
   const vis = forcedVisibility(cfg) ? 'private' : resolve('visibility', mine).value;
   const solutionOff = vis !== 'private' ? 'Not available: student repos are not private, so the solution cannot be pushed automatically.' : d.manual ? 'Needs a hand out time; the solution must follow it.' : null;
-  const tErr = draftErrors(d);
+  const tErr = draftErrors(d, undefined, cutoffOf(d.dueDate, d.dueTime, typeof days === 'number' ? days : 0));
   const rErr = { ...runErrors(keys, layers, r), ...repoNameError(r.semester_dest_repo) };
   const dirtyT = timing !== null && !deepEqual(timing, baseT);
   const dirtyR = run !== null && !deepEqual(compact(run), compact(beforeRun));
