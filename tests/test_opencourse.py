@@ -23,7 +23,9 @@ def test_the_seeded_file_is_instructor_owned_off_and_parses():
 
 
 def test_a_seed_round_trips_its_values():
-    oc = OpenCourse(True, "course-materials-f2025", "none", False, ("labs/**", "*.key"))
+    oc = OpenCourse(
+        True, "course-materials-f2025", "none", False, ("labs/**", "*.key", "!x", "#y")
+    )
     assert opencourse.parse(yaml.safe_load(opencourse.seed_text(oc))) == oc
 
 

@@ -64,7 +64,7 @@ from .site_repo import (
 PUBLIC_MATERIALS_DIR = "public-materials"
 
 # The open site is still built from one repo's folders (its own design, `openware`, is
-# not written yet): `readings` is the section `--readings-mode` governs, and `labs` is the
+# not written yet): `readings` is the section `opencourse.yml`'s `readings_mode` governs, and `labs` is the
 # one section that makes a lab row. The semester site reads kinds from the schedule.
 READINGS_SECTION = "readings"
 LAB_SECTION = "labs"
@@ -263,7 +263,7 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             # Sections are whatever THIS repo has (the same discovery the release workflows
             # use), not a hardcoded lectures/readings pair - a course whose content lives
             # in `labs/` publishes labs. `readings` is the one section with special
-            # semantics (--readings-mode, below); `include_lectures` gates all the others.
+            # semantics (`readings_mode`, below); `include_lectures` gates all the others.
             file_sections = (
                 [sec for sec in discover_sections(src) if sec != READINGS_SECTION]
                 if include_lectures

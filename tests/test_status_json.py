@@ -1229,6 +1229,12 @@ def test_a_website_turned_on_but_never_published_is_not_done_yet():
     }
     off = status_json.render_course_file(_course(website_on=False), NOW)
     assert off["course"]["stages"]["C6"] != "done"
+    broken = status_json.render_course_file(
+        _course(website_on=False, website_unusable=True), NOW
+    )
+    assert broken["course"]["stage_why"] == {
+        "C6": "The public website settings file does not parse."
+    }
 
 
 # ------------------------------------------------------------------ dates for the console's clock

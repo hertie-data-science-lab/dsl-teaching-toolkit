@@ -177,6 +177,8 @@ class CourseFacts:
     public_site: bool = False
     # `opencourse.yml` says `enabled: true` (and parses).
     website_on: bool = False
+    # `opencourse.yml` is there but does not parse or validate.
+    website_unusable: bool = False
 
 
 @dataclass
@@ -797,7 +799,9 @@ def course_checks(facts: CourseFacts) -> dict[str, str | None]:
             out["C5"] = _first_of("assignment templates", pending)
         elif any(template_state(t) != "ready" for t in facts.templates):
             out["C5"] = "An assignment template has settings that need fixing."
-    if not facts.website_on:
+    if facts.website_unusable:
+        out["C6"] = "The public website settings file does not parse."
+    elif not facts.website_on:
         out["C6"] = "The public website is off; it is optional."
     elif not facts.public_site:
         out["C6"] = "The public website is on but not published yet."
@@ -1421,7 +1425,8 @@ def gather_course(course_org: str) -> CourseFacts:
     try:
         oc = read_opencourse(course_org)
     except Unusable:
-        oc = None  # the publish names the fault; the status only says "off"
+        oc = None
+        facts.website_unusable = True
     facts.website_on = bool(oc and oc.enabled)
     return facts
 

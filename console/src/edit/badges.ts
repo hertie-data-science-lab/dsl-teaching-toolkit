@@ -46,11 +46,17 @@ export function badgeFiles(files: string[], lines: string[]): Badged {
   return { badges, unmatched, rules: rs.length };
 }
 
-/** The line that names exactly this file or folder: anchored at the root, a folder with its `/`. */
+/**
+ * The line that names exactly this file or folder: anchored at the root, a folder with its `/`,
+ * and every character a pattern reads specially escaped (`[ ] * ? \\`, and a leading `!` or `#`),
+ * so `a[b]/notes.pdf` withholds that file and not `ab/notes.pdf`.
+ */
 export function exactLine(path: string, isDir: boolean): string {
-  return `${path.includes('/') ? '' : '/'}${path}${isDir ? '/' : ''}`;
+  const escaped = path.replace(/[[\]*?\\]/g, '\\$&').replace(/^[!#]/, '\\$&');
+  return `${path.includes('/') ? '' : '/'}${escaped}${isDir ? '/' : ''}`;
 }
 
+/** A line's pattern with the anchor dropped, for comparing spellings of one path's line. */
 const bare = (line: string) => line.trim().replace(/^\//, '');
 
 /** Whether a list line names exactly this path (`/x`, `x`, and for a folder `x/`). */
@@ -72,7 +78,11 @@ export function standing(rs: Rule[], lines: string[], path: string, isDir: boole
   return { kind: 'broader', rule: w.rule.line, at: w.at, legal: w.at === path };
 }
 
-/** A click: the list after it, or why it cannot change (the path sits inside a withheld folder). */
+/**
+ * A click: the list after it, or why it cannot change: the path sits inside a withheld folder
+ * (`at` is that folder), or it is a folder a `/**` rule withholds, which also covers everything
+ * inside it so no `!` line can release its files (`at` is the folder itself).
+ */
 export type Toggled = { lines: string[] } | { blocked: { rule: string; at: string } };
 
 /**
@@ -86,7 +96,7 @@ export function toggle(lines: string[], path: string, isDir: boolean): Toggled {
   if (s.kind === 'own') return { lines: lines.filter((l) => !(compile(l) && !l.trim().startsWith('!') && names(l, path, isDir))) };
   if (s.kind === 'included') return { lines: lines.filter((l) => !(compile(l) && l.trim().startsWith('!') && names(l.trim().slice(1), path, isDir))) };
   if (s.kind === 'released') return { lines: append(lines, line) };
-  if (!s.legal) return { blocked: { rule: s.rule, at: s.at } };
+  if (!s.legal || (isDir && /(^|\/)\*\*$/.test(s.rule.trim()))) return { blocked: { rule: s.rule, at: s.at } };
   return { lines: append(lines, `!${line}`) };
 }
 

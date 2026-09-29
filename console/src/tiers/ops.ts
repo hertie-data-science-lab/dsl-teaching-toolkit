@@ -47,9 +47,15 @@ export const RETURN_MARKS_ALWAYS = [
   { label: 'Update the registrar export', note: 'always' },
 ];
 
-export function publishWebsite(repos: string[]): Tiers {
+/** `siteExists`: the website was published before, so turning it off leaves that version up. */
+export const WEBSITE_OFF_LIVE = 'Off: the site stays as last published and no longer updates.';
+
+export function publishWebsite(repos: string[], siteExists = false): Tiers {
   return {
-    enabled: { tier: 'ask', label: 'Publish the website', widget: 'checkbox', default: false, reason: 'Off: nothing is published and the daily update stops.' },
+    enabled: {
+      tier: 'ask', label: 'Keep the website updated', widget: 'checkbox', default: false,
+      reason: siteExists ? WEBSITE_OFF_LIVE : 'Off: nothing is published.',
+    },
     source_repo: { tier: 'ask', label: 'Source materials', widget: 'select', reason: 'The website is built from this repo. Publishing replaces the live site.', options: repos.map((r) => opt(r, r)) },
     readings_mode: {
       tier: 'default', label: 'Readings', widget: 'select', default: 'reading-list', defaultLabel: 'default: reading list', reason: 'Publishing the readings themselves needs their licences.',

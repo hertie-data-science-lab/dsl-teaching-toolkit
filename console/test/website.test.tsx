@@ -2,10 +2,17 @@
 
 import { describe, expect, it } from 'vitest';
 import { YamlText } from '../src/edit/yamlText';
-import { websiteFileAfter, websiteOf } from '../src/screens/CourseEdit';
+import { newestRepo, websiteFileAfter, websiteOf } from '../src/screens/CourseEdit';
 
 describe('the public website settings', () => {
   const FILE = '# INSTRUCTOR-OWNED\nenabled: false   # off\nsource_repo:\nreadings_mode: reading-list\ninclude_lectures: true\nwithhold: []\n';
+
+  it('defaults the source to the newest materials repo, not the first listed', () => {
+    expect(newestRepo(['course-materials-f2025', 'course-materials-f2026', 'course-materials-s2026'])).toBe('course-materials-f2026');
+    expect(newestRepo(['course-materials-f2025', 'course-materials-s2026'])).toBe('course-materials-s2026');
+    expect(newestRepo(['slides', 'code'])).toBe('slides');
+    expect(newestRepo([])).toBeUndefined();
+  });
 
   it('reads the defaults the engine fills in', () => {
     expect(websiteOf({})).toEqual({ enabled: false, source_repo: '', readings_mode: 'reading-list', include_lectures: true, withhold: '' });

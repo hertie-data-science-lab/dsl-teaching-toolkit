@@ -17,7 +17,7 @@ import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { ABOUT, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
-import { publishWebsite as publishTiers } from '../tiers/ops';
+import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
 import { CheckLine, Crumbs, EditFile, Lives, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
@@ -295,6 +295,19 @@ export function websiteFileAfter(text: string | null, before: Website, after: We
   return validWebsite(y.toJS()) ? { text: y.text } : { error: invalidText(OPENCOURSE_FILE, validWebsite) };
 }
 
+/**
+ * The newest materials repo by its semester tag (`workflows_render._newest_materials`): spring
+ * before autumn within a year. The status lists repos by name, oldest first, so its first one is
+ * never the default. Without a dated repo, the first one.
+ */
+export function newestRepo(repos: string[]): string | undefined {
+  const key = (r: string) => {
+    const m = /-([fswu])(\d{4})$/.exec(r);
+    return m ? Number(m[2]) * 2 + (m[1] === 'f' ? 1 : 0) : -1;
+  };
+  return repos.reduce<string | undefined>((best, r) => (best === undefined || key(r) > key(best) ? r : best), undefined);
+}
+
 /** A course fact the website shows, read-only here: its value, or that it is not set. */
 function Fact({ label, value }: { label: string; value: unknown }) {
   const v = typeof value === 'string' ? value.trim() : value ? JSON.stringify(value) : '';
@@ -320,10 +333,11 @@ export function WebsiteScreen(p: CourseProps) {
   const meta = p.files.file(course.org, COURSE_REPO, 'dsl-course.yml');
   const my = meta.kind === 'ready' ? new YamlText(meta.text) : null;
   const facts = my && !my.errors.length ? obj(my.toJS()) : {};
-  const src = d.source_repo || repos[0] || '';
+  const src = d.source_repo || newestRepo(repos) || '';
   const tree = p.files.tree(course.org, src);
   const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir).map((x) => x.path) : [];
   const gh = p.files.repos(course.org);
+  const siteExists = gh.kind === 'ready' && gh.repos.some((r) => r.name.toLowerCase() === `${course.org}.github.io`.toLowerCase());
   const branch = (gh.kind === 'ready' ? gh.repos.find((r) => r.name === src)?.default_branch : undefined) ?? null;
   const doSave = async () => {
     if (y?.errors.length) return;
@@ -339,8 +353,8 @@ export function WebsiteScreen(p: CourseProps) {
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Public website' }]} />
       <div class="page-head">
         <div>
-          <h1>Public website <Hint doc="reference/actions-reference.md">An open version of one materials repo, for anyone. Save the settings, then publish. A daily update keeps it current while it is on. Files withheld from students never appear.</Hint></h1>
-          <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : 'Not published'}</span>{published ? 'Updates daily.' : 'Optional: an open version of your materials for anyone.'}</p>
+          <h1>Public website <Hint doc="reference/actions-reference.md">An open version of one materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h1>
+          <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : siteExists && !before.enabled ? 'Off' : 'Not published'}</span>{published ? 'Updates daily.' : siteExists && !before.enabled ? WEBSITE_OFF_LIVE : 'Optional: an open version of your materials for anyone.'}</p>
         </div>
         <div class="actions"><OpButtons def={publishWebsite(courseScope(p), published)} /></div>
       </div>
@@ -349,7 +363,7 @@ export function WebsiteScreen(p: CourseProps) {
       <div class="grid-2">
         <section class="panel section">
           <h2>Settings</h2>
-          {repos.length ? <SchemaForm id="ws" schema={null} tiers={publishTiers(repos)} values={values} onChange={onForm} /> : <p class="footnote">No materials repo yet: create one first.</p>}
+          {repos.length ? <SchemaForm id="ws" schema={null} tiers={publishTiers(repos, siteExists)} values={values} onChange={onForm} /> : <p class="footnote">No materials repo yet: create one first.</p>}
           {before.enabled ? null : <p class="footnote">The website is off: Publish refuses until it is on and saved.</p>}
         </section>
         <section class="panel section">
@@ -512,7 +526,7 @@ export function MaterialsScreen(p: CourseProps) {
           <Lives org={course.org} repo={repo} path={MATERIALS_FILE} />
         </section>
         <section class="panel section">
-          <h2>Withheld from students <Hint label="About withheld files">Withheld files and folders are never copied to a semester, so students never see them. Click one in the tree to withhold it; click again to release it. A release that needs a withheld file is reported as a problem.</Hint></h2>
+          <h2>Withheld from students <Hint label="About withheld files">Withheld files and folders are never copied to a semester, so students never see them. Click one in the tree to withhold it; click again to release it.</Hint></h2>
           {tree.kind === 'absent' ? <p class="footnote">Could not read the repo’s files.</p> : (
             <WithholdEditor id="ign-pat" label="Withheld patterns" files={files} text={ign ?? ignText} onText={setIgn} loading={tree.kind === 'loading'} partial={partial}
               org={course.org} repo={repo} branch={branch} kinds={Object.fromEntries(kinds.map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} withheldWord="withheld" releasedWord="released to students" />

@@ -50,7 +50,10 @@ function Control({ n, dir, s, c }: { n: TreeNode; dir: boolean; s: Standing; c: 
     e.preventDefault();
     const t = toggle(c.patterns, n.path, dir);
     if ('blocked' in t) {
-      c.setNote({ path: n.path, text: `Withheld with its folder ${t.blocked.at}/ by ${t.blocked.rule}. Remove that rule to include it.` });
+      const text = t.blocked.at === n.path
+        ? `${t.blocked.rule} also covers everything inside this folder. Remove or narrow that rule to include it.`
+        : `${c.withheldWord[0].toUpperCase()}${c.withheldWord.slice(1)} with its folder ${t.blocked.at}/ by ${t.blocked.rule}. Remove that rule to include it.`;
+      c.setNote({ path: n.path, text });
       return;
     }
     c.setNote(null);
@@ -64,8 +67,8 @@ function Control({ n, dir, s, c }: { n: TreeNode; dir: boolean; s: Standing; c: 
   return <button class="btn small quiet ft-toggle" type="button" aria-label={`${out ? 'Include' : 'Withhold'} ${what}`} onClick={click}>{out ? 'Include' : 'Withhold'}</button>;
 }
 
-function Why({ s }: { s: Standing }) {
-  return s.kind === 'broader' ? <span class="footnote">withheld by <code>{s.rule}</code></span> : null;
+function Why({ s, word }: { s: Standing; word: string }) {
+  return s.kind === 'broader' ? <span class="footnote">{word} by <code>{s.rule}</code></span> : null;
 }
 
 function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
@@ -82,7 +85,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
         {c.mode === 'select' ? control : null}
         <span class="ft-name">{n.name}</span>
         <span class={`chip ${fixed || out ? 'amber' : ''}`}>{word}</span>
-        <Why s={s} />
+        <Why s={s} word={c.withheldWord} />
         {c.mode === 'exclude' ? control : null}
         {note}
         {c.org && c.repo && c.branch ? <a class="textlink" href={editUrl(c.org, c.repo, n.path, c.branch)} target="_blank" rel="noopener" aria-label={`Edit ${n.path} on GitHub`}>Edit on GitHub</a> : null}
@@ -98,7 +101,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
           <span class="ft-name">{n.name}/</span>
           {depth === 0 && c.kinds[n.name] ? <span class="chip">{c.kinds[n.name]}</span> : null}
           {out ? <span class="chip amber">{c.withheldWord}</span> : count ? <span class="chip amber">{count} {c.withheldWord}</span> : null}
-          <Why s={s} />
+          <Why s={s} word={c.withheldWord} />
           {c.mode === 'exclude' ? control : null}
           {note}
         </summary>

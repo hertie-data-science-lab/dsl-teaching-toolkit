@@ -758,7 +758,7 @@ Self-contained - workflows and their Python implementation both live in this rep
     JWT assertion, no client secret).
   - `scaffold` - create structured materials / assignment repos + the website (semester or course).
   - `site` - regenerate the semester website (`sync_site`) and the public course website
-    (`sync_public_site` / `resync_public_site`).
+    (`public_site.publish` / `sync_public_site`).
   - `sync_roster` / `sync_teams` - reconcile the `students`+`auditors` teams / per-project teams
     from `students.csv` / `teams.csv` (one-way: the CSV is truth).
   - `sync_faculty` - reconcile `course-admin` from the course org's `people:` SSOT into the

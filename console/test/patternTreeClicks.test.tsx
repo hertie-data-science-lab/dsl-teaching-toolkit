@@ -48,4 +48,13 @@ describe('clicking the withhold tree', () => {
     await act(() => button('Include labs/').click());
     expect(seen.at(-1)).toEqual([]);
   });
+
+  it('says a /** rule covers a folder’s files, and uses the tree’s own word', async () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    await act(() => mount(<PatternTree files={FILES} patterns={['lectures/**']} onChange={() => {}} withheldWord="kept off" />, root));
+    expect(root.textContent).toContain('kept off by lectures/**');
+    await act(() => root.querySelector<HTMLButtonElement>('button[aria-label="Include lectures/01/"]')!.click());
+    expect(root.querySelector('.ft-note')!.textContent).toBe('lectures/** also covers everything inside this folder. Remove or narrow that rule to include it.');
+  });
 });

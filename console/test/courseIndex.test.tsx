@@ -216,6 +216,8 @@ describe('materials settings: syllabus file and folder kinds', () => {
     const t = text(<WebsiteScreen {...cp()} />);
     expect(t).not.toContain('publish.yml');
     expect(t).toContain('The website is off: Publish refuses until it is on and saved.');
+    // The site repo is there from an earlier publish: off leaves it up, frozen.
+    expect(t).toContain('Off Off: the site stays as last published and no longer updates.');
     expect(t).toContain('Description');
     expect(t).toContain('Not set');
   });

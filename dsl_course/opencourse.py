@@ -90,10 +90,8 @@ def seed_text(oc: OpenCourse | None = None) -> str:
     """The seeded file, with `oc`'s values (default: off) live and every key explained
     once."""
     oc = oc or OpenCourse()
-    withhold = (
-        "withhold:\n" + "".join(f'  - "{p}"\n' for p in oc.withhold)
-        if oc.withhold
-        else "withhold: []\n"
+    withhold = yaml.safe_dump(
+        {"withhold": list(oc.withhold)}, default_flow_style=False, allow_unicode=True
     )
     return (
         "# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.\n"

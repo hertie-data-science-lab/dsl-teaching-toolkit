@@ -4,7 +4,7 @@
 
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
-import { exactLine, toggle } from '../src/edit/badges';
+import { exactLine, toggle, withheldPaths } from '../src/edit/badges';
 import { PatternTree } from '../src/ui/PatternTree';
 
 const FILES = ['SYLLABUS.md', 'labs/01/lab.pdf', 'labs/01/data.csv', 'lectures/01/a.pdf', 'lectures/02/b.pdf'];
@@ -28,6 +28,23 @@ describe('toggling a path', () => {
     const once = toggle(['*.pdf'], 'lectures/01/a.pdf', false);
     expect(once).toEqual({ lines: ['*.pdf', '!lectures/01/a.pdf'] });
     expect(toggle((once as { lines: string[] }).lines, 'lectures/01/a.pdf', false)).toEqual({ lines: ['*.pdf'] });
+  });
+
+  it('escapes what a pattern reads specially, so the click names that path only', () => {
+    expect(exactLine('a[b]/notes.pdf', false)).toBe('a\\[b\\]/notes.pdf');
+    expect(exactLine('q/*?.md', false)).toBe('q/\\*\\?.md');
+    expect(exactLine('!x', false)).toBe('/\\!x');
+    expect(exactLine('#notes/a.md', false)).toBe('\\#notes/a.md');
+    const once = toggle([], 'a[b]/notes.pdf', false);
+    expect(once).toEqual({ lines: ['a\\[b\\]/notes.pdf'] });
+    expect(withheldPaths(['a[b]/notes.pdf', 'ab/notes.pdf'], (once as { lines: string[] }).lines)).toEqual(['a[b]/notes.pdf']);
+    expect(toggle((once as { lines: string[] }).lines, 'a[b]/notes.pdf', false)).toEqual({ lines: [] });
+  });
+
+  it('cannot release a folder a /** rule withholds: the rule covers its files too', () => {
+    expect(toggle(['lectures/**'], 'lectures/01', true)).toEqual({ blocked: { rule: 'lectures/**', at: 'lectures/01' } });
+    expect(toggle(['lectures/*'], 'lectures/01', true)).toEqual({ lines: ['lectures/*', '!lectures/01/'] });
+    expect(withheldPaths(['lectures/01/a.pdf'], ['lectures/*', '!lectures/01/'])).toEqual([]);
   });
 
   it('refuses to re-include inside a withheld folder, naming the folder rule', () => {

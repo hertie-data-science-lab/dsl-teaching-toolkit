@@ -356,8 +356,8 @@ describe('editing screens', () => {
     const out = html(<WebsiteScreen {...cp} />);
     expect(out).toContain('Publish public website');
     expect(out).toContain('Source materials');
-    expect(out).toContain('Publish the website');
     expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">kept off<\/span>/);
+    expect(out).toContain('Keep the website updated');
     expect(out).toContain('Lives in hertie-dsl-demo-course-e1234/.github/opencourse.yml');
     expect(out).toContain('href="#details"');
   });
