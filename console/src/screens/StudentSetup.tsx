@@ -8,6 +8,7 @@ import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { GitHubClient } from '../github/client';
 import type { Mine } from '../model/mine';
+import { cloneCommand, joinPath, vscodeFolder } from '../model/open';
 import { localPaths, saveLocalPaths, type LocalPaths } from '../model/prefs';
 import type { SemesterFacts } from '../model/student';
 import { Loading } from '../ui/bits';
@@ -22,18 +23,6 @@ export async function forkOf(client: GitHubClient, login: string, org: string, r
   if (!r) return { kind: 'none' };
   return r.fork && r.parent?.full_name.toLowerCase() === `${org}/${repo}`.toLowerCase() ? { kind: 'forked', url: r.html_url } : { kind: 'other', url: r.html_url };
 }
-
-/** `folder` + `name`, with the folder's own separator (a Windows folder keeps its backslashes). */
-export function joinPath(folder: string, name: string): string {
-  const f = folder.trim().replace(/[\\/]+$/, '');
-  if (!f) return name;
-  return `${f}${f.includes('\\') && !f.includes('/') ? '\\' : '/'}${name}`;
-}
-
-/** VS Code's link to open a local folder: forward slashes, one after `file`, a drive letter kept. */
-export const vscodeFolder = (path: string) => `vscode://file/${path.replace(/\\/g, '/').replace(/^\/+/, '')}`;
-
-export const cloneCommand = (url: string, folder: string, name: string) => `git clone ${url}.git${folder.trim() ? ` "${joinPath(folder, name)}"` : ''}`;
 
 function Cmd({ text }: { text: string }) {
   return <pre class="file-text cmd">{text}</pre>;

@@ -1,8 +1,11 @@
 // Per-viewer settings kept in this browser (localStorage): which semesters the student
 // groups show, when the student last opened each semester (for "new since your last visit"),
-// and the local folders the Set up screen writes its commands for. Storage can be missing or
-// refuse (a private window, blocked site data); the console then shows every semester, calls
-// nothing new, and forgets the folders on reload.
+// the local folders the Set up screen writes its commands for, and an instructor's Your
+// setup (folder, editor, the Open button's last choice). Storage can be missing or refuse (a
+// private window, blocked site data); the console then shows every semester, calls nothing
+// new, forgets the folders on reload, and keeps Your setup in memory until reload.
+
+import { EDITORS, OPEN_CHOICES, type Editor, type OpenChoice, type Setup } from './open';
 
 export interface PrefStore {
   getItem(key: string): string | null;
@@ -75,15 +78,16 @@ export function markVisit(login: string, org: string, now: number, store: PrefSt
 /** Forget this page load's answers (tests). */
 export const resetVisits = () => visits.clear();
 
-/** On sign-out: every visit time and remembered folder of `login` in this browser, and this load's answers. */
+/** On sign-out: every visit time, remembered folder and Your setup of `login` in this browser, and this load's answers. */
 export function forgetStudentPrefs(login: string, store: PrefStore | null = localStore()): void {
   visits.clear();
+  kept.delete(login);
   try {
     if (!store?.key || store.length === undefined || !store.removeItem) return;
     const mine = [];
     for (let i = 0; i < store.length; i++) {
       const k = store.key(i);
-      if (k && (k.startsWith(`dsl-console-visit:${login}:`) || k === pathsKey(login))) mine.push(k);
+      if (k && (k.startsWith(`dsl-console-visit:${login}:`) || k === pathsKey(login) || k === setupKey(login))) mine.push(k);
     }
     for (const k of mine) store.removeItem(k);
   } catch {
@@ -114,4 +118,46 @@ export function saveLocalPaths(login: string, paths: LocalPaths, store: PrefStor
   } catch {
     /* storage unavailable: the folders last until reload */
   }
+}
+
+const setupKey = (login: string) => `dsl-console-setup:${login}`;
+/** Your setup per login when storage refuses it: it then lasts until reload. */
+const kept = new Map<string, Setup>();
+
+/** `login`'s Your setup, or null when nothing is stored (and nothing kept since storage refused). */
+export function yourSetup(login: string, store: PrefStore | null = localStore()): Setup | null {
+  try {
+    const raw = store?.getItem(setupKey(login));
+    if (!raw) return kept.get(login) ?? null;
+    const v = JSON.parse(raw) as Partial<Record<keyof Setup, unknown>>;
+    const setup: Setup = {
+      folder: typeof v.folder === 'string' ? v.folder : '',
+      editor: EDITORS.includes(v.editor as Editor) ? (v.editor as Editor) : 'vscode',
+    };
+    if (typeof v.scheme === 'string' && v.scheme) setup.scheme = v.scheme;
+    if (OPEN_CHOICES.includes(v.lastOpen as OpenChoice)) setup.lastOpen = v.lastOpen as OpenChoice;
+    return setup;
+  } catch {
+    return kept.get(login) ?? null;
+  }
+}
+
+/** Store `setup`; false when storage refused and it is kept only until reload. */
+export function saveYourSetup(login: string, setup: Setup, store: PrefStore | null = localStore()): boolean {
+  try {
+    if (!store) throw new Error('no storage');
+    store.setItem(setupKey(login), JSON.stringify(setup));
+    kept.delete(login);
+    return true;
+  } catch {
+    kept.set(login, setup);
+    return false;
+  }
+}
+
+/** Keep `choice` as the Open button's default, leaving the rest of the setup as it is. */
+export function rememberOpen(login: string, choice: OpenChoice, store: PrefStore | null = localStore()): Setup {
+  const next: Setup = { ...(yourSetup(login, store) ?? { folder: '', editor: 'vscode' }), lastOpen: choice };
+  saveYourSetup(login, next, store);
+  return next;
 }

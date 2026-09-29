@@ -49,8 +49,10 @@ export function HeaderLinks({ course, cohort }: { course?: Course; cohort?: Coho
   );
 }
 
-export function Topbar({ user, course, cohort, onSignOut, navOpen, onMenu, title = 'Instructor Console' }: {
+export function Topbar({ user, course, cohort, onSignOut, navOpen, onMenu, setup, title = 'Instructor Console' }: {
   user: GhUser | null;
+  /** Show the link to Your setup (the instructor screens). */
+  setup?: boolean;
   /** The app's name: Student Console in student mode. */
   title?: string;
   course?: Course;
@@ -73,6 +75,7 @@ export function Topbar({ user, course, cohort, onSignOut, navOpen, onMenu, title
               <span class="who-name">{user.name || user.login}</span>
             </div>
           ) : null}
+          {user && setup ? <a class="pill-ghost setup-btn" href="#setup">Your setup</a> : null}
           {user ? <a class="pill-ghost help-btn" href="#help" aria-label="Help: how the console is organised" title="Help">?</a> : null}
           <button class="pill-ghost" type="button" aria-label="Switch colour theme" onClick={toggle}>{dark ? 'Light' : 'Dark'}</button>
           {user && onSignOut ? <button class="pill-ghost" type="button" onClick={onSignOut}>Sign out</button> : null}

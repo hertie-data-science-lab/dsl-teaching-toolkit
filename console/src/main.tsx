@@ -2,6 +2,7 @@ import { render } from 'preact';
 import { App, createDeps, createState } from './app';
 import './styles/tokens.css';
 import './styles/console.css';
+import './styles/open.css';
 
 try {
   const saved = localStorage.getItem('console-theme');

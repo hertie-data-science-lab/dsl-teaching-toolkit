@@ -17,9 +17,10 @@ import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import { formatWord, formatsList, toConfig } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { assignmentMarking, assignmentWhat, assignmentWork } from '../tiers/wizard';
-import { Crumbs, Help, editUrl } from '../ui/bits';
+import { Crumbs, Help } from '../ui/bits';
 import { SaveLine } from '../ui/edit';
 import { Ext } from '../ui/icons';
+import { OpenButton } from '../ui/OpenButton';
 import { useDraft } from '../wizards/drafts';
 import { assignmentArgs, contentTerms, formatError, nextFreeNumber, openAt, signature, templateRepo, termLabel } from '../wizards/model';
 import { allOk, checkFree, checkRepoExists, checkTemplate, useLive, type Check } from '../wizards/verify';
@@ -206,7 +207,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
           <>
             <Verified>Created. Nothing reaches students until you add it to a schedule.</Verified>
             <div class="actions">
-              <a class="btn" href={editUrl(course.org, repo, 'README.md')} target="_blank" rel="noopener">Write the brief <Ext /></a>
+              <OpenButton org={course.org} repo={repo} /><a class="btn outline" href={`https://github.com/${course.org}/${repo}/upload/main`} target="_blank" rel="noopener">Upload files on GitHub <Ext /></a>
               {cohort ? <a class="btn outline" href={`?cohort=${cohort.org}&template=${encodeURIComponent(repo)}#schedule-new`}>Add to {cohort.termLabel} schedule</a> : <a class="btn outline" href={`?course=${course.org}#new-semester-1`}>Add to {termLabel(term)} schedule: set up the semester first</a>}
             </div>
             <div><button class="btn small quiet" type="button" onClick={() => { clear(); go(1); }}>Start another assignment</button></div>
