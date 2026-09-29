@@ -35,6 +35,7 @@ from tests.conftest import ROSTER_HEADER
 
 SHA = "a" * 40
 OTHER_SHA = "b" * 40
+BOT = "dsl-bot-app"
 
 
 @pytest.fixture(autouse=True)
@@ -51,6 +52,14 @@ def _grading_deps_present(monkeypatch):
     monkeypatch.setattr(collect.importlib.util, "find_spec", lambda name: object())
     yield
     _clear_dep_caches()
+
+
+@pytest.fixture(autouse=True)
+def _bot_login(monkeypatch):
+    """The token's own login, answered without asking GitHub. The freeze asks it of every
+    commit it walks and every push record it reads; a test about an unreadable identity
+    re-patches it in its own body and wins."""
+    monkeypatch.setattr(collect, "bot_login", lambda: BOT)
 
 
 def _clear_dep_caches() -> None:
@@ -928,17 +937,16 @@ def test_a_duplicated_unit_is_reported_without_naming_anyone(monkeypatch, capsys
 def _commits_line(
     sha: str = SHA,
     committed: str = "2026-10-12T08:00:00Z",
-    parents: int = 1,
     author: str = "anna-adams",
     email: str = "anna@uni.edu",
     committer: str = "",
 ) -> str:
     """One row of what `_COMMIT_FIELDS` asks the commits API for. Defaults describe a
-    student's push ON TOP of the handout - the ordinary submission.
+    student's own push - the ordinary submission.
 
     `committer` is the second login GitHub answers with, and it is blank in most of these
     rows because the author's is the one that normally answers."""
-    return "\t".join([sha, committed, str(parents), author, email, committer])
+    return f"{sha}\t{committed}\t{author}\t{email}\t{committer}"
 
 
 @pytest.mark.parametrize(
@@ -963,7 +971,7 @@ def test_snapshot_sha_maps_api_outcomes(monkeypatch, response, expected):
     )
 
 
-def test_snapshot_sha_asks_the_api_for_one_commit_before_a_utc_cutoff(monkeypatch):
+def test_snapshot_sha_asks_the_api_for_a_page_before_a_utc_cutoff(monkeypatch):
     seen: list[tuple[str, ...]] = []
     monkeypatch.setattr(
         collect, "gh", lambda *a, **k: seen.append(a) or (0, _commits_line())
@@ -971,7 +979,9 @@ def test_snapshot_sha_asks_the_api_for_one_commit_before_a_utc_cutoff(monkeypatc
     collect._snapshot_sha("Cohort", "assignment-1-anna", "2026-10-15T23:59:59+02:00")
     args = seen[0]
     assert "repos/Cohort/assignment-1-anna/commits" in args
-    assert "until=2026-10-15T21:59:59Z" in args and "per_page=1" in args
+    # A page, not one commit: the newest commit may be the toolkit's, and the student's
+    # own work is under it.
+    assert "until=2026-10-15T21:59:59Z" in args and "per_page=100" in args
 
 
 def test_the_handout_commit_is_not_a_submission(monkeypatch):
@@ -981,50 +991,67 @@ def test_the_handout_commit_is_not_a_submission(monkeypatch):
     monkeypatch.setattr(
         collect,
         "gh",
-        lambda *a, **k: (
-            0,
-            _commits_line(parents=0, author="dsl-bot-app", email=collect.BOT_EMAIL),
-        ),
+        lambda *a, **k: (0, _commits_line(author=BOT, email=collect.BOT_EMAIL)),
     )
     assert collect._snapshot_sha("Cohort", "assignment-1-anna", "2026-10-13") == (
         collect.Pin()
     )
 
 
-def test_a_handout_commit_is_recognised_by_the_tokens_own_login(monkeypatch):
+def test_a_toolkit_commit_is_recognised_by_the_tokens_own_login(monkeypatch):
     # A commit the API made carries no git identity to match on - only the login of the
     # account the call was made with, which is asked for once per process.
-    monkeypatch.setattr(collect, "bot_login", lambda: "dsl-bot-app")
     monkeypatch.setattr(
-        collect,
-        "gh",
-        lambda *a, **k: (0, _commits_line(parents=0, author="dsl-bot-app", email="")),
+        collect, "gh", lambda *a, **k: (0, _commits_line(author=BOT, email=""))
     )
     assert collect._snapshot_sha("Cohort", "assignment-1-anna", "2026-10-13") == (
         collect.Pin()
     )
 
 
-def test_a_students_commit_on_top_of_the_handout_is_a_submission(monkeypatch):
-    # The ordinary case: one parent, so it is not the repo's first commit whoever made it.
+def test_the_solution_commit_is_walked_past_to_the_students_own(monkeypatch):
+    # `solution_datetime` before the cutoff lands the toolkit's "add solution" commit
+    # INSIDE the late window, on top of the student's work. Pinned, it timed every
+    # student's submission by the solution push - days late - and graded the solution.
+    own = _commits_line(sha=OTHER_SHA, committed="2026-10-09T08:00:00Z")
+    solution = _commits_line(
+        committed="2026-10-12T07:00:00Z", author="", email=collect.BOT_EMAIL
+    )
+    handout = _commits_line(
+        sha="c" * 40, committed="2026-10-01T08:00:00Z", author=BOT, email=""
+    )
     monkeypatch.setattr(
-        collect,
-        "gh",
-        lambda *a, **k: (0, _commits_line(parents=1, email=collect.BOT_EMAIL)),
+        collect, "gh", lambda *a, **k: (0, f"{solution}\n{own}\n{handout}")
     )
     assert collect._snapshot_sha(
         "Cohort", "assignment-1-anna", "2026-10-13"
-    ) == collect.Pin(SHA, "2026-10-12T08:00:00Z")
+    ) == collect.Pin(OTHER_SHA, "2026-10-09T08:00:00Z")
 
 
-def test_a_student_authored_root_commit_is_a_submission(monkeypatch):
-    # They force-pushed over the handout, which is theirs to do. Both halves of the test
-    # are required: root ALONE would throw their work away.
-    monkeypatch.setattr(collect, "bot_login", lambda: "dsl-bot-app")
-    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, _commits_line(parents=0)))
+def test_a_repo_with_only_toolkit_commits_has_nothing_submitted(monkeypatch):
+    # The handout and the solution on top of it, and nothing of the student's: before,
+    # the solution commit was pinned and they were recorded as having submitted it.
+    solution = _commits_line(author="", email=collect.BOT_EMAIL)
+    handout = _commits_line(sha=OTHER_SHA, author=BOT, email="")
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, f"{solution}\n{handout}"))
+    assert collect._snapshot_sha("Cohort", "assignment-1-anna", "2026-10-13") == (
+        collect.Pin()
+    )
+
+
+def test_a_toolkit_commit_in_a_drop_box_folder_is_not_an_outsider(monkeypatch):
+    # A correction the toolkit pushed into a unit's folder is not a classmate's hand on
+    # it, so the pin is the unit's own commit and carries no note.
+    patch = _commits_line(author=BOT, email="")
+    own = _commits_line(sha=OTHER_SHA)
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, f"{patch}\n{own}"))
     assert collect._snapshot_sha(
-        "Cohort", "assignment-1-anna", "2026-10-13"
-    ) == collect.Pin(SHA, "2026-10-12T08:00:00Z")
+        "Cohort",
+        "dropbox",
+        "2026-10-13",
+        path="anna-adams",
+        members=["anna-adams"],
+    ) == collect.Pin(OTHER_SHA, "2026-10-12T08:00:00Z")
 
 
 def test_an_unreadable_bot_identity_never_discards_a_submission(monkeypatch):
@@ -1032,7 +1059,7 @@ def test_an_unreadable_bot_identity_never_discards_a_submission(monkeypatch):
     # a transient there must not turn a student's work into "no submission recorded".
     monkeypatch.setattr(collect, "bot_login", lambda: "")
     monkeypatch.setattr(
-        collect, "gh", lambda *a, **k: (0, _commits_line(parents=0, email=""))
+        collect, "gh", lambda *a, **k: (0, _commits_line(author="", email=""))
     )
     assert collect._snapshot_sha(
         "Cohort", "assignment-1-anna", "2026-10-13"
@@ -1325,6 +1352,26 @@ def test_a_repo_with_no_submission_is_asked_for_no_push_records(monkeypatch):
         "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
     )
     assert written
+
+
+def test_the_toolkits_own_pushes_never_time_a_students_work(monkeypatch):
+    # The solution push is a push record like any other. Left in, the "earliest push at
+    # or after the commit" rung timed a student whose own push GitHub did not return by
+    # the solution push, days later.
+    monkeypatch.setattr(
+        collect,
+        "gh",
+        lambda *a, **k: (
+            0,
+            (
+                f"{SHA}\t2026-10-12T07:00:00Z\t{BOT}\n"
+                f"{OTHER_SHA}\t2026-10-09T08:05:00Z\tanna-adams\n"
+            ),
+        ),
+    )
+    activity = collect._push_activity("Cohort", "assignment-1-anna")
+    assert activity == [(OTHER_SHA, "2026-10-09T08:05:00Z")]
+    assert collect.push_time_for(activity, "c" * 40, "2026-10-10T08:00:00Z") == ""
 
 
 def test_snapshot_assignment_never_overwrites_an_existing_snapshot(monkeypatch):
