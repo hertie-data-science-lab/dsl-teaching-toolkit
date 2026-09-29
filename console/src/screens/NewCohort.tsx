@@ -2,6 +2,7 @@
 // `semester.bootstrap` operation, through the course's Console), then Instructors, Schedule and
 // Students as three cards that open their editors and come back. Revision brief v2 section 7.
 
+import type { ComponentChildren } from 'preact';
 import { useEnv } from '../env';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import type { Files } from '../model/files';
@@ -14,14 +15,14 @@ import { Crumbs } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { useDraft } from '../wizards/drafts';
 import { cohortOrgName, cohortTerms, openAt, TERM_RE, termLabel } from '../wizards/model';
-import { allOk, checkCohortSetUp, checkOrg, useLive, type Check } from '../wizards/verify';
-import { Checks, LiveChecks, OrgLinks, Rail, StepCard, Verified } from '../wizards/Wizard';
+import { allOk, checkCohortSetUp, checkOrg, useLive, usePoll, type Check } from '../wizards/verify';
+import { Checks, OrgSteps, OrgWhy, Rail, StepCard, Verified } from '../wizards/Wizard';
 import type { CourseProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO, INSTRUCTORS_FILE, JOIN_REPO } from '../model/names';
 import { YamlText, obj } from '../edit/yamlText';
 
 const STEPS = [
-  { t: 'Org', s: 'Create it on GitHub' },
+  { t: 'Org', s: 'Three things on GitHub' },
   { t: 'Setup', s: 'Site, join form, settings' },
   { t: 'Instructors, schedule, students', s: 'Three editors' },
 ];
@@ -66,20 +67,21 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
   const org = d.org ?? cohortOrgName(course.org, course.code, term);
   const label = termLabel(term);
   const runs = env?.ops.runs.value.length ?? 0;
-  const orgLive = useLive(env ? async () => ({ org, checks: await checkOrg(env.client, org) }) : null, [asked]);
+  const orgLive = useLive(env ? async () => ({ org, ...(await checkOrg(env.client, org, { kind: env.kind })) }) : null, [asked]);
   const setupLive = useLive(env ? async () => ({ org, checks: await checkCohortSetUp(env.client, course.org, org) }) : null, [org, asked, runs]);
   const orgChecks = orgLive.value?.org === org ? orgLive.value.checks : null;
   const setUp = setupLive.value?.org === org ? setupLive.value.checks : null;
   const done = nkDone(d, org, orgChecks, setUp);
   const step = openAt(done, asked);
+  usePoll(orgLive, !!env && step === 1 && !allOk(orgChecks));
   const go = (k: number) => {
     if (typeof location !== 'undefined') location.hash = `#new-semester-${k}`;
   };
   const q = `?course=${course.org}`;
 
-  let title = '', body, foot;
+  let title: ComponentChildren = '', body, foot;
   if (step === 1) {
-    title = 'Create the org on GitHub, install the app, then I check';
+    title = <>Three things on GitHub <OrgWhy doc="04-new-cohort-org.md" /></>;
     const tiers = cohortOrgTiers(terms.includes(term) ? terms : [term, ...terms]);
     const vals: Values = { term, org };
     const errs = fieldErrors(null, tiers, vals);
@@ -91,8 +93,7 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
           const edited = v.org !== org ? String(v.org ?? '') : d.org;
           set({ term: t, org: edited && edited !== derived && t === term ? edited : undefined });
         }} />
-        <OrgLinks org={org} doc="04-new-cohort-org.md" />
-        <LiveChecks live={{ value: orgChecks, busy: orgLive.busy, run: orgLive.run }} pending={[`The org ${org} exists`, 'hertie-dsl-bot can manage it']} />
+        <OrgSteps org={org} check={orgLive.value?.org === org ? orgLive.value : null} busy={orgLive.busy} run={orgLive.run} back={`${q}#new-semester-1`} />
       </>
     );
     foot = <button class="btn" type="button" disabled={!done[0] || Object.keys(errs).length > 0} onClick={() => { set({ orgVerified: org, term }); go(2); }}>Continue</button>;

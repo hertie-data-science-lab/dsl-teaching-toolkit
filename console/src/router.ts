@@ -67,6 +67,25 @@ export function replaceHash(hash: string): void {
   history.replaceState(null, '', `${location.search}${hash}`);
 }
 
+/**
+ * Back from installing the console app: GitHub sends the person to the app's Setup URL (the
+ * console) with `installation_id` and `setup_action`. The query and hash to show instead:
+ * those two gone, and the step `saved` gives (the wizard step the install link was pressed
+ * on, asked only on a return) when it is one, else New course at step 1. Any other parameter
+ * stays. Null when the URL is not a return from an install.
+ */
+export function installReturn(search: string, saved: () => string | null): string | null {
+  const q = new URLSearchParams(search);
+  if (!q.has('installation_id') && !q.has('setup_action')) return null;
+  const back = saved();
+  q.delete('installation_id');
+  q.delete('setup_action');
+  const m = back ? /^(\?[^#]*)?(#new-(?:course|semester)-1)$/.exec(back) : null;
+  for (const [k, v] of new URLSearchParams(m?.[1] ?? '')) q.set(k, v);
+  const rest = q.toString();
+  return `${rest ? `?${rest}` : ''}${m?.[2] ?? '#new-course-1'}`;
+}
+
 /** The link to one tab of an assignment. */
 export function tabHref(slug: string, tab: AssignmentTab): string {
   return `#assignment-${slug}/${tab}`;

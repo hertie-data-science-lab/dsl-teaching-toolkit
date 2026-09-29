@@ -11,6 +11,19 @@ import { opSpec } from '../ops/registry';
 /** The lab's bot: an owner of every course and semester org until the console app replaces it. */
 export const BOT = 'hertie-dsl-bot';
 
+/** The console app's slug (`VITE_GH_APP_SLUG`); empty in a build without one, which drops the install step. */
+export const APP_SLUG: string = (import.meta.env as { VITE_GH_APP_SLUG?: string } | undefined)?.VITE_GH_APP_SLUG ?? '';
+
+export const NEW_ORG_URL = 'https://github.com/account/organizations/new?plan=free';
+
+/** The app's install page for one org, straight to its permissions when the org's id is known. */
+export function installUrl(slug: string, orgId: number | null): string {
+  const base = `https://github.com/apps/${encodeURIComponent(slug)}/installations/new`;
+  return orgId === null ? base : `${base}/permissions?target_id=${orgId}`;
+}
+
+export const peopleUrl = (org: string) => `https://github.com/orgs/${encodeURIComponent(org)}/people`;
+
 /** `hertie-<course-slug>-<code>`: lower case, no year; the code is folded to lower case. */
 export function courseOrgName(name: string, code: string): string {
   const parts = ['hertie', kebab(name), kebab(code)].filter(Boolean);

@@ -25,8 +25,9 @@ import {
   PUBLIC_DIRS, assignmentArgs, autogradeBlock, cohortOrgName, cohortTerms, contentTerms, courseOrgName, courseSlugOf, formatBlock, formatError, materialsArgs,
   nextFreeNumber, nextTerm, openAt, signature, templateRepo, toggleFormat,
 } from '../src/wizards/model';
-import { checkOrg, checkTemplate } from '../src/wizards/verify';
-import { wizardOf } from '../src/router';
+import { allOk, checkOrg, checkTemplate } from '../src/wizards/verify';
+import { OrgSteps } from '../src/wizards/Wizard';
+import { installReturn, wizardOf } from '../src/router';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, fileBody, json } from './fake';
 
@@ -238,15 +239,73 @@ describe('live checks against GitHub', () => {
 
   it('says what to do when the org is missing, the bot is only invited, or all is well', async () => {
     const org = 'hertie-deep-learning-e2345';
-    expect((await checkOrg(client(new FakeGitHub()), org)).map((c) => c.ok)).toEqual([false, false]);
-    const invited = new FakeGitHub().on('GET', `/orgs/${org}`, { login: org }).on('GET', `/orgs/${org}/memberships/hertie-dsl-bot`, { state: 'pending', role: 'admin' });
-    const [, bot] = await checkOrg(client(invited), org);
-    expect(bot.ok).toBe(false);
-    expect(bot.hint).toMatch(/has not accepted/);
+    const oks = async (gh: FakeGitHub, opts = {}) => (await checkOrg(client(gh), org, opts)).checks.map((c) => c.ok);
+    expect(await oks(new FakeGitHub())).toEqual([false, false]);
+    const invited = new FakeGitHub().on('GET', `/orgs/${org}`, { login: org, id: 42 }).on('GET', `/orgs/${org}/memberships/hertie-dsl-bot`, { state: 'pending', role: 'admin' });
+    const got = await checkOrg(client(invited), org);
+    expect(got.id).toBe(42);
+    expect(got.checks[1].ok).toBe(false);
+    expect(got.checks[1].hint).toBe('Invited. The bot accepts within 15 minutes.');
     const fine = new FakeGitHub().on('GET', `/orgs/${org}`, { login: org }).on('GET', `/orgs/${org}/memberships/hertie-dsl-bot`, { state: 'active', role: 'admin' });
-    expect((await checkOrg(client(fine), org)).map((c) => c.ok)).toEqual([true, true]);
+    expect(await oks(fine)).toEqual([true, true]);
     const hidden = new FakeGitHub().on('GET', `/orgs/${org}`, { login: org }).on('GET', `/orgs/${org}/memberships/hertie-dsl-bot`, () => json({ message: 'Must be an owner' }, 403));
-    expect((await checkOrg(client(hidden), org))[1].ok).toBeNull();
+    expect((await oks(hidden))[1]).toBeNull();
+  });
+
+  it('finds the console app on the org across every page of installations, from an App token only', async () => {
+    const org = 'hertie-deep-learning-e2345';
+    const others = Array.from({ length: 100 }, (_, i) => ({ account: { login: `other-${i}`, type: 'Organization' } }));
+    const base = () => new FakeGitHub()
+      .on('GET', `/orgs/${org}`, { login: org, id: 42 })
+      .on('GET', `/orgs/${org}/memberships/hertie-dsl-bot`, { state: 'active', role: 'admin' })
+      .on('GET', '/user/installations?per_page=100&page=1', { installations: others });
+    const on = base().on('GET', '/user/installations?per_page=100&page=2', { installations: [{ account: { login: 'Hertie-Deep-Learning-E2345', type: 'Organization' } }] });
+    const r = await checkOrg(client(on), org, { kind: 'app', slug: 'dsl-teaching-toolkit' });
+    expect(r.checks.map((c) => c.ok)).toEqual([true, true, true]);
+    expect(allOk(r.checks)).toBe(true);
+    const off = base().on('GET', '/user/installations?per_page=100&page=2', { installations: [] });
+    const missing = await checkOrg(client(off), org, { kind: 'app', slug: 'dsl-teaching-toolkit' });
+    expect(missing.checks[1]).toMatchObject({ ok: false, hint: 'Install it; GitHub brings you back here.' });
+    expect(allOk(missing.checks)).toBe(false);
+    // A classic or fine-grained token cannot see installations: a line that says so, and does not block.
+    const classic = base();
+    const told = await checkOrg(client(classic), org, { kind: 'classic', slug: 'dsl-teaching-toolkit' });
+    expect(told.checks[1]).toMatchObject({ ok: null, soft: true, text: `Cannot tell from this token; the console app must be installed on ${org}.` });
+    expect(allOk(told.checks)).toBe(true);
+    expect(classic.seen.some((x) => x.url.includes('/user/installations'))).toBe(false);
+    // A build that names no app has no install step at all.
+    expect((await checkOrg(client(base()), org, { kind: 'app', slug: '' })).checks).toHaveLength(2);
+  });
+
+  it('brings the person back from installing the app to the wizard step they left', () => {
+    const none = () => null;
+    expect(installReturn('?course=x', none)).toBeNull();
+    let asked = 0;
+    expect(installReturn('', () => (asked++, null))).toBeNull();
+    expect(asked).toBe(0);
+    expect(installReturn('?installation_id=7&setup_action=install', none)).toBe('#new-course-1');
+    expect(installReturn('?installation_id=7&setup_action=install', () => `?course=${COURSE_ORG}#new-semester-1`)).toBe(`?course=${COURSE_ORG}#new-semester-1`);
+    expect(installReturn('?setup_action=update&installation_id=7', () => '#new-course-1')).toBe('#new-course-1');
+    // Anything that is not a first wizard step is ignored; other parameters stay.
+    expect(installReturn('?installation_id=7&setup_action=install&x=1', () => '#course')).toBe('?x=1#new-course-1');
+  });
+
+  it('renders the three links, the name and the bot handle to copy, and no Check button', () => {
+    const org = 'hertie-deep-learning-e2345';
+    const check = { id: 42, checks: [{ text: 'a', ok: true }, { text: 'b', ok: false }, { text: 'c', ok: false, hint: 'Invited. The bot accepts within 15 minutes.' }] };
+    const html = render(<OrgSteps org={org} check={check} busy={false} run={() => {}} back="#new-course-1" slug="dsl-teaching-toolkit" />);
+    expect(html).toContain('href="https://github.com/account/organizations/new?plan=free"');
+    expect(html).toContain('href="https://github.com/apps/dsl-teaching-toolkit/installations/new/permissions?target_id=42"');
+    expect(html).toContain(`href="https://github.com/orgs/${org}/people"`);
+    expect(html).toContain(`<code>${org}</code>`);
+    expect(html).toContain('<code>hertie-dsl-bot</code>');
+    expect(html).toContain('Invited. The bot accepts within 15 minutes.');
+    expect(html).toContain('Check again');
+    expect(html).not.toContain('proposed');
+    // Before the org exists there is nothing to install on or invite to.
+    const before = render(<OrgSteps org={org} check={{ id: null, checks: [{ text: 'a', ok: false }, { text: 'b', ok: false }, { text: 'c', ok: false }] }} busy={false} run={() => {}} back="#new-course-1" slug="dsl-teaching-toolkit" />);
+    expect(before).not.toContain('/installations/new');
+    expect(before).not.toContain('/people"');
   });
 
   it('verifies a new template: both branches and a settings file that parses', async () => {
@@ -267,9 +326,11 @@ describe('the wizard screens', () => {
   it('New course derives the org and will not skip ahead of the org check', () => {
     const out = render(<NewCourseScreen files={new StaticFiles()} step={3} />);
     expect(out).toContain('Step 1 of 3');
-    expect(out).toContain('Create the org on GitHub, install the app, then I check');
+    expect(out).toContain('Three things on GitHub');
+    expect(out).toContain('GitHub lets only a person do these three things.');
     expect(out).toContain('https://github.com/account/organizations/new?plan=free');
-    expect(out).toContain('Today: invite hertie-dsl-bot as an Owner');
+    expect(out).toContain('Invite hertie-dsl-bot as an Owner');
+    expect(out).not.toContain('Today: invite');
   });
 
   it('New cohort derives hertie-<course-slug>-<term> for the next term', () => {

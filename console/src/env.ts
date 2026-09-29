@@ -5,6 +5,7 @@
 import { createContext } from 'preact';
 import { useContext } from 'preact/hooks';
 import type { GhUser, GitHubClient } from './github/client';
+import type { TokenKind } from './model/discovery';
 import type { Files } from './model/files';
 import type { StatusStore } from './model/status';
 import type { OpsSession } from './ops/session';
@@ -17,6 +18,8 @@ export interface Env {
   files: Files;
   /** Read the course list again (a wizard just made a course or a semester). */
   rediscover?: () => Promise<void>;
+  /** Which kind of token the person signed in with (only an App token can see installations). */
+  kind?: TokenKind;
   /** How long to wait between reads of a commit's checks (tests pass 0). */
   pollMs?: number;
 }

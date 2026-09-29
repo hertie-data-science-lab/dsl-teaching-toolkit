@@ -2,6 +2,7 @@
 // Bootstrap Course Org workflow, write the course's details and defaults into its
 // dsl-course.yml, then check. Revision brief v3 section 2, design/inputs.md "Set up a course".
 
+import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { useSave } from '../edit/save';
@@ -17,13 +18,13 @@ import { SaveLine } from '../ui/edit';
 import { CENTRAL_ACTIONS, runBootstrap, type CentralRun } from '../wizards/central';
 import { useDraft } from '../wizards/drafts';
 import { courseOrgName, openAt } from '../wizards/model';
-import { allOk, checkCourseSetUp, checkOrg, useLive, type Check } from '../wizards/verify';
-import { Checks, LiveChecks, OrgLinks, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
+import { allOk, checkCourseSetUp, checkOrg, useLive, usePoll, type Check } from '../wizards/verify';
+import { Checks, OrgSteps, OrgWhy, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
 import { AdminRows, courseFileAfter, detailsOf, missingAdmin, type Admin, type Details } from './CourseEdit';
 import { COURSE_REPO } from '../model/names';
 
 const STEPS = [
-  { t: 'Org', s: 'Create it on GitHub' },
+  { t: 'Org', s: 'Three things on GitHub' },
   { t: 'Course details', s: 'Name, code, admins' },
   { t: 'Defaults', s: 'For every assignment and semester' },
   { t: 'Check', s: 'Ready for a semester', check: true },
@@ -59,12 +60,13 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
   const me = env?.user;
   const [d, set] = useDraft<NcDraft>('new-course', () => ({ admins: [{ github_handle: me?.login ?? '', email: me?.email ?? '', start: '', end: '' }] }));
   const org = ncOrg(d);
-  const orgLive = useLive(env && org ? async () => ({ org, checks: await checkOrg(env.client, org) }) : null, [asked]);
+  const orgLive = useLive(env && org ? async () => ({ org, ...(await checkOrg(env.client, org, { kind: env.kind })) }) : null, [asked]);
   const setupLive = useLive(env && org ? async () => ({ org, checks: await checkCourseSetUp(env.client, org) }) : null, [org, asked]);
   const orgChecks = orgLive.value?.org === org ? orgLive.value.checks : null;
   const setUp = setupLive.value?.org === org ? setupLive.value.checks : null;
   const done = ncDone(d, org, orgChecks, setUp);
   const step = openAt(done, asked);
+  usePoll(orgLive, !!env && !!org && step === 1 && !allOk(orgChecks));
   const [run, setRun] = useState<CentralRun | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [save, runSave, setSave] = useSave(env);
@@ -106,9 +108,9 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     }
   };
 
-  let title = '', body, foot;
+  let title: ComponentChildren = '', body, foot;
   if (step === 1) {
-    title = 'Create the org on GitHub, install the app, then I check';
+    title = <>Three things on GitHub <OrgWhy doc="01-new-course-org.md" /></>;
     const vals: Values = { course_name: d.course_name, course_code: d.course_code, org };
     const errs = fieldErrors(null, COURSE_ORG, vals);
     body = (
@@ -118,8 +120,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
           const edited = v.org !== org ? String(v.org ?? '') : d.org;
           set({ course_name: v.course_name as string | undefined, course_code: v.course_code as string | undefined, org: edited && edited !== derived ? edited : undefined });
         }} />
-        <OrgLinks org={org} doc="01-new-course-org.md" />
-        <LiveChecks live={{ value: orgChecks, busy: orgLive.busy, run: orgLive.run }} pending={[`The org ${org} exists`, 'hertie-dsl-bot can manage it']} />
+        <OrgSteps org={org} check={orgLive.value?.org === org ? orgLive.value : null} busy={orgLive.busy} run={orgLive.run} back="#new-course-1" />
       </>
     );
     foot = <button class="btn" type="button" disabled={!done[0] || Object.keys(errs).length > 0} onClick={() => { set({ orgVerified: org }); go(2); }}>Continue</button>;

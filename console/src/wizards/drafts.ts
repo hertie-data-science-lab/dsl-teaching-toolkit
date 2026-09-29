@@ -49,3 +49,26 @@ export function useDraft<T extends object>(key: string, fallback: () => T): [T, 
   };
   return [cur, set, clear];
 }
+
+const INSTALL_RETURN = `${PREFIX}install-return`;
+
+/** The wizard step (`?course=x#new-semester-1`) to reopen when GitHub sends the person back from installing the app. */
+export function rememberInstallReturn(where: string): void {
+  try {
+    store()?.setItem(INSTALL_RETURN, where);
+  } catch {
+    /* the return lands on New course instead */
+  }
+}
+
+/** The remembered step, forgotten as it is read. */
+export function takeInstallReturn(): string | null {
+  try {
+    const s = store();
+    const v = s?.getItem(INSTALL_RETURN) ?? null;
+    s?.removeItem(INSTALL_RETURN);
+    return v;
+  } catch {
+    return null;
+  }
+}

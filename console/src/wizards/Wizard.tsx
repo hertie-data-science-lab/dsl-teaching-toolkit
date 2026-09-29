@@ -3,11 +3,12 @@
 // step past the first unfinished one cannot be reached (inputs.md rule 8).
 
 import type { ComponentChildren } from 'preact';
-import { Prop } from '../ui/bits';
+import { useState } from 'preact/hooks';
 import { Hint } from '../ui/Hint';
 import { Alert, Check as CheckIcon, Ext, Fail } from '../ui/icons';
-import { BOT } from './model';
-import type { Check, Live } from './verify';
+import { rememberInstallReturn } from './drafts';
+import { APP_SLUG, BOT, NEW_ORG_URL, installUrl, peopleUrl } from './model';
+import type { Check, OrgCheck } from './verify';
 
 export interface StepDef {
   t: string;
@@ -38,7 +39,7 @@ export function Rail({ steps, cur, done, heading, base, query = '' }: { steps: S
   );
 }
 
-export function StepCard({ ctx, of, title, children, back, foot, note }: { ctx?: string; of: string; title: string; children: ComponentChildren; back: ComponentChildren; foot: ComponentChildren; note?: ComponentChildren }) {
+export function StepCard({ ctx, of, title, children, back, foot, note }: { ctx?: string; of: string; title: ComponentChildren; children: ComponentChildren; back: ComponentChildren; foot: ComponentChildren; note?: ComponentChildren }) {
   return (
     <section class="wstep">
       <div class="wstep-head">
@@ -64,46 +65,87 @@ export function WizError({ children }: { children: ComponentChildren }) {
   return <div class="wiz-error"><Alert /><span>{children}</span></div>;
 }
 
+type Item = Check | { text: string; ok: undefined; hint?: string; soft?: undefined };
+
+function state(c: Item, busy?: boolean): string {
+  return c.ok === true ? 'ok' : busy ? 'busy' : c.ok === false ? 'no' : c.ok === null ? 'warn' : 'todo';
+}
+
+function Tick({ st }: { st: string }) {
+  return <span class={`ck ${st}`}>{st === 'ok' ? <CheckIcon /> : st === 'no' ? <Fail /> : null}</span>;
+}
+
 /** A live check list: ok, not yet (with what to do), could not tell, or still checking. */
 export function Checks({ list, busy, pending }: { list: Check[] | null; busy?: boolean; pending?: string[] }) {
-  const items: (Check | { text: string; ok: undefined; hint?: string })[] = list ?? (pending ?? []).map((text) => ({ text, ok: undefined }));
+  const items: Item[] = list ?? (pending ?? []).map((text) => ({ text, ok: undefined }));
   return (
     <ul class="checks" aria-live="polite">
-      {items.map((c) => {
-        const st = c.ok === true ? 'ok' : busy ? 'busy' : c.ok === false ? 'no' : c.ok === null ? 'warn' : 'todo';
-        return (
-          <li>
-            <span class={`ck ${st}`}>{st === 'ok' ? <CheckIcon /> : st === 'no' ? <Fail /> : null}</span>
-            <span>{c.text}{c.ok === null ? ' (could not tell)' : ''}{c.hint && c.ok !== true ? <span class="footnote" style="display:block">{c.hint}</span> : null}</span>
-          </li>
-        );
-      })}
+      {items.map((c) => (
+        <li>
+          <Tick st={state(c, busy)} />
+          <span>{c.text}{c.ok === null && !c.soft ? ' (could not tell)' : ''}{c.hint && c.ok !== true ? <span class="footnote" style="display:block">{c.hint}</span> : null}</span>
+        </li>
+      ))}
     </ul>
   );
 }
 
-/** Org step: "Create the org on GitHub, install the app, then I check". */
-export function OrgLinks({ org, doc }: { org: string; doc: string }) {
+function Copy({ text }: { text: string }) {
+  const [done, setDone] = useState<boolean | null>(null);
+  const copy = () => navigator.clipboard.writeText(text).then(() => setDone(true), () => setDone(false));
   return (
-    <div class="ext-links">
-      <div class="lbl-row">
-        <a href="https://github.com/account/organizations/new?plan=free" target="_blank" rel="noopener">
-          <span class="n">1</span>Create the org on GitHub <Ext /><span>Use the name above; the free plan is enough</span>
-        </a>
-        <Hint label="How to create the org" doc={doc}>Choose the free plan, type the org name exactly as above, and pick a business account owned by hertie-data-science-lab. Then come back here and press Check.</Hint>
-      </div>
-      <a href={`https://github.com/orgs/${org}/people`} target="_blank" rel="noopener">
-        <span class="n">2</span>Install the console app on it <Ext /><Prop /><span>Today: invite {BOT} as an Owner</span>
-      </a>
-    </div>
+    <>
+      <code>{text}</code>
+      <button class="textlink" type="button" aria-label={`Copy ${text}`} onClick={() => void copy()}>{done ? 'Copied' : done === false ? 'Select it to copy' : 'Copy'}</button>
+    </>
   );
 }
 
-export function LiveChecks({ live, pending, again = 'Check again' }: { live: Live<Check[]>; pending: string[]; again?: string }) {
+/** The `?` on the org step's title: why these three are the person's. */
+export function OrgWhy({ doc }: { doc: string }) {
   return (
-    <>
-      <div class="field"><span class="label">Live check</span><Checks list={live.value} busy={live.busy} pending={pending} /></div>
-      <div><button class="btn small outline" type="button" disabled={live.busy} onClick={() => live.run()}>{live.value ? again : 'Check'}</button></div>
-    </>
+    <Hint label="Why these three" doc={doc}>
+      GitHub lets only a person do these three things. The app lets this console work in the org, and the bot runs its automation. Everything after them is automatic.
+    </Hint>
+  );
+}
+
+/**
+ * The three things only a person can do on GitHub, each with its live tick: create the org,
+ * install the console app on it (only when the build names the app), invite the bot as an
+ * Owner. The install link opens in this tab, since GitHub sends the person back to the
+ * console afterwards; `back` is the step it reopens.
+ */
+export function OrgSteps({ org, check, busy, run, back, slug = APP_SLUG }: { org: string; check: OrgCheck | null; busy: boolean; run: () => void; back: string; slug?: string }) {
+  const exists = check?.checks[0]?.ok === true;
+  const id = check?.id ?? null;
+  const rows: { label: string; href?: string; here?: boolean; copy?: string; sub?: string }[] = [
+    { label: 'Create the org', href: NEW_ORG_URL, copy: org, sub: 'Free plan; the business account is hertie-data-science-lab.' },
+    ...(slug ? [{ label: 'Install the console app', href: exists ? installUrl(slug, id) : undefined, here: true }] : []),
+    { label: `Invite ${BOT} as an Owner`, href: exists ? peopleUrl(org) : undefined, copy: BOT },
+  ];
+  return (
+    <div class="field">
+      <ol class="checks org-steps" aria-live="polite">
+        {rows.map((r, i) => {
+          const c: Item = check?.checks[i] ?? { text: r.label, ok: undefined };
+          const st = state(c, busy);
+          const note = c.ok === true ? null : c.soft ? c.text : c.hint ?? (i === 0 ? r.sub : null);
+          return (
+            <li>
+              <Tick st={st} />
+              <span>
+                {r.href ? (
+                  <a href={r.href} {...(r.here ? { onClick: () => rememberInstallReturn(back) } : { target: '_blank', rel: 'noopener' })}>{r.label}{r.here ? null : <> <Ext /></>}</a>
+                ) : r.label}
+                {r.copy ? <> <Copy text={r.copy} /></> : null}
+                {note ? <span class="footnote" style="display:block">{note}</span> : null}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      <button class="textlink" type="button" disabled={busy} onClick={run}>Check again</button>
+    </div>
   );
 }
