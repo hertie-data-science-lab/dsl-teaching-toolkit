@@ -19,6 +19,7 @@ import type { CourseStatus, Problem } from '../model/types';
 import { validator } from '../model/validate';
 import { CheckLine, Crumbs, Help, Legend, Lives, Loading, ProblemCards, Probs, Rail, Soon, ghUrl } from '../ui/bits';
 import { Check, Ext } from '../ui/icons';
+import { OpenButton } from '../ui/OpenButton';
 import { formatError } from '../wizards/model';
 import { courseScope, newestScope } from './CourseEdit';
 import type { CourseProps } from './types';
@@ -266,8 +267,8 @@ export function TemplateScreen(p: CourseProps) {
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates', href: '#templates' }, { t: assignmentIdent(slug) }]} />
       <div class="page-head">
-        <div><h1>{assignmentIdent(slug)}{title ? `: ${title}` : ''}</h1><p class="lede">Assignment template settings. <span class="slug">{repo}</span></p></div>
-        <div class="actions"><span class={`chip ${problems.length ? 'bad' : 'ok'}`}>{problems.length ? 'Has a problem' : 'Ready'}</span></div>
+        <div><h1>{assignmentIdent(slug)}{title ? `: ${title}` : ''}</h1><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
+        <div class="actions"><span class={`chip ${problems.length ? 'bad' : 'ok'}`}>{problems.length ? 'Has a problem' : 'Ready'}</span><OpenButton org={course.org} repo={repo} /></div>
       </div>
       <Help title="What these settings do" doc="03-add-assignment-to-course.md">
         <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch. These settings apply to every semester that uses the template; after hand out they reach students only through Update every copy.</p>

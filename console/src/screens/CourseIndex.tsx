@@ -9,6 +9,7 @@ import { DEFAULT_FORMATS } from '../model/policy';
 import { formatWord, formatsList } from '../tiers/grading';
 import { Crumbs, Help, Loading, ghUrl } from '../ui/bits';
 import { Ext } from '../ui/icons';
+import { OpenButton } from '../ui/OpenButton';
 import { CourseHeaderActions, StateChip, courseView } from './Course';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
@@ -92,7 +93,7 @@ export function MaterialsIndexScreen(p: CourseProps) {
                       {open === null ? '' : open ? ' Some files selected for the public website.' : ' Nothing selected for the public website.'}
                       {gh?.pushed_at ? ` Last change ${fmtDay(gh.pushed_at)} (${ago(gh.pushed_at, p.now)}).` : ''}
                     </span>
-                    <span class="r-side"><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
+                    <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
                   </li>
                 );
               })}
@@ -160,7 +161,7 @@ export function TemplatesIndexScreen(p: CourseProps) {
                     {cohorts.length ? `Scheduled in ${cohorts.join(', ')}. ` : ''}
                     <span class="slug">{t.repo}</span>
                   </span>
-                  <span class="r-side"><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.slug}`}>{bad ? 'Fix' : 'Settings'}</a></span>
+                  <span class="r-side"><OpenButton org={course.org} repo={t.repo} small quiet /><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.slug}`}>{bad ? 'Fix' : 'Settings'}</a></span>
                 </li>
               );
             })}

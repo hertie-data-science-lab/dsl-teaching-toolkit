@@ -23,6 +23,7 @@ import { CheckLine, Crumbs, EditFile, Help, Lives, Loading } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
 import { FileTree } from '../ui/FileTree';
 import { Check, Ext } from '../ui/icons';
+import { OpenButton } from '../ui/OpenButton';
 import { courseView, CourseHeaderActions } from './Course';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
@@ -379,7 +380,7 @@ export function MaterialsScreen(p: CourseProps) {
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Materials', href: '#materials' }, { t: repo }]} />
       <div class="page-head">
         <div><h1>{repo}</h1><p class="lede">Materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
-        <div class="actions"><a class="btn quiet" href={`https://github.com/${course.org}/${repo}`} target="_blank" rel="noopener">Open on GitHub <Ext /></a></div>
+        <div class="actions"><OpenButton org={course.org} repo={repo} quiet /></div>
       </div>
       <Help title="Public and withheld" doc="02-add-materials-to-course.md">
         <p>Materials live here privately until a scheduled release copies them to a semester. Files matching the withheld patterns never reach students. Files matching the public patterns are selected for the public website, so a deck opens in a browser there; until that site is rebuilt the selection is only recorded. Both use the same pattern syntax as .gitignore, written for the paths in this repo.</p>
