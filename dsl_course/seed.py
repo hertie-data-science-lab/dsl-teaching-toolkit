@@ -285,7 +285,7 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
         ".github/workflows/generate-syllabus.yml": render_generate_syllabus(
             source_repos, semesters, materials
         ),
-        ".github/workflows/new-assignment.yml": render_new_assignment(assignments),
+        ".github/workflows/new-assignment.yml": render_new_assignment(),
         ".github/workflows/derive-student-version.yml": render_derive_student_version(
             assignments
         ),

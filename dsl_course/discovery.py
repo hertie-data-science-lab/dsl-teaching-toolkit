@@ -57,6 +57,10 @@ ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 # submission repos and the frozen semester-side assignment templates (assign.py), and the
 # private per-student gradebooks (grades.py).
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
+# The topic that makes a COURSE-org repo an assignment template (decision 0014), as
+# `dsl-materials` makes a materials repo. The `assignment-` name is only the scaffold's
+# default; `scaffold` stamps the topic and the migration stamps it on older templates.
+TEMPLATE_TOPIC = "dsl-assignment"
 # The repos only a semester org has - the fallback tier signal for an org bootstrapped
 # before the topics existed, or whose topic stamp never landed.
 SEMESTER_ONLY_REPOS = {JOIN_REPO, CONFIG_REPO}

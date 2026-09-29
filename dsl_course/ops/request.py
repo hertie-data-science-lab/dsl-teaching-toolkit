@@ -62,6 +62,15 @@ MOVED_REQUEST_ARGS = {
 }
 
 
+# Args one op took and no longer does, with the sentence an older console build gets.
+RETIRED_OP_ARGS = {
+    ("assignment.create", "copy_from"): (
+        "An assignment template is no longer copied by the engine. Create it fresh, "
+        "then copy the files you want into it."
+    ),
+}
+
+
 def _refuse_old_spellings(
     fields: object, renames: dict[str, str], where: str, say=not_migrated_text
 ) -> None:
@@ -112,6 +121,9 @@ def parse_request(text: str) -> Request:
         raise RequestError(
             "BAD_ARGS", f"{op.name} was asked for with {'; '.join(problems)}."
         )
+    for (name, arg), refusal in RETIRED_OP_ARGS.items():
+        if op.name == name and arg in raw["args"]:
+            raise RequestError("BAD_ARGS", refusal)
     if op.scope == SEMESTER and not raw.get("semester_org"):
         raise RequestError("BAD_REQUEST", f"{op.name} needs a semester_org.")
     if op.scope == COURSE and raw.get("semester_org"):
