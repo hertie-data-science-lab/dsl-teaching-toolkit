@@ -44,6 +44,8 @@
     "key": "f2026",
     "label": "Fall 2026",
     "timezone": "Europe/Berlin",
+    "start": "2026-09-07",
+    "end": "2026-12-18",
     "week": 3,
     "weeks": 15,
     "live": true,
@@ -65,6 +67,7 @@
       "stage": "K4",
       "text": "Session 5 cites folder lectures/05_trees, which is not in course-materials-f2026.",
       "stops": "The release on Thu 8 Oct will be skipped.",
+      "when": "2026-10-08T10:00:00+02:00",
       "fix": {
         "repo": "hertie-dsl-demo-f2026/semester-config",
         "path": "schedule.yml",

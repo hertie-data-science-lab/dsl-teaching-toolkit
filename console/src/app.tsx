@@ -231,7 +231,7 @@ export function App({ state: s }: { state: AppState }) {
       heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template,
     };
     const screens: Record<string, () => preact.JSX.Element> = {
-      semester: () => <CohortScreen {...cp} />,
+      dashboard: () => <CohortScreen {...cp} />,
       schedule: () => <ScheduleScreen {...cp} />,
       release: () => <ReleaseScreen {...cp} />,
       assignments: () => <AssignmentsScreen {...cp} />,
@@ -244,7 +244,7 @@ export function App({ state: s }: { state: AppState }) {
       marks: () => <MarksOverviewScreen {...cp} />,
       archive: () => <ArchiveScreen {...cp} />,
     };
-    body = (screens[screen] ?? screens.semester)();
+    body = (screens[screen] ?? screens.dashboard)();
   }
 
   return (

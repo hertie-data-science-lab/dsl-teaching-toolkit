@@ -3,7 +3,7 @@
 
 import { parse } from 'yaml';
 import { obj } from '../edit/yamlText';
-import { ASSIGNMENT_WORD, RELEASE_WORD, assignmentIdent, releaseIdent, sortKey } from './format';
+import { ASSIGNMENT_WORD, RELEASE_WORD, addDays, assignmentIdent, dayKey, daysBetween, releaseIdent, sortKey, zoned } from './format';
 import type { Release, Status } from './types';
 
 export interface SchedEntry {
@@ -123,4 +123,50 @@ export function scheduleRows(status: Status, sched: Schedule | null, now: number
   // TBC with no date sorts at the end of the semester, as the site does.
   rows.sort((a, b) => (a.when ? sortKey(a.when, tz) : '9999') .localeCompare(b.when ? sortKey(b.when, tz) : '9999'));
   return rows;
+}
+
+// ------------------------------------------------------------------ term weeks (the Dashboard)
+
+/** A term week, 1 to the last, or the bucket of what falls before or after the term. */
+export type WeekKey = number | 'before' | 'after';
+
+export interface Term {
+  start: string; // yyyy-mm-dd, the first day of week 1
+  end: string;
+  weeks: number;
+}
+
+/**
+ * The term the week strip counts in: status.json's dates, else schedule.yml's, else week 1
+ * counted back from the engine's `week` to the Monday of `today`.
+ */
+export function termOf(status: Status, sched: Schedule | null, today: string): Term {
+  const weeks = status.semester?.weeks ?? 15;
+  let start = status.semester?.start ?? sched?.start ?? null;
+  if (!start) {
+    const monday = addDays(today, -((zoned(today).dow + 6) % 7));
+    start = addDays(monday, -7 * ((status.semester?.week ?? 1) - 1));
+  }
+  const end = status.semester?.end ?? sched?.end ?? addDays(start, 7 * weeks - 3);
+  return { start, end, weeks };
+}
+
+/** The term week `iso` falls in, read in `tz`; outside the term, its bucket. */
+export function weekOf(iso: string, term: Term, tz: string): WeekKey {
+  const n = Math.floor(daysBetween(term.start, dayKey(iso, tz)) / 7) + 1;
+  return n < 1 ? 'before' : n > term.weeks ? 'after' : n;
+}
+
+/**
+ * Split `items` for a week selection: `dated` holds those in the selected weeks (every dated
+ * one when `selected` is empty, which is All weeks), `undated` those no date pins.
+ */
+export function inWeeks<T>(items: T[], when: (t: T) => string | null | undefined, selected: WeekKey[], term: Term, tz: string): { dated: T[]; undated: T[] } {
+  const dated: T[] = [], undated: T[] = [];
+  for (const it of items) {
+    const w = when(it);
+    if (!w) undated.push(it);
+    else if (!selected.length || selected.includes(weekOf(w, term, tz))) dated.push(it);
+  }
+  return { dated, undated };
 }

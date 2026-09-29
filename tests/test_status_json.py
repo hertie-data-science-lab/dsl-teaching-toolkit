@@ -680,6 +680,54 @@ def test_semester_weeks_before_during_and_after_the_semester():
     assert status_json.semester_weeks(None, end, date(2026, 9, 7)) == (None, None)
 
 
+def test_the_semester_block_carries_its_start_and_end():
+    semester = _render()["semester"]
+    assert (semester["start"], semester["end"]) == ("2026-09-07", "2026-12-18")
+    bare = _render(semester=_semester(sched=_sched("timezone: Europe/Berlin\n")))
+    assert (bare["semester"]["start"], bare["semester"]["end"]) == (None, None)
+
+
+def test_a_problem_is_dated_by_the_moment_it_bites_and_a_roster_one_is_not(
+    monkeypatch,
+):
+    # The real checks: the materials repo lacks lectures/05_trees, the assignment-3
+    # template is absent, and assignment-3's grading_config.yml does not parse. The strip
+    # counts each under its week.
+    trees = {"lectures", "lectures/03_trees", "lectures/03_trees/notes.md"}
+    paths = {"course-materials-f2026": trees, "assignment-2-f2026": trees}
+    monkeypatch.setattr(
+        schedule, "source_repo_paths", lambda org, repo: paths.get(repo, set())
+    )
+    sources = schedule.source_faults(_sched(), COURSE)
+    texts = {
+        "assignment-3-f2026": "a: [\n",
+        "assignment-2-f2026": "title: Regression\n",
+    }
+    monkeypatch.setattr(grades, "_grading_text", lambda org, repo: texts[repo])
+    template: list[ConfigFault] = []
+    grades.grading_config_faults(COURSE, SEMESTER, _sched(), template, None)
+    roster_fault = header_fault("students.csv", ["github_handle"])
+    doc = _render(
+        semester=_semester(
+            schedule_faults=sources,
+            template_faults=template,
+            roster_faults=[roster_fault],
+        )
+    )
+    when = {(p["stage"], p["fix"]["entry"]): p.get("when") for p in doc["problems"]}
+    assert when[("K4", "s5")] == "2026-10-08T10:00:00+02:00"  # the release
+    assert when[("K4", "assignment-3")] == "2026-10-20T10:00:00+02:00"  # hand out
+    # A template fault bites when the template is handed out, not at the late cutoff.
+    assert when[("C5", "assignment-3")] == "2026-10-20T10:00:00+02:00"
+    assert when[("K5", None)] is None  # the roster's header: no date pins it
+    assert "when" not in next(p for p in doc["problems"] if p["stage"] == "K5")
+    # The course's own file, with no semester to hand the template out, leaves it undated.
+    course = _course()
+    course.templates[1].faults = template
+    (public,) = status_json.render_course_file(course, NOW)["problems"]
+    assert "when" not in public
+
+
 # ---------------------------------------------------------------------------- writer
 
 

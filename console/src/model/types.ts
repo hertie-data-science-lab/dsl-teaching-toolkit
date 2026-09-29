@@ -22,6 +22,8 @@ export interface Problem {
   text: string;
   stops: string;
   fix?: Fix;
+  /** When the fault bites (ISO); absent for a fault no date pins. */
+  when?: string;
 }
 
 export interface CourseStatus {
@@ -40,6 +42,9 @@ export interface SemesterStatus {
   key: string; // f2026
   label: string; // Fall 2026
   timezone: string;
+  /** `semester_start` / `semester_end` (yyyy-mm-dd); null while unset, absent on an older status. */
+  start?: string | null;
+  end?: string | null;
   week: number;
   weeks: number;
   live: boolean;

@@ -140,7 +140,7 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
         {n === 3 ? <Verified>{label} is live. Automation takes it from here.</Verified> : <p class="footnote">{n} of 3 done. The semester goes live when instructors, schedule and students are done.</p>}
       </>
     );
-    foot = <a class="btn outline" href={`?cohort=${org}#semester`}>Open {label}</a>;
+    foot = <a class="btn outline" href={`?cohort=${org}#dashboard`}>Open {label}</a>;
   }
   const backBtn = step > 1 ? <a class="btn quiet" href={`${q}#new-semester-${step - 1}`}>Back</a> : <a class="btn quiet" href={`${q}#course`}>Cancel</a>;
   return (
