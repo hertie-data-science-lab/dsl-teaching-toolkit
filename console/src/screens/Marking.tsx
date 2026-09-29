@@ -16,10 +16,10 @@ import { parseRoster } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { tabHref } from '../router';
+import { studentHref, tabHref } from '../router';
 import { CheckLine, Crumbs, Help, Lives, Loading } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
-import { Check, Ext, Lock } from '../ui/icons';
+import { Check, Lock } from '../ui/icons';
 import type { TabProps } from './Assignments';
 import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -289,7 +289,9 @@ export function TeamsTab(p: TabProps) {
   const pin = a.grading_cutoff_datetime ?? a.due;
   const opens = a.handout ? a.handout.slice(0, 10) : null;
   const closes = pin ? pin.slice(0, 10) : null;
-  const window = !opens ? 'never' : today < opens ? 'pending' : closes && today > closes ? 'closed' : 'open';
+  // An assigned-teams assignment has no window: its Join-team form refuses every request.
+  const assigned = formation?.value === 'assigned';
+  const window = assigned ? 'assigned' : !opens ? 'never' : today < opens ? 'pending' : closes && today > closes ? 'closed' : 'open';
   const empty = cur.teams.filter((t) => !t.members.length);
   return (
     <>
@@ -298,24 +300,25 @@ export function TeamsTab(p: TabProps) {
           <h1>{assignmentTitle(a)}</h1>
           <p class="lede">{joined.length - free.length} of {joined.length} joined students in {cur.teams.length} teams; {free.length} without a team.{notJoined ? ` ${notJoined} students have not joined yet and cannot be placed.` : ''}</p>
         </div>
-        <div class="actions"><a class="btn outline" href={`https://${p.cohort.org}.github.io/assignments/`} target="_blank" rel="noopener">Assignments on the student site <Ext /></a></div>
+        <div class="actions"><a class="btn outline" href={studentHref(p.cohort.org, 'join')}>Join screen, as students see it</a></div>
       </div>
       {p.tabs}
       <Help title="How teams form" doc="09-release-assignment-to-cohort.md">
-        <p>Students form their own teams on the student site until the window closes; you can assign the rest here. Students without a team get no repo at hand out. Assign them here or they are left out.</p>
+        <p>Students form their own teams on the Join screen of the student console until the window closes; you can assign the rest here. Students without a team get no repo at hand out. Assign them here or they are left out.</p>
       </Help>
       <div class="stack">
         <div class="grid-2">
           <section class="panel section">
             <h2>Window</h2>
             <p>
-              <span class={`chip ${window === 'open' ? 'ok' : ''}`}>{window === 'open' ? 'Open' : window === 'pending' ? 'Not open yet' : window === 'closed' ? 'Closed' : 'Never opens'}</span>{' '}
-              {window === 'open' ? `Students can form and join teams on the student site until ${fmtDay(closes, tz, year)}.`
+              <span class={`chip ${window === 'open' ? 'ok' : ''}`}>{window === 'open' ? 'Open' : window === 'pending' ? 'Not open yet' : window === 'closed' ? 'Closed' : assigned ? 'You assign' : 'Never opens'}</span>{' '}
+              {window === 'open' ? `Students can form and join teams on the Join screen until ${fmtDay(closes, tz, year)}.`
                 : window === 'pending' ? `Opens at hand out, ${fmtDay(opens, tz, year)}.`
                 : window === 'closed' ? 'Only you can change teams now.'
-                : 'This assignment is handed out by hand, so students cannot form teams on the site; assign them here.'}
+                : assigned ? 'You assign every team here; students cannot form their own.'
+                : 'This assignment is handed out by hand, so students cannot form teams on the Join screen; assign them here.'}
             </p>
-            <p class="footnote">The window runs from hand out until the late cutoff: the due date plus the late window.</p>
+            {assigned ? null : <p class="footnote">The window runs from hand out until the late cutoff: the due date plus the late window.</p>}
             {window === 'open' && free.length ? <div class="actions"><OpButtons def={teamsWindow(cohortScope(p), asgRef(a, true), fmtDay(closes, tz, year))} small label={`Email ${free.length} without a team`} /></div> : null}
             <a class="textlink" href={`#schedule-${a.slug}`}>Change the dates in the schedule</a>
           </section>

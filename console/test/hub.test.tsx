@@ -79,6 +79,33 @@ describe('the assignment hub', () => {
     expect(s).toContain('href="#assignment-assignment-2/marks"');
   });
 
+  it('the Teams tab links the students’ Join screen, not the retired site page', () => {
+    const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams' })} />);
+    expect(out).toContain(`href="?semester=${COHORT_ORG}#join"`);
+    expect(out).not.toContain('github.io/assignments');
+    expect(out).not.toContain('student site');
+  });
+
+  it('says what the engine does while teams form: handed out, a repo per team, none for the team-less', () => {
+    const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'overview' })} />);
+    expect(out).toContain('Handed out');
+    expect(out).toContain('students without a team get none');
+    expect(out).not.toContain('own repo at hand out');
+    expect(out).not.toContain('until hand out');
+    expect(out).not.toContain('>Hand out now<');
+  });
+
+  it('an assigned-teams assignment has no window on its Teams tab', () => {
+    const assigned = new StaticFiles({
+      [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\n',
+      [`${COHORT_ORG}/semester-config/assignments.yml`]: 'assignments:\n  assignment-3:\n    team_formation: assigned\n',
+    });
+    const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams', files: assigned })} />);
+    expect(out).toContain('You assign every team here; students cannot form their own.');
+    expect(out).not.toContain('Students can form and join teams');
+    expect(out).not.toContain('Email ');
+  });
+
   it('a Teams link to an assignment done alone lands on its Overview, and says so in the address', () => {
     const out = render(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'teams' })} />);
     expect(current(out)).toBe('Overview');

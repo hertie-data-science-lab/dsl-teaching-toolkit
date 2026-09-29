@@ -33,7 +33,6 @@ from .ghcli import (
 from .log import log_err, log_err_person, log_skip, on_cli_start
 from .repos import default_branch
 
-
 # ------------------------------------------------------------------ read once per process
 
 # A tick asks for the same file many times over: a semester's pointer to its course org was

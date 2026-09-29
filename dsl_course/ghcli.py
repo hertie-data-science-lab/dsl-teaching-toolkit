@@ -748,7 +748,8 @@ BUDGET_WARN_BELOW = 1000
 BUDGET_STOP_BELOW = 100
 
 _RATE_HEADER = re.compile(
-    r"^x-ratelimit-(limit|remaining|used|reset):\s*(\d+)\s*$", re.I | re.M
+    r"^x-ratelimit-(limit|remaining|used|reset):\s*(\d+)\s*$",
+    re.IGNORECASE | re.MULTILINE,
 )
 _LOGIN = re.compile(r'"login"\s*:\s*"([^"]+)"')
 

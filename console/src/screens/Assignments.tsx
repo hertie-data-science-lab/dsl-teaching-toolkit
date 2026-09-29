@@ -156,10 +156,11 @@ function Overview(p: TabProps) {
   const { status, now, a } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
   const cur = stepOf(a.state), group = isGroup(a);
-  const handedOut = cur >= 2;
+  // A group assignment is handed out when its teams start forming: each team's repo follows.
+  const handedOut = cur >= 1;
   const subs = [
     'In the schedule',
-    group ? (cur === 1 ? `${a.teams} teams so far` : cur > 1 ? 'Closed' : 'Before hand out') : 'Skipped: students work alone',
+    group ? (cur === 1 ? `${a.teams} teams so far` : cur >= 4 ? 'Closed' : cur > 1 ? 'Still open' : 'From hand out') : 'Skipped: students work alone',
     cur === 2 ? `${a.submissions} of ${a.units} in` : cur > 2 ? `Closed ${fmtDay(a.due, tz, year)}` : `Opens ${a.handout ? fmtDay(a.handout, tz, year) : 'at hand out'}`,
     cur === 3 ? `Until ${fmtDay(a.grading_cutoff_datetime, tz, year)}` : cur > 3 ? `Closed ${fmtDay(a.grading_cutoff_datetime, tz, year)}` : `Opens after ${fmtDay(a.due, tz, year)}`,
     cur === 4 ? `${a.marks.filled} of ${a.marks.total} marked` : cur > 4 ? 'Done' : `Opens after ${fmtDay(a.grading_cutoff_datetime, tz, year)}`,
@@ -174,8 +175,8 @@ function Overview(p: TabProps) {
     : a.state === 'late_window' ? `Late window. Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions} of ${a.units} submitted.`
     : a.state === 'marking' ? `Marking. ${a.marks.filled} of ${a.marks.total} marked.`
     : a.state === 'returned' ? 'Returned. Marks are with students.'
-    : a.state === 'teams_forming' ? `Teams forming. Hands out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}.`
-    : a.state === 'blocked' ? 'Blocked: some students have no team, and hand out is due.'
+    : a.state === 'teams_forming' ? `Teams forming. Handed out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}; no team has formed yet.`
+    : a.state === 'blocked' ? 'Blocked: handed out, but you have not assigned any team yet.'
     : a.handout ? `Declared. Hands out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}.` : 'Declared. You hand it out from this page.';
   const big = cur === 4 || cur === 5 ? a.marks.filled : cur <= 1 ? (a.teams ?? 0) : a.submissions;
   const bigOf = cur === 4 || cur === 5 ? a.marks.total : a.units;
@@ -194,7 +195,8 @@ function Overview(p: TabProps) {
           {a.state === 'open' || a.state === 'late_window'
             ? 'Students push to their own repo until the due date. Late work is accepted with the penalty until late work closes.'
             : a.state === 'marking' ? 'Marks and feedback go to students; notes you keep for yourself do not. Return marks previews first.'
-            : a.state === 'teams_forming' || a.state === 'blocked' ? 'Students form teams on the student site; you can assign the rest. Team-less students get their own repo at hand out.'
+            : a.state === 'teams_forming' ? 'Students form teams on the Join screen of the student console until late work closes; you can assign the rest. Each team gets its repo as it forms; students without a team get none.'
+            : a.state === 'blocked' ? 'You assign this assignment’s teams on the Teams tab; each team gets its repo once it is saved. Students without a team get none.'
             : 'Hands out at the scheduled time, or now.'}
         </p>
         <p>Preview never changes anything students see.</p>
@@ -221,7 +223,7 @@ function Overview(p: TabProps) {
             <div class="big">{big} <small>/ {bigOf}</small></div>
             <div class="meter"><i style={`width:${bigOf ? ((big / bigOf) * 100).toFixed(1) : 0}%;background:var(--asg-ink)`} /></div>
             <p class="footnote">
-              {cur === 2 || cur === 3 ? `${a.units - a.submissions} have not pushed since hand out.` : cur >= 4 ? `${a.marks.total - a.marks.filled} still to mark.` : group ? 'Teams form on the student site until hand out.' : 'Nothing handed out yet.'}
+              {cur === 2 || cur === 3 ? `${a.units - a.submissions} have not pushed since hand out.` : cur >= 4 ? `${a.marks.total - a.marks.filled} still to mark.` : group ? (cur === 1 ? 'Each team gets its repo as it forms; students without a team get none.' : 'Teams form from hand out until late work closes.') : 'Nothing handed out yet.'}
             </p>
           </section>
           <section class="panel section">
@@ -237,9 +239,9 @@ function Overview(p: TabProps) {
         <section class="panel section">
           <div class="section-head"><h2>What you can do, by state</h2><span class="meta">Preview never changes anything students see</span></div>
           <ul class="state-actions">
-            {row(cur <= 1 ? 'now' : 'past', 'Declared', handedOut ? `Handed out ${fmtWhen(a.handout, tz, year)} to ${a.units} ${group ? 'teams' : 'students'}.` : 'Hands out at its time, or now.',
+            {row(cur === 0 ? 'now' : 'past', 'Declared', handedOut ? `Handed out ${fmtWhen(a.handout, tz, year)} to ${a.units} ${group ? 'teams' : 'students'}.` : 'Hands out at its time, or now.',
               handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><OpButtons def={handout(scope, ref)} small /></div>)}
-            {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the student site; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={tabHref(a.slug, 'teams')}>Open teams</a></div>) : null}
+            {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the Join screen of the student console; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={tabHref(a.slug, 'teams')}>Open teams</a></div>) : null}
             {row(cur === 2 || cur === 3 ? 'now' : cur > 3 ? 'past' : 'later', 'Open, late window',
               cur < 2 ? 'Opens after hand out.' : cur > 3 ? `Closed ${fmtDay(a.grading_cutoff_datetime, tz, year)}.` : 'Update every copy pushes an assignment template file to every student and posts a note on each Submission receipts issue. Collect now pulls the latest work.',
               cur === 2 || cur === 3 ? (

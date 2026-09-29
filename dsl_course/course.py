@@ -216,12 +216,11 @@ LABELS = {
     "team_formation": {
         SELF_SELECT: {
             "label": "Students form their own",
-            "help": "On the student site.",
+            "help": "On the Join screen of the student console.",
         },
         ASSIGNED: {
             "label": "You assign them",
-            "help": "You assign them on the semester's Teams page once hand out is "
-            "scheduled.",
+            "help": "On the assignment's Teams tab.",
         },
     },
 }

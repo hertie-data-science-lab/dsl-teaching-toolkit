@@ -15,7 +15,6 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
-
 from conftest import issue_row
 
 from dsl_course import cadence, course, ghcli, issues, settings
