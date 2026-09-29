@@ -1507,6 +1507,18 @@ def load_grading_spec(course_org: str, template: str) -> GradingSpec:
     return spec if spec is not None else GradingSpec()
 
 
+def readable_grading_spec(course_org: str, template: str) -> GradingSpec | None:
+    """`load_grading_spec`, but None when the file could not be READ - a failure other
+    than a 404. For the one caller that must not act on the defaults: a scheduled solution
+    waits for the late window, and a window it cannot read is not a window of 10 days."""
+    try:
+        _grading_text(course_org, template)
+    except RuntimeError as exc:
+        log_err(f"  ! could not read {template}/{GRADING_FILE}: {exc}")
+        return None
+    return load_grading_spec(course_org, template)
+
+
 # ------------------------------------ what an assignment's definition will not grade as
 #
 # TIME-BOUND, unlike everything else that reaches a digest. `submit_via: emial` is a typo

@@ -114,6 +114,7 @@ from .grades import (
     cutoff_at,
     grading_config_faults,
     load_grading_spec,
+    readable_grading_spec,
     sheet_path,
     sync_team_lock,
 )
@@ -457,13 +458,10 @@ def _solution_cutoff(
 ) -> datetime | None:
     """The grading cutoff a scheduled solution waits for (`grades.cutoff_at`), or None
     when the template's late window cannot be read - and then nothing may go out."""
-    entry = sched.assignments[slug]
-    try:
-        gspec = load_grading_spec(course_org, entry.course_source_repo)
-    except Exception as exc:
-        log_err(f"could not read {slug}'s late window ({type(exc).__name__}): {exc}")
-        return None
-    return cutoff_at(sched, slug, gspec)
+    gspec = readable_grading_spec(
+        course_org, sched.assignments[slug].course_source_repo
+    )
+    return None if gspec is None else cutoff_at(sched, slug, gspec)
 
 
 def _solution_due(

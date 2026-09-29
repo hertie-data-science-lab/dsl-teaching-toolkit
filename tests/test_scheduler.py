@@ -23,6 +23,7 @@ from dsl_course import (
     course,
     deploy,
     ghcli,
+    grades,
     notify,
     repos,
     roster,
@@ -116,11 +117,10 @@ def _grading_spec_defaults(monkeypatch):
     the behaviour it was written for. Spelt out rather than left to the spec's own default,
     which is the Hertie ten-day window; the tests that are ABOUT the window declare their
     own spec."""
-    monkeypatch.setattr(
-        scheduler,
-        "load_grading_spec",
-        lambda org, template: GradingSpec(late_window_days=0),
-    )
+    for name in ("load_grading_spec", "readable_grading_spec"):
+        monkeypatch.setattr(
+            scheduler, name, lambda org, template: GradingSpec(late_window_days=0)
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -2416,7 +2416,7 @@ def _late_window_plan() -> Schedule:
 def _windows(monkeypatch, days: dict[str, int]) -> None:
     monkeypatch.setattr(
         scheduler,
-        "load_grading_spec",
+        "readable_grading_spec",
         lambda org, template: GradingSpec(late_window_days=days[template]),
     )
 
@@ -2456,11 +2456,15 @@ def test_a_solution_inside_the_late_window_is_held_until_the_cutoff(monkeypatch)
 
 
 def test_a_solution_whose_cutoff_cannot_be_read_is_held(monkeypatch):
-    # Not knowing the window is not knowing the cutoff: nothing goes out on a guess.
-    def unreadable(org, template):
+    # Not knowing the window is not knowing the cutoff: nothing goes out on a guess - not
+    # even the default window `load_grading_spec` falls back to on a failed read.
+    def unreadable(org, repo, path, ref=""):
         raise RuntimeError("rate limited")
 
-    monkeypatch.setattr(scheduler, "load_grading_spec", unreadable)
+    monkeypatch.setattr(grades, "get_file_content", unreadable)
+    monkeypatch.setattr(
+        scheduler, "readable_grading_spec", grades.readable_grading_spec
+    )
     monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
     sched = _late_window_plan()
     assert not scheduler._solution_due(
