@@ -72,7 +72,10 @@ from .course import (
 )
 from .discovery import (
     SEMESTERS_PATH,
+    TEMPLATE_TOPIC,
     assignment_rows,
+    is_assignment_template,
+    is_untopicked_template,
     list_org_repos,
     org_meta,
     read_semester_registry,
@@ -146,6 +149,8 @@ class TemplateFacts:
     repo: str
     readme: str | None = None
     faults: list[ConfigFault] = field(default_factory=list)
+    # False for an `assignment-*` GitHub template without the `dsl-assignment` topic yet.
+    topic: bool = True
 
 
 @dataclass
@@ -674,10 +679,33 @@ def materials_problem(m: MaterialsFacts, org: str) -> dict:
     }
 
 
+def template_problem(t: TemplateFacts, org: str) -> dict:
+    """The NOT_MIGRATED problem of an assignment template that has no topic yet."""
+    return {
+        "id": f"template:{_slugify(t.repo)}:{NOT_MIGRATED}",
+        "scope": "course",
+        "stage": "C5",
+        "text": (
+            f"{t.repo} is an assignment template by its old name only: it has no "
+            f"{TEMPLATE_TOPIC} topic yet."
+        ),
+        "stops": "Run the migration, which adds the topic.",
+        "fix": {
+            "repo": f"{org}/{t.repo}",
+            "path": "",
+            "line": None,
+            "screen": None,
+            "entry": t.repo,
+            "url": f"https://github.com/{org}/{t.repo}",
+        },
+    }
+
+
 def template_state(t: TemplateFacts) -> str:
-    """C5, per template: `problem` while its grading_config.yml will not grade as written,
-    `ready` once its README is written, `todo` before that."""
-    if t.faults:
+    """C5, per template: `problem` until the migration gives it the topic, or while its
+    grading_config.yml will not grade as written; `ready` once its README is written,
+    `todo` before that."""
+    if t.faults or not t.topic:
         return PROBLEM
     return "ready" if _written(t.readme) else TODO
 
@@ -715,6 +743,7 @@ def render_course(
     problems += [
         materials_problem(m, facts.org) for m in facts.materials if not m.topic
     ]
+    problems += [template_problem(t, facts.org) for t in facts.templates if not t.topic]
     for t in facts.templates:
         problems += [problem_from_fault(f, facts.org, now) for f in t.faults]
     meta = facts.meta
@@ -736,7 +765,7 @@ def render_course(
         "templates": [
             {
                 "repo": t.repo,
-                "slug": assignment_slug(t.repo),
+                "slug": t.repo,
                 "state": template_state(t),
             }
             for t in facts.templates
@@ -1287,6 +1316,9 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     problems += [
         materials_problem(m, course.org) for m in course.materials if not m.topic
     ]
+    problems += [
+        template_problem(t, course.org) for t in course.templates if not t.topic
+    ]
     problems = _unique_ids(problems)
     course_block, _ = render_course(
         course, now, [p for p in problems if p["scope"] == "course"]
@@ -1411,14 +1443,20 @@ def gather_course(course_org: str) -> CourseFacts:
             m = _materials_facts(course_org, name)
             m.topic = False
             facts.materials.append(m)
-        elif name.startswith("assignment-") and row.get("isTemplate"):
-            t = TemplateFacts(name, get_file_content(course_org, name, README_FILE))
+        elif is_assignment_template(row) or is_untopicked_template(row):
+            # One without the topic is listed, and NOT_MIGRATED until the migration's
+            # topic step gives it the topic (decision 0014).
+            t = TemplateFacts(
+                name,
+                get_file_content(course_org, name, README_FILE),
+                topic=is_assignment_template(row),
+            )
             text = get_file_content(
                 course_org, name, grades.GRADING_FILE, ref=SOLUTION_BRANCH
             )
             if text is not None:
                 t.faults, _ = grades.grading_spec_faults(
-                    assignment_slug(name), name, course_org, text, None
+                    name, name, course_org, text, None
                 )
             facts.templates.append(t)
     facts.public_site = pages_repo(course_org) in listing

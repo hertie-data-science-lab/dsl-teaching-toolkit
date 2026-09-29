@@ -97,19 +97,24 @@ def test_both_discover_functions_apply_the_same_infra_exclusions(monkeypatch):
     assert discovery.discover_content_repos("My-Course-E1234") == expected
 
 
-def test_discover_content_repos_also_excludes_assignment_templates_by_name(monkeypatch):
-    # Course-org assignment templates carry no `assignment-template` topic (that one is
-    # set on the frozen semester-side copy), so the name prefix is the content-side rule.
+def test_assignment_templates_are_found_by_topic_and_are_never_content(monkeypatch):
+    # Decision 0014: the `dsl-assignment` topic makes a course-org repo a template, the
+    # name does not. An older `assignment-*` GitHub template without it (NOT_MIGRATED
+    # until the migration stamps it) is not taken for a content repo either.
     monkeypatch.setattr(
         discovery,
         "list_org_repos",
         lambda org: [
-            {"name": "assignment-1-f2026", "topics": ["assignment"]},
+            {"name": "neural-nets", "topics": ["dsl-assignment"], "isTemplate": True},
+            {"name": "assignment-1-f2026", "topics": [], "isTemplate": True},
+            {"name": "assignment-notes", "topics": []},
             {"name": "course-materials-f2026", "topics": []},
         ],
     )
+    assert discovery.discover_assignments("My-Course-E1234") == ["neural-nets"]
     assert discovery.discover_content_repos("My-Course-E1234") == [
-        "course-materials-f2026"
+        "assignment-notes",
+        "course-materials-f2026",
     ]
 
 

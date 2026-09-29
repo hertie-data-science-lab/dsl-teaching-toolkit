@@ -382,11 +382,6 @@ def _course_renders(fake, monkeypatch):
     )
     monkeypatch.setattr(
         migrate,
-        "discover_assignment_repos",
-        lambda org: [r for r in fake.list_org_repos(org) if r["isTemplate"]],
-    )
-    monkeypatch.setattr(
-        migrate,
         "content_workflow_files",
         lambda sems, names, repo, ref, *, workflows: _hosted(repo, workflows),
     )
@@ -1242,6 +1237,7 @@ def test_a_course_preview_writes_nothing(fake, course, monkeypatch, capsys):
     assert "course-materials-f2026: add the topic dsl-materials" in out
     assert "course-materials-f2026/publish.yml: deleted (retired)" in out
     assert ".github/opencourse.yml: seeded on, from " in out
+    assert "assignment-1-f2026: add the topic dsl-assignment" in out
     assert "(the files are listed once the registry step has run)" in out
     assert f"disable Actions in {COURSE}/.github, {COURSE}/assignment-1-f2026" in out
     assert _state(fake) == before and fake.puts == [] and course == []
@@ -1278,6 +1274,8 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     assert fake._repo(COURSE, "course-materials-f2026")["topics"] == ["dsl-materials"]
     template = fake.tree(COURSE, "assignment-1-f2026")
     assert set(migrate.TEMPLATE_WORKFLOWS) <= set(template)
+    # The template is found by its topic now (decision 0014), stamped beside its own.
+    assert "dsl-assignment" in fake._repo(COURSE, "assignment-1-f2026")["topics"]
     assert all(fake.paused_at_commit[1:-1]) and fake.enabled(COURSE, ".github")
     assert course == ["refresh", "status"]
     assert fake.dispatches == [
@@ -1299,8 +1297,29 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     course.clear()
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    assert capsys.readouterr().out.count("already migrated") == 24
+    assert capsys.readouterr().out.count("already migrated") == 26
     assert course == [] and fake.commits == commits and fake.puts == puts
+
+
+def test_the_assignment_topic_step_stamps_only_the_old_templates(
+    fake, course, monkeypatch, capsys
+):
+    # A template made by the new scaffold already has the topic, and a repo that only
+    # shares the prefix (not a GitHub template) is not one: only the old one is stamped,
+    # its own topics kept.
+    fake.add(COURSE, "assignment-neural-nets", {}, topics=["dsl-assignment"])
+    fake._repo(COURSE, "assignment-neural-nets")["isTemplate"] = True
+    fake.add(COURSE, "assignment-notes", {"x.md": b"x"})
+    fake._repo(COURSE, "assignment-1-f2026")["topics"] = ["keep-me"]
+    assert _main(monkeypatch, COURSE) == 0
+    out = capsys.readouterr().out
+    assert "assignment-1-f2026: add the topic dsl-assignment" in out
+    assert "assignment-neural-nets: add the topic" not in out
+    assert "assignment-notes: add the topic" not in out
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    topics = fake._repo(COURSE, "assignment-1-f2026")["topics"]
+    assert sorted(topics) == ["dsl-assignment", "keep-me"]
+    assert fake._repo(COURSE, "assignment-notes").get("topics") in (None, [])
 
 
 def test_a_course_with_no_workflow_repo_passes_the_pause(
