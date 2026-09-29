@@ -49,7 +49,8 @@ export const RETURN_MARKS_ALWAYS = [
 
 export function publishWebsite(repos: string[]): Tiers {
   return {
-    source_repo: { tier: 'ask', label: 'Source materials', widget: 'select', reason: 'Publishing replaces the live public site, if there is one.', defaultLabel: 'default: newest', options: repos.map((r) => opt(r, r)) },
+    enabled: { tier: 'ask', label: 'Publish the website', widget: 'checkbox', default: false, reason: 'Off: nothing is published and the daily update stops.' },
+    source_repo: { tier: 'ask', label: 'Source materials', widget: 'select', reason: 'The website is built from this repo. Publishing replaces the live site.', options: repos.map((r) => opt(r, r)) },
     readings_mode: {
       tier: 'default', label: 'Readings', widget: 'select', default: 'reading-list', defaultLabel: 'default: reading list', reason: 'Publishing the readings themselves needs their licences.',
       options: [opt('reading-list', 'Reading list only'), opt('actual-readings', 'The readings themselves'), opt('none', 'None')],

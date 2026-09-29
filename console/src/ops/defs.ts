@@ -2,7 +2,7 @@
 // the def for the thing on it (a release, an assignment, the semester) and hands it to the
 // panel; the op name and args follow the registry (schemas/ops.json).
 
-import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ALWAYS, publishWebsite as publishTiers, releaseAdhoc as adhocTiers, updateCopies as copiesTiers } from '../tiers/ops';
+import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ALWAYS, releaseAdhoc as adhocTiers, updateCopies as copiesTiers } from '../tiers/ops';
 import type { OpDef } from './session';
 
 export interface Scope {
@@ -170,14 +170,13 @@ export function archive(s: Scope, scheduled: string | null, passed: boolean): Op
   };
 }
 
-export function publishWebsite(s: Scope, repos: string[], values: { source_repo?: string; readings_mode?: string; include_lectures?: boolean }, published: boolean): OpDef {
+export function publishWebsite(s: Scope, published: boolean): OpDef {
   return {
     ...base(s, 'course.publish_website', 'website'), name: 'Publish public website', title: `${s.courseOrg}.github.io`, where: s.where,
-    intro: 'Publishes an open website from your materials and updates it daily. Withheld folders stay private.',
+    intro: 'Publishes the public website as its saved settings say. A daily update keeps it current.',
     verb: published ? 'Publish again' : 'Publish public website', running: 'Publishing the public website', cancel: 'Stop; nothing is public until the last step',
-    args: { source_repo: values.source_repo ?? repos[0] ?? '', readings_mode: values.readings_mode ?? 'reading-list', include_lectures: values.include_lectures ?? true },
-    options: publishTiers(repos),
-    needsCheck: { label: 'This replaces the live public site', sub: 'The engine has no preview for publishing, so confirm instead.' },
+    args: {},
+    needsCheck: { label: 'This replaces the live public site', sub: 'Publishing has no preview, so confirm instead.' },
   };
 }
 

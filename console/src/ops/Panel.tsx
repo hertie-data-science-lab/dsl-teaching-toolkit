@@ -64,7 +64,8 @@ export function OutcomeView({ result, def, url }: { result: Result; def: OpDef; 
       {result.leaked.length ? (
         <p class="check-line bad"><span>The public record of this run names {result.leaked.length === 1 ? 'a person' : `${result.leaked.length} people`}. Tell the lab: the console reports it so it can be fixed.</span></p>
       ) : null}
-      {reasons.length || details.length || block || result.people.length ? (
+      {block ? <Block text={block} /> : null}
+      {reasons.length || details.length || result.people.length ? (
         <details class="fold reasons">
           <summary>Details</summary>
           <div class="fold-body">
@@ -74,7 +75,6 @@ export function OutcomeView({ result, def, url }: { result: Result; def: OpDef; 
               ))}</tbody></table>
             ) : null}
             {details.length ? <ul class="outcome-list">{details.map((d) => <li>{d}</li>)}</ul> : null}
-            {block ? <Block text={block} /> : null}
             {result.people.length ? (
               <>
                 <p class="footnote">Per person (private; not in the public run log):</p>

@@ -249,7 +249,7 @@ describe('S6 schedule and S11 release', () => {
 });
 
 describe('operation outcome', () => {
-  it('shows what the op produced in the details fold, preformatted', () => {
+  it('shows the generated text directly, and what the op touched in the details fold', () => {
     const def = generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026');
     const outcome = { schema: 'dsl.outcome/1' as const, op: def.op, run_id: 7, actor: 'a', preview: true, conclusion: 'previewed' as const, summary: 'Preview: the session list.', reasons: [{ code: 'NO_SOLUTION_REGION', text: 'solution.py\nhas no region' }], details: ['main/solution.py', 'main/README.md'], block: '## Course sessions and readings\n- Session 1: Intro' };
     const out = html(<OutcomeView result={{ outcome, people: [], leaked: [] }} def={def} />);
@@ -257,7 +257,8 @@ describe('operation outcome', () => {
     expect(out).toContain('<ul class="outcome-list"><li>main/solution.py</li><li>main/README.md</li></ul>');
     expect(out).toContain('<pre class="outcome-details">## Course sessions and readings\n- Session 1: Intro</pre>');
     expect(out).toContain('>Copy</button>');
-    expect(out.indexOf('outcome-list')).toBeLessThan(out.indexOf('outcome-details'));
+    // The session list is what a preview is for (finding 31): above the fold, not in it.
+    expect(out.indexOf('outcome-details')).toBeLessThan(out.indexOf('<summary>Details</summary>'));
     expect(out).toContain('<td class="pre">solution.py\nhas no region');
   });
 });

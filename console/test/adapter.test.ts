@@ -175,7 +175,7 @@ describe('the gate', () => {
     s.open(defs.updateSite(scope));
     expect(modeOf('site.update')).toBe('direct');
     expect(s.canRun(s.current.value!)).toBe(true);
-    s.open(defs.publishWebsite({ courseOrg: COURSE, where: 'Machine Learning' }, ['course-materials-f2026'], {}, false));
+    s.open(defs.publishWebsite({ courseOrg: COURSE, where: 'Machine Learning' }, false));
     expect(modeOf('course.publish_website')).toBe('direct');
     expect(s.canRun(s.current.value!)).toBe(false);
     s.setChecked(true);

@@ -11,7 +11,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { CourseScreen } from '../src/screens/Course';
 import { MaterialsScreen, WebsiteScreen, folderKinds, resetLabel, writeHolds } from '../src/screens/CourseEdit';
-import { MaterialsIndexScreen, TemplatesIndexScreen, materialsSentence, otherRepos, publicPatterns } from '../src/screens/CourseIndex';
+import { MaterialsIndexScreen, TemplatesIndexScreen, materialsSentence, otherRepos } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { Sidenav } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
@@ -31,7 +31,6 @@ const withTemplate: Loaded = { kind: 'ready', status: { ...STATUS, assignments: 
 const MAT = 'course-materials-f2026';
 const files = new StaticFiles(
   {
-    [`${COURSE_ORG}/${MAT}/publish.yml`]: 'public:\n  - lectures/**/slides.html\n  - nothing-here/\n',
     [`${COURSE_ORG}/${MAT}/.releaseignore`]: '# comment\nsolutions/\n*.key\n',
     [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'title: Group project\ntype: group\nformats: [py]\n',
   },
@@ -49,36 +48,18 @@ const text = (v: preact.VNode) => render(v).replace(/<[^>]+>/g, ' ').replace(/\s
 
 describe('file badges', () => {
   const f = ['SYLLABUS.md', 'lectures/05/slides.html', 'lectures/05/notes.pdf', 'solutions/05.ipynb', 'lectures/05/answers.key'];
-  it('marks withheld over published openly, and the rest released to students', () => {
-    const b = badgeFiles(f, ['lectures/**/slides.html', '*.key'], ['solutions/', '*.key']);
+  it('marks what the list withholds, and the rest released to students', () => {
+    const b = badgeFiles(f, ['solutions/', '*.key']);
     expect(b.badges).toEqual({
-      'SYLLABUS.md': 'released', 'lectures/05/slides.html': 'public', 'lectures/05/notes.pdf': 'released', 'solutions/05.ipynb': 'withheld', 'lectures/05/answers.key': 'withheld',
+      'SYLLABUS.md': 'released', 'lectures/05/slides.html': 'released', 'lectures/05/notes.pdf': 'released', 'solutions/05.ipynb': 'withheld', 'lectures/05/answers.key': 'withheld',
     });
   });
   it('flags a rule that matches nothing, skipping comments and blank lines', () => {
-    const b = badgeFiles(f, ['lectures/**/slides.html', 'nothing-here/'], ['# a comment', '', 'solutions/', '!missing.md']);
-    expect(b.unmatched).toEqual({ public: ['nothing-here/'], withheld: ['!missing.md'] });
+    const b = badgeFiles(f, ['# a comment', '', 'solutions/', '!missing.md']);
+    expect(b.unmatched).toEqual(['!missing.md']);
   });
-  it('publishes a public deck’s _files bundle with it, never a denylisted path', () => {
-    const paths = ['l/05/slides.html', 'l/05/slides_files/fig.png', 'l/05/slides_files/solution/key.png', 'l/05/other_files/x.png', 'l/05/solutions/a.py', 'l/05/tests/t.py', 'l/05/.env.local', 'l/grading_config.yml'];
-    const b = badgeFiles(paths, ['l/**'], []);
-    expect(b.badges['l/05/slides.html']).toBe('public');
-    expect(b.badges['l/05/slides_files/fig.png']).toBe('public');
-    expect(b.badges['l/05/other_files/x.png']).toBe('public');
-    expect(b.badges['l/05/slides_files/solution/key.png']).toBe('never_public');
-    expect(b.badges['l/05/solutions/a.py']).toBe('never_public');
-    expect(b.badges['l/05/tests/t.py']).toBe('never_public');
-    expect(b.badges['l/05/.env.local']).toBe('never_public');
-    expect(b.badges['l/grading_config.yml']).toBe('never_public');
-    const only = badgeFiles(['d/slides.html', 'd/slides_files/a.css', 'd/notes_files/b.css'], ['d/slides.html'], []);
-    expect(only.badges).toEqual({ 'd/slides.html': 'public', 'd/slides_files/a.css': 'public', 'd/notes_files/b.css': 'released' });
-  });
-  it('withholds never-material files whatever the rules say', () => {
-    const b = badgeFiles(['l/.gitkeep', 'l/.DS_Store', 'l/a.md'], ['l/**'], []);
-    expect(b.badges).toEqual({ 'l/.gitkeep': 'withheld', 'l/.DS_Store': 'withheld', 'l/a.md': 'public' });
-  });
-  it('counts the rules of each list', () => {
-    expect(badgeFiles(['a'], [], ['# only a comment', '']).rules).toEqual({ public: 0, withheld: 0 });
+  it('counts the rules', () => {
+    expect(badgeFiles(['a'], ['# only a comment', '']).rules).toBe(0);
   });
   it('nests paths into folders before files', () => {
     const t = buildTree(['b.md', 'a/x.md', 'a/b/y.md']);
@@ -95,19 +76,15 @@ describe('other repos', () => {
     expect(otherRepos('org', r, ['listed']).map((x) => x.name)).toEqual(['course-materials-x', 'lecture-code']);
     expect(otherRepos('org', r, ['listed', 'course-materials-x']).map((x) => x.name)).toEqual(['lecture-code']);
   });
-  it('reads the public patterns of publish.yml', () => {
-    expect(publicPatterns('public:\n  - a\n  - b\n')).toEqual(['a', 'b']);
-    expect(publicPatterns('public:\n')).toEqual([]);
-  });
 });
 
 describe('index screens', () => {
-  it('lists materials with state, term, openly published, last change and Other repos', () => {
+  it('lists materials with state, term, last change and Other repos', () => {
     const t = text(<MaterialsIndexScreen {...cp()} />);
     expect(t).toContain(MAT);
     expect(t).toContain('Ready');
     expect(t).toContain('Fall 2026');
-    expect(t).toContain('Some files selected for the public website.');
+    expect(t).not.toContain('public website');
     expect(t).toContain('Last change');
     expect(t).toContain('New materials');
     expect(t).toContain('lecture-code-f2026');
@@ -116,10 +93,9 @@ describe('index screens', () => {
     expect(t).not.toContain('old-thing');
     expect(render(<MaterialsIndexScreen {...cp()} />)).toContain(`href="#materials-${MAT}"`);
   });
-  it('says why a materials repo is not ready only when it can tell', () => {
-    expect(materialsSentence('todo', 'absent')).toBe('Not ready yet: there is no publish.yml.');
-    expect(materialsSentence('todo', 'ready')).toBe('Not ready yet: SYLLABUS.md is still the placeholder.');
-    expect(materialsSentence('todo', 'loading')).toBe('Not ready yet.');
+  it('says why a materials repo is not ready', () => {
+    expect(materialsSentence('todo')).toBe('Not ready yet: the syllabus is not written.');
+    expect(materialsSentence('ready')).toBe('Syllabus written.');
   });
   it('shows a template still being written neutrally, not as a problem', () => {
     const st: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...STATUS.course!, templates: [{ repo: 'assignment-4-f2026', slug: 'assignment-4', state: 'todo' }] } }, sha: 's', stale: [] };
@@ -150,10 +126,9 @@ describe('materials settings file tree', () => {
   it('badges every file, flags the rule that matches nothing and links each file to its editor', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
     const t = text(<MaterialsScreen {...cp({ entry: MAT })} />);
-    expect(t).toContain('for the public website');
+    expect(t).not.toContain('for the public website');
     expect(t).toContain('withheld');
     expect(t).toContain('released to students');
-    expect(t).toContain('nothing-here/ matches no file');
     expect(t).toContain('*.key matches no file');
     expect(out).toContain(`https://github.com/${COURSE_ORG}/${MAT}/edit/main/lectures/05_trees/slides.html`);
     expect(out).not.toContain('class="file-list"');
@@ -162,7 +137,7 @@ describe('materials settings file tree', () => {
   it('says No rules yet, and leaves out Edit links while the default branch is unknown', () => {
     const bare = new StaticFiles({}, {}, { [`${COURSE_ORG}/${MAT}`]: ['a.md'] });
     const out = render(<MaterialsScreen {...cp({ entry: MAT, files: bare })} />);
-    expect(out.match(/No rules yet\./g)).toHaveLength(2);
+    expect(out.match(/No rules yet\./g)).toHaveLength(1);
     expect(out).not.toContain('Edit on GitHub');
     expect(out).not.toContain('/edit/main/a.md');
   });
@@ -221,6 +196,8 @@ describe('materials settings: syllabus file and folder kinds', () => {
     expect(t).toContain('quiz/ Exam set here');
     expect(t).toContain('Tutorials/ Lab from its name');
     expect(t).toContain('datasets/ Lecture the default');
+    expect(out).toContain('<table class="grid kinds">');
+    expect(out).toContain('<th>Kind, and why</th>');
     expect(out).toContain('value="E1282.pdf"');
     expect(out).toContain(`/edit/main/E1282.pdf`);
     expect(out).toContain('<span class="ft-name">Tutorials/</span><span class="chip">Lab</span>');
@@ -235,10 +212,11 @@ describe('materials settings: syllabus file and folder kinds', () => {
     );
     expect(writeHolds('syllabus: a.pdf\nkinds:\n  quiz: exam\n', { syllabus: '', kinds: {} })).toBe('');
   });
-  it('the public website says publish.yml is not used yet', () => {
+  it('the public website shows its settings from opencourse.yml, off when there is none', () => {
     const t = text(<WebsiteScreen {...cp()} />);
-    expect(t).not.toContain('Public patterns');
-    expect(t).toContain('follows the settings here for now');
-    expect(t).toContain('until then it is only recorded');
+    expect(t).not.toContain('publish.yml');
+    expect(t).toContain('The website is off: Publish refuses until it is on and saved.');
+    expect(t).toContain('Description');
+    expect(t).toContain('Not set');
   });
 });

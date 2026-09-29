@@ -20,13 +20,6 @@ function termLabel(repo: string): string | null {
   return /-[fswu]\d{4}$/.test(repo) ? termOf(repo).label : null;
 }
 
-/** The `public:` patterns of a `publish.yml`, or [] when there are none or it does not parse. */
-export function publicPatterns(text: string): string[] {
-  const y = new YamlText(text);
-  const list = y.errors.length ? null : obj(y.toJS()).public;
-  return Array.isArray(list) ? list.map(String).filter((s) => s.trim()) : [];
-}
-
 /**
  * The course org's repos that are none of infra, materials or templates, but that a schedule
  * can still release from: not archived, not `.github` or the org's `.github.io`, not
@@ -40,16 +33,9 @@ export function otherRepos(org: string, repos: GhRepo[], known: string[]): GhRep
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/**
- * Why a materials repo is or is not ready. The engine calls one ready once SYLLABUS.md is
- * written and publish.yml exists; the status says only ready or not, so the publish.yml
- * read tells the two apart: with it present, the syllabus must still be the placeholder.
- */
-export function materialsSentence(state: string, publishFile: string): string {
-  if (state === 'ready') return 'Syllabus written.';
-  if (publishFile === 'absent') return 'Not ready yet: there is no publish.yml.';
-  if (publishFile === 'ready') return 'Not ready yet: SYLLABUS.md is still the placeholder.';
-  return 'Not ready yet.';
+/** Why a materials repo is or is not ready: the engine calls one ready once its syllabus is written. */
+export function materialsSentence(state: string): string {
+  return state === 'ready' ? 'Syllabus written.' : 'Not ready yet: the syllabus is not written.';
 }
 
 function repoOf(files: Files, org: string, name: string): GhRepo | undefined {
@@ -70,7 +56,7 @@ export function MaterialsIndexScreen(p: CourseProps) {
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Materials' }]} />
       <div class="page-head">
-        <div><h1>Materials <Hint doc="02-add-materials-to-course.md">Materials live here privately until a scheduled release copies them to a semester. Some files can be withheld from students, and some selected for the public website.</Hint></h1><p class="lede">The course’s materials repos. A scheduled release copies their folders to a semester.</p></div>
+        <div><h1>Materials <Hint doc="02-add-materials-to-course.md">Materials live here privately until a scheduled release copies them to a semester. Files can be withheld from students.</Hint></h1><p class="lede">The course’s materials repos. A scheduled release copies their folders to a semester.</p></div>
         <CourseHeaderActions course={course} ready={v.course?.ready ?? false} />
       </div>
       <div class="stack">
@@ -79,16 +65,13 @@ export function MaterialsIndexScreen(p: CourseProps) {
           {materials.length ? (
             <ul class="rows">
               {materials.map((m) => {
-                const pub = files.file(course.org, m.repo, 'publish.yml');
-                const open = pub.kind === 'ready' ? publicPatterns(pub.text).length > 0 : null;
                 const gh = repoOf(files, course.org, m.repo);
                 const term = termLabel(m.repo);
                 return (
                   <li>
                     <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" />{term ? <span class="chip term">{term}</span> : null}</span>
                     <span class="r-sub">
-                      {materialsSentence(m.state, pub.kind)}
-                      {open === null ? '' : open ? ' Some files selected for the public website.' : ' Nothing selected for the public website.'}
+                      {materialsSentence(m.state)}
                       {gh?.pushed_at ? ` Last change ${fmtDay(gh.pushed_at)} (${ago(gh.pushed_at, p.now)}).` : ''}
                     </span>
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
