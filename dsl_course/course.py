@@ -220,8 +220,7 @@ LABELS = {
         },
         ASSIGNED: {
             "label": "You assign them",
-            "help": "You assign them on the semester's Teams page once hand out is "
-            "scheduled.",
+            "help": "On the assignment's Teams tab.",
         },
     },
 }

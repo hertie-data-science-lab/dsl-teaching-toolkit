@@ -289,7 +289,9 @@ export function TeamsTab(p: TabProps) {
   const pin = a.grading_cutoff_datetime ?? a.due;
   const opens = a.handout ? a.handout.slice(0, 10) : null;
   const closes = pin ? pin.slice(0, 10) : null;
-  const window = !opens ? 'never' : today < opens ? 'pending' : closes && today > closes ? 'closed' : 'open';
+  // An assigned-teams assignment has no window: its Join-team form refuses every request.
+  const assigned = formation?.value === 'assigned';
+  const window = assigned ? 'assigned' : !opens ? 'never' : today < opens ? 'pending' : closes && today > closes ? 'closed' : 'open';
   const empty = cur.teams.filter((t) => !t.members.length);
   return (
     <>
@@ -309,13 +311,14 @@ export function TeamsTab(p: TabProps) {
           <section class="panel section">
             <h2>Window</h2>
             <p>
-              <span class={`chip ${window === 'open' ? 'ok' : ''}`}>{window === 'open' ? 'Open' : window === 'pending' ? 'Not open yet' : window === 'closed' ? 'Closed' : 'Never opens'}</span>{' '}
+              <span class={`chip ${window === 'open' ? 'ok' : ''}`}>{window === 'open' ? 'Open' : window === 'pending' ? 'Not open yet' : window === 'closed' ? 'Closed' : assigned ? 'You assign' : 'Never opens'}</span>{' '}
               {window === 'open' ? `Students can form and join teams on the Join screen until ${fmtDay(closes, tz, year)}.`
                 : window === 'pending' ? `Opens at hand out, ${fmtDay(opens, tz, year)}.`
                 : window === 'closed' ? 'Only you can change teams now.'
+                : assigned ? 'You assign every team here; students cannot form their own.'
                 : 'This assignment is handed out by hand, so students cannot form teams on the Join screen; assign them here.'}
             </p>
-            <p class="footnote">The window runs from hand out until the late cutoff: the due date plus the late window.</p>
+            {assigned ? null : <p class="footnote">The window runs from hand out until the late cutoff: the due date plus the late window.</p>}
             {window === 'open' && free.length ? <div class="actions"><OpButtons def={teamsWindow(cohortScope(p), asgRef(a, true), fmtDay(closes, tz, year))} small label={`Email ${free.length} without a team`} /></div> : null}
             <a class="textlink" href={`#schedule-${a.slug}`}>Change the dates in the schedule</a>
           </section>

@@ -17,7 +17,7 @@ export const RUN_LABEL: Record<RunKey, string> = {
 };
 
 const REASON: Record<RunKey, string> = {
-  team_formation: 'For team assignments. You assign them on the assignment’s Teams page.',
+  team_formation: 'For team assignments. You assign them on the assignment’s Teams tab.',
   max_team_size: 'For team assignments: students cannot join a team that is full.',
   late_window_days: 'Late work is accepted for this many days after the due date; 0 means none. The late cutoff is the due date plus these days.',
   late_penalty_per_day: 'Taken off the earned mark for each day started after the due date.',
