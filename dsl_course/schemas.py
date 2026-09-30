@@ -437,7 +437,10 @@ def schedule_schema() -> dict:
     assignment = _obj(
         _keys(
             KNOWN_ASSIGNMENT,
-            {"marks_return_datetime": {"oneOf": [_str(), marks_row]}},
+            {
+                "number": {"type": "integer"},
+                "marks_return_datetime": {"oneOf": [_str(), marks_row]},
+            },
         ),
         ("due_datetime", "course_source_repo"),
     )

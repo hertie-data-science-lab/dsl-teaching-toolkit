@@ -9,7 +9,6 @@ touches GitHub or renders anything - `site` turns rows into pages, `syllabus` in
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -23,6 +22,7 @@ from .materials import (
     infer_kind,
     publishable,
 )
+from .schedule import label_number
 
 # A source repo -> its `materials.yml` folder aliases. The caller reads them; the plan
 # stays pure.
@@ -61,17 +61,6 @@ def entry_kind(
             deploy_section(first), aliases(first.course_source_repo)
         ), True
     return DEFAULT_KIND, True
-
-
-# A label's own number: trailing (`lecture_03`, `lab-9`, `s5`) or leading (`01_lab`), as
-# the console has always read it.
-_LABEL_NUMBER = re.compile(r"0*(\d+)$|^0*(\d+)[-_ ]")
-
-
-def label_number(label: str) -> int | None:
-    """The number a label carries (`lecture_03` -> 3, `01_lab` -> 1), or None."""
-    m = _LABEL_NUMBER.search(label.strip())
-    return int(m.group(1) or m.group(2)) if m else None
 
 
 @dataclass

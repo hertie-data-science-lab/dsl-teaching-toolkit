@@ -1839,15 +1839,12 @@ def _formation_pages(
 ) -> dict[str, str]:
     """Each self-select assignment's page URL on the semester site, by schedule key.
 
-    Asked only when the plan HAS a self-select assignment: the pages cost a listing of the
-    course org, and the lock is written on every tick of a semester with any assignment."""
+    Empty when the plan has no self-select assignment: nothing links a page then."""
     if not self_select_keys(course_org, sched):
         return {}
     return {
         key: page.url(semester_org)
-        for key, page in schedule.assignment_pages_by_key(
-            course_org, semester_org, sched
-        ).items()
+        for key, page in schedule.assignment_pages_by_key(sched).items()
     }
 
 

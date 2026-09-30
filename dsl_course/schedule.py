@@ -25,7 +25,9 @@ lifecycle, `events` are display-only calendar rows.
             deploy_datetime: 2026-09-15T09:00
     assignments:                     # each assignment's TIMINGS. The key is a label;
       assignment-1:                  # course_source_repo names the COURSE-org repo
-        course_source_repo: assignment-1-f2026   # it hands out from, and is REQUIRED.
+        course_source_repo: assignment-neural-nets   # it hands out from, and is REQUIRED.
+        number: 1                    # optional: its ordinal (default: the key's, else
+                                     # its position by due date).
         details: Fit it by hand      # the DETAILS column, on its hand-out and due rows
         handout_datetime: 2026-09-22T09:00  # A bare due_datetime is END of day (23:59:59)
         due_datetime: 2026-10-13     # - "due on the 13th" closes at day's end. The late
@@ -105,9 +107,7 @@ from .course import (
     coerce_date,
     is_repo_root,
     pages_repo,
-    semester_of,
 )
-from .discovery import discover_assignments
 from .faults import (
     NOT_MIGRATED,
     NOTIFY_FROM,
@@ -357,6 +357,11 @@ class Release:
         ]
 
 
+# A label's own number: trailing (`lecture_03`, `lab-9`, `s5`) or leading (`01_lab`), as
+# the console has always read it.
+_LABEL_NUMBER = re.compile(r"0*(\d+)$|^0*(\d+)[-_ ]")
+
+
 @dataclass
 class AssignmentEntry:
     """One assignment's TIMING, and nothing else: `handout_datetime` (when student/team
@@ -418,6 +423,9 @@ class AssignmentEntry:
     # Whether the site shows a "marks expected" row for it: only when the key is written
     # `{event_datetime: ..., show_on_site: true}` - the date is internal by default.
     marks_return_on_site: bool = False
+    # Its ordinal ("Assignment 3"), when the entry writes one; else the key's own number,
+    # else its position by due date (`assignment_pages`, decision 0013 rule 1).
+    number: int | None = None
     # The line each of this entry's keys is written on - see `Deploy.lines`.
     lines: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
 
@@ -696,6 +704,7 @@ KNOWN_DEPLOY = frozenset(
 )
 KNOWN_ASSIGNMENT = frozenset(
     {
+        "number",
         "due_datetime",
         "course_source_repo",
         "handout_datetime",
@@ -1353,6 +1362,18 @@ def _parse_assignments(
                 lines,
             )
             marks = None
+        number = None
+        if "number" in entry:
+            number = _whole_days(entry["number"]) or None
+            if number is None:
+                _flag_bad_value(
+                    drops,
+                    where,
+                    "number",
+                    entry["number"],
+                    "the assignment is numbered from its key or its due date instead",
+                    lines,
+                )
         out[str(slug)] = AssignmentEntry(
             due_datetime=due,
             course_source_repo=source_repo,
@@ -1375,6 +1396,7 @@ def _parse_assignments(
             solution_datetime=solution,
             marks_return_datetime=marks,
             marks_return_on_site=marks_on_site,
+            number=number,
             lines=lines,
         )
     return out
@@ -1773,8 +1795,7 @@ def entry_for_repo(sched: Schedule, repo: str) -> tuple[str, AssignmentEntry] | 
 
 class AssignmentPage(NamedTuple):
     """One assignment's page on the semester site: its ordinal, its semester-side name, the
-    course template it is drawn from, and its plan entry (None for a template the plan
-    does not name)."""
+    course template it is drawn from, and its plan entry."""
 
     number: int
     name: str
@@ -1802,56 +1823,41 @@ class AssignmentPage(NamedTuple):
         )
 
 
-def assignment_pages(
-    semester_org: str, sched: Schedule, templates: list[str]
-) -> list[AssignmentPage]:
-    """Every assignment the semester site has a page for, numbered as the site numbers them -
-    the ONE place that numbering is decided, because the site names the pages off it and
-    the team-formation mail, the lock and the Join-team form all link them.
+def label_number(label: str) -> int | None:
+    """The number a label carries (`lecture_03` -> 3, `01_lab` -> 1), or None."""
+    m = _LABEL_NUMBER.search(label.strip())
+    return int(m.group(1) or m.group(2)) if m else None
 
-    `templates` is the course org's `assignment-*` template repos
-    (`discovery.discover_assignments`), cut to this semester's own term tag. From BOTH sides:
-    the templates, so one handed out off-plan still has a page, and the plan's entries, so
-    one appears before its template is staged. Keyed on the SEMESTER-side name, because two
-    plan entries may cite one `course_source_repo`; sorted by it, so a page keeps its URL
-    when faculty add another mid-term.
 
-    HIDDEN ones are included (`show_on_site: false`): the ordinal is a position in the full
-    list, and the site skips a hidden page rather than renumbering around it, so hiding one
-    mid-term moves nobody else's URL."""
-    tag = semester_of(semester_org)
-    if tag:
-        templates = [a for a in templates if a.lower().endswith(tag)]
-    by_name: dict[str, tuple[str, tuple[str, AssignmentEntry] | None]] = {}
-    for repo in templates:
-        hit = entry_for_repo(sched, repo)
-        name = semester_name(*hit) if hit else assignment_slug(repo)
-        by_name.setdefault(name, (repo, hit))
-    for key, entry in sched.assignments.items():
-        by_name.setdefault(
-            semester_name(key, entry), (entry.course_source_repo, (key, entry))
-        )
+def assignment_pages(sched: Schedule) -> list[AssignmentPage]:
+    """Every assignment of the plan, numbered - the ONE place that numbering is decided,
+    because the team-formation mail, the lock and the Join-team form all link a page, and
+    the site dates an entry off it.
+
+    Decision 0013 rule 1, applied to assignment entries (decision 0014): the entry's
+    `number:`, else its key's own number (`assignment-3`), else its position among the
+    plan's assignments by due date. So `assignment-10` is 10 and comes after
+    `assignment-2`, and re-dating one entry renumbers nobody with a number of their own.
+
+    From the plan only: an assignment is handed out from a schedule entry or not at all.
+    HIDDEN ones are included (`show_on_site: false`): a hidden entry keeps its position,
+    so hiding one mid-term moves nobody else's number."""
+    by_due = sorted(sched.assignments.items(), key=lambda kv: kv[1].due_datetime)
     return [
-        AssignmentPage(i + 1, name, repo, hit)
-        for i, (name, (repo, hit)) in enumerate(sorted(by_name.items()))
+        AssignmentPage(
+            entry.number or label_number(key) or position,
+            semester_name(key, entry),
+            entry.course_source_repo,
+            (key, entry),
+        )
+        for position, (key, entry) in enumerate(by_due, start=1)
     ]
 
 
-def assignment_pages_by_key(
-    course_org: str, semester_org: str, sched: Schedule
-) -> dict[str, AssignmentPage]:
-    """`assignment_pages` by SCHEDULE key, off a fresh listing of the course org's
-    templates - for a caller that links a page without building the site.
-
-    `{}` when the listing failed: every caller uses a page to decide whether a sentence
-    carries a link and a number, and one that could not look gets the wording that stands
-    on its own rather than a link to the wrong page."""
-    try:
-        templates = discover_assignments(course_org)
-    except RuntimeError as exc:
-        log_err(f"could not list {course_org}'s assignment templates: {exc}")
-        return {}
-    return {p.key: p for p in assignment_pages(semester_org, sched, templates) if p.key}
+def assignment_pages_by_key(sched: Schedule) -> dict[str, AssignmentPage]:
+    """`assignment_pages` by SCHEDULE key, for a caller that links a page without
+    building the site."""
+    return {p.key: p for p in assignment_pages(sched)}
 
 
 # The remedy a manual run that CAN say which entry gives (Update every copy, Collect now):
