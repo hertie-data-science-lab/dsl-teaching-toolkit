@@ -1,4 +1,5 @@
-// The frame every screen sits in: top bar, context switcher and nav, footer.
+// The frame every screen sits in: the app-level top bar, the course-level switcher and side
+// nav, the footer.
 
 import { useEffect, useState } from 'preact/hooks';
 import type { GhUser } from '../github/client';
@@ -37,46 +38,34 @@ function useTheme(): [boolean, () => void] {
   ];
 }
 
-export function HeaderLinks({ course, cohort }: { course?: Course; cohort?: CohortRef }) {
-  if (!course) return null;
-  return (
-    <>
-      {!course.write ? <span class="ro-chip">read only</span> : null}
-      {cohort ? <a href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Student site <Ext /></a> : null}
-      {cohort ? <a href={ghUrl(cohort.org)} target="_blank" rel="noopener">Semester on GitHub <Ext /></a> : null}
-      <a href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
-    </>
-  );
-}
-
-export function Topbar({ user, course, cohort, onSignOut, navOpen, onMenu, setup, title }: {
+/**
+ * The app-level bar (decision 0021): the product name (a Home link) with the view, the person
+ * (a link to Profile), Guide, theme, Sign out. Nothing course- or semester-specific; the Menu
+ * button only where there is a side nav to open. Its links start `?`: app-level pages are about
+ * no course or semester, so they clear the query.
+ */
+export function Topbar({ user, onSignOut, navOpen = false, onMenu, title }: {
   user: GhUser | null;
-  /** Show the link to Your setup (the instructor screens). */
-  setup?: boolean;
   /** The view after sign-in: Instructor view or Student view. */
   title?: string;
-  course?: Course;
-  cohort?: CohortRef;
   onSignOut?: () => void;
-  navOpen: boolean;
-  onMenu: () => void;
+  navOpen?: boolean;
+  onMenu?: () => void;
 }) {
   const [dark, toggle] = useTheme();
   return (
     <header class="topbar">
       <div class="topbar-inner">
-        {user ? <button class="pill-ghost menu-btn" type="button" aria-expanded={navOpen} aria-controls="sidenav-wrap" onClick={onMenu}>Menu</button> : null}
-        <a class="app-name" href="#home">{user ? title ?? 'Instructor view' : 'DSL Teaching Console'} <small>Data Science Lab</small></a>
-        <nav class="hdr-links" aria-label="Open on the web"><HeaderLinks course={course} cohort={cohort} /></nav>
+        {user && onMenu ? <button class="pill-ghost menu-btn" type="button" aria-expanded={navOpen} aria-controls="sidenav-wrap" onClick={onMenu}>Menu</button> : null}
+        <a class="app-name" href="?#home">DSL Teaching Console{user && title ? <small>{title}</small> : null}</a>
         <div class="topbar-right">
           {user ? (
-            <div class="who">
+            <a class="who" href="?#profile" aria-label="Your profile">
               <span class="avatar" aria-hidden="true">{user.avatar_url ? <img src={user.avatar_url} alt="" /> : initials(user)}</span>
               <span class="who-name">{user.name || user.login}</span>
-            </div>
+            </a>
           ) : null}
-          {user && setup ? <a class="pill-ghost setup-btn" href="#setup">Your setup</a> : null}
-          {user ? <a class="pill-ghost" href="#help" aria-label="Guide: how the console is organised">Guide</a> : null}
+          {user ? <a class="pill-ghost" href="?#help" aria-label="Guide: how the console is organised">Guide</a> : null}
           <button class="pill-ghost" type="button" aria-label="Switch colour theme" onClick={toggle}>{dark ? 'Light' : 'Dark'}</button>
           {user && onSignOut ? <button class="pill-ghost" type="button" onClick={onSignOut}>Sign out</button> : null}
         </div>
@@ -146,16 +135,8 @@ function Switcher({ courses, course, cohort, cohortStates, semesters = [], semes
         <span>{label}</span><span class="caret" aria-hidden="true" />
       </button>
       <div class="popmenu" hidden={!open} role="menu" onClick={(e) => (e.target as Element).closest('a') && setOpen(false)}>
-        <a href="#home" role="menuitem">{courses.length ? 'All courses' : 'Your semesters'}</a>
-        {!courses.length ? null : <a href="#new-course-1" role="menuitem">New course</a>}
-        {!courses.length ? null : !course ? (
-          <span class="disabled" role="menuitem" aria-disabled="true">New semester<small>Select a course first</small></span>
-        ) : !course.write ? (
-          <span class="disabled" role="menuitem" aria-disabled="true">New semester of {course.name}<small>You have no write access</small></span>
-        ) : (
-          <a href={`?course=${course.org}#new-semester-1`} role="menuitem">New semester of {course.name}</a>
-        )}
-        <hr />
+        {/* `?#home` clears the course and semester from the query: All courses is about none. */}
+        <a href="?#home" role="menuitem">{courses.length ? 'All courses' : 'Your semesters'}</a>
         {courses.map((c) => (
           <>
             <button type="button" class="sub-toggle" aria-expanded={sub === c.org} onClick={() => setSub(sub === c.org ? null : c.org)}>
@@ -273,7 +254,7 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
           <hr />
           <ul>
             {cohort && course.write ? <li><a href={studentHref(cohort.org)}>Student view</a></li> : null}
-            {cohort ? <li><a href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Student site <Ext /></a></li> : null}
+            {cohort ? <li><a href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Public site <Ext /></a></li> : null}
             {cohort ? <li><a href={ghUrl(cohort.org)} target="_blank" rel="noopener">Semester on GitHub <Ext /></a></li> : null}
             <li><a href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a></li>
           </ul>

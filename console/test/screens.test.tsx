@@ -91,7 +91,7 @@ describe('S0 sign in', () => {
     const auth = new ConsoleAuth(new PatAuth({ store: null }), null);
     const t = text(<SignInScreen auth={auth} onSignedIn={() => {}} />);
     expect(t).toContain('GitHub token');
-    expect(t).toContain('Sign in with GitHub. The console can see and change only what your GitHub account can.');
+    expect(t).toContain('The console can see and change only what your GitHub account can.');
     expect(html(<SignInScreen auth={auth} onSignedIn={() => {}} />)).not.toContain('>Sign in with GitHub</button>');
     expect(t).toMatch(/repo .*workflow/);
     expect(t).toContain('fine-grained token');
@@ -484,18 +484,18 @@ describe('read only and the shell', () => {
     expect(t).toContain('Read only.');
     expect(t).toContain('No roster, no marks, no buttons.');
   });
-  it('puts the switcher, nav with the problem count and header links in the frame', () => {
+  it('puts the switcher, nav with the problem count and the on-GitHub links in the side nav, none in the bar', () => {
     const nav = html(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" problems={2} />);
     expect(nav).toContain('Machine Learning, Fall 2026');
-    expect(nav).toContain('New semester of Machine Learning');
     expect(nav).toContain('class="n-count"');
     expect(nav).toContain('aria-current="page"');
     expect(nav).toContain('2 problems');
-    const top = html(<Topbar user={{ login: 'a', id: 1, name: 'A', email: null, avatar_url: '' }} course={{ ...course, write: false }} cohort={cohort} navOpen={false} onMenu={() => {}} />);
-    expect(top).toContain('read only');
-    expect(top).toContain(`https://${COHORT_ORG}.github.io`);
-    expect(top).toContain('Semester on GitHub');
-    expect(top).toContain('Course on GitHub');
+    expect(nav).toContain(`https://${COHORT_ORG}.github.io`);
+    expect(nav).toContain('Semester on GitHub');
+    expect(nav).toContain('Course on GitHub');
+    const top = html(<Topbar user={{ login: 'a', id: 1, name: 'A', email: null, avatar_url: '' }} navOpen={false} onMenu={() => {}} />);
+    expect(top).not.toContain('github.io');
+    expect(top).not.toContain('on GitHub');
     const foot = text(<Footer course={course} cohort={cohort} />);
     expect(foot).toContain('Friedrichstraße 180');
     expect(foot).toContain('Part of the Hertie Data Science Lab.');

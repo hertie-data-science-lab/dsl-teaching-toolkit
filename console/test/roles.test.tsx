@@ -39,9 +39,9 @@ describe('Home groups', () => {
     expect(text(<HomeScreen courses={[]} semesters={[NLP_OLD]} cohortStates={{}} now={0} user={user} />)).toContain('Archived');
   });
 
-  it('a person with both roles sees Your courses, then Your semesters', () => {
+  it('a person with both roles sees All courses, then Your semesters', () => {
     const out = render(<HomeScreen courses={[course]} semesters={[NLP]} cohortStates={{}} now={0} user={user} />);
-    expect(out).toContain('<h1>Your courses <span class="hint">');
+    expect(out).toContain('<h1>All courses <span class="hint">');
     expect(out.indexOf('Machine Learning, Fall 2026')).toBeLessThan(out.indexOf('Your semesters'));
     expect(out.indexOf('Your semesters')).toBeLessThan(out.indexOf('Natural Language Processing, Fall 2026'));
   });
