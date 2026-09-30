@@ -324,6 +324,15 @@ describe('live checks against GitHub', () => {
     expect(before).not.toContain('/people"');
   });
 
+  it('puts the org-creation steps in a ? with a Learn more link, not in a line under the row', () => {
+    const org = 'hertie-deep-learning-e2345';
+    const html = render(<OrgSteps org={org} check={null} busy={false} run={() => {}} back="#new-course-1" doc="01-new-course-org.md" slug="" />);
+    expect(html).toContain('aria-label="How to create the org"');
+    expect(html).toContain(`Choose the Free plan.<br/>Enter ${org} as its name.<br/>Choose a business or institution and enter hertie-data-science-lab.`);
+    expect(html).toContain('href="https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/01-new-course-org.md"');
+    expect(html).not.toContain('class="footnote"');
+  });
+
   it('verifies a new template: both branches and a settings file that parses', async () => {
     const repo = 'assignment-4-f2026';
     const gh = new FakeGitHub()

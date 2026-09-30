@@ -116,11 +116,18 @@ export function OrgWhy({ doc }: { doc: string }) {
  * Owner. The install link opens in this tab, since GitHub sends the person back to the
  * console afterwards; `back` is the step it reopens.
  */
-export function OrgSteps({ org, check, busy, run, back, slug = APP_SLUG }: { org: string; check: OrgCheck | null; busy: boolean; run: () => void; back: string; slug?: string }) {
+export function OrgSteps({ org, check, busy, run, back, doc, slug = APP_SLUG }: { org: string; check: OrgCheck | null; busy: boolean; run: () => void; back: string; doc?: string; slug?: string }) {
   const exists = check?.checks[0]?.ok === true;
   const id = check?.id ?? null;
-  const rows: { label: string; href?: string; here?: boolean; copy?: string; sub?: string }[] = [
-    { label: 'Create the org', href: NEW_ORG_URL, copy: org, sub: 'Free plan; choose a business or institution and enter hertie-data-science-lab.' },
+  const how = (
+    <Hint label="How to create the org" doc={doc}>
+      Choose the Free plan.<br />
+      Enter {org || 'the org name'} as its name.<br />
+      Choose a business or institution and enter hertie-data-science-lab.
+    </Hint>
+  );
+  const rows: { label: string; href?: string; here?: boolean; copy?: string; hint?: ComponentChildren }[] = [
+    { label: 'Create the org', href: NEW_ORG_URL, copy: org, hint: how },
     ...(slug ? [{ label: 'Install the console app', href: exists ? installUrl(slug, id) : undefined, here: true }] : []),
     { label: `Invite ${BOT} as an Owner`, href: exists ? peopleUrl(org) : undefined, copy: BOT },
   ];
@@ -130,7 +137,7 @@ export function OrgSteps({ org, check, busy, run, back, slug = APP_SLUG }: { org
         {rows.map((r, i) => {
           const c: Item = check?.checks[i] ?? { text: r.label, ok: undefined };
           const st = state(c, busy);
-          const note = c.ok === true ? null : c.soft ? c.text : c.hint ?? (i === 0 ? r.sub : null);
+          const note = c.ok === true ? null : c.soft ? c.text : c.hint;
           return (
             <li>
               <Tick st={st} />
@@ -139,6 +146,7 @@ export function OrgSteps({ org, check, busy, run, back, slug = APP_SLUG }: { org
                   <a href={r.href} {...(r.here ? { onClick: () => rememberInstallReturn(back) } : { target: '_blank', rel: 'noopener' })}>{r.label}{r.here ? null : <> <Ext /></>}</a>
                 ) : r.label}
                 {r.copy ? <> <Copy text={r.copy} /></> : null}
+                {r.hint ? <> {r.hint}</> : null}
                 {note ? <span class="footnote" style="display:block">{note}</span> : null}
               </span>
             </li>
