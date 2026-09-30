@@ -709,8 +709,10 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
             "At least one folder of a known kind (lectures, labs, readings…)",
             True,
             len(unmapped) < len(m.folders),
-            "No top folder has a kind yet: name one lectures, labs or readings, "
-            "or set its kind under Folder kinds.",
+            (
+                "No top folder has a kind yet: name one lectures, labs or readings, "
+                "or set its kind under Folder kinds."
+            ),
         ),
         (
             "all_mapped",
