@@ -133,7 +133,8 @@ promise no repo, team or marks; an auditor's nav omits Marks and Join.
 
 The visit time behind "new since your last visit" is stored only after that semester's
 receipts were read. Signing out forgets every visit time and remembered folder of that
-login in this browser, the rendered markdown, the team list and the semester facts.
+login in this browser, the rendered markdown, the team list and the semester facts. It keeps
+Profile: the folder, the editor, and the folder picked for the folder check (in IndexedDB).
 
 The shared facts come through one interface, `StudentData` (`src/model/student.ts`), read by
 `StatusFileSource` from the engine's public `<semester>/.github/.system/student-status.json`

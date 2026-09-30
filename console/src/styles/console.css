@@ -867,6 +867,10 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .page-head .my-only { margin: 0; align-self: center; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
+/* WP-S4 */
+.folder-check .saved { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.clone-all-h { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+
 /* WP-S3 */
 .verdict { display: flex; gap: 8px; align-items: center; margin: -6px 0 18px; font-weight: 600; color: var(--ink-2); }
 .verdict svg { width: 14px; height: 14px; flex: none; }

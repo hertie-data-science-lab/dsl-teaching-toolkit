@@ -1,7 +1,7 @@
 // Per-viewer settings kept in this browser (localStorage): which semesters the student
 // groups show, when the student last opened each semester (for "new since your last visit"),
-// the local folders the Set up screen writes its commands for, and an instructor's Your
-// setup (folder, editor, the Open button's last choice). Storage can be missing or refuse (a
+// the local folders the Set up screen writes its commands for, and a person's Profile
+// (folder, editor, the Open button's last choice). Storage can be missing or refuse (a
 // private window, blocked site data); the console then shows every semester, calls nothing
 // new, forgets the folders on reload, and keeps Your setup in memory until reload.
 
@@ -78,16 +78,19 @@ export function markVisit(login: string, org: string, now: number, store: PrefSt
 /** Forget this page load's answers (tests). */
 export const resetVisits = () => visits.clear();
 
-/** On sign-out: every visit time, remembered folder and Your setup of `login` in this browser, and this load's answers. */
+/**
+ * On sign-out: every visit time and remembered student folder of `login` in this browser, and
+ * this load's answers. Profile (Your setup) is kept: a folder and an editor are not secrets
+ * (decision 0021).
+ */
 export function forgetStudentPrefs(login: string, store: PrefStore | null = localStore()): void {
   visits.clear();
-  kept.delete(login);
   try {
     if (!store?.key || store.length === undefined || !store.removeItem) return;
     const mine = [];
     for (let i = 0; i < store.length; i++) {
       const k = store.key(i);
-      if (k && (k.startsWith(`dsl-console-visit:${login}:`) || k === pathsKey(login) || k === setupKey(login))) mine.push(k);
+      if (k && (k.startsWith(`dsl-console-visit:${login}:`) || k === pathsKey(login))) mine.push(k);
     }
     for (const k of mine) store.removeItem(k);
   } catch {
@@ -123,6 +126,9 @@ export function saveLocalPaths(login: string, paths: LocalPaths, store: PrefStor
 const setupKey = (login: string) => `dsl-console-setup:${login}`;
 /** Your setup per login when storage refuses it: it then lasts until reload. */
 const kept = new Map<string, Setup>();
+
+/** Forget the in-memory copies kept when storage refused (tests). */
+export const resetKeptSetups = () => kept.clear();
 
 /** `login`'s Your setup, or null when nothing is stored (and nothing kept since storage refused). */
 export function yourSetup(login: string, store: PrefStore | null = localStore()): Setup | null {
