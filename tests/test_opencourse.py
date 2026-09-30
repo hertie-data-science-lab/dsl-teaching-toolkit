@@ -27,15 +27,22 @@ def test_the_seeded_file_is_instructor_owned_off_and_parses():
 def test_the_seed_withholds_the_system_folder_and_answers_by_default():
     text = opencourse.seed_text()
     assert (
-        "# system folder and anything named solution, exam, grade, marks or private:\n"
+        "# solution, exam, grade, marks or private:\n"
         "withhold:\n"
         "- .system/\n"
-        "- '*solution*'\n"
-        "- '*exam*'\n"
-        "- '*grade*'\n"
-        "- '*marks*'\n"
-        "- '*private*'\n"
+        "- '*[Ss]olution*'\n"
+        "- '*[Ee]xam'\n"
+        "- '*[Ee]xams'\n"
+        "- '*[Ee]xam[-_.]*'\n"
+        "- '[Gg]rade*'\n"
+        "- '*[-_.][Gg]rade*'\n"
+        "- '[Mm]arks*'\n"
+        "- '*[-_.][Mm]arks*'\n"
+        "- '*[Pp]rivate*'\n"
     ) in text
+    # A website already on keeps its empty list: a default would take files off it.
+    live = opencourse.seed_text(OpenCourse(True, "m"))
+    assert opencourse.parse(yaml.safe_load(live)).withhold == ()
     # A seed that names its own list keeps it: the defaults fill only an empty one.
     mine = opencourse.seed_text(OpenCourse(withhold=("drafts/",)))
     assert opencourse.parse(yaml.safe_load(mine)).withhold == ("drafts/",)
@@ -50,8 +57,18 @@ def test_the_default_withhold_list_keeps_answers_off_at_any_depth(tmp_path):
         "lectures/03/midterm_exam.pdf",
         "grades/marks.csv",
         "notes/private/todo.md",
+        "labs/Solutions/a.py",
+        "Exams/paper.pdf",
+        "labs/lab1_Solution.ipynb",
     )
-    public = ("lectures/01/slides.pdf", "labs/01/lab1.ipynb")
+    public = (
+        "lectures/01/slides.pdf",
+        "labs/01/lab1.ipynb",
+        "examples/a.py",
+        "benchmarks/run.py",
+        "notes/remarks.md",
+        "lectures/03/example.py",
+    )
     for rel in kept + public:
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("x")
