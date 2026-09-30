@@ -152,8 +152,8 @@ describe('Save on the schedule’s new assignment entry', () => {
     const gh = github(), f = files();
     await addEntry(gh, f);
     await settle(() => puts(gh, 'assignments.yml').length > 0);
-    expect(Object.keys(parse(body(puts(gh, 'schedule.yml')[0])).assignments)).toEqual(['assignment-2', 'assignment-4']);
-    expect(parse(body(puts(gh, 'assignments.yml')[0])).assignments).toEqual({ 'assignment-4': { late_window_days: 3, late_penalty_per_day: '2%' } });
+    expect(Object.keys(parse(body(puts(gh, 'schedule.yml')[0])).assignments)).toEqual(['assignment-2', 'assignment-3']);
+    expect(parse(body(puts(gh, 'assignments.yml')[0])).assignments).toEqual({ 'assignment-3': { late_window_days: 3, late_penalty_per_day: '2%' } });
   });
 
   it('keeps the saved entry when the run settings fail, and a retry adds no second entry', async () => {
@@ -165,7 +165,7 @@ describe('Save on the schedule’s new assignment entry', () => {
     await settle(() => false);
     expect(puts(gh, 'schedule.yml')).toHaveLength(1);
     const text = (f.file(COHORT_ORG, 'semester-config', 'schedule.yml') as { text: string }).text;
-    expect(Object.keys(parse(text).assignments)).toEqual(['assignment-2', 'assignment-4']);
+    expect(Object.keys(parse(text).assignments)).toEqual(['assignment-2', 'assignment-3']);
   });
 });
 

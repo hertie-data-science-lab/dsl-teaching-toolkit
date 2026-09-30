@@ -37,6 +37,8 @@ export interface AssignmentDraft {
   kind: 'assignments';
   id: string;
   template: string;
+  /** A new entry's number: its key is `assignment-<number>`. Undefined until proposed; '' while the box is empty. */
+  number?: number | '';
   title: string;
   manual: boolean;
   handoutDate: string;
@@ -236,7 +238,7 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
 
 /** A fresh id in `block`: `lecture-6`, `lab-4`, `assignment-2`, `midterm-exam`. */
 export function freshId(doc: Raw, block: Block, stem: string): string {
-  const taken = new Set([...Object.keys(obj(doc.releases)), ...Object.keys(obj(doc.assignments)), ...Object.keys(obj(doc.events))]);
+  const taken = takenKeys(doc);
   const base = kebab(stem) || block.slice(0, -1);
   if (/-\d+$/.test(base) || block !== 'releases') {
     let id = base, n = 2;
@@ -248,9 +250,29 @@ export function freshId(doc: Raw, block: Block, stem: string): string {
   return `${base}-${n}`;
 }
 
-/** The assignment key a template gives: `assignment-2-f2026` -> `assignment-2`. */
-export function slugOfTemplate(template: string): string {
-  return template.replace(/-[fswu]\d{4}$/, '');
+/** Every key the file uses, in any block: keys are unique across blocks. */
+function takenKeys(doc: Raw): Set<string> {
+  return new Set([...Object.keys(obj(doc.releases)), ...Object.keys(obj(doc.assignments)), ...Object.keys(obj(doc.events))]);
+}
+
+/** The key of a new assignment entry numbered `n` (decision 0014: the ordinal is the schedule's). */
+export const assignmentKey = (n: number | '' | undefined) => `assignment-${n === undefined || n === '' ? 'N' : n}`;
+
+/**
+ * The number to propose for a new assignment entry: one more than the entries the schedule
+ * has, stepped past a key already taken. The engine numbers an entry by its key's number, so
+ * this is the number students see.
+ */
+export function nextAssignmentNumber(doc: Raw): number {
+  const taken = takenKeys(doc);
+  let n = Object.keys(obj(doc.assignments)).length + 1;
+  while (taken.has(assignmentKey(n))) n++;
+  return n;
+}
+
+/** A new assignment draft with its number proposed, when it has none yet; any other draft as it is. */
+export function withNumber<T extends Draft>(d: T, doc: Raw): T {
+  return d.kind === 'assignments' && !d.id && d.number === undefined ? { ...d, number: nextAssignmentNumber(doc) } : d;
 }
 
 export function blankDraft(type: string, defaults: { repo: string }): ReleaseDraft | AssignmentDraft | EventDraft {
@@ -271,7 +293,7 @@ function moment(when: string, endOfDay = false): string {
  * What is wrong with a draft, by field; empty when it can be saved. `cutoff` is an assignment's
  * late cutoff as `cutoffOf` gives it: a solution shown before it is refused, as the engine does.
  */
-export function draftErrors(d: Draft, _others?: { templateUsers: (template: string) => number }, cutoff?: string | null): Record<string, string> {
+export function draftErrors(d: Draft, others?: { templateUsers?: (template: string) => number; doc?: Raw }, cutoff?: string | null): Record<string, string> {
   const e: Record<string, string> = {};
   if (d.kind === 'releases') {
     if (!d.date) e.date = 'When is needed.';
@@ -282,6 +304,10 @@ export function draftErrors(d: Draft, _others?: { templateUsers: (template: stri
     });
   } else if (d.kind === 'assignments') {
     if (!d.template) e.template = 'Choose the template.';
+    if (!d.id && d.number !== undefined) {
+      if (!(Number.isInteger(d.number) && (d.number as number) >= 1 && (d.number as number) <= 999)) e.number = 'A whole number from 1 to 999.';
+      else if (others?.doc && takenKeys(others.doc).has(assignmentKey(d.number))) e.number = `${assignmentKey(d.number)} is already in this schedule.`;
+    }
     if (!d.dueDate) e.due = 'Due is needed.';
     if (!d.manual && !d.handoutDate) e.handout = 'Give the hand out date, or choose to hand out manually.';
     const h = joinWhen(d.handoutDate, d.handoutTime) ?? '';
@@ -292,7 +318,7 @@ export function draftErrors(d: Draft, _others?: { templateUsers: (template: stri
     if (d.solutionOn && sol && h && sol <= h) e.solution = 'Must be after the hand out.';
     else if (d.solutionOn && sol && cutoff && moment(sol) < moment(cutoff, true)) {
       const shown = (m: string) => m.slice(0, 16).replace('T', ' ');
-      e.solution = solutionBeforeCutoff(d.id || slugOfTemplate(d.template), shown(moment(sol)), shown(moment(cutoff, true)));
+      e.solution = solutionBeforeCutoff(d.id || assignmentKey(d.number), shown(moment(sol)), shown(moment(cutoff, true)));
     }
   } else if (d.kind === 'events') {
     if (!d.title.trim()) e.title = 'A title is needed; the student site shows only this.';
