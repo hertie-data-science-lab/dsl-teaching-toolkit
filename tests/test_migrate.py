@@ -1273,7 +1273,9 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         *migrate.RELEASE_WORKFLOWS,
     }
     assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse(
-        enabled=True, source_repo="course-materials-f2026"
+        enabled=True,
+        source_repo="course-materials-f2026",
+        withhold=opencourse.DEFAULT_WITHHOLD,
     )
     assert tree["opencourse.yml"].startswith(b"# INSTRUCTOR-OWNED")
     assert fake._repo(COURSE, "course-materials-f2026")["topics"] == ["dsl-materials"]
@@ -2535,7 +2537,9 @@ def test_the_public_website_step_seeds_off_without_earlier_settings(
     assert ".github/opencourse.yml: seeded off" in capsys.readouterr().out
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     tree = fake.tree(COURSE, ".github")
-    assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse()
+    assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse(
+        withhold=opencourse.DEFAULT_WITHHOLD
+    )
 
 
 def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(

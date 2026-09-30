@@ -19,7 +19,47 @@ def test_absent_or_empty_is_off():
 def test_the_seeded_file_is_instructor_owned_off_and_parses():
     text = opencourse.seed_text()
     assert text.startswith("# INSTRUCTOR-OWNED")
-    assert opencourse.parse(yaml.safe_load(text)) == OpenCourse()
+    assert opencourse.parse(yaml.safe_load(text)) == OpenCourse(
+        withhold=opencourse.DEFAULT_WITHHOLD
+    )
+
+
+def test_the_seed_withholds_the_system_folder_and_answers_by_default():
+    text = opencourse.seed_text()
+    assert (
+        "# system folder and anything named solution, exam, grade, marks or private:\n"
+        "withhold:\n"
+        "- .system/\n"
+        "- '*solution*'\n"
+        "- '*exam*'\n"
+        "- '*grade*'\n"
+        "- '*marks*'\n"
+        "- '*private*'\n"
+    ) in text
+    # A seed that names its own list keeps it: the defaults fill only an empty one.
+    mine = opencourse.seed_text(OpenCourse(withhold=("drafts/",)))
+    assert opencourse.parse(yaml.safe_load(mine)).withhold == ("drafts/",)
+
+
+def test_the_default_withhold_list_keeps_answers_off_at_any_depth(tmp_path):
+    kept = (
+        ".system/MAINTAINING.md",
+        "labs/01/lab1_solution.ipynb",
+        "labs/02/solutions/a.py",
+        "exams/2025/paper.pdf",
+        "lectures/03/midterm_exam.pdf",
+        "grades/marks.csv",
+        "notes/private/todo.md",
+    )
+    public = ("lectures/01/slides.pdf", "labs/01/lab1.ipynb")
+    for rel in kept + public:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x")
+    lines = opencourse.parse(yaml.safe_load(opencourse.seed_text())).withhold
+    for rel in kept:
+        assert releaseignore.excludes(tmp_path, tmp_path / rel, lines), rel
+    for rel in public:
+        assert not releaseignore.excludes(tmp_path, tmp_path / rel, lines), rel
 
 
 def test_a_seed_round_trips_its_values():

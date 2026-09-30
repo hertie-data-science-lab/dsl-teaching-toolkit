@@ -24,12 +24,24 @@ import yaml
 
 from .faults import Unusable
 from .gh_contents import load_yaml_config
+from .records import SYSTEM_DIR
 from .schema_check import validate
 
 OPENCOURSE_FILE = "opencourse.yml"
 OPENCOURSE_REPO = ".github"
 READINGS_MODES = ("reading-list", "actual-readings", "none")
 DEFAULT_READINGS_MODE = READINGS_MODES[0]
+# What a new `opencourse.yml` keeps off the website before anyone edits it: the engine's
+# own folder, and anything whose name says answers, assessment or marks. Broader than the
+# publication denylist, which only names exact folders.
+DEFAULT_WITHHOLD = (
+    f"{SYSTEM_DIR}/",
+    "*solution*",
+    "*exam*",
+    "*grade*",
+    "*marks*",
+    "*private*",
+)
 
 SCHEMA = {
     "type": "object",
@@ -88,10 +100,13 @@ def read(org: str) -> OpenCourse | None:
 
 def seed_text(oc: OpenCourse | None = None) -> str:
     """The seeded file, with `oc`'s values (default: off) live and every key explained
-    once."""
+    once. A seed with nothing to withhold gets `DEFAULT_WITHHOLD`: it is a first write,
+    so an empty list there was never anyone's choice."""
     oc = oc or OpenCourse()
     withhold = yaml.safe_dump(
-        {"withhold": list(oc.withhold)}, default_flow_style=False, allow_unicode=True
+        {"withhold": list(oc.withhold or DEFAULT_WITHHOLD)},
+        default_flow_style=False,
+        allow_unicode=True,
     )
     return (
         "# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.\n"
@@ -102,5 +117,7 @@ def seed_text(oc: OpenCourse | None = None) -> str:
         f"source_repo: {oc.source_repo}   # the materials repo it is built from\n"
         f"readings_mode: {oc.readings_mode}   # reading-list, actual-readings or none\n"
         f"include_lectures: {str(oc.include_lectures).lower()}   # publish the repo's files\n"
-        "# Paths kept off the website, as in .releaseignore:\n" + withhold
+        "# Paths kept off the website, as in .releaseignore. The defaults keep back the\n"
+        "# system folder and anything named solution, exam, grade, marks or private:\n"
+        + withhold
     )
