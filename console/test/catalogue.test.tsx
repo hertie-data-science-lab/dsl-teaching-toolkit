@@ -1,0 +1,182 @@
+// @vitest-environment happy-dom
+// All courses shows the institution's catalogue (decision 0021 rule 5): orgs.yml, then each
+// other course's public dsl-course.yml and semesters.yml; one failed org is its name only;
+// courses the person has no role in are greyed and not links; My courses hides them and is
+// remembered per login.
+
+import { render } from 'preact';
+import { act } from 'preact/test-utils';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { EnvCtx, type Env } from '../src/env';
+import { GitHubClient } from '../src/github/client';
+import { loadCatalogue, parseOrgs, runningNow } from '../src/model/catalogue';
+import type { Course } from '../src/model/discovery';
+import { myCoursesOnly, saveMyCoursesOnly, type PrefStore } from '../src/model/prefs';
+import { HomeScreen } from '../src/screens/Home';
+import { FakeGitHub, fileBody, json } from './fake';
+
+const NOW = Date.parse('2026-10-01T12:00:00Z');
+const MINE = 'hertie-dsl-demo-course-e1234';
+const NLP = 'hertie-nlp-e1282';
+const BROKEN = 'hertie-maths-data-science-C23';
+const ORGS_URL = '/repos/hertie-data-science-lab/dsl-teaching-toolkit/contents/orgs.yml?ref=main';
+const ORGS = `# comment\ncourse_orgs:\n  - ${MINE}\n  - ${NLP}\n  - ${BROKEN}\n`;
+const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
+const course: Course = { org: 'Hertie-DSL-Demo-Course-E1234', name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [], meta: null };
+
+function catalogueFake(orgs: string | null = ORGS) {
+  const f = new FakeGitHub();
+  if (orgs !== null) f.on('GET', ORGS_URL, fileBody('orgs.yml', orgs));
+  return f
+    .on('GET', `/repos/${NLP}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Natural Language Processing\ncourse_code: E1282\n'))
+    .on('GET', `/repos/${NLP}/.github/contents/semesters.yml`, fileBody('semesters.yml', 'semesters:\n- hertie-nlp-f2025\n- hertie-nlp-f2026\n- hertie-nlp-s2027\n'))
+    .on('GET', '/repos/hertie-nlp-f2025/.github', { name: '.github', archived: true })
+    .on('GET', '/repos/hertie-nlp-f2026/.github', { name: '.github', archived: false })
+    .on('GET', '/repos/hertie-nlp-f2026/.github/contents/.system/student-status.json', fileBody('student-status.json', JSON.stringify({ archive_datetime: '2027-01-31T00:00:00Z' })))
+    .on('GET', `/repos/${BROKEN}/.github/contents/dsl-course.yml`, () => json({ message: 'Server Error' }, 500));
+  // hertie-nlp-s2027 has no .github yet: it is being set up, so it is not in the catalogue.
+}
+const client = (f: FakeGitHub) => new GitHubClient({ token: () => 't', fetch: f.fetch });
+
+describe('parsing orgs.yml', () => {
+  it('reads course_orgs as spelt, in order', () => {
+    expect(parseOrgs(ORGS)).toEqual([MINE, NLP, BROKEN]);
+  });
+  it('refuses any other shape', () => {
+    expect(() => parseOrgs('orgs:\n  - a\n')).toThrow();
+    expect(() => parseOrgs('course_orgs:\n  - "not an org"\n')).toThrow();
+    expect(() => parseOrgs('course_orgs: [')).toThrow();
+  });
+});
+
+describe('loading the catalogue', () => {
+  it('keeps the person’s courses, reads the others, and shows a failed org by its name', async () => {
+    const f = catalogueFake();
+    const seen: number[] = [];
+    const list = await loadCatalogue(client(f), [course], (l) => seen.push(l.length));
+    const byOrg = Object.fromEntries(list.map((c) => [c.org, c]));
+    expect(byOrg[course.org]).toMatchObject({ mine: true, name: 'Machine Learning', course });
+    expect(byOrg[NLP]).toEqual({
+      org: NLP,
+      name: 'Natural Language Processing',
+      code: 'E1282',
+      mine: false,
+      semesters: [
+        { org: 'hertie-nlp-f2025', termLabel: 'Fall 2025', archived: true },
+        { org: 'hertie-nlp-f2026', termLabel: 'Fall 2026', archived: false, end: '2027-01-31T00:00:00Z' },
+      ],
+    });
+    expect(byOrg[BROKEN]).toEqual({ org: BROKEN, name: BROKEN, code: '', semesters: [], mine: false });
+    expect(list).toHaveLength(3);
+    expect(seen).toEqual([1, 2, 3]);
+    // The person's own course is not read again (orgs.yml's case differs from GitHub's).
+    expect(f.seen.some((r) => r.url.toLowerCase().includes(`/repos/${MINE}/`))).toBe(false);
+  });
+
+  it('reads each org once per page load', async () => {
+    const f = catalogueFake();
+    const c = client(f);
+    await loadCatalogue(c, [course]);
+    const n = f.seen.length;
+    await loadCatalogue(c, [course]);
+    expect(f.seen.length).toBe(n);
+  });
+
+  it('fails as a whole only when orgs.yml cannot be read', async () => {
+    await expect(loadCatalogue(client(catalogueFake(null)), [course])).rejects.toThrow();
+  });
+
+  it('counts a semester as running while it is not archived and its end is not past', () => {
+    expect(runningNow({ org: 'a', termLabel: 'Fall 2026', archived: false, end: '2027-01-31T00:00:00Z' }, NOW)).toBe(true);
+    expect(runningNow({ org: 'a', termLabel: 'Fall 2026', archived: false }, NOW)).toBe(true);
+    expect(runningNow({ org: 'a', termLabel: 'Fall 2025', archived: false, end: '2026-01-31T00:00:00Z' }, NOW)).toBe(false);
+    expect(runningNow({ org: 'a', termLabel: 'Fall 2025', archived: true }, NOW)).toBe(false);
+    expect(runningNow({ org: 'a', termLabel: 'Fall 2025' }, NOW)).toBe(false);
+  });
+});
+
+describe('the My courses pref', () => {
+  it('is off by default, round-trips per login, and survives a refusing store', () => {
+    const m = new Map<string, string>();
+    const store: PrefStore = { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v) };
+    expect(myCoursesOnly('octo', store)).toBe(false);
+    saveMyCoursesOnly('octo', true, store);
+    expect(myCoursesOnly('octo', store)).toBe(true);
+    expect(myCoursesOnly('other', store)).toBe(false);
+    saveMyCoursesOnly('octo', false, store);
+    expect(myCoursesOnly('octo', store)).toBe(false);
+    const refusing: PrefStore = { getItem: () => { throw new Error('no'); }, setItem: () => { throw new Error('no'); } };
+    expect(() => saveMyCoursesOnly('octo', true, refusing)).not.toThrow();
+    expect(myCoursesOnly('octo', refusing)).toBe(false);
+  });
+});
+
+// ------------------------------------------------------------------------ the page
+
+let host: HTMLElement | null = null;
+beforeEach(() => localStorage.clear());
+afterEach(() => {
+  if (host) render(null, host);
+  host?.remove();
+  host = null;
+});
+
+const flush = () => act(async () => { for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0)); });
+
+function mount(f: FakeGitHub) {
+  const env = { client: client(f), user } as unknown as Env;
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => render(<EnvCtx.Provider value={env}><HomeScreen courses={[course]} semesters={[]} cohortStates={{}} now={NOW} user={user} /></EnvCtx.Provider>, host!));
+  return host;
+}
+const greyed = (h: HTMLElement) => [...h.querySelectorAll('.cohort-card.off')];
+const section = (h: HTMLElement, id: string) => h.querySelector(`[aria-labelledby="${id}"]`)!;
+
+describe('All courses', () => {
+  it('shows the catalogue greyed and not as links, and a running semester of another course', async () => {
+    const h = mount(catalogueFake());
+    expect(h.textContent).toContain('Reading the catalogue…');
+    await flush();
+    expect(h.textContent).not.toContain('Reading the catalogue');
+    const courses = section(h, 'h-courses');
+    const names = [...courses.querySelectorAll('.cc-name')].map((n) => n.firstChild?.textContent);
+    expect(names).toEqual(['Machine Learning', BROKEN, 'Natural Language Processing']);
+    const mine = courses.querySelector('a.cohort-card')!;
+    expect(mine.getAttribute('href')).toBe(`?course=${course.org}#course`);
+    for (const g of greyed(h)) {
+      expect(g.tagName).toBe('DIV');
+      expect(g.closest('a')).toBeNull();
+      expect(g.getAttribute('aria-disabled')).toBe('true');
+    }
+    expect(courses.textContent).toContain('Not one of your courses');
+    const now = section(h, 'h-live');
+    expect(now.querySelector('.cohort-card.off')?.textContent).toBe('Natural Language Processing, Fall 2026');
+    expect(now.textContent).not.toContain('Fall 2025');
+  });
+
+  it('hides every greyed row under My courses, and remembers it for this login', async () => {
+    const h = mount(catalogueFake());
+    await flush();
+    expect(greyed(h).length).toBe(3);
+    const box = h.querySelector<HTMLInputElement>('.my-only input')!;
+    expect(box.checked).toBe(false);
+    await act(async () => box.click());
+    expect(greyed(h)).toEqual([]);
+    expect(h.querySelector('a.cohort-card')).not.toBeNull();
+    expect(myCoursesOnly(user.login)).toBe(true);
+    render(null, h);
+    const again = mount(catalogueFake());
+    await flush();
+    expect(again.querySelector<HTMLInputElement>('.my-only input')!.checked).toBe(true);
+    expect(greyed(again)).toEqual([]);
+  });
+
+  it('says so when the catalogue cannot be read, and still shows the person’s courses', async () => {
+    const h = mount(catalogueFake(null));
+    await flush();
+    expect(h.textContent).toContain('The catalogue could not be read.');
+    expect(greyed(h)).toEqual([]);
+    expect(h.querySelector('a.cohort-card')?.getAttribute('href')).toBe(`?course=${course.org}#course`);
+  });
+});
