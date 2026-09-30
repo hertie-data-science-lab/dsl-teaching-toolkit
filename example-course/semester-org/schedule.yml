@@ -139,6 +139,7 @@ assignments:
     handout_datetime: 2026-09-29T14:00
     due_datetime: 2026-10-27T23:59
   assignment-4-project:
+    number: 4                   # a number in the middle of a key is not read
     details: Four weeks, one question of your own choosing, one write-up between you.
     course_source_repo: assignment-group-project
     handout_datetime: 2026-10-13T14:00
