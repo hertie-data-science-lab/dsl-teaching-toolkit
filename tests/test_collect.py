@@ -1805,6 +1805,7 @@ def test_the_assignment_flag_reaches_both_modes(monkeypatch, flags, mode):
     monkeypatch.setattr(
         collect, "collect", lambda *a, **kw: seen.update(kw, mode="collect") or 0
     )
+    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(
         sys,
         "argv",
@@ -7167,3 +7168,37 @@ def test_the_grader_copies_include_each_tagged_questions_file(monkeypatch):
 
     assert written[".system/autograde/a1/alice.report_starter.tex"] == b"\\section{A}"
     assert ".system/autograde/a1/alice.ipynb" in written
+
+
+@pytest.mark.parametrize("flags", [["--refresh-only"], []])
+def test_collect_now_refuses_an_entry_with_no_number(monkeypatch, flags):
+    # Decision 0020 rule 3; the scheduled freeze calls `collect` itself and is not
+    # refused, so a missing number never costs a submission.
+    def boom(*a, **k):
+        raise AssertionError("an unnumbered entry is not collected by hand")
+
+    monkeypatch.setattr(collect, "refresh_assignment_sheet", boom)
+    monkeypatch.setattr(collect, "collect", boom)
+    monkeypatch.setattr(
+        collect.schedule,
+        "load",
+        lambda org: Schedule(
+            assignments={
+                "project": collect.schedule.AssignmentEntry(
+                    course_source_repo="assignment-trees",
+                    due_datetime=datetime(2026, 11, 1, 23, 59, tzinfo=ZoneInfo("UTC")),
+                )
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["collect", "--course-org", "Course", "--course-source-repo",
+         "assignment-trees", "--semester-org", "Semester", *flags],
+    )  # fmt: skip
+    out = collect.main()
+    assert out == 1
+    assert out.reasons == [
+        {"code": "NOT_NUMBERED", "text": "Give project a number first."}
+    ]

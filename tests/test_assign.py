@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import dataclasses
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
 import yaml
 
 from dsl_course import assign, collect, course, grades, settings, workflows_place
-from dsl_course.schedule import Schedule
+from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER, repo_row
 from tests.plans import citing
 
@@ -2857,6 +2857,41 @@ def test_the_manual_hand_out_refuses_an_uncited_template_with_the_sentence(
         "Add it to the schedule first."
     )
     assert out.reasons == [{"code": "NOT_SCHEDULED", "text": out.text}]
+
+
+def _unnumbered_project() -> Schedule:
+    return Schedule(
+        assignments={
+            "project": AssignmentEntry(
+                course_source_repo="assignment-trees",
+                due_datetime=datetime(2026, 11, 1, 23, 59, tzinfo=timezone.utc),
+            )
+        }
+    )
+
+
+@pytest.mark.parametrize("patch", [False, True])
+def test_a_manual_run_refuses_an_entry_with_no_number(monkeypatch, patch):
+    # Decision 0020 rule 3: hand out and update every copy refuse an entry with no
+    # number, the way an uncited template is refused.
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: _unnumbered_project())
+
+    def boom(*a, **k):
+        raise AssertionError("an unnumbered entry is never handed out or patched")
+
+    monkeypatch.setattr(assign, "provision_all", boom)
+    monkeypatch.setattr(assign, "patch_released", boom)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["assign", "--course-org", "C", "--course-source-repo", "assignment-trees",
+         "--semester-org", "S", "--no-preview",
+         *(["--patch-path", "README.md"] if patch else [])],
+    )  # fmt: skip
+    out = assign.main()
+    assert out == 1
+    assert out.text == "Give project a number first."
+    assert out.reasons == [{"code": "NOT_NUMBERED", "text": out.text}]
 
 
 # ------------------------------------------------- an assignment handed out in the open

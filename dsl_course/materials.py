@@ -18,7 +18,7 @@ case-insensitively, else `lecture`.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import cache
 
@@ -98,6 +98,19 @@ def read(org: str, repo: str) -> Declared:
     except yaml.YAMLError as exc:
         raise Unusable(f"{where} is not valid YAML") from exc
     return parse(data, where)
+
+
+def kinds_reader(org: str) -> Callable[[str], Mapping[str, str]]:
+    """Each repo's folder aliases (`kinds`), as the plan's kind inference reads them; a
+    declaration that does not parse counts as none, which its own problem reports."""
+
+    def read_kinds(repo: str) -> Mapping[str, str]:
+        try:
+            return read(org, repo).kinds
+        except Unusable:
+            return {}
+
+    return read_kinds
 
 
 def known_kind(kind: str) -> str:

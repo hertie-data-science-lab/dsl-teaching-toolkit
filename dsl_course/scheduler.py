@@ -87,6 +87,7 @@ from . import (
     notify,
     roster,
     schedule,
+    schedule_plan,
     site,
     source_digest,
     status,
@@ -132,6 +133,7 @@ from .log import (
     log_step,
     plural,
 )
+from .materials import kinds_reader
 from .repos import listed_is_private, set_visibility
 from .schedule import Release, grading_cutoff_datetime
 from .schedule_plan import deploy_dest
@@ -686,6 +688,31 @@ def _held_solution_faults(sched: schedule.Schedule, now: datetime) -> list[Confi
             )
         )
     return out
+
+
+def _unnumbered(
+    course_org: str, sched: schedule.Schedule
+) -> tuple[list[ConfigFault], set[str], set[str]]:
+    """Decision 0020 rule 3: the plan's entries that need a number and have none, as
+    `(faults for the schedule.yml digest, release labels held, assignment keys held)`.
+    Guarded: a read that fails holds nothing and files nothing this tick, and says so."""
+    try:
+        kinds = kinds_reader(course_org)
+        missing = schedule_plan.unnumbered(sched, kinds)
+        faults = schedule_plan.number_faults(sched, kinds)
+    except Exception as exc:
+        log_err(f"could not check the schedule's numbers ({type(exc).__name__})")
+        return [], set(), set()
+    releases = {m.key for m in missing if m.block == "releases"}
+    return faults, releases, {m.key for m in missing if m.block == "assignments"}
+
+
+def _held(release: Release, releases: set[str], assignments: set[str]) -> bool:
+    """Whether `release` is held for want of a number: its entry's, or for a
+    synthesised hand-out, its assignment's."""
+    if release.assignment_slug:
+        return release.assignment_slug in assignments
+    return release.label in releases
 
 
 def _handout_releases(
@@ -1605,6 +1632,10 @@ def _release_phase(
         f"Scheduler {course_org} -> {semester_org} as of {now.isoformat()}: "
         f"{len(due)}/{len(releases)} release(s) due"
     )
+    # An entry that needs a number and has none is skipped, on the skipped-release
+    # ladder: its fault rides into the schedule.yml digest below (decision 0020).
+    number_faults, held_releases, held_assignments = _unnumbered(course_org, sched)
+    held = [r for r in due if _held(r, held_releases, held_assignments)]
 
     # Lateness is measured over the WHOLE plan, not over `due`: an entry is reported when
     # its own moment fell in the gap since the last executed tick, and that is a question
@@ -1673,7 +1704,12 @@ def _release_phase(
         dry_run,
         None
         if window_faults is None
-        else [*window_faults, *marks_faults, *_held_solution_faults(sched, now)],
+        else [
+            *window_faults,
+            *marks_faults,
+            *_held_solution_faults(sched, now),
+            *number_faults,
+        ],
     )
     # The same treatment for every other file faculty edit by hand: a roster nobody can be
     # enrolled from, a instructors.yml entry that grants nothing, a teams.csv row that will not
@@ -1702,11 +1738,19 @@ def _release_phase(
         decisions = dry_run_decisions(
             course_org, semester_org, sched, due, now, listing
         )
+        decisions += [
+            Decision(ref, schedule_plan.NOT_NUMBERED, schedule_plan.give_a_number(ref))
+            for ref in (r.assignment_slug or r.label for r in held)
+        ]
         for decision in decisions:
             log(decision.line())
         preview = preview_summary(due, decisions)
         return Summary(preview.text, preview.counts, preview.reasons, code=errors)
 
+    for r in held:
+        ref = r.assignment_slug or r.label
+        log(f"  [skip] {ref} - {schedule_plan.give_a_number(ref)}")
+    due = [r for r in due if not _held(r, held_releases, held_assignments)]
     release_changed = False
     if not releases:
         log(

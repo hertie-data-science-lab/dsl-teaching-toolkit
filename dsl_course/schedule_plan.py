@@ -16,6 +16,7 @@ from datetime import date, datetime
 from . import policy, schedule
 from .faults import ConfigFault
 from .gh_contents import line_of
+from .log import Summary, log_err
 from .materials import (
     DEFAULT_KIND,
     DEFAULT_SYLLABUS,
@@ -295,6 +296,13 @@ def number_faults(
             )
         )
     return out
+
+
+def refuse_unnumbered(text: str) -> Summary:
+    """A manual run's refusal of an entry with no number: `text` is `give_a_number`'s,
+    which names a schedule key and nobody."""
+    log_err(text)
+    return Summary(text, reasons=[{"code": NOT_NUMBERED, "text": text}], code=1)
 
 
 def unnumbered_assignment(

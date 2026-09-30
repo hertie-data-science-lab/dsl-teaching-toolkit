@@ -35,7 +35,7 @@ import tempfile
 from pathlib import Path
 from typing import NamedTuple
 
-from . import pulls, site
+from . import pulls, schedule, site
 from .access import (
     COURSE_TEAM_ACCESS,
     grant_faculty,
@@ -62,6 +62,7 @@ from .log import (
     log_withheld,
     plural,
 )
+from .materials import kinds_reader
 from .records import SYSTEM_DIR
 from .releaseignore import RELEASEIGNORE, deny_for, excludes
 from .repos import (
@@ -72,7 +73,7 @@ from .repos import (
     repo_is_archived,
 )
 from .schedule import DEFAULT_DEST_REPO, Deploy
-from .schedule_plan import deploy_dest
+from .schedule_plan import deploy_dest, refuse_unnumbered, unnumbered_release
 
 # Never copied, at any depth: a `.git` landing in the dest overwrites its git metadata and
 # redirects the release's own push into the SOURCE repo. That is a mechanical fact about
@@ -788,6 +789,16 @@ def main() -> int:
     except ValueError as e:
         log_err(f"{e}.")
         return 1
+    # A copy the plan names under an entry that needs a number and has none is refused,
+    # as the scheduled release skips it (decision 0020 rule 3). Off the plan it goes.
+    refusal = unnumbered_release(
+        schedule.load(args.semester_org),
+        args.course_source_repo,
+        [src for src, _ in pairs],
+        kinds_reader(args.course_org),
+    )
+    if refusal:
+        return refuse_unnumbered(refusal)
 
     if args.preview:
         log_step(
