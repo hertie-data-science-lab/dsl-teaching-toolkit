@@ -166,7 +166,7 @@ function Overview(p: TabProps) {
     cur === 4 ? `${a.marks.filled} of ${a.marks.total} marked` : cur > 4 ? 'Done' : `Opens after ${fmtDay(a.grading_cutoff_datetime, tz, year)}`,
     cur === 5 ? 'Returned' : 'Opens after marks are returned',
   ];
-  const tplProblems = (status.problems ?? []).filter((x) => x.fix?.screen === 'template' && x.fix.entry === a.slug);
+  const tplProblems = (status.problems ?? []).filter((x) => x.fix?.screen === 'template' && x.fix.entry === a.template);
   const row = (cls: string, state: string, why: string, ops?: preact.ComponentChildren) => (
     <li class={cls}><span class="sa-state">{state}</span><div class="sa-body"><span class="sa-why">{why}</span>{ops}</div></li>
   );
@@ -227,7 +227,7 @@ function Overview(p: TabProps) {
             ) : (
               <div class="check-line ok"><Check /><span><b>Assignment template ready.</b> Brief written; settings check out.</span></div>
             )}
-            <a class="textlink" href={`#template-${a.slug}`}>Assignment template settings</a>
+            <a class="textlink" href={`#template-${a.template}`}>Assignment template settings</a>
           </section>
         </div>
         <section class="panel section">

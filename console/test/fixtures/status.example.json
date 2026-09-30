@@ -31,7 +31,7 @@
     "templates": [
       {
         "repo": "assignment-3-f2026",
-        "slug": "assignment-3",
+        "slug": "assignment-3-f2026",
         "state": "problem"
       }
     ],
@@ -87,7 +87,7 @@
         "path": "grading_config.yml",
         "line": 7,
         "screen": "template",
-        "entry": "assignment-3"
+        "entry": "assignment-3-f2026"
       }
     }
   ],

@@ -188,15 +188,17 @@ export function opLabel(op: string): string {
   return OP_LABEL[op] ?? op;
 }
 
-/** "Assignment 2" from the slug `assignment-2` (or `assignment-4-project`); else the slug. */
-export function assignmentIdent(slug: string): string {
+/** "Assignment 2" from the key `assignment-2` (or `assignment-4-project`); else the title, and
+ * only without one the key itself. A template named for its content (`assignment-regression`) is its title. */
+export function assignmentIdent(slug: string, title = ''): string {
   const m = /^assignment-(\d+)/.exec(slug);
-  return m ? `Assignment ${m[1]}` : slug;
+  return m ? `Assignment ${m[1]}` : title || slug;
 }
 
+/** "Assignment 3: Trees" for a numbered key; the title alone for a key without a number. */
 export function assignmentTitle(a: Pick<Assignment, 'slug' | 'title'>): string {
-  const id = assignmentIdent(a.slug);
-  return a.title ? `${id}: ${a.title}` : id;
+  const id = assignmentIdent(a.slug, a.title);
+  return a.title && id !== a.title ? `${id}: ${a.title}` : id;
 }
 
 export const KIND_LABEL: Record<string, string> = Object.fromEntries(

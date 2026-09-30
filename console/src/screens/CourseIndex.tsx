@@ -2,9 +2,9 @@
 
 import { YamlText, obj } from '../edit/yamlText';
 import type { GhRepo } from '../github/client';
-import { termOf } from '../model/discovery';
+import { TEMPLATE_TOPIC, termOf } from '../model/discovery';
 import type { Files } from '../model/files';
-import { ago, assignmentIdent, fmtDay } from '../model/format';
+import { ago, assignmentTitle, fmtDay } from '../model/format';
 import { DEFAULT_FORMATS } from '../model/policy';
 import { formatWord, formatsList } from '../tiers/grading';
 import { Crumbs, Loading, ghUrl } from '../ui/bits';
@@ -22,14 +22,14 @@ function termLabel(repo: string): string | null {
 
 /**
  * The course org's repos that are none of infra, materials or templates, but that a schedule
- * can still release from: not archived, not `.github` or the org's `.github.io`, not
- * `assignment-*` and not a repo the course status already lists (its materials repos, by
- * topic, and any `course-materials-*` not migrated yet).
+ * can still release from: not archived, not `.github` or the org's `.github.io`, not an
+ * assignment template (by topic, decision 0014) and not a repo the course status already
+ * lists (its materials repos and templates, and any not migrated yet).
  */
 export function otherRepos(org: string, repos: GhRepo[], known: string[]): GhRepo[] {
   const skip = new Set([COURSE_REPO, `${org}.github.io`.toLowerCase(), ...known.map((k) => k.toLowerCase())]);
   return repos
-    .filter((r) => !r.archived && !skip.has(r.name.toLowerCase()) && !/^assignment-/i.test(r.name))
+    .filter((r) => !r.archived && !skip.has(r.name.toLowerCase()) && !r.topics?.includes(TEMPLATE_TOPIC))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -104,20 +104,26 @@ export function MaterialsIndexScreen(p: CourseProps) {
 // --------------------------------------------------------------------------- templates
 
 
+/** The semesters whose schedules use `repo`, as loaded: "Fall 2026", newest first as the course lists them. */
+export function usedIn(p: Pick<CourseProps, 'course' | 'cohortStates'>, repo: string): string[] {
+  return p.course.cohorts.filter((k) => {
+    const l = p.cohortStates[k.org];
+    return l?.kind === 'ready' && (l.status.assignments ?? []).some((a) => a.template === repo);
+  }).map((k) => k.termLabel);
+}
+
+export const VERSIONS_HINT =
+  'A template is reused every semester. Each hand-out freezes a copy in that semester, so edits here never change one already handed out. Want a different variant? Copy it: New assignment can start from it.';
+
 export function TemplatesIndexScreen(p: CourseProps) {
   const { course, files } = p;
   const v = courseView(p);
   const templates = v.course?.templates ?? [];
-  const scheduledIn = (repo: string) =>
-    course.cohorts.filter((k) => {
-      const l = p.cohortStates[k.org];
-      return l?.kind === 'ready' && (l.status.assignments ?? []).some((a) => a.template === repo);
-    }).map((k) => k.termLabel);
   return (
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates' }]} />
       <div class="page-head">
-        <div><h1>Assignment templates</h1><p class="lede">One template per assignment. Students get a copy at hand out; marking reads its solution branch.</p></div>
+        <div><h1>Assignment templates <Hint label="About templates and semesters">{VERSIONS_HINT}</Hint></h1><p class="lede">One template per assignment. Students get a copy at hand out; marking reads its solution branch.</p></div>
         <CourseHeaderActions course={course} ready={v.course?.ready ?? false} />
       </div>
       <section class="panel section">
@@ -131,18 +137,17 @@ export function TemplatesIndexScreen(p: CourseProps) {
               const cfg = y && !y.errors.length ? obj(y.toJS()) : {};
               const title = cfg.title ? String(cfg.title) : '';
               const how = y && !y.errors.length ? [cfg.type === 'group' ? 'In teams' : 'Alone', formatWord(formatsList(cfg.formats)[0] ?? DEFAULT_FORMATS[0])] : [];
-              const term = termLabel(t.repo);
-              const cohorts = scheduledIn(t.repo);
+              const used = usedIn(p, t.repo);
               return (
                 <li>
-                  <span class="r-title">{assignmentIdent(t.slug)}{title ? `: ${title}` : ''} <StateChip state={t.state} todo="Not written yet" />{term ? <span class="chip term">{term}</span> : null}</span>
+                  <span class="r-title">{assignmentTitle({ slug: t.repo, title })} <StateChip state={t.state} todo="Not written yet" /></span>
                   <span class={`r-sub${bad ? ' flag' : ''}`}>
-                    {bad ? `${v.problems.find((x) => x.fix?.entry === t.slug)?.stops ?? 'Has a problem.'} ` : t.state !== 'ready' ? 'The brief (README.md) is not written yet. ' : ''}
+                    {bad ? `${v.problems.find((x) => x.fix?.entry === t.repo)?.stops ?? 'Has a problem.'} ` : t.state !== 'ready' ? 'The brief (README.md) is not written yet. ' : ''}
                     {how.length ? `${how.join(', ')}. ` : ''}
-                    {cohorts.length ? `Scheduled in ${cohorts.join(', ')}. ` : ''}
                     <span class="slug">{t.repo}</span>
                   </span>
-                  <span class="r-side"><OpenButton org={course.org} repo={t.repo} small quiet /><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.slug}`}>{bad ? 'Fix' : 'Settings'}</a></span>
+                  <span class="r-used">{used.length ? `Used in ${used.join(', ')}` : 'Not used in a semester yet'}</span>
+                  <span class="r-side"><OpenButton org={course.org} repo={t.repo} small quiet /><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.repo}`}>{bad ? 'Fix' : 'Settings'}</a></span>
                 </li>
               );
             })}

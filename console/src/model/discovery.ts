@@ -13,6 +13,8 @@ import { SEMESTER_TOPIC } from './migration';
 import { CONFIG_REPO, COURSE_REPO, POINTER_PATH, REGISTRY_FILE } from './names';
 
 export const COURSE_HUB_TOPIC = 'dsl-course-hub';
+/** What makes a course repo an assignment template (decision 0014); the `assignment-` name is only the default. */
+export const TEMPLATE_TOPIC = 'dsl-assignment';
 export const REGISTRY_PATH = REGISTRY_FILE;
 export const COURSE_META_PATH = 'dsl-course.yml';
 

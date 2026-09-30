@@ -7,7 +7,7 @@ import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
-import { STAGE_WORD, assignmentIdent } from '../model/format';
+import { STAGE_WORD, assignmentIdent, assignmentTitle } from '../model/format';
 import { checkNow, derive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
@@ -107,6 +107,15 @@ export function SetupList({ course }: { course: CourseStatus }) {
       })}
     </ul>
   );
+}
+
+/** A template's title from its grading_config.yml, as loaded; '' until then. */
+export function templateTitle(files: CourseProps['files'], org: string, repo: string): string {
+  const f = files.file(org, repo, 'grading_config.yml', 'solution');
+  if (f.kind !== 'ready') return '';
+  const y = new YamlText(f.text);
+  const t = y.errors.length ? undefined : (y.toJS() as Record<string, unknown> | null)?.title;
+  return typeof t === 'string' ? t : '';
 }
 
 /** A semester row's state: live, ended but not archived, or archived. */
@@ -219,9 +228,9 @@ export function CourseScreen(p: CourseProps) {
                   const bad = t.state === 'problem';
                   return (
                     <li>
-                      <span class="r-title">{assignmentIdent(t.slug)} <StateChip state={t.state} todo="Not written yet" /></span>
-                      <span class={`r-sub${bad ? ' flag' : ''}`}>{bad ? v.problems.find((x) => x.fix?.entry === t.slug)?.stops ?? 'Has a problem.' : t.state === 'ready' ? 'Brief written; settings check out.' : 'The brief (README.md) is not written yet.'} <span class="slug">{t.repo}</span></span>
-                      <span class="r-side"><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.slug}`}>{bad ? 'Fix' : 'Settings'}</a></span>
+                      <span class="r-title">{assignmentIdent(t.repo, templateTitle(p.files, course.org, t.repo))} <StateChip state={t.state} todo="Not written yet" /></span>
+                      <span class={`r-sub${bad ? ' flag' : ''}`}>{bad ? v.problems.find((x) => x.fix?.entry === t.repo)?.stops ?? 'Has a problem.' : t.state === 'ready' ? 'Brief written; settings check out.' : 'The brief (README.md) is not written yet.'} <span class="slug">{t.repo}</span></span>
+                      <span class="r-side"><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.repo}`}>{bad ? 'Fix' : 'Settings'}</a></span>
                     </li>
                   );
                 })}
@@ -252,7 +261,7 @@ export function CourseScreen(p: CourseProps) {
 
 const gradingValid = validator(gradingSchema);
 
-function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: QuestionRow[]) => void; files: string[] }) {
+export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: QuestionRow[]) => void; files: string[] }) {
   const total = rows.reduce((n, r) => n + (Number(r.points) || 0), 0);
   const edit = (i: number, patch: Partial<QuestionRow>) => set(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
@@ -287,16 +296,12 @@ function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: Questio
 export function TemplateScreen(p: CourseProps) {
   const { course, entry } = p;
   const env = useEnv();
-  const slug = entry ?? '';
+  // The entry is the template's repo name (`status.json` `course.templates[].slug` is the repo).
+  const repo = entry ?? '';
   const v = courseView(p);
-  const fromCourse = v.course?.templates?.find((t) => t.slug === slug)?.repo;
-  const fromCohort = Object.values(p.cohortStates)
-    .flatMap((l) => (l.kind === 'ready' ? l.status.assignments ?? [] : []))
-    .find((a) => a.slug === slug)?.template;
-  const repo = fromCourse ?? fromCohort ?? slug;
   const file = p.files.file(course.org, repo, 'grading_config.yml', 'solution');
   const tree = p.files.tree(course.org, repo);
-  const problems = v.problems.filter((x) => x.fix?.entry === slug);
+  const problems = v.problems.filter((x) => x.fix?.entry === repo);
   const [values, setValues] = useState<Values | null>(null);
   const [qdraft, setQdraft] = useState<QuestionRow[] | null>(null);
   const [save, runSave, setSave] = useSave(env);
@@ -319,9 +324,13 @@ export function TemplateScreen(p: CourseProps) {
   const errors = { ...fieldErrors(null, tiers, cur), ...(formatError(cur) ? { formats: formatError(cur)! } : {}), ...(fileErr ? { questions: fileErr } : {}) };
   const dirty = (values !== null && !deepEqual(effective(tiers, values), effective(tiers, base))) || (qdraft !== null && !deepEqual(qdraft, baseQ));
   const title = String(cfg.title ?? '');
+  const heading = assignmentTitle({ slug: repo, title });
   const scope = courseScope(p);
   const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.')).map((x) => x.path) : [];
   const newest = course.cohorts[0];
+  const nl = newest ? p.cohortStates[newest.org] : undefined;
+  // The newest semester's key for this template, when its schedule has it.
+  const inNewest = nl?.kind === 'ready' ? (nl.status.assignments ?? []).find((a) => a.template === repo)?.slug : undefined;
   const change = (nv: Values) => { setValues({ ...cur, ...nv }); setSave({ kind: 'idle' }); };
   const doSave = async () => {
     if (file.kind !== 'ready') return;
@@ -338,9 +347,9 @@ export function TemplateScreen(p: CourseProps) {
   };
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates', href: '#templates' }, { t: assignmentIdent(slug) }]} />
+      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates', href: '#templates' }, { t: assignmentIdent(repo, title) }]} />
       <div class="page-head">
-        <div><h1>{assignmentIdent(slug)}{title ? `: ${title}` : ''} <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. These settings apply to every semester, and after hand out they reach students only through Update every copy.</Hint></h1><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
+        <div><h1>{heading} <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. These settings apply to every semester, and after hand out they reach students only through Update every copy.</Hint></h1><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
         <div class="actions"><span class={`chip ${problems.length ? 'bad' : 'ok'}`}>{problems.length ? 'Has a problem' : 'Ready'}</span><OpenButton org={course.org} repo={repo} /></div>
       </div>
       {problems.length ? <div style="margin-bottom:18px"><ProblemCards list={problems} /></div> : null}
@@ -360,7 +369,7 @@ export function TemplateScreen(p: CourseProps) {
               <SchemaForm id="g2" schema={null} tiers={pick(tiers, ['type', 'submit_via'])} values={cur} onChange={change} />
               <p class="footnote">
                 How teams form, the max team size, late work, who can see each repo and the submit link are each semester’s.{' '}
-                {newest ? <a class="textlink" href={`?cohort=${newest.org}#assignment-${slug}/overview`}>Set them for {newest.termLabel}</a> : null}
+                {newest ? (inNewest ? <a class="textlink" href={`?cohort=${newest.org}#assignment-${inNewest}/overview`}>Set them for {newest.termLabel}</a> : <a class="textlink" href={`?cohort=${newest.org}&template=${encodeURIComponent(repo)}#schedule-new`}>Add it to the {newest.termLabel} schedule</a>) : null}
               </p>
             </div>
             <div class="form-section">
@@ -374,7 +383,7 @@ export function TemplateScreen(p: CourseProps) {
             <div class="form-section">
               <h3>Student version</h3>
               <p style="font-size:14px;color:var(--ink-2)">Builds the student starter on main from the solution branch, removing marked answers.</p>
-              <div class="actions"><OpButtons def={derive(scope, slug, repo, `${assignmentIdent(slug)}${title ? `: ${title}` : ''}`)} small /></div>
+              <div class="actions"><OpButtons def={derive(scope, repo, repo, heading)} small /></div>
             </div>
             <div class="form-section">
               <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: course.org, repo, path: 'grading_config.yml', branch: 'solution' }} />
