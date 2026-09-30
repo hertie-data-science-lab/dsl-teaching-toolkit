@@ -323,10 +323,17 @@ def refuse_unnumbered(text: str) -> Summary:
 def unnumbered_assignment(
     sched: schedule.Schedule, template: str, slug: str = ""
 ) -> str | None:
-    """The refusal for a manual run on an assignment entry `template` hands out (the
-    entry `slug`, when given) that has no number; None when it has one."""
-    for key, entry in schedule.entries_for_repo(sched, template):
-        if (not slug or key == slug) and own_number(entry.number, key) is None:
+    """The refusal for a manual run on the assignment entry `template` hands out (the
+    entry `slug`, when given) when that entry has no number; None when it has one. With
+    no slug and two entries citing `template`, which one is meant is not known: None, and
+    `schedule.resolve_target` refuses the run, naming the remedy."""
+    entries = schedule.entries_for_repo(sched, template)
+    if slug:
+        entries = [(key, entry) for key, entry in entries if key == slug]
+    elif len(entries) > 1:
+        return None
+    for key, entry in entries:
+        if own_number(entry.number, key) is None:
             return give_a_number(key)
     return None
 

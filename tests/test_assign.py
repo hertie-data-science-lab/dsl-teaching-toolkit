@@ -2894,6 +2894,60 @@ def test_a_manual_run_refuses_an_entry_with_no_number(monkeypatch, patch):
     assert out.reasons == [{"code": "NOT_NUMBERED", "text": out.text}]
 
 
+def _two_entries_one_numbered() -> Schedule:
+    due = datetime(2026, 11, 1, 23, 59, tzinfo=timezone.utc)
+    return Schedule(
+        assignments={
+            "project": AssignmentEntry(
+                course_source_repo="assignment-trees", due_datetime=due
+            ),
+            "assignment-2": AssignmentEntry(
+                course_source_repo="assignment-trees", due_datetime=due
+            ),
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("argv", "refused"),
+    [
+        (["--patch-path", "README.md", "--assignment", "assignment-2"], False),
+        (["--patch-path", "README.md", "--assignment", "project"], True),
+        # No slug on a hand out: which entry is meant is not known, so the number is
+        # not what refuses it (provision_all refuses a template two entries cite).
+        ([], False),
+    ],
+)
+def test_a_template_cited_twice_is_refused_only_for_the_unnumbered_entry(
+    monkeypatch, argv, refused
+):
+    monkeypatch.setattr(
+        "dsl_course.schedule.load", lambda org: _two_entries_one_numbered()
+    )
+    ran: list = []
+    monkeypatch.setattr(
+        assign, "provision_all", lambda *a, **k: ran.append("hand out") or (1, False)
+    )
+    monkeypatch.setattr(
+        assign, "patch_released", lambda *a, **k: ran.append("patch") or 0
+    )
+    monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["assign", "--course-org", "C", "--course-source-repo", "assignment-trees",
+         "--semester-org", "S", "--no-preview", *argv],
+    )  # fmt: skip
+    out = assign.main()
+    if refused:
+        assert out.reasons == [
+            {"code": "NOT_NUMBERED", "text": "Give project a number first."}
+        ]
+        assert ran == []
+    else:
+        assert len(ran) == 1
+
+
 # ------------------------------------------------- an assignment handed out in the open
 #
 # `visibility: public` creates the same repos world-readable. Two things follow, and both
