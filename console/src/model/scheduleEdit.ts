@@ -4,7 +4,7 @@
 // file already spelt it.
 
 import { obj, type YamlText } from '../edit/yamlText';
-import { kebab } from './format';
+import { kebab, labelNumber } from './format';
 import { solutionBeforeCutoff } from './labels';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO } from './policy';
 
@@ -259,13 +259,15 @@ function takenKeys(doc: Raw): Set<string> {
 export const assignmentKey = (n: number | '' | undefined) => `assignment-${n === undefined || n === '' ? 'N' : n}`;
 
 /**
- * The number to propose for a new assignment entry: one more than the entries the schedule
- * has, stepped past a key already taken. The engine numbers an entry by its key's number, so
- * this is the number students see.
+ * The number to propose for a new assignment entry: one more than the highest number an entry
+ * carries (its `number:`, else its key's own number; a key without one adds nothing), stepped
+ * past a key already taken. The engine numbers an entry the same way, so this is the number
+ * students see.
  */
 export function nextAssignmentNumber(doc: Raw): number {
   const taken = takenKeys(doc);
-  let n = Object.keys(obj(doc.assignments)).length + 1;
+  const nums = Object.entries(obj(doc.assignments)).flatMap(([key, e]) => [obj(e).number, labelNumber(key)]);
+  let n = 1 + Math.max(0, ...nums.filter((x): x is number => Number.isInteger(x) && (x as number) > 0));
   while (taken.has(assignmentKey(n))) n++;
   return n;
 }

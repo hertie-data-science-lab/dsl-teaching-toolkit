@@ -96,13 +96,17 @@ describe('saving a file', () => {
 // ------------------------------------------------------------------ schedule model
 
 describe('the schedule entry sheet model', () => {
-  it('proposes assignment-<n> for a template joining the schedule: one more than its entries, past any key taken', () => {
+  it('proposes assignment-<n> for a template joining the schedule: one more than the highest number, past any key taken', () => {
     expect(nextAssignmentNumber({})).toBe(1);
     expect(nextAssignmentNumber({ assignments: { 'assignment-1': {}, 'assignment-2': {} } })).toBe(3);
-    // Keys need not be numbered: the count still decides, and a taken key is stepped past.
-    expect(nextAssignmentNumber({ assignments: { trees: {}, 'assignment-2': {} } })).toBe(3);
-    expect(nextAssignmentNumber({ assignments: { 'assignment-2': {} } })).toBe(3);
-    expect(nextAssignmentNumber({ assignments: { x: {} }, releases: { 'assignment-2': {} } })).toBe(3);
+    // The highest number decides, not the count: a gap is not filled.
+    expect(nextAssignmentNumber({ assignments: { 'assignment-4': {} } })).toBe(5);
+    // An entry's own number: counts too.
+    expect(nextAssignmentNumber({ assignments: { trees: { number: 6 }, 'assignment-2': {} } })).toBe(7);
+    // A key with no number adds nothing; one used in another block is stepped past.
+    expect(nextAssignmentNumber({ assignments: { trees: {}, 'assignment-3d-vision': {} } })).toBe(1);
+    expect(nextAssignmentNumber({ assignments: { x: {} }, releases: { 'assignment-1': {} } })).toBe(2);
+    expect(nextAssignmentNumber({ assignments: { lab_03: {} } })).toBe(4);
     expect(assignmentKey(4)).toBe('assignment-4');
     const d = { ...blankDraft('handout', { repo: '' }), template: 'assignment-regression' } as AssignmentDraft;
     const doc = { assignments: { 'assignment-1': {} } };
