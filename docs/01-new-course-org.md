@@ -20,7 +20,7 @@ Set up once per course; it serves every future semester. Per-semester setup of t
    - select the free plan **[here](https://github.com/account/organizations/new?plan=free&ref_cta=Create%2520a%2520free%2520organization&ref_loc=cards&ref_page=%2Forganizations%2Fplan)** → *Create a new organization*. 
    - Name it **`hertie-<course-slug>-<code>`** - lowercase-kebab, no year (e.g. `hertie-dsl-demo-course-e1234`).
    - Select a business/institutional account, and enter `hertie-data-science-lab` into the text box.
-   - Install the console app on it: https://github.com/apps/<slug>/installations/new, choose the org, All repositories, Install.
+   - Install the console app on it: https://github.com/apps/dsl-console/installations/new, choose the org, All repositories, Install.
 
 2. **Invite `hertie-dsl-bot` as Owner**: 
    - `https://github.com/orgs/<your-org>/people` → *Invite member* → `hertie-dsl-bot` 

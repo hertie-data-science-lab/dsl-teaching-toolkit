@@ -437,8 +437,11 @@ optional `materials.yml`: `syllabus`, `kinds` folder aliases; `materials.parse`)
 (`course_orgs: [<org>, ...]`, `org_registry`). Maintainers edit it by pull request, and it is
 read like `policy.yml`: from the checkout of the ref the run is on. A `dsl-course-hub` topic
 is anyone's to set, and the tier fan-out writes `DSL_BOT_TOKEN` into every org it refreshes,
-so the topic alone is never enough: `list_orgs` skips a tagged org the registry does not
-name (one log line each), and the bot accepts an invitation only from a registered org.
+so the topic alone is never enough: the fan-out (`list_orgs`, behind Deploy main, Deploy
+preview and Promote) walks the registry and each listed org's `dsl-course.yml`, never a topic
+search, and the bot accepts an invitation only from a registered org, and only under its own
+token (`invitations.BOT`), never a maintainer's break-glass one. The topic search is left to
+the inventory's semester listing and the awaiting-registration report, both best effort.
 Semester orgs are not listed; each course's `semesters.yml` registers its own, and a
 registered course's admins vouch for them. The New semester wizard lists the new org there
 (a plain entry, the registry's only shape) as soon as the org exists, so the course's own
@@ -448,8 +451,9 @@ every sweep skips it as being set up (`discovery.being_set_up`) rather than fail
 A registry that is missing or does not parse raises.
 
 To add a course: check who asked, add its org, merge. The bot accepts its waiting invitation
-on the next scheduler tick in any course org on that ref (so a new real course waits for the
-next Promote). *Bot Token Canary* keeps one issue in this repo, *Course orgs awaiting
+soon after the merge to `main`: the demo course's tick runs on `main` and reads `main`'s
+`orgs.yml`, and there is one bot account, so it accepts for every registered org. Only the
+token seeding by the tier fan-out waits for the next Promote. *Bot Token Canary* keeps one issue in this repo, *Course orgs awaiting
 registration*, listing every org that has invited the bot or carries the topic without being
 registered; it closes itself when the list is empty.
 
