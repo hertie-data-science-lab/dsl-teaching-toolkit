@@ -249,6 +249,37 @@ def status_schema() -> dict:
     repo_state = _obj(
         {"repo": _str(), "slug": _str(), "state": _str()}, ("repo", "state")
     )
+    # A materials repo's checklist (decision 0022 rule 5); `why` is null once done.
+    check = _obj(
+        {
+            "id": _str(),
+            "label": _str(),
+            "done": {"type": "boolean"},
+            "why": nullable,
+            "blocks": {"type": "boolean"},
+        },
+        ("id", "label", "done", "blocks"),
+    )
+    materials_state = _obj(
+        {
+            "repo": _str(),
+            "state": _str(),
+            "checks": {"type": "array", "items": check},
+        },
+        ("repo", "state"),
+    )
+    # Work started and not finished (decision 0022 rule 3): never a problem.
+    todo = _obj(
+        {
+            "id": _str(),
+            "kind": _enum(("materials", "template")),
+            "repo": _str(),
+            "text": _str(),
+            "screen": _str(),
+            "entry": _str(),
+        },
+        ("id", "kind", "repo", "text"),
+    )
     course = _obj(
         {
             "org": _str(),
@@ -258,9 +289,10 @@ def status_schema() -> dict:
             "stages": stages,
             "stage_why": stage_why,
             "ready": {"type": "boolean"},
-            "materials": {"type": "array", "items": repo_state},
+            "materials": {"type": "array", "items": materials_state},
             "templates": {"type": "array", "items": repo_state},
             "semesters": {"type": "array", "items": _str()},
+            "todo": {"type": "array", "items": todo},
         },
         ("org", "stages"),
     )
