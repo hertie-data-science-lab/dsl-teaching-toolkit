@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Collection
 from dataclasses import asdict, dataclass, field
 
 from .. import records
@@ -40,6 +41,17 @@ _SUBMISSION_RE = re.compile(
 )
 
 
+def _named_submission_re(name: str) -> re.Pattern:
+    """`<name>-<suffix>` for one assignment of the run's schedule: a key is free
+    (decision 0014), so `trees-ada-l` is a submission repo as much as `assignment-3-ada-l`.
+    The same exceptions as `_SUBMISSION_RE`."""
+    return re.compile(
+        rf"(?<![A-Za-z0-9-])({re.escape(name)})-(?![fs]\d{{4}}\b)(?!submissions\b)"
+        r"(?!<)[A-Za-z0-9][A-Za-z0-9-]*",
+        re.IGNORECASE,
+    )
+
+
 @dataclass
 class Outcome:
     op: str
@@ -60,10 +72,16 @@ class Outcome:
         return {"schema": OUTCOME_SCHEMA, **asdict(self)}
 
 
-def redact(text: str, handles: set[str] = frozenset()) -> str:
-    """`text` with every person-naming repo name and every known handle replaced."""
+def redact(
+    text: str, handles: Collection[str] = frozenset(), names: Collection[str] = ()
+) -> str:
+    """`text` with every person-naming repo name and every known handle replaced.
+    `names` are the assignment names of the run's schedule (its keys and semester-side
+    names), each of which a submission repo is named after."""
     out = _GRADEBOOK_RE.sub(f"{GRADEBOOK_PREFIX}{HANDLE_MARK}", text)
     out = _SUBMISSION_RE.sub(rf"\1-{HANDLE_MARK}", out)
+    for name in sorted(names, key=len, reverse=True):
+        out = _named_submission_re(name).sub(rf"\1-{HANDLE_MARK}", out)
     for handle in sorted(handles, key=len, reverse=True):
         out = re.sub(
             rf"(?<![A-Za-z0-9-]){re.escape(handle)}(?![A-Za-z0-9-])",
@@ -74,24 +92,25 @@ def redact(text: str, handles: set[str] = frozenset()) -> str:
     return out
 
 
-def _redacted(value: object, handles: set[str]) -> object:
+def _redacted(value: object, handles: set[str], names: Collection[str]) -> object:
     if isinstance(value, str):
-        return redact(value, handles)
+        return redact(value, handles, names)
     if isinstance(value, dict):
-        return {k: _redacted(v, handles) for k, v in value.items()}
+        return {k: _redacted(v, handles, names) for k, v in value.items()}
     if isinstance(value, list):
-        return [_redacted(v, handles) for v in value]
+        return [_redacted(v, handles, names) for v in value]
     return value
 
 
-def public_dict(outcome: Outcome) -> dict:
+def public_dict(outcome: Outcome, names: Collection[str] = ()) -> dict:
     """The outcome as a public surface may show it: no `people`, nothing naming anyone.
-    The actor is kept - it is the member of staff who pressed the button."""
+    The actor is kept - it is the member of staff who pressed the button. `names`: as
+    `redact`."""
     handles = {p["handle"] for p in outcome.people if p.get("handle")}
     data = outcome.to_dict()
     data.pop("people")
     actor = data.pop("actor")
-    return {"actor": actor, **_redacted(data, handles)}
+    return {"actor": actor, **_redacted(data, handles, names)}
 
 
 def _escape_command(data: str) -> str:
@@ -128,8 +147,8 @@ def _capped(data: dict) -> str:
             return message
 
 
-def annotation(outcome: Outcome) -> str:
-    return f"::notice title={ANNOTATION_TITLE}::{_capped(public_dict(outcome))}"
+def annotation(outcome: Outcome, names: Collection[str] = ()) -> str:
+    return f"::notice title={ANNOTATION_TITLE}::{_capped(public_dict(outcome, names))}"
 
 
 def private_path(op: str) -> str:

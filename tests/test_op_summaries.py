@@ -117,6 +117,7 @@ def engine(monkeypatch):
     monkeypatch.setattr(request_mod, "discover_semesters", lambda org: [SEMESTER])
     hooked = []
     monkeypatch.setattr(status, "write_after_op", hooked.append)
+    monkeypatch.setattr(console, "assignment_names", lambda request: set())
     monkeypatch.setattr(outcome_mod, "put_file", lambda *a, **k: True)
     return hooked
 
