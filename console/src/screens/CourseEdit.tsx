@@ -166,27 +166,38 @@ export function WebsiteSwitch(p: CourseProps) {
   const { course } = p;
   const env = useEnv();
   const [save, runSave, setSave] = useSave(env);
+  const [pending, setPending] = useState(false);
   const file = p.files.file(course.org, COURSE_REPO, OPENCOURSE_FILE);
   const y = file.kind === 'ready' ? new YamlText(file.text) : null;
   const broken = !!y?.errors.length;
   const before = websiteOf(y && !broken ? obj(y.toJS()) : {});
   const busy = save.kind === 'busy';
+  // Only a file that was read (or read as absent) may be written: never seed over one not read.
+  const known = file.kind === 'ready' || file.kind === 'absent';
   const flip = async (on: boolean) => {
+    if (!known) return;
     const repos = (courseView(p).course?.materials ?? []).map((m) => m.repo);
-    const out = websiteFileAfter(file.kind === 'ready' ? file.text : null, before, { ...before, enabled: on, source_repo: before.source_repo || (on ? newestRepo(repos) ?? '' : '') });
+    const out = websiteFileAfter(file.kind === 'ready' ? file.text : null, before, { ...before, enabled: on, source_repo: before.source_repo || (on ? newestRepo(repos) : null) || '' });
     if ('error' in out) return setSave({ kind: 'bad', text: out.error });
+    setPending(on);
     await runSave({ owner: course.org, repo: COURSE_REPO, path: OPENCOURSE_FILE }, out.text, file.kind === 'ready' ? file.sha : null, {
       message: `course: turn the public website ${on ? 'on' : 'off'}, from the DSL Teaching Console`, statusRepo: [course.org, COURSE_REPO],
     });
   };
-  const word = broken ? `${OPENCOURSE_FILE} does not parse; fix it in Manage.` : file.kind === 'loading' ? 'Not known yet.' : busy ? 'Saving…' : before.enabled ? 'On: updates daily' : 'Off';
+  const word =
+    file.kind === 'loading' ? 'Not known yet.'
+    : file.kind === 'error' ? 'Could not read the website settings.'
+    : broken ? `${OPENCOURSE_FILE} does not parse; fix it in Manage.`
+    : p.migrated === false ? 'Not yet: the console has not confirmed this course uses the current names.'
+    : busy ? save.text
+    : before.enabled ? 'On: updates daily' : 'Off';
   return (
     <div class="field web-switch">
       <label class="switch">
-        <input type="checkbox" role="switch" id="cd-web" checked={before.enabled} disabled={busy || broken || file.kind === 'loading' || p.migrated === false} onChange={(e) => void flip((e.target as HTMLInputElement).checked)} />
+        <input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked={busy ? pending : before.enabled} disabled={busy || broken || !known || p.migrated === false} onChange={(e) => void flip((e.target as HTMLInputElement).checked)} />
         <span>Public website</span>
       </label>
-      <span class="footnote" aria-live="polite">{word}</span> <a class="textlink" href="#website">Manage</a>
+      <span class="footnote" id="cd-web-state" aria-live="polite">{word}</span> <a class="textlink" href="#website">Manage</a>
       {save.kind === 'bad' ? <CheckLine cls="bad">{save.text}</CheckLine> : null}
     </div>
   );
@@ -197,7 +208,7 @@ export function LinkKindsField({ id, value, onInput }: { id: string; value: stri
   return (
     <div class="field">
       <label for={id}>File types linked on each semester’s student site <Hint label="About linked file types">
-        Each semester has its own student site, with a row for every session. A release copies files from your materials into the semester, and the row links them. Left empty, a row links the files at the top of each released folder, and each subfolder once. With types listed, a row links only files of those types, such as notebooks, PDFs and slides, at any depth, plus one link to browse the folder. Other files are still released: students reach them through the repo. For example: ipynb, pdf, html. The public website is not affected.
+        Each semester has its own student site, with a row for every session. A release copies files from your materials into the semester, and the row links them. Left empty, a row links the files at the top of each released folder, and one link for each subfolder. With types listed, a row links only files of those types, such as notebooks, PDFs and slides, at any depth, plus one link to browse the folder. Other files are still released: students reach them through the repo. For example: ipynb, pdf, html. The public website is not affected.
       </Hint></label>
       <input type="text" id={id} value={value} placeholder="pdf, html" onInput={(e) => onInput((e.target as HTMLInputElement).value)} />
       <p class="why">Released files of these types get a direct link on every semester’s student site. Separate them with commas.</p>
@@ -220,7 +231,7 @@ export function DetailsScreen(p: CourseProps) {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
-  const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, COURSE_FACTS, d.about), ...fieldErrors(null, courseDefaultTiers(), d.defaults) };
+  const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, COURSE_FACTS, d.about), ...fieldErrors(null, courseDefaultTiers(before.defaults), d.defaults) };
   const doSave = async () => {
     if (!y || file.kind !== 'ready') return;
     if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
@@ -263,7 +274,7 @@ export function DetailsScreen(p: CourseProps) {
             </div>
             <div class="form-section">
               <h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3>
-              <SchemaForm id="cdx" schema={null} tiers={courseDefaultTiers()} values={d.defaults} onChange={(v) => set({ defaults: v })} />
+              <SchemaForm id="cdx" schema={null} tiers={courseDefaultTiers(before.defaults)} values={d.defaults} onChange={(v) => set({ defaults: v })} />
             </div>
             <div class="form-section">
               <h3>Site links</h3>

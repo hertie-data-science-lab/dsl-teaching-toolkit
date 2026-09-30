@@ -882,8 +882,8 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .rows .r-sub.unmet { list-style: none; margin: 0; padding: 0; }
 
 /* WP-S6 */
-/* The grey note beside a field title: a small gap from the title, inline or wrapped. */
-.default { display: inline-block; margin: 2px 0 0 6px; }
+/* The grey note beside a field title: a small gap from the title. */
+.default { margin-left: 6px; }
 /* The public website switch in Course details. */
 .web-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .switch { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; min-height: 32px; cursor: pointer; }
