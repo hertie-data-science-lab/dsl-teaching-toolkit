@@ -3,7 +3,7 @@
 # The student console opens the same issue through the API, with this form's body under a
 # hidden first line, `<!-- dsl:join-team -->`, which routes it in place of the label.
 name: Join team
-description: Join or form a team for a group assignment
+description: Join, start or switch team for a group assignment
 title: "Join team"
 labels: ["team-formation"]
 body:
@@ -12,7 +12,7 @@ body:
       value: |
         The teams that already exist, and how much room each has left, are listed in the student console, under Join.
 
-        To **join** one, choose *Join an existing team* and type its name exactly as the console spells it. To **start** one, choose *Create a new team* and pick a name nobody is using yet.
+        To **join** one, choose *Join or switch to an existing team* and type its name exactly as the console spells it. To **start** one, choose *Create a new team* and pick a name nobody is using yet.
 
         Already in a team? Joining or creating another moves you out of your current one while team formation is open.
   # dsl:assignment-field:start - this semester's open assignments are spliced in here as a
@@ -34,7 +34,7 @@ body:
       label: Action
       description: Joining a team and starting one are different things - say which, so a typo in the name below cannot silently open a second team.
       options:
-        - Join an existing team
+        - Join or switch to an existing team
         - Create a new team
     validations:
       required: true

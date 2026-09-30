@@ -89,6 +89,8 @@ OLD_RECORDS = {
     "solutions/a1.json": b'{"released": "2026-10-01"}\n',
     "gradebook/distributed.csv": b"target,sha\n",
     "team-formation/mailed.csv": b"recipient\n",
+    "enrolment/refusals/9.json": b'{"issue": 9}\n',
+    "enrolment/relinks/101.json": b'{"old_id": "101"}\n',
     ".dsl/status.json": b'{"schema": "dsl.status/1", "problems": []}\n',
     ".dsl/outcomes/release.now.json": b"{}\n",
 }
@@ -523,7 +525,7 @@ def test_a_preview_prints_the_plan_and_writes_nothing(
     out = capsys.readouterr().out
     assert f"rename {OLD_CONFIG_REPO} -> {CONFIG_REPO}" in out
     assert f"rename {OLD_JOIN_REPO} -> {JOIN_REPO}" in out
-    assert f"move 10 record file(s) under .system/ in {OLD_CONFIG_REPO}" in out
+    assert f"move 12 record file(s) under .system/ in {OLD_CONFIG_REPO}" in out
     # Per step, the writes it would make: each move, each delete, each re-rendered file -
     # a record folder by its file count, never by the names inside it.
     assert "-   assignments.lock.yml -> .system/assignments.lock.yml" in out
@@ -557,6 +559,7 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
     moved = migrate.fold(set(OLD_RECORDS), migrate.SEMESTER_MOVES)
     assert moved["autograde/a1/_graded.json"] == ".system/autograde/a1/_graded.json"
     assert moved["cohort-gradebook.csv"] == ".system/semester-gradebook.csv"
+    assert moved["enrolment/refusals/9.json"] == ".system/enrolment/refusals/9.json"
     for old, new in moved.items():
         assert old not in tree, old
         # status.json and the lock are rewritten afterwards, by this engine.

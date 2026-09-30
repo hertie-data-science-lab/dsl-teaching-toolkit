@@ -591,3 +591,18 @@ def test_is_collaborator_answers_from_the_query_without_a_read(monkeypatch):
     held = {"grades-ada": {"ada-l": "READ"}}
     assert repos.is_collaborator("Org", "Grades-Ada", "ADA-L", held=held) is True
     assert repos.is_collaborator("Org", "grades-ada", "bo", held=held) is False
+
+
+def test_a_rename_succeeds_only_when_github_names_the_repo_anew(monkeypatch):
+    # The old name keeps answering after a rename (GitHub redirects it), so the PATCH's own
+    # answer is the confirmation.
+    seen: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        repos, "gh", lambda *a, **k: seen.append(a) or (0, "grades-b\n")
+    )
+    assert repos.rename_repo("Org", "grades-a", "grades-b", description="for @b")
+    assert "name=grades-b" in seen[0] and "description=for @b" in seen[0]
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, "grades-a\n"))
+    assert not repos.rename_repo("Org", "grades-a", "grades-b")
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 422"))
+    assert not repos.rename_repo("Org", "grades-a", "grades-b")

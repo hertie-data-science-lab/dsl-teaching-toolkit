@@ -14,7 +14,6 @@ import { PERSON, displayOnly } from '../tiers/people';
 import { CheckLine, Crumbs, EditFile, Lives, Loading, ProblemCards } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar, SaveLine } from '../ui/edit';
-import { Lock } from '../ui/icons';
 import { StudentCounts } from './Cohort';
 import { WithStatus, cohortCrumbs, cohortScope } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -22,6 +21,9 @@ import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
 
 type Row = Record<string, string>;
 const YOURS = ['hertie_email', 'name', 'role'] as const;
+// A joined row's handle is yours too: a student who switched GitHub account is re-pointed
+// here, and the next membership sync moves their repos, marks and team to it (`relink`).
+const EDITED = [...YOURS, 'github_handle'] as const;
 
 function RowStatus({ r }: { r: Row }) {
   if (!r.code_sent_at) return <span class="notsent">Not sent{r.hertie_email && !EMAIL_RE.test(r.hertie_email) ? ': email has no domain' : ''}</span>;
@@ -48,7 +50,7 @@ function Students(p: ReadyProps) {
 
   const base = table?.rows ?? [];
   const current: Row[] = replacement ? replacement.rows : [...base.map((r, i) => ({ ...r, ...(edits[i + 2] ?? {}) })), ...added];
-  const nEdits = replacement ? 1 : Object.keys(edits).filter((l) => YOURS.some((k) => (edits[+l][k] ?? '') !== (base[+l - 2]?.[k] ?? ''))).length + added.filter((r) => r.hertie_email || r.name).length;
+  const nEdits = replacement ? 1 : Object.keys(edits).filter((l) => EDITED.some((k) => (edits[+l][k] ?? '') !== (base[+l - 2]?.[k] ?? ''))).length + added.filter((r) => r.hertie_email || r.name).length;
   const badEmail = current.filter((r) => (r.hertie_email || r.name) && !EMAIL_RE.test(r.hertie_email ?? ''));
   const toSend = current.filter((r) => !r.code_sent_at && EMAIL_RE.test(r.hertie_email ?? '')).length - base.filter((r) => !r.code_sent_at && EMAIL_RE.test(r.hertie_email ?? '')).length;
   const saveLabel = !nEdits ? 'Save' : toSend > 0 ? `Save and send ${toSend} code${toSend > 1 ? 's' : ''}` : `Save ${nEdits} change${nEdits > 1 ? 's' : ''}`;
@@ -68,6 +70,18 @@ function Students(p: ReadyProps) {
   const doSave = async () => {
     if (!table || file.kind !== 'ready') return;
     if (badEmail.length) return setSave({ kind: 'bad', text: `${badEmail.length} row${badEmail.length > 1 ? 's have' : ' has'} an email that is not an address; no code can be sent to it.` });
+    const switched = replacement ? [] : base.map((r, i) => (edits[i + 2]?.github_handle ?? r.github_handle ?? '').trim()).filter((h, i) => h.toLowerCase() !== (base[i].github_handle ?? '').trim().toLowerCase());
+    if (switched.includes('')) return setSave({ kind: 'bad', text: 'A joined student’s GitHub handle cannot be blank. Put back the old one, or type their new account.' });
+    for (const handle of switched) {
+      setSave({ kind: 'busy', text: `Checking that ${handle} exists on GitHub…` });
+      let ok = false;
+      try {
+        ok = env ? await env.client.userExists(handle) : true;
+      } catch {
+        ok = true; // cannot tell: the sync checks the account itself
+      }
+      if (!ok) return setSave({ kind: 'bad', text: `There is no GitHub account called ${handle}.` });
+    }
     const rows = current.filter((r) => r.hertie_email || r.name);
     const text = writeTable({ header: table.header, rows });
     const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv' }, text, file.sha, { message: `roster: ${replacement ? `replace from ${replacement.name}` : `${nEdits} change${nEdits > 1 ? 's' : ''}`}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
@@ -92,7 +106,7 @@ function Students(p: ReadyProps) {
     <>
       <Crumbs items={cohortCrumbs(p, 'Students')} />
       <div class="page-head">
-        <div><h1>Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown.</Hint></h1><p class="lede">{s.rows} on the roster. {s.codes_sent} codes sent; {s.joined} joined.</p></div>
+        <div><h1>Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h1><p class="lede">{s.rows} on the roster. {s.codes_sent} codes sent; {s.joined} joined.</p></div>
         <div class="actions">
           <button class="btn quiet" type="button" aria-expanded={upload.open} onClick={() => setUpload({ ...upload, open: !upload.open })}>Replace from CSV</button>
           <OpButtons def={sendCodes(scope, waiting)} label="Send new codes to students who have not joined" />
@@ -138,7 +152,7 @@ function Students(p: ReadyProps) {
                 <thead>
                   <tr>
                     <th>Line</th><th>Email<span class="grp">yours: hertie_email</span></th><th>Name<span class="grp">yours</span></th><th>Role<span class="grp">yours</span></th>
-                    <th class="sys">GitHub handle<span class="grp">system <Lock /></span></th><th class="sys">GitHub id<span class="grp">system</span></th>
+                    <th class="sys">GitHub handle<span class="grp">yours once joined</span></th><th class="sys">GitHub id<span class="grp">system</span></th>
                     <th class="sys">Code sent<span class="grp">system</span></th><th class="sys">Status<span class="grp">system</span></th>
                   </tr>
                 </thead>
@@ -152,7 +166,7 @@ function Students(p: ReadyProps) {
                         <td>{input(line, r, 'hertie_email', 'Email', 'email')}</td>
                         <td>{input(line, r, 'name', 'Name')}</td>
                         <td>{role(line, r)}</td>
-                        <td class="sys mono">{r.github_handle || <span style="color:var(--muted)">not yet</span>}</td>
+                        {r.github_id && i < base.length ? <td class="mono">{input(line, r, 'github_handle', 'GitHub handle')}</td> : <td class="sys mono">{r.github_handle || <span style="color:var(--muted)">not yet</span>}</td>}
                         <td class="sys mono">{r.github_id}</td>
                         <td class="sys">{(r.code_sent_at ?? '').replace('T', ', ').replace(/:\d\d(\.\d+)?Z?$/, '')}</td>
                         <td class="sys"><RowStatus r={r} /></td>

@@ -63,6 +63,63 @@ def listed(monkeypatch):
     monkeypatch.setattr(sync_membership, "direct_collaborators_by_repo", lambda org: {})
 
 
+@pytest.fixture(autouse=True)
+def relinks(monkeypatch):
+    """The switched-account relink, run per semester before the roster reconcile. It reads
+    the roster and GitHub's users, so it is stubbed for the orchestration tests. Records
+    `(org, the listing it was handed)`."""
+    calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        sync_membership.relink,
+        "sync",
+        lambda org, existing, dry_run=False: calls.append((org, existing)) or 0,
+    )
+    return calls
+
+
+def test_the_relink_runs_first_and_its_renames_reach_the_reconcile(
+    monkeypatch, relinks
+):
+    # The roster reconcile keeps whichever account the stored id names, and the prune and
+    # the gradebooks read repo names off the listing and the collaborator query - so a
+    # relink that ran after them would leave the old account on the team and a fresh empty
+    # gradebook beside the renamed one.
+    _stub_course_admins(monkeypatch)
+    monkeypatch.setattr(
+        sync_membership, "discover_semesters", lambda org: ["Semester-A"]
+    )
+    monkeypatch.setattr(sync_membership, "semester_is_live", lambda org: True)
+    monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_membership, "discover_assignments", lambda org: [])
+    order: list[str] = []
+
+    def relink(org, existing, dry_run=False):
+        order.append("relink")
+        existing["grades-new"] = existing.pop("Semester-A-welcome")
+        return 0
+
+    monkeypatch.setattr(sync_membership.relink, "sync", relink)
+    monkeypatch.setattr(
+        sync_membership,
+        "direct_collaborators_by_repo",
+        lambda org: order.append("collaborators") or {},
+    )
+    seen: list[object] = []
+    monkeypatch.setattr(
+        sync_membership.sync_roster,
+        "sync",
+        lambda org, **k: order.append("roster") or seen.append(set(k["existing"])) or 0,
+    )
+    monkeypatch.setattr(sync_membership.sync_teams, "sync", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        sync_membership.sync_faculty, "sync_semester_instructors", lambda *a, **k: 0
+    )
+
+    assert sync_membership.sync("Course", all_semesters=True) == 0
+    assert order == ["relink", "collaborators", "roster"]
+    assert seen == [{"grades-new"}]
+
+
 def test_every_live_semesters_sync_provisions_its_gradebooks(monkeypatch, gradebooks):
     # The gradebook is where feedback goes for every shape that has no Submission receipts issue, and
     # the assignment brief points at it from the day it is published - so it exists from
