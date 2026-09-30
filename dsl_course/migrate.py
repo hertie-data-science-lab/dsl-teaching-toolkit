@@ -2677,9 +2677,15 @@ class Course:
         return [r["name"] for r in self.template_rows() if not r.get("archived")]
 
     def untopicked_templates(self) -> list[str]:
-        """The `assignment-*` GitHub templates that do not carry the topic yet, archived
-        ones included: discovery finds a template by the topic now (decision 0014)."""
-        return [r["name"] for r in self.template_rows() if is_untopicked_template(r)]
+        """The live `assignment-*` GitHub templates that do not carry the topic yet:
+        discovery finds a template by the topic now (decision 0014). An archived one is
+        read-only on GitHub and this migration never writes to one, as everywhere else in
+        the module, so the topic step leaves it alone."""
+        return [
+            r["name"]
+            for r in self.template_rows()
+            if is_untopicked_template(r) and not r.get("archived")
+        ]
 
     def topic_templates(self) -> bool:
         return all(

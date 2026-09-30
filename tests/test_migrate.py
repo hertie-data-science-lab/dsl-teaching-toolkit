@@ -1322,6 +1322,28 @@ def test_the_assignment_topic_step_stamps_only_the_old_templates(
     assert fake._repo(COURSE, "assignment-notes").get("topics") in (None, [])
 
 
+def test_the_assignment_topic_step_leaves_an_archived_template_alone(
+    fake, course, monkeypatch, capsys
+):
+    # GitHub refuses writes on an archived repo: an archived old template is neither
+    # planned nor stamped, and with only archived ones left the step reads done.
+    fake.add(COURSE, "assignment-0-f2024", {}, archived=True, template=True)
+    assert _main(monkeypatch, COURSE) == 0
+    out = capsys.readouterr().out
+    assert "assignment-1-f2026: add the topic dsl-assignment" in out
+    assert "assignment-0-f2024: add the topic" not in out
+    migrate._forget()
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    assert "dsl-assignment" in fake._repo(COURSE, "assignment-1-f2026")["topics"]
+    assert fake._repo(COURSE, "assignment-0-f2024")["topics"] == []
+    migrate._forget()
+    step = next(
+        s for s in migrate.Course(COURSE).steps() if s.name == "assignment topic"
+    )
+    assert step.done()
+    assert step.plan() == []
+
+
 def test_a_course_with_no_workflow_repo_passes_the_pause(
     fake, course, monkeypatch, capsys
 ):

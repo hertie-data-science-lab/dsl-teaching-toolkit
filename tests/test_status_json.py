@@ -485,6 +485,29 @@ def test_gather_lists_a_template_without_the_topic_as_not_migrated(monkeypatch):
     ]
 
 
+def test_gather_raises_no_problem_for_an_archived_template_without_the_topic(
+    monkeypatch,
+):
+    # The migration never writes to an archived repo, so an archived old template can
+    # never be stamped: it is not NOT_MIGRATED.
+    listing = [
+        repo_row(".github"),
+        repo_row("assignment-0-f2024", isTemplate=True, archived=True),
+    ]
+    monkeypatch.setattr(status_json, "list_org_repos", lambda org: listing)
+    monkeypatch.setattr(status_json, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(status_json, "repo_path_shas", lambda *a, **k: {})
+    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(status_json, "org_meta", lambda org: {})
+    monkeypatch.setattr(status_json, "read_semester_registry", lambda org, f: [])
+    monkeypatch.setattr(status_json, "read_opencourse", lambda org: None)
+    monkeypatch.setattr(
+        status_json.sync_faculty, "read_course_config", lambda org, faults: None
+    )
+    facts = status_json.gather_course(COURSE)
+    assert not [t for t in facts.templates if not t.topic]
+
+
 def test_a_release_carries_the_number_the_site_gives_it():
     doc = _render()
     assert {r["id"]: r["number"] for r in doc["releases"]} == {"s3": 3, "s5": 5}
