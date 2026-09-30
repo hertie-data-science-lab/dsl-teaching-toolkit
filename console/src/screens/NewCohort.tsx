@@ -3,7 +3,7 @@
 // Students as three cards that open their editors and come back. Revision brief v2 section 7.
 
 import type { ComponentChildren } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import type { Files } from '../model/files';
@@ -35,6 +35,8 @@ export interface NkDraft {
   org?: string;
   orgVerified?: string;
   setUp?: string;
+  /** The org New semester has listed in the course's registry, so the bot may join it. */
+  listed?: string;
 }
 
 export function nkDone(d: NkDraft, org: string, orgChecks: Check[] | null, setUp: Check[] | null): boolean[] {
@@ -77,17 +79,24 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
   const done = nkDone(d, org, orgChecks, setUp);
   const step = openAt(done, asked);
   usePoll(orgLive, !!env && step === 1 && !allOk(orgChecks));
-  // Once the org exists, list it in the course's registry: the course's admins vouch for
-  // their semesters, and that is what lets the bot join it by itself. Once per org; the
-  // term is pinned in the draft, since a listed semester moves the next-term default on.
-  const [listed, setListed] = useState<{ org: string; error?: string } | null>(null);
-  const exists = orgChecks?.[0]?.ok === true;
-  useEffect(() => {
-    if (!env || step !== 1 || !exists || listed?.org === org) return;
-    setListed({ org });
-    set({ term });
-    registerSemester(env.client, course.org, org, authorOf(env.user)).catch((e: unknown) => setListed({ org, error: e instanceof Error ? e.message : String(e) }));
-  }, [env, step, exists, org]);
+  // Continue lists the org in the course's registry, once the person has shown they own it:
+  // the course's admins vouch for their semesters, and that is what lets the bot join it by
+  // itself. Never on a poll, never for an org someone else owns.
+  const [listing, setListing] = useState<{ org: string; busy: boolean; error?: string } | null>(null);
+  const list = async () => {
+    if (!env) return;
+    setListing({ org, busy: true });
+    const fail = (error: string) => setListing({ org, busy: false, error });
+    try {
+      const m = await env.client.getMyMembership(org);
+      if (m?.state !== 'active' || m.role !== 'admin') return fail(`You must be an owner of ${org}.`);
+      await registerSemester(env.client, course.org, org, authorOf(env.user));
+      set({ listed: org, term });
+      setListing(null);
+    } catch (e) {
+      fail(`Could not list ${org} with the course: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
   const go = (k: number) => {
     if (typeof location !== 'undefined') location.hash = `#new-semester-${k}`;
   };
@@ -108,10 +117,15 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
           set({ term: t, org: edited && edited !== derived && t === term ? edited : undefined });
         }} />
         <OrgSteps org={org} check={orgLive.value?.org === org ? orgLive.value : null} busy={orgLive.busy} run={orgLive.run} back={`${q}#new-semester-1`} />
-        {listed?.org === org && listed.error ? <WizError>Could not list {org} with the course, so the bot cannot join it yet: {listed.error}</WizError> : null}
+        {listing?.org === org && listing.error ? <WizError>{listing.error}</WizError> : null}
+        {d.listed === org && !done[0] ? <p class="footnote">Listed with {course.name}.</p> : null}
       </>
     );
-    foot = <button class="btn" type="button" disabled={!done[0] || Object.keys(errs).length > 0} onClick={() => { set({ orgVerified: org, term }); go(2); }}>Continue</button>;
+    // Everything but the bot passes: Continue lists the org, which is what the bot waits for.
+    const checks = orgChecks ?? [];
+    const toList = !done[0] && d.listed !== org && checks.length > 1 && allOk(checks.slice(0, -1));
+    const busy = listing?.org === org && listing.busy;
+    foot = <button class="btn" type="button" disabled={(!done[0] && !toList) || busy || Object.keys(errs).length > 0} onClick={() => (done[0] ? (set({ orgVerified: org, term }), go(2)) : void list())}>Continue</button>;
   } else if (step === 2) {
     title = `Set up ${label}`;
     const ok = setUp ? allOk(setUp) : false;

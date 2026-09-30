@@ -58,33 +58,58 @@ describe('New course step 1', () => {
 });
 
 describe('New semester step 1', () => {
-  it('lists the new org in the course registry once it exists, and says the bot joins within 15 minutes', async () => {
-    const COURSE = 'hertie-dsl-demo-course-e1234';
-    const SEM = 'hertie-dsl-demo-course-s2027';
-    const course: Course = { org: COURSE, name: 'Deep Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [{ org: 'hertie-dsl-demo-course-f2026', term: 'f2026', termLabel: 'Fall 2026' }], meta: {} };
+  const COURSE = 'hertie-dsl-demo-course-e1234';
+  const SEM = 'hertie-dsl-demo-course-s2027';
+  const course: Course = { org: COURSE, name: 'Deep Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [{ org: 'hertie-dsl-demo-course-f2026', term: 'f2026', termLabel: 'Fall 2026' }], meta: {} };
+  const now = Date.parse('2026-09-30T10:00:00Z');
+
+  async function mountSemester(mine: { state: string; role: string }) {
     const gh = new FakeGitHub()
       .on('GET', `/orgs/${SEM}`, { login: SEM, id: 7 })
       .on('GET', `/orgs/${SEM}/memberships/hertie-dsl-bot`, { state: 'pending', role: 'admin' })
+      .on('GET', `/user/memberships/orgs/${SEM}`, mine)
       .on('GET', `/repos/${COURSE}/.github/contents/semesters.yml`, fileBody('semesters.yml', 'semesters:\n- hertie-dsl-demo-course-f2026\n', 'r1'))
       .on('PUT', `/repos/${COURSE}/.github/contents/semesters.yml`, { content: { sha: 'r2' }, commit: { sha: 'c2' } });
     const client = new GitHubClient({ token: () => 't', fetch: gh.fetch });
     const env = { client, user: { login: 'a-example', id: 1, name: null, email: null, avatar_url: '' }, files: new StaticFiles(), kind: 'classic', ops: { runs: { value: [] } } } as unknown as Env;
     root = document.createElement('div');
     document.body.appendChild(root);
-    const now = Date.parse('2026-09-30T10:00:00Z');
     await act(async () => render(<EnvCtx.Provider value={env}><NewCohortScreen course={course} files={new StaticFiles()} now={now} step={1} /></EnvCtx.Provider>, root!));
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(100); }); // the registry read, then its write
-    const puts = gh.seen.filter((x) => x.method === 'PUT');
-    expect(puts).toHaveLength(1);
-    const body = puts[0].body as { content: string; sha: string; message: string };
+    const cont = () => [...root!.querySelectorAll<HTMLButtonElement>('button.btn')].find((b) => b.textContent === 'Continue')!;
+    const press = async () => {
+      await act(async () => { cont().click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    };
+    return { gh, cont, press, puts: () => gh.seen.filter((x) => x.method === 'PUT') };
+  }
+
+  it('lists the org in the course registry only when its owner presses Continue', async () => {
+    const { cont, press, puts } = await mountSemester({ state: 'active', role: 'admin' });
+    expect(root!.textContent).toContain('Invited. The bot joins within 15 minutes.');
+    // The org exists: nothing is written by itself, on the first read or on a poll.
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS * 2); });
+    expect(puts()).toHaveLength(0);
+    expect(cont().disabled).toBe(false);
+    await press();
+    expect(puts()).toHaveLength(1);
+    const body = puts()[0].body as { content: string; sha: string; message: string };
     expect(body.sha).toBe('r1');
     expect(decodeBase64(body.content)).toBe(`semesters:\n- hertie-dsl-demo-course-f2026\n- ${SEM}\n`);
     expect(body.message).toBe(`registry: add semester ${SEM}, from the DSL Teaching Console`);
-    expect(root!.textContent).toContain('Invited. The bot joins within 15 minutes.');
-    // Polling on does not write it again.
+    expect(root!.textContent).toContain('Listed with Deep Learning.');
+    // Listed; now it waits for the bot, and nothing is written again.
+    expect(cont().disabled).toBe(true);
     await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS * 2); });
-    expect(gh.seen.filter((x) => x.method === 'PUT')).toHaveLength(1);
+    expect(puts()).toHaveLength(1);
+  });
+
+  it('writes nothing for an org the person does not own', async () => {
+    const { press, puts } = await mountSemester({ state: 'active', role: 'member' });
+    await press();
+    expect(puts()).toHaveLength(0);
+    expect(root!.textContent).toContain(`You must be an owner of ${SEM}.`);
   });
 });
 
