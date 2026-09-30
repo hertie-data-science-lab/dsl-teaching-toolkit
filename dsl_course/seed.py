@@ -272,7 +272,9 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
     stale one. Every input is discovered from the org itself (semesters, content repos,
     assignment templates), so the answer is org-specific without the caller having to know
     any of it."""
-    semesters = discover_semesters(course_org)
+    # A semester the wizard has listed but Bootstrap has not set up has nothing a button
+    # could release into, so no dropdown offers it yet.
+    semesters = [s for s in discover_semesters(course_org) if not being_set_up(s)]
     source_repos = discover_content_repos(course_org)
     materials = discover_materials_repos(course_org)
     assignments = discover_assignments(course_org)

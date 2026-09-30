@@ -239,7 +239,8 @@ class FakeGitHub:
         jq = argv[argv.index("--jq") + 1] if "--jq" in argv else ""
         parts = path.split("?")[0].split("/")
         if path == "user":
-            return 0, "bot" if jq else '{"login": "bot"}'
+            # The lab's bot, as in production: the invitation pass runs only under it.
+            return 0, "hertie-dsl-bot" if jq else '{"login": "hertie-dsl-bot"}'
         if parts[:3] == ["user", "memberships", "orgs"]:
             return 0, "" if jq else "[]"  # the bot holds no pending invitation
         if parts[0] == "orgs" and len(parts) == 2:
@@ -603,7 +604,8 @@ OPERATIONS = {
     # the fixture has pushed since the handout; each student who has adds two commit
     # reads per assignment whose sheet is still open (`collect._provisional_pins`).
     "tick: list the semesters": (("scheduler", *_C, "--list-semesters"), 3, 0),
-    # Re-measured 2026-09-30 at 42, with the bot's pending-invitation read (one call).
+    # Re-measured 2026-09-30 at 42 (was 36): one call is the bot's pending-invitation
+    # read, the other five are fixture drift since the 2026-09-26 measurement.
     "tick: release (real)": ((*_TICK, "--no-preview"), 42, 0),
     "tick: release (preview)": ((*_TICK, "--preview"), 31, 0),
     "tick: autograde leg": (

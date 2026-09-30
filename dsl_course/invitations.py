@@ -22,8 +22,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from . import org_registry
-from .ghcli import gh
+from .ghcli import bot_login, gh
 from .log import log, log_err, log_ok
+
+# The lab's bot account. Accepting is ITS job: a maintainer's break-glass token running the
+# scheduler must never join orgs as that maintainer.
+BOT = "hertie-dsl-bot"
 
 
 def pending_orgs() -> list[str]:
@@ -44,12 +48,17 @@ def pending_orgs() -> list[str]:
 def accept_pending(course_org: str = "", semesters: Iterable[str] = ()) -> list[str]:
     """Accept every pending invitation from a registered course org, or from one of
     `semesters` (the registry of `course_org`, counted only when that course is itself
-    registered), and return the orgs accepted. Raises when the registry cannot be read,
-    before anything is accepted.
+    registered), and return the orgs accepted. Only with the bot's own token: any other
+    login accepts nothing. Raises when the registry cannot be read, before anything is
+    accepted.
 
     Idempotent: an accepted invitation is no longer pending, so the next run skips it. One
     org that cannot be accepted (the invitation withdrawn meanwhile) does not stop the rest."""
-    accepted = []
+    accepted: list[str] = []
+    login = bot_login()
+    if login.casefold() != BOT:
+        log(f"  [skip] org invitations: this token is {login or 'unknown'}, not {BOT}")
+        return accepted
     registered = set(org_registry.course_orgs())
     if course_org.casefold() in registered:
         registered |= {s.casefold() for s in semesters}

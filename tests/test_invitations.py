@@ -12,6 +12,7 @@ REGISTERED = frozenset({"hertie-new-e1234", "hertie-new-f2026", "gone"})
 @pytest.fixture(autouse=True)
 def registry(monkeypatch):
     monkeypatch.setattr(invitations.org_registry, "course_orgs", lambda: REGISTERED)
+    monkeypatch.setattr(invitations, "bot_login", lambda: "hertie-dsl-bot")
 
 
 def _stub_gh(monkeypatch, pending: str, fail: frozenset[str] = frozenset()):
@@ -111,3 +112,13 @@ def test_an_unregistered_course_cannot_vouch_for_semesters(monkeypatch):
     calls = _stub_gh(monkeypatch, "stranger-s2027\n")
     assert invitations.accept_pending("stranger-e1", ["stranger-s2027"]) == []
     assert len(calls) == 1
+
+
+def test_a_maintainers_break_glass_token_accepts_nothing(monkeypatch, capsys):
+    # The scheduler can be run from a laptop with a maintainer's token; that must never
+    # join orgs as the maintainer.
+    monkeypatch.setattr(invitations, "bot_login", lambda: "h-maintainer")
+    calls = _stub_gh(monkeypatch, "hertie-new-e1234\n")
+    assert invitations.accept_pending() == []
+    assert calls == []
+    assert "this token is h-maintainer, not hertie-dsl-bot" in capsys.readouterr().out

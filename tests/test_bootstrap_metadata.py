@@ -226,9 +226,7 @@ def test_inventory_skips_semester_pointer_orgs(monkeypatch):
 
     # Both registered, so this is about the metadata shape and nothing else.
     monkeypatch.setattr(
-        list_orgs.org_registry,
-        "course_orgs",
-        lambda: frozenset({"course-org", "semester-org"}),
+        list_orgs.org_registry, "names", lambda: ("Course-Org", "Semester-Org")
     )
     monkeypatch.setattr(
         list_orgs,

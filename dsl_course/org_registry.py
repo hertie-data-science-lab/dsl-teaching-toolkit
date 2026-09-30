@@ -27,6 +27,11 @@ _ORG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 def parse(text: str) -> frozenset[str]:
     """The registered course orgs in `text`, casefolded (GitHub's names are not
     case-sensitive). Raises on anything that is not `course_orgs:` and a list of org names."""
+    return frozenset(o.casefold() for o in parse_names(text))
+
+
+def parse_names(text: str) -> tuple[str, ...]:
+    """The registered course orgs in `text` as the file spells them, in its order."""
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError as exc:
@@ -36,19 +41,24 @@ def parse(text: str) -> frozenset[str]:
         isinstance(o, str) and _ORG.match(o) for o in orgs
     ):
         raise RuntimeError("orgs.yml must be `course_orgs:` and a list of org names")
-    return frozenset(o.casefold() for o in orgs)
+    return tuple(orgs)
 
 
 @cache
-def course_orgs() -> frozenset[str]:
-    """The registry of the checkout this process runs from, read once."""
+def names() -> tuple[str, ...]:
+    """The registry of the checkout this process runs from, as spelt, read once."""
     try:
         text = PATH.read_text()
     except OSError as exc:
         raise RuntimeError(
             f"could not read the course org registry {PATH.name}: {exc}"
         ) from exc
-    return parse(text)
+    return parse_names(text)
+
+
+def course_orgs() -> frozenset[str]:
+    """The registered course orgs, casefolded."""
+    return frozenset(o.casefold() for o in names())
 
 
 def registered(org: str) -> bool:

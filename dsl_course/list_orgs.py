@@ -1,10 +1,9 @@
-"""list-orgs -- discover DSL course and semester orgs dynamically from GitHub.
+"""list-orgs -- the DSL course and semester orgs, as an inventory.
 
-Source of truth: every org's `.github` repo is tagged by `bootstrap_course.py` -
-`dsl-course-hub` for a persistent COURSE org, `dsl-semester` for a per-year SEMESTER
-org. This tool searches for both topics across all repos the caller can see, reads
-each org's `.github/dsl-course.yml`, and emits a JSON / Markdown / YAML inventory
-of the two tiers separately.
+COURSE orgs are the ones the toolkit's `orgs.yml` names (`org_registry`), each read off its
+`.github/dsl-course.yml`: the tier fan-out reads this list, and a topic is anyone's to set.
+SEMESTER orgs are still found by their `dsl-semester` topic, best effort, for the report
+only. The output is a JSON / Markdown / YAML inventory of the two tiers separately.
 
 Usage:
     python3 -m dsl_course.list_orgs                       # JSON to stdout
@@ -32,7 +31,7 @@ from .course import (
     SEMESTER_TOPIC,
 )
 from .discovery import discover_semesters, org_meta, semester_pointer
-from .faults import not_migrated_text
+from .faults import Unusable, not_migrated_text
 from .ghcli import gh_json
 from .log import CLIParser, log_err
 from .repos import org_exists
@@ -90,7 +89,7 @@ def _tier_or_none(org: str, declared: dict) -> str | None:
 
 
 def discover_course_orgs() -> list[dict]:
-    """Find every `.github` repo tagged `dsl-course-hub` and fetch its metadata.
+    """Every course org `orgs.yml` names, with its `.github/dsl-course.yml` metadata.
 
     Returns a list of dicts with keys: org, readable, course_name, course_code,
     central_ref, url. Sorted by org name.
@@ -101,16 +100,9 @@ def discover_course_orgs() -> list[dict]:
     and refreshes the rest.
     """
     orgs = []
-    registered = org_registry.course_orgs()
-    for owner in _tagged_orgs(COURSE_HUB_TOPIC):
-        if owner.casefold() not in registered:
-            # The topic is anyone's to set: an org orgs.yml does not name is never
-            # refreshed, so the bot token is never written into it.
-            print(
-                f"  [skip] {owner}: tagged {COURSE_HUB_TOPIC} but not in orgs.yml",
-                file=sys.stderr,
-            )
-            continue
+    # The registry, never a topic search: the topic is anyone's to set, and the fan-out
+    # this feeds writes the bot token into every org it refreshes.
+    for owner in org_registry.names():
         meta = _metadata_or_none(owner)
         if meta and meta.get("course"):
             # A semester org's dsl-course.yml is a pointer back to its course org
@@ -219,14 +211,24 @@ def awaiting_registration() -> list[dict]:
     registered = org_registry.course_orgs()
     # A semester a registered course lists is vouched for: the course's own scheduler pass
     # accepts its invitation, so it waits on nobody here.
-    known = registered | {
-        s.casefold() for course in registered for s in discover_semesters(course)
-    }
+    known = set(registered)
+    for course in org_registry.names():
+        try:
+            known |= {s.casefold() for s in discover_semesters(course)}
+        except Unusable as exc:
+            # One course's broken registry vouches for nothing, and stops nothing else.
+            log_err(f"{course}: {exc}")
     found: dict[str, dict] = {}
     for org in invitations.pending_orgs():
         if org.casefold() not in known:
             found.setdefault(org.casefold(), {"org": org, "why": "invited the bot"})
-    for org in _tagged_orgs(COURSE_HUB_TOPIC):
+    try:
+        tagged = _tagged_orgs(COURSE_HUB_TOPIC)
+    except RuntimeError as exc:
+        # The report's second source is best effort: the invitations above still file.
+        log_err(str(exc))
+        tagged = []
+    for org in tagged:
         if org.casefold() in known or org.casefold() in found:
             continue
         meta = _metadata_or_none(org)
@@ -368,7 +370,14 @@ def main() -> int:
     # guard, so the Actions log gets a line rather than a traceback.
     try:
         orgs = discover_course_orgs()
-        semesters = discover_semester_orgs()
+        # The semester listing is the one part of the inventory a topic search still
+        # finds (the report shows semesters no registry lists), and the fan-out never reads
+        # it: a search that fails is a line, never an empty fan-out.
+        try:
+            semesters = discover_semester_orgs()
+        except RuntimeError as exc:
+            log_err(f"semester orgs not listed: {exc}")
+            semesters = []
         combined = {"course_orgs": orgs, "semester_orgs": semesters}
         rendered = (
             json.dumps(combined, indent=2)
