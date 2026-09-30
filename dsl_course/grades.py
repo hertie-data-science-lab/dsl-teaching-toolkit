@@ -128,6 +128,9 @@ GRADEBOOK_DIR = records.path(
 # migration in `_read_distributed` reads it once and deletes it in the same commit that
 # writes `distributed.csv`, which records every channel rather than just the email.
 NOTIFIED_PATH = f"{GRADEBOOK_DIR}/notified.csv"
+GRADEBOOK_PERMISSION = (
+    "pull"  # a student READS their gradebook; the sheet is the source
+)
 SEMESTER_CSV_NAME = records.path(
     "semester_gradebook"
 )  # the wide faculty-only glance view
@@ -1218,6 +1221,18 @@ def load_grading_spec(
     if spec is None:
         spec = with_run_settings(GradingSpec(), course_org, semester_org, slug)
     return spec
+
+
+def readable_grading_spec(course_org: str, template: str) -> GradingSpec | None:
+    """`load_grading_spec`, but None when the file could not be READ - a failure other
+    than a 404. For the one caller that must not act on the defaults: a scheduled solution
+    waits for the late window, and a window it cannot read is not a window of 10 days."""
+    try:
+        _grading_text(course_org, template)
+    except RuntimeError as exc:
+        log_err(f"  ! could not read {template}/{GRADING_FILE}: {exc}")
+        return None
+    return load_grading_spec(course_org, template)
 
 
 # ------------------------------------ what an assignment's definition will not grade as
@@ -3339,7 +3354,9 @@ def provision_one(
         # Held at anything else - more than read included - the PUT puts it back to read.
         log_person(f"  [ok]   + @{handle} (read)")
         return "skipped"
-    if add_collaborator(semester_org, repo, handle, permission="pull", person=True):
+    if add_collaborator(
+        semester_org, repo, handle, permission=GRADEBOOK_PERMISSION, person=True
+    ):
         log_person(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"
     # A gradebook the student can't open is a failure, not a partial success - the status

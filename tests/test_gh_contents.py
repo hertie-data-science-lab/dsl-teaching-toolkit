@@ -771,3 +771,51 @@ def test_a_failed_write_leg_moves_no_branch(monkeypatch, leg):
     # reaches the ref, and a refused ref move leaves the branch where it was.
     ref_moves = [args for args, _ in calls if "PATCH" in args]
     assert len(ref_moves) == (1 if leg == "git/refs" else 0)
+
+
+def test_path_commit_subjects_reads_the_whole_history_or_raises(monkeypatch):
+    seen: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        gh_contents,
+        "gh",
+        lambda *a, **k: seen.append(a) or (0, "roster: link @a (id 1)\n\nEdit\n"),
+    )
+    assert gh_contents.path_commit_subjects("O", "c", "students.csv") == (
+        "roster: link @a (id 1)",
+        "Edit",
+    )
+    assert "--paginate" in seen[0] and "path=students.csv" in seen[0][2]
+    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
+    with pytest.raises(RuntimeError):
+        gh_contents.path_commit_subjects("O", "c", "students.csv")
+
+
+def test_put_files_on_a_base_builds_on_that_commit_and_never_forces(monkeypatch):
+    # A compare-and-set: the files were computed from `base`, so the commit's parent is
+    # `base` whatever the branch head says now, and the ref move is not forced - GitHub
+    # refuses it (422, not a fast-forward) if anything landed since the read.
+    calls = []
+
+    def fake_gh(*args, **kwargs):
+        calls.append((args, kwargs.get("stdin")))
+        url = args[1] if args[0] == "api" and args[1] != "--method" else args[3]
+        if url == "repos/org/repo":
+            return 0, _REPO_OBJECT
+        if "git/trees/read-tree" in url:
+            return 0, "false\na.yml\tstale"
+        if "commits/" in url:
+            raise AssertionError("the branch head must not be re-read")
+        if "git/refs/heads/main" in url:
+            return 1, "gh: Update is not a fast forward (HTTP 422)"
+        return 0, "new-sha\n"
+
+    _stub_gh(monkeypatch, fake_gh)
+    ok = gh_contents.put_files(
+        "org", "repo", {"a.yml": b"one\n"}, "m", base=("read-sha", "read-tree")
+    )
+    assert ok is False
+    posted = [json.loads(stdin) for args, stdin in calls if stdin]
+    assert posted[0]["base_tree"] == "read-tree"
+    assert posted[1]["parents"] == ["read-sha"]
+    (patch,) = [args for args, _ in calls if "PATCH" in args]
+    assert not any("force" in a for a in patch)

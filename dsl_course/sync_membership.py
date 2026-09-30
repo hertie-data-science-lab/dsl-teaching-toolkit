@@ -40,7 +40,7 @@ import sys
 
 import yaml
 
-from . import status, sync_faculty, sync_roster, sync_teams
+from . import relink, status, sync_faculty, sync_roster, sync_teams
 from .discovery import (
     SEMESTERS_PATH,
     discover_assignments,
@@ -170,6 +170,10 @@ def sync(
             # the gradebooks need. None is "we could not look", and each of them answers
             # it for itself.
             existing = listing_by_name(org)
+            # Before the roster reconcile: a student who switched GitHub account is moved
+            # to it here, and the reconcile, the prune and the gradebooks below then read
+            # the renamed repos off `existing` and the new id off the roster.
+            errors += relink.sync(org, existing, dry_run=dry_run)
             # And ONE GraphQL query for every repo's direct collaborators, which the
             # prune and the gradebooks each asked per repo (None: they still do).
             collaborators = direct_collaborators_by_repo(org)

@@ -98,8 +98,9 @@ _RECORD_BANNER = (
 _RETENTION_NOTE = f"""This repository is the semester's private record and is now read-only.
 It holds the roster (`students.csv`), the project teams (`teams.csv`), the instructors
 (`instructors.yml`), the semester plan (`schedule.yml`), every grading sheet (`grading_sheets/`),
-the autograde detail (`.system/autograde/`), what was sent to whom (`.system/gradebook/distributed.csv`)
-and the registrar export (`{SEMESTER_CSV_NAME}`). Together those are this semester's record of
+the autograde detail (`.system/autograde/`), what was sent to whom (`.system/gradebook/distributed.csv`),
+the enrolment refusals and account relinks (`.system/enrolment/`) and the registrar export
+(`{SEMESTER_CSV_NAME}`). Together those are this semester's record of
 assessment: delete the repository when your institution's retention period for that record
 expires, and the archived student repos with it."""
 
