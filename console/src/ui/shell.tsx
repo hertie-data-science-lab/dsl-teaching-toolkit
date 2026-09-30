@@ -250,7 +250,7 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
       {course && !course.write ? <p class="footnote" style="padding:8px 10px">Read only: other pages need write access.</p> : null}
       {!course ? <p class="footnote" style="padding:4px 10px">{courses.length ? 'Choose a course and semester to see its pages.' : 'Choose a semester to see its pages.'}</p> : null}
       {course ? (
-        <div class="nav-links">
+        <div>
           <hr />
           <ul>
             {cohort && course.write ? <li><a href={studentHref(cohort.org)}>Student view</a></li> : null}
@@ -281,7 +281,7 @@ export function StudentNav({ courses, cohortStates, semesters, semester, current
       <ul>
         {STUDENT_SCREENS.filter(([k]) => !(knownAuditor(semester.org) && AUDITOR_HIDDEN.includes(k))).map(([k, t]) => <li><a href={studentHref(semester.org, k)} aria-current={k === current ? 'page' : undefined}>{t}</a></li>)}
       </ul>
-      <div class="nav-links">
+      <div>
         <hr />
         <ul><li><a href={ghUrl(semester.org)} target="_blank" rel="noopener">Semester on GitHub <Ext /></a></li></ul>
       </div>

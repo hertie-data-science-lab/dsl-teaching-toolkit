@@ -57,9 +57,11 @@ export const schemeOk = (scheme: string) => /[/:]\{path\}/.test(scheme.trim());
 export function courseFolder(folder: string, org: string): string {
   const f = folder.trim().replace(/[\\/]+$/, '');
   if (!f) return '';
-  const last = f.split(/[\\/]/).pop() ?? '';
-  return last.toLowerCase() === org.toLowerCase() ? f : joinPath(f, org);
+  return lastSegment(f).toLowerCase() === org.toLowerCase() ? f : joinPath(f, org);
 }
+
+/** The last segment of a typed folder (`courseFolder`'s test, and the picked folder's name to compare). */
+export const lastSegment = (folder: string) => folder.trim().replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
 
 /** `/tree/<branch>/<path>` inside a repo on github.com or github.dev; nothing for the repo's root on its default branch. */
 const inRepo = (r: RepoRef) => (r.path || r.branch ? `/tree/${r.branch ?? 'main'}${r.path ? `/${r.path.split('/').filter(Boolean).map(encodeURIComponent).join('/')}` : ''}` : '');

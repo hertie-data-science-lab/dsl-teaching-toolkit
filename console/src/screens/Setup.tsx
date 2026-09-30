@@ -8,10 +8,10 @@
 
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { canCheckFolders, folderHandle, forgetFolder, lastSegment, pickFolder } from '../model/localFolder';
-import { cloneCommand, courseFolder, folderExample, platformOf, repoUrl, schemeOk, type Editor, type Setup } from '../model/open';
+import { canCheckFolders, folderHandle, forgetFolder, pickFolder } from '../model/localFolder';
+import { cloneCommand, courseFolder, folderExample, lastSegment, platformOf, repoUrl, schemeOk, type Editor, type Setup } from '../model/open';
 import { saveYourSetup, yourSetup } from '../model/prefs';
-import { copyText } from '../ui/OpenButton';
+import { copyText, useFlash } from '../ui/OpenButton';
 
 const EDITOR_WORD: Record<Editor, string> = { vscode: 'VS Code', desktop: 'GitHub Desktop', other: 'another editor' };
 
@@ -61,15 +61,10 @@ function FolderCheck({ login, typed, org }: { login: string; typed: string; org?
 
 /** One `git clone` per repo of the course, into the course's folder, with a Copy button. */
 function CloneAll({ org, repos, folder }: { org: string; repos: string[]; folder: string }) {
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNote] = useFlash();
   const parent = courseFolder(folder, org);
   const text = repos.map((r) => cloneCommand(repoUrl({ org, repo: r }), parent, r)).join('\n');
   const copy = async () => setNote((await copyText(text)) ? 'Copied' : 'Could not copy: select it below');
-  useEffect(() => {
-    if (!note) return;
-    const t = setTimeout(() => setNote(null), 2000);
-    return () => clearTimeout(t);
-  }, [note]);
   return (
     <div class="field clone-all">
       <div class="clone-all-h"><span class="label">Clone every repo of this course</span><button class="btn small quiet" type="button" onClick={copy}>Copy</button><span class="footnote" role="status">{note ?? ''}</span></div>

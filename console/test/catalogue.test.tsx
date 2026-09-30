@@ -192,7 +192,7 @@ describe('All courses', () => {
     const off = [...now.querySelectorAll('.cohort-card.off')];
     expect(off.map((o) => o.querySelector('.cc-name')?.firstChild?.textContent)).toEqual(['Natural Language Processing, Fall 2024', 'Natural Language Processing, Fall 2026', 'Natural Language Processing, Spring 2026']);
     // The greyed semester says whose it is to a screen reader.
-    expect(off[0].querySelector('.sr-only')?.textContent).toBe('Not one of your courses');
+    expect(off[0].querySelector('.sr')?.textContent).toBe('Not one of your courses');
     expect(now.textContent).not.toContain('Fall 2025');
     expect(now.textContent).not.toContain('Summer 2026');
   });
