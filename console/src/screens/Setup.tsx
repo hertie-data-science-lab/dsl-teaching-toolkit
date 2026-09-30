@@ -1,13 +1,17 @@
-// Your setup (`#setup`, beside Help): the folder a person keeps the course repos in and the
-// editor the Open button uses (decision 0017). Kept per login in this browser only
-// (`model/prefs.ts`), never sent anywhere. The login is known from sign-in, so there is no
-// handle field; instructors push to the course repos, so there is no fork step. Nothing is
-// stored until Save, and the line under each field says what is.
+// Profile (`#profile`, from the avatar; decisions 0017, 0021 rule 3): the folder a person
+// keeps the course repos in and the editor the Open button uses. Kept per login in this
+// browser only (`model/prefs.ts`), never sent anywhere, and kept across sign-out. The login
+// is known from sign-in, so there is no handle field; instructors push to the course repos,
+// so there is no fork step. Nothing is stored until Save, and the line under each field says
+// what is. Where the browser allows it, the folder check (decision 0023) and, with a course
+// in context, one block that clones every repo of it.
 
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { courseFolder, folderExample, platformOf, schemeOk, type Editor, type Setup } from '../model/open';
+import { canCheckFolders, folderHandle, forgetFolder, lastSegment, pickFolder } from '../model/localFolder';
+import { cloneCommand, courseFolder, folderExample, platformOf, repoUrl, schemeOk, type Editor, type Setup } from '../model/open';
 import { saveYourSetup, yourSetup } from '../model/prefs';
+import { copyText } from '../ui/OpenButton';
 
 const EDITOR_WORD: Record<Editor, string> = { vscode: 'VS Code', desktop: 'GitHub Desktop', other: 'another editor' };
 
@@ -16,7 +20,57 @@ type Draft = Pick<Setup, 'folder' | 'editor'> & { scheme: string };
 const draftOf = (s: Setup | null): Draft => ({ folder: s?.folder ?? '', editor: s?.editor ?? 'vscode', scheme: s?.scheme ?? '' });
 const same = (a: Draft, b: Draft) => a.folder.trim() === b.folder.trim() && a.editor === b.editor && (a.editor !== 'other' || a.scheme.trim() === b.scheme.trim());
 
-export function SetupScreen({ org }: { org?: string }) {
+/** The picked repos folder: pick it, see its name, forget it. Chrome and Edge only. */
+function FolderCheck({ login, typed }: { login: string; typed: string }) {
+  const [name, setName] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void folderHandle(login).then((h) => live && setName(h?.name ?? null));
+    return () => {
+      live = false;
+    };
+  }, [login]);
+  const pick = async () => {
+    const h = await pickFolder(login);
+    if (h) setName(h.name);
+  };
+  const forget = async () => {
+    await forgetFolder(login);
+    setName(null);
+  };
+  const end = lastSegment(typed);
+  return (
+    <div class="field folder-check">
+      {name ? (
+        <>
+          <p class="saved">Checking: <code>{name}</code> <button class="btn small quiet" type="button" onClick={forget}>Forget</button></p>
+          {end && end !== name ? <p class="invalid-msg">The folder you picked is <code>{name}</code>; the path above ends in <code>{end}</code>.</p> : null}
+        </>
+      ) : (
+        <>
+          <button class="btn outline" type="button" onClick={pick}>Let the console see which repos are cloned</button>
+          <p class="hint">Chrome and Edge only. The console only checks which folders exist; it reads nothing.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** One `git clone` per repo of the course, into the course's folder, with a Copy button. */
+function CloneAll({ org, repos, folder }: { org: string; repos: string[]; folder: string }) {
+  const [note, setNote] = useState<string | null>(null);
+  const parent = courseFolder(folder, org);
+  const text = repos.map((r) => cloneCommand(repoUrl({ org, repo: r }), parent, r)).join('\n');
+  const copy = async () => setNote((await copyText(text)) ? 'Copied' : 'Could not copy: select it below');
+  return (
+    <div class="field clone-all">
+      <div class="clone-all-h"><span class="label">Clone every repo of this course</span><button class="btn small quiet" type="button" onClick={copy}>Copy</button><span class="footnote" role="status">{note ?? ''}</span></div>
+      <pre class="cmd"><code>{text}</code></pre>
+    </div>
+  );
+}
+
+export function SetupScreen({ org, repos }: { org?: string; repos?: string[] }) {
   const env = useEnv();
   const login = env?.user.login ?? '';
   const [saved, setSaved] = useState<Setup | null>(() => yourSetup(login));
@@ -40,7 +94,7 @@ export function SetupScreen({ org }: { org?: string }) {
   return (
     <>
       <div class="page-head">
-        <div><h1>Your setup</h1><p class="lede">Where the Open button finds the course repos on your computer.</p></div>
+        <div><h1>Profile</h1><p class="lede">Where the Open button finds this course’s repos on your computer, and which editor it uses.</p></div>
       </div>
       <section class="panel section">
         <div class="setup-form">
@@ -51,6 +105,8 @@ export function SetupScreen({ org }: { org?: string }) {
             <p class="hint">{org ? <>Each course gets a folder inside it. This course’s repos go in <code>{where}</code>.</> : 'Each course gets a folder inside it, named after its organisation.'}</p>
             <p class="saved">{saved?.folder ? <>Stored: <code>{saved.folder}</code></> : 'No folder stored: Open offers to clone instead.'}</p>
           </div>
+          {canCheckFolders() ? <FolderCheck login={login} typed={draft.folder} /> : null}
+          {org && repos?.length ? <CloneAll org={org} repos={repos} folder={draft.folder} /> : null}
           <fieldset class="field">
             <legend class="label">Editor</legend>
             <div class="choices" role="radiogroup" aria-label="Editor">
@@ -74,7 +130,7 @@ export function SetupScreen({ org }: { org?: string }) {
           </div>
         </div>
       </section>
-      <p class="footnote">Kept in this browser only. Signing out forgets it.</p>
+      <p class="footnote">Kept in this browser, for your GitHub login.</p>
     </>
   );
 }
