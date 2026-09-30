@@ -55,7 +55,7 @@ export const Prop = () => <span class="prop" title="Not in the engine today">pro
 export function EditFile({ org, repo, path, branch = 'main', line }: { org: string; repo: string; path: string; branch?: string; line?: number }) {
   return (
     <a class="edit-file" href={editUrl(org, repo, path, branch, line)} target="_blank" rel="noopener">
-      Edit the file <Ext />
+      Edit the file directly <Ext />
     </a>
   );
 }

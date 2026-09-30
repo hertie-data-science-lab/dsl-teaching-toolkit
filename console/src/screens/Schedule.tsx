@@ -629,7 +629,7 @@ function View(p: ReadyProps) {
       </div>
       {file === 'loading' ? <p class="footnote" style="margin-bottom:12px">Reading schedule.yml…</p> : null}
       {file === null ? <p class="footnote" style="margin-bottom:12px">There is no schedule.yml to edit.</p> : null}
-      {sf?.error ? <p class="check-line bad" style="margin-bottom:12px"><span>schedule.yml does not parse ({sf.error}); fix it with Edit the file before editing here.</span></p> : null}
+      {sf?.error ? <p class="check-line bad" style="margin-bottom:12px"><span>schedule.yml does not parse ({sf.error}); fix it with Edit the file directly before editing here.</span></p> : null}
       <div class={`sched-layout${sheet ? '' : ' no-entry'}`}>
         <div>
           <div class="filters" role="group" aria-label="Show">

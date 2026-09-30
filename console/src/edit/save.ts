@@ -73,7 +73,7 @@ export function problemsIn(problems: Problem[] | undefined, t: Target): Problem[
 }
 
 export const CONFLICT =
-  'This file changed on GitHub since you opened it, so nothing was saved. Reload it to see the change, then make yours again; or use Edit the file.';
+  'This file changed on GitHub since you opened it, so nothing was saved. Reload it to see the change, then make yours again; or use Edit the file directly.';
 
 export interface SaveOptions {
   message: string;
