@@ -536,6 +536,40 @@ export class GitHubClient {
     return this.getOrNull<{ name: string }>(`/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`);
   }
 
+  /** A branch's head commit and its root tree, or null when the branch is absent. */
+  async getHead(owner: string, repo: string, branch: string): Promise<{ commit: string; tree: string } | null> {
+    const b = await this.getOrNull<{ commit: { sha: string; commit: { tree: { sha: string } } } }>(`/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`);
+    return b ? { commit: b.commit.sha, tree: b.commit.commit.tree.sha } : null;
+  }
+
+  // ---------------------------------------------------------------- git data (the import copy)
+
+  /** A blob's content, base64 as GitHub gives it (not cached: a blob is read once, to copy it). */
+  async readBlob(owner: string, repo: string, sha: string): Promise<string> {
+    const url = this.url(`/repos/${owner}/${repo}/git/blobs/${sha}`);
+    const res = await this.fetchFn(url, { method: 'GET', headers: this.headers(), cache: 'no-store' });
+    this.noteRateLimit(res);
+    if (!res.ok) return this.fail(res, url);
+    return ((await res.json()) as { content?: string }).content?.replace(/\n/g, '') ?? '';
+  }
+
+  async createBlob(owner: string, repo: string, base64: string): Promise<string> {
+    return (await this.send<{ sha: string }>('POST', `/repos/${owner}/${repo}/git/blobs`, { content: base64, encoding: 'base64' }))!.sha;
+  }
+
+  async createTree(owner: string, repo: string, baseTree: string, entries: { path: string; mode: string; type: 'blob'; sha: string }[]): Promise<string> {
+    return (await this.send<{ sha: string }>('POST', `/repos/${owner}/${repo}/git/trees`, { base_tree: baseTree, tree: entries }))!.sha;
+  }
+
+  async createCommit(owner: string, repo: string, args: { message: string; tree: string; parents: string[]; author: Author }): Promise<string> {
+    return (await this.send<{ sha: string }>('POST', `/repos/${owner}/${repo}/git/commits`, { ...args, committer: args.author }))!.sha;
+  }
+
+  /** Move a branch to `sha`, fast-forward only: a branch that moved meanwhile is refused (422). */
+  async updateRef(owner: string, repo: string, branch: string, sha: string): Promise<void> {
+    await this.send('PATCH', `/repos/${owner}/${repo}/git/refs/heads/${enc(branch)}`, { sha, force: false });
+  }
+
   // ---------------------------------------------------------------- student screens
 
   /**
@@ -644,4 +678,46 @@ export class GitHubClient {
 /** The commit author for a write made as `user`: their public email, or GitHub's noreply. */
 export function authorOf(user: GhUser): Author {
   return { name: user.name || user.login, email: user.email || `${user.id}+${user.login}@users.noreply.github.com` };
+}
+
+export interface CopyResult {
+  branch: string;
+  /** Files in the commit; 0 when nothing was committed. */
+  copied: number;
+  /** Why the branch got nothing, as GitHub said it; absent when it was copied. */
+  error?: string;
+}
+
+/**
+ * Copy `entries` (blobs of `from` at any ref) onto `to.branch` as ONE commit over its head,
+ * as the signed-in user: each blob read and written, then one tree, one commit and a
+ * fast-forward of the branch. Nothing is committed unless every file was written, so a
+ * failure leaves the branch as it was; `progress` hears each file.
+ */
+export async function copyFiles(
+  client: GitHubClient,
+  from: { owner: string; repo: string },
+  to: { owner: string; repo: string; branch: string },
+  entries: TreeEntry[],
+  opts: { message: string; author: Author; progress?: (done: number, of: number) => void },
+): Promise<CopyResult> {
+  const branch = to.branch;
+  if (!entries.length) return { branch, copied: 0 };
+  try {
+    const head = await client.getHead(to.owner, to.repo, branch);
+    if (!head) return { branch, copied: 0, error: `${to.repo} has no ${branch} branch.` };
+    const tree: { path: string; mode: string; type: 'blob'; sha: string }[] = [];
+    for (const [i, e] of entries.entries()) {
+      opts.progress?.(i, entries.length);
+      const sha = await client.createBlob(to.owner, to.repo, await client.readBlob(from.owner, from.repo, e.sha));
+      tree.push({ path: e.path, mode: e.mode, type: 'blob', sha });
+    }
+    opts.progress?.(entries.length, entries.length);
+    const root = await client.createTree(to.owner, to.repo, head.tree, tree);
+    const commit = await client.createCommit(to.owner, to.repo, { message: opts.message, tree: root, parents: [head.commit], author: opts.author });
+    await client.updateRef(to.owner, to.repo, branch, commit);
+    return { branch, copied: tree.length };
+  } catch (e) {
+    return { branch, copied: 0, error: e instanceof Error ? e.message : String(e) };
+  }
 }
