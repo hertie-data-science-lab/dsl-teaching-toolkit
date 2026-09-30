@@ -695,14 +695,28 @@ def _unnumbered(
 ) -> tuple[list[ConfigFault], set[str], set[str]]:
     """Decision 0020 rule 3: the plan's entries that need a number and have none, as
     `(faults for the schedule.yml digest, release labels held, assignment keys held)`.
-    Guarded: a read that fails holds nothing and files nothing this tick, and says so."""
+    Guarded: a read that fails holds nothing and files nothing this tick, and says so.
+    A release whose kind comes only from a `materials.yml` that does not parse is not
+    held either: one line says so."""
     try:
         kinds = kinds_reader(course_org)
         missing = schedule_plan.unnumbered(sched, kinds)
         faults = schedule_plan.number_faults(sched, kinds)
+        unsure = sorted(
+            {
+                r.deploy[0].course_source_repo
+                for r in sched.releases
+                if schedule_plan.kind_unknown(r, kinds)
+            }
+        )
     except Exception as exc:
         log_err(f"could not check the schedule's numbers ({type(exc).__name__})")
         return [], set(), set()
+    if unsure:
+        log(
+            f"  [numbers] {', '.join(unsure)}: materials.yml does not parse, so an entry "
+            "whose kind only it decides needs no number this tick"
+        )
     releases = {m.key for m in missing if m.block == "releases"}
     return faults, releases, {m.key for m in missing if m.block == "assignments"}
 

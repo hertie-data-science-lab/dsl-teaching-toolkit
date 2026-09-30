@@ -27,9 +27,9 @@ from .materials import (
 )
 from .schedule import label_number
 
-# A source repo -> its `materials.yml` folder aliases. The caller reads them; the plan
-# stays pure.
-Aliases = Callable[[str], Mapping[str, str]]
+# A source repo -> its `materials.yml` folder aliases (None: the file does not parse).
+# The caller reads them; the plan stays pure.
+Aliases = Callable[[str], Mapping[str, str] | None]
 
 
 def _no_aliases(_repo: str) -> Mapping[str, str]:
@@ -188,6 +188,16 @@ def needs_number(release: schedule.Release, kind: str) -> bool:
     return release.show_on_site and kind != "readings"
 
 
+def kind_unknown(release: schedule.Release, aliases: Aliases = _no_aliases) -> bool:
+    """Whether `release`'s kind is only inferred, from a repo whose `materials.yml` does
+    not parse: the kind is a guess, so no number is required of it on its strength."""
+    return (
+        not release.kind
+        and bool(release.deploy)
+        and aliases(release.deploy[0].course_source_repo) is None
+    )
+
+
 def _first_fire(release: schedule.Release) -> datetime | None:
     """The earliest moment any copy of `release` ships: its own `deploy_datetime`, else
     the entry's `event_datetime`."""
@@ -212,10 +222,13 @@ class Unnumbered:
 def unnumbered(
     sched: schedule.Schedule, aliases: Aliases = _no_aliases
 ) -> list[Unnumbered]:
-    """Every entry that needs a number and has none, releases first, in plan order."""
+    """Every entry that needs a number and has none, releases first, in plan order. A
+    release whose kind is unknown (`kind_unknown`) needs none until it is known."""
     out = []
     for r in sched.releases:
         kind, _ = entry_kind(r, aliases)
+        if kind_unknown(r, aliases):
+            continue
         if needs_number(r, kind) and own_number(r.number, r.label) is None:
             out.append(
                 Unnumbered(
@@ -248,6 +261,8 @@ def duplicate_numbers(
     groups: dict[tuple[str, int], list[str]] = {}
     for r in sched.releases:
         kind, _ = entry_kind(r, aliases)
+        if kind_unknown(r, aliases):
+            continue
         if needs_number(r, kind) and (n := own_number(r.number, r.label)):
             groups.setdefault((kind, n), []).append(r.label)
     for key, entry in sched.assignments.items():

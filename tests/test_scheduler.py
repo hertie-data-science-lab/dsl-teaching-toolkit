@@ -23,6 +23,7 @@ from dsl_course import (
     course,
     deploy,
     ghcli,
+    materials,
     notify,
     repos,
     roster,
@@ -5006,10 +5007,10 @@ def test_invitations_that_cannot_be_read_never_red_the_release(monkeypatch, caps
 # ------------------------------------------------------------ explicit numbers (0020)
 
 
-def _numbers_phase(monkeypatch, dry_run: bool):
+def _numbers_phase(monkeypatch, dry_run: bool, sched: Schedule | None = None):
     """`_release_phase` over one unnumbered lecture, one numbered lecture and one
-    unnumbered hand-out, all due, every other pass stubbed: what was fired, what the
-    schedule digest was synced with, and what the phase returned."""
+    unnumbered hand-out (or `sched`), all due, every other pass stubbed: what was fired,
+    what the schedule digest was synced with, and what the phase returned."""
     seen: dict = {}
     for name in (
         "_snapshot_passed_deadlines",
@@ -5042,7 +5043,7 @@ def _numbers_phase(monkeypatch, dry_run: bool):
     monkeypatch.setattr(scheduler, "_team_formation_phase", lambda *a, **k: (0, False))
     monkeypatch.setattr(scheduler, "marks_due", lambda *a, **k: ([], []))
     earlier = WHEN - timedelta(hours=1)
-    sched = Schedule(
+    sched = sched or Schedule(
         releases=[
             _r("guest", earlier, kind="lecture", deploy=[Deploy("cm", "lectures/g")]),
             _r(
@@ -5082,6 +5083,36 @@ def test_a_due_entry_with_no_number_is_skipped_on_the_skipped_release_ladder(
     assert faults["releases.guest"].fires == WHEN - timedelta(hours=1)
     assert faults["releases.guest"].severity(WHEN) is faults_mod.Severity.MISSED
     assert faults["assignments.project"].plain == "Give project a number."
+
+
+def test_a_materials_yml_that_does_not_parse_holds_no_inferred_entry(
+    monkeypatch, capsys
+):
+    # `week` would be aliased to readings; the file does not parse, so the kind is a
+    # guess (lecture) and no number is required on its strength. An explicit kind counts.
+    def broken(org, repo, path):
+        raise yaml.YAMLError("bad")
+
+    monkeypatch.setattr(materials, "load_yaml_config", broken)
+    materials.read.cache_clear()
+    earlier = WHEN - timedelta(hours=1)
+    sched = Schedule(
+        releases=[
+            _r("week-reading", earlier, deploy=[Deploy("cm", "week/1")]),
+            _r("guest", earlier, kind="lecture", deploy=[Deploy("cm", "week/2")]),
+        ]
+    )
+    try:
+        _rc, seen = _numbers_phase(monkeypatch, dry_run=False, sched=sched)
+    finally:
+        materials.read.cache_clear()
+    assert seen["fired"] == ["week-reading"]
+    assert [f.where for f in seen["faults"] if f.field == "number"] == [
+        "releases.guest"
+    ]
+    log = capsys.readouterr().out
+    assert "Give week-reading a number" not in log
+    assert log.count("[numbers] cm: materials.yml does not parse") == 1
 
 
 def test_the_preview_names_an_entry_with_no_number(monkeypatch):

@@ -100,15 +100,17 @@ def read(org: str, repo: str) -> Declared:
     return parse(data, where)
 
 
-def kinds_reader(org: str) -> Callable[[str], Mapping[str, str]]:
-    """Each repo's folder aliases (`kinds`), as the plan's kind inference reads them; a
-    declaration that does not parse counts as none, which its own problem reports."""
+def kinds_reader(org: str) -> Callable[[str], Mapping[str, str] | None]:
+    """Each repo's folder aliases (`kinds`), as the plan's kind inference reads them. A
+    declaration that does not parse is None: inference falls back to the built-in aliases,
+    and a caller that must not act on a guess (a number to require) can tell. Its own
+    problem reports the file."""
 
-    def read_kinds(repo: str) -> Mapping[str, str]:
+    def read_kinds(repo: str) -> Mapping[str, str] | None:
         try:
             return read(org, repo).kinds
         except Unusable:
-            return {}
+            return None
 
     return read_kinds
 
