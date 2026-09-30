@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { YamlText } from '../edit/yamlText';
-import { GitHubError, type GitHubClient } from '../github/client';
+import { GitHubError, type GitHubClient, type TreeEntry } from '../github/client';
 import { COURSE_HUB_TOPIC, REGISTRY_PATH, parseRegistry, type TokenKind } from '../model/discovery';
 import { APP_SLUG, BOT } from './model';
 import { CONFIG_REPO, COURSE_REPO, JOIN_REPO } from '../model/names';
@@ -125,7 +125,7 @@ export async function checkCohortSetUp(client: GitHubClient, courseOrg: string, 
 export async function checkFree(client: GitHubClient, org: string, repo: string, what: string): Promise<Check> {
   try {
     const r = await client.getRepo(org, repo);
-    return r ? { text: `${what} is free in the course`, ok: false, hint: `${org}/${repo} already exists. Choose another number or semester.` } : { text: `${what} is free in the course`, ok: true };
+    return r ? { text: `${what} is free in the course`, ok: false, hint: `${org}/${repo} already exists. Choose another name.` } : { text: `${what} is free in the course`, ok: true };
   } catch (e) {
     return { text: `${what} is free in the course`, ok: null, hint: `GitHub did not answer (${why(e)}).` };
   }
@@ -161,6 +161,44 @@ export async function checkTemplate(client: GitHubClient, org: string, repo: str
     };
   } catch (e) {
     return { checks: [{ text: `Assignment template ${repo} created`, ok: null, hint: `GitHub did not answer (${why(e)}).` }], config: null };
+  }
+}
+
+/** One branch of an import source, as listed. */
+export interface SourceBranch {
+  branch: string;
+  entries: TreeEntry[];
+  /** GitHub listed only part of it. */
+  truncated: boolean;
+}
+
+export interface SourceRead {
+  check: Check;
+  main: SourceBranch | null;
+  solution: SourceBranch | null;
+}
+
+/**
+ * An import source read with the signed-in user's token: its default branch's files and, when
+ * it has one, its `solution` branch's. A repo GitHub does not show this account reads as not
+ * found, which is also what a private repo of someone else looks like.
+ */
+export async function readSource(client: GitHubClient, owner: string, repo: string): Promise<SourceRead> {
+  const text = `${owner}/${repo} can be read`;
+  const none = { main: null, solution: null };
+  try {
+    const r = await client.getRepo(owner, repo);
+    if (!r) return { check: { text, ok: false, hint: 'Not found, or your account cannot read it.' }, ...none };
+    const list = async (branch: string): Promise<SourceBranch | null> => {
+      const t = await client.listTree(owner, repo, branch, true);
+      return t ? { branch, entries: t.tree.filter((e) => e.type === 'blob'), truncated: t.truncated } : null;
+    };
+    const main = await list(r.default_branch);
+    if (!main) return { check: { text, ok: false, hint: 'It has no files yet.' }, ...none };
+    const solution = r.default_branch !== 'solution' && (await client.getBranch(owner, repo, 'solution')) ? await list('solution') : null;
+    return { check: { text, ok: true }, main, solution };
+  } catch (e) {
+    return { check: { text, ok: null, hint: `GitHub did not answer (${why(e)}).` }, ...none };
   }
 }
 

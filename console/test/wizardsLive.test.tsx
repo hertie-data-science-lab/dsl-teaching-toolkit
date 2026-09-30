@@ -10,6 +10,8 @@ import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
+import { NewAssignmentScreen, S1, S2, S3, S4 } from '../src/screens/NewAssignment';
+import { signature } from '../src/wizards/model';
 import { NewCohortScreen } from '../src/screens/NewCohort';
 import { NewCourseScreen } from '../src/screens/NewCourse';
 import { INSTALL_RETURN_MS, rememberInstallReturn, takeInstallReturn } from '../src/wizards/drafts';
@@ -120,5 +122,57 @@ describe('the remembered install return', () => {
     expect(takeInstallReturn(1000)).toBeNull();
     rememberInstallReturn('#new-course-1', 1000);
     expect(takeInstallReturn(1001 + INSTALL_RETURN_MS)).toBeNull();
+  });
+});
+
+describe('New assignment: import', () => {
+  const COURSE = 'hertie-dsl-demo-course-e1234';
+  const course: Course = { org: COURSE, name: 'Deep Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [{ org: 'hertie-dsl-demo-course-f2026', term: 'f2026', termLabel: 'Fall 2026' }], meta: {} };
+  const now = Date.parse('2026-09-30T10:00:00Z');
+  const blob = (path: string) => ({ path, mode: '100644', type: 'blob', sha: `s-${path.replace(/\//g, '_')}` });
+
+  it('lists the source ticked, solutions and tests left out, then copies the ticked files once the template exists', async () => {
+    const T = 'assignment-regression';
+    let exists = false;
+    const gh = new FakeGitHub()
+      .on('GET', '/repos/prof/old-course', { name: 'old-course', default_branch: 'main' })
+      .on('GET', '/repos/prof/old-course/git/trees/main?recursive=1', { sha: 't', truncated: false, tree: ['README.md', 'data/x.csv', 'tests/test_x.py'].map(blob) })
+      .on('GET', `/repos/${COURSE}/${T}`, () => (exists ? json({ name: T }) : json({ message: 'Not Found' }, 404)))
+      .on('GET', `/repos/${COURSE}/${T}/branches/main`, { name: 'main', commit: { sha: 'h1', commit: { tree: { sha: 'tr1' } } } })
+      .on('GET', `/repos/${COURSE}/${T}/branches/solution`, { name: 'solution', commit: { sha: 'h2', commit: { tree: { sha: 'tr2' } } } })
+      .on('GET', `/repos/${COURSE}/${T}/contents/grading_config.yml?ref=solution`, fileBody('grading_config.yml', 'title: Regression\n', 'g1'))
+      .on('GET', /^\/repos\/prof\/old-course\/git\/blobs\//, { content: 'eA==', encoding: 'base64' })
+      .on('POST', `/repos/${COURSE}/${T}/git/blobs`, { sha: 'nb' })
+      .on('POST', `/repos/${COURSE}/${T}/git/trees`, { sha: 'nt' })
+      .on('POST', `/repos/${COURSE}/${T}/git/commits`, { sha: 'nc' })
+      .on('PATCH', `/repos/${COURSE}/${T}/git/refs/heads/main`, { object: { sha: 'nc' } });
+    const client = new GitHubClient({ token: () => 't', fetch: gh.fetch });
+    const env = { client, user: { login: 'a-example', id: 1, name: null, email: null, avatar_url: '' }, files: new StaticFiles(), kind: 'classic', ops: { runs: { value: [] } } } as unknown as Env;
+    const v = { name: 'Regression', start: 'repo', source_repo: 'https://github.com/prof/old-course', type: 'individual', submit_via: 'assignment_repo', formats: ['ipynb'], autograde: 'false', completion_check: 'auto', grader_pdf: false };
+    localStorage.setItem(`dsl-console:wizard:new-assignment:${COURSE}`, JSON.stringify({ v, verified: {} }));
+    const props = { course, loaded: { kind: 'absent' } as const, cohortStates: {}, files: new StaticFiles(), now };
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={1} /></EnvCtx.Provider>, root!));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    const ticks = [...root.querySelectorAll<HTMLInputElement>('input.ft-tick')].map((i) => [i.getAttribute('aria-label'), i.checked]);
+    expect(ticks).toEqual([['Include data/', true], ['Include data/x.csv', true], ['Include tests/', false], ['Include tests/test_x.py', false], ['Include README.md', true]]);
+    expect(root.textContent).toContain('2 of 3 files ticked');
+    expect(root.textContent).toContain('prof/old-course has no solution branch, so only its brief is copied.');
+
+    // The template now exists (the operation ran); every step verified: the check step copies.
+    exists = true;
+    const verified = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4) };
+    localStorage.setItem(`dsl-console:wizard:new-assignment:${COURSE}`, JSON.stringify({ v, verified, extrasSaved: T }));
+    render(null, root);
+    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={5} /></EnvCtx.Provider>, root!));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    const copy = [...root.querySelectorAll<HTMLButtonElement>('button.btn')].find((b) => b.textContent === 'Copy the files')!;
+    expect(copy).toBeTruthy();
+    await act(async () => { copy.click(); await vi.advanceTimersByTimeAsync(100); });
+    expect(root.textContent).toContain('Copied 2 files to main.');
+    expect(gh.seen.find((x) => x.method === 'POST' && x.url.endsWith('/git/trees'))!.body).toMatchObject({ base_tree: 'tr1', tree: [{ path: 'README.md' }, { path: 'data/x.csv' }] });
+    expect(root.textContent).toContain('Created. Nothing reaches students until you add it to a schedule.');
+    expect(root.textContent).toContain('Add to the Fall 2026 schedule');
   });
 });

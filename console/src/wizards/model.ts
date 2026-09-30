@@ -2,9 +2,12 @@
 // section 1), terms, which step a wizard opens at (inputs.md rule 8), the two forbidden
 // format pairs (research/06 C1, C2) and the request args each wizard sends.
 
+import { neverMaterial } from '../edit/badges';
+import { compileAll, withheldBy } from '../edit/glob';
+import type { TreeEntry } from '../github/client';
 import { termOf } from '../model/discovery';
 import { kebab } from '../model/format';
-import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
+import { DEFAULT_FORMATS, HANDLE_RE, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import type { Values } from '../tiers/types';
 
 /** The lab's bot: an owner of every course and semester org until the console app replaces it. */
@@ -73,15 +76,38 @@ export function contentTerms(existing: string[], now: number): string[] {
   return [...existing, next].filter((t, i, a) => a.indexOf(t) === i);
 }
 
-/** `assignment-<n>-<term>`, the name scaffold gives a template. */
-export function templateRepo(number: string | number | undefined, term: string): string {
-  return `assignment-${number === undefined || number === '' ? 'N' : number}-${term}`;
+/** Room left for `-<handle>` on every student copy (`scaffold._TEMPLATE_SLUG_MAX`). */
+const MAX_SLUG = 60;
+
+/**
+ * `assignment-<name>`, as `scaffold.template_repo` names a template (decision 0014): lower
+ * case, every run of anything but letters and digits one `-`, a leading word "assignment"
+ * not said twice. "" when nothing of the name is left.
+ */
+export function templateRepo(name: unknown): string {
+  let slug = String(name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  slug = slug.replace(/^assignment(-|$)/, '').slice(0, MAX_SLUG).replace(/^-+|-+$/g, '');
+  return slug ? `assignment-${slug}` : '';
 }
 
-/** The next number no template of `term` uses. */
-export function nextFreeNumber(repos: string[], term: string): number {
-  const used = repos.map((r) => new RegExp(`^assignment-(\\d+)-${term}$`).exec(r)).filter(Boolean).map((m) => Number(m![1]));
-  return used.length ? Math.max(...used) + 1 : 1;
+/** A name that carries an ordinal ("Assignment 3", "A2: trees", "3. Trees"), which the schedule adds by itself. */
+export function ordinalInName(name: unknown): boolean {
+  const t = String(name ?? '');
+  return /\b(assignment|a)[\s_-]*\d+\b/i.test(t) || /^\s*\d/.test(t);
+}
+
+export const ORDINAL_WARNING =
+  'Numbers are added automatically when an assignment joins a semester’s schedule: the third assignment becomes assignment-3, and each student’s copy assignment-3-<handle>. Keep the number in the name anyway?';
+
+/** A semester key's order: newest first (f2026 before s2026 before f2025). */
+const termRank = (term: string) => {
+  const m = /^([fswu])(\d{4})$/.exec(term);
+  return m ? Number(m[2]) * 10 + ({ s: 1, u: 2, f: 3, w: 4 } as Record<string, number>)[m[1]] : 0;
+};
+
+/** The semesters a template can be added to: the live ones, newest first. */
+export function liveSemesters<T extends { term: string }>(cohorts: T[], live: (c: T) => boolean): T[] {
+  return cohorts.filter(live).sort((a, b) => termRank(b.term) - termRank(a.term));
 }
 
 export function materialsRepo(term: string): string {
@@ -149,14 +175,13 @@ export function toggleFormat(formats: string[], f: string): string[] {
   return [...formats.filter((x) => x !== 'none'), f];
 }
 
-/** The `assignment.create` args (schemas/ops.json) for the wizard's values. */
+/** The `assignment.create` args (schemas/ops.json): the name and the template's own keys. No
+ * number and no semester (decision 0014); an import is the console's, after creation. */
 export function assignmentArgs(v: Values): Record<string, unknown> {
-  const base = { name: v.name, number: v.number === undefined ? undefined : String(v.number), semester: v.term };
-  if (v.copy_from) return { ...base, copy_from: v.copy_from };
   const group = v.type === 'group';
   const submit = v.submit_via ?? SUBMIT_VIA_DEFAULT;
   return {
-    ...base,
+    name: typeof v.name === 'string' ? v.name.trim() : v.name,
     type: group ? 'group' : 'individual',
     submit_via: submit,
     formats: ((v.formats as string[] | undefined) ?? DEFAULT_FORMATS).join(','),
@@ -167,4 +192,43 @@ export function assignmentArgs(v: Values): Record<string, unknown> {
 /** The `materials.create` args for the New materials form. */
 export function materialsArgs(v: Values): Record<string, unknown> {
   return v.copy_from ? { semester: v.term, copy_from: v.copy_from } : { semester: v.term };
+}
+
+// ------------------------------------------------------------------ New assignment: import
+
+export interface SourceRepo {
+  owner: string;
+  repo: string;
+}
+
+/** `owner/repo`, or a GitHub URL of it (any page of it, `.git` or not); null for anything else. */
+export function parseSource(text: unknown): SourceRepo | null {
+  const t = String(text ?? '').trim().replace(/^(https?:\/\/)?(www\.)?github\.com\//i, '').replace(/^git@github\.com:/i, '');
+  const [owner = '', second = ''] = t.split('/');
+  const repo = second.split(/[?#]/)[0].replace(/\.git$/, '');
+  return HANDLE_RE.test(owner) && /^[A-Za-z0-9._-]{1,100}$/.test(repo) && repo !== '.' && repo !== '..' ? { owner, repo } : null;
+}
+
+/** What goes to students on `main` never includes these: they start unticked (repos.PUBLICATION_DENYLIST). */
+export const IMPORT_UNTICKED_MAIN = ['solution', 'solutions', 'tests', 'grading_config.yml', 'grading.yml', '.env', '.env.*'];
+/** The solution branch keeps its tests and model answer; only secrets start unticked. */
+export const IMPORT_UNTICKED_SOLUTION = ['.env', '.env.*'];
+
+/**
+ * A path an import never copies, and the word the tree shows for it: never-material names;
+ * the workflows the toolkit seeds (the hand-out button, aimed at this template); and, on
+ * `solution`, grading_config.yml, which this wizard writes from its own answers.
+ */
+export function importFixed(branch: 'main' | 'solution'): (path: string) => string | null {
+  return (path) =>
+    neverMaterial(path) ? 'never copied'
+    : path === '.github/workflows' || path.startsWith('.github/workflows/') ? 'set by the toolkit'
+    : branch === 'solution' && path === 'grading_config.yml' ? 'set by this wizard'
+    : null;
+}
+
+/** The files a copy takes: every blob of the source tree that is not fixed and not left out by a line. */
+export function tickedEntries(entries: TreeEntry[], lines: string[], fixed: (path: string) => string | null): TreeEntry[] {
+  const rules = compileAll(lines);
+  return entries.filter((e) => e.type === 'blob' && !fixed(e.path) && !withheldBy(rules, e.path));
 }
