@@ -158,6 +158,53 @@ export function websiteWord(files: CourseProps['files'], org: string): string {
 /** The live public website. */
 export const websiteUrl = (org: string) => `https://${org}.github.io`;
 
+/**
+ * The public website's on/off as a switch: a flip writes `enabled` in opencourse.yml at once
+ * (seeding the file when there is none), apart from the page's Save.
+ */
+export function WebsiteSwitch(p: CourseProps) {
+  const { course } = p;
+  const env = useEnv();
+  const [save, runSave, setSave] = useSave(env);
+  const file = p.files.file(course.org, COURSE_REPO, OPENCOURSE_FILE);
+  const y = file.kind === 'ready' ? new YamlText(file.text) : null;
+  const broken = !!y?.errors.length;
+  const before = websiteOf(y && !broken ? obj(y.toJS()) : {});
+  const busy = save.kind === 'busy';
+  const flip = async (on: boolean) => {
+    const repos = (courseView(p).course?.materials ?? []).map((m) => m.repo);
+    const out = websiteFileAfter(file.kind === 'ready' ? file.text : null, before, { ...before, enabled: on, source_repo: before.source_repo || (on ? newestRepo(repos) ?? '' : '') });
+    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
+    await runSave({ owner: course.org, repo: COURSE_REPO, path: OPENCOURSE_FILE }, out.text, file.kind === 'ready' ? file.sha : null, {
+      message: `course: turn the public website ${on ? 'on' : 'off'}, from the DSL Teaching Console`, statusRepo: [course.org, COURSE_REPO],
+    });
+  };
+  const word = broken ? `${OPENCOURSE_FILE} does not parse; fix it in Manage.` : file.kind === 'loading' ? 'Not known yet.' : busy ? 'Saving…' : before.enabled ? 'On: updates daily' : 'Off';
+  return (
+    <div class="field web-switch">
+      <label class="switch">
+        <input type="checkbox" role="switch" id="cd-web" checked={before.enabled} disabled={busy || broken || file.kind === 'loading' || p.migrated === false} onChange={(e) => void flip((e.target as HTMLInputElement).checked)} />
+        <span>Public website</span>
+      </label>
+      <span class="footnote" aria-live="polite">{word}</span> <a class="textlink" href="#website">Manage</a>
+      {save.kind === 'bad' ? <CheckLine cls="bad">{save.text}</CheckLine> : null}
+    </div>
+  );
+}
+
+/** The one dsl-course.yml key the semester sites read for which files a row links (`site._link_extensions`). */
+export function LinkKindsField({ id, value, onInput }: { id: string; value: string; onInput: (v: string) => void }) {
+  return (
+    <div class="field">
+      <label for={id}>File types linked on each semester’s student site <Hint label="About linked file types">
+        Each semester has its own student site, with a row for every session. A release copies files from your materials into the semester, and the row links them. Left empty, a row links the files at the top of each released folder, and each subfolder once. With types listed, a row links only files of those types, such as notebooks, PDFs and slides, at any depth, plus one link to browse the folder. Other files are still released: students reach them through the repo. For example: ipynb, pdf, html. The public website is not affected.
+      </Hint></label>
+      <input type="text" id={id} value={value} placeholder="pdf, html" onInput={(e) => onInput((e.target as HTMLInputElement).value)} />
+      <p class="why">Released files of these types get a direct link on every semester’s student site. Separate them with commas.</p>
+    </div>
+  );
+}
+
 export function DetailsScreen(p: CourseProps) {
   const { course } = p;
   const env = useEnv();
@@ -169,7 +216,6 @@ export function DetailsScreen(p: CourseProps) {
   const before = detailsOf(meta);
   const d = draft ?? before;
   const ready = courseView(p).course?.ready ?? false;
-  const siteOn = websiteWord(p.files, course.org);
   const set = (patch: Partial<Details>) => {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
@@ -197,7 +243,7 @@ export function DetailsScreen(p: CourseProps) {
       </div>
       {file.kind === 'loading' ? <Loading what="Reading dsl-course.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no dsl-course.yml in {course.org}/.github.</CheckLine> : null}
-      {y?.errors.length ? <CheckLine cls="bad">dsl-course.yml does not parse ({y.errors[0]}); fix it with Edit the file.</CheckLine> : null}
+      {y?.errors.length ? <CheckLine cls="bad">dsl-course.yml does not parse ({y.errors[0]}); fix it with Edit the file directly.</CheckLine> : null}
       {y && !y.errors.length ? (
         <div class="panel">
           <div class="form" style="max-width:720px">
@@ -208,8 +254,8 @@ export function DetailsScreen(p: CourseProps) {
               <dl class="kv">
                 <dt>Org</dt><dd>{course.org} <span class="footnote">cannot be renamed here</span></dd>
                 <dt>Engine version</dt><dd>{String(meta.central_ref ?? 'release')} <span class="footnote">set by the lab</span></dd>
-                <dt>Public website</dt><dd>{siteOn} <a class="textlink" href="#website">Manage</a></dd>
               </dl>
+              <WebsiteSwitch {...p} />
             </div>
             <div class="form-section">
               <h3>Course admins <Hint label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, in every semester. Instructors and teaching assistants are set for each semester under Instructors, and change only that semester and the course’s materials and assignment templates.</Hint></h3>
@@ -221,11 +267,7 @@ export function DetailsScreen(p: CourseProps) {
             </div>
             <div class="form-section">
               <h3>Site links</h3>
-              <div class="field">
-                <label for="cdk">File types the student site links to</label>
-                <input type="text" id="cdk" value={d.links} placeholder="pdf, html" onInput={(e) => set({ links: (e.target as HTMLInputElement).value })} />
-                <p class="why">Released files of these types get a direct link on every semester’s student site. Separate them with commas.</p>
-              </div>
+              <LinkKindsField id="cdk" value={d.links} onInput={(links) => set({ links })} />
             </div>
             <div class="form-section">
               <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml' }} />
@@ -304,7 +346,7 @@ const validWebsite = validator(opencourseSchema);
 /** `opencourse.yml` after `after`, key by key, or why it would not be valid. */
 export function websiteFileAfter(text: string | null, before: Website, after: Website): { text: string } | { error: string } {
   const y = new YamlText(text ?? OPENCOURSE_STUB);
-  if (y.errors.length) return { error: `${OPENCOURSE_FILE} does not parse; fix it with Edit the file.` };
+  if (y.errors.length) return { error: `${OPENCOURSE_FILE} does not parse; fix it with Edit the file directly.` };
   const val = (w: Website) => ({ ...w, withhold: w.withhold.split('\n').map((l) => l.trim()).filter(Boolean) });
   const b = val(before), a = val(after);
   for (const k of Object.keys(a) as (keyof Website)[]) if (!deepEqual(b[k], a[k]) || text === null) y.assign([k], a[k] === '' ? null : a[k]);
@@ -376,7 +418,7 @@ export function WebsiteScreen(p: CourseProps) {
         <div class="actions"><OpButtons def={publishWebsite(courseScope(p), published)} /></div>
       </div>
       {file.kind === 'loading' ? <Loading what={`Reading ${OPENCOURSE_FILE}`} /> : null}
-      {y?.errors.length ? <CheckLine cls="bad">{OPENCOURSE_FILE} does not parse ({y.errors[0]}); fix it with Edit the file.</CheckLine> : null}
+      {y?.errors.length ? <CheckLine cls="bad">{OPENCOURSE_FILE} does not parse ({y.errors[0]}); fix it with Edit the file directly.</CheckLine> : null}
       <div class="grid-2">
         <section class="panel section">
           <h2>Settings</h2>
@@ -519,7 +561,7 @@ export function MaterialsScreen(p: CourseProps) {
             <datalist id="m-syl-files">{files.filter((f) => !f.includes('/')).map((f) => <option value={f} />)}</datalist>
             <p class="hint">The file the student site pins as the syllabus, at the repo’s top level.</p>
           </div>
-          {declared === null ? <CheckLine cls="bad">{MATERIALS_FILE} does not parse; fix it with Edit the file.</CheckLine> : null}
+          {declared === null ? <CheckLine cls="bad">{MATERIALS_FILE} does not parse; fix it with Edit the file directly.</CheckLine> : null}
           <SaveBar state={sylSave} onSave={() => void saveMat({ syllabus: syl ?? baseSyl, kinds: baseKinds }, runSyl, setSylSave, () => setSyl(null))} small disabled={syl === null || syl === baseSyl || declared === null} file={{ org: course.org, repo, path: MATERIALS_FILE }} />
           {scope ? (
             <>
@@ -539,8 +581,8 @@ export function MaterialsScreen(p: CourseProps) {
                     <td><code>{k.folder}/</code></td>
                     <td><span class="chip">{KIND_LABEL[k.kind] ?? k.kind}</span> <span class="footnote">{FROM_WORD[k.from]}</span></td>
                     <td><select aria-label={`Kind of ${k.folder}`} onChange={(e) => setKind(k.folder, (e.target as HTMLSelectElement).value)}>
-                      <option value="" selected={k.from !== 'declared'}>{resetLabel(k.folder)}</option>
-                      {CONTENT_KINDS.map((x) => <option value={x} selected={k.from === 'declared' && k.kind === x}>{KIND_LABEL[x] ?? x}</option>)}
+                      <option value="" selected={k.from !== 'declared' || k.kind === inferKind(k.folder).kind}>{resetLabel(k.folder)}</option>
+                      {CONTENT_KINDS.filter((x) => x !== inferKind(k.folder).kind).map((x) => <option value={x} selected={k.from === 'declared' && k.kind === x}>{KIND_LABEL[x] ?? x}</option>)}
                     </select></td>
                   </tr>
                 ))}
