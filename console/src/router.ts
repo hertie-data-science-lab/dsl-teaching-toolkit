@@ -2,7 +2,8 @@
 // a problem's fix `{screen, entry}` is the route `#<screen>-<entry>`. An assignment's tabs
 // ride after a slash (`#assignment-assignment-2/marks`); the retired `#teams-<slug>` and
 // `#marks-<slug>` screens parse to those tabs, and the hashes decisions 0012 and 0015 renamed
-// (`#cohort`, `#staff`, `#new-cohort-<n>`, `#schedule-term`; `#semester` to `#dashboard`) to
+// (`#cohort`, `#staff`, `#new-cohort-<n>`, `#schedule-term`; `#semester` to `#dashboard`) and
+// 0021 (`#setup` to `#profile`, instructor screens only: a student's Set up is still `#setup`) to
 // their new names, so old links still land. Which course or semester the page is about rides in the query string
 // (`?cohort=<org>` or `?course=<org>`: `?semester=` is taken by the student screens), so a
 // link from a fault mail can name both. `?semester=<org>` opens that semester's student screens:
@@ -24,18 +25,20 @@ const TABS: AssignmentTab[] = ['overview', 'teams', 'marks'];
 
 const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'marks', 'teams', 'materials'];
 
-/** Hashes decisions 0012 and 0015 renamed, old -> new. */
-const RENAMED: [RegExp, string][] = [
+/** Hashes decisions 0012, 0015 and 0021 renamed, old -> new; the last flag marks an instructor-only rename. */
+const RENAMED: [RegExp, string, boolean?][] = [
   [/^(cohort|semester)$/, 'dashboard'],
   [/^staff$/, 'instructors'],
   [/^new-cohort(-\d)?$/, 'new-semester$1'],
   [/^schedule-term$/, 'schedule-semester'],
+  [/^setup$/, 'profile', true],
 ];
 
-export function parseHash(hash: string): Route {
+/** The route a hash names; `student` when it is read by a semester's student screens. */
+export function parseHash(hash: string, student = false): Route {
   let r = decodeURIComponent(hash.replace(/^#/, ''));
   if (!r) return { screen: '' };
-  for (const [re, to] of RENAMED) if (re.test(r)) r = r.replace(re, to);
+  for (const [re, to, instructorOnly] of RENAMED) if (!(student && instructorOnly) && re.test(r)) r = r.replace(re, to);
   if (r === 'teams') return { screen: 'assignments' };
   for (const s of ENTRY_SCREENS) {
     if (!r.startsWith(`${s}-`)) continue;
@@ -56,9 +59,9 @@ export function hashOf(r: Route): string {
 }
 
 /** The hash to write instead of `hash` (an old Teams, Marks or renamed link), or null when it is already canonical. */
-export function movedHash(hash: string): string | null {
+export function movedHash(hash: string, student = false): string | null {
   if (!hash || hash === '#') return null;
-  const canonical = hashOf(parseHash(hash));
+  const canonical = hashOf(parseHash(hash, student));
   return decodeURIComponent(hash) === canonical ? null : canonical;
 }
 
@@ -146,8 +149,12 @@ export interface Context {
   cohort?: CohortRef;
 }
 
-/** The course and cohort a URL is about, falling back to the newest semester of the first writable course. */
+/**
+ * The course and cohort a URL is about, falling back to the newest semester of the first
+ * writable course. Home (All courses) is about none, whatever the query names.
+ */
 export function resolveContext(courses: Course[], sel: Selection, route: Route): Context {
+  if (route.screen === 'home') return {};
   if (sel.cohort) {
     for (const c of courses) {
       const k = c.cohorts.find((x) => x.org === sel.cohort);
@@ -156,7 +163,7 @@ export function resolveContext(courses: Course[], sel: Selection, route: Route):
   }
   const byCourse = sel.course ? courses.find((c) => c.org === sel.course) : undefined;
   if (byCourse) return { course: byCourse, cohort: route.screen in COHORT_SCREENS ? byCourse.cohorts[0] : undefined };
-  if (route.screen === 'home' || wizardOf(route.screen)?.name === 'new-course') return {};
+  if (wizardOf(route.screen)?.name === 'new-course') return {};
   const first = courses.find((c) => c.write && c.cohorts.length) ?? courses.find((c) => c.cohorts.length) ?? courses[0];
   return first ? { course: first, cohort: first.cohorts[0] } : {};
 }

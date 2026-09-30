@@ -247,6 +247,9 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
 
 // --------------------------------------------------------------------------- S0
 
+/** The line under the sign-in button (decision 0021 rule 2). */
+const REACH_LINE = 'The console can see and change only what your GitHub account can.';
+
 export function SignInScreen({ auth, onSignedIn }: { auth: ConsoleAuth; onSignedIn: (u: GhUser) => void }) {
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState<'token' | 'app' | null>(null);
@@ -288,7 +291,7 @@ export function SignInScreen({ auth, onSignedIn }: { auth: ConsoleAuth; onSigned
   const problem = error ? <div class="invalid-msg"><span /><span>{error}</span></div> : null;
   return (
     <div class="signin">
-      <div class="page-head" style="margin-bottom:0"><div><h1>Sign in to the DSL Teaching Console</h1><p class="lede">Sign in with GitHub. The console can see and change only what your GitHub account can.</p></div></div>
+      <div class="page-head" style="margin-bottom:0"><div><h1>Sign in to the DSL Teaching Console</h1><p class="lede">Where instructors run their courses and semesters, and students find their materials, assignments and marks. Everything lives on GitHub; the console is the one place to work it from.</p></div></div>
       {who ? (
         <section class="panel section">
           <div class="who-card"><img src={who.avatar_url} alt="" /><div><b>{who.name || who.login}</b><div class="footnote">Signed in as {who.login}</div></div></div>
@@ -299,16 +302,17 @@ export function SignInScreen({ auth, onSignedIn }: { auth: ConsoleAuth; onSigned
         <section class="panel section">
           {problem}
           <div class="actions"><button class="btn" type="button" onClick={withGitHub} disabled={busy !== null}>{busy === 'app' ? 'Going to GitHub…' : 'Sign in with GitHub'}</button></div>
-          <p class="footnote">You approve the lab’s GitHub App on github.com once; the sign-in lasts until you close this tab.</p>
+          <p class="footnote">{REACH_LINE}</p>
           <details class="fold">
             <summary>Use a token instead</summary>
-            {tokenForm}
+            <div class="fold-body">{tokenForm}</div>
           </details>
         </section>
       ) : (
         <section class="panel section">
           {problem}
           {tokenForm}
+          <p class="footnote">{REACH_LINE}</p>
         </section>
       )}
     </div>
