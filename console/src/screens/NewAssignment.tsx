@@ -133,7 +133,7 @@ export function copySentences(results: CopyResult[]): { ok: string[]; bad: strin
   const files = (n: number) => `${n} file${n === 1 ? '' : 's'}`;
   return {
     ok: results.filter((r) => !r.error).map((r) => (r.copied ? `Copied ${files(r.copied)} to ${r.branch}.` : `Nothing to copy to ${r.branch}.`)),
-    bad: results.filter((r) => r.error).map((r) => `Not copied to ${r.branch}: ${r.error}`),
+    bad: results.filter((r) => r.error).map((r) => `Not copied to ${r.branch}. ${r.error}`),
   };
 }
 

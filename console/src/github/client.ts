@@ -684,8 +684,17 @@ export interface CopyResult {
   branch: string;
   /** Files in the commit; 0 when nothing was committed. */
   copied: number;
-  /** Why the branch got nothing, as GitHub said it; absent when it was copied. */
+  /** Why the branch got nothing, in sentences; absent when it was copied. */
   error?: string;
+}
+
+/** Why a copy failed, as plain sentences that each end with a full stop. */
+export function copyError(e: unknown): string {
+  if (e instanceof GitHubError && e.status === 404) return 'GitHub found no such file or repo. The console may not be able to read the source or write to the template.';
+  if (e instanceof GitHubError && e.status === 403) return 'GitHub refused the copy. Your account may lack access to the source or the template.';
+  if (e instanceof GitHubError && e.status === 422) return 'The branch moved during the copy. Nothing was added to it.';
+  const t = (e instanceof Error ? e.message : String(e)).trim();
+  return /[.!?]$/.test(t) ? t : `${t}.`;
 }
 
 /**
@@ -718,6 +727,6 @@ export async function copyFiles(
     await client.updateRef(to.owner, to.repo, branch, commit);
     return { branch, copied: tree.length };
   } catch (e) {
-    return { branch, copied: 0, error: e instanceof Error ? e.message : String(e) };
+    return { branch, copied: 0, error: copyError(e) };
   }
 }

@@ -26,7 +26,7 @@ import {
 } from '../src/wizards/model';
 import { allOk, checkOrg, checkTemplate, readSource } from '../src/wizards/verify';
 import { saveDraft } from '../src/wizards/drafts';
-import { copyFiles, type TreeEntry } from '../src/github/client';
+import { GitHubError, copyError, copyFiles, type TreeEntry } from '../src/github/client';
 import { OrgSteps } from '../src/wizards/Wizard';
 import { installReturn, wizardOf } from '../src/router';
 import example from './fixtures/status.example.json';
@@ -528,11 +528,19 @@ describe('New assignment: import from a repo', () => {
       .on('GET', /^\/repos\/a\/b\/git\/blobs\//, () => ({ status: 403, body: { message: 'Resource not accessible by integration' } }));
     const r = await copyFiles(client(gh), { owner: 'a', repo: 'b' }, { owner: COURSE_ORG, repo: 't', branch: 'solution' }, [blob('x.py')], { message: 'm', author: { name: 'A', email: 'a@x' } });
     expect(r.copied).toBe(0);
-    expect(r.error).toBeTruthy();
+    expect(r.error).toBe('GitHub refused the copy. Your account may lack access to the source or the template.');
     expect(gh.seen.some((x) => x.method === 'POST' || x.method === 'PATCH')).toBe(false);
     const said = copySentences([{ branch: 'main', copied: 3 }, r]);
     expect(said.ok).toEqual(['Copied 3 files to main.']);
-    expect(said.bad[0]).toMatch(/^Not copied to solution: /);
+    expect(said.bad).toEqual(['Not copied to solution. GitHub refused the copy. Your account may lack access to the source or the template.']);
     expect((await copyFiles(client(gh), { owner: 'a', repo: 'b' }, { owner: COURSE_ORG, repo: 'gone', branch: 'main' }, [blob('x')], { message: 'm', author: { name: 'A', email: 'a@x' } })).error).toBe('gone has no main branch.');
+  });
+
+  it('says why a copy failed in plain sentences, each with a full stop', () => {
+    const e = (status: number, m: string) => new GitHubError(status, m, 'u');
+    expect(copyError(e(404, 'Not Found'))).toBe('GitHub found no such file or repo. The console may not be able to read the source or write to the template.');
+    expect(copyError(e(422, 'Update is not a fast forward'))).toBe('The branch moved during the copy. Nothing was added to it.');
+    expect(copyError(e(500, 'Server Error'))).toBe('Server Error.');
+    expect(copyError(new Error('Failed to fetch.'))).toBe('Failed to fetch.');
   });
 });
