@@ -343,7 +343,8 @@ describe('S2 course and S17 template', () => {
     // C1-C3 are done; the template's problem is what holds the course back.
     expect(t).toContain('Not ready: a problem below needs fixing.');
     expect(t).not.toMatch(/\b0 (setup steps|problems)/);
-    expect(t).toContain('Setup steps are things still to do. Problems are things that broke.');
+    expect(t).toContain('Setup steps are the one-time things a course needs. To-dos are work started but not finished.');
+    expect(t).toContain('Unfinished work is a to-do on the left, not a problem.');
     expect(t).toContain('Students get only what a semester releases or hands out');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).toContain('assignment-3-f2026');
@@ -367,6 +368,50 @@ describe('S2 course and S17 template', () => {
     templates: [],
     ready: false,
   } as typeof base;
+  it('puts the verdict under the page note with a tick or a red cross, not in the page head', () => {
+    const out = html(<CourseScreen {...cp} />);
+    expect(out).toContain('<p class="verdict bad"><svg');
+    expect(out).toContain('<span>Not ready: a problem below needs fixing.</span></p>');
+    expect(out).not.toContain('class="lede"');
+    expect(out.indexOf('class="page-note"')).toBeLessThan(out.indexOf('class="verdict'));
+    const fine: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, ready: true } }, sha: 's', stale: [] };
+    const ok = html(<CourseScreen {...cp} loaded={fine} />);
+    expect(ok).toContain('<p class="verdict ok"><svg');
+    expect(ok).toContain('<span>Ready for a new semester.</span>');
+  });
+  it('lists the to-dos under Setup & To do, each with where it is done', () => {
+    const out = html(<CourseScreen {...cp} />);
+    expect(out).toContain('Setup &amp; To do');
+    expect(out).toContain('<h3 class="todo-head">To do</h3>');
+    expect(out).toContain('<span class="slug">course-materials-f2026</span> The session list has not been generated yet. <a class="textlink" href="#materials-course-materials-f2026">Open settings</a>');
+    const none: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [] } }, sha: 's', stale: [] };
+    expect(text(<CourseScreen {...cp} loaded={none} />)).toContain('Nothing to do.');
+    const tpl: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.' }] } }, sha: 's', stale: [] };
+    expect(html(<CourseScreen {...cp} loaded={tpl} />)).toContain('href="#template-a">Open settings</a>');
+  });
+  it('shows every course fact in Course details, the institution’s in grey', () => {
+    const t = text(<CourseScreen {...cp} />);
+    expect(t).toContain('Description Not set');
+    expect(t).toMatch(/Contact \S+@\S+, from the institution/);
+    expect(t).toContain(', from the institution');
+    expect(t).toContain('Public website Off. Manage');
+    expect(t).toContain('The course’s code in the catalogue, as students know it.');
+    expect(t).toContain('A semester’s instructors and TAs are set on that semester’s Instructors page.');
+    expect(t).toContain('This course’s default. Each assignment can set its own.');
+    const own = { ...course, meta: { ...course.meta, course_description: 'Learning from data.', contact: 'ml@example.org', licence: 'CC BY 4.0' } };
+    const mine = text(<CourseScreen {...cp} course={own} />);
+    expect(mine).toContain('Description Learning from data.');
+    expect(mine).toContain('Contact ml@example.org');
+    expect(mine).toContain('Licence CC BY 4.0');
+    expect(mine).not.toContain(', from the institution');
+  });
+  it('links the live public website once it is published', () => {
+    expect(html(<CourseScreen {...cp} />)).not.toContain(`href="https://${COURSE_ORG}.github.io"`);
+    const pub: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, stages: { ...base.stages, C6: 'done' } } }, sha: 's', stale: [] };
+    const out = html(<CourseScreen {...cp} loaded={pub} />);
+    expect(out).toContain(`href="https://${COURSE_ORG}.github.io"`);
+    expect(text(<CourseScreen {...cp} loaded={pub} />)).toContain('Optional: an open version of your materials for anyone, updated daily.');
+  });
   it('renders the setup checklist from stage_why: ticks, the why and one link each', () => {
     const out = html(<SetupList course={withWhy} />);
     expect((out.match(/class="done"/g) ?? []).length).toBe(2);

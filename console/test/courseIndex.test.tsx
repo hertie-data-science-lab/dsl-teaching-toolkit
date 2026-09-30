@@ -9,10 +9,10 @@ import type { Course } from '../src/model/discovery';
 import { StaticFiles, type Files } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
-import { CourseScreen } from '../src/screens/Course';
+import { CourseScreen, materialsWhys } from '../src/screens/Course';
 import { HomeScreen } from '../src/screens/Home';
 import { MaterialsScreen, WebsiteScreen, folderKinds, resetLabel, writeHolds } from '../src/screens/CourseEdit';
-import { MaterialsIndexScreen, TemplatesIndexScreen, materialsSentence, otherRepos } from '../src/screens/CourseIndex';
+import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { Sidenav } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
@@ -98,9 +98,21 @@ describe('index screens', () => {
     expect(t).not.toContain('old-thing');
     expect(render(<MaterialsIndexScreen {...cp()} />)).toContain(`href="#materials-${MAT}"`);
   });
-  it('says why a materials repo is not ready', () => {
-    expect(materialsSentence('todo')).toBe('Not ready yet: the syllabus is not written.');
-    expect(materialsSentence('ready')).toBe('Syllabus written.');
+  it('says why a materials repo is not ready: its unmet required checks, one per line', () => {
+    const m = STATUS.course!.materials[0];
+    // Ready: no list, though a non-required line is still open.
+    expect(materialsWhys(m)).toEqual([]);
+    const checks = m.checks!.map((c) => (c.id === 'syllabus' || c.id === 'all_mapped' ? { ...c, done: false, why: `${c.id} is missing.` } : c));
+    const todo = { ...m, state: 'todo', checks };
+    expect(materialsWhys(todo)).toEqual(['syllabus is missing.', 'all_mapped is missing.']);
+    const st: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...STATUS.course!, materials: [todo] } }, sha: 's', stale: [] };
+    for (const v of [<MaterialsIndexScreen {...cp({ loaded: st })} />, <CourseScreen {...cp({ loaded: st })} />])
+      expect(render(v)).toContain('<ul class="r-sub unmet"><li>syllabus is missing.</li><li>all_mapped is missing.</li></ul>');
+    // The ready fixture shows the chip and no sentence.
+    const out = render(<MaterialsIndexScreen {...cp()} />);
+    expect(out).toContain('<span class="chip ok">Ready</span>');
+    expect(out).not.toContain('r-sub unmet');
+    expect(out).not.toContain('Syllabus written');
   });
   it('shows a template still being written neutrally, not as a problem', () => {
     const st: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...STATUS.course!, templates: [{ repo: 'assignment-regression', slug: 'assignment-regression', state: 'todo' }] } }, sha: 's', stale: [] };
@@ -132,6 +144,14 @@ describe('index screens', () => {
 });
 
 describe('materials settings file tree', () => {
+  it('heads the settings with the full checklist, ticks included', () => {
+    const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
+    expect(out).toContain('<h2>Checklist</h2><span class="chip ok">Ready</span>');
+    expect((out.match(/<li class="done">/g) ?? []).length).toBe(4);
+    expect(out).toContain('Session list generated<span class="sr">: To do</span>');
+    expect(out).toContain('<span class="s-why">The session list has not been generated yet.</span>');
+    expect((out.match(/<span class="s-need">required<\/span>/g) ?? []).length).toBe(3);
+  });
   it('badges every file, flags the rule that matches nothing and links each file to its editor', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
     const t = text(<MaterialsScreen {...cp({ entry: MAT })} />);

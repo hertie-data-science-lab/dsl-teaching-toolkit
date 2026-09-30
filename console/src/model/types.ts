@@ -35,9 +35,36 @@ export interface CourseStatus {
   stage_why?: Record<string, string>;
   /** C1-C3 done and no course problem: a new semester can start (decision 0019). */
   ready: boolean;
-  materials: { repo: string; state: string }[];
+  materials: MaterialsState[];
   templates: { repo: string; slug: string; state: string }[];
   semesters: string[];
+  /** Work started and not finished (decision 0022): never a problem. */
+  todo?: Todo[];
+}
+
+/** One line of a materials repo's checklist; `blocks` lines are what `ready` needs. */
+export interface MaterialsCheck {
+  id: string;
+  label: string;
+  done: boolean;
+  /** What is missing, one sentence; null once done. */
+  why?: string | null;
+  blocks: boolean;
+}
+
+export interface MaterialsState {
+  repo: string;
+  state: string;
+  checks?: MaterialsCheck[];
+}
+
+export interface Todo {
+  id: string;
+  kind: 'materials' | 'template';
+  repo: string;
+  text: string;
+  screen?: string;
+  entry?: string;
 }
 
 export interface SemesterStatus {
