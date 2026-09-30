@@ -75,12 +75,14 @@ function CardRow({ c }: { c: Card }) {
   );
 }
 
-/** A catalogue row the person has no role in: greyed, and not a link. */
-function OffRow({ name, sub }: { name: string; sub?: string }) {
+const NOT_MINE = 'Not one of your courses';
+
+/** A catalogue row the person has no role in: greyed, and not a link. `quiet` keeps its sub-line for screen readers only. */
+function OffRow({ name, quiet = false }: { name: string; quiet?: boolean }) {
   return (
     <li>
       <div class="cohort-card ro off" aria-disabled="true">
-        <span class="cc-name">{name}{sub ? <span>{sub}</span> : null}</span>
+        <span class="cc-name">{name}<span class={quiet ? 'sr-only' : undefined}>{NOT_MINE}</span></span>
         <span class="cc-week" />
         <span />
         <span class="cc-next" />
@@ -91,13 +93,17 @@ function OffRow({ name, sub }: { name: string; sub?: string }) {
 
 type CatalogueState = { list: CatalogueCourse[]; state: 'off' | 'loading' | 'ready' | 'failed' };
 
-/** The catalogue, read after the estate; 'off' with no one signed in (a render test). */
+/** The catalogue, read after the estate for a person with a course; 'off' otherwise, and with no one signed in (a render test). */
 function useCatalogue(courses: Course[]): CatalogueState {
-  const client = useEnv()?.client;
+  const env = useEnv();
+  const client = courses.length ? env?.client : undefined;
   const [st, setSt] = useState<CatalogueState>({ list: [], state: client ? 'loading' : 'off' });
   const key = courses.map((c) => c.org).join(' ');
   useEffect(() => {
-    if (!client) return;
+    if (!client) {
+      setSt({ list: [], state: 'off' });
+      return;
+    }
     let live = true;
     setSt({ list: [], state: 'loading' });
     loadCatalogue(client, courses, (list) => live && setSt({ list, state: 'loading' }))
@@ -253,7 +259,8 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
   // The person's courses by what needs them (their running semesters' problems), then the rest by name.
   const need = (c: Course) => cards.filter((k) => !k.past && c.cohorts.some((h) => h.org === k.key)).reduce((n, k) => n + Math.max(k.urgency, 0), 0);
   const mine = courses.map((c) => ({ c, n: need(c) })).sort((a, b) => b.n - a.n || a.c.name.localeCompare(b.c.name));
-  const others = only ? [] : catalogue.list.filter((c) => !c.mine).sort((a, b) => a.name.localeCompare(b.name));
+  const foreign = catalogue.list.filter((c) => !c.mine);
+  const others = only ? [] : foreign.sort((a, b) => a.name.localeCompare(b.name));
   const othersNow = others
     .flatMap((c) => c.semesters.filter((s) => runningNow(s, now)).map((s) => `${c.name}, ${s.termLabel}`))
     .sort((a, b) => a.localeCompare(b));
@@ -267,7 +274,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
       <div class="page-head">
         <div><h1>All courses <Hint doc="01-new-course-org.md">A course holds your materials and assignment templates for every semester; each semester runs in its own org, which students join. The console offers only what your GitHub account can do.</Hint></h1><p class="lede">Every course the lab runs; yours in colour, ordered by what needs your attention</p></div>
         <div class="actions">
-          <label class="check my-only"><input type="checkbox" checked={only} onChange={flipOnly} /><span>My courses</span></label>
+          {foreign.length ? <label class="check my-only"><input type="checkbox" checked={only} onChange={flipOnly} /><span>My courses</span></label> : null}
           <a class="btn" href="#new-course-1">New course</a>
         </div>
       </div>
@@ -282,16 +289,16 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
               {mine.map(({ c }) => (
                 <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{courseSub(c, user)}</span></span><span class="cc-week" /><span /><span class="cc-next">Open the course</span></a></li>
               ))}
-              {others.map((c) => <OffRow name={c.name} sub="Not one of your courses" />)}
+              {others.map((c) => <OffRow name={c.name} />)}
             </ul>
-            {catalogue.state === 'loading' ? <p class="footnote">Reading the catalogue…</p> : catalogue.state === 'failed' ? <p class="footnote">The catalogue could not be read.</p> : null}
+            {catalogue.state === 'loading' && !only ? <p class="footnote">Reading the catalogue…</p> : catalogue.state === 'failed' ? <p class="footnote">The catalogue could not be read.</p> : null}
           </section>
           <section class="section" aria-labelledby="h-live">
             <h2 id="h-live">This semester</h2>
             {live.length || othersNow.length ? (
               <ul class="cohort-list">
                 {live.map((c) => <CardRow c={c} />)}
-                {othersNow.map((name) => <OffRow name={name} />)}
+                {othersNow.map((name) => <OffRow name={name} quiet />)}
               </ul>
             ) : (
               <p class="footnote">No semester is running.</p>

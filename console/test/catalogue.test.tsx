@@ -29,10 +29,18 @@ function catalogueFake(orgs: string | null = ORGS) {
   if (orgs !== null) f.on('GET', ORGS_URL, fileBody('orgs.yml', orgs));
   return f
     .on('GET', `/repos/${NLP}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Natural Language Processing\ncourse_code: E1282\n'))
-    .on('GET', `/repos/${NLP}/.github/contents/semesters.yml`, fileBody('semesters.yml', 'semesters:\n- hertie-nlp-f2025\n- hertie-nlp-f2026\n- hertie-nlp-s2027\n'))
+    .on('GET', `/repos/${NLP}/.github/contents/semesters.yml`, fileBody('semesters.yml', 'semesters:\n- hertie-nlp-f2025\n- hertie-nlp-f2026\n- hertie-nlp-s2027\n- hertie-nlp-u2026\n- hertie-nlp-w2026\n- hertie-nlp-s2026\n- hertie-nlp-f2024\n'))
     .on('GET', '/repos/hertie-nlp-f2025/.github', { name: '.github', archived: true })
     .on('GET', '/repos/hertie-nlp-f2026/.github', { name: '.github', archived: false })
     .on('GET', '/repos/hertie-nlp-f2026/.github/contents/.system/student-status.json', fileBody('student-status.json', JSON.stringify({ archive_datetime: '2027-01-31T00:00:00Z' })))
+    // Its .github refused (403) or failed (500): kept, but not counted as running.
+    .on('GET', '/repos/hertie-nlp-u2026/.github', () => json({ message: 'Forbidden' }, 403))
+    .on('GET', '/repos/hertie-nlp-w2026/.github', () => json({ message: 'Server Error' }, 500))
+    // Running, but its student status is not JSON / carries a non-string date: no end.
+    .on('GET', '/repos/hertie-nlp-s2026/.github', { name: '.github', archived: false })
+    .on('GET', '/repos/hertie-nlp-s2026/.github/contents/.system/student-status.json', fileBody('student-status.json', '{ not json'))
+    .on('GET', '/repos/hertie-nlp-f2024/.github', { name: '.github', archived: false })
+    .on('GET', '/repos/hertie-nlp-f2024/.github/contents/.system/student-status.json', fileBody('student-status.json', JSON.stringify({ archive_datetime: 20250131, term_label: 'Fall 2024' })))
     .on('GET', `/repos/${BROKEN}/.github/contents/dsl-course.yml`, () => json({ message: 'Server Error' }, 500));
   // hertie-nlp-s2027 has no .github yet: it is being set up, so it is not in the catalogue.
 }
@@ -64,6 +72,10 @@ describe('loading the catalogue', () => {
       semesters: [
         { org: 'hertie-nlp-f2025', termLabel: 'Fall 2025', archived: true },
         { org: 'hertie-nlp-f2026', termLabel: 'Fall 2026', archived: false, end: '2027-01-31T00:00:00Z' },
+        { org: 'hertie-nlp-u2026', termLabel: 'Summer 2026' },
+        { org: 'hertie-nlp-w2026', termLabel: 'Winter 2026' },
+        { org: 'hertie-nlp-s2026', termLabel: 'Spring 2026', archived: false },
+        { org: 'hertie-nlp-f2024', termLabel: 'Fall 2024', archived: false },
       ],
     });
     expect(byOrg[BROKEN]).toEqual({ org: BROKEN, name: BROKEN, code: '', semesters: [], mine: false });
@@ -71,6 +83,32 @@ describe('loading the catalogue', () => {
     expect(seen).toEqual([1, 2, 3]);
     // The person's own course is not read again (orgs.yml's case differs from GitHub's).
     expect(f.seen.some((r) => r.url.toLowerCase().includes(`/repos/${MINE}/`))).toBe(false);
+  });
+
+  it('keeps a course’s name when its semester list cannot be read', async () => {
+    const f = catalogueFake();
+    // The fake's first matching route wins, so the failing read goes in front of it.
+    const fetch = (u: string, i?: RequestInit) => (u.endsWith(`/repos/${NLP}/.github/contents/semesters.yml`) ? Promise.resolve(json({ message: 'Server Error' }, 500)) : f.fetch(u, i));
+    const list = await loadCatalogue(new GitHubClient({ token: () => 't', fetch }), [course]);
+    expect(list.find((c) => c.org === NLP)).toEqual({ org: NLP, name: 'Natural Language Processing', code: 'E1282', semesters: [], mine: false });
+  });
+
+  it('keeps at most six reads in flight', async () => {
+    const f = catalogueFake();
+    let active = 0, most = 0;
+    const slow = async (u: string, i?: RequestInit) => {
+      active++;
+      most = Math.max(most, active);
+      await new Promise((r) => setTimeout(r, 1));
+      try {
+        return await f.fetch(u, i);
+      } finally {
+        active--;
+      }
+    };
+    await loadCatalogue(new GitHubClient({ token: () => 't', fetch: slow }), [course]);
+    expect(most).toBeLessThanOrEqual(6);
+    expect(most).toBeGreaterThan(1);
   });
 
   it('reads each org once per page load', async () => {
@@ -151,18 +189,23 @@ describe('All courses', () => {
     }
     expect(courses.textContent).toContain('Not one of your courses');
     const now = section(h, 'h-live');
-    expect(now.querySelector('.cohort-card.off')?.textContent).toBe('Natural Language Processing, Fall 2026');
+    const off = [...now.querySelectorAll('.cohort-card.off')];
+    expect(off.map((o) => o.querySelector('.cc-name')?.firstChild?.textContent)).toEqual(['Natural Language Processing, Fall 2024', 'Natural Language Processing, Fall 2026', 'Natural Language Processing, Spring 2026']);
+    // The greyed semester says whose it is to a screen reader.
+    expect(off[0].querySelector('.sr-only')?.textContent).toBe('Not one of your courses');
     expect(now.textContent).not.toContain('Fall 2025');
+    expect(now.textContent).not.toContain('Summer 2026');
   });
 
   it('hides every greyed row under My courses, and remembers it for this login', async () => {
     const h = mount(catalogueFake());
     await flush();
-    expect(greyed(h).length).toBe(3);
+    expect(greyed(h).length).toBe(5);
     const box = h.querySelector<HTMLInputElement>('.my-only input')!;
     expect(box.checked).toBe(false);
     await act(async () => box.click());
     expect(greyed(h)).toEqual([]);
+    expect(h.textContent).not.toContain('Reading the catalogue');
     expect(h.querySelector('a.cohort-card')).not.toBeNull();
     expect(myCoursesOnly(user.login)).toBe(true);
     render(null, h);
@@ -170,6 +213,18 @@ describe('All courses', () => {
     await flush();
     expect(again.querySelector<HTMLInputElement>('.my-only input')!.checked).toBe(true);
     expect(greyed(again)).toEqual([]);
+  });
+
+  it('shows no My courses switch while every course is yours, and reads nothing for a person with no course', async () => {
+    const h = mount(catalogueFake('course_orgs:\n  - hertie-dsl-demo-course-e1234\n'));
+    await flush();
+    expect(h.querySelector('.my-only')).toBeNull();
+    render(null, h);
+    const f = catalogueFake();
+    const env = { client: client(f), user } as unknown as Env;
+    act(() => render(<EnvCtx.Provider value={env}><HomeScreen courses={[]} semesters={[]} cohortStates={{}} now={NOW} user={user} /></EnvCtx.Provider>, h));
+    await flush();
+    expect(f.seen).toEqual([]);
   });
 
   it('says so when the catalogue cannot be read, and still shows the person’s courses', async () => {
