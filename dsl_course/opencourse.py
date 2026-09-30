@@ -38,7 +38,8 @@ DEFAULT_READINGS_MODE = READINGS_MODES[0]
 # names exact folders.
 DEFAULT_WITHHOLD = (
     f"{SYSTEM_DIR}/",
-    "*[Ss]olution*",
+    "[Ss]olution*",
+    "*[-_.][Ss]olution*",
     "*[Ee]xam",
     "*[Ee]xams",
     "*[Ee]xam[-_.]*",
@@ -126,6 +127,6 @@ def seed_text(oc: OpenCourse | None = None) -> str:
         f"readings_mode: {oc.readings_mode}   # reading-list, actual-readings or none\n"
         f"include_lectures: {str(oc.include_lectures).lower()}   # publish the repo's files\n"
         "# Paths kept off the website, as in .releaseignore. A course whose website is\n"
-        "# off starts with the system folder kept off, and anything whose name contains\n"
-        "# solution, exam, grade, marks or private:\n" + withhold
+        "# off starts with the system folder kept off, and anything whose name has the\n"
+        "# word solution, exam, grade, marks or private in it:\n" + withhold
     )

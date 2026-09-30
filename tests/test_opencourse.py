@@ -27,10 +27,11 @@ def test_the_seeded_file_is_instructor_owned_off_and_parses():
 def test_the_seed_withholds_the_system_folder_and_answers_by_default():
     text = opencourse.seed_text()
     assert (
-        "# solution, exam, grade, marks or private:\n"
+        "# word solution, exam, grade, marks or private in it:\n"
         "withhold:\n"
         "- .system/\n"
-        "- '*[Ss]olution*'\n"
+        "- '[Ss]olution*'\n"
+        "- '*[-_.][Ss]olution*'\n"
         "- '*[Ee]xam'\n"
         "- '*[Ee]xams'\n"
         "- '*[Ee]xam[-_.]*'\n"
@@ -53,6 +54,7 @@ def test_the_default_withhold_list_keeps_answers_off_at_any_depth(tmp_path):
         ".system/MAINTAINING.md",
         "labs/01/lab1_solution.ipynb",
         "labs/02/solutions/a.py",
+        "solutions/a.py",
         "exams/2025/paper.pdf",
         "lectures/03/midterm_exam.pdf",
         "grades/marks.csv",
@@ -68,6 +70,8 @@ def test_the_default_withhold_list_keeps_answers_off_at_any_depth(tmp_path):
         "benchmarks/run.py",
         "notes/remarks.md",
         "lectures/03/example.py",
+        "lectures/04/image-resolution.ipynb",
+        "conflict-resolution/notes.md",
     )
     for rel in kept + public:
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)

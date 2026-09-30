@@ -129,8 +129,8 @@ re-include, `/` to anchor or to mean a directory, `#` comments.
 It applies to every copy out of the repo it sits in: the semester release, the public
 website and the assignment handout. The public website can withhold more on top, in the
 course's `.github/opencourse.yml` (`withhold:`, the same syntax). A course whose website is
-off starts with the system folder kept off, and anything whose name contains solution, exam,
-grade, marks or private.
+off starts with the system folder kept off, and anything whose name has the word solution,
+exam, grade, marks or private in it.
 
 What that means in practice:
 
