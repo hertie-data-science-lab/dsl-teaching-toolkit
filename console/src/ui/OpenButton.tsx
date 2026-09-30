@@ -1,7 +1,9 @@
 // The Open split button (decision 0017), modelled on GitHub's Code button: the main part
 // does the last choice made (remembered per login in this browser), the arrow opens every
 // choice: on GitHub, on github.dev, in VS Code, in GitHub Desktop, in the editor Your setup
-// names, or the clone command to copy. A menu button in the WAI-ARIA sense: the arrow opens
+// names, or the clone command to copy. Where the folder check can tell (decision 0023), it
+// offers Open or Clone, whichever applies; it renders with both and narrows once it knows,
+// and the arrow's click asks for read permission after a reload. A menu button in the WAI-ARIA sense: the arrow opens
 // it from the keyboard (Enter, Space, Down, Up), arrows move through it, Escape closes it
 // and gives focus back.
 
@@ -9,6 +11,7 @@ import { signal } from '@preact/signals';
 import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { SETUP_HREF, defaultItem, isWeb, openItems, type OpenItem, type RepoRef, type Setup } from '../model/open';
+import { askFolderOnce, folderChanged, isCloned } from '../model/localFolder';
 import { rememberOpen, yourSetup } from '../model/prefs';
 import { Ext } from './icons';
 
@@ -23,7 +26,23 @@ function useSetup(login: string): [Setup | null, (item: OpenItem) => void] {
   }];
 }
 
-async function copyText(text: string): Promise<boolean> {
+/** Whether the folder check finds `repo` cloned; undefined until it answers, or when it cannot tell. */
+function useCloned(login: string, org: string, repo: string, folder: boolean): boolean | undefined {
+  const [cloned, setCloned] = useState<boolean | undefined>(undefined);
+  const version = folderChanged.value;
+  useEffect(() => {
+    setCloned(undefined);
+    if (!login || !folder) return;
+    let live = true;
+    void isCloned(login, org, repo).then((c) => live && setCloned(c));
+    return () => {
+      live = false;
+    };
+  }, [login, org, repo, folder, version]);
+  return cloned;
+}
+
+export async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
     return true;
@@ -34,8 +53,10 @@ async function copyText(text: string): Promise<boolean> {
 
 export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean; quiet?: boolean }) {
   const env = useEnv();
-  const [setup, remember] = useSetup(env?.user.login ?? '');
-  const items = openItems(ref, setup);
+  const login = env?.user.login ?? '';
+  const [setup, remember] = useSetup(login);
+  const cloned = useCloned(login, ref.org, ref.repo, !!setup?.folder.trim());
+  const items = openItems(ref, setup, cloned);
   const main = defaultItem(items, setup);
   const [open, setOpen] = useState(false);
   const [focusAt, setFocusAt] = useState<'first' | 'last' | null>(null);
@@ -66,6 +87,7 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
 
   const menuItems = () => [...(wrap.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
   const show = (at: 'first' | 'last') => {
+    if (login) void askFolderOnce(login);
     setOpen(true);
     setFocusAt(at);
   };

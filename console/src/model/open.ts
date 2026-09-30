@@ -3,8 +3,10 @@
 // student Set up screen and the instructors' Open button (decision 0017). The local folder
 // and editor come from Your setup (`model/prefs.ts`); nothing here reads storage.
 
-export type OpenChoice = 'github' | 'githubdev' | 'vscode' | 'desktop' | 'editor' | 'clone';
-export const OPEN_CHOICES: OpenChoice[] = ['github', 'githubdev', 'vscode', 'desktop', 'editor', 'clone'];
+// `vscode` opens the local folder (or, with no folder set up, clones); `vsclone` clones with a
+// folder set up, beside it (decision 0023).
+export type OpenChoice = 'github' | 'githubdev' | 'vscode' | 'desktop' | 'editor' | 'clone' | 'vsclone';
+export const OPEN_CHOICES: OpenChoice[] = ['github', 'githubdev', 'vscode', 'desktop', 'editor', 'clone', 'vsclone'];
 
 export type Editor = 'vscode' | 'desktop' | 'other';
 export const EDITORS: Editor[] = ['vscode', 'desktop', 'other'];
@@ -77,34 +79,49 @@ export interface OpenItem {
 
 export const SETUP_HREF = '#setup';
 
-/** Every way to open `r` with this setup, in menu order. */
-export function openItems(r: RepoRef, setup: Setup | null): OpenItem[] {
+/**
+ * Every way to open `r` with this setup, in menu order. With a folder set up, VS Code both
+ * opens it and clones (decision 0023); `cloned` (from the folder check) keeps only the one
+ * that applies: Open when the repo is there, Clone when it is not. Undefined keeps both.
+ */
+export function openItems(r: RepoRef, setup: Setup | null, cloned?: boolean): OpenItem[] {
   const url = repoUrl(r);
   const parent = courseFolder(setup?.folder ?? '', r.org);
   const local = parent ? joinPath(parent, r.repo) : '';
   const inside = local ? (r.path ?? '').split('/').filter(Boolean).reduce(joinPath, local) : '';
+  const vsClone = `vscode://vscode.git/clone?url=${encodeURIComponent(url)}${r.branch ? `&ref=${encodeURIComponent(r.branch)}` : ''}`;
+  const canOpen = !!local && cloned !== false;
+  const canClone = !local || cloned !== true;
   const items: OpenItem[] = [
     { choice: 'github', label: 'Open on GitHub', href: `${url}${inRepo(r)}`, group: 'online' },
     { choice: 'githubdev', label: 'Open on github.dev', href: `https://github.dev/${r.org}/${r.repo}${inRepo(r)}`, group: 'online' },
-    local
-      ? { choice: 'vscode', label: 'Open in VS Code', href: vscodeFolder(inside), group: 'local' }
-      : { choice: 'vscode', label: 'Clone in VS Code', href: `vscode://vscode.git/clone?url=${encodeURIComponent(url)}${r.branch ? `&ref=${encodeURIComponent(r.branch)}` : ''}`, group: 'local' },
-    { choice: 'desktop', label: 'Open in GitHub Desktop', href: `x-github-client://openRepo/${url}${r.branch ? `?branch=${encodeURIComponent(r.branch)}` : ''}`, group: 'local' },
   ];
+  if (!local) items.push({ choice: 'vscode', label: 'Clone in VS Code', href: vsClone, group: 'local' });
+  if (canOpen) items.push({ choice: 'vscode', label: 'Open in VS Code', href: vscodeFolder(inside), group: 'local' });
+  if (local && canClone) items.push({ choice: 'vsclone', label: 'Clone in VS Code', href: vsClone, group: 'local' });
+  items.push({ choice: 'desktop', label: 'Open in GitHub Desktop', href: `x-github-client://openRepo/${url}${r.branch ? `?branch=${encodeURIComponent(r.branch)}` : ''}`, group: 'local' });
   const scheme = setup?.editor === 'other' ? (setup.scheme ?? '').trim() : '';
   // Another editor opens a folder or nothing: with no folder set up, the menu's last line
   // ("Set up a local folder") is its way in.
-  if (local && schemeOk(scheme)) items.push({ choice: 'editor', label: 'Open in your editor', href: scheme.replace('{path}', urlPath(inside)), group: 'local' });
-  items.push({ choice: 'clone', label: 'Copy the clone command', copy: cloneCommand(url, parent, r.repo), group: 'local' });
+  if (canOpen && schemeOk(scheme)) items.push({ choice: 'editor', label: 'Open in your editor', href: scheme.replace('{path}', urlPath(inside)), group: 'local' });
+  if (canClone) items.push({ choice: 'clone', label: 'Copy the clone command', copy: cloneCommand(url, parent, r.repo), group: 'local' });
   return items;
 }
 
 const EDITOR_CHOICE: Record<Editor, OpenChoice> = { vscode: 'vscode', desktop: 'desktop', other: 'editor' };
 
-/** The button's own action: the last choice, else the editor once a folder is set up, else GitHub. */
+/**
+ * The button's own action: the last choice, else the editor once a folder is set up, else
+ * GitHub. When the folder check took that away, its opposite: a clone for an open, an open
+ * for a clone.
+ */
 export function defaultItem(items: OpenItem[], setup: Setup | null): OpenItem {
   const find = (c: OpenChoice | undefined) => items.find((i) => i.choice === c);
-  return find(setup?.lastOpen) ?? (setup?.folder.trim() ? find(EDITOR_CHOICE[setup.editor]) : undefined) ?? items[0];
+  const opener = setup ? EDITOR_CHOICE[setup.editor] : 'vscode';
+  const folder = !!setup?.folder.trim();
+  const want = setup?.lastOpen ?? (folder ? opener : undefined);
+  const opposite: OpenChoice[] = want === 'vscode' || want === 'editor' ? ['vsclone'] : want === 'vsclone' || want === 'clone' ? [opener, 'vscode'] : [];
+  return find(want) ?? opposite.map(find).find(Boolean) ?? (folder ? find(opener) : undefined) ?? items[0];
 }
 
 /** Whether a link leaves for a web page (a new tab) rather than an app's own scheme (no empty tab left behind). */
