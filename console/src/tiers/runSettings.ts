@@ -5,7 +5,7 @@
 
 import { RUN_KEYS, SOURCE_WORD, TEAM_FORMATION, VISIBILITY, valueWord, type Effective, type RunKey } from '../model/cascade';
 import { penaltyError } from '../model/policy';
-import { opt, type FieldTier, type Tiers, type Values } from './types';
+import { defaultFirst, opt, type FieldTier, type Tiers, type Values } from './types';
 
 export const RUN_LABEL: Record<RunKey, string> = {
   team_formation: 'How teams form',
@@ -39,7 +39,7 @@ export function lateError(v: Values): string | null {
 export function runTier(key: RunKey, fallback: Effective, tier: FieldTier['tier'] = 'default'): FieldTier {
   const grey = `${SOURCE_WORD[fallback.source]}: ${valueWord(key, fallback.value)}`;
   const base = { tier, label: RUN_LABEL[key], reason: REASON[key], defaultLabel: grey };
-  const choose = (labels: Record<string, string>) => [opt('', `Default (${valueWord(key, fallback.value)})`), ...Object.entries(labels).map(([v, l]) => opt(v, l))];
+  const choose = (labels: Record<string, string>) => defaultFirst(fallback.value, valueWord(key, fallback.value), Object.entries(labels).map(([v, l]) => opt(v, l)));
   switch (key) {
     case 'team_formation':
       return { ...base, widget: 'select', options: choose(TEAM_FORMATION) };

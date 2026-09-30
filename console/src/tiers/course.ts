@@ -8,7 +8,7 @@ import { labelOf } from '../model/labels';
 import { DEFAULT_FORMATS, DEFAULT_TIMEZONE, POLICY, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import { FORMATS, SUBMIT, formatWord } from './grading';
 import { runTiers } from './runSettings';
-import type { Tiers } from './types';
+import { defaultFirst, type Tiers } from './types';
 
 const opt = (value: string, label: string) => ({ value, label });
 
@@ -31,7 +31,7 @@ export const COURSE_FACTS: Tiers = {
   },
   licence: {
     tier: 'default', label: 'Licence', widget: 'select', defaultLabel: `institution default: ${LICENCE}`,
-    options: [opt('', `Default (${LICENCE})`), ...POLICY.licences.slice(1).map((l) => opt(l.name, l.name))],
+    options: defaultFirst(LICENCE, LICENCE, POLICY.licences.map((l) => opt(l.name, l.name))),
   },
 };
 
@@ -45,8 +45,8 @@ export function courseDefaultTiers(): Tiers {
     ...runTiers((k) => resolve(k, inst), COURSE_RUN_KEYS),
     formats: {
       tier: 'default', label: 'Format a new assignment starts with', widget: 'select', defaultLabel: `institution default: ${formatWord(DEFAULT_FORMATS[0])}`,
-      options: [opt('', `Default (${formatWord(DEFAULT_FORMATS[0])})`), ...FORMATS.map(([v, l]) => opt(v, l))],
+      options: defaultFirst(DEFAULT_FORMATS[0], formatWord(DEFAULT_FORMATS[0]), FORMATS.map(([v, l]) => opt(v, l))),
     },
-    submit_via: { tier: 'default', label: 'Where a new assignment’s students submit', widget: 'select', options: [opt('', `Default (${labelOf('submit_via', SUBMIT_VIA_DEFAULT).toLowerCase()})`), ...SUBMIT.map(([v, l]) => opt(v, l))] },
+    submit_via: { tier: 'default', label: 'Where a new assignment’s students submit', widget: 'select', options: defaultFirst(SUBMIT_VIA_DEFAULT, labelOf('submit_via', SUBMIT_VIA_DEFAULT), SUBMIT.map(([v, l]) => opt(v, l))) },
   };
 }

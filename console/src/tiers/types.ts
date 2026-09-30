@@ -39,3 +39,12 @@ export type Tiers = Record<string, FieldTier>;
 
 /** One option of a select or radio field. */
 export const opt = (value: string, label: string, sub?: string) => ({ value, label, sub });
+
+/**
+ * A select's options with the inherited value first, as "X (default)" with value `''`, and X
+ * not listed again: choosing it would mean the same as leaving the field empty.
+ */
+export function defaultFirst(fallback: unknown, word: string, options: { value: string; label: string; sub?: string }[]) {
+  const w = word.charAt(0).toUpperCase() + word.slice(1);
+  return [opt('', `${w} (default)`), ...options.filter((o) => o.value !== String(fallback ?? ''))];
+}
