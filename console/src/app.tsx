@@ -218,7 +218,12 @@ export function App({ state: s }: { state: AppState }) {
   } else if (screen === 'help') {
     body = <HelpScreen />;
   } else if (screen === 'profile') {
-    body = <SetupScreen org={ctx.course?.org} />;
+    // The course's repos, for Profile's "Clone every repo" (the `repos` prop lands with WP-S4).
+    const loaded = ctx.course?.write ? s.statuses.course(ctx.course.org).value : undefined;
+    const cs = loaded?.kind === 'ready' ? loaded.status.course : undefined;
+    const repos = cs ? [...cs.materials.map((m) => m.repo), ...cs.templates.map((t) => t.repo)] : undefined;
+    const Profile = SetupScreen as (p: { org?: string; repos?: string[] }) => preact.JSX.Element;
+    body = <Profile org={ctx.course?.org} repos={repos} />;
   } else if (screen === 'home') {
     body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {
