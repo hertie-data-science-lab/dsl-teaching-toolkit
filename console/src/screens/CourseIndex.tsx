@@ -11,7 +11,7 @@ import { Crumbs, Loading, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
-import { CourseHeaderActions, StateChip, courseView } from './Course';
+import { CourseHeaderActions, StateChip, Whys, courseView } from './Course';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
 
@@ -31,11 +31,6 @@ export function otherRepos(org: string, repos: GhRepo[], known: string[]): GhRep
   return repos
     .filter((r) => !r.archived && !skip.has(r.name.toLowerCase()) && !r.topics?.includes(TEMPLATE_TOPIC))
     .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-/** Why a materials repo is or is not ready: the engine calls one ready once its syllabus is written. */
-export function materialsSentence(state: string): string {
-  return state === 'ready' ? 'Syllabus written.' : 'Not ready yet: the syllabus is not written.';
 }
 
 function repoOf(files: Files, org: string, name: string): GhRepo | undefined {
@@ -70,10 +65,8 @@ export function MaterialsIndexScreen(p: CourseProps) {
                 return (
                   <li>
                     <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" />{term ? <span class="chip term">{term}</span> : null}</span>
-                    <span class="r-sub">
-                      {materialsSentence(m.state)}
-                      {gh?.pushed_at ? ` Last change ${fmtDay(gh.pushed_at)} (${ago(gh.pushed_at, p.now)}).` : ''}
-                    </span>
+                    <Whys m={m} />
+                    {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
                   </li>
                 );

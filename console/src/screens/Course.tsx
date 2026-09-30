@@ -12,18 +12,18 @@ import { checkNow, derive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
 import { courseBlock, institutionLayer, lateWord, resolve, valueWord, type Layers } from '../model/cascade';
-import { DEFAULT_FORMATS } from '../model/policy';
+import { DEFAULT_FORMATS, POLICY } from '../model/policy';
 import { formatsList, fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
-import type { CourseStatus, Problem, SemesterStatus } from '../model/types';
+import type { CourseStatus, MaterialsCheck, MaterialsState, Problem, SemesterStatus, Todo } from '../model/types';
 import { validator } from '../model/validate';
 import { CheckLine, Crumbs, Lives, Loading, ProblemCards, Probs, Soon, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
-import { Check, Ext } from '../ui/icons';
+import { Check, Ext, Fail } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { formatError } from '../wizards/model';
-import { courseScope, newestScope } from './CourseEdit';
+import { Fact, courseScope, detailsOf, newestScope, websiteUrl, websiteWord } from './CourseEdit';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
 
@@ -109,6 +109,57 @@ export function SetupList({ course }: { course: CourseStatus }) {
   );
 }
 
+/** The readiness verdict under the page note: a tick when ready, a red cross when not. */
+export function Verdict({ course }: { course: CourseStatus | null }) {
+  if (!course) return <p class="verdict">Status not computed yet.</p>;
+  return <p class={`verdict ${course.ready ? 'ok' : 'bad'}`}>{course.ready ? <Check /> : <Fail />}<span>{readyWords(course)}</span></p>;
+}
+
+/** Where a to-do is done: the repo's settings page. */
+export function todoHref(t: Todo): string {
+  return `#${t.kind === 'materials' ? 'materials' : 'template'}-${t.repo}`;
+}
+
+/** The open to-dos, one line each with where it is done. */
+export function TodoList({ todo }: { todo: Todo[] }) {
+  if (!todo.length) return <p class="footnote">Nothing to do.</p>;
+  return (
+    <ul class="todo">
+      {todo.map((t) => (
+        <li><span class="slug">{t.repo}</span> {t.text} <a class="textlink" href={todoHref(t)} aria-label={`Open ${t.repo} settings`}>Open settings</a></li>
+      ))}
+    </ul>
+  );
+}
+
+/** What stops a materials repo being ready: its unmet blocking checks. A ready repo has none. */
+export function materialsWhys(m: MaterialsState): string[] {
+  if (m.state === 'ready' || m.state === 'problem') return [];
+  const unmet = (m.checks ?? []).filter((c) => c.blocks && !c.done).map((c) => c.why ?? c.label);
+  return unmet.length ? unmet : ['Not ready yet.'];
+}
+
+/** The unmet checks under a materials row, one per line. */
+export function Whys({ m }: { m: MaterialsState }) {
+  const whys = materialsWhys(m);
+  return whys.length ? <ul class="r-sub unmet">{whys.map((w) => <li>{w}</li>)}</ul> : null;
+}
+
+/** A materials repo's whole checklist, ticks included: the settings screen's head. */
+export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
+  return (
+    <ul class="setup">
+      {checks.map((c) => (
+        <li class={c.done ? 'done' : 'open'}>
+          <span class="s-mark" aria-hidden="true">{c.done ? <Check /> : null}</span>
+          <span class="s-name">{c.label}{c.blocks ? <span class="s-need">required</span> : null}<span class="sr">: {c.done ? 'Done' : 'To do'}</span></span>
+          {!c.done && c.why ? <span class="s-why">{c.why}</span> : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** A template's title from its grading_config.yml, as loaded; '' until then. */
 export function templateTitle(files: CourseProps['files'], org: string, repo: string): string {
   const f = files.file(org, repo, 'grading_config.yml', 'solution');
@@ -157,26 +208,34 @@ export function CourseScreen(p: CourseProps) {
   const lateDays = resolve('late_window_days', layers), latePen = resolve('late_penalty_per_day', layers);
   const team = resolve('max_team_size', layers);
   const pub = v.course?.stages?.C6 === 'done';
+  const about = detailsOf(course.meta ?? {}).about;
+  const fallback = (value: unknown, institution: string) => (value ? String(value) : <span class="footnote">{institution}, from the institution</span>);
   return (
     <>
       <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: course.name }]} />
       <div class="page-head">
         <div>
           <h1>{course.name} <Hint doc="02-add-materials-to-course.md">Materials are staged here privately until a release copies them in whole or in part to a semester. Selected materials can also be published on the course’s optional public website.</Hint></h1>
-          <p class="lede">{!v.course ? 'Status not computed yet.' : ready ? 'Ready for a new semester.' : <span class="amber">{readyWords(v.course)}</span>}</p>
         </div>
         <CourseHeaderActions course={course} ready={ready} />
       </div>
       <p class="page-note">Materials and assignment templates are prepared here, for every semester. Students get only what a semester releases or hands out, from that semester’s page.</p>
+      <Verdict course={v.course} />
       {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
       <div class="stack">
         <div class="grid-2">
           <section class="panel section">
-            <h2>Setup <Hint label="Setup and problems">Setup steps are things still to do. Problems are things that broke.</Hint></h2>
-            {v.course ? <SetupList course={v.course} /> : <p class="footnote">Status not computed yet.</p>}
+            <h2>Setup &amp; To do <Hint label="Setup, to-dos and problems">Setup steps are the one-time things a course needs. To-dos are work started but not finished. Problems, on the right, are things that broke.</Hint></h2>
+            {v.course ? (
+              <>
+                <SetupList course={v.course} />
+                <h3 class="todo-head">To do</h3>
+                <TodoList todo={v.course.todo ?? []} />
+              </>
+            ) : <p class="footnote">Status not computed yet.</p>}
           </section>
           <section class="panel section" id="course-problems">
-            <div class="problems-head"><h2>Problems <Hint label="About course problems">They also appear on every semester they will affect.</Hint></h2></div>
+            <div class="problems-head"><h2>Problems <Hint label="About course problems">Things that broke and need fixing. They also appear on every semester they will affect. Unfinished work is a to-do on the left, not a problem.</Hint></h2></div>
             {!v.computed ? <p class="footnote">Status not computed yet.</p> : v.problems.length ? <ProblemCards list={v.problems} /> : <div class="no-problems"><Check /><span>No problems.</span></div>}
           </section>
         </div>
@@ -205,16 +264,20 @@ export function CourseScreen(p: CourseProps) {
               <div class="section-head"><h2>Course details</h2><a class="btn small quiet" href="#details">Edit course details</a></div>
               <dl class="kv">
                 <dt>Name</dt><dd>{course.name}</dd>
-                <dt>Code</dt><dd>{course.code || 'not set'}</dd>
-                <dt>Admins</dt><dd>{course.admins.join(', ') || 'none'}</dd>
+                <dt>Code <Hint label="About the code">The course’s code in the catalogue, as students know it.</Hint></dt><dd>{course.code || 'not set'}</dd>
+                <Fact label="Description" value={about.course_description} />
+                <dt>Contact</dt><dd>{fallback(about.contact, POLICY.contact)}</dd>
+                <dt>Licence</dt><dd>{fallback(about.licence, POLICY.licences[0].name)}</dd>
+                <dt>Admins <Hint label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, every semester. A semester’s instructors and TAs are set on that semester’s Instructors page.</Hint></dt><dd>{course.admins.join(', ') || 'none'}</dd>
                 <dt>Late work <Hint label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>
-                <dt>Max team size</dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
+                <dt>Max team size <Hint label="About max team size">This course’s default. Each assignment can set its own.</Hint></dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
+                <dt>Public website</dt><dd>{websiteWord(p.files, course.org)} <a class="textlink" href="#website">Manage</a></dd>
               </dl>
               <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
             </section>
             <section class="panel section">
-              <div class="section-head"><h2>Public website</h2><span class={`chip ${pub ? 'ok' : ''}`}>{pub ? 'Published' : 'Not published'}</span></div>
-              <p style="color:var(--ink-2)">Optional: an open version of your materials for anyone, updated daily.</p>
+              <div class="section-head"><h2>Public website <Hint label="About the public website">Optional: an open version of your materials for anyone, updated daily.</Hint></h2><span class={`chip ${pub ? 'ok' : ''}`}>{pub ? 'Published' : 'Not published'}</span></div>
+              {pub ? <p><a class="textlink" href={websiteUrl(course.org)} target="_blank" rel="noopener">{course.org}.github.io <Ext /></a></p> : null}
               <a class="textlink" href="#website">Public website settings</a>
             </section>
           </div>
@@ -244,7 +307,7 @@ export function CourseScreen(p: CourseProps) {
                 {v.course.materials.map((m) => (
                   <li>
                     <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" /></span>
-                    <span class="r-sub">{m.state === 'ready' ? 'Syllabus written.' : 'Not ready yet.'}</span>
+                    <Whys m={m} />
                     <span class="r-side"><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
                   </li>
                 ))}

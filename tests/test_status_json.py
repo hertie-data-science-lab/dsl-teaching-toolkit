@@ -16,7 +16,9 @@ import pytest
 
 from dsl_course import (
     grades,
+    releaseignore,
     roster,
+    scaffold,
     schedule,
     schemas,
     settings,
@@ -207,6 +209,13 @@ def _people(email: str | None = "prof@x.edu") -> dict:
     return sync_faculty.parse_faculty_from_meta({"people": {"instructors": [entry]}})
 
 
+def _materials(repo: str, syllabus: str | None = "# Syllabus", **over):
+    """A materials repo whose blocking checks pass unless `over` says otherwise."""
+    return status_json.MaterialsFacts(
+        repo, syllabus, **{"folders": ("lectures",), **over}
+    )
+
+
 def _course(**over) -> status_json.CourseFacts:
     facts = status_json.CourseFacts(
         org=COURSE,
@@ -224,7 +233,7 @@ def _course(**over) -> status_json.CourseFacts:
             ".github/workflows/scheduled-release.yml": "beef",
         },
         registry=[SEMESTER],
-        materials=[status_json.MaterialsFacts("course-materials-f2026", "# Syllabus")],
+        materials=[_materials("course-materials-f2026")],
         templates=[
             status_json.TemplateFacts("assignment-2-f2026", "# Regression"),
             status_json.TemplateFacts("assignment-3-f2026", "# Trees"),
@@ -508,9 +517,11 @@ def test_an_undeclared_kind_is_inferred_through_the_repos_aliases_and_says_so():
 def test_a_materials_repo_by_its_old_name_only_is_not_migrated():
     old = status_json.MaterialsFacts("course-materials-f2025", "# S", topic=False)
     doc = _render(_course(materials=[old]))
-    assert doc["course"]["materials"] == [
-        {"repo": "course-materials-f2025", "state": "problem"}
+    assert [(m["repo"], m["state"]) for m in doc["course"]["materials"]] == [
+        ("course-materials-f2025", "problem")
     ]
+    # Its unmet checks are the migration's problem, not to-dos.
+    assert doc["course"]["todo"] == []
     (problem,) = [p for p in doc["problems"] if p["id"].startswith("materials:")]
     assert problem["id"] == "materials:course-materials-f2025:NOT_MIGRATED"
     assert "dsl-materials" in problem["text"] and problem["stage"] == "C4"
@@ -588,19 +599,19 @@ def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
         "read_materials",
         lambda org, repo: Declared(syllabus="E1282_syllabus.pdf"),
     )
-    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(
         status_json, "get_file_content", lambda org, repo, path, ref="": None
     )
-    present = {"E1282_syllabus.pdf": "5ha"}
-    monkeypatch.setattr(status_json, "repo_path_shas", lambda org, repo, b: present)
+    monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
+    present = {"E1282_syllabus.pdf": "file", "lectures": "dir"}
+    monkeypatch.setattr(status_json, "top_level", lambda org, repo: present)
     facts = status_json._materials_facts(COURSE, "nlp-materials")
     assert status_json.materials_state(facts) == "ready"
-    present.clear()
+    del present["E1282_syllabus.pdf"]
     facts = status_json._materials_facts(COURSE, "nlp-materials")
     assert status_json.materials_state(facts) == "todo"
-    assert status_json._materials_why(facts) == (
-        "nlp-materials has no E1282_syllabus.pdf yet"
+    assert status_json.materials_checks(facts)[0]["why"] == (
+        "There is no E1282_syllabus.pdf yet."
     )
 
 
@@ -1057,6 +1068,13 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     monkeypatch.setattr(
         status_json, "repo_tree", lambda org, repo, branch: ("lectures",)
     )
+    # A materials repo is read by its top only, never its whole tree.
+    monkeypatch.setattr(
+        status_json,
+        "top_level",
+        lambda org, repo: {"SYLLABUS.md": "file", "lectures": "dir", ".system": "dir"},
+    )
+    monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
     monkeypatch.setattr(status_json, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
     monkeypatch.setattr(status_json, "get_team_members", lambda org, team: {"prof"})
     monkeypatch.setattr(grades, "_org_settings_faults", lambda org: [])
@@ -1077,9 +1095,10 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     course = status_json.collect_course(COURSE, NOW)
     assert course["course"]["templates"][0]["state"] == "problem"
     # The topic makes a materials repo, not the name: the code repo is not one.
-    assert course["course"]["materials"] == [
-        {"repo": "course-materials-f2026", "state": "ready"}
-    ]
+    (m,) = course["course"]["materials"]
+    assert (m["repo"], m["state"]) == ("course-materials-f2026", "ready")
+    # Read off the one tree: its folder has a kind; no withhold list, no session list.
+    assert [c["id"] for c in m["checks"] if not c["done"]] == ["withheld", "sessions"]
 
 
 def test_every_render_validates_against_the_exported_schema():
@@ -1298,12 +1317,7 @@ def test_a_stage_that_is_not_done_says_why():
         }
     )
     course = _course(
-        materials=[
-            status_json.MaterialsFacts(
-                "course-materials-f2025", "<!-- dsl-stub: syllabus -->"
-            ),
-            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus"),
-        ]
+        materials=[_materials("course-materials-f2025", "<!-- dsl-stub: syllabus -->")]
     )
     doc = _render(course, _semester(people=ta_only))
     assert doc["semester"]["stages"]["K3"] == "todo"
@@ -1311,9 +1325,7 @@ def test_a_stage_that_is_not_done_says_why():
         "No instructor is declared in instructors.yml yet."
     )
     assert doc["course"]["stages"]["C4"] == "todo"
-    assert doc["course"]["stage_why"]["C4"] == (
-        "course-materials-f2025's SYLLABUS.md is still the placeholder."
-    )
+    assert doc["course"]["stage_why"]["C4"] == "No materials repo is ready yet."
     # Done stages carry no sentence; every other one does.
     for block in (doc["course"], doc["semester"]):
         assert set(block["stage_why"]) == {
@@ -1620,3 +1632,145 @@ def test_an_unnumbered_release_will_be_skipped_and_an_assignment_says_so():
     assert rows["assignment-2"]["number"] == 2
     numbers = {r["id"]: r["number"] for r in doc["releases"]}
     assert numbers["guest"] is None and numbers["lecture-3"] == 3
+
+
+# ------------------------------------------------------- materials checklist and to-dos
+
+
+def _unmet(m: status_json.MaterialsFacts) -> list[str]:
+    return [c["id"] for c in status_json.materials_checks(m) if not c["done"]]
+
+
+@pytest.mark.parametrize(
+    ("over", "unmet", "state"),
+    [
+        ({}, [], "ready"),
+        ({"syllabus": None}, ["syllabus"], "todo"),
+        ({"syllabus": "<!-- dsl-stub: syllabus -->"}, ["syllabus"], "todo"),
+        # A PDF syllabus that is there counts as written.
+        ({"syllabus": ""}, [], "ready"),
+        # No folder at all: none of a known kind, and none unmapped either.
+        ({"folders": ()}, ["kind_folder"], "todo"),
+        # A folder on the default fallback blocks, though another has a kind.
+        ({"folders": ("lectures", "img")}, ["all_mapped"], "todo"),
+        ({"folders": ("img",)}, ["kind_folder", "all_mapped"], "todo"),
+        # A declared kind maps the folder, matched case-insensitively.
+        ({"folders": ("Tutorien",), "kinds": {"tutorien": "lab"}}, [], "ready"),
+        # The two non-blocking lines never stop ready.
+        ({"releaseignore": None, "sessions": False}, ["withheld", "sessions"], "ready"),
+        ({"topic": False}, [], "problem"),
+    ],
+)
+def test_the_materials_checklist_and_its_state(over, unmet, state):
+    base = {"releaseignore": "solutions/\n", "sessions": True}
+    m = _materials("course-materials-f2026", **{**base, **over})
+    assert _unmet(m) == unmet
+    assert status_json.materials_state(m) == state
+
+
+def test_the_checklist_order_and_what_blocks():
+    checks = status_json.materials_checks(_materials("m", None))
+    assert [(c["id"], c["blocks"]) for c in checks] == [
+        ("syllabus", True),
+        ("kind_folder", True),
+        ("all_mapped", True),
+        ("withheld", False),
+        ("sessions", False),
+    ]
+    # A done check carries no why; an unmet one names what is missing.
+    assert [c["why"] is None for c in checks] == [False, True, True, False, False]
+    assert checks[0]["why"] == "There is no SYLLABUS.md yet."
+
+
+def test_the_seeded_releaseignore_is_not_reviewed_and_a_pattern_or_the_mark_is():
+    stub = scaffold._RELEASEIGNORE_STUB
+    for text, reviewed in (
+        (None, False),
+        (stub, False),
+        (stub + "\ndrafts/\n", True),
+        # Looked at, and nothing withheld: the mark the console writes.
+        (f"{stub}{releaseignore.REVIEWED_MARK}\n", True),
+    ):
+        m = _materials("m", releaseignore=text, sessions=True)
+        assert ("withheld" not in _unmet(m)) is reviewed
+
+
+def test_the_unmapped_folders_are_named_and_never_released_ones_skipped():
+    m = _materials("m", folders=("lectures", "data", "img", "solution", "tests"))
+    (why,) = [
+        c["why"] for c in status_json.materials_checks(m) if c["id"] == "all_mapped"
+    ]
+    assert (
+        why == "The folders data/, img/ have no kind yet; set them under Folder kinds."
+    )
+    # Only never-released folders: as good as none.
+    only = _materials("m", folders=("solution",))
+    (kind,) = [
+        c for c in status_json.materials_checks(only) if c["id"] == "kind_folder"
+    ]
+    assert kind["why"] == (
+        "There is no lectures/, labs/ or readings/ folder yet; add one or set a "
+        "folder's kind under Folder kinds."
+    )
+    img = _materials("m", folders=("img",))
+    (kind,) = [c for c in status_json.materials_checks(img) if c["id"] == "kind_folder"]
+    assert kind["why"] == "No top folder has a kind yet; set one under Folder kinds."
+
+
+def test_c4_and_c5_are_done_once_any_one_is_ready():
+    course = _course(
+        materials=[
+            _materials("course-materials-a"),
+            _materials("course-materials-b", None),
+        ],
+        templates=[
+            status_json.TemplateFacts("assignment-1", "# Trees"),
+            status_json.TemplateFacts("assignment-2", "<!-- dsl-stub: readme -->"),
+        ],
+    )
+    block = _course_block(course)
+    assert (block["stages"]["C4"], block["stages"]["C5"]) == ("done", "done")
+    assert "C4" not in block["stage_why"] and "C5" not in block["stage_why"]
+    none_ready = _course(
+        materials=[_materials("course-materials-b", None)],
+        templates=[status_json.TemplateFacts("assignment-2", None)],
+    )
+    why = _course_block(none_ready)["stage_why"]
+    assert why["C4"] == "No materials repo is ready yet."
+    assert why["C5"] == "No assignment template is ready yet."
+
+
+def test_the_todo_list_is_every_unmet_check_and_every_unwritten_brief():
+    course = _course(
+        materials=[
+            _materials("course-materials-b", None),
+            # Ready, but its non-blocking lines are still to-dos.
+            _materials("course-materials-a", releaseignore="drafts/\n"),
+        ],
+        templates=[
+            status_json.TemplateFacts("assignment-1", "# Trees"),
+            status_json.TemplateFacts("assignment-2", None),
+        ],
+    )
+    doc = status_json.render_course_file(course, NOW)
+    todo = doc["course"]["todo"]
+    assert [t["id"] for t in todo] == [
+        "materials:course-materials-a:sessions",
+        "materials:course-materials-b:syllabus",
+        "materials:course-materials-b:withheld",
+        "materials:course-materials-b:sessions",
+        "template:assignment-2:brief",
+    ]
+    assert todo[-1] == {
+        "id": "template:assignment-2:brief",
+        "kind": "template",
+        "repo": "assignment-2",
+        "text": "The brief (README.md) is not written yet.",
+        "screen": "template",
+        "entry": "assignment-2",
+    }
+    assert todo[1]["text"] == "There is no SYLLABUS.md yet."
+    assert (todo[1]["screen"], todo[1]["entry"]) == ("materials", "course-materials-b")
+    # To-dos never enter the problem list.
+    assert doc["problems"] == []
+    assert validate(doc, schemas.status_schema()) == []

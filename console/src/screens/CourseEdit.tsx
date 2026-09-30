@@ -11,7 +11,7 @@ import { invalidText, useSave } from '../edit/save';
 import { YamlText, compact, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { KIND_LABEL } from '../model/format';
-import { CONTENT_KINDS, DEFAULT_SYLLABUS, MATERIALS_FILE, NOTHING_DECLARED, inferKind, readDeclared } from '../model/materialsRules';
+import { CONTENT_KINDS, DEFAULT_SYLLABUS, MATERIALS_FILE, NOTHING_DECLARED, inferKind, readDeclared, withMark } from '../model/materialsRules';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
@@ -25,7 +25,7 @@ import { SaveBar } from '../ui/edit';
 import { PatternTree } from '../ui/PatternTree';
 import { Check, Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
-import { courseView, CourseHeaderActions } from './Course';
+import { courseView, CourseHeaderActions, MaterialsChecklist, StateChip } from './Course';
 import type { CourseProps } from './types';
 import { COURSE_REPO, OPENCOURSE_FILE } from '../model/names';
 
@@ -147,6 +147,17 @@ export function AdminRows({ admins, onChange, id }: { admins: Admin[]; onChange:
   );
 }
 
+/** The public website's on/off, from opencourse.yml's `enabled`: no file is off (`opencourse.parse`), one not loaded is not known. */
+export function websiteWord(files: CourseProps['files'], org: string): string {
+  const site = files.file(org, COURSE_REPO, OPENCOURSE_FILE);
+  if (site.kind === 'absent') return 'Off.';
+  const y = site.kind === 'ready' ? new YamlText(site.text) : null;
+  return y && !y.errors.length ? (websiteOf(obj(y.toJS())).enabled ? 'On.' : 'Off.') : 'Not known yet.';
+}
+
+/** The live public website. */
+export const websiteUrl = (org: string) => `https://${org}.github.io`;
+
 export function DetailsScreen(p: CourseProps) {
   const { course } = p;
   const env = useEnv();
@@ -158,10 +169,7 @@ export function DetailsScreen(p: CourseProps) {
   const before = detailsOf(meta);
   const d = draft ?? before;
   const ready = courseView(p).course?.ready ?? false;
-  const site = p.files.file(course.org, COURSE_REPO, OPENCOURSE_FILE);
-  const siteYaml = site.kind === 'ready' ? new YamlText(site.text) : null;
-  // opencourse.yml's `enabled`; no file is off (`opencourse.parse`), one not loaded is not known.
-  const siteOn = site.kind === 'absent' ? 'Off.' : siteYaml && !siteYaml.errors.length ? (websiteOf(obj(siteYaml.toJS())).enabled ? 'On.' : 'Off.') : 'Not known yet.';
+  const siteOn = websiteWord(p.files, course.org);
   const set = (patch: Partial<Details>) => {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
@@ -318,7 +326,7 @@ export function newestRepo(repos: string[]): string | undefined {
 }
 
 /** A course fact the website shows, read-only here: its value, or that it is not set. */
-function Fact({ label, value }: { label: string; value: unknown }) {
+export function Fact({ label, value }: { label: string; value: unknown }) {
   const v = typeof value === 'string' ? value.trim() : value ? JSON.stringify(value) : '';
   return <><dt>{label}</dt><dd>{v || <span class="footnote">Not set</span>}</dd></>;
 }
@@ -378,7 +386,7 @@ export function WebsiteScreen(p: CourseProps) {
         <section class="panel section">
           <h2>About the course</h2>
           <dl class="kv">
-            <dt>Address</dt><dd>{published ? <a href={`https://${course.org}.github.io`} target="_blank" rel="noopener">{course.org}.github.io <Ext /></a> : `${course.org}.github.io`}</dd>
+            <dt>Address</dt><dd>{published ? <a href={websiteUrl(course.org)} target="_blank" rel="noopener">{course.org}.github.io <Ext /></a> : `${course.org}.github.io`}</dd>
             <Fact label="Description" value={facts.course_description} />
             <Fact label="Contact" value={facts.contact} />
             <Fact label="Licence" value={facts.licence} />
@@ -457,7 +465,8 @@ export function MaterialsScreen(p: CourseProps) {
   const [sylSave, runSyl, setSylSave] = useSave(env);
   const [kindSave, runKind, setKindSave] = useSave(env);
   const curKinds = kindsDraft ?? baseKinds;
-  const folders = tree.kind === 'ready' ? tree.paths.filter((x) => x.dir && !x.path.includes('/') && !x.path.startsWith('.')).map((x) => x.path) : [];
+  // The top folders a release can copy (`status_json._released_folders`): never-released ones need no kind.
+  const folders = tree.kind === 'ready' ? tree.paths.filter((x) => x.dir && !x.path.includes('/') && !x.path.startsWith('.') && !neverMaterial(x.path) && !denylisted(x.path)).map((x) => x.path) : [];
   const kinds = folderKinds(folders, curKinds);
   const syllabus = (syl ?? baseSyl).trim() || DEFAULT_SYLLABUS;
   const sylFile = p.files.file(course.org, repo, syllabus);
@@ -465,6 +474,8 @@ export function MaterialsScreen(p: CourseProps) {
   const [ign, setIgn] = useState<string | null>(null);
   const [ignSave, runIgn] = useSave(env);
   const scope = newestScope(p);
+  // The syllabus line of the checklist; a status without one reads it off `ready`.
+  const sylDone = m ? (m.checks?.find((c) => c.id === 'syllabus')?.done ?? m.state === 'ready') : false;
   const repos = p.files.repos(course.org);
   const branch = (repos.kind === 'ready' ? repos.repos.find((r) => r.name === repo)?.default_branch : undefined) ?? null;
   const partial = tree.kind === 'ready' && tree.truncated;
@@ -480,10 +491,11 @@ export function MaterialsScreen(p: CourseProps) {
     if (!validMaterials(new YamlText(text).toJS() ?? {})) return setState({ kind: 'bad', text: invalidText(MATERIALS_FILE, validMaterials) });
     if (await run({ owner: course.org, repo, path: MATERIALS_FILE }, text, matFile.kind === 'ready' ? matFile.sha : null, { message: 'materials: edit the syllabus file and folder kinds, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) done();
   };
+  const ignDraft = ign ?? ignText;
+  // What Save writes: a list that withholds nothing is marked reviewed.
+  const ignOut = withMark(ignDraft.endsWith('\n') || !ignDraft ? ignDraft : `${ignDraft}\n`);
   const saveIgn = async () => {
-    if (ign === null) return;
-    const text = ign.endsWith('\n') || !ign ? ign : `${ign}\n`;
-    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, text, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setIgn(null);
+    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, ignOut, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setIgn(null);
   };
   return (
     <>
@@ -493,9 +505,15 @@ export function MaterialsScreen(p: CourseProps) {
         <div class="actions"><OpenButton org={course.org} repo={repo} quiet /></div>
       </div>
       <div class="stack">
+        {m?.checks?.length ? (
+          <section class="panel section">
+            <div class="section-head"><h2>Checklist</h2><StateChip state={m.state} todo="Not ready yet" /></div>
+            <MaterialsChecklist checks={m.checks} />
+          </section>
+        ) : null}
         <section class="panel section">
           <h2>Syllabus</h2>
-          {m ? (m.state === 'ready' ? <div class="check-line ok"><Check /><span>Written.</span></div> : sylFile.kind === 'ready' ? <CheckLine cls="bad">Still the template text. Students would see the placeholder at the first release.</CheckLine> : sylFile.kind === 'absent' ? <CheckLine cls="bad">There is no {syllabus} yet.</CheckLine> : <p class="footnote">Not ready yet.</p>) : <p class="footnote">Not checked yet.</p>}
+          {m ? (sylDone ? <div class="check-line ok"><Check /><span>Written.</span></div> : sylFile.kind === 'ready' ? <CheckLine cls="bad">Still the template text. Students would see the placeholder at the first release.</CheckLine> : sylFile.kind === 'absent' ? <CheckLine cls="bad">There is no {syllabus} yet.</CheckLine> : <p class="footnote">Not ready yet.</p>) : <p class="footnote">Not checked yet.</p>}
           <div class="actions"><EditFile org={course.org} repo={repo} path={syllabus} /></div>
           <div class="field">
             <label for="m-syl">Syllabus file <span class="default">default: {DEFAULT_SYLLABUS}</span></label>
@@ -541,7 +559,7 @@ export function MaterialsScreen(p: CourseProps) {
               org={course.org} repo={repo} branch={branch} kinds={Object.fromEntries(kinds.map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} withheldWord="withheld" releasedWord="released to students" />
           )}
           <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
-          <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ign === null || ign === ignText} file={{ org: course.org, repo, path: '.releaseignore' }} />
+          <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ignFile.kind === 'loading' || (ignFile.kind === 'ready' && ignOut === ignText)} file={{ org: course.org, repo, path: '.releaseignore' }} />
           <Lives org={course.org} repo={repo} path=".releaseignore" />
         </section>
       </div>

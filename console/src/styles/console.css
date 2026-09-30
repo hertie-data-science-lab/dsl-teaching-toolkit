@@ -870,3 +870,13 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 /* WP-S4 */
 .folder-check .saved { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
 .clone-all-h { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+
+/* WP-S3 */
+.verdict { display: flex; gap: 8px; align-items: center; margin: -6px 0 18px; font-weight: 600; color: var(--ink-2); }
+.verdict svg { width: 14px; height: 14px; flex: none; }
+.verdict.ok { color: var(--ok); }
+.verdict.bad { color: var(--bad-ink); }
+.todo-head { margin: 16px 0 6px; font-size: 14px; }
+.todo { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13.5px; color: var(--ink-2); }
+.todo .textlink { min-height: 0; padding: 0 2px; }
+.rows .r-sub.unmet { list-style: none; margin: 0; padding: 0; }
