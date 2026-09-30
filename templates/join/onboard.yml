@@ -171,7 +171,7 @@ jobs:
                 r[iHandle] && r[iHandle].toLowerCase() !== handle.toLowerCase() &&
                 (r[iId] || '').trim() !== String(userId);
               // The public reply cannot say WHY (above), so the teaching team is told
-              // privately: one new file per issue in classroom-config, so no sha to race.
+              // privately: one new file per issue in semester-config, so no sha to race.
               // Who asked and who the row is bound to - never the code. Best-effort: a
               // record that cannot be written must not cost the student their reply.
               const recordRefusal = async (r) => {
@@ -183,7 +183,7 @@ jobs:
                     at: new Date().toISOString(),
                   };
                   await github.rest.repos.createOrUpdateFileContents({
-                    owner: org, repo: CONFIG, path: `enrolment/refusals/${issue.number}.json`,
+                    owner: org, repo: CONFIG, path: `.system/enrolment/refusals/${issue.number}.json`,
                     message: `enrolment: record why Join #${issue.number} was refused`,
                     content: Buffer.from(JSON.stringify(record, null, 2) + '\n', 'utf8').toString('base64'),
                   });

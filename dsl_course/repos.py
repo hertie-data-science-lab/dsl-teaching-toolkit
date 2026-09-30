@@ -248,7 +248,7 @@ def rename_repo(
     if description is not None:
         args += ["-f", f"description={description}"]
     code, out = gh_settled(*args, "--jq", ".name")
-    _repo.cache_clear()
+    _repos.clear()
     if code == 0 and out.strip() == new_name:
         return True
     _failed_on(

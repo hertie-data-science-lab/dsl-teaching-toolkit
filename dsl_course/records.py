@@ -36,6 +36,9 @@ RECORDS = {
     "gradebook": "gradebook",
     "distributed": "gradebook/distributed.csv",
     "team_formation": "team-formation",
+    # why a Join was refused (`refusals/<issue>.json`, written by the join repo's onboard
+    # workflow) and each switched-account relink (`relinks/<old id>.json`, `relink`)
+    "enrolment": "enrolment",
     "archive": "archive.md",
     "semester_gradebook": "semester-gradebook.csv",
     # the course org's `.github`: the refresh's heartbeat and its miss ledger

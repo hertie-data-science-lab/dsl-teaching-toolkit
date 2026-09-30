@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import course, roster, teams, welcome
+from dsl_course import course, records, roster, teams, welcome
 
 WELCOME = Path(__file__).resolve().parents[1] / "templates" / "join"
 TEMPLATES = [
@@ -1349,7 +1349,7 @@ def _run_onboard(rosters: list[str], record_fails: bool = False) -> dict:
         "const process = { env: { HAS_BOT: 'true' } };\n"
         "const setTimeout = (fn, ms) => fn();\n"
         "const core = { setFailed: (m) => {}, warning: (m) => OUT.warnings.push(m) };\n"
-        "const context = { repo: { owner: 'cohort', repo: 'welcome' },"
+        "const context = { repo: { owner: 'semester', repo: 'join' },"
         " payload: { issue: ISSUE } };\n"
         "let reads = 0;\n"
         "const github = {\n"
@@ -1401,7 +1401,7 @@ def test_a_code_bound_elsewhere_is_recorded_privately_and_answered_as_before(ros
     out = _run_onboard(rosters)
     (comment,) = out["comments"]
     assert _NO_MATCH in comment and "oldacct" not in comment
-    record = out["records"]["enrolment/refusals/9.json"]
+    record = out["records"][records.path("enrolment", "refusals", "9.json")]
     assert record["issue"] == 9
     assert record["claimant"] == {"login": "newacct", "id": 202}
     assert record["bound"] == {"handle": "oldacct", "id": "101"}

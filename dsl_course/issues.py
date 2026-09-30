@@ -322,7 +322,7 @@ def close_by_creator(
             "--label",
             label,
             "--limit",
-            _LIST_LIMIT,
+            _SEARCH_LIMIT,
             "--json",
             "number",
         )

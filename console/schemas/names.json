@@ -12,6 +12,7 @@
     "archive": ".system/archive.md",
     "autograde": ".system/autograde",
     "distributed": ".system/gradebook/distributed.csv",
+    "enrolment": ".system/enrolment",
     "gradebook": ".system/gradebook",
     "heartbeat": ".system/last-refresh",
     "lock": ".system/assignments.lock.yml",
