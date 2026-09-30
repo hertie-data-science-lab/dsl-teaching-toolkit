@@ -31,18 +31,30 @@ function useSetup(login: string): [Setup | null, (item: OpenItem) => void] {
  * cannot tell. A recheck of the same repo keeps the last answer until the new one comes.
  */
 function useCloned(login: string, org: string, repo: string, folder: boolean): boolean | undefined {
-  const [cloned, setCloned] = useState<boolean | undefined>(undefined);
+  const key = `${login}/${org}/${repo}`;
+  const [answer, setAnswer] = useState<{ key: string; cloned?: boolean }>({ key });
   const version = folderChanged.value;
-  useEffect(() => setCloned(undefined), [login, org, repo]);
   useEffect(() => {
-    if (!login || !folder) return setCloned(undefined);
+    if (!login || !folder) return setAnswer({ key });
     let live = true;
-    void isCloned(login, org, repo).then((c) => live && setCloned(c));
+    void isCloned(login, org, repo).then((cloned) => live && setAnswer({ key, cloned }));
     return () => {
       live = false;
     };
-  }, [login, org, repo, folder, version]);
-  return cloned;
+  }, [key, folder, version]);
+  // An answer about another repo (the props changed) is no answer.
+  return answer.key === key ? answer.cloned : undefined;
+}
+
+/** A short note (Copied) that clears itself after two seconds. */
+export function useFlash(): [string | null, (note: string | null) => void] {
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!note) return;
+    const t = setTimeout(() => setNote(null), 2000);
+    return () => clearTimeout(t);
+  }, [note]);
+  return [note, setNote];
 }
 
 export async function copyText(text: string): Promise<boolean> {
@@ -63,7 +75,7 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
   const main = defaultItem(items, setup);
   const [open, setOpen] = useState(false);
   const [focusAt, setFocusAt] = useState<'first' | 'last' | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNote] = useFlash();
   const id = useId();
   const wrap = useRef<HTMLDivElement>(null);
   const caret = useRef<HTMLButtonElement>(null);
@@ -82,11 +94,6 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
     (focusAt === 'first' ? all[0] : all[all.length - 1])?.focus();
     setFocusAt(null);
   }, [open, focusAt]);
-  useEffect(() => {
-    if (!note) return;
-    const t = setTimeout(() => setNote(null), 2000);
-    return () => clearTimeout(t);
-  }, [note]);
 
   const menuItems = () => [...(wrap.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
   const show = (at: 'first' | 'last') => {

@@ -82,7 +82,7 @@ function OffRow({ name, quiet = false }: { name: string; quiet?: boolean }) {
   return (
     <li>
       <div class="cohort-card ro off" aria-disabled="true">
-        <span class="cc-name">{name}<span class={quiet ? 'sr-only' : undefined}>{NOT_MINE}</span></span>
+        <span class="cc-name">{name}<span class={quiet ? 'sr' : undefined}>{NOT_MINE}</span></span>
         <span class="cc-week" />
         <span />
         <span class="cc-next" />
@@ -258,7 +258,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
   const courseOnly = courses.filter((c) => !c.cohorts.length);
   // The person's courses by what needs them (their running semesters' problems), then the rest by name.
   const need = (c: Course) => cards.filter((k) => !k.past && c.cohorts.some((h) => h.org === k.key)).reduce((n, k) => n + Math.max(k.urgency, 0), 0);
-  const mine = courses.map((c) => ({ c, n: need(c) })).sort((a, b) => b.n - a.n || a.c.name.localeCompare(b.c.name));
+  const mine = [...courses].sort((a, b) => need(b) - need(a) || a.name.localeCompare(b.name));
   const foreign = catalogue.list.filter((c) => !c.mine);
   const others = only ? [] : foreign.sort((a, b) => a.name.localeCompare(b.name));
   const othersNow = others
@@ -286,7 +286,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
           <section class="section" aria-labelledby="h-courses">
             <h2 id="h-courses">Courses</h2>
             <ul class="cohort-list">
-              {mine.map(({ c }) => (
+              {mine.map((c) => (
                 <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{courseSub(c, user)}</span></span><span class="cc-week" /><span /><span class="cc-next">Open the course</span></a></li>
               ))}
               {others.map((c) => <OffRow name={c.name} />)}

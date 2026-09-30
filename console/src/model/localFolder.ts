@@ -41,7 +41,7 @@ async function withStore<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) =
   }
 }
 
-export const idbStore: HandleStore = {
+const idbStore: HandleStore = {
   get: async (login) => ((await withStore('readonly', (s) => s.get(login))) as FileSystemDirectoryHandle | undefined) ?? null,
   set: async (login, handle) => void (await withStore('readwrite', (s) => s.put(handle, login))),
   delete: async (login) => void (await withStore('readwrite', (s) => s.delete(login))),
@@ -149,5 +149,3 @@ export async function isCloned(login: string, org: string, repo: string): Promis
   return h ? clonedIn(h, org, repo) : undefined;
 }
 
-/** The last segment of a typed folder, for comparing it with the picked folder's name. */
-export const lastSegment = (folder: string) => folder.trim().replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';

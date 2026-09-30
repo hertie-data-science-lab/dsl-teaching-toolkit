@@ -9,26 +9,32 @@ import type { GitHubClient } from '../github/client';
 import { CENTRAL } from './central';
 import { COURSE_META_PATH, parseRegistry, REGISTRY_PATH, termOf, type Course } from './discovery';
 import { str } from './format';
+import { ORG_NAME_RE } from './policy';
 import { COURSE_REPO, STUDENT_STATUS_PATH } from './names';
 
-export const ORGS_PATH = 'orgs.yml';
+const ORGS_PATH = 'orgs.yml';
 /** Most catalogue reads in flight at once. */
-export const POOL = 6;
+const POOL = 6;
 
 type Run = <T>(task: () => Promise<T>) => Promise<T>;
 
-/** At most `size` tasks running at once; the rest wait their turn. Each task is one request, so none waits on another. */
-function pool(size: number): Run {
+/**
+ * At most `size` tasks running at once; the rest wait their turn. A finished task hands its
+ * slot straight to the next in line, so a newcomer cannot take it meanwhile. Each task is one
+ * request, so none waits on another.
+ */
+export function pool(size: number): Run {
   let active = 0;
   const queue: (() => void)[] = [];
   return async (task) => {
-    if (active >= size) await new Promise<void>((go) => queue.push(go));
-    active++;
+    if (active < size) active++;
+    else await new Promise<void>((go) => queue.push(go));
     try {
       return await task();
     } finally {
-      active--;
-      queue.shift()?.();
+      const next = queue.shift();
+      if (next) next();
+      else active--;
     }
   };
 }
@@ -52,13 +58,11 @@ export interface CatalogueCourse {
   course?: Course;
 }
 
-const ORG_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
-
 /** `orgs.yml`'s course orgs as spelt, in order (`dsl_course/org_registry.parse_names`); throws on any other shape. */
 export function parseOrgs(text: string): string[] {
   const doc: unknown = parse(text);
   const orgs = doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as { course_orgs?: unknown }).course_orgs : undefined;
-  if (!Array.isArray(orgs) || !orgs.every((o) => typeof o === 'string' && ORG_RE.test(o))) throw new Error('orgs.yml must be `course_orgs:` and a list of org names');
+  if (!Array.isArray(orgs) || !orgs.every((o) => typeof o === 'string' && ORG_NAME_RE.test(o))) throw new Error('orgs.yml must be `course_orgs:` and a list of org names');
   return orgs as string[];
 }
 
