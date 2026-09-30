@@ -9,7 +9,7 @@ import { act } from 'preact/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient } from '../src/github/client';
-import { loadCatalogue, parseOrgs, runningNow } from '../src/model/catalogue';
+import { loadCatalogue, parseOrgs, pool, runningNow } from '../src/model/catalogue';
 import type { Course } from '../src/model/discovery';
 import { myCoursesOnly, saveMyCoursesOnly, type PrefStore } from '../src/model/prefs';
 import { HomeScreen } from '../src/screens/Home';
@@ -45,6 +45,32 @@ function catalogueFake(orgs: string | null = ORGS) {
   // hertie-nlp-s2027 has no .github yet: it is being set up, so it is not in the catalogue.
 }
 const client = (f: FakeGitHub) => new GitHubClient({ token: () => 't', fetch: f.fetch });
+
+describe('the request pool', () => {
+  it('never runs more than its size, even when a newcomer arrives as a slot frees', async () => {
+    const run = pool(1);
+    let active = 0;
+    let most = 0;
+    const gates: (() => void)[] = [];
+    const started: Promise<void>[] = [];
+    const task = () => {
+      most = Math.max(most, ++active);
+      const p = new Promise<void>((go) => gates.push(() => (active--, go())));
+      started.push(p);
+      return p;
+    };
+    const done = [run(task), run(task)]; // the second waits for the slot
+    // A newcomer that runs right after the first task ends, before the waiter wakes.
+    done.push(started[0].then(() => run(task)));
+    gates[0]();
+    for (let n = 1; n < 3; n++) {
+      while (gates.length <= n) await new Promise((r) => setTimeout(r, 0));
+      gates[n]();
+    }
+    await Promise.all(done);
+    expect(most).toBe(1);
+  });
+});
 
 describe('parsing orgs.yml', () => {
   it('reads course_orgs as spelt, in order', () => {

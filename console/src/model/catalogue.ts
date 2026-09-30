@@ -18,18 +18,23 @@ const POOL = 6;
 
 type Run = <T>(task: () => Promise<T>) => Promise<T>;
 
-/** At most `size` tasks running at once; the rest wait their turn. Each task is one request, so none waits on another. */
-function pool(size: number): Run {
+/**
+ * At most `size` tasks running at once; the rest wait their turn. A finished task hands its
+ * slot straight to the next in line, so a newcomer cannot take it meanwhile. Each task is one
+ * request, so none waits on another.
+ */
+export function pool(size: number): Run {
   let active = 0;
   const queue: (() => void)[] = [];
   return async (task) => {
-    if (active >= size) await new Promise<void>((go) => queue.push(go));
-    active++;
+    if (active < size) active++;
+    else await new Promise<void>((go) => queue.push(go));
     try {
       return await task();
     } finally {
-      active--;
-      queue.shift()?.();
+      const next = queue.shift();
+      if (next) next();
+      else active--;
     }
   };
 }
