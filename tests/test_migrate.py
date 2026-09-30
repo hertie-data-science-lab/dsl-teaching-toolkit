@@ -2626,7 +2626,7 @@ def test_position_numbers_are_the_numbers_shown_today_and_only_those():
 def test_numbers_are_stamped_keeping_every_comment_and_read_done_on_rerun():
     stamps = migrate.position_numbers(_parsed(POSITIONAL), lambda repo: {})
     new, declined = migrate.stamp_numbers(POSITIONAL, stamps)
-    assert declined == ["flow"]
+    assert declined == {"flow": "written as a flow mapping"}
     assert "  intro:        # the first lecture\n    number: 1\n" in new
     assert "  wrap-up:\n    number: 3\n    kind: lecture\n" in new
     assert "  project:\n    number: 2\n" in new
@@ -2644,12 +2644,34 @@ def test_numbers_are_stamped_keeping_every_comment_and_read_done_on_rerun():
     assert before["intro"] == 1 and before["wrap-up"] == 3
 
 
+def test_an_empty_entry_is_declined_as_empty_not_as_a_flow_mapping():
+    text = "releases:\n  guest:\n  flow: {kind: lab}\n"
+    stamps = {("releases", "guest"): 1, ("releases", "flow"): 2}
+    new, declined = migrate.stamp_numbers(text, stamps)
+    assert new == text
+    assert declined == {"guest": "empty", "flow": "written as a flow mapping"}
+
+
+UNDATED = POSITIONAL.replace(
+    "assignments:\n",
+    "  later:\n    event_datetime: tbc\n    kind: lecture\n"
+    "  hidden:\n    event_datetime: tbc\n    show_on_site: false\n"
+    "assignments:\n",
+)
+
+
+def test_an_undated_shown_entry_is_listed_apart_from_the_stamps():
+    sched = _parsed(UNDATED)
+    assert migrate.undated_unnumbered(sched, lambda repo: {}) == ["later"]
+    assert ("releases", "later") not in migrate.position_numbers(sched, lambda repo: {})
+
+
 def test_the_numbers_step_previews_each_key_then_stamps_then_reads_done(
     fake, semester, monkeypatch, capsys
 ):
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     tree = fake.tree(SEM, CONFIG_REPO)
-    tree["schedule.yml"] = POSITIONAL.replace(
+    tree["schedule.yml"] = UNDATED.replace(
         "  flow: {event_datetime: 2026-09-29T10:00, kind: lab}\n", ""
     ).encode()
     fake.commits.clear()
@@ -2658,6 +2680,7 @@ def test_the_numbers_step_previews_each_key_then_stamps_then_reads_done(
     assert _main(monkeypatch, SEM) == 0
     out = capsys.readouterr().out
     assert "  intro: 1\n" in out and "  wrap-up: 3\n" in out and "  project: 2\n" in out
+    assert "  later: undated: will show as a problem until dated and numbered\n" in out
     assert fake.commits == []
 
     assert _main(monkeypatch, SEM, "--no-preview") == 0

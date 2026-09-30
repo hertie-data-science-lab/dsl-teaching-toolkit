@@ -120,7 +120,9 @@ from .repos import (
 from .scaffold import materials_system_files
 from .schedule_plan import (
     Aliases,
+    entry_kind,
     label_number,
+    needs_number,
     offplan_folders,
     own_number,
     planned_rows,
@@ -1154,16 +1156,30 @@ def position_numbers(
     return out
 
 
+def undated_unnumbered(sched: schedule.Schedule, aliases: Aliases) -> list[str]:
+    """The shown `releases:` keys of a numbered kind that are undated (`tbc`) and carry
+    no number: no position numbered them, so there is nothing to stamp, and each will be a
+    problem until it is dated and numbered."""
+    return [
+        r.label
+        for r in sched.releases
+        if r.when is None
+        and needs_number(r, entry_kind(r, aliases)[0])
+        and own_number(r.number, r.label) is None
+    ]
+
+
 def stamp_numbers(
     text: str, stamps: dict[tuple[str, str], int]
-) -> tuple[str, list[str]]:
+) -> tuple[str, dict[str, str]]:
     """`text` with `number: <n>` written as the first key of each stamped entry, at its
-    own indent - every other line, comment and order kept - and the keys it could not
-    stamp (an entry written as a flow mapping), for a person to fix by hand."""
+    own indent - every other line, comment and order kept - and `{key: why}` for each
+    entry it could not stamp (empty, or written as a flow mapping), for a person to fix
+    by hand."""
     meta = load_yaml_lines(text) or {}
     lines = text.splitlines(keepends=True)
     inserts: list[tuple[int, str]] = []
-    declined = []
+    declined: dict[str, str] = {}
     for (block, key), n in stamps.items():
         mapping = meta.get(block) if isinstance(meta, dict) else None
         entry = mapping.get(key) if isinstance(mapping, dict) else None
@@ -1171,7 +1187,8 @@ def stamp_numbers(
         own = entry.get(LINES, {}) if isinstance(entry, dict) else {}
         children = [line for k, line in own.items() if k]
         if not at or not children or min(children) <= at:
-            declined.append(key)
+            empty = entry is None or (isinstance(entry, dict) and not children)
+            declined[key] = "empty" if empty else "written as a flow mapping"
             continue
         first = lines[min(children) - 1]
         indent = first[: len(first) - len(first.lstrip())]
@@ -2436,24 +2453,27 @@ class Semester:
         )
 
     # explicit numbers --------------------------------------------------------
-    def numbers_work(self) -> tuple[str | None, str | None, dict, list[str]]:
-        """`(schedule.yml now, as this step leaves it, {(block, key): n}, declined)`,
-        over the schedule as the keys step leaves it."""
+    def numbers_work(
+        self,
+    ) -> tuple[str | None, str | None, dict, dict[str, str], list[str]]:
+        """`(schedule.yml now, as this step leaves it, {(block, key): n}, declined,
+        undated)`, over the schedule as the keys step leaves it."""
         text, keyed = self.keys_text()
         if keyed is None:
-            return text, None, {}, []
+            return text, None, {}, {}, []
         sched = schedule.parse(
             load_yaml_lines(keyed) or {}, settings.parse_instance(self.instance_text())
         )
-        stamps = position_numbers(sched, kinds_reader(self.course))
+        aliases = kinds_reader(self.course)
+        stamps = position_numbers(sched, aliases)
         new, declined = stamp_numbers(keyed, stamps)
-        return text, new, stamps, declined
+        return text, new, stamps, declined, undated_unnumbered(sched, aliases)
 
     def numbers_done(self) -> bool:
         return self.keys_done() and not self.numbers_work()[2]
 
     def numbers_plan(self) -> list[str]:
-        _, _, stamps, declined = self.numbers_work()
+        _, _, stamps, declined, undated = self.numbers_work()
         return [
             (
                 f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: write `number:` on each entry "
@@ -2461,13 +2481,17 @@ class Semester:
             ),
             *(f"  {key}: {n}" for (_, key), n in stamps.items()),
             *(
-                f"  {key}: written as a flow mapping - add `number:` by hand"
-                for key in declined
+                f"  {key}: {why} - add `number:` by hand"
+                for key, why in declined.items()
+            ),
+            *(
+                f"  {key}: undated: will show as a problem until dated and numbered"
+                for key in undated
             ),
         ]
 
     def numbers(self) -> bool:
-        text, new, _, declined = self.numbers_work()
+        text, new, _, declined, _ = self.numbers_work()
         for key in declined:
             log_err(f"{schedule.SCHEDULE_PATH} {key}: add `number:` by hand")
         if not self.keys_done() or text is None or new is None:
