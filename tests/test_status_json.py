@@ -1584,6 +1584,21 @@ def test_an_entry_with_no_number_is_a_problem_dated_at_what_it_stops():
     } & set(problems)
 
 
+def test_an_unnumbered_release_already_out_says_only_its_row_goes_without():
+    # Every copy is there (released before the number was required): nothing is skipped.
+    doc = _render(
+        semester=_semester(
+            sched=_sched(UNNUMBERED),
+            dest_paths={schedule.DEFAULT_DEST_REPO: {"lectures/05_guest"}},
+        )
+    )
+    guest = {p["id"]: p for p in doc["problems"]}["number:lecture:guest"]
+    assert guest["text"] == "Give guest a number."
+    assert guest["stops"] == "Its rows show no number until then."
+    assert "when" not in guest
+    assert "skipped" not in guest["stops"]
+
+
 def test_two_entries_sharing_a_number_are_one_problem():
     problems = {p["id"]: p for p in _numbers_render()["problems"]}
     dup = problems["number:lecture:3"]

@@ -711,10 +711,13 @@ def template_problem(t: TemplateFacts, org: str) -> dict:
     }
 
 
-def _number_stops(m: Unnumbered, now: datetime) -> str:
-    """What an entry with no number stops, said the way a skipped release is."""
+def _number_stops(m: Unnumbered, now: datetime, released: bool = False) -> str:
+    """What an entry with no number stops, said the way a skipped release is. A release
+    whose every copy is already there stops nothing: only its row goes without."""
     if m.block == "releases" and not m.copies:
         return "Its row on the site shows no number."
+    if released:
+        return "Its rows show no number until then."
     moment = "hand out" if m.block == "assignments" else "release"
     if m.fires is None:
         if m.block == "assignments":
@@ -746,17 +749,27 @@ def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
     kind with no number, dated at the release or hand-out it stops (so the Dashboard
     counts it in that week), and `number:<kind>:<n>` for a number two entries share."""
     aliases = lambda repo: facts.aliases.get(repo, {})
+    released = {
+        r.label
+        for r in facts.sched.releases
+        if r.deploy and all(_dest_present(facts, d) for d in r.deploy)
+    }
     out = []
     for m in unnumbered(facts.sched, aliases):
+        shipped = m.block == "releases" and m.key in released
         problem = {
             "id": f"number:{m.kind}:{_slugify(m.key)}",
             "scope": "semester",
             "stage": "K4",
             "text": f"Give {m.key} a number.",
-            "stops": _number_stops(m, now),
+            "stops": _number_stops(m, now, shipped),
             "fix": _schedule_fix(facts.org, m.key, m.line),
         }
-        if m.fires is not None and (m.block == "assignments" or m.copies):
+        if (
+            m.fires is not None
+            and not shipped
+            and (m.block == "assignments" or m.copies)
+        ):
             problem["when"] = m.fires.isoformat()
         out.append(problem)
     for kind, n, keys in duplicate_numbers(facts.sched, aliases):
