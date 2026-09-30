@@ -5115,6 +5115,22 @@ def test_a_materials_yml_that_does_not_parse_holds_no_inferred_entry(
     assert log.count("[numbers] cm: materials.yml does not parse") == 1
 
 
+def test_a_numbers_check_that_fails_leaves_the_digest_as_it_is(monkeypatch, capsys):
+    # Syncing without the number faults would clear them for a tick and file them again
+    # as New on the next: the digest is skipped instead, and nothing is held.
+    def fails(org):
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setattr(scheduler, "kinds_reader", fails)
+    rc, seen = _numbers_phase(monkeypatch, dry_run=False)
+    assert rc == 0
+    assert "faults" not in seen
+    assert {"guest", "lecture-2"} <= set(seen["fired"])
+    log = capsys.readouterr()
+    assert "could not check the schedule's numbers (RuntimeError)" in log.err + log.out
+    assert "digest - part of it could not be worked out this tick" in log.out
+
+
 def test_the_preview_names_an_entry_with_no_number(monkeypatch):
     summary, _seen = _numbers_phase(monkeypatch, dry_run=True)
     assert {

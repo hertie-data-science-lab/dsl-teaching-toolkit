@@ -692,10 +692,11 @@ def _held_solution_faults(sched: schedule.Schedule, now: datetime) -> list[Confi
 
 def _unnumbered(
     course_org: str, sched: schedule.Schedule
-) -> tuple[list[ConfigFault], set[str], set[str]]:
+) -> tuple[list[ConfigFault] | None, set[str], set[str]]:
     """Decision 0020 rule 3: the plan's entries that need a number and have none, as
     `(faults for the schedule.yml digest, release labels held, assignment keys held)`.
-    Guarded: a read that fails holds nothing and files nothing this tick, and says so.
+    Guarded: a read that fails holds nothing this tick and says so, and its faults are
+    None, so the digest is left as it is rather than cleared (`_preflight_sources`).
     A release whose kind comes only from a `materials.yml` that does not parse is not
     held either: one line says so."""
     try:
@@ -711,7 +712,7 @@ def _unnumbered(
         )
     except Exception as exc:
         log_err(f"could not check the schedule's numbers ({type(exc).__name__})")
-        return [], set(), set()
+        return None, set(), set()
     if unsure:
         log(
             f"  [numbers] {', '.join(unsure)}: materials.yml does not parse, so an entry "
@@ -811,8 +812,8 @@ def _preflight_sources(
     same as every other phase."""
     if extra is None:
         log(
-            f"  [skip] {semester_org}'s {schedule.SCHEDULE_PATH} digest - who is still "
-            "without a team could not be read this tick"
+            f"  [skip] {semester_org}'s {schedule.SCHEDULE_PATH} digest - part of it "
+            "could not be worked out this tick"
         )
         return 0
     try:
@@ -1717,7 +1718,7 @@ def _release_phase(
         now,
         dry_run,
         None
-        if window_faults is None
+        if window_faults is None or number_faults is None
         else [
             *window_faults,
             *marks_faults,
