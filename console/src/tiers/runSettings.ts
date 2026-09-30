@@ -5,7 +5,7 @@
 
 import { RUN_KEYS, SOURCE_WORD, TEAM_FORMATION, VISIBILITY, valueWord, type Effective, type RunKey } from '../model/cascade';
 import { penaltyError } from '../model/policy';
-import { opt, type FieldTier, type Tiers, type Values } from './types';
+import { defaultFirst, opt, type FieldTier, type Tiers, type Values } from './types';
 
 export const RUN_LABEL: Record<RunKey, string> = {
   team_formation: 'How teams form',
@@ -35,11 +35,21 @@ export function lateError(v: Values): string | null {
   return null;
 }
 
-/** One run setting as a field; `fallback` is what applies when it is left empty. */
-export function runTier(key: RunKey, fallback: Effective, tier: FieldTier['tier'] = 'default'): FieldTier {
+/** An assignment's own override row: no inherit option ("Use the default" is that), every value choosable, so choosing the current default pins it. */
+const CHOOSE = { value: '', label: 'Choose…', off: 'Choose a value, or Use the default' };
+
+/**
+ * One run setting as a field; `fallback` is what applies when it is left empty. `saved` is the
+ * layer's value as the file holds it (a pin shows as "set here"); `override` is an assignment's
+ * own row, where every value is an explicit choice.
+ */
+export function runTier(key: RunKey, fallback: Effective, { saved, override }: { saved?: unknown; override?: boolean } = {}): FieldTier {
   const grey = `${SOURCE_WORD[fallback.source]}: ${valueWord(key, fallback.value)}`;
-  const base = { tier, label: RUN_LABEL[key], reason: REASON[key], defaultLabel: grey };
-  const choose = (labels: Record<string, string>) => [opt('', `Default (${valueWord(key, fallback.value)})`), ...Object.entries(labels).map(([v, l]) => opt(v, l))];
+  const base = { tier: 'default' as const, label: RUN_LABEL[key], reason: REASON[key], defaultLabel: grey };
+  const choose = (labels: Record<string, string>) => {
+    const all = Object.entries(labels).map(([v, l]) => opt(v, l));
+    return override ? [CHOOSE, ...all] : defaultFirst(fallback.value, valueWord(key, fallback.value), all, saved);
+  };
   switch (key) {
     case 'team_formation':
       return { ...base, widget: 'select', options: choose(TEAM_FORMATION) };
@@ -56,7 +66,7 @@ export function runTier(key: RunKey, fallback: Effective, tier: FieldTier['tier'
   }
 }
 
-/** The run settings at one layer, in the order an instructor thinks; `keys` limits which. */
-export function runTiers(fallback: (k: RunKey) => Effective, keys: readonly RunKey[] = RUN_KEYS): Tiers {
-  return Object.fromEntries(keys.map((k) => [k, runTier(k, fallback(k))]));
+/** The run settings at one layer, in the order an instructor thinks; `keys` limits which; `saved` is the layer as its file holds it. */
+export function runTiers(fallback: (k: RunKey) => Effective, keys: readonly RunKey[] = RUN_KEYS, saved: Values = {}): Tiers {
+  return Object.fromEntries(keys.map((k) => [k, runTier(k, fallback(k), { saved: saved[k] })]));
 }

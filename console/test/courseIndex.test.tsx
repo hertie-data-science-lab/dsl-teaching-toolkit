@@ -262,6 +262,14 @@ describe('materials settings: syllabus file and folder kinds', () => {
     expect(out).toContain(`/edit/main/E1282.pdf`);
     expect(out).toContain('<span class="ft-name">Tutorials/</span><span class="chip">Lab</span>');
   });
+  it('lists the kind a folder falls back to once, first', () => {
+    const out = render(<MaterialsScreen {...cp({ entry: MAT, files: withYml })} />);
+    const sel = (folder: string) => out.split(`aria-label="Kind of ${folder}">`)[1].split('</select>')[0];
+    expect(sel('Tutorials').startsWith('<option value selected>Lab (from its name)</option>')).toBe(true);
+    expect(sel('Tutorials')).not.toContain('value="lab"');
+    expect(sel('quiz')).toContain('<option value="exam" selected>');
+    expect(sel('quiz')).not.toContain('value="lecture"');
+  });
   it('names the kind a folder falls back to, and why', () => {
     expect(resetLabel('quiz')).toBe('Lecture (the default)');
     expect(resetLabel('Tutorials')).toBe('Lab (from its name)');

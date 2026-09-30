@@ -386,12 +386,14 @@ describe('editing screens', () => {
     expect(out).toContain(`placeholder="${POLICY.contact}"`);
     expect(out).toContain(`institution default: ${POLICY.licences[0].name}`);
     expect(out).toContain(`<option value="${POLICY.licences[1].name}"`);
-    // The website's switch lives on its own tab: shown here, read only.
-    expect(out).toMatch(/<dt>Public website<\/dt><dd>On\. <a class="textlink" href="#website">Manage<\/a>/);
+    // The website's on/off is a switch here, beside the link to its own tab.
+    expect(out).toMatch(/<input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked\/><span>Public website<\/span><\/label><span class="footnote" id="cd-web-state" aria-live="polite">On: updates daily<\/span> <a class="textlink" href="#website">Manage<\/a>/);
     const off = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: false\n' }, {}, TREES);
-    expect(html(<DetailsScreen {...cp} files={off} />)).toContain('<dd>Off. <a');
+    expect(html(<DetailsScreen {...cp} files={off} />)).toContain('aria-describedby="cd-web-state"/><span>Public website</span></label><span class="footnote" id="cd-web-state" aria-live="polite">Off</span>');
     const none = Object.fromEntries(Object.entries(FILES).filter(([k]) => !k.endsWith('opencourse.yml')));
-    expect(html(<DetailsScreen {...cp} files={new StaticFiles(none, {}, TREES)} />)).toContain('<dd>Off. <a');
+    expect(html(<DetailsScreen {...cp} files={new StaticFiles(none, {}, TREES)} />)).toContain('aria-live="polite">Off</span>');
+    const broken = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: [\n' }, {}, TREES);
+    expect(html(<DetailsScreen {...cp} files={broken} />)).toMatch(/id="cd-web" aria-describedby="cd-web-state" disabled\/>.*opencourse.yml does not parse; fix it in Manage\./);
   });
   it('writes a contact and a licence into dsl-course.yml and a file without them still saves', () => {
     const src = 'course_name: ML\ncourse_code: E1\n';

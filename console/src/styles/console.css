@@ -880,3 +880,17 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .todo { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13.5px; color: var(--ink-2); }
 .todo .textlink { min-height: 0; padding: 0 2px; }
 .rows .r-sub.unmet { list-style: none; margin: 0; padding: 0; }
+
+/* WP-S6 */
+/* The grey note beside a field title: a small gap from the title. */
+.default { margin-left: 6px; }
+/* The public website switch in Course details. */
+.web-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.switch { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; min-height: 32px; cursor: pointer; }
+.switch input[role="switch"] { appearance: none; -webkit-appearance: none; margin: 0; width: 34px; height: 20px; border-radius: 999px; background: var(--rule-strong); position: relative; cursor: pointer; flex: none; transition: background 0.15s; }
+.switch input[role="switch"]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: transform 0.15s; }
+.switch input[role="switch"]:checked { background: var(--ok); }
+.switch input[role="switch"]:checked::after { transform: translateX(14px); }
+.switch input[role="switch"]:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.switch input[role="switch"]:disabled { opacity: 0.5; cursor: default; }
+.web-switch .check-line { flex-basis: 100%; }

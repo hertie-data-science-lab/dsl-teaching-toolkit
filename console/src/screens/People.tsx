@@ -299,7 +299,7 @@ function Instructors(p: ReadyProps) {
       <div class="stack">
         {file.kind === 'loading' ? <Loading what={`Reading ${INSTRUCTORS_FILE}`} /> : null}
         {file.kind === 'absent' ? <p class="footnote">There is no {INSTRUCTORS_FILE} yet.</p> : null}
-        {y && y.errors.length ? <CheckLine cls="bad">{INSTRUCTORS_FILE} does not parse ({y.errors[0]}); fix it with Edit the file.</CheckLine> : null}
+        {y && y.errors.length ? <CheckLine cls="bad">{INSTRUCTORS_FILE} does not parse ({y.errors[0]}); fix it with Edit the file directly.</CheckLine> : null}
         {people.length ? (
           <div class="table-wrap">
             <table class="grid" style="min-width:880px">

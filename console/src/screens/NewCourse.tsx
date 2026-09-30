@@ -20,7 +20,7 @@ import { useDraft } from '../wizards/drafts';
 import { courseOrgName, openAt } from '../wizards/model';
 import { allOk, checkCourseSetUp, checkOrg, useLive, usePoll, type Check } from '../wizards/verify';
 import { Checks, OrgSteps, OrgWhy, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
-import { AdminRows, courseFileAfter, detailsOf, missingAdmin, type Admin, type Details } from './CourseEdit';
+import { AdminRows, LinkKindsField, courseFileAfter, detailsOf, missingAdmin, type Admin, type Details } from './CourseEdit';
 import { COURSE_REPO } from '../model/names';
 
 const STEPS = [
@@ -167,17 +167,13 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     title = 'Defaults';
     const defaults = d.defaults ?? before?.defaults ?? {};
     const links = d.links ?? before?.links ?? '';
-    const errs = fieldErrors(null, courseDefaultTiers(), defaults);
+    const errs = fieldErrors(null, courseDefaultTiers(before?.defaults), defaults);
     body = (
       <>
-        <div class="form-section"><h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3><SchemaForm id="ncx" schema={null} tiers={courseDefaultTiers()} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
+        <div class="form-section"><h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3><SchemaForm id="ncx" schema={null} tiers={courseDefaultTiers(before?.defaults)} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
         <div class="form-section">
           <h3>Site links</h3>
-          <div class="field">
-            <label for="nck">File types the student site links to</label>
-            <input type="text" id="nck" value={links} placeholder="pdf, html" onInput={(e) => set({ links: (e.target as HTMLInputElement).value })} />
-            <p class="why">Released files of these types get a direct link on every semester’s student site. Separate them with commas.</p>
-          </div>
+          <LinkKindsField id="nck" value={links} onInput={(v) => set({ links: v })} />
         </div>
         <SaveLine state={save} />
       </>

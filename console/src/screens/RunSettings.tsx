@@ -128,8 +128,8 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
   const env = useEnv();
   const [save, runSave, setSave] = useSave(env);
   const layers = semesterLayers(p, f.doc);
-  const tiers = runTiers((k) => resolve(k, layers, 'course'));
   const before = toValues(rawBlock(f.doc, ['defaults']));
+  const tiers = runTiers((k) => resolve(k, layers, 'course'), RUN_KEYS, before);
   const cur = draft ?? before;
   const errors = fieldErrors(null, tiers, cur);
   const dirty = draft !== null && !deepEqual(compact(draft), compact(before));
@@ -144,7 +144,7 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
   return (
     <>
       <p class="footnote">Every assignment this semester runs on these unless its own page says otherwise. Left empty, the value in grey applies: the course’s default, else the institution’s. <a class="textlink" href={`?course=${p.course.org}#details`}>Change the course’s defaults</a></p>
-      {f.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({f.error}); fix it with Edit the file.</CheckLine> : (
+      {f.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({f.error}); fix it with Edit the file directly.</CheckLine> : (
         <>
           <SchemaForm id="sd" schema={null} tiers={tiers} values={cur} onChange={(v) => { setDraft(v); setSave({ kind: 'idle' }); }} />
           <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }} />
@@ -209,7 +209,7 @@ export function RunRows({ id, keys, layers, draft, setDraft, errors, defaultsHre
             {open ? (
               <div class="cond">
                 {r.keys.map((k) => (
-                  <Field id={`${id}-${k}`} k={k} t={runTier(k, resolve(k, layers, below('assignment'))) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
+                  <Field id={`${id}-${k}`} k={k} t={runTier(k, resolve(k, layers, below('assignment')), { override: true }) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
                     set={(key, v) => setDraft({ ...draft, [key]: v })} />
                 ))}
                 <button class="textlink" type="button" onClick={() => { setOpened(opened.filter((x) => x !== r.name)); setDraft(Object.fromEntries(Object.entries(draft).filter(([k]) => !r.keys.includes(k as RunKey)))); }}>Use the default</button>
@@ -319,7 +319,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   const sf = scheduleFile(p.files, p.cohort.org);
   const af = assignmentsFile(p.files, p.cohort.org);
   if (sf === 'loading' || af === 'loading') return <section class="panel section"><h2>How this semester runs it</h2><Loading what="Reading the schedule and assignments.yml" /></section>;
-  if (!sf || sf.error) return <section class="panel section"><h2>How this semester runs it</h2><CheckLine cls="bad">The schedule could not be read{sf?.error ? ` (${sf.error})` : ''}; fix it with Edit the file.</CheckLine></section>;
+  if (!sf || sf.error) return <section class="panel section"><h2>How this semester runs it</h2><CheckLine cls="bad">The schedule could not be read{sf?.error ? ` (${sf.error})` : ''}; fix it with Edit the file directly.</CheckLine></section>;
   const baseT = readDraft(sf.doc, a.slug);
   if (!baseT || baseT.kind !== 'assignments') return <section class="panel section"><h2>How this semester runs it</h2><p class="footnote">{a.slug} is not in the schedule.</p></section>;
   const afOk = af !== null && !af.error;
@@ -371,7 +371,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
         </div>
         <div class="form-section">
           <h3>Run settings</h3>
-          {af === null ? <CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}; the defaults below may not be this semester’s.</CheckLine> : af.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({af.error}); fix it with Edit the file.</CheckLine> : null}
+          {af === null ? <CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}; the defaults below may not be this semester’s.</CheckLine> : af.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({af.error}); fix it with Edit the file directly.</CheckLine> : null}
           <RunRows id="ov" keys={keys} layers={layers} draft={r} setDraft={(v) => { setRun(v); setSave({ kind: 'idle' }); }} errors={rErr}
             defaultsHref="#assignments" teamsHref={group ? `#assignment-${a.slug}/teams` : undefined} forced={forcedVisibility(cfg)} />
           <details class="fold" open={!!repoName}>

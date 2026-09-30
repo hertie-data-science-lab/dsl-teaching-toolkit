@@ -1,5 +1,5 @@
 // The pieces every editor shares: the save line ("Checking… Valid. Problem cleared."),
-// the Save bar with "Edit the file" beside it, and the unsaved-changes bar.
+// the Save bar with "Edit the file directly" beside it, and the unsaved-changes bar.
 
 import type { ComponentChildren } from 'preact';
 import type { SaveState } from '../edit/save';
@@ -64,7 +64,7 @@ export function UnsavedBar({ count, onDiscard, onSave, file, busy }: { count: nu
   );
 }
 
-/** The line a YAML key starts on (1-based), for "Edit the file" to open near it. */
+/** The line a YAML key starts on (1-based), for "Edit the file directly" to open near it. */
 export function lineOf(text: string, key: string, indent = 2): number | undefined {
   const re = new RegExp(`^ {${indent}}${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`, 'm');
   const m = re.exec(text);
