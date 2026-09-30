@@ -64,6 +64,14 @@ describe('whether a repo is cloned', () => {
     expect(await clonedIn(broken, ORG, 'materials')).toBeUndefined();
   });
 
+  it('cannot tell where the browser has no folder picker, and makes no storage read', async () => {
+    const reads: string[] = [];
+    setHandleStore({ get: async (l) => (reads.push(l), fakeDir('r', TREE)), set: async () => {}, delete: async () => {} });
+    delete (window as { showDirectoryPicker?: unknown }).showDirectoryPicker;
+    expect(await isCloned(LOGIN, ORG, 'materials')).toBeUndefined();
+    expect(reads).toEqual([]);
+  });
+
   it('reads the handle per login, and cannot tell with none or with broken storage', async () => {
     setHandleStore(memHandles({ [LOGIN]: fakeDir('repositories', TREE) }));
     expect(await isCloned(LOGIN, ORG, 'materials')).toBe(true);
@@ -97,7 +105,10 @@ describe('whether a repo is cloned', () => {
 
 const env = { user: { login: LOGIN, id: 1, name: 'A', email: null, avatar_url: '' } } as unknown as Env;
 let root: HTMLElement | null = null;
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  (window as { showDirectoryPicker?: unknown }).showDirectoryPicker = async () => fakeDir('repositories', TREE);
+});
 afterEach(() => {
   if (root) render(null, root);
   root?.remove();
@@ -148,7 +159,6 @@ describe('Profile', () => {
     const store = memHandles();
     setHandleStore(store);
     saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'vscode' });
-    (window as { showDirectoryPicker?: unknown }).showDirectoryPicker = async () => fakeDir('repositories', TREE);
     await mount(<SetupScreen org={ORG} />);
     await settle();
     const pick = [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Let the console see which repos are cloned')!;
@@ -164,10 +174,25 @@ describe('Profile', () => {
     expect(root!.textContent).toContain('Let the console see which repos are cloned');
   });
 
+  it('does not flag the course folder picked under the typed one, nor a difference in case', async () => {
+    setHandleStore(memHandles({ [LOGIN]: fakeDir(ORG, { materials: {} }) }));
+    saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'vscode' });
+    await mount(<SetupScreen org={ORG} />);
+    await settle();
+    expect(root!.textContent).toContain(`Checking: ${ORG}`);
+    expect(root!.textContent).not.toContain('The folder you picked');
+    render(null, root!);
+    setHandleStore(memHandles({ [LOGIN]: fakeDir('Repos', {}) }));
+    await mount(<SetupScreen org={ORG} />);
+    await settle();
+    expect(root!.textContent).not.toContain('The folder you picked');
+  });
+
   it('lists one git clone per course repo, into the course folder', async () => {
     setHandleStore(memHandles());
     saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'vscode' });
     await mount(<SetupScreen org={ORG} repos={['materials', 'assignment-1-template']} />);
+    expect(root!.textContent).toContain('Let the console see which repos are cloned');
     expect(root!.textContent).toContain('Clone every repo of this course');
     expect(root!.querySelector('.clone-all code')!.textContent).toBe(
       `git clone https://github.com/${ORG}/materials.git "/Users/a/repos/${ORG}/materials"\n` +

@@ -21,7 +21,7 @@ const draftOf = (s: Setup | null): Draft => ({ folder: s?.folder ?? '', editor: 
 const same = (a: Draft, b: Draft) => a.folder.trim() === b.folder.trim() && a.editor === b.editor && (a.editor !== 'other' || a.scheme.trim() === b.scheme.trim());
 
 /** The picked repos folder: pick it, see its name, forget it. Chrome and Edge only. */
-function FolderCheck({ login, typed }: { login: string; typed: string }) {
+function FolderCheck({ login, typed, org }: { login: string; typed: string; org?: string }) {
   const [name, setName] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
@@ -38,13 +38,16 @@ function FolderCheck({ login, typed }: { login: string; typed: string }) {
     await forgetFolder(login);
     setName(null);
   };
-  const end = lastSegment(typed);
+  const end = lastSegment(typed).toLowerCase();
+  const picked = name?.toLowerCase();
+  // Picking the course's own folder under the typed one is a setup `courseFolder` supports.
+  const differs = !!end && !!picked && end !== picked && picked !== org?.toLowerCase();
   return (
     <div class="field folder-check">
       {name ? (
         <>
           <p class="saved">Checking: <code>{name}</code> <button class="btn small quiet" type="button" onClick={forget}>Forget</button></p>
-          {end && end !== name ? <p class="invalid-msg">The folder you picked is <code>{name}</code>; the path above ends in <code>{end}</code>.</p> : null}
+          {differs ? <p class="invalid-msg">The folder you picked is <code>{name}</code>; the path above ends in <code>{lastSegment(typed)}</code>.</p> : null}
         </>
       ) : (
         <>
@@ -62,6 +65,11 @@ function CloneAll({ org, repos, folder }: { org: string; repos: string[]; folder
   const parent = courseFolder(folder, org);
   const text = repos.map((r) => cloneCommand(repoUrl({ org, repo: r }), parent, r)).join('\n');
   const copy = async () => setNote((await copyText(text)) ? 'Copied' : 'Could not copy: select it below');
+  useEffect(() => {
+    if (!note) return;
+    const t = setTimeout(() => setNote(null), 2000);
+    return () => clearTimeout(t);
+  }, [note]);
   return (
     <div class="field clone-all">
       <div class="clone-all-h"><span class="label">Clone every repo of this course</span><button class="btn small quiet" type="button" onClick={copy}>Copy</button><span class="footnote" role="status">{note ?? ''}</span></div>
@@ -105,8 +113,8 @@ export function SetupScreen({ org, repos }: { org?: string; repos?: string[] }) 
             <p class="hint">{org ? <>Each course gets a folder inside it. This course’s repos go in <code>{where}</code>.</> : 'Each course gets a folder inside it, named after its organisation.'}</p>
             <p class="saved">{saved?.folder ? <>Stored: <code>{saved.folder}</code></> : 'No folder stored: Open offers to clone instead.'}</p>
           </div>
-          {canCheckFolders() ? <FolderCheck login={login} typed={draft.folder} /> : null}
-          {org && repos?.length ? <CloneAll org={org} repos={repos} folder={draft.folder} /> : null}
+          {draft.folder.trim() && canCheckFolders() ? <FolderCheck login={login} typed={draft.folder} org={org} /> : null}
+          {draft.folder.trim() && org && repos?.length ? <CloneAll org={org} repos={repos} folder={draft.folder} /> : null}
           <fieldset class="field">
             <legend class="label">Editor</legend>
             <div class="choices" role="radiogroup" aria-label="Editor">
@@ -125,7 +133,7 @@ export function SetupScreen({ org, repos }: { org?: string; repos?: string[] }) 
             <p class="saved">{saved ? <>Stored: {EDITOR_WORD[saved.editor]}{saved.editor === 'other' && saved.scheme ? <>, <code>{saved.scheme}</code></> : null}</> : 'Nothing stored: VS Code is used.'}</p>
           </fieldset>
           <div class="actions">
-            <button class="btn" type="button" disabled={badScheme || (!!saved && same(draft, draftOf(saved)))} onClick={save}>Save your setup</button>
+            <button class="btn" type="button" disabled={badScheme || (!!saved && same(draft, draftOf(saved)))} onClick={save}>Save</button>
             {done === 'stored' ? <span class="valid-msg" role="status">Saved.</span> : done === 'kept' ? <span class="footnote" role="status">This browser does not keep it: it lasts until you reload.</span> : null}
           </div>
         </div>

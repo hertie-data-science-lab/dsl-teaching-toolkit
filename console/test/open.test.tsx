@@ -8,7 +8,7 @@ import { act } from 'preact/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { courseFolder, defaultItem, folderExample, openItems, platformOf, schemeOk, type RepoRef, type Setup } from '../src/model/open';
-import { forgetStudentPrefs, rememberOpen, saveYourSetup, yourSetup, type PrefStore } from '../src/model/prefs';
+import { forgetStudentPrefs, rememberOpen, resetKeptSetups, saveYourSetup, yourSetup, type PrefStore } from '../src/model/prefs';
 import { SetupScreen } from '../src/screens/Setup';
 import { OpenButton } from '../src/ui/OpenButton';
 
@@ -53,8 +53,7 @@ describe('Your setup in this browser', () => {
     expect(yourSetup(LOGIN, refusing)).toEqual({ folder: '/x', editor: 'vscode' });
     forgetStudentPrefs(LOGIN, refusing);
     expect(yourSetup(LOGIN, refusing)).toEqual({ folder: '/x', editor: 'vscode' });
-    // A write that storage takes drops the in-memory copy (and keeps the tests below clean).
-    saveYourSetup(LOGIN, { folder: '', editor: 'vscode' }, memStore());
+    resetKeptSetups();
     expect(yourSetup(LOGIN, refusing)).toBeNull();
   });
 });
@@ -130,6 +129,8 @@ describe('where each choice opens', () => {
     expect(pick({ ...vs, lastOpen: 'vscode' }, false)).toBe('vsclone');
     expect(pick({ ...vs, lastOpen: 'vsclone' }, true)).toBe('vscode');
     expect(pick({ ...vs, lastOpen: 'clone' }, true)).toBe('vscode');
+    // A VS Code clone becomes a VS Code open, whatever the editor setting.
+    expect(pick({ folder: '/r', editor: 'desktop', lastOpen: 'vsclone' }, true)).toBe('vscode');
     expect(pick({ folder: '/r', editor: 'other', scheme: 'zed://file/{path}', lastOpen: 'clone' }, true)).toBe('editor');
     expect(pick({ folder: '/r', editor: 'other', scheme: 'zed://file/{path}', lastOpen: 'editor' }, false)).toBe('vsclone');
     expect(pick({ ...vs, lastOpen: 'desktop' }, false)).toBe('desktop');
@@ -240,7 +241,7 @@ describe('the Your setup screen', () => {
     expect(root!.textContent).toContain(`/Users/a/repos/${ORG}`);
     const radios = [...root!.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
     await act(() => radios[2].click());
-    const save = [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Save your setup')!;
+    const save = [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Save')!;
     const scheme = q<HTMLInputElement>('#ys-scheme');
     await act(() => {
       scheme.value = 'zed://file';
@@ -266,7 +267,7 @@ describe('the Your setup screen', () => {
       folder.value = '/Users/a/repos';
       folder.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(() => [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Save your setup')!.click());
+    await act(() => [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Save')!.click());
     expect(yourSetup(LOGIN)).toEqual({ folder: '/Users/a/repos', editor: 'vscode' });
   });
 });

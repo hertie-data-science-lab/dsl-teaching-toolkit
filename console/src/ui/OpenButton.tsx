@@ -1,11 +1,11 @@
 // The Open split button (decision 0017), modelled on GitHub's Code button: the main part
 // does the last choice made (remembered per login in this browser), the arrow opens every
-// choice: on GitHub, on github.dev, in VS Code, in GitHub Desktop, in the editor Your setup
+// choice: on GitHub, on github.dev, in VS Code, in GitHub Desktop, in the editor Profile
 // names, or the clone command to copy. Where the folder check can tell (decision 0023), it
 // offers Open or Clone, whichever applies; it renders with both and narrows once it knows,
-// and the arrow's click asks for read permission after a reload. A menu button in the WAI-ARIA sense: the arrow opens
-// it from the keyboard (Enter, Space, Down, Up), arrows move through it, Escape closes it
-// and gives focus back.
+// and the arrow's click asks for read permission after a reload. A menu button in the
+// WAI-ARIA sense: the arrow opens it from the keyboard (Enter, Space, Down, Up), arrows move
+// through it, Escape closes it and gives focus back.
 
 import { signal } from '@preact/signals';
 import { useEffect, useId, useRef, useState } from 'preact/hooks';
@@ -26,13 +26,16 @@ function useSetup(login: string): [Setup | null, (item: OpenItem) => void] {
   }];
 }
 
-/** Whether the folder check finds `repo` cloned; undefined until it answers, or when it cannot tell. */
+/**
+ * Whether the folder check finds `repo` cloned; undefined until it first answers, or when it
+ * cannot tell. A recheck of the same repo keeps the last answer until the new one comes.
+ */
 function useCloned(login: string, org: string, repo: string, folder: boolean): boolean | undefined {
   const [cloned, setCloned] = useState<boolean | undefined>(undefined);
   const version = folderChanged.value;
+  useEffect(() => setCloned(undefined), [login, org, repo]);
   useEffect(() => {
-    setCloned(undefined);
-    if (!login || !folder) return;
+    if (!login || !folder) return setCloned(undefined);
     let live = true;
     void isCloned(login, org, repo).then((c) => live && setCloned(c));
     return () => {

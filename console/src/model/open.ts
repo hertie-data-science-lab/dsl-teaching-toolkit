@@ -112,15 +112,15 @@ const EDITOR_CHOICE: Record<Editor, OpenChoice> = { vscode: 'vscode', desktop: '
 
 /**
  * The button's own action: the last choice, else the editor once a folder is set up, else
- * GitHub. When the folder check took that away, its opposite: a clone for an open, an open
- * for a clone.
+ * GitHub. When the folder check took that away, its opposite: a clone for an open; VS Code
+ * for a VS Code clone; the editor, else VS Code, for the clone command.
  */
 export function defaultItem(items: OpenItem[], setup: Setup | null): OpenItem {
   const find = (c: OpenChoice | undefined) => items.find((i) => i.choice === c);
   const opener = setup ? EDITOR_CHOICE[setup.editor] : 'vscode';
   const folder = !!setup?.folder.trim();
   const want = setup?.lastOpen ?? (folder ? opener : undefined);
-  const opposite: OpenChoice[] = want === 'vscode' || want === 'editor' ? ['vsclone'] : want === 'vsclone' || want === 'clone' ? [opener, 'vscode'] : [];
+  const opposite: OpenChoice[] = want === 'vscode' || want === 'editor' ? ['vsclone'] : want === 'vsclone' ? ['vscode'] : want === 'clone' ? [opener, 'vscode'] : [];
   return find(want) ?? opposite.map(find).find(Boolean) ?? (folder ? find(opener) : undefined) ?? items[0];
 }
 

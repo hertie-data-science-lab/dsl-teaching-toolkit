@@ -48,8 +48,8 @@ export const idbStore: HandleStore = {
 };
 
 let store: HandleStore = idbStore;
-/** This page load's handles, so a click can ask for permission without waiting on storage. */
-const handles = new Map<string, FileSystemDirectoryHandle | null>();
+/** This page load's handle reads, one per login, so every Open button shares one storage read. */
+const handles = new Map<string, Promise<FileSystemDirectoryHandle | null>>();
 /** The logins asked for permission this page load: once is enough. */
 const asked = new Set<string>();
 
@@ -67,15 +67,12 @@ export function setHandleStore(s: HandleStore): void {
 export const canCheckFolders = () => typeof globalThis.window?.showDirectoryPicker === 'function';
 
 /** `login`'s picked folder, or null. Storage that fails reads as none. */
-export async function folderHandle(login: string): Promise<FileSystemDirectoryHandle | null> {
-  if (handles.has(login)) return handles.get(login)!;
-  let h: FileSystemDirectoryHandle | null = null;
-  try {
-    h = await store.get(login);
-  } catch {
-    /* storage unavailable: no folder */
+export function folderHandle(login: string): Promise<FileSystemDirectoryHandle | null> {
+  let h = handles.get(login);
+  if (!h) {
+    h = store.get(login).catch(() => null); // storage unavailable: no folder
+    handles.set(login, h);
   }
-  handles.set(login, h);
   return h;
 }
 
@@ -87,7 +84,7 @@ export async function pickFolder(login: string): Promise<FileSystemDirectoryHand
   } catch {
     return null; // cancelled, or refused
   }
-  handles.set(login, h);
+  handles.set(login, Promise.resolve(h));
   asked.add(login); // picking it granted read
   try {
     await store.set(login, h);
@@ -99,7 +96,7 @@ export async function pickFolder(login: string): Promise<FileSystemDirectoryHand
 }
 
 export async function forgetFolder(login: string): Promise<void> {
-  handles.set(login, null);
+  handles.set(login, Promise.resolve(null));
   try {
     await store.delete(login);
   } catch {
@@ -113,7 +110,7 @@ export async function forgetFolder(login: string): Promise<void> {
  * once per page load. Resolves when there is nothing to ask or the person answered.
  */
 export async function askFolderOnce(login: string): Promise<void> {
-  if (asked.has(login)) return;
+  if (asked.has(login) || !canCheckFolders()) return;
   asked.add(login);
   const h = await folderHandle(login);
   if (!h?.queryPermission || !h.requestPermission) return;
@@ -125,7 +122,8 @@ export async function askFolderOnce(login: string): Promise<void> {
   }
 }
 
-const isNotThere = (e: unknown) => e instanceof DOMException ? e.name === 'NotFoundError' || e.name === 'TypeMismatchError' : (e as { name?: string })?.name === 'NotFoundError';
+/** No folder of that name: nothing there (NotFoundError), or a file (TypeMismatchError). */
+const isNotThere = (e: unknown) => ['NotFoundError', 'TypeMismatchError'].includes((e as { name?: string } | null)?.name ?? '');
 
 /**
  * Whether `<handle>/<org>/<repo>` is a folder. A handle already named for the org is the
@@ -145,6 +143,8 @@ export async function clonedIn(handle: FileSystemDirectoryHandle, org: string, r
 
 /** Whether `repo` of `org` is cloned in `login`'s picked folder; undefined when the console cannot tell. */
 export async function isCloned(login: string, org: string, repo: string): Promise<boolean | undefined> {
+  // Safari and Firefox: no check, and no IndexedDB database made for nothing.
+  if (!canCheckFolders()) return undefined;
   const h = await folderHandle(login);
   return h ? clonedIn(h, org, repo) : undefined;
 }

@@ -127,6 +127,9 @@ const setupKey = (login: string) => `dsl-console-setup:${login}`;
 /** Your setup per login when storage refuses it: it then lasts until reload. */
 const kept = new Map<string, Setup>();
 
+/** Forget the in-memory copies kept when storage refused (tests). */
+export const resetKeptSetups = () => kept.clear();
+
 /** `login`'s Your setup, or null when nothing is stored (and nothing kept since storage refused). */
 export function yourSetup(login: string, store: PrefStore | null = localStore()): Setup | null {
   try {
