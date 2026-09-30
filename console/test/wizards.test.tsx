@@ -12,7 +12,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { validateArgs } from '../src/ops/adapter';
 import { FormatPicker } from '../src/forms/FormatPicker';
-import { NewAssignmentScreen, copySentences, extrasOf, initialValues, linesFor, naDone, ordinalUnconfirmed, sourceOf, S1, S2, S3, S4, withExtras } from '../src/screens/NewAssignment';
+import { NewAssignmentScreen, withStart, copySentences, extrasOf, initialValues, linesFor, naDone, ordinalUnconfirmed, sourceOf, S1, S2, S3, S4, withExtras } from '../src/screens/NewAssignment';
 import { NewCohortScreen, cardsDone, nkDone } from '../src/screens/NewCohort';
 import { NewCourseScreen, ncDone, ncOrg } from '../src/screens/NewCourse';
 import { NewMaterialsScreen } from '../src/screens/NewMaterials';
@@ -404,6 +404,28 @@ describe('the wizard screens', () => {
       expect(out).toContain('you can fill it in later');
       expect(out).toContain('no total is shown');
       expect(out).toContain('>Skip</button>');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('New assignment starts an import at No starter file, and says why on step 3', () => {
+    const fresh = initialValues(null);
+    const repo = withStart(fresh, { ...fresh, start: 'repo' }, fresh);
+    expect(repo.formats).toEqual(['none']);
+    // Changing the source keeps whatever format was chosen since.
+    expect(withStart(repo, { ...repo, start: 'template', formats: ['py'] }, fresh).formats).toEqual(['py']);
+    // Back to fresh: the default returns, unless someone chose another format.
+    expect(withStart(repo, { ...repo, start: 'fresh' }, fresh).formats).toEqual(fresh.formats);
+    expect(withStart(repo, { ...repo, start: 'fresh', formats: ['py'] }, fresh).formats).toEqual(['py']);
+    const kept = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => kept.set(k, v), removeItem: (k: string) => kept.delete(k) });
+    try {
+      const v = { ...repo, name: 'Regression', source_repo: 'prof/old-course' };
+      saveDraft(`new-assignment:${COURSE_ORG}`, { v, verified: { 1: signature(v, S1), 2: signature(v, S2) } });
+      const out = render(<NewAssignmentScreen {...cp()} step={3} />);
+      expect(out).toMatch(/id="na-fmt-none" checked/);
+      expect(out).toContain('The imported files are the starter, so No starter file starts ticked.');
     } finally {
       vi.unstubAllGlobals();
     }

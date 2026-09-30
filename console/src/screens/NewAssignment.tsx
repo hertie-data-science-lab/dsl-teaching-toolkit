@@ -89,6 +89,19 @@ export function sourceOf(v: Values, courseOrg: string): SourceRepo | null {
   return null;
 }
 
+const imports = (v: Values) => v.start === 'repo' || v.start === 'template';
+
+/**
+ * `next` after a change on step 1. Starting from a repo makes its files the starter, so the
+ * starter format becomes "No starter file"; going back to fresh restores `fresh`'s formats
+ * unless someone chose others since. Either way it can still be changed on step 3.
+ */
+export function withStart(prev: Values, next: Values, fresh: Values): Values {
+  if (imports(next) && !imports(prev)) return { ...next, formats: ['none'] };
+  if (!imports(next) && imports(prev) && deepEqual(next.formats, ['none'])) return { ...next, formats: fresh.formats };
+  return next;
+}
+
 /** Step 1 cannot continue while the name carries a number nobody said to keep. */
 export const ordinalUnconfirmed = (v: Values) => ordinalInName(v.name) && v.keep_number !== true;
 
@@ -278,7 +291,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
             <label class="check"><input type="checkbox" id="na-keep-number" checked={v.keep_number === true} onChange={(e) => setV({ ...v, keep_number: (e.target as HTMLInputElement).checked })} /> Keep the number</label>
           </div>
         ) : null}
-        <SchemaForm id="na1s" schema={null} tiers={tiersStart} values={v} onChange={setV} />
+        <SchemaForm id="na1s" schema={null} tiers={tiersStart} values={v} onChange={(nv) => setV(withStart(v, nv, initialValues(course.meta)))} />
         {src ? <ImportPicker src={src} read={read} busy={source.busy} lines={lines} set={(l) => set({ lines: l })} /> : null}
         {s1.list || s1.busy ? <Checks list={s1.list} busy={s1.busy} pending={[`${repo} is free in the course`]} /> : null}
       </>
@@ -303,6 +316,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
       <>
         {createdNote}
         {step === 3 ? <FormatPicker v={v} set={setV} fallback={courseFormats.length ? { formats: courseFormats, source: 'course' } : undefined} /> : null}
+        {step === 3 && imports(v) ? <p class="why">The imported files are the starter, so No starter file starts ticked.</p> : null}
         <SchemaForm id={`na${step}`} schema={null} tiers={tiers} values={v} onChange={setV} />
       </>
     );
