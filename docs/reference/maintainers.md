@@ -119,7 +119,8 @@ Things whose *literal spelling* is depended on from outside Python:
   `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what makes the quarter-hourly
   refresh post once rather than four times an hour.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-semester`, `submission`, `gradebook`,
-  `assignment-template`, `dsl-materials` (a course materials repo; `materials.MATERIALS_TOPIC`).
+  `assignment-template`, `dsl-materials` (a course materials repo; `materials.MATERIALS_TOPIC`),
+  `dsl-assignment` (a course assignment template; `discovery.TEMPLATE_TOPIC`).
   Discovery reads them; renaming one is a discovery outage.
 - **An ARCHIVED `semester-config`** is a semester's "finished" marker. `archive` (`teardown`) archives it
   last, after everything else it archives; `discovery.semester_is_live` is what every
@@ -865,6 +866,7 @@ Promote.
 | course `.github/.github/.last-refresh`, `.github/.github/.missing-cohorts` | `.github/.system/last-refresh`, `.github/.system/missing-semesters` | course org |
 | materials `MAINTAINING.md`, `SYLLABUS.md.sample`, `SYLLABUS.sessions.md` | `.system/MAINTAINING.md`, `.system/SYLLABUS.md.sample`, `.system/SYLLABUS.sessions.md`; a whole-repo release skips `.system/` | every `course-materials-*` repo |
 | a `course-materials-*` name as the mark of a materials repo | the `dsl-materials` topic (the name stays the scaffold's default) | course org; the course step "materials topic" adds it |
+| an `assignment-*` name on a GitHub template as the mark of an assignment template; `assignment-<n>-<semester>`, CLI `scaffold assignment --number`, `--semester`, `--copy-from` | the `dsl-assignment` topic; `assignment-<name>`, `--name` (decision 0014: the number is the schedule entry's, access follows the schedule's citations) | course org; the course step "assignment topic" adds the topic (live templates keep their names); an untopicked one is NOT_MIGRATED in status.json |
 | a materials repo's `publish.yml`; the public site repo's `_publish-config.yml` | the course's `.github/opencourse.yml` (decision 0016) | every materials repo; the course step "public website" deletes each `publish.yml` and seeds `opencourse.yml` from `_publish-config.yml` (else off); the next publish deletes `_publish-config.yml` |
 | semester site Assignments, All Materials and Your Profile tabs, assignment pages, hosted copies under `files/`, team lists and member digests | none: the site is a public calendar (decision 0011 rule 5); the student console reads `student-status.json` | the site sync removes them (`site_repo.retired_sections`) |
 | semester site rows keyed by the `NN_` folder ordinal; the `readings` section | one row per shown `releases:` entry, of its kind, numbered by `number:`, else the label, else position; numbered readings joined to the lecture of that number, others their own row (`schedule_plan.site_rows`, decision 0013); unplanned kind folders as undated tab rows; tabs per kind; the pinned syllabus by `materials.yml` declaration, else the old root-file rule | every semester site, on its next sync |

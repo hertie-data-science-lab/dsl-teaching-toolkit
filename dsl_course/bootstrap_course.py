@@ -1106,7 +1106,7 @@ NEXT STEPS (manual):
 
 3. Put content in the materials repo (any top-level dir with ordinal-prefixed
    subdirectories, e.g. lectures/01_.../, readings/01_.../) and create
-   assignment-N-f2026 template repos, then run "Refresh actions" so they appear in the
+   assignment-<name> template repos, then run "Refresh actions" so they appear in the
    dropdowns. Run Release materials/assignment from inside the materials repo's Actions tab.
 
 4. Add a semester: create the empty semester org, add the bot as owner, then run the

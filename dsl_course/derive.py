@@ -39,7 +39,7 @@ Nothing here ever writes to `solution`. `main` is the only destination, through 
 
 Usage:
     python3 -m dsl_course.derive --course-org hertie-dsl-demo-course-e1234 \\
-        --course-source-repo assignment-1-f2026 [--no-preview]
+        --course-source-repo assignment-linear-regression [--no-preview]
 """
 
 from __future__ import annotations
@@ -604,7 +604,7 @@ def main() -> int:
         "--course-source-repo",
         dest="template",
         required=True,
-        help="Assignment template repo (e.g. assignment-1-f2026)",
+        help="Assignment template repo (e.g. assignment-linear-regression)",
     )
     # Default ON, like every other write button: the rendered workflow passes --preview /
     # --no-preview explicitly, so a bare local invocation cannot overwrite a starter.

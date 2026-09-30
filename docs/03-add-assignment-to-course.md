@@ -2,7 +2,8 @@
 
 Scaffold an assignment **template** repo, then fill in the brief and starter. Assignments
 are marked by hand; the model solution and the autograder are optional extras on top. One
-per assignment: `assignment-N-{f/s}YYYY`.
+per assignment, named after it: `assignment-<name>`, with no number and no semester. A
+template is reused every semester; its number comes from each semester's schedule.
 
 ## Prerequisites
 
@@ -10,19 +11,11 @@ per assignment: `assignment-N-{f/s}YYYY`.
 
 ## Steps
 
-Live example: [`example-course/course-org/assignment-1-f2026/`](../example-course/course-org/assignment-1-f2026).
+Live example: [`example-course/course-org/assignment-linear-regression/`](../example-course/course-org/assignment-linear-regression).
 
 1. **Scaffold the template.** 
    - In the course org → `.github` → **Actions tab** → [New assignment](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/new-assignment.yml). Inputs:
       - `assignment_name` = the assignment's name, e.g. `Neural networks from scratch`
-      - `assignment_number` = `1`, `2`, etc
-      - `semester_tag` = `f/sYYYY`
-      - `copy_from` (optional): an existing `assignment-*` template to start from instead -
-        `main` and `solution` arrive whole, history included, and nothing is written over
-        them. Every box below it is then ignored, because the copied `grading_config.yml`
-        is this assignment's definition, and the run says so with a link to it. The name
-        and the number are still used: they name the repo and describe it. A source with
-        no `solution` branch is refused.
       - `formats` = which starter file(s) to seed, comma-separated (the first is the
         runnable one): `ipynb`, `py`, `rmd`,
         `qmd`, `latex` - or `none` on its own for the brief and nothing else. Picks the
@@ -45,7 +38,8 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
      `assignment_defaults:` in `.github/dsl-course.yml`, else the institution's (Hertie:
      teams of 5, `late_penalty_per_day: 10%` per day started, `late_window_days: 10`).
      See [07](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment).
-   - this creates **`assignment-1-f2026`** with two branches of stubs for you to replace:
+   - this creates **`assignment-neural-networks-from-scratch`**, marked with the
+     `dsl-assignment` topic, with two branches of stubs for you to replace:
 
    | Branch | Holds | Who sees it |
    |--------|-------|-------------|
@@ -71,7 +65,9 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
 
 3. **Run Refresh actions** so the assignment dropdowns update.
 
-Repeat for each assignment (`number` = 2, 3, …). 
+Repeat for each assignment. A semester hands one out only once its `schedule.yml` names it
+([09](09-release-assignment-to-cohort.md#deadlines)), and that entry numbers it: the third
+assignment of the semester is `assignment-3`, and each student's copy `assignment-3-<handle>`.
 
 ### Formats and what students hand in
 

@@ -4,7 +4,7 @@ Replaces the old "use this template" repo: the required structure is defined her
 code, so a new repo is always laid out the way the Release actions expect.
 
     scaffold materials   --org X --semester f2026                 -> course-materials-f2026
-    scaffold assignment  --org X --number 1 --semester f2026      -> assignment-1-f2026
+    scaffold assignment  --org X --name "Neural networks"         -> assignment-neural-networks
 
 Materials repos get `lectures/`, `readings/` and `labs/` `01_session-1/` skeletons (any
 top-level directory with an ordinal-prefixed subdirectory is a releasable section - add
@@ -14,20 +14,23 @@ grading is faculty-side) and a `solution` branch carrying the model solution,
 `grading_config.yml`, and the HIDDEN tests, so generate never ships any of them to
 students.
 
-Either kind can start from last year's instead of from the stubs: `--copy-from <repo>`
-copies every branch of it, history and all, and rewrites only the SYSTEM-owned files.
+A materials repo can start from last year's instead of from the stubs: `--copy-from
+<repo>` copies every branch of it, history and all, and rewrites only the SYSTEM-owned
+files. An assignment template is always made fresh; copying one in is the console's
+(decision 0014).
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sys
 import tempfile
 import time
 from pathlib import Path
 
 from . import settings
-from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_tagged_team_access
+from .access import COURSE_TEAM_ACCESS, grant_faculty
 from .central import CENTRAL
 from .course import (
     ASSIGNMENT_TYPES,
@@ -54,7 +57,12 @@ from .derive import (
     TEX_BEGIN_SOLUTION,
     TEX_END_SOLUTION,
 )
-from .discovery import central_ref_for, discover_assignments, discover_semesters
+from .discovery import (
+    TEMPLATE_TOPIC,
+    central_ref_for,
+    discover_assignments,
+    discover_semesters,
+)
 from .gh_contents import put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import CLIParser, log, log_err, log_ok, log_skip, log_step
@@ -642,7 +650,7 @@ _MODEL_PY = (
 _MODEL_R = "answer <- 42  # TODO - the model answer"
 
 
-def _model_answer(number: int, fmt: str) -> str | None:
+def _model_answer(name: str, fmt: str) -> str | None:
     """The model answer seeded on the `solution` branch for `fmt`, or None where there is
     nothing to seed.
 
@@ -653,12 +661,12 @@ def _model_answer(number: int, fmt: str) -> str | None:
 
     `latex` is the starter with its task fenced in `%` comments; `none` seeds nothing, as
     it has no starter to become."""
-    title = f"Assignment {number} - model solution (stub)"
+    title = f"{name} - model solution (stub)"
     if fmt == "ipynb":
         return _notebook([f"# {title}"], _MODEL_PY)
     if fmt == "py":
         return (
-            f'"""Model solution for assignment {number} (stub)."""\n\n\n{_MODEL_PY}\n'
+            f'"""Model solution for {_py_docstring(name)} (stub)."""\n\n\n{_MODEL_PY}\n'
         )
     if fmt in _MARKDOWN_OUTPUT:
         return (
@@ -923,15 +931,9 @@ def _copy_source_head(org: str, source: str) -> str | None:
     return head
 
 
-def _copy_branches(
-    org: str, source: str, repo: str, *, needs: str = "", head: str = ""
-) -> bool:
+def _copy_branches(org: str, source: str, repo: str, *, head: str = "") -> bool:
     """Copy every branch of `org/source`, history and all, into the just-created
     `org/repo`. False (having said why) if any of it failed.
-
-    `needs` names a branch the copy would be worthless without - an assignment whose
-    source has no `solution` branch would arrive with no model answer and no
-    `grading_config.yml`, and grade on the defaults, so the run refuses instead.
 
     `head` is the branch the copy must open on, from `_copy_source_head`; empty leaves the
     new repo's HEAD alone."""
@@ -943,12 +945,6 @@ def _copy_branches(
         branches, left_behind = _source_branches(src)
         if not branches:
             log_err(f"  ! {org}/{source} has no branches to copy")
-            return False
-        if needs and needs not in branches:
-            log_err(
-                f"  ! {org}/{source} has no {needs} branch - copy from a repo that has "
-                "one, or leave copy_from empty for a fresh starter"
-            )
             return False
         if not clone(org, repo, new):
             log_err(f"  ! could not clone {org}/{repo} to copy into")
@@ -1008,7 +1004,6 @@ def scaffold_materials(
     ):
         return 1
     grant_faculty(org, repo, COURSE_TEAM_ACCESS)
-    grant_tagged_team_access(org, repo, tag)
     failures = 0
     # The topic is what makes it a materials repo (the name is only the default).
     if not set_repo_topics(org, repo, [MATERIALS_TOPIC]):
@@ -1186,19 +1181,33 @@ def _not_a_format(problem: str) -> ValueError:
     )
 
 
+# A repo name GitHub accepts, short enough to leave room for `-<handle>` on every copy.
+_TEMPLATE_SLUG_MAX = 60
+
+
+def template_repo(name: str) -> str:
+    """`assignment-<name>` for the assignment's name: lower case, runs of anything else
+    than letters and digits one `-`. A name that already opens with the word
+    "assignment" does not say it twice. "" when nothing of the name is left."""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    slug = re.sub(r"^assignment(-|$)", "", slug)
+    slug = slug[:_TEMPLATE_SLUG_MAX].strip("-")
+    return f"assignment-{slug}" if slug else ""
+
+
 def scaffold_assignment(
     org: str,
-    number: str,
-    tag: str,
+    name: str,
     formats: list[str],
     kind: str = "individual",
     *,
-    name: str = "",
     submit_via: str = "assignment_repo",
     autograde: bool = False,
-    copy_from: str = "",
 ) -> int:
-    """Create `assignment-<number>-<tag>` and write the assignment's own definition into it.
+    """Create `assignment-<name>` (`template_repo`) and write the assignment's own
+    definition into it (decision 0014). No number and no semester: an assignment's
+    ordinal is its place in a semester's schedule, and a template is reused every
+    semester.
 
     Every argument but `formats` lands verbatim in the solution branch's
     `grading_config.yml`, which is what the handout, the grading sheet and the Join-team
@@ -1209,67 +1218,26 @@ def scaffold_assignment(
     `formats` is the exception: it picks which starter stubs are seeded on `main`, one
     each with its model answer on `solution`, and nothing else. The grader reads whatever
     is in the repo, so a student who works in a notebook on a `py` assignment still
-    grades; an empty list seeds no starter at all.
-
-    `copy_from` overrides all but the name and the number: last year's template arrives
-    whole, both branches, and the `grading_config.yml` that came with it is the
-    assignment's definition. Writing the button's answers over it would silently
-    re-declare an assignment the course has already run."""
-    repo = f"assignment-{number}-{tag}"
-    named = name.strip()
+    grades; an empty list seeds no starter at all."""
+    title = " ".join(name.split())
+    repo = template_repo(title)
+    if not repo:
+        log_err("the assignment's name needs at least one letter or digit")
+        return 1
     starters = ", ".join(formats) or NO_STARTER
     log_step(
-        f"Scaffolding {org}/{repo} "
-        + (
-            f"(copied from {copy_from})"
-            if copy_from
-            else f"({kind}, {starters}; template + solution branch)"
-        )
+        f"Scaffolding {org}/{repo} ({kind}, {starters}; template + solution branch)"
     )
-    # Before the repo exists, so a source the copy refuses leaves nothing behind.
-    head = ""
-    if copy_from:
-        source_head = _copy_source_head(org, copy_from)
-        if source_head is None:
-            return 1
-        head = source_head
-    # The name is the one answer both paths keep: it is this repo's description on the
-    # org's landing page, which is the only place a copied template says which assignment
-    # it is without opening its grading_config.yml.
-    if not create_repo(
-        org,
-        repo,
-        private=True,
-        is_template=True,
-        description=(
-            f"Assignment {number}: {named}"
-            if named
-            else f"Assignment {number} template"
-        ),
-    ):
+    # The name is this repo's description on the org's landing page; the topic is what
+    # makes it an assignment template (the `assignment-` name is only the default).
+    if not create_repo(org, repo, private=True, is_template=True, description=title):
         return 1
     grant_faculty(org, repo, COURSE_TEAM_ACCESS)
-    grant_tagged_team_access(org, repo, tag)
-    set_repo_topics(org, repo, [f"assignment-{number}", "assignment"])
-    if copy_from:
-        # Nothing to SEED: both branches, every stub's grown-up version and the definition
-        # itself came with the copy. The button is the exception - the copy brought the
-        # source's, aimed at the source - so it is re-rendered for this repo, as on the
-        # fresh path.
-        if not _copy_branches(org, copy_from, repo, needs=SOLUTION_BRANCH, head=head):
-            return 1
-        log(
-            "  (boxes 5-8 - format, type, submit_via and autograde - "
-            "were ignored: the number and the semester name the repo, the name describes it, "
-            "and the copied definition governs the rest: "
-            f"https://github.com/{org}/{repo}/blob/"
-            f"{SOLUTION_BRANCH}/grading_config.yml)"
+    if not set_repo_topics(org, repo, [TEMPLATE_TOPIC]):
+        log_err(
+            f"could not mark {org}/{repo} as an assignment template ({TEMPLATE_TOPIC})"
         )
-        if _seed_template_workflows(org, repo):
-            return 1
-        log_ok(f"assignment template ready: {org}/{repo} (copied from {copy_from})")
-        return 0
-    title = named or f"Assignment {number}"
+        return 1
     if autograde and submit_via == "shared_dropbox_repo":
         # Corrected here as well as in the file, because it also decides whether `tests/`
         # is seeded: placeholder hidden tests beside an assignment nothing will ever run
@@ -1343,11 +1311,11 @@ def scaffold_assignment(
         # untouched starter instead of becoming it. The stem AND the suffix are the same
         # contract on both branches (see `_model_answer` and `_STARTERS`).
         for fmt in formats:
-            model = _model_answer(number, fmt)
+            model = _model_answer(title, fmt)
             if model is not None:
                 (sol / starter_name(fmt)).write_text(model)
         (sol / "README.md").write_text(
-            f"# Assignment {number} - model solution\n\n"
+            f"# {title} - model solution\n\n"
             "Goes out to students after the deadline, two ways:\n\n"
             "- **On a clock** - set `solution_datetime:` on this assignment in the "
             "semester's `semester-config/schedule.yml`, beside its `due_datetime`. The "
@@ -1390,7 +1358,7 @@ def scaffold_assignment(
             "-q",
             "--no-verify",
             "-m",
-            f"solution: assignment {number} (model answer + grading_config.yml)",
+            f"solution: {repo} (model answer + grading_config.yml)",
         )
         if (
             git("-C", str(wd), *GIT_ENV, "push", "-q", "-u", "origin", SOLUTION_BRANCH)[
@@ -1593,13 +1561,11 @@ def main() -> int:
     )
     pa = sub.add_parser("assignment")
     pa.add_argument("--org", required=True)
-    pa.add_argument("--number", required=True)
-    pa.add_argument("--semester", required=True, help="Semester, e.g. f2026 or s2026")
     pa.add_argument(
         "--name",
-        default="",
-        help="The assignment's name, e.g. 'Neural networks from scratch' (default: "
-        "'Assignment <number>'). Goes into grading_config.yml as `title:`.",
+        required=True,
+        help="The assignment's name, e.g. 'Neural networks from scratch': the repo is "
+        "assignment-<name>, and the name is its `title:` in grading_config.yml.",
     )
     # Four boxes default to COURSE_DEFAULT_CHOICE: the course's `assignment_defaults:`
     # answers them, else the toolkit does (`resolve_answers`).
@@ -1638,19 +1604,10 @@ def main() -> int:
         help="true = seed a tests/ stub on the solution branch and run it at the late "
         "cutoff; the count is shown to graders and never to a student",
     )
-    pa.add_argument(
-        "--copy-from",
-        dest="copy_from",
-        default="",
-        help="An existing assignment-* template to start from: `main` and `solution` are "
-        "copied whole, and every option above is ignored - the copied "
-        "grading_config.yml defines the assignment.",
-    )
     ps = sub.add_parser("site")
     ps.add_argument("--org", required=True)
     args = parser.parse_args()
-    if args.cmd == "assignment" and not args.copy_from:
-        # A copy ignores these boxes, so it pays for no read of the course's defaults.
+    if args.cmd == "assignment":
         answers = resolve_answers(
             {"formats": args.formats, "submit_via": args.submit_via},
             settings.course_defaults(args.org),
@@ -1666,13 +1623,8 @@ def main() -> int:
     # costs a re-run and nothing else. Caught on its OWN, the way `deploy.main` catches
     # `parse_path_pairs`: a ValueError from anywhere deeper is a bug and still earns its
     # traceback, rather than being printed as though a faculty member had mistyped a box.
-    #
-    # Not asked at all on a copy: `--copy-from` says on the form itself that boxes 5 to 9
-    # are ignored, and the copied grading_config.yml is the assignment - so refusing a run
-    # over a collision between two starters that will never be seeded held a copy up for a
-    # box its own help text told faculty not to bother with.
     formats: list[str] = []
-    if args.cmd == "assignment" and not args.copy_from:
+    if args.cmd == "assignment":
         try:
             formats = parse_formats(args.formats, args.autograde == "true")
         except ValueError as exc:
@@ -1688,14 +1640,11 @@ def main() -> int:
             return scaffold_site(args.org)
         return scaffold_assignment(
             args.org,
-            args.number,
-            args.semester,
+            args.name,
             formats,
             args.kind,
-            name=args.name,
             submit_via=args.submit_via,
             autograde=args.autograde == "true",
-            copy_from=args.copy_from,
         )
     except RuntimeError as exc:
         log_err(str(exc))

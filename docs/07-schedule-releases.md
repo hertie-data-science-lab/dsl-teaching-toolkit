@@ -186,7 +186,7 @@ Each assignment's **dates**, keyed by a key you choose. `course_source_repo` nam
 ```yaml
 assignments:
   assignment-1:
-    course_source_repo: assignment-1-f2026
+    course_source_repo: assignment-linear-regression
     handout_datetime: 2026-09-22T09:00
     due_datetime: 2026-10-13
     solution_datetime: 2026-10-16T09:00 # optional. No default - omitted = never

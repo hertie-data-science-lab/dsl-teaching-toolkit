@@ -80,10 +80,12 @@ from .course import (
 from .discovery import (
     OLD_SEMESTERS_PATH,
     SEMESTERS_PATH,
+    TEMPLATE_TOPIC,
     central_ref_for,
-    discover_assignment_repos,
     discover_content_repos,
     discover_semesters,
+    is_assignment_template,
+    is_untopicked_template,
     list_org_repos,
 )
 from .faults import NOT_MIGRATED, NotMigrated
@@ -2658,13 +2660,43 @@ class Course:
         )
 
     # templates ---------------------------------------------------------------
-    def templates(self) -> list[str]:
+    def template_rows(self) -> list[dict]:
+        """Every assignment template's listing row: those with the topic, and the ones the
+        topic step gives it (so a preview, where that step has not run, plans the same)."""
         return sorted(
-            name
-            for name, row in _listing(self.org).items()
-            if row.get("isTemplate")
-            and not row.get("archived")
-            and name.startswith("assignment-")
+            (
+                row
+                for row in _listing(self.org).values()
+                if is_assignment_template(row) or is_untopicked_template(row)
+            ),
+            key=lambda row: row["name"],
+        )
+
+    def templates(self) -> list[str]:
+        """The live templates, by name."""
+        return [r["name"] for r in self.template_rows() if not r.get("archived")]
+
+    def untopicked_templates(self) -> list[str]:
+        """The live `assignment-*` GitHub templates that do not carry the topic yet:
+        discovery finds a template by the topic now (decision 0014). An archived one is
+        read-only on GitHub and this migration never writes to one, as everywhere else in
+        the module, so the topic step leaves it alone."""
+        return [
+            r["name"]
+            for r in self.template_rows()
+            if is_untopicked_template(r) and not r.get("archived")
+        ]
+
+    def topic_templates(self) -> bool:
+        return all(
+            set_repo_topics(
+                self.org,
+                repo,
+                sorted(
+                    {*(_listing(self.org)[repo].get("topics") or []), TEMPLATE_TOPIC}
+                ),
+            )
+            for repo in self.untopicked_templates()
         )
 
     def grading_text(self, repo: str) -> str | None:
@@ -2890,7 +2922,7 @@ class Course:
         and a retired workflow still lying in a content repo or template."""
         ref = central_ref_for(self.org)
         semesters = discover_semesters(self.org)
-        templates = discover_assignment_repos(self.org)
+        templates = self.template_rows()
         assignments = [r["name"] for r in templates]
 
         def hosted(repo: str, workflows: tuple[str, ...]) -> dict[str, bytes]:
@@ -3046,6 +3078,17 @@ class Course:
                     f"git revert the '{PUBLISH_COMMIT}' commit in each materials repo "
                     f"and in {dotgithub}"
                 ),
+            ),
+            Step(
+                "assignment topic",
+                done=lambda: not self.untopicked_templates(),
+                plan=lambda: [
+                    f"{repo}: add the topic {TEMPLATE_TOPIC}"
+                    for repo in self.untopicked_templates()
+                ],
+                do=self.topic_templates,
+                verify=lambda: not self.untopicked_templates(),
+                rollback=f"remove the {TEMPLATE_TOPIC} topic from the templates",
             ),
             Step(
                 "re-render",

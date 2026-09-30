@@ -7,11 +7,12 @@ from __future__ import annotations
 import json
 from datetime import date
 
+import pytest
 import yaml
 
 from dsl_course import bootstrap_course, course, policy, scaffold, schedule, settings
 from dsl_course.ops.registry import REGISTRY
-from dsl_course.ops.request import parse_request
+from dsl_course.ops.request import RequestError, parse_request
 from dsl_course.welcome import template
 
 SENTINEL = course.COURSE_DEFAULT_CHOICE
@@ -91,7 +92,7 @@ def test_with_no_course_defaults_the_toolkit_answers_as_the_form_used_to():
 def _run_new_assignment(monkeypatch, argv: list[str], defaults: dict) -> dict:
     seen: dict = {}
 
-    def fake_scaffold(org, number, tag, formats, kind, **kw):
+    def fake_scaffold(org, name, formats, kind, **kw):
         seen.update(formats=formats, kind=kind, **kw)
         return 0
 
@@ -104,10 +105,8 @@ def _run_new_assignment(monkeypatch, argv: list[str], defaults: dict) -> dict:
             "assignment",
             "--org",
             "Org",
-            "--number",
-            "1",
-            "--semester",
-            "f2026",
+            "--name",
+            "Trees",
             *argv,
         ],
     )
@@ -139,7 +138,7 @@ def test_the_console_s_new_assignment_leaves_unanswered_boxes_to_the_cascade():
                 "op": "assignment.create",
                 "actor": "prof",
                 "course_org": "Course",
-                "args": {"number": "1", "semester": "f2026"},
+                "args": {"name": "Trees"},
                 "preview": False,
             }
         )
@@ -148,6 +147,41 @@ def test_the_console_s_new_assignment_leaves_unanswered_boxes_to_the_cascade():
     for flag in ("--formats", "--submit-via"):
         assert argv[argv.index(flag) + 1] == SENTINEL
     assert "--team-formation" not in argv and "--visibility" not in argv
+
+
+def _create(args: dict) -> str:
+    return json.dumps(
+        {
+            "schema": "dsl.request/1",
+            "op": "assignment.create",
+            "actor": "prof",
+            "course_org": "Course",
+            "args": args,
+            "preview": False,
+        }
+    )
+
+
+def test_new_assignment_takes_a_name_and_ignores_the_old_number_and_semester():
+    # The deployed console still sends `number` and `semester` (decision 0014 takes both
+    # away): accepted, and never passed on.
+    request = parse_request(
+        _create({"name": "Trees", "number": "3", "semester": "f2026"})
+    )
+    argv = REGISTRY["assignment.create"].argv(request)
+    assert argv[:5] == ["assignment", "--org", "Course", "--name", "Trees"]
+    assert "--number" not in argv and "--semester" not in argv
+    with pytest.raises(RequestError) as exc:
+        parse_request(_create({"number": "3", "semester": "f2026"}))
+    assert exc.value.code == "BAD_ARGS"
+
+
+def test_a_copy_is_refused_with_a_sentence_not_ignored():
+    # Ignoring it would make a fresh template where a copy was asked for.
+    with pytest.raises(RequestError) as exc:
+        parse_request(_create({"name": "Trees", "copy_from": "assignment-1-f2025"}))
+    assert exc.value.code == "BAD_ARGS"
+    assert "Create it fresh" in exc.value.text
 
 
 def test_an_answer_on_the_form_beats_the_course_default(monkeypatch):

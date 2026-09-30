@@ -663,13 +663,6 @@ def post(monkeypatch):
         monkeypatch.setattr(
             team_formation, "course_name_of", lambda org: "Deep Learning"
         )
-        # The course org's templates, which number the assignment's page on the semester
-        # site: one off-plan template sorts first, so `assignment-2` is page 2.
-        monkeypatch.setattr(
-            team_formation.schedule,
-            "discover_assignments",
-            lambda org: ["a1-f2026", "a2-f2026"],
-        )
         return rec, sender
 
     return _wire
@@ -1145,23 +1138,6 @@ def test_the_assignment_is_named_as_the_site_names_it(semester, post):
 )
 def test_the_number_is_not_doubled_up(title, expected):
     assert team_formation.numbered(title, "assignment-3", 3) == expected
-
-
-def test_a_page_nobody_could_look_up_leaves_the_title_and_drops_the_link(
-    semester, post, monkeypatch
-):
-    # A course org whose templates could not be listed: no number to give and no page to
-    # link, so the mail says what stands on its own rather than naming the wrong page.
-    semester()
-    _rec, sender = post()
-
-    def refuse(org):
-        raise RuntimeError("API rate limit exceeded")
-
-    monkeypatch.setattr(team_formation.schedule, "discover_assignments", refuse)
-    _tick()
-    assert sender.sent[0].subject == "Form your team for assignment-2 - Deep Learning"
-    assert "github.io" not in sender.sent[0].body
 
 
 def test_the_message_says_nothing_about_working_alone(semester, post):

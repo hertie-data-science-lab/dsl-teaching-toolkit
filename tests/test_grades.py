@@ -2603,12 +2603,6 @@ def _writes(monkeypatch, existing, ok: bool = True) -> list[dict]:
     monkeypatch.setattr(grades, "_grading_text", lambda org, t, **_: "type: group\n")
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
     monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo, **_: False)
-    # The course org's templates, which number the assignment pages the lock links.
-    monkeypatch.setattr(
-        grades.schedule,
-        "discover_assignments",
-        lambda org: ["assignment-4-project-f2026"],
-    )
 
     def read(org, repo, path):
         if isinstance(existing, Exception):
@@ -2649,15 +2643,9 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
 def test_the_lock_links_no_page_for_an_individual_assignment_and_lists_nothing(
     monkeypatch,
 ):
-    # The page is for the refusal of a Join, which only a self-select assignment gets - and
-    # a plan with none of those does not pay a listing of the course org for it.
+    # The page is for the refusal of a Join, which only a self-select assignment gets.
     puts = _writes(monkeypatch, None)
     monkeypatch.setattr(grades, "_grading_text", lambda org, t: "type: individual\n")
-
-    def boom(org):
-        raise AssertionError("no self-select assignment, so no listing")
-
-    monkeypatch.setattr(grades.schedule, "discover_assignments", boom)
     assert grades.sync_team_lock("COURSE", "SEMESTER", _sched(a1="assignment-1")).ok
     assert "    team_formation_page:\n" in puts[0]["content"].decode()
 

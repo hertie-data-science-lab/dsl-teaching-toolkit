@@ -32,6 +32,17 @@ from dsl_course.faults import NotMigrated, Severity
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
 from tests.conftest import ROSTER_HEADER
+from tests.plans import citing
+
+# Every template these tests hand out, collect or patch: the plan cites each.
+TEMPLATES = (
+    "assignment-1-f2026",
+    "assignment-2-f2026",
+    "assignment-3-f2026",
+    "assignment-4-f2026",
+    "assignment-4-project-f2026",
+    "assignment-9-f2026",
+)
 
 SHA = "a" * 40
 OTHER_SHA = "b" * 40
@@ -1542,7 +1553,7 @@ def test_snapshot_assignment_with_no_targets_yet_writes_nothing_and_is_not_an_er
     def boom(*args, **kwargs):
         raise AssertionError("an empty snapshot must never be frozen")
 
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
     monkeypatch.setattr(collect, "submission_targets", lambda *a, **k: [])
     monkeypatch.setattr(collect, "put_file", boom)
@@ -1633,7 +1644,7 @@ def _stub_collect(monkeypatch, snapshots, grading: str | None = None):
     _stub_solution_clone(
         monkeypatch, **({"grading": grading} if grading is not None else {})
     )
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     monkeypatch.setattr(
         collect,
         "submission_targets",
@@ -1913,7 +1924,7 @@ def test_collect_records_a_skip_when_the_template_has_no_solution_branch(monkeyp
     # same skip on every hourly tick, for ever. Hand-marked assignments are common.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     sheets = _recorded_sheet_writes(monkeypatch)
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
@@ -1933,7 +1944,7 @@ def test_a_freeze_that_fails_records_no_skip_and_goes_red(monkeypatch, capsys):
     # re-derives. So the marker waits, and the next tick seals and then records.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     _recorded_sheet_writes(monkeypatch, ok=False)
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 1
@@ -1946,7 +1957,7 @@ def test_the_next_run_after_a_failed_freeze_seals_and_then_records(monkeypatch):
     # tick that follows does both halves.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     sheets = _recorded_sheet_writes(monkeypatch, ok=True)
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
@@ -1965,7 +1976,7 @@ def test_autograde_is_off_unless_the_assignment_asks_for_it():
 
 def test_collect_records_a_skip_when_autograde_is_disabled(monkeypatch):
     _stub_solution_clone(monkeypatch, "autograde: false\n")
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
     ((path, text),) = written
@@ -1980,7 +1991,7 @@ def test_no_unit_of_a_shared_drop_box_is_ever_machine_marked(monkeypatch):
     # every target of a drop box names the same repo, so one of them reaching `_grade_target`
     # would score each student on the whole semester's work.
     _stub_solution_clone(monkeypatch)
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     monkeypatch.setattr(
         collect,
         "load_grading_spec",
@@ -2014,7 +2025,7 @@ def test_collect_records_a_skip_when_the_solution_branch_has_no_tests(monkeypatc
     monkeypatch.setattr(
         collect.grades, "_grading_text", lambda org, template: "autograde: true\n"
     )
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     sheets = _recorded_sheet_writes(monkeypatch)
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
@@ -2027,7 +2038,7 @@ def test_collect_records_a_skip_when_the_solution_branch_has_no_tests(monkeypatc
 def test_collect_dry_run_records_no_skip(monkeypatch):
     # A dry run must not fire the marker - that would silence the real run that follows.
     _stub_solution_clone(monkeypatch, "autograde: false\n")
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     written = _captured_writes(monkeypatch)
     assert (
         collect.collect("Course", "assignment-1-f2026", "Semester", dry_run=True) == 0
@@ -3537,7 +3548,7 @@ def test_submission_targets_individual_excludes_auditors(monkeypatch):
 def test_collect_refuses_an_unparseable_deadline(monkeypatch, capsys):
     # An unparseable --deadline would reach git's approxidate and silently match NO commits,
     # zeroing the whole semester. Validate up front and fail loudly instead.
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, tpl: GRADING_YML)
     assert (
         collect.collect(
@@ -3819,7 +3830,7 @@ def test_an_unwritten_autograde_false_marker_goes_red_rather_than_green(
     # and re-decides the identical skip on every hourly tick, for ever. Returning 0 on a
     # failed write reported that as done.
     _stub_solution_clone(monkeypatch, "autograde: false\n")
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     _failing_put_file(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 1
     assert "could not record the skip" in capsys.readouterr().err
@@ -3831,7 +3842,7 @@ def test_an_unwritten_no_solution_branch_marker_goes_red(monkeypatch, capsys):
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
     monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: collect.SheetWrite(True))
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     _failing_put_file(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 1
     assert "could not record the skip" in capsys.readouterr().err
