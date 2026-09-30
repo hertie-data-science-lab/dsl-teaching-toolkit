@@ -5,10 +5,10 @@
 // the run's conclusion is the verdict and the org's live state is the proof.
 
 import { wait, type GitHubClient } from '../github/client';
+import { CENTRAL, CENTRAL_ACTIONS } from '../model/central';
 import { HANDLE_RE, ORG_NAME_RE } from '../model/policy';
 
-export const CENTRAL = { owner: 'hertie-data-science-lab', repo: 'dsl-teaching-toolkit', workflow: 'bootstrap-org.yml', ref: 'main' } as const;
-export const CENTRAL_ACTIONS = `https://github.com/${CENTRAL.owner}/${CENTRAL.repo}/actions/workflows/${CENTRAL.workflow}`;
+export { CENTRAL, CENTRAL_ACTIONS };
 
 export interface BootstrapCourse {
   org: string;

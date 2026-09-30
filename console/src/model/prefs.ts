@@ -167,3 +167,24 @@ export function rememberOpen(login: string, choice: OpenChoice, store: PrefStore
   saveYourSetup(login, next, store);
   return next;
 }
+
+// --------------------------------------------------------------------------- My courses (WP-S2)
+
+const myCoursesKey = (login: string) => `dsl-console-my-courses:${login}`;
+
+/** Whether `login` chose to see only their own courses on All courses; off by default. */
+export function myCoursesOnly(login: string, store: PrefStore | null = localStore()): boolean {
+  try {
+    return store?.getItem(myCoursesKey(login)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveMyCoursesOnly(login: string, on: boolean, store: PrefStore | null = localStore()): void {
+  try {
+    store?.setItem(myCoursesKey(login), on ? '1' : '0');
+  } catch {
+    /* storage unavailable: the choice lasts until reload */
+  }
+}
