@@ -175,4 +175,37 @@ describe('New assignment: import', () => {
     expect(root.textContent).toContain('Created. Nothing reaches students until you add it to a schedule.');
     expect(root.textContent).toContain('Add to the Fall 2026 schedule');
   });
+
+  it('never says Created while the source cannot be read: the check fails with its sentence and a way to read it again', async () => {
+    const T = 'assignment-regression';
+    let sourceUp = false;
+    const gh = new FakeGitHub()
+      .on('GET', '/repos/prof/old-course', () => (sourceUp ? json({ name: 'old-course', default_branch: 'main' }) : json({ message: 'Server Error' }, 500)))
+      .on('GET', '/repos/prof/old-course/git/trees/main?recursive=1', { sha: 't', truncated: false, tree: ['README.md'].map(blob) })
+      .on('GET', `/repos/${COURSE}/${T}`, { name: T })
+      .on('GET', `/repos/${COURSE}/${T}/branches/main`, { name: 'main', commit: { sha: 'h1', commit: { tree: { sha: 'tr1' } } } })
+      .on('GET', `/repos/${COURSE}/${T}/branches/solution`, { name: 'solution', commit: { sha: 'h2', commit: { tree: { sha: 'tr2' } } } })
+      .on('GET', `/repos/${COURSE}/${T}/contents/grading_config.yml?ref=solution`, fileBody('grading_config.yml', 'title: Regression\n', 'g1'));
+    const client = new GitHubClient({ token: () => 't', fetch: gh.fetch });
+    const env = { client, user: { login: 'a-example', id: 1, name: null, email: null, avatar_url: '' }, files: new StaticFiles(), kind: 'classic', ops: { runs: { value: [] } } } as unknown as Env;
+    const v = { name: 'Regression', start: 'repo', source_repo: 'prof/old-course', type: 'individual', submit_via: 'assignment_repo', formats: ['ipynb'], autograde: 'false', completion_check: 'auto', grader_pdf: false };
+    const verified = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4) };
+    localStorage.setItem(`dsl-console:wizard:new-assignment:${COURSE}`, JSON.stringify({ v, verified, extrasSaved: T }));
+    const props = { course, loaded: { kind: 'absent' } as const, cohortStates: {}, files: new StaticFiles(), now };
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={5} /></EnvCtx.Provider>, root!));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(root.textContent).toContain('prof/old-course can be read (could not tell)');
+    expect(root.textContent).not.toContain('Created');
+    expect(root.textContent).not.toContain(' of prof/old-course');
+    expect(gh.seen.some((x) => x.method === 'POST')).toBe(false);
+    const again = [...root.querySelectorAll<HTMLButtonElement>('button.btn')].find((b) => b.textContent === 'Read it again')!;
+    expect(again).toBeTruthy();
+    sourceUp = true;
+    await act(async () => { again.click(); await vi.advanceTimersByTimeAsync(100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(root.textContent).not.toContain('Read it again');
+    expect(root.textContent).toContain('1 files from main of prof/old-course');
+  });
 });

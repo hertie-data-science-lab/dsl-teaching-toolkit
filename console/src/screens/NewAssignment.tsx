@@ -208,7 +208,9 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     ...(read.solution ? [{ branch: 'solution', entries: tickedEntries(read.solution.entries, lines.solution, importFixed('solution')) }] : []),
   ] : [];
   const importDone = d.imported?.repo === repo ? d.imported.branches : [];
-  const importPending = !!src && toCopy.some((c) => !importDone.includes(c.branch));
+  // A source counts as pending until it has been read: an unread or unreadable source is never "nothing to copy".
+  const importPending = !!src && (!read?.main || toCopy.some((c) => !importDone.includes(c.branch)));
+  const readFailed = !!src && !!read && !read.main;
 
   const w = effective(tiers3, effective(tiers2, v));
   const writeExtras = async () => {
@@ -312,7 +314,6 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
       </>
     );
   } else {
-    heading = created ? 'Created' : 'Check and create';
     const fmts = ((w.formats as string[]) ?? []).map(formatWord).join(' + ');
     const submit = w.submit_via ? labelOf('submit_via', String(w.submit_via)) : '';
     const rows = ((v.questions as QuestionRow[] | undefined) ?? []).filter((r) => r.name.trim());
@@ -321,6 +322,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     const extrasPending = created && Object.keys(extrasOf(w)).length > 0 && d.extrasSaved !== repo;
     const checksOk = created && allOk(tplNow?.checks);
     const ready = checksOk && !importPending && !extrasPending;
+    heading = ready ? 'Created' : 'Check and create';
     const live = liveSemesters(course.cohorts, (c) => {
       const l = p.cohortStates[c.org];
       return l?.kind !== 'ready' || l.status.semester?.live !== false;
@@ -331,13 +333,15 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
       <>
         <dl class="summary-dl">
           <dt>Name</dt><dd>{name}</dd><dd><a href="#new-assignment-1">Change</a></dd>
-          <dt>Starts from</dt><dd>{src ? `${toCopy.map((c) => `${c.entries.length} files from ${c.branch}`).join(', ')} of ${srcKey}` : 'Fresh starter files'}</dd><dd><a href="#new-assignment-1">Change</a></dd>
+          <dt>Starts from</dt><dd>{!src ? 'Fresh starter files' : read?.main ? `${toCopy.map((c) => `${c.entries.length} files from ${c.branch}`).join(', ')} of ${srcKey}` : srcKey}</dd><dd><a href="#new-assignment-1">Change</a></dd>
           <dt>Students</dt><dd>{w.type === 'group' ? 'In teams' : 'Alone'}</dd><dd><a href="#new-assignment-2">Change</a></dd>
           <dt>Submit</dt><dd>{submit}</dd><dd><a href="#new-assignment-2">Change</a></dd>
           <dt>Marking</dt><dd>{`${fmts}; tests ${w.autograde === 'true' ? `on (${String(w.tests ?? 'tests')})` : 'off'}`}</dd><dd><a href="#new-assignment-3">Change</a></dd>
           <dt>Points</dt><dd>{rows.length ? `${rows.length} question${rows.length === 1 ? '' : 's'}, total ${total}` : 'Not set yet'}</dd><dd><a href="#new-assignment-4">Change</a></dd>
         </dl>
         <Checks list={tplNow?.checks ?? null} busy={tpl.busy} pending={[`Assignment template ${repo} created`]} />
+        {src && !read ? <CheckLine cls="busy">Reading {srcKey}</CheckLine> : null}
+        {readFailed ? <Checks list={[read!.check]} busy={source.busy} /> : null}
         {checksOk && importPending && !copy.busy ? <p class="footnote">The ticked files are copied next, as you.</p> : null}
         {copy.busy ? <CheckLine cls="busy">{copy.line}</CheckLine> : null}
         {said?.ok.map((t) => <CheckLine cls="ok">{t}</CheckLine>)}
@@ -364,9 +368,11 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
         {tplNow && !tpl.busy && tplNow.checks.some((c) => c.ok === false) && created ? <WizError>The assignment template is not complete yet. Check again in a minute; if it stays like this, open the run from All operations.</WizError> : null}
       </>
     );
-    foot = !created ? (
-      <button class="btn" type="button" disabled={!env || !repo} onClick={() => env?.ops.open(def, 'run')}>Create assignment</button>
-    ) : checksOk && importPending ? (
+    foot = readFailed ? (
+      <button class="btn" type="button" disabled={source.busy} onClick={() => source.run()}>Read it again</button>
+    ) : !created ? (
+      <button class="btn" type="button" disabled={!env || !repo || (!!src && !read)} onClick={() => env?.ops.open(def, 'run')}>Create assignment</button>
+    ) : checksOk && importPending && read?.main ? (
       <button class="btn" type="button" disabled={copy.busy} onClick={() => void runCopy()}>{copy.results ? 'Copy again' : 'Copy the files'}</button>
     ) : checksOk && extrasPending ? (
       <button class="btn" type="button" disabled={save.kind === 'busy' || !tplNow?.config} onClick={() => void writeExtras()}>Save the marking settings</button>
