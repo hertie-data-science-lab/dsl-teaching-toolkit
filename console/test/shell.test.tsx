@@ -72,7 +72,11 @@ describe('top bar', () => {
   });
   it('links the person to Profile, with no Your setup pill and no course links', () => {
     const out = render(<Topbar user={user} title="Instructor view" onSignOut={() => {}} />);
-    expect(out).toMatch(/<a class="who" href="#profile" aria-label="Your profile">/);
+    const who = /<a[^>]*class="who"[^>]*>/.exec(out)?.[0] ?? '';
+    expect(who).toContain('href="?#profile"');
+    expect(who).toContain('aria-label="Your profile"');
+    expect(out).toMatch(/<a[^>]*href="\?#help"[^>]*>Guide<\/a>/);
+    expect(out).toMatch(/<a[^>]*class="app-name"[^>]*href="\?#home"|<a[^>]*href="\?#home"[^>]*class="app-name"/);
     expect(out).toContain('Octo Cat');
     expect(out).not.toContain('Your setup');
     expect(out).not.toContain('hdr-links');
@@ -86,7 +90,7 @@ describe('switcher and side nav', () => {
     const out = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{}} current="dashboard" problems={0} />);
     expect(out).not.toContain('New course');
     expect(out).not.toContain('New semester');
-    expect(out).toContain('<a href="?#home" role="menuitem">All courses</a>');
+    expect(out).toMatch(/<a[^>]*href="\?#home"[^>]*>All courses<\/a>/);
   });
   it('reads All courses on Home', () => {
     expect(render(<Sidenav courses={[course]} cohortStates={{}} current="home" problems={0} />)).toContain('<span>All courses</span>');
@@ -112,6 +116,6 @@ describe('sign-in page', () => {
     expect(out.indexOf('>Sign in with GitHub</button>')).toBeGreaterThan(-1);
     expect(out.indexOf('>Sign in with GitHub</button>')).toBeLessThan(out.indexOf(LINE));
     expect(out).toMatch(/<p class="footnote">The console can see/);
-    expect(out).toContain('<summary>Use a token instead</summary><div class="fold-body"><form');
+    expect(out).toMatch(/<details class="fold">.*<div class="fold-body"><form[\s\S]*id="pat"[\s\S]*<\/form><\/div><\/details>/s);
   });
 });

@@ -41,7 +41,8 @@ function useTheme(): [boolean, () => void] {
 /**
  * The app-level bar (decision 0021): the product name (a Home link) with the view, the person
  * (a link to Profile), Guide, theme, Sign out. Nothing course- or semester-specific; the Menu
- * button only where there is a side nav to open.
+ * button only where there is a side nav to open. Its links start `?`: app-level pages are about
+ * no course or semester, so they clear the query.
  */
 export function Topbar({ user, onSignOut, navOpen = false, onMenu, title }: {
   user: GhUser | null;
@@ -56,15 +57,15 @@ export function Topbar({ user, onSignOut, navOpen = false, onMenu, title }: {
     <header class="topbar">
       <div class="topbar-inner">
         {user && onMenu ? <button class="pill-ghost menu-btn" type="button" aria-expanded={navOpen} aria-controls="sidenav-wrap" onClick={onMenu}>Menu</button> : null}
-        <a class="app-name" href="#home">DSL Teaching Console{user && title ? <small>{title}</small> : null}</a>
+        <a class="app-name" href="?#home">DSL Teaching Console{user && title ? <small>{title}</small> : null}</a>
         <div class="topbar-right">
           {user ? (
-            <a class="who" href="#profile" aria-label="Your profile">
+            <a class="who" href="?#profile" aria-label="Your profile">
               <span class="avatar" aria-hidden="true">{user.avatar_url ? <img src={user.avatar_url} alt="" /> : initials(user)}</span>
               <span class="who-name">{user.name || user.login}</span>
             </a>
           ) : null}
-          {user ? <a class="pill-ghost" href="#help" aria-label="Guide: how the console is organised">Guide</a> : null}
+          {user ? <a class="pill-ghost" href="?#help" aria-label="Guide: how the console is organised">Guide</a> : null}
           <button class="pill-ghost" type="button" aria-label="Switch colour theme" onClick={toggle}>{dark ? 'Light' : 'Dark'}</button>
           {user && onSignOut ? <button class="pill-ghost" type="button" onClick={onSignOut}>Sign out</button> : null}
         </div>

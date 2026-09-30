@@ -92,7 +92,10 @@ export function App({ state: s }: { state: AppState }) {
   }, []);
 
   // A semester's student screens keep their own `#setup` (Set up); only instructor links rename.
-  const studentHash = !!parseSearch(s.search.value).semester;
+  // Until discovery answers, a `?semester=` URL is taken as the student screens' (nothing is
+  // rewritten yet); after, only when the person holds a role in that semester.
+  const asked = parseSearch(s.search.value);
+  const studentHash = !!asked.semester && (!s.estate.value || !!studentContext(s.estate.value, asked));
   const route = parseHash(s.hash.value, studentHash);
   // An old `#teams-<slug>` / `#marks-<slug>` link: show the tab, and write its new hash.
   const moved = movedHash(s.hash.value, studentHash);
@@ -151,7 +154,8 @@ export function App({ state: s }: { state: AppState }) {
     );
   }
 
-  const stu = studentContext(estate, sel, s.archivedOf);
+  // Profile and Guide are app-level: a semester in the query does not turn them into student screens.
+  const stu = FULL_WIDTH.includes(route.screen) ? null : studentContext(estate, sel, s.archivedOf);
   if (stu?.pending) {
     return (
       <>
