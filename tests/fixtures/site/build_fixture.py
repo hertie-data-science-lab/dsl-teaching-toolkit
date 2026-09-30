@@ -238,12 +238,14 @@ SCHEDULE = schedule.Schedule(
             show_on_site=False,
             title="Attention, further",
         ),
-        # A drop-in whose one copy is a single file outside any session folder.
+        # A drop-in whose one copy is a single file outside any session folder. Its label
+        # carries no number, so the entry says it (decision 0020: never by position).
         _release(
             "clinic",
             datetime(2026, 9, 4, 16, 0, tzinfo=BERLIN),
             "clinic/notes.pdf",
             kind="drop-in",
+            number=1,
             title="Project clinic",
         ),
         # Released, with a published deck beside an unpublished pdf.
