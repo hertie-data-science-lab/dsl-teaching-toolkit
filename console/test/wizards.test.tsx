@@ -22,7 +22,7 @@ import { assignmentMarking, assignmentWork, newMaterials } from '../src/tiers/wi
 import { CENTRAL, bootstrapInputs, runBootstrap } from '../src/wizards/central';
 import {
   assignmentArgs, autogradeBlock, cohortOrgName, cohortTerms, contentTerms, courseOrgName, courseSlugOf, formatBlock, formatError, materialsArgs,
-  IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, importFixed, liveSemesters, nextTerm, openAt, ordinalInName, parseSource, signature, templateRepo, tickedEntries, toggleFormat,
+  IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, importFixed, liveSemesters, nextTerm, openAt, ordinalInName, parseSource, signature, sourceFixed, templateRepo, tickedEntries, toggleFormat,
 } from '../src/wizards/model';
 import { allOk, checkOrg, checkTemplate, readSource } from '../src/wizards/verify';
 import { saveDraft } from '../src/wizards/drafts';
@@ -478,7 +478,12 @@ describe('New assignment: import from a repo', () => {
       .on('GET', '/repos/a/b/git/trees/solution?recursive=1', { sha: 't2', truncated: true, tree: [blob('solution/x.py')] });
     const r = await readSource(client(gh), 'a', 'b');
     expect(r.check.ok).toBe(true);
-    expect(r.main).toEqual({ branch: 'trunk', entries: [blob('README.md')], truncated: false });
+    const lib = { path: 'lib', mode: '160000', type: 'commit', sha: 'c' };
+    expect(r.main).toEqual({ branch: 'trunk', entries: [blob('README.md'), lib], truncated: false });
+    // A submodule is listed as a fixed, unticked row, and never copied.
+    expect(sourceFixed('main', r.main!.entries)('lib')).toBe('not copied');
+    expect(sourceFixed('main', r.main!.entries)('README.md')).toBeNull();
+    expect(tickedEntries(r.main!.entries, [], sourceFixed('main', r.main!.entries)).map((e) => e.path)).toEqual(['README.md']);
     expect(r.solution).toEqual({ branch: 'solution', entries: [blob('solution/x.py')], truncated: true });
     const none = await readSource(client(new FakeGitHub()), 'a', 'gone');
     expect(none.check).toMatchObject({ ok: false, hint: 'Not found, or the console cannot read it. It reads public repos and repos in organisations where the DSL console app is installed.' });

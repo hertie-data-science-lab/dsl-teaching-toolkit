@@ -196,7 +196,8 @@ export async function readSource(client: GitHubClient, owner: string, repo: stri
     if (!r) return { check: { text, ok: false, hint: SOURCE_NOT_FOUND }, ...none };
     const list = async (branch: string): Promise<SourceBranch | null> => {
       const t = await client.listTree(owner, repo, branch, true);
-      return t ? { branch, entries: t.tree.filter((e) => e.type === 'blob'), truncated: t.truncated } : null;
+      // Submodules are listed too, so the picker can show them as not copied.
+      return t ? { branch, entries: t.tree.filter((e) => e.type === 'blob' || e.type === 'commit'), truncated: t.truncated } : null;
     };
     const main = await list(r.default_branch);
     if (!main) return { check: { text, ok: false, hint: 'It has no files yet.' }, ...none };

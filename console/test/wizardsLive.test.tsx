@@ -136,7 +136,7 @@ describe('New assignment: import', () => {
     let exists = false;
     const gh = new FakeGitHub()
       .on('GET', '/repos/prof/old-course', { name: 'old-course', default_branch: 'main' })
-      .on('GET', '/repos/prof/old-course/git/trees/main?recursive=1', { sha: 't', truncated: false, tree: ['README.md', 'data/x.csv', 'tests/test_x.py'].map(blob) })
+      .on('GET', '/repos/prof/old-course/git/trees/main?recursive=1', { sha: 't', truncated: false, tree: [...['README.md', 'data/x.csv', 'tests/test_x.py'].map(blob), { path: 'vendor', mode: '160000', type: 'commit', sha: 'c' }] })
       .on('GET', `/repos/${COURSE}/${T}`, () => (exists ? json({ name: T }) : json({ message: 'Not Found' }, 404)))
       .on('GET', `/repos/${COURSE}/${T}/branches/main`, { name: 'main', commit: { sha: 'h1', commit: { tree: { sha: 'tr1' } } } })
       .on('GET', `/repos/${COURSE}/${T}/branches/solution`, { name: 'solution', commit: { sha: 'h2', commit: { tree: { sha: 'tr2' } } } })
@@ -157,7 +157,10 @@ describe('New assignment: import', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     const ticks = [...root.querySelectorAll<HTMLInputElement>('input.ft-tick')].map((i) => [i.getAttribute('aria-label'), i.checked]);
     expect(ticks).toEqual([['Include data/', true], ['Include data/x.csv', true], ['Include tests/', false], ['Include tests/test_x.py', false], ['Include README.md', true]]);
-    expect(root.textContent).toContain('2 of 3 files ticked');
+    expect(root.textContent).toContain('2 of 4 files ticked');
+    const vendor = [...root.querySelectorAll('li')].find((li) => li.textContent?.startsWith('vendor'))!;
+    expect(vendor.textContent).toContain('not copied');
+    expect(vendor.querySelector('input')).toBeNull();
     expect(root.textContent).toContain('prof/old-course has no solution branch, so only its brief is copied.');
 
     // The template now exists (the operation ran); every step verified: the check step copies.

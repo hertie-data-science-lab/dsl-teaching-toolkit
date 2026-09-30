@@ -29,8 +29,8 @@ import { OpenButton } from '../ui/OpenButton';
 import { PatternTree } from '../ui/PatternTree';
 import { useDraft } from '../wizards/drafts';
 import {
-  APP_SLUG, IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, ORDINAL_WARNING, assignmentArgs, formatError, importFixed, installUrl, liveSemesters, openAt, ordinalInName,
-  parseSource, signature, templateRepo, tickedEntries, type SourceRepo,
+  APP_SLUG, IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, ORDINAL_WARNING, assignmentArgs, formatError, installUrl, liveSemesters, openAt, ordinalInName,
+  parseSource, signature, sourceFixed, templateRepo, tickedEntries, type SourceRepo,
 } from '../wizards/model';
 import { allOk, checkFree, checkTemplate, readSource, useLive, type Check, type SourceBranch, type SourceRead } from '../wizards/verify';
 import { Checks, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
@@ -163,12 +163,12 @@ function ImportPicker({ src, read, busy, lines, set }: { src: SourceRepo; read: 
   return (
     <>
       <BranchPicker
-        title={`Files from ${read.main.branch}, for students`} b={read.main} lines={lines.main} set={(main) => set({ ...lines, main })} fixed={importFixed('main')}
+        title={`Files from ${read.main.branch}, for students`} b={read.main} lines={lines.main} set={(main) => set({ ...lines, main })} fixed={sourceFixed('main', read.main.entries)}
         note="Students get everything copied here. Solutions, tests, grading files and .env start unticked."
       />
       {read.solution ? (
         <BranchPicker
-          title="Files from solution, for marking" b={read.solution} lines={lines.solution} set={(solution) => set({ ...lines, solution })} fixed={importFixed('solution')}
+          title="Files from solution, for marking" b={read.solution} lines={lines.solution} set={(solution) => set({ ...lines, solution })} fixed={sourceFixed('solution', read.solution.entries)}
           note="The model answer and tests. grading_config.yml is written from your answers in the next steps."
         />
       ) : <p class="footnote">{src.owner}/{src.repo} has no solution branch, so only its brief is copied.</p>}
@@ -213,8 +213,8 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const read = source.value?.key === srcKey ? source.value.r : null;
   const lines = linesFor(d.lines, srcKey);
   const toCopy = read?.main ? [
-    { branch: 'main', entries: tickedEntries(read.main.entries, lines.main, importFixed('main')) },
-    ...(read.solution ? [{ branch: 'solution', entries: tickedEntries(read.solution.entries, lines.solution, importFixed('solution')) }] : []),
+    { branch: 'main', entries: tickedEntries(read.main.entries, lines.main, sourceFixed('main', read.main.entries)) },
+    ...(read.solution ? [{ branch: 'solution', entries: tickedEntries(read.solution.entries, lines.solution, sourceFixed('solution', read.solution.entries)) }] : []),
   ] : [];
   const importDone = d.imported?.repo === repo ? d.imported.branches : [];
   // A source counts as pending until it has been read: an unread or unreadable source is never "nothing to copy".

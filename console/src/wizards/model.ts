@@ -227,6 +227,13 @@ export function importFixed(branch: 'main' | 'solution'): (path: string) => stri
     : null;
 }
 
+/** `importFixed` for one listed branch, with its submodules shown as never copied (a copy writes blobs only). */
+export function sourceFixed(branch: 'main' | 'solution', entries: TreeEntry[]): (path: string) => string | null {
+  const submodules = new Set(entries.filter((e) => e.type === 'commit').map((e) => e.path));
+  const base = importFixed(branch);
+  return (path) => (submodules.has(path) ? 'not copied' : base(path));
+}
+
 /** The files a copy takes: every blob of the source tree that is not fixed and not left out by a line. */
 export function tickedEntries(entries: TreeEntry[], lines: string[], fixed: (path: string) => string | null): TreeEntry[] {
   const rules = compileAll(lines);
