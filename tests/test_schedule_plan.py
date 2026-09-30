@@ -326,3 +326,24 @@ def test_offplan_folders_are_the_kind_sections_no_copy_covers():
         ("materials", "lectures/03_off", "lecture"),
         ("materials", "readings/01_week", "readings"),
     ]
+
+
+def test_the_console_s_key_for_a_new_readings_pack_joins_no_lecture():
+    # The console keys a new unnumbered readings entry `readings`, `readings-<title>`,
+    # then `readings-b`: no digit, so no number, so it joins no lecture (0013 rule 3).
+    rows = _rows(
+        [
+            Release("lecture-1", _at(3), [Deploy("cm", "lectures/01")]),
+            Release("lecture-2", _at(4), [Deploy("cm", "lectures/02")]),
+            Release("readings", _at(5), [Deploy("cm", "readings/a")]),
+            Release("readings-week", _at(6), [Deploy("cm", "readings/b")]),
+            Release("readings-b", _at(7), [Deploy("cm", "readings/c")]),
+        ]
+    )
+    assert _shown(schedule_plan.site_rows(rows)) == [
+        ("lecture-1", 1, []),
+        ("lecture-2", 2, []),
+        ("readings", None, []),
+        ("readings-week", None, []),
+        ("readings-b", None, []),
+    ]

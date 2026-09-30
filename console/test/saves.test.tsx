@@ -162,9 +162,9 @@ describe('Save on the schedule’s new release, its kind inferred from the folde
   it('writes no number for a readings folder', async () => {
     const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
     const out = await addRelease(gh, f, 'readings/week_3');
-    const [key] = Object.keys(out).filter((k) => k !== 'lab-2');
-    expect(key).toMatch(/^readings/);
-    expect(out[key]).not.toHaveProperty('number');
+    // No digit in the key: `readings-1` would join lecture 1 (decision 0013 rule 3).
+    expect(Object.keys(out)).toEqual(['lab-2', 'readings']);
+    expect(out.readings).not.toHaveProperty('number');
   });
 });
 

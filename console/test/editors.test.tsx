@@ -15,7 +15,7 @@ import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
 import { POLICY, penaltyRate } from '../src/model/policy';
 import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { assignmentKey, blankDraft, draftErrors, freshId, nextNumber, readDraft, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { assignmentKey, blankDraft, draftErrors, freshId, nextNumber, readDraft, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
@@ -138,6 +138,15 @@ describe('the schedule entry sheet model', () => {
     const out = parse(y.text);
     expect(out.releases['lecture-1']).toEqual({ event_datetime: '2026-09-10T10:00', kind: 'lecture', number: 1, title: 'Intro', deploy: [{ course_source_repo: 'course-materials-f2026', course_source_path: 'lectures/01_intro' }] });
     expect(y.text.split('\n').filter((l) => l.trim().startsWith('#'))).toEqual(SEEDED.split('\n').filter((l) => l.trim().startsWith('#')));
+  });
+
+  it('keys an unnumbered release with no digit, so a readings pack joins no lecture', () => {
+    const doc = { releases: { readings: {}, 'readings-week': {}, 'lecture-1': {} }, events: { 'readings-week-b': {} } };
+    expect(unnumberedId({}, 'readings', '')).toBe('readings');
+    expect(unnumberedId(doc, 'readings', '')).toBe('readings-b');
+    expect(unnumberedId(doc, 'readings', 'Week 3')).toBe('readings-week-c');
+    expect(unnumberedId(doc, 'readings', 'Week 3, part A')).toBe('readings-week-3-part-a');
+    expect(unnumberedId({}, 'lecture', '')).toBe('lecture');
   });
 
   it('edits an entry in place, keeping the keys the sheet does not show', () => {

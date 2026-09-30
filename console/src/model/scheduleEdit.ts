@@ -265,6 +265,27 @@ export function freshId(doc: Raw, block: Block, stem: string): string {
   return `${base}-${n}`;
 }
 
+/**
+ * A fresh key for a release with no number (decision 0013 rule 3, 0020): `readings`,
+ * `readings-week-pack`. A digit at the end of a key is a number, and a readings number joins
+ * that lecture, so none is ever added: trailing digits of the title go, a taken key gets a
+ * letter (`readings-b`).
+ */
+export function unnumberedId(doc: Raw, kind: string, title: string): string {
+  const taken = takenKeys(doc);
+  const base = kebab(`${kind} ${title}`).replace(/[-\d]+$/, '') || kebab(kind) || 'entry';
+  let id = base, n = 1;
+  while (taken.has(id)) id = `${base}-${letters(++n)}`;
+  return id;
+}
+
+/** 1 -> a, 2 -> b, 27 -> aa: a suffix with no digit in it. */
+function letters(n: number): string {
+  let s = '';
+  for (; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(97 + ((n - 1) % 26)) + s;
+  return s;
+}
+
 /** Every key the file uses, in any block: keys are unique across blocks. */
 function takenKeys(doc: Raw): Set<string> {
   return new Set([...Object.keys(obj(doc.releases)), ...Object.keys(obj(doc.assignments)), ...Object.keys(obj(doc.events))]);

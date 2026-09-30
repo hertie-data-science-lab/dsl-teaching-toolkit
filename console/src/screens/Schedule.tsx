@@ -10,7 +10,7 @@ import { Field, Invalid } from '../forms/Form';
 import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  assignmentKey, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, withNumber, writeDraft,
+  assignmentKey, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft,
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
@@ -454,8 +454,9 @@ function View(p: ReadyProps) {
     for (const k of dirtyKeys) {
       const d = prefill(drafts[k]);
       if (k === 'new' && (d.kind === 'releases' || d.kind === 'assignments' || d.kind === 'events')) {
-        const stem = d.kind === 'releases' ? `${kindFor(d)}${d.number ? `-${d.number}` : ''}` : d.title || 'event';
-        newId = d.kind === 'assignments' ? assignmentKey(d.number) : freshId(doc, d.kind, stem);
+        newId = d.kind === 'assignments' ? assignmentKey(d.number)
+          : d.kind === 'releases' ? (d.number ? freshId(doc, 'releases', `${kindFor(d)}-${d.number}`) : unnumberedId(doc, kindFor(d) ?? 'lecture', d.title))
+          : freshId(doc, d.kind, d.title || 'event');
         writeDraft(y, { ...d, id: newId }, doc);
       } else writeDraft(y, d, doc);
     }
