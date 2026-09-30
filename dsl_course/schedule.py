@@ -1761,6 +1761,14 @@ def semester_name(slug: str, entry: AssignmentEntry) -> str:
     return entry.semester_dest_repo or slug
 
 
+def cited_repos(sched: Schedule) -> set[str]:
+    """Every course-org repo the plan cites: each assignment's template and each copy's
+    source. What a semester's instructors get push on (decision 0014 rule 4)."""
+    return {e.course_source_repo for e in sched.assignments.values()} | {
+        d.course_source_repo for r in sched.releases for d in r.deploy
+    }
+
+
 def entries_for_repo(sched: Schedule, repo: str) -> list[tuple[str, AssignmentEntry]]:
     """Every `(slug, entry)` that hands out from `repo`, in the plan's own order.
 

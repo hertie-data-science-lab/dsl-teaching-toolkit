@@ -45,9 +45,8 @@ def scaffold_grants(monkeypatch):
         "grant_team_repo_access",
         lambda org, team, repo, perm, **k: granted.append((team, repo, perm)) or True,
     )
-    monkeypatch.setattr(access, "create_team", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "create_repo", lambda *a, **k: True)
-    monkeypatch.setattr(scaffold, "set_repo_topics", lambda *a, **k: None)
+    monkeypatch.setattr(scaffold, "set_repo_topics", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "put_files", lambda *a, **k: True)
     monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(gh_contents, "put_files", lambda *a, **k: True)

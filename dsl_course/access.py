@@ -16,7 +16,6 @@ from .course import (
     STUDENTS_TEAM,
 )
 from .discovery import classify_repos
-from .gh_teams import create_team
 from .ghcli import gh, is_missing_resource
 from .log import log, log_err, log_err_person, log_ok, log_person
 from .repos import Converged, gh_settled, set_repo_topics, topic_name
@@ -146,20 +145,6 @@ def grant_faculty(
         grant_team_repo_access(
             org, team, repo, perm, missing_is_note=missing_is_note, person=person
         )
-
-
-def grant_tagged_team_access(course_org: str, repo: str, tag: str) -> None:
-    """Give this tag's semester-declared instructors team (`instructors-<tag>`) push
-    access on `repo` - scoped to just that tag's own content, unlike the standing
-    COURSE_TEAM_ACCESS grant every repo gets. No course-admin-<tag> variant: admin
-    access stays on the single, course-wide `course-admin` team.
-
-    Ensures the team exists first (idempotent) - callable in either order, whether
-    a tag's content repo is scaffolded before or after its semester first declares
-    instructors."""
-    team = f"{INSTRUCTORS_TEAM}-{tag}"
-    create_team(course_org, team, f"Instructors for {tag} (semester-declared)")
-    grant_team_repo_access(course_org, team, repo, "push")
 
 
 # The semester-org role teams that get read on released content.
