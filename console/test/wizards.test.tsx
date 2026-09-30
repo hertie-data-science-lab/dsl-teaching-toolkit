@@ -309,7 +309,7 @@ describe('live checks against GitHub', () => {
   it('renders the three links, the name and the bot handle to copy, and no Check button', () => {
     const org = 'hertie-deep-learning-e2345';
     const check = { id: 42, checks: [{ text: 'a', ok: true }, { text: 'b', ok: false }, { text: 'c', ok: false, hint: 'Invited. The DSL team registers new courses; the bot then joins by itself.' }] };
-    const html = render(<OrgSteps org={org} check={check} busy={false} run={() => {}} back="#new-course-1" slug="dsl-teaching-toolkit" />);
+    const html = render(<OrgSteps org={org} check={check} busy={false} run={() => {}} back="#new-course-1" doc="01-new-course-org.md" slug="dsl-teaching-toolkit" />);
     expect(html).toContain('href="https://github.com/account/organizations/new?plan=free"');
     expect(html).toContain('href="https://github.com/apps/dsl-teaching-toolkit/installations/new/permissions?target_id=42"');
     expect(html).toContain(`href="https://github.com/orgs/${org}/people"`);
@@ -319,9 +319,18 @@ describe('live checks against GitHub', () => {
     expect(html).toContain('Check again');
     expect(html).not.toContain('proposed');
     // Before the org exists there is nothing to install on or invite to.
-    const before = render(<OrgSteps org={org} check={{ id: null, checks: [{ text: 'a', ok: false }, { text: 'b', ok: false }, { text: 'c', ok: false }] }} busy={false} run={() => {}} back="#new-course-1" slug="dsl-teaching-toolkit" />);
+    const before = render(<OrgSteps org={org} check={{ id: null, checks: [{ text: 'a', ok: false }, { text: 'b', ok: false }, { text: 'c', ok: false }] }} busy={false} run={() => {}} back="#new-course-1" doc="01-new-course-org.md" slug="dsl-teaching-toolkit" />);
     expect(before).not.toContain('/installations/new');
     expect(before).not.toContain('/people"');
+  });
+
+  it('puts the org-creation steps in a ? with a Learn more link, not in a line under the row', () => {
+    const org = 'hertie-deep-learning-e2345';
+    const html = render(<OrgSteps org={org} check={null} busy={false} run={() => {}} back="#new-course-1" doc="01-new-course-org.md" slug="" />);
+    expect(html).toContain('aria-label="How to create the org"');
+    expect(html).toContain(`Choose the Free plan.<br/>Enter ${org} as its name.<br/>Choose a business or institution and enter hertie-data-science-lab.`);
+    expect(html).toContain('href="https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/01-new-course-org.md"');
+    expect(html).not.toContain('class="footnote"');
   });
 
   it('verifies a new template: both branches and a settings file that parses', async () => {

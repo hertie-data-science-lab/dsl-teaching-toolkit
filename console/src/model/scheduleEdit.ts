@@ -251,18 +251,37 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
   y.assign([d.kind, d.id], entryValue(d, obj(doc[d.kind])[d.id]));
 }
 
-/** A fresh id in `block`: `lecture-6`, `lab-4`, `assignment-2`, `midterm-exam`. */
+/**
+ * A fresh id in `block` from `stem` (`lecture-6`, `midterm-exam`). A taken one gets a letter
+ * (`lecture-3-b`), never a digit: a digit at the end of a key is its number (decision 0020).
+ */
 export function freshId(doc: Raw, block: Block, stem: string): string {
+  return unique(doc, kebab(stem) || block.slice(0, -1));
+}
+
+/**
+ * A fresh key for a release with no number (decision 0013 rule 3, 0020): `readings`,
+ * `readings-week-pack`. A digit at the end of a key is a number, and a readings number joins
+ * that lecture, so none is ever added: trailing digits of the title go, a taken key gets a
+ * letter (`readings-b`).
+ */
+export function unnumberedId(doc: Raw, kind: string, title: string): string {
+  return unique(doc, kebab(`${kind} ${title}`).replace(/[-\d]+$/, '') || kebab(kind) || 'entry');
+}
+
+/** `base`, or `base-b`, `base-c`... when taken: a letter, since a trailing digit is a number. */
+function unique(doc: Raw, base: string): string {
   const taken = takenKeys(doc);
-  const base = kebab(stem) || block.slice(0, -1);
-  if (/-\d+$/.test(base) || block !== 'releases') {
-    let id = base, n = 2;
-    while (taken.has(id)) id = `${base}-${n++}`;
-    return id;
-  }
-  let n = 1;
-  while (taken.has(`${base}-${n}`)) n++;
-  return `${base}-${n}`;
+  let id = base, n = 1;
+  while (taken.has(id)) id = `${base}-${letters(++n)}`;
+  return id;
+}
+
+/** 1 -> a, 2 -> b, 27 -> aa: a suffix with no digit in it. */
+function letters(n: number): string {
+  let s = '';
+  for (; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(97 + ((n - 1) % 26)) + s;
+  return s;
 }
 
 /** Every key the file uses, in any block: keys are unique across blocks. */

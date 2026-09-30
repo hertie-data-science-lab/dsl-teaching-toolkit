@@ -120,7 +120,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
           const edited = v.org !== org ? String(v.org ?? '') : d.org;
           set({ course_name: v.course_name as string | undefined, course_code: v.course_code as string | undefined, org: edited && edited !== derived ? edited : undefined });
         }} />
-        <OrgSteps org={org} check={orgLive.value?.org === org ? orgLive.value : null} busy={orgLive.busy} run={orgLive.run} back="#new-course-1" />
+        <OrgSteps org={org} check={orgLive.value?.org === org ? orgLive.value : null} busy={orgLive.busy} run={orgLive.run} back="#new-course-1" doc="01-new-course-org.md" />
       </>
     );
     foot = <button class="btn" type="button" disabled={!done[0] || Object.keys(errs).length > 0} onClick={() => { set({ orgVerified: org }); go(2); }}>Continue</button>;
