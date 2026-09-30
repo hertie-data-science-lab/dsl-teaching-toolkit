@@ -168,7 +168,7 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
         {local.map(entry)}
         <hr />
         <a href={SETUP_HREF} role="menuitem" tabIndex={-1} onClick={() => setOpen(false)}>
-          <span>{folder ? 'Change your setup' : 'Set up a local folder'}</span>
+          <span>{folder ? 'Change your profile' : 'Set up a local folder'}</span>
         </a>
       </div>
       <span class="sr" role="status">{note ?? ''}</span>

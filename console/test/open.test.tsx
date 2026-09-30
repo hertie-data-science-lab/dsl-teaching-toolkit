@@ -193,7 +193,7 @@ describe('the Open button', () => {
     expect(document.activeElement).toBe(caret);
     await key(caret, 'ArrowDown');
     expect(document.activeElement).toBe(items()[0]);
-    expect(items().at(-1)!.getAttribute('href')).toBe('#setup');
+    expect(items().at(-1)!.getAttribute('href')).toBe('?#profile');
     await key(items()[0], 'Escape');
     expect(q('[role="menu"]').hidden).toBe(true);
     expect(document.activeElement).toBe(caret);
@@ -219,7 +219,7 @@ describe('the Open button', () => {
     expect(main.textContent).toBe('Open in VS Code');
     expect(main.getAttribute('href')).toBe(`vscode://file/Users/a/repos/${ORG}/assignment-2-f2026`);
     expect(main.hasAttribute('target')).toBe(false);
-    expect(items().at(-1)!.textContent).toBe('Change your setup');
+    expect(items().at(-1)!.textContent).toBe('Change your profile');
   });
 });
 

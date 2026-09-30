@@ -77,7 +77,7 @@ export interface OpenItem {
   group: 'online' | 'local';
 }
 
-export const SETUP_HREF = '#setup';
+export const SETUP_HREF = '?#profile';
 
 /**
  * Every way to open `r` with this setup, in menu order. With a folder set up, VS Code both
