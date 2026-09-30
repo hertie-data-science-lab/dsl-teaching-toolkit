@@ -126,7 +126,7 @@ export function TodoList({ todo }: { todo: Todo[] }) {
   return (
     <ul class="todo">
       {todo.map((t) => (
-        <li><span class="slug">{t.repo}</span> {t.text} <a class="textlink" href={todoHref(t)}>Open settings</a></li>
+        <li><span class="slug">{t.repo}</span> {t.text} <a class="textlink" href={todoHref(t)} aria-label={`Open ${t.repo} settings`}>Open settings</a></li>
       ))}
     </ul>
   );
@@ -220,8 +220,8 @@ export function CourseScreen(p: CourseProps) {
         <CourseHeaderActions course={course} ready={ready} />
       </div>
       <p class="page-note">Materials and assignment templates are prepared here, for every semester. Students get only what a semester releases or hands out, from that semester’s page.</p>
-      {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
       <Verdict course={v.course} />
+      {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
       <div class="stack">
         <div class="grid-2">
           <section class="panel section">

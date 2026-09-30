@@ -726,6 +726,7 @@ def materials_json() -> dict:
         "default_syllabus": materials.DEFAULT_SYLLABUS,
         "default_kind": materials.DEFAULT_KIND,
         "aliases": materials.BUILTIN_ALIASES,
+        "reviewed_mark": releaseignore.REVIEWED_MARK,
         "denylist": list(PUBLICATION_DENYLIST),
         "never_material": sorted(NEVER_MATERIAL),
         "cases": [

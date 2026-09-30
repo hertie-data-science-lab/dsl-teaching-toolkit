@@ -36,6 +36,10 @@ from pathspec import GitIgnoreSpec
 from .fs import Deny
 
 RELEASEIGNORE = ".releaseignore"
+# The line a `.releaseignore` carries when somebody looked and chose to withhold nothing,
+# so the materials checklist can tell a reviewed empty list from the seeded one. A comment:
+# it withholds nothing. The console writes it; spelt once, here.
+REVIEWED_MARK = "# Reviewed: nothing withheld."
 
 # Withheld by every copy, with no pattern needed and no way to opt back in - see the
 # module docstring. A `!` cannot re-include it: the check runs before the chain.

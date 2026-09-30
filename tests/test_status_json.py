@@ -16,6 +16,7 @@ import pytest
 
 from dsl_course import (
     grades,
+    releaseignore,
     roster,
     scaffold,
     schedule,
@@ -598,12 +599,12 @@ def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
         "read_materials",
         lambda org, repo: Declared(syllabus="E1282_syllabus.pdf"),
     )
-    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(
         status_json, "get_file_content", lambda org, repo, path, ref="": None
     )
-    present = {"E1282_syllabus.pdf": "5ha", "lectures/01.md": "1ec"}
-    monkeypatch.setattr(status_json, "repo_path_shas", lambda org, repo, b: present)
+    monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
+    present = {"E1282_syllabus.pdf": "file", "lectures": "dir"}
+    monkeypatch.setattr(status_json, "top_level", lambda org, repo: present)
     facts = status_json._materials_facts(COURSE, "nlp-materials")
     assert status_json.materials_state(facts) == "ready"
     del present["E1282_syllabus.pdf"]
@@ -1036,8 +1037,6 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         lambda org, repo, branch: (
             {"dsl-course.yml": "c0ffee"}
             if repo == ".github"
-            else {"lectures/01.md": "1ec"}
-            if repo == "course-materials-f2026"
             else {"schedule.yml": "5c4ed", ".system/outcomes/release.now.json": "0u7"}
         ),
     )
@@ -1069,6 +1068,13 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     monkeypatch.setattr(
         status_json, "repo_tree", lambda org, repo, branch: ("lectures",)
     )
+    # A materials repo is read by its top only, never its whole tree.
+    monkeypatch.setattr(
+        status_json,
+        "top_level",
+        lambda org, repo: {"SYLLABUS.md": "file", "lectures": "dir", ".system": "dir"},
+    )
+    monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
     monkeypatch.setattr(status_json, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
     monkeypatch.setattr(status_json, "get_team_members", lambda org, team: {"prof"})
     monkeypatch.setattr(grades, "_org_settings_faults", lambda org: [])
@@ -1676,21 +1682,39 @@ def test_the_checklist_order_and_what_blocks():
     assert checks[0]["why"] == "There is no SYLLABUS.md yet."
 
 
-def test_the_seeded_releaseignore_is_not_reviewed_and_a_pattern_is():
+def test_the_seeded_releaseignore_is_not_reviewed_and_a_pattern_or_the_mark_is():
     stub = scaffold._RELEASEIGNORE_STUB
-    for text, reviewed in ((None, False), (stub, False), (stub + "\ndrafts/\n", True)):
+    for text, reviewed in (
+        (None, False),
+        (stub, False),
+        (stub + "\ndrafts/\n", True),
+        # Looked at, and nothing withheld: the mark the console writes.
+        (f"{stub}{releaseignore.REVIEWED_MARK}\n", True),
+    ):
         m = _materials("m", releaseignore=text, sessions=True)
         assert ("withheld" not in _unmet(m)) is reviewed
 
 
-def test_the_unmapped_folders_are_named():
-    m = _materials("m", folders=("lectures", "data", "img"))
+def test_the_unmapped_folders_are_named_and_never_released_ones_skipped():
+    m = _materials("m", folders=("lectures", "data", "img", "solution", "tests"))
     (why,) = [
         c["why"] for c in status_json.materials_checks(m) if c["id"] == "all_mapped"
     ]
     assert (
         why == "The folders data/, img/ have no kind yet; set them under Folder kinds."
     )
+    # Only never-released folders: as good as none.
+    only = _materials("m", folders=("solution",))
+    (kind,) = [
+        c for c in status_json.materials_checks(only) if c["id"] == "kind_folder"
+    ]
+    assert kind["why"] == (
+        "There is no lectures/, labs/ or readings/ folder yet; add one or set a "
+        "folder's kind under Folder kinds."
+    )
+    img = _materials("m", folders=("img",))
+    (kind,) = [c for c in status_json.materials_checks(img) if c["id"] == "kind_folder"]
+    assert kind["why"] == "No top folder has a kind yet; set one under Folder kinds."
 
 
 def test_c4_and_c5_are_done_once_any_one_is_ready():
@@ -1731,13 +1755,13 @@ def test_the_todo_list_is_every_unmet_check_and_every_unwritten_brief():
     doc = status_json.render_course_file(course, NOW)
     todo = doc["course"]["todo"]
     assert [t["id"] for t in todo] == [
-        "template:assignment-2:brief",
         "materials:course-materials-a:sessions",
         "materials:course-materials-b:syllabus",
         "materials:course-materials-b:withheld",
         "materials:course-materials-b:sessions",
+        "template:assignment-2:brief",
     ]
-    assert todo[0] == {
+    assert todo[-1] == {
         "id": "template:assignment-2:brief",
         "kind": "template",
         "repo": "assignment-2",
@@ -1745,8 +1769,8 @@ def test_the_todo_list_is_every_unmet_check_and_every_unwritten_brief():
         "screen": "template",
         "entry": "assignment-2",
     }
-    assert todo[2]["text"] == "There is no SYLLABUS.md yet."
-    assert (todo[2]["screen"], todo[2]["entry"]) == ("materials", "course-materials-b")
+    assert todo[1]["text"] == "There is no SYLLABUS.md yet."
+    assert (todo[1]["screen"], todo[1]["entry"]) == ("materials", "course-materials-b")
     # To-dos never enter the problem list.
     assert doc["problems"] == []
     assert validate(doc, schemas.status_schema()) == []

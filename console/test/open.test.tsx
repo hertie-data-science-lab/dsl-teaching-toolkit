@@ -8,7 +8,7 @@ import { act } from 'preact/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { courseFolder, defaultItem, folderExample, openItems, platformOf, schemeOk, type RepoRef, type Setup } from '../src/model/open';
-import { forgetStudentPrefs, rememberOpen, saveYourSetup, yourSetup, type PrefStore } from '../src/model/prefs';
+import { forgetStudentPrefs, rememberOpen, resetKeptSetups, saveYourSetup, yourSetup, type PrefStore } from '../src/model/prefs';
 import { SetupScreen } from '../src/screens/Setup';
 import { OpenButton } from '../src/ui/OpenButton';
 
@@ -25,7 +25,7 @@ const refusing: PrefStore = { getItem: () => { throw new Error('blocked'); }, se
 const hrefs = (setup: Setup | null, ref = REF) => Object.fromEntries(openItems(ref, setup).map((i) => [i.choice, i.href ?? i.copy]));
 
 describe('Your setup in this browser', () => {
-  it('round-trips per login, keeps the folder when a choice is remembered, and is forgotten on sign-out', () => {
+  it('round-trips per login, keeps the folder when a choice is remembered, and is kept across sign-out', () => {
     const store = memStore();
     expect(yourSetup(LOGIN, store)).toBeNull();
     saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'other', scheme: 'zed://file/{path}' }, store);
@@ -33,9 +33,12 @@ describe('Your setup in this browser', () => {
     expect(yourSetup('someone-else', store)).toBeNull();
     expect(rememberOpen(LOGIN, 'githubdev', store)).toEqual({ folder: '/Users/a/repos', editor: 'other', scheme: 'zed://file/{path}', lastOpen: 'githubdev' });
     expect(rememberOpen('b-example', 'clone', store)).toEqual({ folder: '', editor: 'vscode', lastOpen: 'clone' });
+    store.setItem(`dsl-console-visit:${LOGIN}:${ORG}`, '1');
+    store.setItem(`dsl-console-paths:${LOGIN}`, '{}');
     forgetStudentPrefs(LOGIN, store);
-    expect(yourSetup(LOGIN, store)).toBeNull();
-    expect(yourSetup('b-example', store)).not.toBeNull();
+    // Visit times and student folders go; Profile stays (decision 0021 rule 3).
+    expect([...store.data.keys()].sort()).toEqual([`dsl-console-setup:${LOGIN}`, 'dsl-console-setup:b-example']);
+    expect(yourSetup(LOGIN, store)?.folder).toBe('/Users/a/repos');
   });
 
   it('reads a damaged entry as defaults and survives blocked storage', () => {
@@ -45,10 +48,12 @@ describe('Your setup in this browser', () => {
     store.setItem(`dsl-console-setup:${LOGIN}`, '{not json');
     expect(yourSetup(LOGIN, store)).toBeNull();
     expect(yourSetup(LOGIN, refusing)).toBeNull();
-    // A refused write is kept until reload, and sign-out forgets it too.
+    // A refused write is kept until reload, across sign-out too.
     expect(saveYourSetup(LOGIN, { folder: '/x', editor: 'vscode' }, refusing)).toBe(false);
     expect(yourSetup(LOGIN, refusing)).toEqual({ folder: '/x', editor: 'vscode' });
     forgetStudentPrefs(LOGIN, refusing);
+    expect(yourSetup(LOGIN, refusing)).toEqual({ folder: '/x', editor: 'vscode' });
+    resetKeptSetups();
     expect(yourSetup(LOGIN, refusing)).toBeNull();
   });
 });
@@ -104,6 +109,33 @@ describe('where each choice opens', () => {
     expect(pick({ folder: '/r', editor: 'vscode', lastOpen: 'clone' })).toBe('clone');
     // A last choice that is no longer offered (the editor changed) falls back.
     expect(pick({ folder: '', editor: 'vscode', lastOpen: 'editor' })).toBe('github');
+  });
+
+  it('with a folder offers both Open and Clone in VS Code; the folder check keeps the one that applies', () => {
+    const setup: Setup = { folder: '/r', editor: 'other', scheme: 'zed://file/{path}' };
+    const menu = (c?: boolean) => openItems(REF, setup, c).filter((i) => i.group === 'local').map((i) => i.label);
+    expect(menu()).toEqual(['Open in VS Code', 'Clone in VS Code', 'Open in GitHub Desktop', 'Open in your editor', 'Copy the clone command']);
+    expect(hrefs(setup).vsclone).toBe(`vscode://vscode.git/clone?url=${encodeURIComponent(GH)}`);
+    expect(menu(true)).toEqual(['Open in VS Code', 'Open in GitHub Desktop', 'Open in your editor']);
+    expect(menu(false)).toEqual(['Clone in VS Code', 'Open in GitHub Desktop', 'Copy the clone command']);
+    // Without a folder the check changes nothing.
+    expect(openItems(REF, null, true)).toEqual(openItems(REF, null));
+  });
+
+  it('keeps the remembered choice while offered, else takes its opposite', () => {
+    const pick = (s: Setup, c?: boolean) => defaultItem(openItems(REF, s, c), s).choice;
+    const vs: Setup = { folder: '/r', editor: 'vscode' };
+    expect(pick({ ...vs, lastOpen: 'vsclone' })).toBe('vsclone');
+    expect(pick({ ...vs, lastOpen: 'vscode' }, false)).toBe('vsclone');
+    expect(pick({ ...vs, lastOpen: 'vsclone' }, true)).toBe('vscode');
+    expect(pick({ ...vs, lastOpen: 'clone' }, true)).toBe('vscode');
+    // A VS Code clone becomes a VS Code open, whatever the editor setting.
+    expect(pick({ folder: '/r', editor: 'desktop', lastOpen: 'vsclone' }, true)).toBe('vscode');
+    expect(pick({ folder: '/r', editor: 'other', scheme: 'zed://file/{path}', lastOpen: 'clone' }, true)).toBe('editor');
+    expect(pick({ folder: '/r', editor: 'other', scheme: 'zed://file/{path}', lastOpen: 'editor' }, false)).toBe('vsclone');
+    expect(pick({ ...vs, lastOpen: 'desktop' }, false)).toBe('desktop');
+    expect(pick(vs, false)).toBe('vsclone');
+    expect(pick(vs, true)).toBe('vscode');
   });
 
   it('checks an editor link and spells the example folder for the platform', () => {
@@ -162,7 +194,7 @@ describe('the Open button', () => {
     expect(document.activeElement).toBe(caret);
     await key(caret, 'ArrowDown');
     expect(document.activeElement).toBe(items()[0]);
-    expect(items().at(-1)!.getAttribute('href')).toBe('#setup');
+    expect(items().at(-1)!.getAttribute('href')).toBe(`?course=${ORG}#profile`);
     await key(items()[0], 'Escape');
     expect(q('[role="menu"]').hidden).toBe(true);
     expect(document.activeElement).toBe(caret);
@@ -188,7 +220,7 @@ describe('the Open button', () => {
     expect(main.textContent).toBe('Open in VS Code');
     expect(main.getAttribute('href')).toBe(`vscode://file/Users/a/repos/${ORG}/assignment-2-f2026`);
     expect(main.hasAttribute('target')).toBe(false);
-    expect(items().at(-1)!.textContent).toBe('Change your setup');
+    expect(items().at(-1)!.textContent).toBe('Change your profile');
   });
 });
 
@@ -196,7 +228,11 @@ describe('the Your setup screen', () => {
   it('stores the folder and the editor on Save, and says what is stored', async () => {
     await mount(<SetupScreen org={ORG} />);
     expect(root!.textContent).toContain('No folder stored');
-    expect(root!.textContent).toContain('Kept in this browser only.');
+    expect(q('h1').textContent).toBe('Profile');
+    expect(root!.textContent).toContain('Kept in this browser, for your GitHub login.');
+    // No course repos passed, no File System Access API: neither block.
+    expect(root!.textContent).not.toContain('Clone every repo');
+    expect(root!.textContent).not.toContain('which repos are cloned');
     const folder = q<HTMLInputElement>('#ys-folder');
     await act(() => {
       folder.value = '/Users/a/repos';
@@ -205,7 +241,7 @@ describe('the Your setup screen', () => {
     expect(root!.textContent).toContain(`/Users/a/repos/${ORG}`);
     const radios = [...root!.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
     await act(() => radios[2].click());
-    const save = [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Save your setup')!;
+    const save = [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Save')!;
     const scheme = q<HTMLInputElement>('#ys-scheme');
     await act(() => {
       scheme.value = 'zed://file';
@@ -231,7 +267,7 @@ describe('the Your setup screen', () => {
       folder.value = '/Users/a/repos';
       folder.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(() => [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Save your setup')!.click());
+    await act(() => [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Save')!.click());
     expect(yourSetup(LOGIN)).toEqual({ folder: '/Users/a/repos', editor: 'vscode' });
   });
 });

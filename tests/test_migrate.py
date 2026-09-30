@@ -2535,7 +2535,22 @@ def test_the_public_website_step_seeds_off_without_earlier_settings(
     assert ".github/opencourse.yml: seeded off" in capsys.readouterr().out
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     tree = fake.tree(COURSE, ".github")
-    assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse()
+    assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse(
+        withhold=opencourse.DEFAULT_WITHHOLD
+    )
+
+
+def test_a_website_already_on_is_seeded_with_nothing_extra_withheld(
+    fake, course, monkeypatch
+):
+    # Its earlier publish withheld nothing extra: a default list would take files off a
+    # live site at the next publish.
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    seeded = opencourse.parse(
+        yaml.safe_load(fake.tree(COURSE, ".github")["opencourse.yml"])
+    )
+    assert seeded.enabled
+    assert seeded.withhold == ()
 
 
 def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(

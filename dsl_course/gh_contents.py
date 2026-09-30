@@ -384,6 +384,27 @@ def file_exists(org: str, repo: str, path: str) -> bool:
     return code == 0
 
 
+def top_level(org: str, repo: str) -> dict[str, str]:
+    """`{name: type}` ("file", "dir", ...) for the entries at the root of `org/repo`'s
+    default branch - ONE Contents read, not recursive, so no repo is too large for it.
+    `{}` for a repo that is not there or has no commits yet; any other failure raises,
+    get_file_content's rule."""
+    code, out = _read(
+        org,
+        repo,
+        "api",
+        f"repos/{org}/{repo}/contents/",
+        "--jq",
+        ".[] | [.name, .type] | @tsv",
+    )
+    if code != 0:
+        if is_missing_resource(out) or "HTTP 409" in out:
+            return {}
+        raise RuntimeError(f"could not list the top of {org}/{repo}: {out[:200]}")
+    entries = (line.split("\t") for line in out.splitlines() if "\t" in line)
+    return {name: kind for name, kind in entries}
+
+
 def blob_sha(content: bytes) -> str:
     """Git's blob hash of `content` - what the Contents API reports as a file's `.sha`.
 

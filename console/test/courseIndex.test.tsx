@@ -14,6 +14,7 @@ import { HomeScreen } from '../src/screens/Home';
 import { MaterialsScreen, WebsiteScreen, folderKinds, resetLabel, writeHolds } from '../src/screens/CourseEdit';
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
+import { REVIEWED_MARK, withMark } from '../src/model/materialsRules';
 import { Sidenav } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
 
@@ -151,6 +152,26 @@ describe('materials settings file tree', () => {
     expect(out).toContain('Session list generated<span class="sr">: To do</span>');
     expect(out).toContain('<span class="s-why">The session list has not been generated yet.</span>');
     expect((out.match(/<span class="s-need">required<\/span>/g) ?? []).length).toBe(3);
+  });
+  it('saves a withhold list that withholds nothing with the reviewed mark, Save enabled', () => {
+    expect(withMark('')).toBe(`${REVIEWED_MARK}\n`);
+    expect(withMark('# seeded comment\n\n')).toBe(`# seeded comment\n${REVIEWED_MARK}\n`);
+    expect(withMark('solutions/\n')).toBe('solutions/\n');
+    expect(withMark(`# c\n${REVIEWED_MARK}\n`)).toBe(`# c\n${REVIEWED_MARK}\n`);
+    const seeded = new StaticFiles({ [`${COURSE_ORG}/${MAT}/.releaseignore`]: '# seeded comment\n' }, {}, { [`${COURSE_ORG}/${MAT}`]: ['a.md'] });
+    // The withhold list's own Save, after its heading.
+    const saveOf = (f: Files) => { const out = render(<MaterialsScreen {...cp({ entry: MAT, files: f })} />); return /<button[^>]*>Save<\/button>/.exec(out.slice(out.indexOf('Withheld from students')))?.[0] ?? ''; };
+    // Unchanged but withholding nothing: Save is on, and would write the mark.
+    expect(saveOf(seeded)).toContain('>Save<');
+    expect(saveOf(seeded)).not.toContain('disabled');
+    // The fixture's list has patterns and is unchanged: nothing to save.
+    expect(saveOf(files)).toContain('disabled');
+  });
+  it('leaves never-released folders out of Folder kinds', () => {
+    const t = text(<MaterialsScreen {...cp({ entry: MAT })} />);
+    expect(t).toContain('lectures/');
+    expect(t).not.toContain('Kind of solutions');
+    expect(render(<MaterialsScreen {...cp({ entry: MAT })} />)).not.toContain('aria-label="Kind of solutions"');
   });
   it('badges every file, flags the rule that matches nothing and links each file to its editor', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);

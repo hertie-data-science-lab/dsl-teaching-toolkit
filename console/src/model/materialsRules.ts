@@ -12,6 +12,17 @@ export const MATERIALS_FILE = rules.file;
 export const DEFAULT_SYLLABUS = rules.default_syllabus;
 export const DEFAULT_KIND = rules.default_kind;
 const ALIASES: Record<string, string> = rules.aliases;
+/** The line a `.releaseignore` carries when somebody looked and chose to withhold nothing. */
+export const REVIEWED_MARK: string = rules.reviewed_mark;
+
+/** A withhold list as it is saved: one that withholds nothing gets the reviewed mark, so the
+ * checklist counts it as reviewed (`status_json._reviewed`). */
+export function withMark(text: string): string {
+  const lines = text.split('\n').map((l) => l.trim());
+  if (lines.includes(REVIEWED_MARK) || lines.some((l) => l && !l.startsWith('#'))) return text;
+  const body = text.replace(/\n*$/, '');
+  return body ? `${body}\n${REVIEWED_MARK}\n` : `${REVIEWED_MARK}\n`;
+}
 
 /** The kinds a release entry or a folder may be: the policy's non-system kinds, in its order. */
 export const CONTENT_KINDS: string[] = POLICY.kinds.filter((k) => !k.system).map((k) => k.key);

@@ -819,3 +819,24 @@ def test_put_files_on_a_base_builds_on_that_commit_and_never_forces(monkeypatch)
     assert posted[1]["parents"] == ["read-sha"]
     (patch,) = [args for args, _ in calls if "PATCH" in args]
     assert not any("force" in a for a in patch)
+
+
+def test_top_level_lists_the_root_only_and_tells_empty_from_unreadable(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        gh_contents,
+        "gh",
+        lambda *a, **k: seen.append(a) or (0, "SYLLABUS.md\tfile\nlectures\tdir\n"),
+    )
+    assert gh_contents.top_level("O", "m") == {"SYLLABUS.md": "file", "lectures": "dir"}
+    # One Contents read of the root: never the recursive tree.
+    assert seen[0][1] == "repos/O/m/contents/" and "recursive" not in " ".join(seen[0])
+    monkeypatch.setattr(
+        gh_contents,
+        "gh",
+        lambda *a, **k: (1, "gh: This repository is empty. (HTTP 404)"),
+    )
+    assert gh_contents.top_level("O", "m") == {}
+    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
+    with pytest.raises(RuntimeError):
+        gh_contents.top_level("O", "m")

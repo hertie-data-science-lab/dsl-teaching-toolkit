@@ -83,11 +83,13 @@ from .discovery import (
 )
 from .faults import NOT_MIGRATED, ConfigFault, FaultKind, Unusable
 from .gh_contents import (
+    file_exists,
     get_file_content,
     is_untouched_stub,
     line_of,
     repo_path_shas,
     repo_tree,
+    top_level,
 )
 from .gh_teams import get_team_members
 from .ghcli import gh
@@ -97,12 +99,13 @@ from .materials import (
     Declared,
     alias_kind,
     is_materials_repo,
+    publishable,
 )
 from .materials import read as read_materials
 from .opencourse import read as read_opencourse
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
-from .releaseignore import RELEASEIGNORE
+from .releaseignore import RELEASEIGNORE, REVIEWED_MARK
 from .repos import default_branch
 from .schedule_plan import (
     Unnumbered,
@@ -670,18 +673,25 @@ def _syllabus_written(m: MaterialsFacts) -> bool:
     return m.syllabus == "" or _written(m.syllabus)
 
 
+def _released_folders(m: MaterialsFacts) -> list[str]:
+    """The top folders a release can copy: `solution/`, `tests/` and the like never go
+    anywhere, so they need no kind."""
+    return [f for f in m.folders if publishable(f)]
+
+
 def _unmapped(m: MaterialsFacts) -> list[str]:
-    """The top folders that name no kind (by the repo's alias or a built-in one): the ones
-    a release would put on the default fallback."""
-    return [f for f in m.folders if alias_kind(f, m.kinds) is None]
+    """The released top folders that name no kind (by the repo's alias or a built-in one):
+    the ones a release would put on the default fallback."""
+    return [f for f in _released_folders(m) if alias_kind(f, m.kinds) is None]
 
 
-def _has_patterns(text: str | None) -> bool:
-    """A `.releaseignore` that says something: one line that is not blank or a comment.
-    The seeded one is every line a comment (`scaffold`), in every wording it has had."""
-    return any(
-        line.strip() and not line.lstrip().startswith("#")
-        for line in (text or "").splitlines()
+def _reviewed(text: str | None) -> bool:
+    """A `.releaseignore` somebody has been through: one pattern (a line that is not blank
+    or a comment), or the mark the console writes when nothing is withheld. The seeded one
+    is every line a comment (`scaffold`), in every wording it has had."""
+    lines = [line.strip() for line in (text or "").splitlines()]
+    return REVIEWED_MARK in lines or any(
+        line and not line.startswith("#") for line in lines
     )
 
 
@@ -702,16 +712,21 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
     """Decision 0022 rule 5: a materials repo's checklist, in order. `blocks` marks the
     checks `ready` needs; `why` names what is missing, None once the check is done."""
     unmapped = _unmapped(m)
+    released = _released_folders(m)
     rows = (
         ("syllabus", "Syllabus written", True, _syllabus_written(m), _syllabus_why(m)),
         (
             "kind_folder",
             "At least one folder of a known kind (lectures, labs, readings…)",
             True,
-            len(unmapped) < len(m.folders),
+            len(unmapped) < len(released),
             (
-                "No top folder has a kind yet: name one lectures, labs or readings, "
-                "or set its kind under Folder kinds."
+                "No top folder has a kind yet; set one under Folder kinds."
+                if released
+                else (
+                    "There is no lectures/, labs/ or readings/ folder yet; add one or "
+                    "set a folder's kind under Folder kinds."
+                )
             ),
         ),
         (
@@ -725,7 +740,7 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
             "withheld",
             "Withheld patterns reviewed",
             False,
-            _has_patterns(m.releaseignore),
+            _reviewed(m.releaseignore),
             "Nothing is withheld from students yet; review the withheld patterns.",
         ),
         (
@@ -975,7 +990,8 @@ def render_course(
 def course_todo(facts: CourseFacts) -> list[dict]:
     """Decision 0022 rule 3: work started and not finished, one entry per missing item -
     every unmet check of a materials repo (the non-blocking ones of a ready repo too) and
-    every template whose brief is the placeholder. By repo, then check order. Never a
+    every template whose brief is the placeholder. Materials first, then by repo, then
+    check order. Never a
     problem: a repo without its topic is the migration's problem, not a to-do."""
     out = []
     for m in facts.materials:
@@ -1005,7 +1021,7 @@ def course_todo(facts: CourseFacts) -> list[dict]:
         for t in facts.templates
         if t.topic and not _written(t.readme)
     ]
-    return sorted(out, key=lambda e: e["repo"])
+    return sorted(out, key=lambda e: (e["kind"] != "materials", e["repo"]))
 
 
 def course_checks(facts: CourseFacts) -> dict[str, str | None]:
@@ -1625,23 +1641,21 @@ def _declaration(org: str, repo: str) -> Declared:
 
 
 def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
-    """A materials repo's C4 facts, off one tree read: its declared syllabus (markdown
-    read, anything else only looked for), its top folders and declared kinds, its
-    `.releaseignore` and whether the session list was generated."""
+    """A materials repo's C4 facts: its declared syllabus (markdown read, anything else
+    only looked for), its top folders and declared kinds, its `.releaseignore` and whether
+    the session list was generated. The top is listed, never the whole tree: a repo too
+    large for one recursive listing must not fail the course's status."""
     declared = _declaration(course_org, repo)
     path = declared.syllabus
-    tree = (
-        repo_path_shas(
-            course_org, repo, default_branch(course_org, repo, fallback="main")
-        )
-        or {}
-    )
+    top = top_level(course_org, repo)
     if path.lower().endswith((".md", ".markdown")):
         syllabus = get_file_content(course_org, repo, path)
+    elif "/" in path:
+        syllabus = "" if file_exists(course_org, repo, path) else None
     else:
-        syllabus = "" if path in tree else None
+        syllabus = "" if path in top else None
     folders = sorted(
-        {p.split("/", 1)[0] for p in tree if "/" in p and not p.startswith(".")}
+        name for name, kind in top.items() if kind == "dir" and not name.startswith(".")
     )
     return MaterialsFacts(
         repo,
@@ -1651,10 +1665,10 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
         kinds=declared.kinds,
         releaseignore=(
             get_file_content(course_org, repo, RELEASEIGNORE)
-            if RELEASEIGNORE in tree
+            if RELEASEIGNORE in top
             else None
         ),
-        sessions=SYLLABUS_SESSIONS_FILE in tree,
+        sessions=file_exists(course_org, repo, SYLLABUS_SESSIONS_FILE),
     )
 
 
