@@ -518,7 +518,31 @@ def test_a_solution_datetime_not_after_the_handout_is_refused():
         assert sched.assignments["assignment-1"].handout_datetime is not None
 
 
-def test_a_solution_datetime_after_the_handout_is_kept():
+def test_a_solution_datetime_at_or_after_the_cutoff_is_kept():
+    # The due date is the cutoff this file knows when it names no `grading_datetime`: a
+    # bare due date closes at the END of that day.
+    for good in ("2026-10-13T23:59:59", "2026-10-14T09:00"):
+        sched = parse(
+            {
+                "assignments": {
+                    "assignment-1": {
+                        "course_source_repo": "a-f2026",
+                        "due_datetime": "2026-10-13",
+                        "handout_datetime": "2026-09-22T09:00",
+                        "solution_datetime": good,
+                    }
+                }
+            }
+        )
+        assert sched.assignments["assignment-1"].solution_datetime is not None, good
+        assert not sched.dropped, good
+
+
+def test_a_solution_datetime_before_the_cutoff_is_refused_and_nothing_else_is():
+    # Out before the cutoff, the solution is read by everyone still handing in. Refused
+    # with a sentence faculty can act on, naming the assignment and both dates - and ONLY
+    # the solution: the entry, its handout and its dates run as written, and so does the
+    # rest of the plan.
     sched = parse(
         {
             "assignments": {
@@ -526,13 +550,61 @@ def test_a_solution_datetime_after_the_handout_is_kept():
                     "course_source_repo": "a-f2026",
                     "due_datetime": "2026-10-13",
                     "handout_datetime": "2026-09-22T09:00",
-                    "solution_datetime": "2026-09-22T09:01",
+                    "solution_datetime": "2026-10-10T09:00",
+                },
+                "assignment-2": {
+                    "course_source_repo": "b-f2026",
+                    "due_datetime": "2026-11-13",
+                    "handout_datetime": "2026-10-22T09:00",
+                    "solution_datetime": "2026-11-20T09:00",
+                },
+            },
+            "releases": {
+                "lecture_01": {
+                    "event_datetime": "2026-09-15T10:00",
+                    "deploy": [
+                        {"course_source_repo": "cm", "course_source_path": "l/01"}
+                    ],
                 }
-            }
+            },
         }
     )
-    assert sched.assignments["assignment-1"].solution_datetime is not None
-    assert not sched.dropped
+    (line,) = sched.dropped
+    assert line == (
+        "assignments.assignment-1.solution_datetime: the solution for assignment-1 is "
+        "set to go out on 2026-10-10 09:00, before its grading cutoff on 2026-10-13 "
+        "23:59. Students can still hand in until the cutoff, so the solution must go "
+        "out on or after it - refused, so the solution now waits for a human"
+    )
+    (fault,) = sched.faults
+    assert (fault.where, fault.field) == (
+        "assignments.assignment-1",
+        "solution_datetime",
+    )
+    a1 = sched.assignments["assignment-1"]
+    assert a1.solution_datetime is None
+    assert a1.handout_datetime == datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN)
+    assert sched.assignments["assignment-2"].solution_datetime is not None
+    assert [r.label for r in sched.releases] == ["lecture_01"]
+
+
+def test_an_explicit_grading_datetime_is_the_cutoff_a_solution_must_wait_for():
+    meta = {
+        "assignments": {
+            "assignment-1": {
+                "course_source_repo": "a-f2026",
+                "due_datetime": "2026-10-13",
+                "grading_datetime": "2026-10-20",
+                "handout_datetime": "2026-09-22T09:00",
+                "solution_datetime": "2026-10-16T09:00",
+            }
+        }
+    }
+    sched = parse(meta)
+    assert sched.assignments["assignment-1"].solution_datetime is None
+    assert "before its grading cutoff on 2026-10-20 23:59" in sched.dropped[0]
+    meta["assignments"]["assignment-1"]["solution_datetime"] = "2026-10-21T09:00"
+    assert parse(meta).assignments["assignment-1"].solution_datetime is not None
 
 
 def test_an_unparseable_solution_datetime_is_flagged_with_what_it_costs():

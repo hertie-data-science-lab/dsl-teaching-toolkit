@@ -180,7 +180,7 @@ Unlike a `releases:` label, **an assignment's slug is shown to students**: it na
 | `handout_datetime` | no* | - | when repos are provisioned, automatically. |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
 | `grading_datetime` | no | `due_datetime` + the template's `late_window_days` | when the snapshot freezes and it is [autograded](#deadline-snapshots-and-autograding) - i.e. the END of the late window, not the deadline it is measured from |
-| `solution_datetime` | no | - | when the template's `solution/` is pushed into every provisioned repo. **No default** - omit it and the solution only ever goes out by hand. Must be **after** `handout_datetime`, and needs it set |
+| `solution_datetime` | no | - | when the template's `solution/` is pushed into every provisioned repo. **No default** - omit it and the solution only ever goes out by hand. Must be **after** `handout_datetime` (and needs it set), and **no earlier than the grading cutoff** |
 | `course_source_repo` | **yes** | - | the course-org repo this hands out from - one repo per student (or team) is generated from it |
 | `cohort_dest_repo` | no | the slug | what the cohort-side repos are called: `<name>-<handle>` per student (or `<name>-<team>`), and the frozen cohort template `<name>` |
 
@@ -386,7 +386,7 @@ Kept rather than dropped - the entry still runs on its documented fallback, and 
 
 An empty `deploy:` - the key written with nothing under it - is flagged too. It parses as "no copies", so the entry becomes a display-only row that ships nothing; if that is what you meant, delete the key (or write `deploy: []`) and the flag goes away.
 
-`solution_datetime` is the exception that is **dropped, not kept**: malformed, missing its `handout_datetime`, or not after it, the value is discarded and the model solution waits for a human. Honouring a bad one could ship the answers with the questions, and nothing undoes that.
+`solution_datetime` is the exception that is **dropped, not kept**: malformed, missing its `handout_datetime`, not after it, or before the grading cutoff (`grading_datetime`, else the due date), the value is discarded and the model solution waits for a human. Honouring a bad one could ship the answers with the questions, and nothing undoes that.
 
 ## Timezones and bare dates
 
@@ -419,6 +419,8 @@ Each assignment's **cutoff** is `grading_datetime` if you set it, else `due_date
 `solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the scheduled run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `include_solution` does by hand. Both are idempotent, so doing one after the other changes nothing.
 
 It needs `handout_datetime` set: the schedule can only push a solution into repos the schedule provisioned. If you hand out manually, release the solution manually too.
+
+It must not fall before the grading cutoff: students still handing in could read it. A date before `grading_datetime` (else the due date) is refused. A date inside the template's `late_window_days` is held: the scheduler pushes the solution once the cutoff has passed, and the digest issue names the line to move. Only the solution waits; the handout, releases and freeze run as written.
 
 ---
 

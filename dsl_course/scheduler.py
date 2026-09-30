@@ -114,6 +114,7 @@ from .grades import (
     cutoff_at,
     grading_config_faults,
     load_grading_spec,
+    readable_grading_spec,
     sheet_path,
     sync_team_lock,
 )
@@ -452,17 +453,79 @@ def _run_releases(
     return errors, changed or did_assign
 
 
+def _solution_cutoff(
+    course_org: str, sched: schedule.Schedule, slug: str
+) -> datetime | None:
+    """The grading cutoff a scheduled solution waits for (`grades.cutoff_at`), or None
+    when the template's late window cannot be read - and then nothing may go out."""
+    gspec = readable_grading_spec(
+        course_org, sched.assignments[slug].course_source_repo
+    )
+    return None if gspec is None else cutoff_at(sched, slug, gspec)
+
+
 def _solution_due(
-    cohort_org: str, slug: str, entry: schedule.AssignmentEntry, now: datetime
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    slug: str,
+    now: datetime,
 ) -> bool:
     """Whether this tick should push the model solution for `slug`.
 
     The datetime check is cheap and comes first, so the fire-once read is paid only by an
     assignment whose solution moment has actually arrived - not by every assignment on
-    every tick."""
+    every tick.
+
+    HELD until the grading cutoff has passed, whatever the file says. The parser refuses a
+    date before `grading_datetime` (else the due date), but it cannot read the template's
+    late window, and a window lengthened after the date was set moves the cutoff past it.
+    Only the solution waits: the handout it rides on still fires."""
+    entry = sched.assignments[slug]
     if entry.solution_datetime is None or entry.solution_datetime > now:
         return False
+    cutoff = _solution_cutoff(course_org, sched, slug)
+    if cutoff is None or cutoff > now:
+        log(
+            f"  [hold] solution {slug} - "
+            + (
+                schedule.solution_before_cutoff(slug, entry.solution_datetime, cutoff)
+                if cutoff is not None
+                else "its grading cutoff could not be worked out"
+            )
+        )
+        return False
     return not solution_released(cohort_org, schedule.cohort_name(slug, entry))
+
+
+def _held_solution_faults(
+    course_org: str, sched: schedule.Schedule, now: datetime
+) -> list[ConfigFault]:
+    """A fault on each `solution_datetime` the scheduler is holding, or will: set inside
+    the template's late window, which the parser cannot see. It goes into the schedule.yml
+    digest, beside the entries the parser refused, so the date gets moved rather than
+    quietly running late. Once the cutoff has passed nothing is held, and nothing said."""
+    out = []
+    for slug, entry in sched.assignments.items():
+        if entry.solution_datetime is None:
+            continue
+        cutoff = _solution_cutoff(course_org, sched, slug)
+        if cutoff is None or cutoff <= now or entry.solution_datetime >= cutoff:
+            continue
+        out.append(
+            ConfigFault(
+                f"assignments.{slug}",
+                f"{schedule.solution_before_cutoff(slug, entry.solution_datetime, cutoff)}"
+                " (the due date plus the template's `late_window_days`) - held, so the "
+                "solution goes out at the cutoff instead",
+                fires=entry.solution_datetime,
+                field="solution_datetime",
+                lineno=entry.lines.get("solution_datetime"),
+                file=schedule.SCHEDULE_PATH,
+                ceiling=Severity.WARNING,
+            )
+        )
+    return out
 
 
 def _handout_releases(
@@ -505,7 +568,9 @@ def _handout_releases(
                 when=entry.handout_datetime,
                 assignment=template,
                 assignment_slug=slug,
-                assignment_solution=_solution_due(cohort_org, slug, entry, now),
+                assignment_solution=_solution_due(
+                    course_org, cohort_org, sched, slug, now
+                ),
             )
         )
     return out
@@ -1406,13 +1471,16 @@ def _release_phase(
     # schedule.yml, and a plan written in August and forgotten is exactly the case that
     # needs catching. Never fatal to the run, at any rung: the fault is faculty's to fix
     # and the digest issue is how they hear about it (see _preflight_sources).
+    extra = team_formation.window_faults(sched, windows)
     errors += _preflight_sources(
         course_org,
         cohort_org,
         sched,
         now,
         dry_run,
-        team_formation.window_faults(sched, windows),
+        None
+        if extra is None
+        else extra + _held_solution_faults(course_org, sched, now),
     )
     # The same treatment for every other file faculty edit by hand: a roster nobody can be
     # enrolled from, a people.yml entry that grants nothing, a teams.csv row that will not

@@ -22,7 +22,7 @@ Student code is run in a subprocess with the GitHub token stripped from the envi
 
 SNAPSHOTS (a server-timed FREEZE, not a server-timed deadline).  A git committer date is
 entirely client-supplied (`GIT_COMMITTER_DATE`), so late work backdated to before the
-deadline passes a `rev-list --before` pin. The hourly scheduler therefore freezes each
+deadline passes a `git log --before` pin. The hourly scheduler therefore freezes each
 assignment shortly after its grading deadline, writing one row per submission repo into
 
     classroom-config/snapshots/<slug>.csv
@@ -656,8 +656,8 @@ def _until_param(deadline: str, tz: str | None = None) -> str:
 
 
 # The commit facts the freeze needs, in one read: the sha and its committer date, plus
-# what tells the toolkit's own handout commit from a student's push - how many parents it
-# has, and who GitHub says wrote it. Tab-joined because a git author's name and email are
+# what tells the toolkit's own commits from a student's push - who GitHub says wrote it,
+# and the git address it carries. Tab-joined because a git author's name and email are
 # free text and a space is not a separator in them.
 #
 # BOTH logins, because either can be null: GitHub fills `author` and `committer` in from
@@ -665,15 +665,15 @@ def _until_param(deadline: str, tz: str | None = None) -> str:
 # nothing, so the field comes back null for a student who pushed from a laptop configured
 # with their personal email. `_commit_facts` is what merges the two.
 _COMMIT_FIELDS = (
-    '.[] | [(.sha // ""), (.commit.committer.date // ""), '
-    '((.parents // [] | length) | tostring), (.author.login // ""), '
-    '(.commit.author.email // ""), (.committer.login // "")] | join("\t")'
+    '.[] | [(.sha // ""), (.commit.committer.date // ""), (.author.login // ""), '
+    '(.commit.author.email // ""), (.committer.login // ""), '
+    '(.commit.committer.email // "")] | join("\t")'
 )
 
 
-def _commit_facts(out: str) -> tuple[str, str, int | None, str, str]:
-    """ONE line of `_COMMIT_FIELDS` parsed back: (sha, committer date, parent count,
-    login, email).
+def _commit_facts(out: str) -> tuple[str, str, str, str, str, str]:
+    """ONE line of `_COMMIT_FIELDS` parsed back: (sha, committer date, login, email,
+    committer login, committer email).
 
     Per line rather than per answer, because a shared drop box's pin is not simply the
     newest commit: the newest commit by a MEMBER of the unit is, so the walk needs every
@@ -683,35 +683,52 @@ def _commit_facts(out: str) -> tuple[str, str, int | None, str, str]:
     either where the git address on that end is not one of some account's verified ones,
     and a student pushing from a personal email is the ordinary way that happens. "" means
     neither end could be linked to an account at all, which is a fact about the account
-    rather than about the work - see `UNLINKED_AUTHOR_NOTE`.
-
-    The parent count is None when the answer did not carry one - an older shape, or a
-    truncated read. None means "cannot tell", and every caller must read it that way."""
+    rather than about the work - see `UNLINKED_AUTHOR_NOTE`. The committer's own login and
+    address come back as well, unmerged: `_is_toolkit_commit` needs both ends."""
     parts = out.strip().split("\t")
     parts += [""] * (6 - len(parts))
-    sha, committed, parents, author, email, committer = parts[:6]
-    return (
-        sha,
-        committed,
-        int(parents) if parents.isdigit() else None,
-        author or committer,
-        email,
-    )
+    sha, committed, author, email, committer, committer_email = parts[:6]
+    return sha, committed, author or committer, email, committer, committer_email
 
 
-def _is_handout_commit(parents: int | None, author: str, email: str) -> bool:
-    """Whether this commit is the repo's first AND the toolkit's own.
+# The committer GitHub itself stamps on a commit it made for an API call - the
+# `/generate` that creates every submission repo.
+GITHUB_COMMITTER_EMAIL = "noreply@github.com"
 
-    Both halves are required. A ROOT commit that a student made is a real submission (they
-    force-pushed over the handout, which is theirs to do), and a bot commit further along
-    the history is not the handout. `bot_login()` answering "" means the identity could not
-    be read, so nothing is claimed - a transient must never turn a student's work into "no
-    submission recorded"."""
-    if parents != 0:
-        return False
+
+def _is_toolkit_identity(login: str, email: str) -> bool:
+    """Whether one end of a commit (author or committer) is the toolkit: a git push from
+    it carries `BOT_EMAIL`, an API commit only the token's own login."""
     if email and email == BOT_EMAIL:
         return True
-    return bool(author) and author == bot_login()
+    return bool(login) and login == bot_login()
+
+
+def _is_toolkit_commit(
+    author: str, email: str, committer: str, committer_email: str
+) -> bool:
+    """Whether the toolkit made this commit, rather than a student.
+
+    Any of them, not only the repo's first: `/generate` makes the handout, and the model
+    solution (`push_solution`) and a correction (`patch_one_repo`) land on top of the
+    student's work later. None of them is a submission. Pinning the solution commit - it
+    lands inside the late window whenever `solution_datetime` falls before the cutoff -
+    recorded every student as submitting at the moment the SOLUTION was pushed, late by
+    however long that was after the due date, and one who never pushed as submitting.
+
+    BOTH ends must be the toolkit's (or GitHub's, for `/generate`). A student who amends
+    or rebases one of the toolkit's commits keeps its author but becomes its committer,
+    and that commit carries their work - walking past it would record them as submitting
+    nothing. `author` and `committer` are logins where the commits API answers (git
+    names off a clone, where the bot account's name is its login).
+
+    Callers must first make sure `bot_login()` answered: "" recognises only `BOT_EMAIL`,
+    and a handout pinned for good as a submission is the result."""
+    if not _is_toolkit_identity(author, email):
+        return False
+    return committer_email == GITHUB_COMMITTER_EMAIL or _is_toolkit_identity(
+        committer, committer_email
+    )
 
 
 @dataclass(frozen=True)
@@ -730,6 +747,9 @@ class Pin:
     # What a grader has to be told about HOW this pin was chosen, and nothing else records
     # - today only that somebody outside the unit was the last to touch its folder.
     note: str = ""
+    # A toolkit commit (the solution, a correction) sits above the pin, so the repo's
+    # `pushed_at` may be the toolkit's push and says nothing about when this arrived.
+    past_toolkit: bool = False
 
 
 # The folders of a shared drop box are a convention, not a boundary: every student has
@@ -785,8 +805,9 @@ def _snapshot_sha(
     so, because that is a thing a grader has to look at rather than a thing to correct.
 
     Returns a bare `Pin()` when there is nothing to grade - no commit that early, none by a
-    member, or an empty repo - and `Pin(absent=True)` when there is no such repo at all (an
-    on-time submission cannot live in a repo that does not exist). A walk that ran out of
+    member, only the toolkit's own (`_is_toolkit_commit`), or an empty repo - and
+    `Pin(absent=True)` when there is no such repo at all (an on-time submission cannot
+    live in a repo that does not exist). A walk that ran out of
     page before it found the unit's own commit comes back blank too, but with
     `PAGE_EXHAUSTED_NOTE` on it: the pin is empty because WE stopped looking, not because
     the student pushed nothing.
@@ -801,7 +822,7 @@ def _snapshot_sha(
         "-f",
         f"until={_until_param(deadline)}",
         "-f",
-        f"per_page={_COMMIT_PAGE if members else 1}",
+        f"per_page={_COMMIT_PAGE}",
         *(("-f", f"path={path}") if path else ()),
         "--jq",
         _COMMIT_FIELDS,
@@ -813,16 +834,27 @@ def _snapshot_sha(
             return Pin()  # the repo is reachable; no commit on/before the deadline
         wanted = {m.casefold() for m in members} if members is not None else None
         outsider = False
+        if not bot_login():
+            # Without the toolkit's own login its handout and corrections read as the
+            # student's work, and the snapshot is write-once. Retry next tick instead.
+            log_err(
+                f"  ! could not read the toolkit's own login - cannot tell its commits "
+                f"from {target_ref(repo)}'s own"
+            )
+            return None
+        past_toolkit = False
         for line in lines:
-            sha, committed, parents, author, email = _commit_facts(line)
+            sha, committed, author, email, committer, committer_email = _commit_facts(
+                line
+            )
             if not sha:
                 continue
-            if _is_handout_commit(parents, author, email):
-                # The repo's FIRST commit, made by the toolkit: `/generate` copies the
-                # template into every student repo, so a student who never pushed still has
-                # a commit dated at the handout. Pinning it recorded them as having
-                # submitted, on time, and posted them a receipt saying so.
-                break
+            if _is_toolkit_commit(author, email, committer, committer_email):
+                # The handout, the model solution or a correction - the toolkit's, never
+                # the student's. Walk past it to their own work under it; a repo whose
+                # every commit is the toolkit's has nothing of theirs to grade.
+                past_toolkit = True
+                continue
             unlinked = wanted is not None and not author
             if wanted is not None and author and author.casefold() not in wanted:
                 # Somebody else's commit in this unit's folder. Keep walking - the unit's
@@ -840,6 +872,7 @@ def _snapshot_sha(
             return Pin(
                 sha,
                 committed,
+                past_toolkit=past_toolkit,
                 # Both can be true of one pin - an outsider touched the folder later, and
                 # the unit's own commit carries no account - so they are joined rather
                 # than chosen between, as the freeze joins its own notes.
@@ -917,13 +950,13 @@ def delivery_is_suspect(
     return made <= moment < delivered
 
 
-# The two fields a push record answers with: the HEAD the push left behind, and when
-# GitHub observed it. Tab-joined, like `_COMMIT_FIELDS`, and filtered to the activity
-# types that actually deliver commits - a branch creation or a repo merge says nothing
-# about when a student's work arrived.
+# The fields a push record answers with: the HEAD the push left behind, when GitHub
+# observed it, and who pushed. Tab-joined, like `_COMMIT_FIELDS`, and filtered to the
+# activity types that actually deliver commits - a branch creation or a repo merge says
+# nothing about when a student's work arrived.
 _ACTIVITY_FIELDS = (
     '.[] | select(.activity_type == "push" or .activity_type == "force_push") | '
-    '[(.after // ""), (.timestamp // "")] | join("\t")'
+    '[(.after // ""), (.timestamp // ""), (.actor.login // "")] | join("\t")'
 )
 
 
@@ -953,10 +986,17 @@ def _push_activity(cohort_org: str, repo: str) -> list[tuple[str, str]] | None:
         # a read that failed would fix a wrong submission time - and the late penalty that
         # follows from it - for good. A retry costs a tick.
         return [] if is_missing_resource(out) else None
+    # The toolkit's own pushes - the model solution, a correction - deliver nothing of the
+    # student's, so they are not records of when the student's work arrived. Left in, the
+    # "earliest push at or after the commit" rung could time a student's work by the
+    # solution push, days after they really pushed.
+    bot = bot_login()
+    if not bot:
+        return None  # cannot tell the toolkit's pushes from theirs - retry next tick
     rows = []
     for line in out.splitlines():
-        after, _, stamp = line.partition("\t")
-        if stamp.strip():
+        after, stamp, actor = ([*line.split("\t"), "", ""])[:3]
+        if stamp.strip() and actor.strip() != bot:
             rows.append((after.strip(), stamp.strip()))
     return rows
 
@@ -1256,7 +1296,8 @@ def snapshot_assignment(
                 # rung it feeds - "the server says this arrived after the deadline while
                 # the commit claims otherwise" - would accuse every unit in the cohort of
                 # the one that really did push late.
-                "" if target.shared else _pushed_at(listing, repo),
+                # Nor above a toolkit commit: the last push may be the solution's.
+                "" if target.shared or pin.past_toolkit else _pushed_at(listing, repo),
                 moment,
             )
             if submitted is None:
@@ -1519,7 +1560,11 @@ def _provisional_pins(
         pins[target.key] = (pin.sha, pin.committed)
         if pin.note:
             notes[target.key] = pin.note
-        elif not target.shared and delivery_is_suspect(pin.committed, pushed_at, due):
+        elif (
+            not target.shared
+            and not pin.past_toolkit
+            and delivery_is_suspect(pin.committed, pushed_at, due)
+        ):
             notes[target.key] = SUSPECT_NOTE
     return pins, notes
 
@@ -1953,9 +1998,9 @@ def _pin_commit(
 
     `snapshot` is this repo's server-timed snapshot entry: a sha to grade, or "" for "no
     commit existed by the deadline". None means no snapshot covers this repo, so we fall
-    back to `rev-list --before` - which filters on the COMMITTER date, a value the student
-    supplies, so it can be backdated. `deadline` is an ISO date or datetime; a bare date
-    (no time) is treated as end-of-day."""
+    back to the newest `git log --before` commit that is not the toolkit's own - which
+    filters on the COMMITTER date, a value the student supplies, so it can be backdated.
+    `deadline` is an ISO date or datetime; a bare date (no time) is treated as end-of-day."""
 
     def _checkout_if_present() -> bool:
         """Check out the frozen commit if it's in the clone; True if it was."""
@@ -1987,9 +2032,27 @@ def _pin_commit(
     before = (
         deadline if ("T" in deadline or ":" in deadline) else f"{deadline} 23:59:59"
     )
-    code, out = git("-C", str(repo_dir), "rev-list", "-1", f"--before={before}", "HEAD")
-    sha = out.strip()
-    if code != 0 or not sha:
+    # Newest first, walking past the toolkit's own commits as the freeze does: the
+    # solution or a correction on top is not the student's submission.
+    code, out = git(
+        "-C",
+        str(repo_dir),
+        "log",
+        f"--before={before}",
+        "--format=%H%x09%an%x09%ae%x09%cn%x09%ce",
+        "HEAD",
+    )
+    if code != 0:
+        return None
+    sha = ""
+    for line in out.splitlines():
+        found, author, email, committer, committer_email = (
+            [*line.split("\t")] + [""] * 5
+        )[:5]
+        if found and not _is_toolkit_commit(author, email, committer, committer_email):
+            sha = found
+            break
+    if not sha:
         return None
     git("-C", str(repo_dir), *GIT_ENV, "checkout", "-q", sha)
     return sha
@@ -3233,10 +3296,10 @@ def collect(
     )
     # Pin the deadline to an explicit instant in the COHORT's timezone, once, here: a bare
     # `--deadline 2026-11-15` means the end of the 15th where the students are, and every
-    # consumer below (the commits API `until=`, git's `rev-list --before`, the log lines)
+    # consumer below (the commits API `until=`, `git log --before`, the log lines)
     # then reads the same moment instead of each defaulting to the runner's UTC.
     #
-    # It also validates (raises on a non-ISO string). git's `rev-list --before` would
+    # It also validates (raises on a non-ISO string). `git log --before` would
     # otherwise take an unparseable `--deadline` as an approxidate that silently matches
     # NOTHING, zeroing every submission in the cohort without a word.
     try:
