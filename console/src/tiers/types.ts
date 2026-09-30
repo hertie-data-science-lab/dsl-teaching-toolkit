@@ -40,11 +40,16 @@ export type Tiers = Record<string, FieldTier>;
 /** One option of a select or radio field. */
 export const opt = (value: string, label: string, sub?: string) => ({ value, label, sub });
 
+type Option = { value: string; label: string; sub?: string };
+
 /**
  * A select's options with the inherited value first, as "X (default)" with value `''`, and X
- * not listed again: choosing it would mean the same as leaving the field empty.
+ * not listed again: choosing it means the same as leaving the field empty. A file that already
+ * holds X explicitly (`saved`) is a pin, so X stays as "X (set here)" and shows selected.
  */
-export function defaultFirst(fallback: unknown, word: string, options: { value: string; label: string; sub?: string }[]) {
+export function defaultFirst(fallback: unknown, word: string, options: Option[], saved?: unknown): Option[] {
   const w = word.charAt(0).toUpperCase() + word.slice(1);
-  return [opt('', `${w} (default)`), ...options.filter((o) => o.value !== String(fallback ?? ''))];
+  const fb = String(fallback ?? '');
+  const pinned = saved !== undefined && saved !== null && saved !== '' && String(saved) === fb && options.some((o) => o.value === fb);
+  return [opt('', `${w} (default)`), ...(pinned ? [opt(fb, `${w} (set here)`)] : []), ...options.filter((o) => o.value !== fb)];
 }

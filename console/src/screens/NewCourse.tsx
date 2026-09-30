@@ -167,10 +167,10 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     title = 'Defaults';
     const defaults = d.defaults ?? before?.defaults ?? {};
     const links = d.links ?? before?.links ?? '';
-    const errs = fieldErrors(null, courseDefaultTiers(), defaults);
+    const errs = fieldErrors(null, courseDefaultTiers(before?.defaults), defaults);
     body = (
       <>
-        <div class="form-section"><h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3><SchemaForm id="ncx" schema={null} tiers={courseDefaultTiers()} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
+        <div class="form-section"><h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3><SchemaForm id="ncx" schema={null} tiers={courseDefaultTiers(before?.defaults)} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
         <div class="form-section">
           <h3>Site links</h3>
           <LinkKindsField id="nck" value={links} onInput={(v) => set({ links: v })} />

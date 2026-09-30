@@ -8,7 +8,7 @@ import { labelOf } from '../model/labels';
 import { DEFAULT_FORMATS, DEFAULT_TIMEZONE, POLICY, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import { FORMATS, SUBMIT, formatWord } from './grading';
 import { runTiers } from './runSettings';
-import { defaultFirst, type Tiers } from './types';
+import { defaultFirst, type Tiers, type Values } from './types';
 
 const opt = (value: string, label: string) => ({ value, label });
 
@@ -31,22 +31,26 @@ export const COURSE_FACTS: Tiers = {
   },
   licence: {
     tier: 'default', label: 'Licence', widget: 'select', defaultLabel: `institution default: ${LICENCE}`,
-    options: defaultFirst(LICENCE, LICENCE, POLICY.licences.map((l) => opt(l.name, l.name))),
+    options: [opt('', `${LICENCE} (default)`), opt(LICENCE, `${LICENCE}, fixed for this course`), ...POLICY.licences.slice(1).map((l) => opt(l.name, l.name))],
   },
 };
 
 
 const onlyInstitution = (): Layers => Object.fromEntries(SOURCES.map((s) => [s, s === 'institution' ? institutionLayer() : {}])) as Layers;
 
-/** Defaults for this course's assignments: the run keys over the institution's values, then the two template keys New assignment starts from. */
-export function courseDefaultTiers(): Tiers {
+/**
+ * Defaults for this course's assignments: the run keys over the institution's values, then the
+ * two template keys New assignment starts from. `saved` is what dsl-course.yml holds, so a value
+ * pinned equal to the institution's shows as "set here".
+ */
+export function courseDefaultTiers(saved: Values = {}): Tiers {
   const inst = onlyInstitution();
   return {
-    ...runTiers((k) => resolve(k, inst), COURSE_RUN_KEYS),
+    ...runTiers((k) => resolve(k, inst), COURSE_RUN_KEYS, saved),
     formats: {
       tier: 'default', label: 'Format a new assignment starts with', widget: 'select', defaultLabel: `institution default: ${formatWord(DEFAULT_FORMATS[0])}`,
-      options: defaultFirst(DEFAULT_FORMATS[0], formatWord(DEFAULT_FORMATS[0]), FORMATS.map(([v, l]) => opt(v, l))),
+      options: defaultFirst(DEFAULT_FORMATS[0], formatWord(DEFAULT_FORMATS[0]), FORMATS.map(([v, l]) => opt(v, l)), saved.formats),
     },
-    submit_via: { tier: 'default', label: 'Where a new assignment’s students submit', widget: 'select', options: defaultFirst(SUBMIT_VIA_DEFAULT, labelOf('submit_via', SUBMIT_VIA_DEFAULT), SUBMIT.map(([v, l]) => opt(v, l))) },
+    submit_via: { tier: 'default', label: 'Where a new assignment’s students submit', widget: 'select', options: defaultFirst(SUBMIT_VIA_DEFAULT, labelOf('submit_via', SUBMIT_VIA_DEFAULT), SUBMIT.map(([v, l]) => opt(v, l)), saved.submit_via) },
   };
 }

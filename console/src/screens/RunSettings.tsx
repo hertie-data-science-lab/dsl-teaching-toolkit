@@ -128,8 +128,8 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
   const env = useEnv();
   const [save, runSave, setSave] = useSave(env);
   const layers = semesterLayers(p, f.doc);
-  const tiers = runTiers((k) => resolve(k, layers, 'course'));
   const before = toValues(rawBlock(f.doc, ['defaults']));
+  const tiers = runTiers((k) => resolve(k, layers, 'course'), RUN_KEYS, before);
   const cur = draft ?? before;
   const errors = fieldErrors(null, tiers, cur);
   const dirty = draft !== null && !deepEqual(compact(draft), compact(before));
@@ -209,7 +209,7 @@ export function RunRows({ id, keys, layers, draft, setDraft, errors, defaultsHre
             {open ? (
               <div class="cond">
                 {r.keys.map((k) => (
-                  <Field id={`${id}-${k}`} k={k} t={runTier(k, resolve(k, layers, below('assignment'))) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
+                  <Field id={`${id}-${k}`} k={k} t={runTier(k, resolve(k, layers, below('assignment')), { override: true }) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
                     set={(key, v) => setDraft({ ...draft, [key]: v })} />
                 ))}
                 <button class="textlink" type="button" onClick={() => { setOpened(opened.filter((x) => x !== r.name)); setDraft(Object.fromEntries(Object.entries(draft).filter(([k]) => !r.keys.includes(k as RunKey)))); }}>Use the default</button>
