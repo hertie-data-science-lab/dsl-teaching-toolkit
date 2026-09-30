@@ -409,7 +409,8 @@ describe('S2 course and S17 template', () => {
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
-    expect(out).toContain("<h1>Assignment 3: Group project");
+    expect(out).toContain('<h1>Group project <span class="hint">');
+    expect(out).toContain('<span>Group project</span></div>');
     expect(out).toContain('value="Group project"');
     expect(out).toMatch(/value="group" checked/);
     expect(out).toContain('The file says “sometimes”. Choose on or off.');

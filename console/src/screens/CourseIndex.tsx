@@ -4,7 +4,7 @@ import { YamlText, obj } from '../edit/yamlText';
 import type { GhRepo } from '../github/client';
 import { TEMPLATE_TOPIC, termOf } from '../model/discovery';
 import type { Files } from '../model/files';
-import { ago, assignmentTitle, fmtDay } from '../model/format';
+import { ago, fmtDay, templateName } from '../model/format';
 import { DEFAULT_FORMATS } from '../model/policy';
 import { formatWord, formatsList } from '../tiers/grading';
 import { Crumbs, Loading, ghUrl } from '../ui/bits';
@@ -140,7 +140,7 @@ export function TemplatesIndexScreen(p: CourseProps) {
               const used = usedIn(p, t.repo);
               return (
                 <li>
-                  <span class="r-title">{assignmentTitle({ slug: t.repo, title })} <StateChip state={t.state} todo="Not written yet" /></span>
+                  <span class="r-title">{templateName(title)} <StateChip state={t.state} todo="Not written yet" /></span>
                   <span class={`r-sub${bad ? ' flag' : ''}`}>
                     {bad ? `${v.problems.find((x) => x.fix?.entry === t.repo)?.stops ?? 'Has a problem.'} ` : t.state !== 'ready' ? 'The brief (README.md) is not written yet. ' : ''}
                     {how.length ? `${how.join(', ')}. ` : ''}

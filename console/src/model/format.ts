@@ -188,11 +188,16 @@ export function opLabel(op: string): string {
   return OP_LABEL[op] ?? op;
 }
 
-/** "Assignment 2" from the key `assignment-2` (or `assignment-4-project`); else the title, and
- * only without one the key itself. A template named for its content (`assignment-regression`) is its title. */
+/** "Assignment 2" from the schedule key `assignment-2` (or `assignment-4-project`, never
+ * `assignment-3d-vision`); else the title, and only without one the key itself. */
 export function assignmentIdent(slug: string, title = ''): string {
-  const m = /^assignment-(\d+)/.exec(slug);
+  const m = /^assignment-(\d+)(?=-|$)/.exec(slug);
   return m ? `Assignment ${m[1]}` : title || slug;
+}
+
+/** How a template is named: its title, never an ordinal from its repo name (the ordinal is a schedule fact, decision 0014). */
+export function templateName(title: string): string {
+  return title.trim() || 'Untitled template';
 }
 
 /** "Assignment 3: Trees" for a numbered key; the title alone for a key without a number. */

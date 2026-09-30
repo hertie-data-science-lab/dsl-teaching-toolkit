@@ -118,7 +118,8 @@ describe('index screens', () => {
   it('lists templates with title, teams, format, verdict and the cohorts that schedule them', () => {
     const out = render(<TemplatesIndexScreen {...cp({ cohortStates: { [COHORT_ORG]: withTemplate } })} />);
     const t = text(<TemplatesIndexScreen {...cp({ cohortStates: { [COHORT_ORG]: withTemplate } })} />);
-    expect(t).toContain('Assignment 3: Group project');
+    expect(t).toContain('Group project');
+    expect(t).not.toContain('Assignment 3: Group project');
     expect(t).toContain('Has a problem');
     expect(t).toContain('In teams, Python files.');
     expect(t).toContain('Used in Fall 2026');
