@@ -867,6 +867,19 @@ def seeded_wording(ref: str) -> dict[str, str]:
             "# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the SEMESTER "
             "sites, link ONLY"
         ),
+        # The old pointer at the retired `publish.yml` (decision 0016), in both of the
+        # spellings a live course carries: it names `opencourse.yml` now.
+        **dict.fromkeys(
+            (
+                f"#   # WHICH of those files the {word} site hosts publicly, so an HTML "
+                "deck opens rendered"
+                for word in ("cohort", "semester")
+            ),
+            "#   # WHICH files the public website shows, and how, is `opencourse.yml` "
+            "beside this",
+        ),
+        "#   # instead of showing as source, is `publish.yml` in the materials repo - "
+        "not here.": "#   # file - not here.",
         "# `course_name`, `course_code` and `course_description` are what reach the "
         "cohort": (
             "# `course_name`, `course_code` and `course_description` are what reach the "

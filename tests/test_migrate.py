@@ -2666,3 +2666,20 @@ def test_the_numbers_step_previews_each_key_then_stamps_then_reads_done(
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     assert "  explicit numbers: already migrated" in capsys.readouterr().out
     assert fake.commits == commits
+
+
+def test_the_old_pointer_at_publish_yml_names_opencourse_yml():
+    for word in ("cohort", "semester"):
+        old = (
+            "course_name: X\n"
+            f"#   # WHICH of those files the {word} site hosts publicly, so an HTML deck "
+            "opens rendered\n"
+            "#   # instead of showing as source, is `publish.yml` in the materials repo "
+            "- not here.\n"
+        )
+        new = migrate.seeded_yaml(old, "main", "Course-e1")
+        assert "publish.yml" not in new
+        assert new.endswith(
+            "#   # WHICH files the public website shows, and how, is `opencourse.yml` "
+            "beside this\n#   # file - not here.\n"
+        )
