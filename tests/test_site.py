@@ -270,7 +270,7 @@ def test_assignment_entry_dates_the_released_row_from_the_handout(monkeypatch):
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
         now=datetime(2026, 9, 23, tzinfo=BERLIN),
@@ -288,7 +288,7 @@ def test_assignment_entry_falls_back_to_the_due_date_without_a_handout(monkeypat
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-2-f2026",
+        "assignment-2",
         date(2026, 11, 10),
         handed_out=frozenset({"assignment-2"}),
     )
@@ -309,7 +309,7 @@ def test_an_unhanded_out_assignment_is_a_placeholder(monkeypatch):
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
         now=datetime(2026, 9, 21, tzinfo=BERLIN),
@@ -330,7 +330,7 @@ def test_a_passed_handout_is_out_on_the_calendar(monkeypatch):
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
         now=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),  # the moment itself is released
@@ -351,7 +351,7 @@ def test_a_manual_handout_is_out_with_no_date_pinned(monkeypatch):
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-2-f2026",
+        "assignment-2",
         date(2026, 11, 10),
         handed_out=frozenset({"assignment-2"}),
     )
@@ -367,7 +367,7 @@ def test_an_assignment_with_no_handout_on_record_withholds_its_brief(monkeypatch
         site, "get_file_content", lambda *a, **k: "# Assignment 2\nThe brief."
     )
     out = site._assignment_entry(
-        "Course", "Semester-f2026", "assignment-2-f2026", date(2026, 11, 10)
+        "Course", "Semester-f2026", "assignment-2", date(2026, 11, 10)
     )
     assert "handout_pending: true" in out
     assert "The brief." not in out
@@ -384,7 +384,7 @@ def test_a_released_assignment_links_the_semester_repo_not_the_course_org(monkey
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         date(2026, 10, 13),
         handed_out=frozenset({"assignment-1"}),
     )
@@ -627,7 +627,7 @@ def _entry_for(monkeypatch, config: str, **kw) -> str:
     return site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         **kw,
     )
@@ -686,7 +686,7 @@ def test_a_public_assignment_says_so_at_both_levels(monkeypatch):
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
     )
@@ -707,7 +707,7 @@ def test_a_pending_public_assignment_names_the_repo_it_will_make(monkeypatch):
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
         now=datetime(2026, 9, 21, tzinfo=BERLIN),
@@ -729,7 +729,7 @@ def test_a_student_choice_assignment_says_so_at_both_levels(monkeypatch):
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
     )
@@ -750,7 +750,7 @@ def test_a_pending_student_choice_assignment_promises_a_private_repo(monkeypatch
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
         now=datetime(2026, 9, 21, tzinfo=BERLIN),
@@ -795,7 +795,7 @@ def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
     )
@@ -815,7 +815,7 @@ def test_a_definition_that_cannot_be_read_leaves_the_github_wording(monkeypatch)
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
     )
@@ -830,7 +830,7 @@ def test_a_pending_assignment_links_no_repo(monkeypatch):
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
         now=datetime(2026, 9, 21, tzinfo=BERLIN),
@@ -850,7 +850,7 @@ def test_an_early_manual_release_beats_a_pin_still_in_the_future(monkeypatch):
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 10, 20, 14, 0, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
@@ -1548,7 +1548,7 @@ def test_front_matter_survives_a_backslash_in_a_title(monkeypatch):
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-1-f2026",
+        "assignment-1",
         date(2026, 11, 10),
         handed_out=frozenset(
             {"assignment-1"}
@@ -1735,7 +1735,7 @@ def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-3-f2026",
+        "assignment-3",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-3"}),
     )
@@ -1761,7 +1761,7 @@ def test_a_shared_group_assignment_names_the_team_s_folder(monkeypatch):
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-3-f2026",
+        "assignment-3",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-3"}),
     )
@@ -1782,7 +1782,7 @@ def test_a_pending_shared_assignment_promises_a_drop_box_and_not_a_repo(monkeypa
     out = site._assignment_entry(
         "Course",
         "Semester-f2026",
-        "assignment-3-f2026",
+        "assignment-3",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
         now=datetime(2026, 9, 21, tzinfo=BERLIN),

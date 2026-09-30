@@ -2487,11 +2487,11 @@ def test_resolve_target_refuses_to_choose_between_two_entries_on_one_template():
     )
     # A slug that names no entry on this template is a refusal too, not a silent fallback
     assert isinstance(schedule.resolve_target(sched, "a2-f2026", "nope"), str)
-    # A template the plan does not name at all still resolves - the manual buttons work on
-    # an unscheduled template - and the fallback is spelt HERE, not at three call sites.
-    assert schedule.resolve_target(sched, "wk3-regression-f2026") == (
-        "wk3-regression",
-        "wk3-regression",
+    # A template the plan does not cite at all is refused (decision 0014), in the one
+    # sentence every caller prints.
+    assert schedule.resolve_target(sched, "wk3-regression") == (
+        "wk3-regression is not in this semester's schedule. "
+        "Add it to the schedule first."
     )
 
 

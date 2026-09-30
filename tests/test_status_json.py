@@ -370,7 +370,8 @@ def test_the_contract_example_marks_k4_k5_and_c5_and_lists_three_problems():
     assert [p["id"] for p in doc["problems"]] == [
         "schedule:s5:SOURCE_MISSING",
         "roster:header:ROSTER",
-        "template:assignment-3:GRADING_CONFIG",
+        # A template is no schedule entry: its problem is keyed by the repo.
+        "template:assignment-3-f2026:GRADING_CONFIG",
     ]
     source, _, template = doc["problems"]
     assert source["stops"] == "The release on Thu 8 Oct will be skipped."
@@ -754,7 +755,7 @@ def test_a_problem_is_dated_by_the_moment_it_bites_and_a_roster_one_is_not(
     assert when[("K4", "s5")] == "2026-10-08T10:00:00+02:00"  # the release
     assert when[("K4", "assignment-3")] == "2026-10-20T10:00:00+02:00"  # hand out
     # A template fault bites when the template is handed out, not at the late cutoff.
-    assert when[("C5", "assignment-3")] == "2026-10-20T10:00:00+02:00"
+    assert when[("C5", "assignment-3-f2026")] == "2026-10-20T10:00:00+02:00"
     assert when[("K5", None)] is None  # the roster's header: no date pins it
     assert "when" not in next(p for p in doc["problems"] if p["stage"] == "K5")
     # The course's own file, with no semester to hand the template out, leaves it undated.
@@ -978,7 +979,9 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     assert a2["marks"] == {"filled": 1, "total": 1}
     # The template's unreadable value, seen from the semester that cites it and from the
     # course: one fault, both scopes' problem lists.
-    assert "template:assignment-2:GRADING_CONFIG" in [p["id"] for p in doc["problems"]]
+    assert "template:assignment-2-f2026:GRADING_CONFIG" in [
+        p["id"] for p in doc["problems"]
+    ]
     course = status_json.collect_course(COURSE, NOW)
     assert course["course"]["templates"][0]["state"] == "problem"
     # The topic makes a materials repo, not the name: the code repo is not one.

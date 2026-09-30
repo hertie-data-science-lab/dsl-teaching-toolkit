@@ -665,11 +665,6 @@ def pages_repo(org: str) -> str:
     return f"{org.lower()}.github.io"
 
 
-def assignment_slug(template: str) -> str:
-    """assignment-1-f2026 -> assignment-1 (drop a trailing semester suffix)."""
-    return re.sub(r"-[fs]\d{4}$", "", template)
-
-
 def coerce_date(value: object) -> date | None:
     """A YAML date/datetime or an ISO `YYYY-MM-DD` string -> a `date` (None if unparseable).
     Date-level only (whole-day). The single canonical date coercion: `active_today` here and

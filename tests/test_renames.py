@@ -38,6 +38,7 @@ from dsl_course.course import INSTRUCTOR_ROLES, people_by_role
 from dsl_course.faults import NOT_MIGRATED, NotMigrated
 from dsl_course.ops.registry import REGISTRY
 from dsl_course.ops.request import RequestError, parse_request
+from tests.plans import citing
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -419,6 +420,7 @@ def _hand_out(monkeypatch, *flags: str, store: dict | None = None, rc: int = 0):
         lambda *a, solution=False, **k: seen.append(solution) or (0, 0),
     )
     monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
+    monkeypatch.setattr(assign.schedule, "load", lambda org: citing("a1"))
     monkeypatch.setattr(
         assign, "get_file_content", lambda org, repo, path, ref="": store.get(path)
     )
@@ -610,6 +612,7 @@ def test_every_cli_previews_unless_told_otherwise(monkeypatch, capsys):
         assign, "provision_all", lambda *a, dry_run, **k: seen.append(dry_run) or (0, 0)
     )
     monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
+    monkeypatch.setattr(assign.schedule, "load", lambda org: citing("a1"))
     base = [
         "assign",
         "--course-org",

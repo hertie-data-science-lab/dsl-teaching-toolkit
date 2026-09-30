@@ -103,7 +103,6 @@ from .course import (
     CONFIG_REPO,
     SOLUTION_BEFORE_CUTOFF,
     SOLUTION_WARNING,
-    assignment_slug,
     coerce_date,
     is_repo_root,
     pages_repo,
@@ -1860,6 +1859,16 @@ def assignment_pages_by_key(sched: Schedule) -> dict[str, AssignmentPage]:
     return {p.key: p for p in assignment_pages(sched)}
 
 
+# A template the plan does not cite is handed out, collected and patched by nothing
+# (decision 0014): the remedy, in the words of the refusal every caller prints.
+ADD_TO_SCHEDULE = "Add it to the schedule first."
+
+
+def not_scheduled(repo: str) -> str:
+    """The refusal for a template this semester's schedule does not cite."""
+    return f"{repo} is not in this semester's schedule. {ADD_TO_SCHEDULE}"
+
+
 # The remedy a manual run that CAN say which entry gives (Update every copy, Collect now):
 # the workflow box, the console op argument and the CLI flag all spell `assignment`.
 NAME_THE_ENTRY = (
@@ -1877,16 +1886,15 @@ def resolve_target(
     ),
 ) -> tuple[str, str] | str:
     """`(schedule key, semester-side name)` for the assignment `repo` hands out, or an ERROR
-    MESSAGE (a `str`) when the plan names more than one of them and `slug` does not say
-    which.
+    MESSAGE (a `str`) when the plan names none of them, or more than one and `slug` does
+    not say which.
 
     The two names, and the only two, that every consumer starting from a TEMPLATE needs:
     the KEY is what `teams.csv`, the fire-once marker and the grading sheet are keyed on;
     the NAME is what the semester-side repos are called (`semester_dest_repo`, else the key).
-    A template the plan does not name AT ALL answers with `assignment_slug(repo)` for
-    both - the manual buttons must still work on a template nobody has scheduled - and
-    that fallback lives here rather than at each call site, because a caller that copied
-    only half of it would write semester-side artefacts under the schedule key.
+    A template the plan does not name AT ALL is refused (`not_scheduled`, decision 0014):
+    an assignment is handed out from a schedule entry or not at all, because the entry is
+    what numbers it and dates it.
 
     `slug` is the SCHEDULE KEY. Two entries handing out from one template are REFUSED
     rather than guessed between: they make different repos for different students and
@@ -1917,8 +1925,7 @@ def resolve_target(
             f"since they make different repos and keep different grades"
         )
     if not found:
-        unscheduled = assignment_slug(repo)
-        return unscheduled, unscheduled
+        return not_scheduled(repo)
     return found[0][0], semester_name(*found[0])
 
 

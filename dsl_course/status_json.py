@@ -64,7 +64,6 @@ from .course import (
     SELF_SELECT,
     SOLUTION_BRANCH,
     active_today,
-    assignment_slug,
     is_repo_root,
     pages_repo,
     semester_label,
@@ -524,8 +523,8 @@ def problem_from_fault(
     fault does not say otherwise (the semester, for everything in semester-config).
 
     `when` is the instant the fault bites: the fault's own `fires` (a release, a hand-out),
-    except a template's, which bites at the hand-out that consumes the template -
-    `handouts`, by schedule key; undated without one.
+    except a template's, which bites at the first hand-out that consumes the template -
+    `handouts`, by template; undated without one.
 
     The fix pointer names the repo, path and line to edit and the console screen that
     edits it; a file on a branch other than `main` (a template's `solution`) says which."""
@@ -537,7 +536,7 @@ def problem_from_fault(
     else:
         code = fault.code or filed.code
         if filed.kind == "template":
-            entry = assignment_slug(fault.in_repo)
+            entry = fault.in_repo
         elif filed is _SHEET:
             entry = fault.file.removeprefix(f"{grades.SHEETS_DIR}/").removesuffix(
                 ".yml"
@@ -1030,8 +1029,7 @@ def render_assignments(
                 else None,
                 "marks": {"filled": filled, "total": total},
                 "returned": returned,
-                "problem": slug in flagged
-                or assignment_slug(entry.course_source_repo) in flagged,
+                "problem": slug in flagged or entry.course_source_repo in flagged,
                 "settings": run_settings(spec),
             }
         )
@@ -1306,7 +1304,12 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
         *facts.teams_faults,
         *facts.sheet_faults,
     ]
-    handouts = {k: a.handout_datetime for k, a in facts.sched.assignments.items()}
+    handouts: dict[str, datetime | None] = {}
+    for a in facts.sched.assignments.values():
+        dates = [
+            d for d in (handouts.get(a.course_source_repo), a.handout_datetime) if d
+        ]
+        handouts[a.course_source_repo] = min(dates, default=None)
     problems = [problem_from_fault(f, facts.org, now, handouts) for f in faults]
     problems += [problem_from_fault(f, course.org, now) for f in course.faults]
     problems += [

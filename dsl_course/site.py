@@ -39,7 +39,6 @@ from .course import (
     CONFIG_REPO,
     INSTRUCTORS_FILE,
     SELF_SELECT,
-    assignment_slug,
     identifier,
     pages_repo,
     row_name,
@@ -669,7 +668,7 @@ def _assignment_entry(
     (`schedule.formation_state`, the same answer the Join-team form's lock reads), the
     hand-out row carries `team_join_url` / `team_join_closes`: the one thing a student can
     do about it, and the day the door shuts. Never the teams."""
-    slug = schedule.semester_name(*found) if found else assignment_slug(repo)
+    slug = schedule.semester_name(*found) if found else repo
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
     due = iso_when(when, "23:59:00")
     released = iso_when(handout) if handout is not None else due
