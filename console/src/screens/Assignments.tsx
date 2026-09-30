@@ -141,7 +141,7 @@ const TAB_NAME: Record<AssignmentTab, string> = { overview: 'Overview', teams: '
 function TabBar({ a, cur }: { a: Assignment; cur: AssignmentTab }) {
   const tabs: AssignmentTab[] = isGroup(a) ? ['overview', 'teams', 'marks'] : ['overview', 'marks'];
   return (
-    <nav class="tabs" aria-label={`${assignmentIdent(a.slug)} pages`}>
+    <nav class="tabs" aria-label={`${assignmentTitle(a)} pages`}>
       {tabs.map((t) => <a href={tabHref(a.slug, t)} aria-current={t === cur ? 'page' : undefined}>{TAB_NAME[t]}</a>)}
     </nav>
   );
@@ -279,7 +279,7 @@ export function AssignmentScreen(p: CohortProps) {
         return (
           <>
             {moved ? <Rehash to={moved} /> : null}
-            <Crumbs items={cohortCrumbs(p, tab === 'overview' ? assignmentIdent(a.slug) : TAB_NAME[tab], [{ t: 'Assignments', href: '#assignments' }, ...(tab === 'overview' ? [] : [{ t: assignmentIdent(a.slug), href: tabHref(a.slug, 'overview') }])])} />
+            <Crumbs items={cohortCrumbs(p, tab === 'overview' ? assignmentTitle(a) : TAB_NAME[tab], [{ t: 'Assignments', href: '#assignments' }, ...(tab === 'overview' ? [] : [{ t: assignmentTitle(a), href: tabHref(a.slug, 'overview') }])])} />
             {tab === 'teams' ? <TeamsTab {...tp} /> : tab === 'marks' ? <MarksTab {...tp} /> : <Overview {...tp} />}
           </>
         );

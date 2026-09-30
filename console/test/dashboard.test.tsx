@@ -232,3 +232,18 @@ describe('the Dashboard', () => {
     expect(after.textContent).toContain('After the semester');
   });
 });
+
+describe('the Dashboard and explicit numbers (decision 0020)', () => {
+  it('counts an entry with no number in its week and says it will be skipped', () => {
+    const status: Status = {
+      ...STATUS,
+      releases: [...(STATUS.releases ?? []), { id: 'guest', when: '2026-09-24T10:00:00+02:00', kind: 'lecture', number: null, title: 'Guest', state: 'will_be_skipped', source: { repo: 'course-materials-f2026', path: 'lectures/guest' }, dest: { repo: 'materials', path: 'lectures/guest' }, show_on_site: true, tbc: false }],
+      problems: [...(STATUS.problems ?? []), { id: 'number:lecture:guest', scope: 'semester', stage: 'K4', text: 'Give guest a number.', stops: 'The release on Thu 24 Sep will be skipped.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', line: 9, screen: 'schedule', entry: 'guest' }, when: '2026-09-24T10:00:00+02:00' }],
+    };
+    const h = mount(status);
+    expect(cell(h, 3).querySelector('.wk-count')!.textContent).toBe('1');
+    expect(problemsText(h).some((t) => t!.includes('Give guest a number.'))).toBe(true);
+    expect(h.textContent).toContain('Will be skipped: it has no number.');
+    expect(h.querySelector('a[href="#schedule-guest"]')).not.toBeNull();
+  });
+});

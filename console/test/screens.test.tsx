@@ -456,3 +456,33 @@ describe('read only and the shell', () => {
     expect(foot).toContain('Part of the Hertie Data Science Lab.');
   });
 });
+
+describe('explicit numbers (decision 0020)', () => {
+  const GUEST = `${SCHEDULE.replace('assignments:', `  guest:\n    event_datetime: 2026-09-25T10:00\n    kind: lecture\n    deploy:\n      - course_source_repo: course-materials-f2026\n        course_source_path: lectures/03_regularisation\nassignments:`)}`;
+  const numbered: Loaded = {
+    kind: 'ready', sha: 's', stale: [],
+    status: {
+      ...STATUS,
+      releases: [...(STATUS.releases ?? []), { id: 'guest', when: '2026-09-25T10:00:00+02:00', kind: 'lecture', number: null, title: '', state: 'will_be_skipped', source: { repo: 'course-materials-f2026', path: 'lectures/03_regularisation' }, dest: { repo: 'materials', path: 'lectures/03_regularisation' }, show_on_site: true, tbc: false }],
+      problems: [...(STATUS.problems ?? []), { id: 'number:lecture:guest', scope: 'semester', stage: 'K4', text: 'Give guest a number.', stops: 'The release on Fri 25 Sep will be skipped.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', line: 14, screen: 'schedule', entry: 'guest' }, when: '2026-09-25T10:00:00+02:00' }],
+    },
+  };
+  const guestFiles = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: GUEST }, {}, TREE);
+
+  it('shows an entry with no number by its kind alone, says why it is skipped, and asks for the number', () => {
+    const out = html(<ScheduleScreen {...props({ loaded: numbered, files: guestFiles, entry: 'guest' })} />);
+    expect(out).toContain('<b>Lecture</b>: ');
+    expect(out).toContain('Give it a number first</span>');
+    expect(out).toContain('Give it a number first; it cannot be released until it has one.');
+    expect(out).toContain('Give guest a number.');
+    expect(out).toContain('<input id="e-num" type="number" min="1" max="999" value style');
+    expect(out).toContain('The number students see. Prefilled with the next one; change it if this is not the next lecture.');
+  });
+
+  it('shows a saved entry its own number, and the release detail says what it waits for', () => {
+    const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
+    expect(out).toMatch(/<input id="e-num" type="number" min="1" max="999" value="5"/);
+    const t = text(<ReleaseScreen {...props({ loaded: numbered, files: guestFiles, entry: 'guest' })} />);
+    expect(t).toContain('Automation will skip this until it has a number.');
+  });
+});

@@ -381,7 +381,7 @@ describe('the wizard screens', () => {
       saveDraft(`new-assignment:${COURSE_ORG}`, { v: { ...initialValues(null), name: 'Assignment 3: Regression' }, verified: {} });
       const out = render(<NewAssignmentScreen {...cp()} step={1} />);
       expect(out).toContain('Repo: <code>assignment-3-regression</code>');
-      expect(out).toContain("Numbers are added automatically when an assignment joins a semester's schedule: the third assignment becomes assignment-3, and each student's copy assignment-3-&lt;handle>. Keep the number in the name anyway?");
+      expect(out).toContain("The number is set when the assignment joins a semester's schedule: the third assignment becomes assignment-3, and each student's copy assignment-3-&lt;handle>. Keep the number in the name anyway?");
       expect(out).toContain('Keep the number');
       expect(out).toMatch(/<button class="btn" type="button" disabled[^>]*>Continue/);
       saveDraft(`new-assignment:${COURSE_ORG}`, { v: { ...initialValues(null), name: 'Regression' }, verified: {} });
@@ -455,7 +455,7 @@ describe('the wizard screens', () => {
     const out = render(<ScheduleScreen {...p} />);
     expect(out).toContain(`<option value="${tpl}" selected>Group project</option>`);
     expect(out).toMatch(/<input id="e-num" type="number" min="1" max="999" value="2"/);
-    expect(out).toContain('The number students see. Change it if this is not the next assignment.');
+    expect(out).toContain('The number students see. Prefilled with the next one; change it if this is not the next assignment.');
     expect(out).toContain("Each student's repo is assignment-2-&lt;handle>.");
     expect(out).toContain('<b>Assignment 2</b>');
   });

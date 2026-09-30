@@ -15,7 +15,7 @@ import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
 import { POLICY, penaltyRate } from '../src/model/policy';
 import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { assignmentKey, blankDraft, draftErrors, freshId, nextAssignmentNumber, readDraft, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { assignmentKey, blankDraft, draftErrors, freshId, nextNumber, readDraft, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
@@ -97,16 +97,16 @@ describe('saving a file', () => {
 
 describe('the schedule entry sheet model', () => {
   it('proposes assignment-<n> for a template joining the schedule: one more than the highest number, past any key taken', () => {
-    expect(nextAssignmentNumber({})).toBe(1);
-    expect(nextAssignmentNumber({ assignments: { 'assignment-1': {}, 'assignment-2': {} } })).toBe(3);
+    expect(nextNumber({}, 'assignment')).toBe(1);
+    expect(nextNumber({ assignments: { 'assignment-1': {}, 'assignment-2': {} } }, 'assignment')).toBe(3);
     // The highest number decides, not the count: a gap is not filled.
-    expect(nextAssignmentNumber({ assignments: { 'assignment-4': {} } })).toBe(5);
+    expect(nextNumber({ assignments: { 'assignment-4': {} } }, 'assignment')).toBe(5);
     // An entry's own number: counts too.
-    expect(nextAssignmentNumber({ assignments: { trees: { number: 6 }, 'assignment-2': {} } })).toBe(7);
+    expect(nextNumber({ assignments: { trees: { number: 6 }, 'assignment-2': {} } }, 'assignment')).toBe(7);
     // A key with no number adds nothing; one used in another block is stepped past.
-    expect(nextAssignmentNumber({ assignments: { trees: {}, 'assignment-3d-vision': {} } })).toBe(1);
-    expect(nextAssignmentNumber({ assignments: { x: {} }, releases: { 'assignment-1': {} } })).toBe(2);
-    expect(nextAssignmentNumber({ assignments: { lab_03: {} } })).toBe(4);
+    expect(nextNumber({ assignments: { trees: {}, 'assignment-3d-vision': {} } }, 'assignment')).toBe(1);
+    expect(nextNumber({ assignments: { x: {} }, releases: { 'assignment-1': {} } }, 'assignment')).toBe(2);
+    expect(nextNumber({ assignments: { lab_03: {} } }, 'assignment')).toBe(4);
     expect(assignmentKey(4)).toBe('assignment-4');
     const d = { ...blankDraft('handout', { repo: '' }), template: 'assignment-regression' } as AssignmentDraft;
     const doc = { assignments: { 'assignment-1': {} } };
@@ -118,21 +118,25 @@ describe('the schedule entry sheet model', () => {
     const ok = { ...d, dueDate: '2026-10-01', handoutDate: '2026-09-01' };
     expect(draftErrors({ ...ok, number: 2 }, { doc })).toEqual({});
     expect(draftErrors({ ...ok, number: 1 }, { doc }).number).toBe('assignment-1 is already in this schedule.');
-    expect(draftErrors({ ...ok, number: '' }, { doc }).number).toBe('A whole number from 1 to 999.');
+    expect(draftErrors({ ...ok, number: '' }, { doc }).number).toBe('A number is needed.');
     expect(draftErrors({ ...ok, number: 2.5 }, { doc }).number).toBe('A whole number from 1 to 999.');
   });
 
   it('adds a release to the seeded file and keeps every comment', () => {
     const y = new YamlText(SEEDED);
     const doc = y.toJS() as Record<string, unknown>;
-    const d = { ...(blankDraft('lecture', { repo: 'course-materials-f2026' }) as ReleaseDraft), title: 'Intro', date: '2026-09-10' };
-    d.deploys[0].folder = 'lectures/01_intro';
+    const blank = { ...(blankDraft('lecture', { repo: 'course-materials-f2026' }) as ReleaseDraft), title: 'Intro', date: '2026-09-10' };
+    blank.deploys[0].folder = 'lectures/01_intro';
+    // Required, and prefilled with the next lecture's number (decision 0020).
+    expect(draftErrors(blank, { templateUsers: () => 0 }).number).toBe('A number is needed.');
+    const d = withNumber(blank, doc);
+    expect(d.number).toBe(1);
     expect(draftErrors(d, { templateUsers: () => 0 })).toEqual({});
     const id = freshId(doc, 'releases', 'lecture');
     expect(id).toBe('lecture-1');
     writeDraft(y, { ...d, id }, doc);
     const out = parse(y.text);
-    expect(out.releases['lecture-1']).toEqual({ event_datetime: '2026-09-10T10:00', kind: 'lecture', title: 'Intro', deploy: [{ course_source_repo: 'course-materials-f2026', course_source_path: 'lectures/01_intro' }] });
+    expect(out.releases['lecture-1']).toEqual({ event_datetime: '2026-09-10T10:00', kind: 'lecture', number: 1, title: 'Intro', deploy: [{ course_source_repo: 'course-materials-f2026', course_source_path: 'lectures/01_intro' }] });
     expect(y.text.split('\n').filter((l) => l.trim().startsWith('#'))).toEqual(SEEDED.split('\n').filter((l) => l.trim().startsWith('#')));
   });
 
@@ -172,7 +176,7 @@ describe('the schedule entry sheet model', () => {
   });
 
   it('refuses a solution shown before the late cutoff, in the engine’s words', () => {
-    const a = { ...blankDraft('handout', { repo: '' }), id: 'assignment-1', template: 'assignment-1-f2026', handoutDate: '2026-09-15', dueDate: '2026-10-13', dueTime: '', solutionOn: true, solutionDate: '2026-10-16', solutionTime: '09:00' };
+    const a = { ...blankDraft('handout', { repo: '' }), id: 'assignment-1', number: 1, template: 'assignment-1-f2026', handoutDate: '2026-09-15', dueDate: '2026-10-13', dueTime: '', solutionOn: true, solutionDate: '2026-10-16', solutionTime: '09:00' };
     // due + 5 days, a bare due date closing at the end of its day, as the engine reads it
     expect(draftErrors(a as never, undefined, cutoffOf('2026-10-13', '', 5)).solution).toBe(
       'The solution for assignment-1 is set to be shown on 2026-10-16 09:00, before its late cutoff on 2026-10-18 23:59. Students can still hand in until the late cutoff, so the solution must be shown on or after it.',
@@ -410,5 +414,57 @@ describe('editing screens', () => {
     expect(out).toContain('Keep the website updated');
     expect(out).toContain('Lives in hertie-dsl-demo-course-e1234/.github/opencourse.yml');
     expect(out).toContain('href="#details"');
+  });
+});
+
+describe('explicit numbers in the entry sheet (decision 0020)', () => {
+  const doc = {
+    releases: {
+      'lecture-1': { kind: 'lecture' },
+      guest: { kind: 'lecture', number: 7 },
+      'lab_03': {},
+      intro: {},
+      reading: { kind: 'readings' },
+    },
+    assignments: { 'assignment-2': {}, project: {} },
+  };
+  const kindOf = (k: string, e: unknown) => ({ lab_03: 'lab' })[k] ?? (((e as { kind?: string }).kind) || 'lecture');
+
+  it('prefills 1 + the highest number of the kind, never a count', () => {
+    expect(nextNumber(doc, 'lecture', kindOf)).toBe(8);
+    expect(nextNumber(doc, 'lab', kindOf)).toBe(4);
+    expect(nextNumber(doc, 'drop-in', kindOf)).toBe(1);
+    expect(nextNumber(doc, 'assignment')).toBe(3);
+    const lab = blankDraft('lab', { repo: 'm' }) as ReleaseDraft;
+    expect(withNumber(lab, doc, kindOf).number).toBe(4);
+    // Readings are numbered only to join a lecture: nothing is proposed.
+    expect(withNumber(blankDraft('readings', { repo: 'm' }) as ReleaseDraft, doc, kindOf).number).toBeUndefined();
+  });
+
+  it('shows a saved entry its number, and requires one where the site shows the row', () => {
+    expect((readDraft(doc, 'guest') as ReleaseDraft).number).toBe(7);
+    expect((readDraft(doc, 'lab_03') as ReleaseDraft).number).toBe(3);
+    const intro = readDraft(doc, 'intro') as ReleaseDraft;
+    expect(intro.number).toBe('');
+    const ok = { ...intro, date: '2026-09-10', deploys: [] };
+    expect(draftErrors(ok, { kind: 'lecture' }).number).toBe('A number is needed.');
+    expect(draftErrors({ ...ok, show: false }, { kind: 'lecture' }).number).toBeUndefined();
+    expect(draftErrors(ok, { kind: 'readings' }).number).toBeUndefined();
+    expect((readDraft(doc, 'project') as AssignmentDraft).number).toBe('');
+  });
+
+  it('writes number: when typed, and leaves a label-numbered entry as it is written', () => {
+    const src = 'releases:\n  intro:\n    event_datetime: 2026-09-10T10:00\n    kind: lecture\n  lecture-2:\n    event_datetime: 2026-09-17T10:00\n';
+    const y = new YamlText(src);
+    const d0 = y.toJS() as Record<string, unknown>;
+    writeDraft(y, { ...(readDraft(d0, 'intro') as ReleaseDraft), number: 1 }, d0);
+    writeDraft(y, { ...(readDraft(d0, 'lecture-2') as ReleaseDraft), title: 'Two' }, d0);
+    const out = parse(y.text);
+    expect(out.releases.intro.number).toBe(1);
+    expect(out.releases['lecture-2'].number).toBeUndefined();
+    const y2 = new YamlText(y.text);
+    const d1 = y2.toJS() as Record<string, unknown>;
+    writeDraft(y2, { ...(readDraft(d1, 'lecture-2') as ReleaseDraft), number: 3 }, d1);
+    expect(parse(y2.text).releases['lecture-2'].number).toBe(3);
   });
 });
