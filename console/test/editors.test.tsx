@@ -132,7 +132,7 @@ describe('the schedule entry sheet model', () => {
     const d = withNumber(blank, doc);
     expect(d.number).toBe(1);
     expect(draftErrors(d, { templateUsers: () => 0 })).toEqual({});
-    const id = freshId(doc, 'releases', 'lecture');
+    const id = freshId(doc, 'releases', 'lecture-1');
     expect(id).toBe('lecture-1');
     writeDraft(y, { ...d, id }, doc);
     const out = parse(y.text);
@@ -147,6 +147,8 @@ describe('the schedule entry sheet model', () => {
     expect(unnumberedId(doc, 'readings', 'Week 3')).toBe('readings-week-c');
     expect(unnumberedId(doc, 'readings', 'Week 3, part A')).toBe('readings-week-3-part-a');
     expect(unnumberedId({}, 'lecture', '')).toBe('lecture');
+    expect(freshId({ releases: { 'lecture-3': {} } }, 'releases', 'lecture-3')).toBe('lecture-3-b');
+    expect(freshId({ events: { 'midterm-exam': {} } }, 'events', 'Midterm exam')).toBe('midterm-exam-b');
   });
 
   it('edits an entry in place, keeping the keys the sheet does not show', () => {

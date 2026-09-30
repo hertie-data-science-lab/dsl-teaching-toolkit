@@ -547,7 +547,8 @@ function View(p: ReadyProps) {
         let next = { ...(d as object), ...patch } as unknown as Draft;
         // A new release holds only a typed number: the proposed one follows its kind (chosen, or
         // inferred from the folder), so a kind or folder change takes that kind's next number.
-        if (key === 'new' && d.kind === 'releases' && next.kind === 'releases' && d.number === nextNumber(doc, kindFor(d)!, kindOf)) next = { ...next, number: undefined };
+        // Typing in the Number field (clearing it included) is the instructor's own number.
+        if (key === 'new' && d.kind === 'releases' && next.kind === 'releases' && !('number' in patch) && d.number === nextNumber(doc, kindFor(d)!, kindOf)) next = { ...next, number: undefined };
         setDraft(key, next);
       };
       const rel = d.kind === 'releases' && key !== 'new' ? (status.releases ?? []).find((x) => x.id === key) : undefined;

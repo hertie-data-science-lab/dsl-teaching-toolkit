@@ -159,6 +159,22 @@ describe('Save on the schedule’s new release, its kind inferred from the folde
     expect(out['lab-3'].kind).toBeUndefined();
   });
 
+  it('keys a silent lecture with its number cleared `lecture`, with no number', async () => {
+    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new' })} />);
+    await click(button('lecture'));
+    await type('#e-d0-folder', 'lectures/01_intro');
+    await type('#e-date', '2026-10-01');
+    await click(root!.querySelector('#e-show')!);
+    await type('#e-num', '');
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    const out = parse(body(puts(gh, 'schedule.yml')[0])).releases;
+    expect(Object.keys(out)).toEqual(['lab-2', 'lecture']);
+    expect(out.lecture).not.toHaveProperty('number');
+    expect(out.lecture.show_on_site).toBe(false);
+  });
+
   it('writes no number for a readings folder', async () => {
     const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
     const out = await addRelease(gh, f, 'readings/week_3');

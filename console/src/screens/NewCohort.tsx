@@ -116,7 +116,7 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
           const edited = v.org !== org ? String(v.org ?? '') : d.org;
           set({ term: t, org: edited && edited !== derived && t === term ? edited : undefined });
         }} />
-        <OrgSteps org={org} check={orgLive.value?.org === org ? orgLive.value : null} busy={orgLive.busy} run={orgLive.run} back={`${q}#new-semester-1`} />
+        <OrgSteps org={org} check={orgLive.value?.org === org ? orgLive.value : null} busy={orgLive.busy} run={orgLive.run} back={`${q}#new-semester-1`} doc="04-new-cohort-org.md" />
         {listing?.org === org && listing.error ? <WizError>{listing.error}</WizError> : null}
         {d.listed === org && !done[0] ? <p class="footnote">Listed with {course.name}.</p> : null}
       </>

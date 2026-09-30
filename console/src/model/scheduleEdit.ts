@@ -251,18 +251,16 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
   y.assign([d.kind, d.id], entryValue(d, obj(doc[d.kind])[d.id]));
 }
 
-/** A fresh id in `block`: `lecture-6`, `lab-4`, `assignment-2`, `midterm-exam`. */
+/**
+ * A fresh id in `block` from `stem` (`lecture-6`, `midterm-exam`). A taken one gets a letter
+ * (`lecture-3-b`), never a digit: a digit at the end of a key is its number (decision 0020).
+ */
 export function freshId(doc: Raw, block: Block, stem: string): string {
   const taken = takenKeys(doc);
   const base = kebab(stem) || block.slice(0, -1);
-  if (/-\d+$/.test(base) || block !== 'releases') {
-    let id = base, n = 2;
-    while (taken.has(id)) id = `${base}-${n++}`;
-    return id;
-  }
-  let n = 1;
-  while (taken.has(`${base}-${n}`)) n++;
-  return `${base}-${n}`;
+  let id = base, n = 1;
+  while (taken.has(id)) id = `${base}-${letters(++n)}`;
+  return id;
 }
 
 /**
