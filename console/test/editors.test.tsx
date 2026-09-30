@@ -15,7 +15,7 @@ import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
 import { POLICY, penaltyRate } from '../src/model/policy';
 import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { blankDraft, draftErrors, freshId, readDraft, writeDraft, type ArchiveDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { assignmentKey, blankDraft, draftErrors, freshId, nextAssignmentNumber, readDraft, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
@@ -96,6 +96,32 @@ describe('saving a file', () => {
 // ------------------------------------------------------------------ schedule model
 
 describe('the schedule entry sheet model', () => {
+  it('proposes assignment-<n> for a template joining the schedule: one more than the highest number, past any key taken', () => {
+    expect(nextAssignmentNumber({})).toBe(1);
+    expect(nextAssignmentNumber({ assignments: { 'assignment-1': {}, 'assignment-2': {} } })).toBe(3);
+    // The highest number decides, not the count: a gap is not filled.
+    expect(nextAssignmentNumber({ assignments: { 'assignment-4': {} } })).toBe(5);
+    // An entry's own number: counts too.
+    expect(nextAssignmentNumber({ assignments: { trees: { number: 6 }, 'assignment-2': {} } })).toBe(7);
+    // A key with no number adds nothing; one used in another block is stepped past.
+    expect(nextAssignmentNumber({ assignments: { trees: {}, 'assignment-3d-vision': {} } })).toBe(1);
+    expect(nextAssignmentNumber({ assignments: { x: {} }, releases: { 'assignment-1': {} } })).toBe(2);
+    expect(nextAssignmentNumber({ assignments: { lab_03: {} } })).toBe(4);
+    expect(assignmentKey(4)).toBe('assignment-4');
+    const d = { ...blankDraft('handout', { repo: '' }), template: 'assignment-regression' } as AssignmentDraft;
+    const doc = { assignments: { 'assignment-1': {} } };
+    expect(withNumber(d, doc).number).toBe(2);
+    // A number typed (or emptied) stays as it is; a saved entry keeps its key.
+    expect(withNumber({ ...d, number: 7 }, doc).number).toBe(7);
+    expect(withNumber({ ...d, number: '' }, doc).number).toBe('');
+    expect(withNumber({ ...d, id: 'assignment-1' }, doc).number).toBeUndefined();
+    const ok = { ...d, dueDate: '2026-10-01', handoutDate: '2026-09-01' };
+    expect(draftErrors({ ...ok, number: 2 }, { doc })).toEqual({});
+    expect(draftErrors({ ...ok, number: 1 }, { doc }).number).toBe('assignment-1 is already in this schedule.');
+    expect(draftErrors({ ...ok, number: '' }, { doc }).number).toBe('A whole number from 1 to 999.');
+    expect(draftErrors({ ...ok, number: 2.5 }, { doc }).number).toBe('A whole number from 1 to 999.');
+  });
+
   it('adds a release to the seeded file and keeps every comment', () => {
     const y = new YamlText(SEEDED);
     const doc = y.toJS() as Record<string, unknown>;
@@ -154,8 +180,8 @@ describe('the schedule entry sheet model', () => {
     // on or after the cutoff, or with no late window past the date: saved
     expect(draftErrors({ ...a, solutionDate: '2026-10-18', solutionTime: '23:59' } as never, undefined, cutoffOf('2026-10-13', '23:59', 5))).toEqual({});
     expect(draftErrors(a as never, undefined, cutoffOf('2026-10-13', '', 2))).toEqual({});
-    // a new entry is named by its template
-    expect(draftErrors({ ...a, id: '' } as never, undefined, cutoffOf('2026-10-13', '', 5)).solution).toMatch(/^The solution for assignment-1 is/);
+    // a new entry is named by its number, not its template
+    expect(draftErrors({ ...a, id: '', number: 3 } as never, undefined, cutoffOf('2026-10-13', '', 5)).solution).toMatch(/^The solution for assignment-3 is/);
   });
 
   it('leaves a retired key an unmigrated entry still carries exactly as it is', () => {

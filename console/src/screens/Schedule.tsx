@@ -10,7 +10,7 @@ import { Field, Invalid } from '../forms/Form';
 import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
 import { parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  blankDraft, blockOf, draftErrors, freshId, readDraft, slugOfTemplate, writeDraft,
+  assignmentKey, blankDraft, blockOf, draftErrors, freshId, readDraft, withNumber, writeDraft,
   type AssignmentDraft, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
@@ -216,7 +216,7 @@ export interface NewRun {
 
 function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; slug: string; state: string }[]; isNew: boolean; run: NewRun }) {
   const tpl = templates.find((t) => t.repo === d.template);
-  const key = d.id || slugOfTemplate(d.template);
+  const key = d.id || assignmentKey(d.number);
   const af = assignmentsFile(p.files, p.cohort.org);
   const doc = af && af !== 'loading' ? af.doc : {};
   const layers = semesterLayers(p, doc, isNew ? '' : key);
@@ -224,7 +224,9 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: Ready
   const cfg = d.template ? gradingConfig(p, d.template) : {};
   const vis = forcedVisibility(cfg) ? 'private' : resolve('visibility', mine).value;
   const late = resolve('late_window_days', mine);
-  const opts = [...templates.map((t) => ({ value: t.repo, label: `${t.slug.replace(/^assignment-(\d+).*/, 'Assignment $1')} (${t.repo})` }))];
+  // Each template by its title (a copy may share one, so a repeated title says its repo too).
+  const titles = templates.map((t) => String(gradingConfig(p, t.repo).title ?? '') || t.repo);
+  const opts = templates.map((t, i) => ({ value: t.repo, label: titles.indexOf(titles[i]) !== titles.lastIndexOf(titles[i]) ? `${titles[i]} (${t.repo})` : titles[i] }));
   if (d.template && !tpl) opts.push({ value: d.template, label: d.template });
   return (
     <>
@@ -235,10 +237,18 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: Ready
           {opts.map((o) => <option value={o.value} selected={o.value === d.template}>{o.label}</option>)}
         </select>
         {errors.template ? <Invalid>{errors.template}</Invalid>
-          : tpl && tpl.state !== 'ready' ? <Invalid>This assignment template has a problem. <a href={`#template-${tpl.slug}`}>Fix it on the assignment template</a></Invalid>
+          : tpl && tpl.state !== 'ready' ? <Invalid>This assignment template has a problem. <a href={`#template-${tpl.repo}`}>Fix it on the assignment template</a></Invalid>
           : d.template ? <span class="valid-msg"><Check />Assignment template ready</span> : null}
         <p class="why">Must exist and be ready.</p>
       </div>
+      {isNew ? (
+        <div class="field">
+          <span class="label"><label for="e-num">Number</label> <Hint label="About the number">The number students see. Change it if this is not the next assignment.</Hint></span>
+          <input id="e-num" type="number" min="1" max="999" value={d.number ?? ''} aria-invalid={errors.number ? 'true' : undefined} style="max-width:110px"
+            onInput={(e) => { const t = (e.target as HTMLInputElement).value; set({ number: t === '' ? '' : Number(t) }); }} />
+          {errors.number ? <Invalid>{errors.number}</Invalid> : <p class="why">Each student's repo is {assignmentKey(d.number)}-&lt;handle&gt;.</p>}
+        </div>
+      ) : null}
       <div class="field">
         <span class="label">Hand out</span>
         <div class="choices">
@@ -344,7 +354,7 @@ const NEW_TYPES: [string, string, string][] = [['lecture', 'lecture', 'lec'], ['
 
 function identOf(d: Draft, row: Row | undefined, doc: Record<string, unknown>): string {
   if (row) return row.ident;
-  if (d.kind === 'assignments') return (slugOfTemplate(d.template) || 'assignment').replace(/^assignment-(\d+).*/, 'Assignment $1');
+  if (d.kind === 'assignments') return d.number ? `Assignment ${d.number}` : 'Assignment';
   if (d.kind === 'events') return d.type === 'exam' ? 'Exam' : 'Event';
   if (d.kind === 'releases') {
     const n = Object.values((doc.releases ?? {}) as Record<string, { type?: string }>).filter((x) => (x.type || 'lecture') === (d.type || 'lecture')).length + 1;
@@ -378,7 +388,8 @@ function View(p: ReadyProps) {
   const [newRun, setNewRun] = useState<Values>({});
 
   const baseOf = (k: string): Draft | null => (k === 'new' ? null : readDraft(doc, k));
-  const draftOf = (k: string): Draft | null => drafts[k] ?? baseOf(k);
+  // A new assignment entry shows the number it will get until one is typed (decision 0014).
+  const draftOf = (k: string): Draft | null => (drafts[k] ? withNumber(drafts[k], doc) : baseOf(k));
   const dirtyKeys = Object.keys(drafts).filter((k) => k === 'new' || !deepEqual(drafts[k], baseOf(k)));
   const dirty = dirtyKeys.length + Object.keys(removed).length;
   const setDraft = (k: string, d: Draft) => {
@@ -408,7 +419,7 @@ function View(p: ReadyProps) {
     const days = resolve('late_window_days', isNew ? { ...layers, assignment: usableBlock(newRunFor(d)) } : layers).value;
     return cutoffOf(d.dueDate, d.dueTime, typeof days === 'number' ? days : 0);
   };
-  const errorsOf = (d: Draft) => draftErrors(d, { templateUsers }, cutoffFor(d));
+  const errorsOf = (d: Draft) => draftErrors(withNumber(d, doc), { templateUsers, doc }, cutoffFor(d));
   const newRunErrors = (d: Draft): Record<string, string> => {
     if (d.kind !== 'assignments') return {};
     const cfg = d.template ? gradingConfig(p, d.template) : {};
@@ -426,10 +437,9 @@ function View(p: ReadyProps) {
     const y = new YamlText(sf.text);
     let newId: string | null = null;
     for (const k of dirtyKeys) {
-      const d = drafts[k];
+      const d = withNumber(drafts[k], doc);
       if (k === 'new' && (d.kind === 'releases' || d.kind === 'assignments' || d.kind === 'events')) {
-        const stem = d.kind === 'releases' ? d.type || 'lecture' : d.kind === 'assignments' ? slugOfTemplate(d.template) : d.title || 'event';
-        newId = freshId(doc, d.kind, stem);
+        newId = d.kind === 'assignments' ? assignmentKey(d.number) : freshId(doc, d.kind, d.kind === 'releases' ? d.type || 'lecture' : d.title || 'event');
         writeDraft(y, { ...d, id: newId }, doc);
       } else writeDraft(y, d, doc);
     }
@@ -501,7 +511,7 @@ function View(p: ReadyProps) {
 
   let sheet = null;
   if (key && sf) {
-    const d = key === 'new' ? drafts.new ?? null : draftOf(key);
+    const d = draftOf(key);
     const close = <a class="x" href="#schedule" aria-label="Close entry" style="text-decoration:none;display:grid;place-items:center">&times;</a>;
     if (key === 'new' && !d) {
       sheet = (

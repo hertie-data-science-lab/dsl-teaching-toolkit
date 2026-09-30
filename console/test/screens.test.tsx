@@ -137,7 +137,7 @@ describe('S4 cohort overview', () => {
     // This week on load: the s5 problem (week 5) is counted on its cell, not listed.
     expect(t).not.toContain('Session 5 cites folder lectures/05_trees');
     expect(out).toMatch(/aria-label="Week 5, from 5 Oct[^"]*; 1 problem"/);
-    expect(out).toContain('href="#template-assignment-3"');
+    expect(out).toContain('href="#template-assignment-3-f2026"');
     expect(t).toContain('(course)');
     expect(t).toContain('Assignment 2: Regression');
     expect(t).toContain('37 of 48 submitted so far.');
@@ -408,7 +408,9 @@ describe('S2 course and S17 template', () => {
     expect(text(<>{semesterChip({ ...sem, live: false, ended: false })}</>).trim()).toBe('Archived');
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
-    const out = html(<TemplateScreen {...cp} entry="assignment-3" />);
+    const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
+    expect(out).toContain('<h1>Group project <span class="hint">');
+    expect(out).toContain('<span>Group project</span></div>');
     expect(out).toContain('value="Group project"');
     expect(out).toMatch(/value="group" checked/);
     expect(out).toContain('The file says “sometimes”. Choose on or off.');
@@ -424,7 +426,7 @@ describe('S2 course and S17 template', () => {
       {},
       TREE,
     );
-    const out = html(<TemplateScreen {...cp} files={tagged} entry="assignment-3" />);
+    const out = html(<TemplateScreen {...cp} files={tagged} entry="assignment-3-f2026" />);
     expect(out).toContain('value="30"');
     expect(out).toContain('<td>50</td>');
     expect(out).not.toContain('[object Object]');

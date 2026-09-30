@@ -4,10 +4,11 @@
 // (and says it cannot be changed later), and tests are refused for the formats that have
 // nothing to run.
 
+import type { ComponentChildren } from 'preact';
 import { settingsTiers } from './grading';
 import { opt, type FieldTier, type Tiers } from './types';
 import { ORG_NAME_RE } from '../model/policy';
-import { autogradeBlock, termLabel } from '../wizards/model';
+import { autogradeBlock, parseSource, templateRepo, termLabel } from '../wizards/model';
 
 const pick = (t: Tiers, keys: string[]): Tiers => Object.fromEntries(keys.map((k) => [k, t[k]]));
 
@@ -34,18 +35,35 @@ export function cohortOrg(terms: string[]): Tiers {
 
 // ------------------------------------------------------------------ New assignment
 
-export function assignmentWhat(terms: string[], next: number, templates: string[]): Tiers {
+/** New assignment, step 1: the name. No number and no semester (decision 0014). */
+export function assignmentName(): Tiers {
   return {
-    name: { tier: 'ask', label: 'Name', reason: 'Becomes the title students see, and part of their repo name.', check: (x) => (x && String(x).trim() ? null : 'Needed.') },
-    number: {
-      tier: 'default', label: 'Number', widget: 'number', defaultLabel: `next free: ${next}`, reason: 'Must be free this semester.',
-      check: (x) => (x === undefined ? 'Needed.' : Number.isInteger(x) && (x as number) >= 1 && (x as number) <= 999 ? null : 'A whole number from 1 to 999.'),
+    name: {
+      tier: 'ask', label: 'Name', reason: "The assignment's title.",
+      check: (x) => (!x || !String(x).trim() ? 'Needed.' : templateRepo(x) ? null : 'Needs a word or a number besides “assignment”.'),
     },
-    term: { tier: 'default', label: 'Semester', widget: 'select', defaultLabel: 'default: newest semester', reason: 'The semester that first uses this assignment template.', options: terms.map((t) => opt(t, termLabel(t))) },
-    copy_from: {
-      tier: 'advanced', label: 'Copy an existing assignment template', widget: 'select', default: '', defaultLabel: 'default: start fresh',
-      reason: 'Copying takes its settings too, so the next two questions are skipped.',
-      options: [opt('', 'No, start fresh'), ...templates.map((r) => opt(r, r))],
+  };
+}
+
+/** New assignment, step 1: what it starts from. `repoHint` says which repos the console can read. */
+export function assignmentStart(templates: string[], repoHint?: ComponentChildren): Tiers {
+  return {
+    start: {
+      tier: 'default', label: 'Start from', widget: 'radio', default: 'fresh', defaultLabel: 'default: fresh',
+      options: [
+        opt('fresh', 'Fresh', 'Starter files for the formats you choose.'),
+        { value: 'template', label: 'A template of this course', sub: 'Choose the files to copy.', off: templates.length ? undefined : 'The course has no assignment templates yet.' },
+        { ...opt('repo', 'A repo the console can read', 'Choose the files to copy.'), hint: repoHint },
+      ],
+    },
+    source_template: {
+      tier: 'conditional', under: 'start', label: 'Template', widget: 'select', when: (v) => v.start === 'template',
+      options: [opt('', 'Choose a template'), ...templates.map((r) => opt(r, r))],
+      check: (x, v) => (v.start === 'template' && !x ? 'Choose a template.' : null),
+    },
+    source_repo: {
+      tier: 'conditional', under: 'start', label: 'Repo', placeholder: 'owner/repo, or its GitHub link', when: (v) => v.start === 'repo',
+      check: (x, v) => (v.start !== 'repo' ? null : !x ? 'Needed.' : parseSource(x) ? null : 'Give it as owner/repo, or paste its GitHub link.'),
     },
   };
 }

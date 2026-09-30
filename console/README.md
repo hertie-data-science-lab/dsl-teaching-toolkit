@@ -239,8 +239,11 @@ a first visit, mostly free 304s after).
   answers stay in this browser so leaving loses nothing. Setting up a course is the one
   operation outside the instructor's orgs: the wizard dispatches the central
   `bootstrap-org.yml` in `hertie-data-science-lab/dsl-teaching-toolkit` and follows its run.
-  New assignment writes the Advanced marking values `assignment.create` does not take into
-  the new template's `grading_config.yml`.
+  New assignment writes the marking values `assignment.create` does not take (points per
+  question among them) into the new template's `grading_config.yml`. Starting from another
+  repo is the console's (decision 0014): the engine makes the template fresh, then the
+  console copies the ticked files onto `main` and `solution` with the signed-in user's
+  token, one commit per branch through the git data API.
 
 ## Names and migration
 

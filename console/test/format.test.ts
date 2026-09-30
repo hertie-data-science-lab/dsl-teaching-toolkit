@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { md, releaseIdent } from '../src/model/format';
+import { assignmentIdent, md, releaseIdent, templateName } from '../src/model/format';
 import type { Release } from '../src/model/types';
 
 describe('md', () => {
@@ -17,6 +17,21 @@ describe('md', () => {
   });
   it('keeps lists and escapes HTML', () => {
     expect(md('- a\n- <b>')).toBe('<ul><li>a</li><li>&lt;b&gt;</li></ul>');
+  });
+});
+
+describe('assignment names', () => {
+  it('reads an ordinal from a schedule key only where the number stands alone', () => {
+    expect(assignmentIdent('assignment-3')).toBe('Assignment 3');
+    expect(assignmentIdent('assignment-4-project')).toBe('Assignment 4');
+    expect(assignmentIdent('assignment-3d-vision', '3D vision')).toBe('3D vision');
+    expect(assignmentIdent('assignment-3d-vision')).toBe('assignment-3d-vision');
+  });
+
+  it('names a template by its title, never by a number in its repo name', () => {
+    expect(templateName('Regression')).toBe('Regression');
+    expect(templateName('  ')).toBe('Untitled template');
+    expect(templateName('')).toBe('Untitled template');
   });
 });
 

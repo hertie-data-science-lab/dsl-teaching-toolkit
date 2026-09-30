@@ -188,15 +188,22 @@ export function opLabel(op: string): string {
   return OP_LABEL[op] ?? op;
 }
 
-/** "Assignment 2" from the slug `assignment-2` (or `assignment-4-project`); else the slug. */
-export function assignmentIdent(slug: string): string {
-  const m = /^assignment-(\d+)/.exec(slug);
-  return m ? `Assignment ${m[1]}` : slug;
+/** "Assignment 2" from the schedule key `assignment-2` (or `assignment-4-project`, never
+ * `assignment-3d-vision`); else the title, and only without one the key itself. */
+export function assignmentIdent(slug: string, title = ''): string {
+  const m = /^assignment-(\d+)(?=-|$)/.exec(slug);
+  return m ? `Assignment ${m[1]}` : title || slug;
 }
 
+/** How a template is named: its title, never an ordinal from its repo name (the ordinal is a schedule fact, decision 0014). */
+export function templateName(title: string): string {
+  return title.trim() || 'Untitled template';
+}
+
+/** "Assignment 3: Trees" for a numbered key; the title alone for a key without a number. */
 export function assignmentTitle(a: Pick<Assignment, 'slug' | 'title'>): string {
-  const id = assignmentIdent(a.slug);
-  return a.title ? `${id}: ${a.title}` : id;
+  const id = assignmentIdent(a.slug, a.title);
+  return a.title && id !== a.title ? `${id}: ${a.title}` : id;
 }
 
 export const KIND_LABEL: Record<string, string> = Object.fromEntries(
@@ -209,11 +216,17 @@ export const KIND_LABEL: Record<string, string> = Object.fromEntries(
  * null is a row the site does not number (`show_on_site: false`, or readings on a lecture). Without it
  * (an older status): the label's own number, else the position among its kind.
  */
+/** The number a key carries, as the engine reads it (`schedule.label_number`): `lecture_03` 3, `01_lab` 1, else null. */
+export function labelNumber(key: string): number | null {
+  const m = /0*(\d+)$|^0*(\d+)[-_ ]/.exec(key.trim());
+  return m ? Number(m[1] ?? m[2]) : null;
+}
+
 export function releaseIdent(r: Release, all: Release[]): string {
   const word = KIND_LABEL[r.kind ?? 'lecture'] ?? r.kind ?? 'Lecture';
   if (r.number !== undefined) return r.number === null ? word : `${word} ${r.number}`;
-  const num = /0*(\d+)$|^0*(\d+)[-_ ]/.exec(r.id); // `lecture_03`, `lab-9`, `01_lab`
-  if (num) return `${word} ${Number(num[1] ?? num[2])}`;
+  const num = labelNumber(r.id); // `lecture_03`, `lab-9`, `01_lab`
+  if (num !== null) return `${word} ${num}`;
   const same = all.filter((x) => x.kind === r.kind).sort((a, b) => a.when.localeCompare(b.when));
   const n = same.findIndex((x) => x.id === r.id) + 1;
   return `${word} ${n || same.length + 1}`;
