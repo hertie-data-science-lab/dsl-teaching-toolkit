@@ -84,7 +84,7 @@ with `testthat` (see docs/10) without this module learning a word of R.
 
 Usage:
     python3 -m dsl_course.collect \\
-        --course-org COURSE --course-source-repo assignment-1-f2026 \\
+        --course-org COURSE --course-source-repo assignment-linear-regression \\
         --semester-org SEMESTER --deadline 2026-10-15 [--group] [--preview]
 """
 
@@ -3799,7 +3799,7 @@ def main() -> int:
         "--course-source-repo",
         dest="template",
         required=True,
-        help="Assignment template (e.g. assignment-1-f2026)",
+        help="Assignment template (e.g. assignment-linear-regression)",
     )
     parser.add_argument(
         "--semester-org",

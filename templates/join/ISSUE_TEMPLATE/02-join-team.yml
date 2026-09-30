@@ -24,7 +24,7 @@ body:
     attributes:
       label: Assignment
       description: The assignment slug, spelt as the course site spells it.
-      placeholder: "e.g. assignment-4-project"
+      placeholder: "e.g. assignment-3"
     validations:
       required: true
   # dsl:assignment-field:end

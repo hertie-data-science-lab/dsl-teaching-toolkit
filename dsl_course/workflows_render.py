@@ -919,7 +919,7 @@ def _assignment_input(
             default if default in assignments else None,
         )
     return (
-        f'      course_source_repo:\n        description: "{description} (e.g. assignment-1-f2026)"\n'
+        f'      course_source_repo:\n        description: "{description} (e.g. assignment-linear-regression)"\n'
         "        required: true"
     )
 

@@ -1,7 +1,7 @@
 """dsl-course assign -- provision per-student assignment repos from a template repo.
 
 Generates ONE private repo per onboarded ENROLLED student from an assignment TEMPLATE repo
-(e.g. assignment-1-f2026) in the course org, using GitHub's native template-generate,
+(e.g. assignment-linear-regression) in the course org, using GitHub's native template-generate,
 then adds the student as a collaborator (maintain). The template carries its own
 starter code + autograder workflow, which every generated repo inherits. Students
 never use a CLI. Roster rows with `role=auditor` are skipped - auditors are read-only.
@@ -45,7 +45,7 @@ the scheduler puts any of them back that has gone public early.
 
 Usage:
     python3 -m dsl_course.assign \\
-        --course-org TEST-HERTIE-COURSE --course-source-repo assignment-1-f2026 \\
+        --course-org TEST-HERTIE-COURSE --course-source-repo assignment-linear-regression \\
         --semester-org TEST-HERTIE-SEMESTER-f2026
 """
 
@@ -1238,7 +1238,7 @@ def main() -> int:
         "--course-source-repo",
         dest="template",
         required=True,
-        help="COURSE-org repo to hand out from (e.g. assignment-1-f2026)",
+        help="COURSE-org repo to hand out from (e.g. assignment-linear-regression)",
     )
     parser.add_argument("--semester-org", required=True, help="Semester org (target)")
     parser.add_argument(
