@@ -2,10 +2,11 @@
 // "New assignment", decision 0014 rules 6 and 7). What the `assignment.create` operation
 // accepts goes in its request; the marking values it does not accept are written into the new
 // template's grading_config.yml straight after, as its Settings form would. An import is the
-// console's: once the template exists, the ticked files are copied onto it with the signed-in
-// user's token, one commit per branch.
+// console's: once the template exists and checks out, the ticked files are copied onto it by
+// themselves with the signed-in user's token, one commit per branch; a button retries a branch
+// the copy missed.
 
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
@@ -211,6 +212,10 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   // A source counts as pending until it has been read: an unread or unreadable source is never "nothing to copy".
   const importPending = !!src && (!read?.main || toCopy.some((c) => !importDone.includes(c.branch)));
   const readFailed = !!src && !!read && !read.main;
+  /** The copy has run for this template (in full or in part): what is missing now waits for a retry. */
+  const attempted = d.imported?.repo === repo;
+  const missing = toCopy.filter((c) => !importDone.includes(c.branch)).map((c) => c.branch);
+  const checksOk = created && allOk(tplNow?.checks);
 
   const w = effective(tiers3, effective(tiers2, v));
   const writeExtras = async () => {
@@ -238,6 +243,14 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     setCopy({ busy: false, results });
     set({ imported: { repo, branches } });
   };
+  // The copy runs by itself, once, as soon as the template exists and checks out.
+  const autoCopied = useRef('');
+  const copyNow = checksOk && !!read?.main && importPending && !attempted && !copy.busy && autoCopied.current !== repo;
+  useEffect(() => {
+    if (!copyNow) return;
+    autoCopied.current = repo;
+    void runCopy();
+  }, [copyNow]);
 
   let heading = '', body, foot;
   const createdNote = created && step < 5 ? <p class="note">{repo} is created. Change its settings on the <a href={`#template-${repo}`}>assignment template’s settings</a>.</p> : null;
@@ -320,7 +333,6 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     const total = rows.reduce((n, r) => n + (Number(r.points) || 0), 0);
     const def = createAssignment(courseScope(p), repo, name, assignmentArgs(v), src ? srcKey : undefined);
     const extrasPending = created && Object.keys(extrasOf(w)).length > 0 && d.extrasSaved !== repo;
-    const checksOk = created && allOk(tplNow?.checks);
     const ready = checksOk && !importPending && !extrasPending;
     heading = ready ? 'Created' : 'Check and create';
     const live = liveSemesters(course.cohorts, (c) => {
@@ -342,10 +354,10 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
         <Checks list={tplNow?.checks ?? null} busy={tpl.busy} pending={[`Assignment template ${repo} created`]} />
         {src && !read ? <CheckLine cls="busy">Reading {srcKey}</CheckLine> : null}
         {readFailed ? <Checks list={[read!.check]} busy={source.busy} /> : null}
-        {checksOk && importPending && !copy.busy ? <p class="footnote">The ticked files are copied next, as you.</p> : null}
         {copy.busy ? <CheckLine cls="busy">{copy.line}</CheckLine> : null}
         {said?.ok.map((t) => <CheckLine cls="ok">{t}</CheckLine>)}
         {said?.bad.length ? <WizError>{said.bad.join(' ')} Copy again to try only what is missing.</WizError> : null}
+        {attempted && missing.length && !said && !copy.busy ? <WizError>Not copied to {missing.join(' or ')} yet. Copy again to try only what is missing.</WizError> : null}
         {checksOk && !importPending && extrasPending ? <p class="footnote">The marking settings the create step does not take are written to grading_config.yml next.</p> : null}
         <SaveLine state={save} />
         {ready ? (
@@ -364,7 +376,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
             </div>
             <div><button class="btn small quiet" type="button" onClick={() => { clear(); go(1); }}>Start another assignment</button></div>
           </>
-        ) : created ? null : <p class="footnote">Creating makes an assignment template with a main branch for the brief and a solution branch for marking.</p>}
+        ) : created ? null : <p class="footnote">Creating makes an assignment template with a main branch for the brief and a solution branch for marking.{src ? ' The ticked files are copied next with your GitHub account.' : ''}</p>}
         {tplNow && !tpl.busy && tplNow.checks.some((c) => c.ok === false) && created ? <WizError>The assignment template is not complete yet. Check again in a minute; if it stays like this, open the run from All operations.</WizError> : null}
       </>
     );
@@ -373,7 +385,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     ) : !created ? (
       <button class="btn" type="button" disabled={!env || !repo || (!!src && !read)} onClick={() => env?.ops.open(def, 'run')}>Create assignment</button>
     ) : checksOk && importPending && read?.main ? (
-      <button class="btn" type="button" disabled={copy.busy} onClick={() => void runCopy()}>{copy.results ? 'Copy again' : 'Copy the files'}</button>
+      attempted ? <button class="btn" type="button" disabled={copy.busy} onClick={() => void runCopy()}>Copy again</button> : null
     ) : checksOk && extrasPending ? (
       <button class="btn" type="button" disabled={save.kind === 'busy' || !tplNow?.config} onClick={() => void writeExtras()}>Save the marking settings</button>
     ) : (

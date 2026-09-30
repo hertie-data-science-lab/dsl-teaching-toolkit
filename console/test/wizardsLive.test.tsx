@@ -131,7 +131,7 @@ describe('New assignment: import', () => {
   const now = Date.parse('2026-09-30T10:00:00Z');
   const blob = (path: string) => ({ path, mode: '100644', type: 'blob', sha: `s-${path.replace(/\//g, '_')}` });
 
-  it('lists the source ticked, solutions and tests left out, then copies the ticked files once the template exists', async () => {
+  it('lists the source ticked, solutions and tests left out, then copies the ticked files by itself once the template exists', async () => {
     const T = 'assignment-regression';
     let exists = false;
     const gh = new FakeGitHub()
@@ -167,10 +167,9 @@ describe('New assignment: import', () => {
     render(null, root);
     await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={5} /></EnvCtx.Provider>, root!));
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    const copy = [...root.querySelectorAll<HTMLButtonElement>('button.btn')].find((b) => b.textContent === 'Copy the files')!;
-    expect(copy).toBeTruthy();
-    await act(async () => { copy.click(); await vi.advanceTimersByTimeAsync(100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(root.textContent).toContain('Copied 2 files to main.');
+    expect([...root.querySelectorAll('button')].some((b) => b.textContent === 'Copy again')).toBe(false);
     expect(gh.seen.find((x) => x.method === 'POST' && x.url.endsWith('/git/trees'))!.body).toMatchObject({ base_tree: 'tr1', tree: [{ path: 'README.md' }, { path: 'data/x.csv' }] });
     expect(root.textContent).toContain('Created. Nothing reaches students until you add it to a schedule.');
     expect(root.textContent).toContain('Add to the Fall 2026 schedule');
@@ -207,5 +206,48 @@ describe('New assignment: import', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(root.textContent).not.toContain('Read it again');
     expect(root.textContent).toContain('1 files from main of prof/old-course');
+  });
+
+  it('copies main and solution by itself, and a retry copies only the branch that failed', async () => {
+    const T = 'assignment-regression';
+    let refusals = 1;
+    const gh = new FakeGitHub()
+      .on('GET', '/repos/prof/old-course', { name: 'old-course', default_branch: 'main' })
+      .on('GET', '/repos/prof/old-course/git/trees/main?recursive=1', { sha: 't', truncated: false, tree: ['README.md', 'tests/test_x.py'].map(blob) })
+      .on('GET', '/repos/prof/old-course/branches/solution', { name: 'solution', commit: { sha: 'ps', commit: { tree: { sha: 'pt' } } } })
+      .on('GET', '/repos/prof/old-course/git/trees/solution?recursive=1', { sha: 't2', truncated: false, tree: ['answer.ipynb', 'tests/test_x.py', '.env'].map(blob) })
+      .on('GET', `/repos/${COURSE}/${T}`, { name: T })
+      .on('GET', `/repos/${COURSE}/${T}/branches/main`, { name: 'main', commit: { sha: 'h1', commit: { tree: { sha: 'tr1' } } } })
+      .on('GET', `/repos/${COURSE}/${T}/branches/solution`, { name: 'solution', commit: { sha: 'h2', commit: { tree: { sha: 'tr2' } } } })
+      .on('GET', `/repos/${COURSE}/${T}/contents/grading_config.yml?ref=solution`, fileBody('grading_config.yml', 'title: Regression\n', 'g1'))
+      .on('GET', /^\/repos\/prof\/old-course\/git\/blobs\//, { content: 'eA==', encoding: 'base64' })
+      .on('POST', `/repos/${COURSE}/${T}/git/blobs`, { sha: 'nb' })
+      .on('POST', `/repos/${COURSE}/${T}/git/trees`, { sha: 'nt' })
+      .on('POST', `/repos/${COURSE}/${T}/git/commits`, { sha: 'nc' })
+      .on('PATCH', `/repos/${COURSE}/${T}/git/refs/heads/main`, { object: { sha: 'nc' } })
+      .on('PATCH', `/repos/${COURSE}/${T}/git/refs/heads/solution`, () => (refusals-- > 0 ? json({ message: 'Update is not a fast forward' }, 422) : json({ object: { sha: 'nc' } })));
+    const client = new GitHubClient({ token: () => 't', fetch: gh.fetch });
+    const env = { client, user: { login: 'a-example', id: 1, name: null, email: null, avatar_url: '' }, files: new StaticFiles(), kind: 'classic', ops: { runs: { value: [] } } } as unknown as Env;
+    const v = { name: 'Regression', start: 'repo', source_repo: 'prof/old-course', type: 'individual', submit_via: 'assignment_repo', formats: ['ipynb'], autograde: 'false', completion_check: 'auto', grader_pdf: false };
+    const verified = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4) };
+    localStorage.setItem(`dsl-console:wizard:new-assignment:${COURSE}`, JSON.stringify({ v, verified, extrasSaved: T }));
+    const props = { course, loaded: { kind: 'absent' } as const, cohortStates: {}, files: new StaticFiles(), now };
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={5} /></EnvCtx.Provider>, root!));
+    for (let i = 0; i < 3; i++) await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    const trees = () => gh.seen.filter((x) => x.method === 'POST' && x.url.endsWith('/git/trees')).map((x) => (x.body as { base_tree: string }).base_tree);
+    expect(trees()).toEqual(['tr1', 'tr2']);
+    expect(gh.seen.find((x) => x.method === 'POST' && x.url.endsWith('/git/trees') && (x.body as { base_tree: string }).base_tree === 'tr2')!.body).toMatchObject({ tree: [{ path: 'answer.ipynb' }, { path: 'tests/test_x.py' }] });
+    expect(root.textContent).toContain('Copied 1 file to main.');
+    expect(root.textContent).toContain('Copy again to try only what is missing.');
+    expect(root.textContent).not.toContain('Created.');
+    const again = [...root.querySelectorAll<HTMLButtonElement>('button.btn')].find((b) => b.textContent === 'Copy again')!;
+    expect(again).toBeTruthy();
+    await act(async () => { again.click(); await vi.advanceTimersByTimeAsync(100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(trees()).toEqual(['tr1', 'tr2', 'tr2']);
+    expect(root.textContent).toContain('Copied 2 files to solution.');
+    expect(root.textContent).toContain('Created. Nothing reaches students until you add it to a schedule.');
   });
 });
