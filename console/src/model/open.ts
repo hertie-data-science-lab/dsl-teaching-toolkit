@@ -77,7 +77,8 @@ export interface OpenItem {
   group: 'online' | 'local';
 }
 
-export const SETUP_HREF = '?#profile';
+/** Profile, about `org`'s course, so its clone block lists the repos of the course the person came from. */
+export const profileHref = (org: string) => `?course=${encodeURIComponent(org)}#profile`;
 
 /**
  * Every way to open `r` with this setup, in menu order. With a folder set up, VS Code both

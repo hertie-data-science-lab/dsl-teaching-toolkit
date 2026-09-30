@@ -10,7 +10,7 @@
 import { signal } from '@preact/signals';
 import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { SETUP_HREF, defaultItem, isWeb, openItems, type OpenItem, type RepoRef, type Setup } from '../model/open';
+import { defaultItem, isWeb, openItems, profileHref, type OpenItem, type RepoRef, type Setup } from '../model/open';
 import { askFolderOnce, folderChanged, isCloned } from '../model/localFolder';
 import { rememberOpen, yourSetup } from '../model/prefs';
 import { Ext } from './icons';
@@ -170,7 +170,7 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
         <div class="pm-h" role="presentation">On your computer</div>
         {local.map(entry)}
         <hr />
-        <a href={SETUP_HREF} role="menuitem" tabIndex={-1} onClick={() => setOpen(false)}>
+        <a href={profileHref(ref.org)} role="menuitem" tabIndex={-1} onClick={() => setOpen(false)}>
           <span>{folder ? 'Change your profile' : 'Set up a local folder'}</span>
         </a>
       </div>

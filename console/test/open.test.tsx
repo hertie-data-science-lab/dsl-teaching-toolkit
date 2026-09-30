@@ -194,7 +194,7 @@ describe('the Open button', () => {
     expect(document.activeElement).toBe(caret);
     await key(caret, 'ArrowDown');
     expect(document.activeElement).toBe(items()[0]);
-    expect(items().at(-1)!.getAttribute('href')).toBe('?#profile');
+    expect(items().at(-1)!.getAttribute('href')).toBe(`?course=${ORG}#profile`);
     await key(items()[0], 'Escape');
     expect(q('[role="menu"]').hidden).toBe(true);
     expect(document.activeElement).toBe(caret);

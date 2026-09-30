@@ -27,22 +27,38 @@ afterEach(() => {
   localStorage.clear();
 });
 
-it('shows the course repos to clone on ?#profile once the course status is ready', async () => {
-  saveYourSetup(user.login, { folder: '/Users/o/repos', editor: 'vscode' });
-  history.replaceState(null, '', '/?#profile');
+const OTHER = 'hertie-dsl-other-course-e9999';
+const other: Course = { ...course, org: OTHER, name: 'Other', code: 'E9999' };
+const otherStatus = { ...example, course: { ...example.course, org: OTHER, materials: [{ ...example.course.materials[0], repo: 'other-materials' }], templates: [] } };
+
+async function mount(url: string) {
+  history.replaceState(null, '', url);
   const gh = new FakeGitHub()
     .on('GET', `/repos/${ORG}/.github/contents/.system/status.json`, () => json(fileBody('.system/status.json', JSON.stringify(example))))
+    .on('GET', `/repos/${OTHER}/.github/contents/.system/status.json`, () => json(fileBody('.system/status.json', JSON.stringify(otherStatus))))
     .on('GET', /git\/trees\/HEAD/, { sha: 't', tree: [], truncated: false });
   const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: new GitHubClient({ token: () => 't', fetch: gh.fetch }) });
   s.user.value = user;
-  s.estate.value = { courses: [course], semesters: [], roles: new Map(), kind: 'classic' };
+  s.estate.value = { courses: [course, other], semesters: [], roles: new Map(), kind: 'classic' };
   root = document.createElement('div');
   document.body.appendChild(root);
   await act(async () => render(<App state={s} />, root!));
   for (let i = 0; i < 5 && !root.querySelector('.clone-all'); i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  return root;
+}
+
+it('shows the course repos to clone on ?#profile once the course status is ready', async () => {
+  saveYourSetup(user.login, { folder: '/Users/o/repos', editor: 'vscode' });
+  const root = await mount('/?#profile');
   expect(root.querySelector('#view h1')?.textContent).toBe('Profile');
   const repos = [...example.course.materials.map((m) => m.repo), ...example.course.templates.map((t) => t.repo)];
   expect(root.querySelector('.clone-all code')?.textContent).toBe(
     repos.map((r) => `git clone https://github.com/${ORG}/${r}.git "/Users/o/repos/${ORG}/${r}"`).join('\n'),
   );
+});
+
+it('shows the repos of the course the Open menu came from on ?course=<org>#profile', async () => {
+  saveYourSetup(user.login, { folder: '/Users/o/repos', editor: 'vscode' });
+  const root = await mount(`/?course=${OTHER}#profile`);
+  expect(root.querySelector('.clone-all code')?.textContent).toBe(`git clone https://github.com/${OTHER}/other-materials.git "/Users/o/repos/${OTHER}/other-materials"`);
 });
