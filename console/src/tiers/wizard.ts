@@ -4,6 +4,7 @@
 // (and says it cannot be changed later), and tests are refused for the formats that have
 // nothing to run.
 
+import type { ComponentChildren } from 'preact';
 import { settingsTiers } from './grading';
 import { opt, type FieldTier, type Tiers } from './types';
 import { ORG_NAME_RE } from '../model/policy';
@@ -44,15 +45,15 @@ export function assignmentName(): Tiers {
   };
 }
 
-/** New assignment, step 1: what it starts from. */
-export function assignmentStart(templates: string[]): Tiers {
+/** New assignment, step 1: what it starts from. `repoHint` says which repos the console can read. */
+export function assignmentStart(templates: string[], repoHint?: ComponentChildren): Tiers {
   return {
     start: {
       tier: 'default', label: 'Start from', widget: 'radio', default: 'fresh', defaultLabel: 'default: fresh',
       options: [
         opt('fresh', 'Fresh', 'Starter files for the formats you choose.'),
         { value: 'template', label: 'A template of this course', sub: 'Choose the files to copy.', off: templates.length ? undefined : 'The course has no assignment templates yet.' },
-        opt('repo', 'A repo you can read', 'Choose the files to copy.'),
+        { ...opt('repo', 'A repo the console can read', 'Choose the files to copy.'), hint: repoHint },
       ],
     },
     source_template: {

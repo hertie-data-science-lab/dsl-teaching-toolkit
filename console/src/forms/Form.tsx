@@ -11,6 +11,7 @@ import { md, str } from '../model/format';
 import { validator } from '../model/validate';
 import type { FieldTier, Tiers, Values } from '../tiers/types';
 import { Prop } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { Alert, Lock } from '../ui/icons';
 
 export interface Item {
@@ -155,7 +156,7 @@ export function Field({ id, k, t, value, values, error, set, readOnly }: FieldPr
           {(t.options ?? []).map((o) => (
             <label class={`choice${o.off ? ' off' : ''}`} title={o.off}>
               <input type="radio" name={id} value={o.value} checked={str(value) === o.value} disabled={readOnly || !!o.off} onChange={() => set(k, o.value)} />
-              <b>{o.label}</b>
+              <b>{o.label}{o.hint ? <Hint label={`About ${o.label}`}>{o.hint}</Hint> : null}</b>
               {o.sub || o.off ? <span>{o.off ?? o.sub}{o.href && !o.off ? <> <a class="textlink" href={o.href}>Open Teams</a></> : null}</span> : null}
             </label>
           ))}

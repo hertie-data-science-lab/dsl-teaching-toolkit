@@ -178,17 +178,22 @@ export interface SourceRead {
   solution: SourceBranch | null;
 }
 
+/** What an import source that is not there, or not visible to the console, says. */
+export const SOURCE_NOT_FOUND = 'Not found, or the console cannot read it. It reads public repos and repos in organisations where the DSL console app is installed.';
+/** A source's org refused the read (the app not installed there, or SSO not authorised). */
+export const SOURCE_REFUSED = 'GitHub refused the read. The organisation may require the app to be installed or SSO to be authorised.';
+
 /**
  * An import source read with the signed-in user's token: its default branch's files and, when
- * it has one, its `solution` branch's. A repo GitHub does not show this account reads as not
- * found, which is also what a private repo of someone else looks like.
+ * it has one, its `solution` branch's. A repo the console cannot see reads as not found, which
+ * is also what a private repo of someone else looks like; a 403 is an org that refuses the read.
  */
 export async function readSource(client: GitHubClient, owner: string, repo: string): Promise<SourceRead> {
   const text = `${owner}/${repo} can be read`;
   const none = { main: null, solution: null };
   try {
     const r = await client.getRepo(owner, repo);
-    if (!r) return { check: { text, ok: false, hint: 'Not found, or your account cannot read it.' }, ...none };
+    if (!r) return { check: { text, ok: false, hint: SOURCE_NOT_FOUND }, ...none };
     const list = async (branch: string): Promise<SourceBranch | null> => {
       const t = await client.listTree(owner, repo, branch, true);
       return t ? { branch, entries: t.tree.filter((e) => e.type === 'blob'), truncated: t.truncated } : null;
@@ -198,6 +203,7 @@ export async function readSource(client: GitHubClient, owner: string, repo: stri
     const solution = r.default_branch !== 'solution' && (await client.getBranch(owner, repo, 'solution')) ? await list('solution') : null;
     return { check: { text, ok: true }, main, solution };
   } catch (e) {
+    if (e instanceof GitHubError && e.status === 403) return { check: { text, ok: false, hint: SOURCE_REFUSED }, ...none };
     return { check: { text, ok: null, hint: `GitHub did not answer (${why(e)}).` }, ...none };
   }
 }

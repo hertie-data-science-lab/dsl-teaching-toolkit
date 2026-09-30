@@ -368,7 +368,8 @@ describe('the wizard screens', () => {
     expect(out).toContain('The assignment’s title.');
     expect(out).toContain('Start from');
     expect(out).toContain('A template of this course');
-    expect(out).toContain('A repo you can read');
+    expect(out).toContain('A repo the console can read');
+    expect(out).toContain('The console reads public repos, and private repos in organisations where the DSL console app is installed. For another organisation, an owner installs the app there first.');
     expect(out).not.toContain('Semester');
     expect(out).not.toContain('next free');
   });
@@ -480,8 +481,12 @@ describe('New assignment: import from a repo', () => {
     expect(r.main).toEqual({ branch: 'trunk', entries: [blob('README.md')], truncated: false });
     expect(r.solution).toEqual({ branch: 'solution', entries: [blob('solution/x.py')], truncated: true });
     const none = await readSource(client(new FakeGitHub()), 'a', 'gone');
-    expect(none.check).toMatchObject({ ok: false, hint: 'Not found, or your account cannot read it.' });
+    expect(none.check).toMatchObject({ ok: false, hint: 'Not found, or the console cannot read it. It reads public repos and repos in organisations where the DSL console app is installed.' });
     expect(none.main).toBeNull();
+    const refused = await readSource(client(new FakeGitHub().on('GET', '/repos/sso/b', () => json({ message: 'Resource protected by organization SAML enforcement.' }, 403))), 'sso', 'b');
+    expect(refused.check).toMatchObject({ ok: false, hint: 'GitHub refused the read. The organisation may require the app to be installed or SSO to be authorised.' });
+    const down = await readSource(client(new FakeGitHub().on('GET', '/repos/a/b', () => json({ message: 'Server Error' }, 500))), 'a', 'b');
+    expect(down.check).toMatchObject({ ok: null, hint: 'GitHub did not answer (Server Error).' });
   });
 
   it('copies the ticked files as one commit over the branch head: blobs, one tree, one commit, a fast-forward', async () => {

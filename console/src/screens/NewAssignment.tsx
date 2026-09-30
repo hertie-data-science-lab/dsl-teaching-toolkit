@@ -29,7 +29,7 @@ import { OpenButton } from '../ui/OpenButton';
 import { PatternTree } from '../ui/PatternTree';
 import { useDraft } from '../wizards/drafts';
 import {
-  IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, ORDINAL_WARNING, assignmentArgs, formatError, importFixed, liveSemesters, openAt, ordinalInName,
+  APP_SLUG, IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, ORDINAL_WARNING, assignmentArgs, formatError, importFixed, installUrl, liveSemesters, openAt, ordinalInName,
   parseSource, signature, templateRepo, tickedEntries, type SourceRepo,
 } from '../wizards/model';
 import { allOk, checkFree, checkTemplate, readSource, useLive, type Check, type SourceBranch, type SourceRead } from '../wizards/verify';
@@ -137,6 +137,14 @@ export function copySentences(results: CopyResult[]): { ok: string[]; bad: strin
   };
 }
 
+/** Which repos "A repo the console can read" covers, and where an owner installs the app for another. */
+const REPO_HINT = (
+  <>
+    The console reads public repos, and private repos in organisations where the DSL console app is installed. For another organisation, an owner installs the app there first.
+    {APP_SLUG ? <> <a href={installUrl(APP_SLUG, null)} target="_blank" rel="noopener">Install the console app <Ext /></a></> : null}
+  </>
+);
+
 function BranchPicker({ title, note, b, lines, set, fixed }: { title: string; note: string; b: SourceBranch; lines: string[]; set: (l: string[]) => void; fixed: (p: string) => string | null }) {
   const n = tickedEntries(b.entries, lines, fixed).length;
   return (
@@ -194,7 +202,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     if (typeof location !== 'undefined') location.hash = `#new-assignment-${k}`;
   };
   const tiersName = assignmentName();
-  const tiersStart = assignmentStart(templates);
+  const tiersStart = assignmentStart(templates, REPO_HINT);
   const tiers2 = assignmentWork();
   const tiers3 = assignmentMarking();
   const errsOf = (t: Tiers) => fieldErrors(null, t, v);
