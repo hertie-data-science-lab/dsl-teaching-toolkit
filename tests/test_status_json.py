@@ -1512,3 +1512,96 @@ def test_an_assignments_yml_that_is_not_yaml_is_a_problem_not_a_crash(monkeypatc
         status_json.problem_from_fault(f, SEMESTER, NOW) for f in facts.schedule_faults
     ]
     assert [p["id"] for p in problems] == ["assignments:file:ASSIGNMENTS"]
+
+
+# ------------------------------------------------------------ explicit numbers (0020)
+
+UNNUMBERED = """\
+timezone: Europe/Berlin
+releases:
+  lecture-3:
+    event_datetime: 2026-09-24T10:00
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/03_trees
+  guest:
+    event_datetime: 2026-10-08T10:00
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/05_guest
+  week-reading:
+    event_datetime: 2026-10-09T10:00
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/extra
+  setup:
+    event_datetime: 2026-09-10T10:00
+    show_on_site: false
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: setup
+  other-three:
+    event_datetime: 2026-10-15T10:00
+    number: 3
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/03_again
+assignments:
+  project:
+    course_source_repo: assignment-project
+    handout_datetime: 2026-10-20T10:00
+    due_datetime: 2026-11-01T23:59
+  assignment-2:
+    course_source_repo: assignment-2-f2026
+    due_datetime: 2026-09-27T23:59
+"""
+
+
+def _numbers_render() -> dict:
+    return _render(semester=_semester(sched=_sched(UNNUMBERED), dest_paths={}))
+
+
+def test_an_entry_with_no_number_is_a_problem_dated_at_what_it_stops():
+    problems = {p["id"]: p for p in _numbers_render()["problems"]}
+    guest = problems["number:lecture:guest"]
+    assert guest["text"] == "Give guest a number."
+    assert guest["stops"] == "The release on Thu 8 Oct will be skipped."
+    assert guest["when"] == "2026-10-08T10:00:00+02:00"
+    assert guest["scope"] == "semester"
+    assert guest["fix"]["path"] == "schedule.yml"
+    assert guest["fix"]["entry"] == "guest"
+    assert guest["fix"]["screen"] == "schedule"
+    assert guest["fix"]["line"] == 9
+    project = problems["number:assignment:project"]
+    assert project["when"] == "2026-10-20T10:00:00+02:00"
+    assert project["stops"] == "The hand out on Tue 20 Oct will be skipped."
+    # Label-numbered entries, a stand-alone readings row and a silent copy need none.
+    assert not {
+        "number:lecture:lecture-3",
+        "number:readings:week-reading",
+        "number:lecture:setup",
+        "number:assignment:assignment-2",
+    } & set(problems)
+
+
+def test_two_entries_sharing_a_number_are_one_problem():
+    problems = {p["id"]: p for p in _numbers_render()["problems"]}
+    dup = problems["number:lecture:3"]
+    assert dup["text"] == "Two lectures are numbered 3: lecture-3, other-three."
+    assert dup["fix"]["entry"] == "other-three"
+    assert "when" not in dup
+    ids = [p["id"] for p in _numbers_render()["problems"]]
+    assert len(ids) == len(set(ids))
+
+
+def test_an_unnumbered_release_will_be_skipped_and_an_assignment_says_so():
+    doc = _numbers_render()
+    states = {r["id"]: r["state"] for r in doc["releases"]}
+    assert states["guest"] == "will_be_skipped"
+    assert states["lecture-3"] == "planned"
+    assert states["week-reading"] == "planned"
+    rows = {a["slug"]: a for a in doc["assignments"]}
+    assert rows["project"]["number"] is None and rows["project"]["problem"]
+    assert rows["assignment-2"]["number"] == 2
+    numbers = {r["id"]: r["number"] for r in doc["releases"]}
+    assert numbers["guest"] is None and numbers["lecture-3"] == 3

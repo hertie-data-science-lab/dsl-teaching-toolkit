@@ -83,6 +83,7 @@ from .faults import NOT_MIGRATED, ConfigFault, FaultKind, Unusable
 from .gh_contents import (
     get_file_content,
     is_untouched_stub,
+    line_of,
     repo_path_shas,
     repo_tree,
 )
@@ -99,7 +100,17 @@ from .opencourse import read as read_opencourse
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
 from .repos import default_branch
-from .schedule_plan import deploy_dest, entry_kind, planned_rows, site_rows
+from .schedule_plan import (
+    Unnumbered,
+    deploy_dest,
+    duplicate_numbers,
+    duplicate_text,
+    entry_kind,
+    own_number,
+    planned_rows,
+    site_rows,
+    unnumbered,
+)
 from .sync_teams import known_handles
 
 # Where each file lives, inside `semester-config` (semester) or `.github` (course).
@@ -700,6 +711,72 @@ def template_problem(t: TemplateFacts, org: str) -> dict:
     }
 
 
+def _number_stops(m: Unnumbered, now: datetime) -> str:
+    """What an entry with no number stops, said the way a skipped release is."""
+    if m.block == "releases" and not m.copies:
+        return "Its row on the site shows no number."
+    moment = "hand out" if m.block == "assignments" else "release"
+    if m.fires is None:
+        if m.block == "assignments":
+            return "It cannot be handed out until it has one."
+        return f"The {moment} has no date yet, and will be skipped until this is fixed."
+    if m.fires <= now:
+        return f"The {moment} on {_day(m.fires)} was skipped."
+    return f"The {moment} on {_day(m.fires)} will be skipped."
+
+
+def _schedule_fix(org: str, key: str, line: int | None) -> dict:
+    return {
+        "repo": f"{org}/{schedule.CONFIG_REPO}",
+        "path": schedule.SCHEDULE_PATH,
+        "line": line,
+        "screen": "schedule",
+        "entry": key,
+    }
+
+
+def _entry_lines(sched: schedule.Schedule, key: str) -> dict[str, int]:
+    if key in sched.assignments:
+        return sched.assignments[key].lines
+    return next((r.lines for r in sched.releases if r.label == key), {})
+
+
+def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
+    """Decision 0020 rules 2 and 4: `number:<kind>:<key>` for an entry of a numbered
+    kind with no number, dated at the release or hand-out it stops (so the Dashboard
+    counts it in that week), and `number:<kind>:<n>` for a number two entries share."""
+    aliases = lambda repo: facts.aliases.get(repo, {})
+    out = []
+    for m in unnumbered(facts.sched, aliases):
+        problem = {
+            "id": f"number:{m.kind}:{_slugify(m.key)}",
+            "scope": "semester",
+            "stage": "K4",
+            "text": f"Give {m.key} a number.",
+            "stops": _number_stops(m, now),
+            "fix": _schedule_fix(facts.org, m.key, m.line),
+        }
+        if m.fires is not None and (m.block == "assignments" or m.copies):
+            problem["when"] = m.fires.isoformat()
+        out.append(problem)
+    for kind, n, keys in duplicate_numbers(facts.sched, aliases):
+        out.append(
+            {
+                "id": f"number:{kind}:{n}",
+                "scope": "semester",
+                "stage": "K4",
+                "text": f"{duplicate_text(kind, n, keys)}.",
+                "stops": "Students see the same number more than once.",
+                "fix": _schedule_fix(
+                    facts.org,
+                    keys[-1],
+                    line_of(_entry_lines(facts.sched, keys[-1]), "number"),
+                ),
+            }
+        )
+    return out
+
+
 def template_state(t: TemplateFacts) -> str:
     """C5, per template: `problem` until the migration gives it the topic, or while its
     grading_config.yml will not grade as written; `ready` once its README is written,
@@ -872,18 +949,20 @@ def release_state(
     facts: SemesterFacts,
     faults: list[ConfigFault],
     now: datetime,
+    numbered: bool = True,
 ) -> str:
     """`planned | will_be_skipped | released | late` (lifecycle, per scheduled release).
 
     released - every copy is on the destination's default branch (whenever it got there:
     an early release is released); late - a copy is due and not there; will_be_skipped -
-    automation cannot perform it as written (a source not found or held back); planned
-    otherwise. An entry with nothing to copy is released once its moment has passed."""
+    automation cannot perform it as written (a source not found or held back, or an entry
+    that needs a number and has none); planned otherwise. An entry with nothing to copy is
+    released once its moment has passed."""
     if release.deploy and all(_dest_present(facts, d) for d in release.deploy):
         return "released"
     if release.due_deploys(now):
         return "late"
-    if faults:
+    if faults or (release.deploy and not numbered):
         return "will_be_skipped"
     if not release.deploy and release.when is not None and release.when <= now:
         return "released"
@@ -1023,6 +1102,8 @@ def render_assignments(
         rows.append(
             {
                 "slug": slug,
+                # Its number (decision 0020), or None: the console never counts one.
+                "number": own_number(entry.number, slug),
                 "title": facts.titles.get(slug) or spec.title or slug,
                 "template": entry.course_source_repo,
                 "state": assignment_state(now, entry, cutoff, spec, units, returned),
@@ -1060,6 +1141,7 @@ def render_releases(
     numbers = {
         sr.row.key: sr.number for sr in site_rows(planned_rows(facts.sched, aliases))
     }
+    held = {m.key for m in unnumbered(facts.sched, aliases) if m.block == "releases"}
     for r in facts.sched.releases:
         own = [f for f in faults if f.is_source and f.where == f"releases.{r.label}"]
         first = r.deploy[0] if r.deploy else None
@@ -1074,7 +1156,7 @@ def render_releases(
                 "kind_inferred": inferred,
                 "number": numbers.get(r.label),
                 "title": r.title,
-                "state": release_state(r, facts, own, now),
+                "state": release_state(r, facts, own, now, r.label not in held),
                 "source": {
                     "repo": first.course_source_repo,
                     "path": first.course_source_path,
@@ -1328,6 +1410,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
         problem_from_fault(f, course.org, now, handouts) for f in facts.template_faults
     ]
     problems += _no_email_problem(facts.org, facts.people)
+    problems += number_problems(facts, now)
     problems += [
         materials_problem(m, course.org) for m in course.materials if not m.topic
     ]
