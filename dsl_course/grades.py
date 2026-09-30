@@ -128,6 +128,9 @@ GRADEBOOK_DIR = records.path(
 # migration in `_read_distributed` reads it once and deletes it in the same commit that
 # writes `distributed.csv`, which records every channel rather than just the email.
 NOTIFIED_PATH = f"{GRADEBOOK_DIR}/notified.csv"
+GRADEBOOK_PERMISSION = (
+    "pull"  # a student READS their gradebook; the sheet is the source
+)
 SEMESTER_CSV_NAME = records.path(
     "semester_gradebook"
 )  # the wide faculty-only glance view
@@ -3339,7 +3342,9 @@ def provision_one(
         # Held at anything else - more than read included - the PUT puts it back to read.
         log_person(f"  [ok]   + @{handle} (read)")
         return "skipped"
-    if add_collaborator(semester_org, repo, handle, permission="pull", person=True):
+    if add_collaborator(
+        semester_org, repo, handle, permission=GRADEBOOK_PERMISSION, person=True
+    ):
         log_person(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"
     # A gradebook the student can't open is a failure, not a partial success - the status

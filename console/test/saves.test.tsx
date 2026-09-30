@@ -16,6 +16,7 @@ import type { Assignment, Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
 import { AssignmentScreen } from '../src/screens/Assignments';
+import { StudentsScreen } from '../src/screens/People';
 import { ScheduleScreen } from '../src/screens/Schedule';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
@@ -183,5 +184,32 @@ describe('Save on the marks grid', () => {
     expect(sheet.teams['team-alpha'].score_group).toEqual({ Q1: 4 });
     expect(sheet.teams['team-alpha'].feedback_per_question).toEqual({ Q1: 'Clear proof.' });
     expect(sheet.teams['team-alpha'].members['anna-a'].adjustment_individual).toBe(1);
+  });
+});
+
+describe('Save on the Students grid', () => {
+  const ROSTER = 'hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,anna-a,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,Ben Baker,enrolled,,,SECRET2,2026-09-02T09:30:00Z\n';
+  const roster = () => files({ [`${COHORT_ORG}/semester-config/students.csv`]: ROSTER });
+  const HANDLE = 'input[aria-label="GitHub handle, line 2"]';
+
+  it('re-points a joined student at their new account, checked on GitHub first', async () => {
+    const gh = github().on('GET', '/users/anna-new', { login: 'anna-new' }), f = roster();
+    await mount(envOf(gh, f), <StudentsScreen {...props(f)} />);
+    // Only a joined row's handle is editable: the next sync moves the student to it.
+    expect(root!.querySelector('input[aria-label="GitHub handle, line 3"]')).toBeNull();
+    await type(HANDLE, 'anna-new');
+    await click(button('Save 1 change'));
+    await settle(() => puts(gh, 'students.csv').length > 0);
+    expect(body(puts(gh, 'students.csv')[0])).toContain('anna@x.org,Anna Adams,enrolled,anna-new,101,');
+  });
+
+  it('writes nothing for a handle no GitHub account has', async () => {
+    const gh = github(), f = roster();
+    await mount(envOf(gh, f), <StudentsScreen {...props(f)} />);
+    await type(HANDLE, 'nobody-here');
+    await click(button('Save 1 change'));
+    await settle(() => root!.textContent!.includes('There is no GitHub account'));
+    expect(root!.textContent).toContain('There is no GitHub account called nobody-here.');
+    expect(puts(gh, 'students.csv')).toEqual([]);
   });
 });

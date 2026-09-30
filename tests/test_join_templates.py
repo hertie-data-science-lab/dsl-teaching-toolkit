@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import course, roster, teams, welcome
+from dsl_course import course, records, roster, teams, welcome
 
 WELCOME = Path(__file__).resolve().parents[1] / "templates" / "join"
 TEMPLATES = [
@@ -777,7 +777,7 @@ def test_a_shut_window_refuses_and_says_which_day_it_shut():
     out = _run_form(
         _lock_for("closed"),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
     assert out["writes"] == [], "a request outside the window was recorded anyway"
     assert out["labels"] == ["team-refused"]
@@ -793,7 +793,7 @@ def test_a_window_that_has_not_opened_yet_never_says_it_closed():
     out = _run_form(
         _lock_for("pending"),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
     assert out["writes"] == [], "a request before the window opened was recorded anyway"
     assert out["labels"] == ["team-refused"]
@@ -812,7 +812,7 @@ def test_a_lock_written_before_the_window_existed_still_forms_teams():
         "assignments:\n  assignment-2:\n"
         "    team_formation: self_select\n    max_team_size: 4\n",
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
     assert out["labels"] == ["team-recorded"]
     assert "assignment-2,team-alpha,stu" in out["writes"][0]
@@ -829,7 +829,7 @@ def test_creating_a_team_whose_name_is_taken_is_refused_not_joined():
     assert (
         "**team-alpha** already exists for `assignment-2` (2/4)" in out["comments"][0]
     )
-    assert "Join an existing team" in out["comments"][0]
+    assert "Join or switch to an existing team" in out["comments"][0]
 
 
 @needs_js
@@ -839,7 +839,7 @@ def test_joining_a_mistyped_name_names_the_team_that_was_meant():
     out = _run_form(
         _lock_for("open"),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "TeamAlpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "TeamAlpha"),
     )
     assert out["writes"] == []
     assert "no team **teamalpha** for `assignment-2`" in out["comments"][0]
@@ -865,7 +865,7 @@ def test_creating_a_near_miss_of_an_existing_name_is_refused_too(team):
     assert (
         "**team-alpha** already exists for `assignment-2` (2/4)" in out["comments"][0]
     )
-    assert "Join an existing team" in out["comments"][0]
+    assert "Join or switch to an existing team" in out["comments"][0]
     assert "team=team-alpha" in out["comments"][0], "the new issue is prefilled"
 
 
@@ -887,7 +887,7 @@ def test_joining_a_name_nothing_resembles_is_refused_with_somewhere_to_look():
     out = _run_form(
         _lock_for("open"),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-zeta"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-zeta"),
     )
     assert out["writes"] == []
     assert "no team **team-zeta** for `assignment-2`" in out["comments"][0]
@@ -913,7 +913,7 @@ def test_a_lock_with_no_page_still_says_where_the_teams_are_listed():
     out = _run_form(
         _lock_for("open", page=""),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-zeta"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-zeta"),
     )
     said = out["comments"][0]
     assert "spelt exactly as in the student console" in said
@@ -923,7 +923,10 @@ def test_a_lock_with_no_page_still_says_where_the_teams_are_listed():
 @needs_js
 @pytest.mark.parametrize(
     "action,team",
-    [("Join an existing team", "team-alpha"), ("Create a new team", "team-beta")],
+    [
+        ("Join or switch to an existing team", "team-alpha"),
+        ("Create a new team", "team-beta"),
+    ],
     ids=["join", "create"],
 )
 def test_both_actions_still_end_in_a_row_in_teams_csv(action, team):
@@ -954,7 +957,7 @@ def test_a_recorded_join_points_at_the_next_step():
     out = _run_form(
         _lock_for("open"),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
     said = out["comments"][0]
     assert "you're in team **team-alpha** for `assignment-2` (3/4)" in said
@@ -975,7 +978,10 @@ def test_a_recorded_create_tells_the_student_how_teammates_join():
     )
     said = out["comments"][0]
     assert "you're in team **team-beta** for `assignment-2` (1/4)" in said
-    assert "choose *Join an existing team* and type **team-beta** exactly" in said
+    assert (
+        "choose *Join or switch to an existing team* and type **team-beta** exactly"
+        in said
+    )
 
 
 _IN_BETA = _TEAMS_CSV + "assignment-2,team-beta,stu\n"
@@ -988,7 +994,7 @@ def test_joining_while_in_a_team_moves_you_in_one_write():
     out = _run_form(
         _lock_for("open"),
         _IN_BETA,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
     (written,) = out["writes"]
     assert "assignment-2,team-beta,stu" not in written
@@ -1029,9 +1035,17 @@ def test_creating_while_in_a_team_moves_you_to_the_new_one():
 @pytest.mark.parametrize(
     "action,team,expect",
     [
-        ("Join an existing team", "team-beta", "**team-beta** is already your team"),
+        (
+            "Join or switch to an existing team",
+            "team-beta",
+            "**team-beta** is already your team",
+        ),
         ("Create a new team", "team-beta", "**team-beta** is already your team"),
-        ("Join an existing team", "teamalpha", "Did you mean **team-alpha** (2/4)?"),
+        (
+            "Join or switch to an existing team",
+            "teamalpha",
+            "Did you mean **team-alpha** (2/4)?",
+        ),
         ("Create a new team", "team_alpha", "**team-alpha** already exists"),
     ],
     ids=["join-own", "create-own", "join-miss", "create-taken"],
@@ -1052,7 +1066,7 @@ def test_moving_into_a_full_team_is_refused():
     out = _run_form(
         _lock_for("open"),
         full,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
         roster=("ann", "bob", "cy", "di", "stu"),
     )
     assert out["writes"] == []
@@ -1064,7 +1078,7 @@ def test_a_move_after_the_window_shuts_is_the_window_refusal():
     out = _run_form(
         _lock_for("closed"),
         _IN_BETA,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
     assert out["writes"] == []
     assert "closed on 4th Oct" in out["comments"][0]
@@ -1082,7 +1096,7 @@ def test_an_action_the_workflow_does_not_know_is_refused_not_crashed():
     assert out["writes"] == []
     said = out["comments"][0]
     assert "I don't recognise that Action" in said
-    assert "*Join an existing team* or *Create a new team*" in said
+    assert "*Join or switch to an existing team* or *Create a new team*" in said
     assert out["labels"] == ["team-refused"]
     assert out["states"] == ["closed:not_planned"]
 
@@ -1117,7 +1131,7 @@ def test_a_student_not_on_the_roster_stays_open_for_staff():
     out = _run_form(
         _lock_for("open"),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
         handle="stranger",
         roster=("ann", "bob"),
     )
@@ -1164,7 +1178,7 @@ def test_the_open_assignments_become_a_dropdown_the_workflow_can_still_parse():
     assert fields["assignment"]["validations"]["required"] is True
     # The action field is never generated - two fixed options, the same in every semester.
     assert fields["action"]["attributes"]["options"] == [
-        "Join an existing team",
+        "Join or switch to an existing team",
         "Create a new team",
     ]
 
@@ -1298,3 +1312,114 @@ def test_a_form_that_could_not_be_written_is_reported(monkeypatch, capsys):
     monkeypatch.setattr(welcome, "put_file", lambda *a, **k: False)
     assert welcome.refresh_join_team_form("Org") == 1
     assert "Join-team form" in capsys.readouterr().err
+
+
+# --- The onboard refusal record, run as shipped ---------------------------------------
+
+_CODE = "dsl-abc234"
+
+
+def _bound_roster(handle: str, user_id: str) -> str:
+    """students.csv whose one row carries `_CODE`, bound to `handle` / `user_id`."""
+    cells = {"github_handle": handle, "github_id": user_id, "enrol_code": _CODE}
+    return _ROSTER + ",".join(cells.get(f, "") for f in roster.FIELDS) + "\n"
+
+
+def _run_onboard(rosters: list[str], record_fails: bool = False) -> dict:
+    """Run the SHIPPED onboard script for a Join from `newacct` (id 202). `rosters` is
+    what successive reads of students.csv return; a write of it is refused with a 409, so a
+    second entry is what the retry re-reads. Returns `comments`, `records` (path -> the
+    parsed record) and `warnings`."""
+    code = re.sub(
+        r"\basync\s+",
+        "",
+        re.sub(r"\bawait\s+", "", script_of("onboard.yml", "onboard")),
+    )
+    issue = {
+        "number": 9,
+        "user": {"login": "newacct", "id": 202},
+        "body": f"### Enrolment code\n\n{_CODE}\n",
+    }
+    harness = (
+        f"const ROSTERS = {json.dumps(rosters)};\n"
+        f"const ISSUE = {json.dumps(issue)};\n"
+        f"const RECORD_FAILS = {json.dumps(record_fails)};\n"
+        "const OUT = { comments: [], records: {}, warnings: [] };\n"
+        "const Buffer = { from: (s, e) => ({ toString: () => s }) };\n"
+        "const process = { env: { HAS_BOT: 'true' } };\n"
+        "const setTimeout = (fn, ms) => fn();\n"
+        "const core = { setFailed: (m) => {}, warning: (m) => OUT.warnings.push(m) };\n"
+        "const context = { repo: { owner: 'semester', repo: 'join' },"
+        " payload: { issue: ISSUE } };\n"
+        "let reads = 0;\n"
+        "const github = {\n"
+        "  paginate: (fn, args) => [],\n"
+        "  rest: {\n"
+        "  repos: {\n"
+        "    getContent: (a) => ({ data: { content:"
+        " ROSTERS[Math.min(reads++, ROSTERS.length - 1)], sha: 's' + reads } }),\n"
+        "    createOrUpdateFileContents: (a) => {\n"
+        "      if (a.path === 'students.csv') {"
+        " const e = new Error('stale'); e.status = 409; throw e; }\n"
+        "      if (RECORD_FAILS) { const e = new Error('no'); e.status = 403; throw e; }\n"
+        "      OUT.records[a.path] = JSON.parse(a.content); return {}; },\n"
+        "  },\n"
+        "  issues: {\n"
+        "    update: (a) => ({}),\n"
+        "    createComment: (a) => { OUT.comments.push(a.body); return {}; },\n"
+        "    addLabels: (a) => ({}),\n"
+        "  },\n"
+        "} };\n"
+        "(function () {\n" + code + "\n})();\n"
+        "JSON.stringify(OUT);\n"
+    )
+    run = subprocess.run(
+        [_JSC, "-l", "JavaScript", "-e", harness],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+_NO_MATCH = "could not be matched to an unclaimed enrolment placement"
+
+
+@needs_js
+@pytest.mark.parametrize(
+    "rosters",
+    [
+        pytest.param([_bound_roster("oldacct", "101")], id="bound-when-read"),
+        pytest.param(
+            [_bound_roster("", ""), _bound_roster("oldacct", "101")],
+            id="bound-while-writing",
+        ),
+    ],
+)
+def test_a_code_bound_elsewhere_is_recorded_privately_and_answered_as_before(rosters):
+    out = _run_onboard(rosters)
+    (comment,) = out["comments"]
+    assert _NO_MATCH in comment and "oldacct" not in comment
+    record = out["records"][records.path("enrolment", "refusals", "9.json")]
+    assert record["issue"] == 9
+    assert record["claimant"] == {"login": "newacct", "id": 202}
+    assert record["bound"] == {"handle": "oldacct", "id": "101"}
+    assert _CODE not in json.dumps(record)
+
+
+@needs_js
+def test_a_record_that_cannot_be_written_still_answers_the_student():
+    out = _run_onboard([_bound_roster("oldacct", "101")], record_fails=True)
+    assert out["records"] == {}
+    assert _NO_MATCH in out["comments"][0]
+    assert out["warnings"] == ["could not record why this Join was refused (403)"]
+
+
+def test_the_refusal_record_is_written_at_both_bound_elsewhere_sites():
+    code = code_of(script_of("onboard.yml", "onboard"))
+    assert code.count("await recordRefusal(") == 2
+    assert "await recordRefusal(matched)" in retry_loop(code)
+    record = code[code.index("const recordRefusal") : code.index("const row = rows")]
+    assert "try {" in record and "catch (e)" in record
+    assert "code" not in re.sub(r"\bcore\b|\bcontent\b", "", record)

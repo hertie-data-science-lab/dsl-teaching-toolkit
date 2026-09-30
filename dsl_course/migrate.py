@@ -152,6 +152,7 @@ SEMESTER_MOVES = {
     "solutions/": f"{records.path('solutions')}/",
     "gradebook/": f"{records.path('gradebook')}/",
     "team-formation/": f"{records.path('team_formation')}/",
+    "enrolment/": f"{records.path('enrolment')}/",
     ".dsl/": f"{records.SYSTEM_DIR}/",
 }
 # The course org's `.github`.

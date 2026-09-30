@@ -34,7 +34,7 @@ export const joinTeamUrl = (org: string, assignment: string, team: string) =>
 /** The Join course issue's body: the seeded form's, under the marker that routes it. */
 export const joinCourseBody = (code: string) => `${JOIN_MARKERS.join_course}\n### Enrolment code\n\n${code.trim()}\n`;
 
-export const TEAM_ACTIONS = { join: 'Join an existing team', create: 'Create a new team' } as const;
+export const TEAM_ACTIONS = { join: 'Join or switch to an existing team', create: 'Create a new team' } as const;
 
 /** The Join team issue's body, field by field as the seeded form writes it. */
 export const joinTeamBody = (assignment: string, action: keyof typeof TEAM_ACTIONS, team: string) =>
@@ -185,7 +185,7 @@ export function TeamForm({ org, assignments, mine, onSent }: { org: string; assi
       </div>
       <fieldset class="field">
         <legend class="label">Action</legend>
-        <label class="check"><input type="radio" name="j-act" checked={action === 'join'} onChange={() => setAction('join')} /><span>Join an existing team</span></label>
+        <label class="check"><input type="radio" name="j-act" checked={action === 'join'} onChange={() => setAction('join')} /><span>{TEAM_ACTIONS.join}</span></label>
         <label class="check"><input type="radio" name="j-act" checked={action === 'create'} onChange={() => setAction('create')} /><span>Create a new team</span></label>
       </fieldset>
       <div class="field">
