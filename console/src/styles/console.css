@@ -866,3 +866,13 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .cohort-card.off, .cohort-card.off:hover { opacity: 0.5; border-color: var(--rule); cursor: default; }
 .page-head .my-only { margin: 0; align-self: center; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* WP-S3 */
+.verdict { display: flex; gap: 8px; align-items: center; margin: -6px 0 18px; font-weight: 600; color: var(--ink-2); }
+.verdict svg { width: 14px; height: 14px; flex: none; }
+.verdict.ok { color: var(--ok); }
+.verdict.bad { color: var(--bad-ink); }
+.todo-head { margin: 16px 0 6px; font-size: 14px; }
+.todo { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13.5px; color: var(--ink-2); }
+.todo .textlink { min-height: 0; padding: 0 2px; }
+.rows .r-sub.unmet { list-style: none; margin: 0; padding: 0; }

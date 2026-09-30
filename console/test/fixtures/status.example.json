@@ -25,7 +25,44 @@
     "materials": [
       {
         "repo": "course-materials-f2026",
-        "state": "ready"
+        "state": "ready",
+        "checks": [
+          {
+            "id": "syllabus",
+            "label": "Syllabus written",
+            "done": true,
+            "why": null,
+            "blocks": true
+          },
+          {
+            "id": "kind_folder",
+            "label": "At least one folder of a known kind (lectures, labs, readings…)",
+            "done": true,
+            "why": null,
+            "blocks": true
+          },
+          {
+            "id": "all_mapped",
+            "label": "Every top folder has a kind",
+            "done": true,
+            "why": null,
+            "blocks": true
+          },
+          {
+            "id": "withheld",
+            "label": "Withheld patterns reviewed",
+            "done": true,
+            "why": null,
+            "blocks": false
+          },
+          {
+            "id": "sessions",
+            "label": "Session list generated",
+            "done": false,
+            "why": "The session list has not been generated yet.",
+            "blocks": false
+          }
+        ]
       }
     ],
     "templates": [
@@ -37,6 +74,16 @@
     ],
     "semesters": [
       "hertie-dsl-demo-f2026"
+    ],
+    "todo": [
+      {
+        "id": "materials:course-materials-f2026:sessions",
+        "kind": "materials",
+        "repo": "course-materials-f2026",
+        "text": "The session list has not been generated yet.",
+        "screen": "materials",
+        "entry": "course-materials-f2026"
+      }
     ]
   },
   "semester": {

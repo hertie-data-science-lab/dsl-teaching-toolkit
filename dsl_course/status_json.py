@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -63,6 +64,7 @@ from .course import (
     MATERIALS_REPO_PREFIX,
     SELF_SELECT,
     SOLUTION_BRANCH,
+    SYLLABUS_SESSIONS_FILE,
     active_today,
     is_repo_root,
     pages_repo,
@@ -93,12 +95,14 @@ from .materials import (
     DEFAULT_SYLLABUS,
     MATERIALS_TOPIC,
     Declared,
+    alias_kind,
     is_materials_repo,
 )
 from .materials import read as read_materials
 from .opencourse import read as read_opencourse
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
+from .releaseignore import RELEASEIGNORE
 from .repos import default_branch
 from .schedule_plan import (
     Unnumbered,
@@ -174,6 +178,13 @@ class MaterialsFacts:
     syllabus_path: str = DEFAULT_SYLLABUS
     # False for a `course-materials-*` repo without the `dsl-materials` topic yet.
     topic: bool = True
+    # The top-level folders (dot-folders left out) and `materials.yml`'s `kinds`.
+    folders: tuple[str, ...] = ()
+    kinds: Mapping[str, str] = field(default_factory=dict)
+    # The top-level `.releaseignore`'s text; None when there is none.
+    releaseignore: str | None = None
+    # `.system/SYLLABUS.sessions.md` is there.
+    sessions: bool = False
 
 
 @dataclass
@@ -659,12 +670,91 @@ def _syllabus_written(m: MaterialsFacts) -> bool:
     return m.syllabus == "" or _written(m.syllabus)
 
 
+def _unmapped(m: MaterialsFacts) -> list[str]:
+    """The top folders that name no kind (by the repo's alias or a built-in one): the ones
+    a release would put on the default fallback."""
+    return [f for f in m.folders if alias_kind(f, m.kinds) is None]
+
+
+def _has_patterns(text: str | None) -> bool:
+    """A `.releaseignore` that says something: one line that is not blank or a comment.
+    The seeded one is every line a comment (`scaffold`), in every wording it has had."""
+    return any(
+        line.strip() and not line.lstrip().startswith("#")
+        for line in (text or "").splitlines()
+    )
+
+
+def _syllabus_why(m: MaterialsFacts) -> str:
+    if m.syllabus is None:
+        return f"There is no {m.syllabus_path} yet."
+    return f"{m.syllabus_path} is still the placeholder."
+
+
+def _unmapped_why(folders: list[str]) -> str:
+    names = ", ".join(f"{f}/" for f in folders)
+    if len(folders) == 1:
+        return f"The folder {names} has no kind yet; set it under Folder kinds."
+    return f"The folders {names} have no kind yet; set them under Folder kinds."
+
+
+def materials_checks(m: MaterialsFacts) -> list[dict]:
+    """Decision 0022 rule 5: a materials repo's checklist, in order. `blocks` marks the
+    checks `ready` needs; `why` names what is missing, None once the check is done."""
+    unmapped = _unmapped(m)
+    rows = (
+        ("syllabus", "Syllabus written", True, _syllabus_written(m), _syllabus_why(m)),
+        (
+            "kind_folder",
+            "At least one folder of a known kind (lectures, labs, readings…)",
+            True,
+            len(unmapped) < len(m.folders),
+            (
+                "No top folder has a kind yet: name one lectures, labs or readings, "
+                "or set its kind under Folder kinds."
+            ),
+        ),
+        (
+            "all_mapped",
+            "Every top folder has a kind",
+            True,
+            not unmapped,
+            _unmapped_why(unmapped) if unmapped else None,
+        ),
+        (
+            "withheld",
+            "Withheld patterns reviewed",
+            False,
+            _has_patterns(m.releaseignore),
+            "Nothing is withheld from students yet; review the withheld patterns.",
+        ),
+        (
+            "sessions",
+            "Session list generated",
+            False,
+            m.sessions,
+            "The session list has not been generated yet.",
+        ),
+    )
+    return [
+        {
+            "id": cid,
+            "label": label,
+            "done": done,
+            "why": None if done else why,
+            "blocks": blocks,
+        }
+        for cid, label, blocks, done, why in rows
+    ]
+
+
 def materials_state(m: MaterialsFacts) -> str:
-    """C4, per repo: `problem` until the migration gives it the topic; `ready` once its
-    declared syllabus is written."""
+    """C4, per repo: `problem` until the migration gives it the topic; `ready` once every
+    blocking check of `materials_checks` is done."""
     if not m.topic:
         return PROBLEM
-    return "ready" if _syllabus_written(m) else TODO
+    blocking = (c for c in materials_checks(m) if c["blocks"])
+    return "ready" if all(c["done"] for c in blocking) else TODO
 
 
 def materials_problem(m: MaterialsFacts, org: str) -> dict:
@@ -835,8 +925,8 @@ def render_course(
     - C1 the org resolves (`app_installed` is a stub until decision 0002);
     - C2 `.github` holds dsl-course.yml and its seeded workflows;
     - C3 dsl-course.yml names the course, its code and description, and one course admin;
-    - C4 at least one materials repo, every one of them `ready`;
-    - C5 at least one template, every one of them `ready`;
+    - C4 any materials repo `ready` (decision 0022: the others are to-dos);
+    - C5 any template `ready`;
     - C6 `opencourse.yml` turns the public website on and its repo exists.
     `ready` (decision 0019) is C1-C3 done and no course-scope problem standing: a new
     semester can start. Materials, templates and the website are listed but optional."""
@@ -861,7 +951,12 @@ def render_course(
         "stage_why": stage_why(stages, todo, standing),
         "ready": course_ready(stages, standing),
         "materials": [
-            {"repo": m.repo, "state": materials_state(m)} for m in facts.materials
+            {
+                "repo": m.repo,
+                "state": materials_state(m),
+                "checks": materials_checks(m),
+            }
+            for m in facts.materials
         ],
         "templates": [
             {
@@ -872,23 +967,45 @@ def render_course(
             for t in facts.templates
         ],
         "semesters": list(facts.registry),
+        "todo": course_todo(facts),
     }
     return block, problems
 
 
-def _materials_why(m: MaterialsFacts) -> str:
-    if not m.topic:
-        return f"{m.repo} is not migrated yet (no {MATERIALS_TOPIC} topic)"
-    if m.syllabus is None:
-        return f"{m.repo} has no {m.syllabus_path} yet"
-    return f"{m.repo}'s {m.syllabus_path} is still the placeholder"
-
-
-def _first_of(what: str, reasons: list[str]) -> str:
-    """One sentence about the first of several things that are not ready."""
-    if len(reasons) == 1:
-        return f"{reasons[0]}."
-    return f"{len(reasons)} {what} are not ready yet; the first: {reasons[0]}."
+def course_todo(facts: CourseFacts) -> list[dict]:
+    """Decision 0022 rule 3: work started and not finished, one entry per missing item -
+    every unmet check of a materials repo (the non-blocking ones of a ready repo too) and
+    every template whose brief is the placeholder. By repo, then check order. Never a
+    problem: a repo without its topic is the migration's problem, not a to-do."""
+    out = []
+    for m in facts.materials:
+        if not m.topic:
+            continue
+        out += [
+            {
+                "id": f"materials:{_slugify(m.repo)}:{c['id']}",
+                "kind": "materials",
+                "repo": m.repo,
+                "text": c["why"],
+                "screen": "materials",
+                "entry": m.repo,
+            }
+            for c in materials_checks(m)
+            if not c["done"]
+        ]
+    out += [
+        {
+            "id": f"template:{_slugify(t.repo)}:brief",
+            "kind": "template",
+            "repo": t.repo,
+            "text": f"The brief ({README_FILE}) is not written yet.",
+            "screen": "template",
+            "entry": t.repo,
+        }
+        for t in facts.templates
+        if t.topic and not _written(t.readme)
+    ]
+    return sorted(out, key=lambda e: e["repo"])
 
 
 def course_checks(facts: CourseFacts) -> dict[str, str | None]:
@@ -909,26 +1026,15 @@ def course_checks(facts: CourseFacts) -> dict[str, str | None]:
         out["C3"] = "Course details have no description yet."
     elif course_admin_count(meta) == 0:
         out["C3"] = "No course admin is declared in course details yet."
+    # Decision 0022 rule 2: done once ANY repo is ready; the rest are to-dos.
     if not facts.materials:
         out["C4"] = "There is no materials repo yet."
-    else:
-        pending = [
-            _materials_why(m) for m in facts.materials if materials_state(m) != "ready"
-        ]
-        if pending:
-            out["C4"] = _first_of("materials repos", pending)
+    elif not any(materials_state(m) == "ready" for m in facts.materials):
+        out["C4"] = "No materials repo is ready yet."
     if not facts.templates:
         out["C5"] = "There is no assignment template yet."
-    else:
-        pending = [
-            f"{t.repo}'s README.md is still the placeholder"
-            for t in facts.templates
-            if template_state(t) == TODO
-        ]
-        if pending:
-            out["C5"] = _first_of("assignment templates", pending)
-        elif any(template_state(t) != "ready" for t in facts.templates):
-            out["C5"] = "An assignment template has settings that need fixing."
+    elif not any(template_state(t) == "ready" for t in facts.templates):
+        out["C5"] = "No assignment template is ready yet."
     if facts.website_unusable:
         out["C6"] = "The public website settings file does not parse."
     elif not facts.website_on:
@@ -1519,17 +1625,37 @@ def _declaration(org: str, repo: str) -> Declared:
 
 
 def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
-    """A materials repo's C4 facts: its declared syllabus (markdown read, anything else
-    only looked for)."""
-    path = _declaration(course_org, repo).syllabus
+    """A materials repo's C4 facts, off one tree read: its declared syllabus (markdown
+    read, anything else only looked for), its top folders and declared kinds, its
+    `.releaseignore` and whether the session list was generated."""
+    declared = _declaration(course_org, repo)
+    path = declared.syllabus
+    tree = (
+        repo_path_shas(
+            course_org, repo, default_branch(course_org, repo, fallback="main")
+        )
+        or {}
+    )
     if path.lower().endswith((".md", ".markdown")):
         syllabus = get_file_content(course_org, repo, path)
     else:
-        tree = repo_path_shas(
-            course_org, repo, default_branch(course_org, repo, fallback="main")
-        )
-        syllabus = "" if path in (tree or {}) else None
-    return MaterialsFacts(repo, syllabus, path)
+        syllabus = "" if path in tree else None
+    folders = sorted(
+        {p.split("/", 1)[0] for p in tree if "/" in p and not p.startswith(".")}
+    )
+    return MaterialsFacts(
+        repo,
+        syllabus,
+        path,
+        folders=tuple(folders),
+        kinds=declared.kinds,
+        releaseignore=(
+            get_file_content(course_org, repo, RELEASEIGNORE)
+            if RELEASEIGNORE in tree
+            else None
+        ),
+        sessions=SYLLABUS_SESSIONS_FILE in tree,
+    )
 
 
 def gather_course(course_org: str) -> CourseFacts:

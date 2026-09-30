@@ -290,10 +290,40 @@
           "items": {
             "additionalProperties": false,
             "properties": {
-              "repo": {
-                "type": "string"
+              "checks": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "blocks": {
+                      "type": "boolean"
+                    },
+                    "done": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "why": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "done",
+                    "blocks"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
               },
-              "slug": {
+              "repo": {
                 "type": "string"
               },
               "state": {
@@ -358,6 +388,43 @@
             "required": [
               "repo",
               "state"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "todo": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "entry": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "materials",
+                  "template"
+                ],
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "screen": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "repo",
+              "text"
             ],
             "type": "object"
           },
