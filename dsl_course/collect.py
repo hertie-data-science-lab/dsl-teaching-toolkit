@@ -3823,9 +3823,14 @@ def main() -> int:
     args = parser.parse_args()
     # A manual collection of an entry with no number is refused (decision 0020 rule 3);
     # the scheduled freeze is not, so a missing number never costs a submission.
-    refusal = unnumbered_assignment(
-        schedule.load(args.semester_org), args.template, args.assignment
-    )
+    # A read helper that couldn't reach the API raises; in an Actions log a one-line
+    # error beats a traceback, and the run still goes red.
+    try:
+        sched = schedule.load(args.semester_org)
+    except RuntimeError as exc:
+        log_err(str(exc))
+        return 1
+    refusal = unnumbered_assignment(sched, args.template, args.assignment)
     if refusal:
         return refuse_unnumbered(refusal)
     if args.refresh_only:

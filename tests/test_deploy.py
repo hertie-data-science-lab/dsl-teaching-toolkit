@@ -740,6 +740,24 @@ def test_a_dest_that_cannot_reach_upstream_is_dropped_like_a_failed_clone(
     assert deploy.UPSTREAM_BRANCH in err
 
 
+def test_release_now_says_in_one_line_when_the_schedule_cannot_be_read(
+    monkeypatch, capsys
+):
+    def unreachable(org):
+        raise RuntimeError("gh api failed: HTTP 502")
+
+    monkeypatch.setattr(deploy.schedule, "load", unreachable)
+    monkeypatch.setattr(deploy, "deploy_many", lambda *a, **k: pytest.fail("no copy"))
+    monkeypatch.setattr(
+        "sys.argv",
+        ["deploy", "--course-org", "C", "--course-source-repo", "cm",
+         "--semester-org", "S", "--course-source-path", "x", "--no-preview"],
+    )  # fmt: skip
+    assert deploy.main() == 1
+    captured = capsys.readouterr()
+    assert "gh api failed: HTTP 502" in captured.out + captured.err
+
+
 def _plan_with_guest(monkeypatch):
     when = None
     monkeypatch.setattr(

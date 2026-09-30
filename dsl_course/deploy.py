@@ -791,8 +791,15 @@ def main() -> int:
         return 1
     # A copy the plan names under an entry that needs a number and has none is refused,
     # as the scheduled release skips it (decision 0020 rule 3). Off the plan it goes.
+    # A read helper that couldn't reach the API raises; in an Actions log a one-line
+    # error beats a traceback, and the run still goes red.
+    try:
+        sched = schedule.load(args.semester_org)
+    except RuntimeError as exc:
+        log_err(str(exc))
+        return 1
     refusal = unnumbered_release(
-        schedule.load(args.semester_org),
+        sched,
         args.course_source_repo,
         [src for src, _ in pairs],
         kinds_reader(args.course_org),

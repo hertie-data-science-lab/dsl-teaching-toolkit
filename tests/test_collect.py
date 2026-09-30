@@ -7170,6 +7170,24 @@ def test_the_grader_copies_include_each_tagged_questions_file(monkeypatch):
     assert ".system/autograde/a1/alice.ipynb" in written
 
 
+def test_collect_now_says_in_one_line_when_the_schedule_cannot_be_read(
+    monkeypatch, capsys
+):
+    def unreachable(org):
+        raise RuntimeError("gh api failed: HTTP 502")
+
+    monkeypatch.setattr(collect.schedule, "load", unreachable)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["collect", "--course-org", "Course", "--course-source-repo",
+         "assignment-trees", "--semester-org", "Semester"],
+    )  # fmt: skip
+    assert collect.main() == 1
+    captured = capsys.readouterr()
+    assert "gh api failed: HTTP 502" in captured.out + captured.err
+
+
 @pytest.mark.parametrize("flags", [["--refresh-only"], []])
 def test_collect_now_refuses_an_entry_with_no_number(monkeypatch, flags):
     # Decision 0020 rule 3; the scheduled freeze calls `collect` itself and is not
