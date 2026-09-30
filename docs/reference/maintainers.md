@@ -397,7 +397,7 @@ layers above its own:
 |---|---|
 | 0, nothing | `log`, `course` (the course vocabulary: config repo, semester key, session-folder rule, syllabus filenames, org topics), `readings`, `fs`, `releaseignore` (the `.releaseignore` rule) |
 | 1, the shell | `ghcli` (`gh`/`git`, timeouts, the 404 test) |
-| 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted) |
+| 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted), `invitations` (the bot accepts its own org invitations, from registered course orgs only) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
 | 5 and up | `access` (team permissions and the faculty floor), `materials` (the `materials.yml` escape hatch and the kind aliases), `opencourse` (the public website's `opencourse.yml`), `schedule_plan` (the rows a plan declares, one per release entry), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
@@ -432,6 +432,32 @@ stdout.
 writes `names.json` (repo and path names) and `policy.json` (the loaded policy, below), so
 the console holds no default of its own, and `materials.schema.json` (a materials repo's
 optional `materials.yml`: `syllabus`, `kinds` folder aliases; `materials.parse`).
+
+## The course org registry
+
+`orgs.yml` at this repo's root is the list of course orgs the toolkit serves
+(`course_orgs: [<org>, ...]`, `org_registry`). Maintainers edit it by pull request, and it is
+read like `policy.yml`: from the checkout of the ref the run is on. A `dsl-course-hub` topic
+is anyone's to set, and the tier fan-out writes `DSL_BOT_TOKEN` into every org it refreshes,
+so the topic alone is never enough: the fan-out (`list_orgs`, behind Deploy main, Deploy
+preview and Promote) walks the registry and each listed org's `dsl-course.yml`, never a topic
+search, and the bot accepts an invitation only from a registered org, and only under its own
+token (`invitations.BOT`), never a maintainer's break-glass one. The topic search is left to
+the inventory's semester listing and the awaiting-registration report, both best effort.
+Semester orgs are not listed; each course's `semesters.yml` registers its own, and a
+registered course's admins vouch for them. The New semester wizard lists the new org there
+(a plain entry, the registry's only shape) as soon as the org exists, so the course's own
+scheduler pass accepts the bot's invitation to it. Until Bootstrap semester has run - it finds
+the entry and carries on - the org has no `semester-config` and no `dsl-semester` topic, and
+every sweep skips it as being set up (`discovery.being_set_up`) rather than failing on it.
+A registry that is missing or does not parse raises.
+
+To add a course: check who asked, add its org, merge. The bot accepts its waiting invitation
+soon after the merge to `main`: the demo course's tick runs on `main` and reads `main`'s
+`orgs.yml`, and there is one bot account, so it accepts for every registered org. Only the
+token seeding by the tier fan-out waits for the next Promote. *Bot Token Canary* keeps one issue in this repo, *Course orgs awaiting
+registration*, listing every org that has invited the bot or carries the topic without being
+registered; it closes itself when the list is empty.
 
 ## Policy and the cascade
 
@@ -650,6 +676,14 @@ hours. Everything either alarm says is bounded by the **100** runs the check fet
 armed only while a dispatch-driven run sits inside that window: a freshly bootstrapped or newly
 promoted org never alarms on its way in, and an org whose dispatcher died long enough ago to
 scroll out of the window re-disarms unless its driver-health issue is already open.
+
+Every real all-semesters release pass also accepts the bot's pending org invitations
+(`invitations.accept_pending`) from the course orgs `orgs.yml` names, before the semester
+listing so a course with no semester yet still does it. The bot is one account, so whichever
+course org ticks first accepts for every org being set up. Any other invitation is left
+pending and logged by org name, never declined. A failure there is logged and never reds the
+run: it is not that course's release failing, and every course org would file its failure
+issue at once.
 
 **Break-glass.** If both drivers are down, or Actions itself is out, drive a course org from a
 laptop with a `repo`-scoped token: `GH_TOKEN=<token> python3 -m dsl_course.scheduler

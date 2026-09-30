@@ -1,10 +1,9 @@
-"""list-orgs -- discover DSL course and semester orgs dynamically from GitHub.
+"""list-orgs -- the DSL course and semester orgs, as an inventory.
 
-Source of truth: every org's `.github` repo is tagged by `bootstrap_course.py` -
-`dsl-course-hub` for a persistent COURSE org, `dsl-semester` for a per-year SEMESTER
-org. This tool searches for both topics across all repos the caller can see, reads
-each org's `.github/dsl-course.yml`, and emits a JSON / Markdown / YAML inventory
-of the two tiers separately.
+COURSE orgs are the ones the toolkit's `orgs.yml` names (`org_registry`), each read off its
+`.github/dsl-course.yml`: the tier fan-out reads this list, and a topic is anyone's to set.
+SEMESTER orgs are still found by their `dsl-semester` topic, best effort, for the report
+only. The output is a JSON / Markdown / YAML inventory of the two tiers separately.
 
 Usage:
     python3 -m dsl_course.list_orgs                       # JSON to stdout
@@ -19,10 +18,12 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import yaml
 
-from .central import MissingCentralRef, resolve_central_ref
+from . import invitations, issues, org_registry
+from .central import CENTRAL, MissingCentralRef, resolve_central_ref
 from .course import (
     COURSE_CONFIG,
     COURSE_HUB_TOPIC,
@@ -30,7 +31,7 @@ from .course import (
     SEMESTER_TOPIC,
 )
 from .discovery import discover_semesters, org_meta, semester_pointer
-from .faults import not_migrated_text
+from .faults import Unusable, not_migrated_text
 from .ghcli import gh_json
 from .log import CLIParser, log_err
 from .repos import org_exists
@@ -88,7 +89,7 @@ def _tier_or_none(org: str, declared: dict) -> str | None:
 
 
 def discover_course_orgs() -> list[dict]:
-    """Find every `.github` repo tagged `dsl-course-hub` and fetch its metadata.
+    """Every course org `orgs.yml` names, with its `.github/dsl-course.yml` metadata.
 
     Returns a list of dicts with keys: org, readable, course_name, course_code,
     central_ref, url. Sorted by org name.
@@ -99,7 +100,9 @@ def discover_course_orgs() -> list[dict]:
     and refreshes the rest.
     """
     orgs = []
-    for owner in _tagged_orgs(COURSE_HUB_TOPIC):
+    # The registry, never a topic search: the topic is anyone's to set, and the fan-out
+    # this feeds writes the bot token into every org it refreshes.
+    for owner in org_registry.names():
         meta = _metadata_or_none(owner)
         if meta and meta.get("course"):
             # A semester org's dsl-course.yml is a pointer back to its course org
@@ -196,6 +199,67 @@ def _pointer_or_none(semester_org: str) -> dict | None:
         return None
 
 
+# Picked once: `issues` finds the issue by this exact title, so a rename opens a second one.
+AWAITING_TITLE = "Course orgs awaiting registration"
+
+
+def awaiting_registration() -> list[dict]:
+    """Every org that looks like a course the registry does not name, with why: it has
+    invited the bot (a new course, before its set-up) or its `.github` carries the course
+    topic. A tagged org whose metadata points at a course is a semester, not a course, and
+    a semester a registered course's `semesters.yml` lists is never awaiting anyone."""
+    registered = org_registry.course_orgs()
+    # A semester a registered course lists is vouched for: the course's own scheduler pass
+    # accepts its invitation, so it waits on nobody here.
+    known = set(registered)
+    for course in org_registry.names():
+        try:
+            known |= {s.casefold() for s in discover_semesters(course)}
+        except Unusable as exc:
+            # One course's broken registry vouches for nothing, and stops nothing else.
+            log_err(f"{course}: {exc}")
+    found: dict[str, dict] = {}
+    for org in invitations.pending_orgs():
+        if org.casefold() not in known:
+            found.setdefault(org.casefold(), {"org": org, "why": "invited the bot"})
+    try:
+        tagged = _tagged_orgs(COURSE_HUB_TOPIC)
+    except RuntimeError as exc:
+        # The report's second source is best effort: the invitations above still file.
+        log_err(str(exc))
+        tagged = []
+    for org in tagged:
+        if org.casefold() in known or org.casefold() in found:
+            continue
+        meta = _metadata_or_none(org)
+        if not (meta or {}).get("course"):
+            found[org.casefold()] = {"org": org, "why": f"tagged {COURSE_HUB_TOPIC}"}
+    return sorted(found.values(), key=lambda o: o["org"].lower())
+
+
+def awaiting_body(orgs: list[dict]) -> str:
+    rows = "\n".join(
+        f"- [{o['org']}](https://github.com/{o['org']}) - {o['why']}" for o in orgs
+    )
+    return (
+        "These orgs look like new courses but are not in `orgs.yml`, so the bot does not "
+        "join them and they are never refreshed:\n\n"
+        f"{rows}\n\n"
+        "Check who asked for each one, then add it to `orgs.yml` by pull request. The bot "
+        "accepts a waiting invitation on the next automatic run. This issue is rewritten "
+        "daily by *Bot Token Canary* and closes itself when the list is empty."
+    )
+
+
+def file_awaiting(orgs: list[dict]) -> int:
+    """Keep the one issue in the toolkit repo in step with `orgs`; the error count."""
+    if not orgs:
+        return issues.close_issues_titled(
+            CENTRAL, AWAITING_TITLE, "Every course org is registered."
+        )
+    return issues.upsert_issue(CENTRAL, AWAITING_TITLE, awaiting_body(orgs)).errors
+
+
 def unreadable(orgs: list[dict], semesters: list[dict]) -> list[str]:
     """The orgs whose metadata this run could not read - see _metadata_or_none."""
     return sorted(o["org"] for o in [*orgs, *semesters] if not o["readable"])
@@ -277,14 +341,43 @@ def main() -> int:
         default="json",
         help="Output format when writing to stdout. Default: json.",
     )
+    parser.add_argument(
+        "--awaiting-registration",
+        action="store_true",
+        help="Print, as JSON, the orgs that look like courses but are not in orgs.yml "
+        "(needs the bot's token: it reads the bot's pending invitations).",
+    )
+    parser.add_argument(
+        "--file-awaiting",
+        metavar="JSON",
+        help="Open, update or close the toolkit repo's 'Course orgs awaiting "
+        "registration' issue from a file --awaiting-registration wrote.",
+    )
     args = parser.parse_args()
+
+    if args.file_awaiting:
+        return file_awaiting(json.loads(Path(args.file_awaiting).read_text()))
+    if args.awaiting_registration:
+        try:
+            print(json.dumps(awaiting_registration()))
+        except RuntimeError as exc:
+            log_err(str(exc))
+            return 1
+        return 0
 
     # Discovery is one `gh search repos` call per topic, and the markdown tree reads each
     # course's semester registry; if either fails there is no inventory. Both are inside the
     # guard, so the Actions log gets a line rather than a traceback.
     try:
         orgs = discover_course_orgs()
-        semesters = discover_semester_orgs()
+        # The semester listing is the one part of the inventory a topic search still
+        # finds (the report shows semesters no registry lists), and the fan-out never reads
+        # it: a search that fails is a line, never an empty fan-out.
+        try:
+            semesters = discover_semester_orgs()
+        except RuntimeError as exc:
+            log_err(f"semester orgs not listed: {exc}")
+            semesters = []
         combined = {"course_orgs": orgs, "semester_orgs": semesters}
         rendered = (
             json.dumps(combined, indent=2)

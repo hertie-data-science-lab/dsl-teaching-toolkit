@@ -507,3 +507,60 @@ def test_the_materials_repos_are_the_live_ones_with_the_topic(monkeypatch):
         "course-materials-f2026",
         "slides",
     ]
+
+
+def _no_config_repo(topics: str | None):
+    """A `gh` stub for an org with no semester-config, whose `.github` topics are `topics`
+    (None: no `.github` at all)."""
+
+    def gh(*args, **_kw):
+        if topics is None:
+            return 1, "gh: Not Found (HTTP 404)"
+        return 0, topics
+
+    return gh
+
+
+@pytest.mark.parametrize("topics", [None, "", "dsl-course-hub"])
+def test_a_registered_semester_not_yet_set_up_is_skipped_quietly(
+    monkeypatch, capsys, topics
+):
+    # The New semester wizard lists the org before Bootstrap semester runs, so the bot can
+    # join it. Until then there is nothing in it to write, and no sweep may fail on it.
+    monkeypatch.setattr(discovery, "repo_is_archived", lambda org, name: False)
+    monkeypatch.setattr(discovery, "repo_missing", lambda org, name: True)
+    monkeypatch.setattr(discovery, "gh", _no_config_repo(topics))
+    assert discovery.being_set_up("Course-s2027") is True
+    assert discovery.semester_is_live("Course-s2027") is False
+    printed = capsys.readouterr()
+    assert "[skip] Course-s2027 (being set up" in printed.out
+    assert printed.err == ""
+
+
+def test_a_semester_whose_topics_cannot_be_read_is_not_taken_for_one_being_set_up(
+    monkeypatch,
+):
+    monkeypatch.setattr(discovery, "repo_is_archived", lambda org, name: False)
+    monkeypatch.setattr(discovery, "repo_missing", lambda org, name: True)
+    monkeypatch.setattr(discovery, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
+    assert discovery.being_set_up("Course-f2026") is False
+    assert discovery.semester_is_live("Course-f2026") is True
+
+
+def test_a_set_up_semester_is_never_being_set_up(monkeypatch):
+    monkeypatch.setattr(discovery, "repo_missing", lambda org, name: False)
+    assert discovery.being_set_up("Course-f2026") is False
+
+
+def test_bootstrap_completes_a_semester_the_wizard_listed_first(monkeypatch):
+    # Bootstrap semester registers the org as its last step; one the wizard already listed
+    # is registered already, so it carries on rather than refusing or writing twice.
+    monkeypatch.setattr(
+        discovery,
+        "get_file_content",
+        _registry("semesters:\n- Course-f2026\n- Course-s2027\n"),
+    )
+    writes = []
+    monkeypatch.setattr(discovery, "put_file", lambda *a, **k: writes.append(a) or True)
+    assert discovery.register_semester("Course", "Course-s2027") is True
+    assert writes == []

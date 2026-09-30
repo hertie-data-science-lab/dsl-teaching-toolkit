@@ -7,7 +7,7 @@
 // student of a semester org.
 
 import { parse } from 'yaml';
-import type { GhRepo, GitHubClient } from '../github/client';
+import type { Author, GhRepo, GitHubClient } from '../github/client';
 import { str } from './format';
 import { SEMESTER_TOPIC } from './migration';
 import { CONFIG_REPO, COURSE_REPO, POINTER_PATH, REGISTRY_FILE } from './names';
@@ -30,6 +30,8 @@ export interface Course {
   write: boolean;
   admins: string[];
   cohorts: CohortRef[];
+  /** Semesters New semester has listed that Bootstrap semester has not set up yet; not semesters of the course until it has. */
+  settingUp?: CohortRef[];
   meta: Record<string, unknown> | null; // dsl-course.yml as parsed, for Course details
 }
 
@@ -58,6 +60,38 @@ export function parseRegistry(text: string | null | undefined): string[] {
   return Array.isArray(list) ? list.filter((c): c is string => typeof c === 'string' && c.length > 0) : [];
 }
 
+/**
+ * List `semester` in its course's registry, as Bootstrap semester would (`registry: add
+ * semester`, the same sorted `semesters:` shape), before the set-up has run: the course's
+ * admins vouch for it, which is what lets the bot join it by itself. Bootstrap semester later
+ * finds it listed and carries on; until then the engine's sweeps skip it as being set up.
+ * 'present' when it was already listed. Refuses (throws) to rewrite a registry that is not a
+ * list of org names: rebuilt from a parse that read as empty, it would drop every semester.
+ */
+export async function registerSemester(client: GitHubClient, courseOrg: string, semester: string, author: Author): Promise<'present' | 'written'> {
+  const file = await client.getContents(courseOrg, COURSE_REPO, REGISTRY_PATH);
+  const listed = file ? registryList(file.text) : [];
+  if (!listed) throw new Error(`${REGISTRY_PATH} in ${courseOrg}/${COURSE_REPO} is not a list of semester org names. Fix it first.`);
+  if (listed.some((o) => o.toLowerCase() === semester.toLowerCase())) return 'present';
+  const text = `semesters:\n${[...listed, semester].sort().map((o) => `- ${o}\n`).join('')}`;
+  await client.putContents({ owner: courseOrg, repo: COURSE_REPO, path: REGISTRY_PATH, text, sha: file?.sha ?? null, message: `registry: add semester ${semester}, from the DSL Teaching Console`, author });
+  return 'written';
+}
+
+/** The registry's names when it is a list of strings (`semesters:` or bare, empty file = none); null for anything else. */
+export function registryList(text: string): string[] | null {
+  if (!text.trim()) return [];
+  let data: unknown;
+  try {
+    data = parse(text);
+  } catch {
+    return null;
+  }
+  if (data === null) return [];
+  const list = data && typeof data === 'object' && !Array.isArray(data) ? (data as { semesters?: unknown }).semesters ?? [] : data;
+  return Array.isArray(list) && list.every((c) => typeof c === 'string') ? list.filter((c) => c.length > 0) : null;
+}
+
 /** The course `org` is, reading its `.github` repo unless the caller already has it; null when it is not a course. */
 export async function discoverCourse(client: GitHubClient, org: string, known?: GhRepo): Promise<Course | null> {
   const repo = known ?? (await client.getRepo(org, COURSE_REPO));
@@ -71,14 +105,21 @@ export async function discoverCourse(client: GitHubClient, org: string, known?: 
     return { org: c, term: t.term, termLabel: t.label };
   });
   cohorts.sort((a, b) => b.term.slice(1).localeCompare(a.term.slice(1)) || a.term.localeCompare(b.term));
+  // A listed semester with no config repo is one New semester registered before Bootstrap
+  // semester ran: it is not a semester yet, so it is kept apart (the nav names it as being
+  // set up). Only a writer can tell: the config repo is private.
+  const write = repo.permissions?.push === true;
+  const configs = write ? await Promise.all(cohorts.map((c) => client.getRepo(c.org, CONFIG_REPO).catch(() => undefined))) : [];
+  const settingUp = cohorts.filter((_, i) => configs[i] === null);
   return {
     org,
     name: str(meta?.course_name) || org,
     code: str(meta?.course_code),
     description: str(meta?.course_description),
-    write: repo.permissions?.push === true,
+    write,
     admins: (people.course_admins ?? []).map((a) => str(a.github_handle)).filter(Boolean),
-    cohorts,
+    cohorts: cohorts.filter((c) => !settingUp.includes(c)),
+    ...(settingUp.length ? { settingUp } : {}),
     meta,
   };
 }

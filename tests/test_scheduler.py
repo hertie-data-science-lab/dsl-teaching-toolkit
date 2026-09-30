@@ -116,6 +116,18 @@ def cadence_calls(monkeypatch):
     return calls
 
 
+@pytest.fixture(autouse=True)
+def accepted(monkeypatch):
+    """Stub the bot's invitation pass (real gh I/O) and count the calls to it."""
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        scheduler.invitations,
+        "accept_pending",
+        lambda *args: calls.append(args) or [],
+    )
+    return calls
+
+
 # `{schedule key: late_window_days}` the semester's assignments.yml gives, for the
 # schedules `_assignments` builds (`_due(..., grading_day=)`). Reset per test.
 _WINDOWS: dict[str, int] = {}
@@ -4933,3 +4945,59 @@ def test_an_assignments_yml_that_is_not_yaml_holds_the_tick_green(monkeypatch):
     assert scheduler.run("Course", "Semester-f2026", now) == 0
     ((fault,),) = synced
     assert fault.file == "assignments.yml"
+
+
+# ------------------------------------------------------ the bot's pending invitations
+
+
+def test_a_real_pass_accepts_the_bots_invitations_even_with_no_semester(
+    monkeypatch, accepted
+):
+    # A course with no semester yet is exactly where a new org's invitation waits.
+    monkeypatch.setattr(scheduler.discovery, "discover_semesters", lambda org: [])
+    _all_semesters_argv(monkeypatch)
+    assert scheduler.main() == 0
+    assert accepted == [("Course-Org", [])]
+
+
+def test_the_pass_hands_its_own_registry_to_the_invitation_pass(monkeypatch, accepted):
+    # A semester the New semester wizard has listed but Bootstrap has not set up yet is
+    # skipped by every sweep - and is exactly the org whose invitation is waiting.
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_semesters", lambda org: ["Course-f2027"]
+    )
+    monkeypatch.setattr(scheduler.discovery, "semester_is_live", lambda org: False)
+    _all_semesters_argv(monkeypatch)
+    scheduler.main()
+    assert accepted == [("Course-Org", ["Course-f2027"])]
+
+
+def test_a_preview_or_the_grading_job_never_accepts(monkeypatch, accepted):
+    monkeypatch.setattr(scheduler.discovery, "discover_semesters", lambda org: [])
+    _all_semesters_argv(monkeypatch, "--preview")
+    assert scheduler.main() == 0
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--all-semesters",
+            "--autograde-only",
+            "--no-preview",
+        ],
+    )
+    assert scheduler.main() == 0
+    assert accepted == []
+
+
+def test_invitations_that_cannot_be_read_never_red_the_release(monkeypatch, capsys):
+    def broken():
+        raise RuntimeError("could not list the bot's pending invitations: HTTP 401")
+
+    monkeypatch.setattr(scheduler.invitations, "accept_pending", broken)
+    monkeypatch.setattr(scheduler.discovery, "discover_semesters", lambda org: [])
+    _all_semesters_argv(monkeypatch)
+    assert scheduler.main() == 0
+    assert "could not accept the bot's org invitations" in capsys.readouterr().err

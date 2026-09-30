@@ -49,3 +49,29 @@ export function useDraft<T extends object>(key: string, fallback: () => T): [T, 
   };
   return [cur, set, clear];
 }
+
+const INSTALL_RETURN = `${PREFIX}install-return`;
+/** How long a remembered step stays good: an install is minutes, not days. */
+export const INSTALL_RETURN_MS = 60 * 60 * 1000;
+
+/** The wizard step (`?course=x#new-semester-1`) to reopen when GitHub sends the person back from installing the app. */
+export function rememberInstallReturn(where: string, now = Date.now()): void {
+  try {
+    store()?.setItem(INSTALL_RETURN, JSON.stringify({ where, at: now }));
+  } catch {
+    /* the return lands on New course instead */
+  }
+}
+
+/** The remembered step, forgotten as it is read; null when there is none or it is over an hour old. */
+export function takeInstallReturn(now = Date.now()): string | null {
+  try {
+    const s = store();
+    const raw = s?.getItem(INSTALL_RETURN) ?? null;
+    s?.removeItem(INSTALL_RETURN);
+    const v = raw ? (JSON.parse(raw) as { where?: unknown; at?: unknown }) : null;
+    return v && typeof v.where === 'string' && typeof v.at === 'number' && now - v.at <= INSTALL_RETURN_MS ? v.where : null;
+  } catch {
+    return null;
+  }
+}

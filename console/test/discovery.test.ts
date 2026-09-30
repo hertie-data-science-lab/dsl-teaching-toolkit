@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GitHubClient } from '../src/github/client';
-import { discoverEstate, parseRegistry, roleOf, termOf, type TokenKind } from '../src/model/discovery';
+import { discoverEstate, parseRegistry, registerSemester, registryList, roleOf, termOf, type TokenKind } from '../src/model/discovery';
 import { FakeGitHub, fileBody, json } from './fake';
 
 const discover = (gh: FakeGitHub, kind: TokenKind = 'classic') => discoverEstate(new GitHubClient({ token: () => 't', fetch: gh.fetch }), { kind, login: 'octo' });
@@ -15,7 +15,8 @@ function estate() {
     .on('GET', '/repos/hertie-ml-e1234/.github/contents/semesters.yml', fileBody('semesters.yml', 'semesters:\n  - hertie-ml-s2026\n  - hertie-ml-f2026\n'))
     .on('GET', '/repos/hertie-ml-e1234/.github/contents/dsl-course.yml', fileBody('dsl-course.yml', 'course_name: Machine Learning\ncourse_code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n'))
     .on('GET', '/repos/hertie-ids-c11/.github/contents/semesters.yml', fileBody('x', '- hertie-ids-f2026\n'))
-    .on('GET', '/repos/hertie-ids-c11/.github/contents/dsl-course.yml', fileBody('x', 'course_name: Intro to Data Science\ncourse_code: C11\n'));
+    .on('GET', '/repos/hertie-ids-c11/.github/contents/dsl-course.yml', fileBody('x', 'course_name: Intro to Data Science\ncourse_code: C11\n'))
+    .on('GET', /^\/repos\/[^/]+\/semester-config$/, { name: 'semester-config' });
 }
 
 describe('discovery', () => {
@@ -41,6 +42,33 @@ describe('discovery', () => {
     const courses = await discoverCourses(gh);
     expect(courses).toHaveLength(1);
     expect(courses[0].cohorts).toEqual([]);
+  });
+
+  it('keeps a listed semester with no config repo apart, as being set up', async () => {
+    // New semester lists the org before Bootstrap semester has made anything in it.
+    const gh = new FakeGitHub()
+      .on('GET', '/repos/hertie-ml-f2026/semester-config', { name: 'semester-config' })
+      .on('GET', '/user/orgs?per_page=100&page=1', [{ login: 'hertie-ml-e1234' }])
+      .on('GET', '/repos/hertie-ml-e1234/.github', { name: '.github', topics: ['dsl-course-hub'], permissions: { push: true } })
+      .on('GET', '/repos/hertie-ml-e1234/.github/contents/semesters.yml', fileBody('semesters.yml', 'semesters:\n  - hertie-ml-f2026\n  - hertie-ml-s2027\n'));
+    const [ml] = await discoverCourses(gh);
+    expect(ml.cohorts.map((c) => c.org)).toEqual(['hertie-ml-f2026']);
+    expect(ml.settingUp?.map((c) => c.org)).toEqual(['hertie-ml-s2027']);
+  });
+
+  it('only rewrites a registry that is a list of names', () => {
+    expect(registryList('semesters: [a, b]')).toEqual(['a', 'b']);
+    expect(registryList('- a\n')).toEqual(['a']);
+    expect(registryList('')).toEqual([]);
+    expect(registryList('semesters:\n')).toEqual([]);
+    for (const bad of ['just a string', ': : :', 'semesters: [a, {b: 1}]', 'semesters: a', 'other: 1\nsemesters: 3']) expect(registryList(bad)).toBeNull();
+  });
+
+  it('refuses to list a semester into a registry that is not a list of names', async () => {
+    const gh = new FakeGitHub().on('GET', '/repos/c/.github/contents/semesters.yml', fileBody('semesters.yml', 'semesters: {broken: true}\n'));
+    const client = new GitHubClient({ token: () => 't', fetch: gh.fetch });
+    await expect(registerSemester(client, 'c', 'c-s2027', { name: 'a', email: 'a@x' })).rejects.toThrow('is not a list of semester org names');
+    expect(gh.seen.some((x) => x.method === 'PUT')).toBe(false);
   });
 
   it('parses both registry shapes and nothing else', () => {
@@ -70,6 +98,7 @@ const meta = (course: string) => fileBody('dsl-course.yml', `# SYSTEM-OWNED\ncou
 function orgs(gh: FakeGitHub, push: string[] = [], archived: string[] = []) {
   const dot = (org: string, topics: string[]) => ({ name: '.github', topics, archived: archived.includes(org), permissions: { push: push.includes(org), pull: true } });
   return gh
+    .on('GET', /^\/repos\/[^/]+\/semester-config$/, { name: 'semester-config' })
     .on('GET', `/repos/${COURSE}/.github`, dot(COURSE, ['course-e1234', 'dsl-course-hub']))
     .on('GET', `/repos/${COURSE}/.github/contents/semesters.yml`, fileBody('x', `semesters:\n  - ${OLD}\n  - ${SEM}\n`))
     .on('GET', `/repos/${COURSE}/.github/contents/dsl-course.yml`, fileBody('x', 'course_name: Machine Learning\ncourse_code: E1234\n'))

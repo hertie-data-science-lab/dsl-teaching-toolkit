@@ -19,7 +19,8 @@ import { OpPanel } from './ops/Panel';
 import { OpsSession } from './ops/session';
 import { ArchiveScreen } from './screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
-import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, landing, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, wizardOf } from './router';
+import { takeInstallReturn } from './wizards/drafts';
+import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, landing, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseScreen, TemplateScreen } from './screens/Course';
@@ -286,6 +287,11 @@ export function createState({ auth, client }: AppDeps) {
     },
   });
   const estate = signal<Estate | null>(null);
+  // Back from installing the console app: drop GitHub's two parameters and reopen the wizard's
+  // first step, before anything reads the URL. Discovery then runs as on any load, and finds
+  // the installation.
+  const back = typeof location !== 'undefined' ? installReturn(location.search, () => takeInstallReturn()) : null;
+  if (back) history.replaceState(null, '', `${location.pathname}${back}`);
   const search = signal(typeof location !== 'undefined' ? location.search : '');
   const st = {
     auth,
@@ -305,7 +311,7 @@ export function createState({ auth, client }: AppDeps) {
     ops,
     /** What screens need to change anything, for the signed-in user. */
     env(user: GhUser): Env {
-      if (!env || env.user !== user) env = { client, user, ops, statuses, files, rediscover: st.rediscover };
+      if (!env || env.user !== user) env = { client, user, ops, statuses, files, rediscover: st.rediscover, kind: auth.kind() ?? 'classic' };
       return env;
     },
     heartbeat(org: string): Heartbeat | null | undefined {

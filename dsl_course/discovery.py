@@ -37,7 +37,7 @@ from .course import (
 )
 from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
-from .ghcli import ALL, EVERYTHING, FILE, FILES, META, gh, on_write
+from .ghcli import ALL, EVERYTHING, FILE, FILES, META, gh, is_missing_resource, on_write
 from .log import log, log_err, log_ok, on_cli_start
 from .materials import is_materials_repo
 from .repos import default_branch, repo_exists, repo_is_archived, repo_missing
@@ -534,22 +534,58 @@ def semester_is_live(semester_org: str) -> bool:
     if repo_is_archived(semester_org, CONFIG_REPO):
         log(f"  [skip] {semester_org} (archived semester - left frozen)")
         return False
-    # No config repo under its name at all, and the old topic: a semester archived before
-    # decision 0010 (never migrated, never touched) or one the migration has not reached.
-    # Either way nothing may be written into it.
-    if repo_missing(semester_org, CONFIG_REPO) and not_migrated_org(semester_org):
-        log(f"  [skip] {semester_org} (not migrated - archived, or run the migration)")
-        return False
+    # No config repo under its name at all: either the old topic - a semester archived
+    # before decision 0010 (never migrated, never touched) or one the migration has not
+    # reached - or no semester topic at all, a semester the New semester wizard has
+    # registered before Bootstrap semester has run. Nothing may be written into either.
+    if repo_missing(semester_org, CONFIG_REPO):
+        topics = _github_topics(semester_org)
+        if topics is not None and _old_topic_only(topics):
+            log(
+                f"  [skip] {semester_org} (not migrated - archived, or run the migration)"
+            )
+            return False
+        if topics is not None and SEMESTER_TOPIC not in topics:
+            log(
+                f"  [skip] {semester_org} (being set up - Bootstrap semester has not run)"
+            )
+            return False
     return True
+
+
+def being_set_up(semester_org: str) -> bool:
+    """Whether a registered semester is still waiting for Bootstrap semester: no config
+    repo, and no semester topic on its `.github` (or no `.github` yet). The New semester
+    wizard registers the org first, so the bot may join it; until the set-up has run, every
+    sweep skips it rather than failing on it. "Could not tell" reads as set up."""
+    if not repo_missing(semester_org, CONFIG_REPO):
+        return False
+    topics = _github_topics(semester_org)
+    return (
+        topics is not None
+        and SEMESTER_TOPIC not in topics
+        and not _old_topic_only(topics)
+    )
+
+
+def _github_topics(org: str) -> set[str] | None:
+    """The topics on `org`'s `.github`: empty when there is no `.github` yet, None when
+    they could not be read."""
+    code, out = gh("api", f"repos/{org}/.github/topics", "--jq", ".names[]")
+    if code == 0:
+        return set(out.split())
+    return set() if is_missing_resource(out) else None
+
+
+def _old_topic_only(topics: set[str]) -> bool:
+    return OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics
 
 
 def not_migrated_org(org: str) -> bool:
     """Whether `org`'s `.github` carries the OLD semester topic and not the new one, read
     from its topics. The listing form, for a caller that already holds one, is
     `carries_old_semester_topic`."""
-    code, out = gh("api", f"repos/{org}/.github/topics", "--jq", ".names[]")
-    topics = set(out.split()) if code == 0 else set()
-    return OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics
+    return _old_topic_only(_github_topics(org) or set())
 
 
 def live_semesters(course_org: str) -> list[str]:

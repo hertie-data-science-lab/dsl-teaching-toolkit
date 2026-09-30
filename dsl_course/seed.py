@@ -50,6 +50,7 @@ from .course import (
     semester_of,
 )
 from .discovery import (
+    being_set_up,
     carries_old_semester_topic,
     central_ref_for,
     discover_assignment_repos,
@@ -218,7 +219,14 @@ def _live_semesters(course_org: str) -> tuple[list[str], int]:
             log(f"  [warn] could not probe {semester}, treating it as live: {exc}")
             gone = False
         if not gone:
-            live.append(semester)
+            if being_set_up(semester):
+                # Registered by the New semester wizard, not yet bootstrapped: nothing to
+                # refresh there, and nothing to prune either.
+                log(
+                    f"  [skip] {semester} (being set up - Bootstrap semester has not run)"
+                )
+            else:
+                live.append(semester)
             continue
         first_seen = previous.get(semester.casefold(), "")
         try:
@@ -264,7 +272,9 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
     stale one. Every input is discovered from the org itself (semesters, content repos,
     assignment templates), so the answer is org-specific without the caller having to know
     any of it."""
-    semesters = discover_semesters(course_org)
+    # A semester the wizard has listed but Bootstrap has not set up has nothing a button
+    # could release into, so no dropdown offers it yet.
+    semesters = [s for s in discover_semesters(course_org) if not being_set_up(s)]
     source_repos = discover_content_repos(course_org)
     materials = discover_materials_repos(course_org)
     assignments = discover_assignments(course_org)
