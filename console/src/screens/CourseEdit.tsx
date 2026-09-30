@@ -11,7 +11,7 @@ import { invalidText, useSave } from '../edit/save';
 import { YamlText, compact, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { KIND_LABEL } from '../model/format';
-import { CONTENT_KINDS, DEFAULT_SYLLABUS, MATERIALS_FILE, NOTHING_DECLARED, inferKind, readDeclared } from '../model/materialsRules';
+import { CONTENT_KINDS, DEFAULT_SYLLABUS, MATERIALS_FILE, NOTHING_DECLARED, inferKind, readDeclared, withMark } from '../model/materialsRules';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
@@ -465,7 +465,8 @@ export function MaterialsScreen(p: CourseProps) {
   const [sylSave, runSyl, setSylSave] = useSave(env);
   const [kindSave, runKind, setKindSave] = useSave(env);
   const curKinds = kindsDraft ?? baseKinds;
-  const folders = tree.kind === 'ready' ? tree.paths.filter((x) => x.dir && !x.path.includes('/') && !x.path.startsWith('.')).map((x) => x.path) : [];
+  // The top folders a release can copy (`status_json._released_folders`): never-released ones need no kind.
+  const folders = tree.kind === 'ready' ? tree.paths.filter((x) => x.dir && !x.path.includes('/') && !x.path.startsWith('.') && !neverMaterial(x.path) && !denylisted(x.path)).map((x) => x.path) : [];
   const kinds = folderKinds(folders, curKinds);
   const syllabus = (syl ?? baseSyl).trim() || DEFAULT_SYLLABUS;
   const sylFile = p.files.file(course.org, repo, syllabus);
@@ -490,10 +491,11 @@ export function MaterialsScreen(p: CourseProps) {
     if (!validMaterials(new YamlText(text).toJS() ?? {})) return setState({ kind: 'bad', text: invalidText(MATERIALS_FILE, validMaterials) });
     if (await run({ owner: course.org, repo, path: MATERIALS_FILE }, text, matFile.kind === 'ready' ? matFile.sha : null, { message: 'materials: edit the syllabus file and folder kinds, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) done();
   };
+  const ignDraft = ign ?? ignText;
+  // What Save writes: a list that withholds nothing is marked reviewed.
+  const ignOut = withMark(ignDraft.endsWith('\n') || !ignDraft ? ignDraft : `${ignDraft}\n`);
   const saveIgn = async () => {
-    if (ign === null) return;
-    const text = ign.endsWith('\n') || !ign ? ign : `${ign}\n`;
-    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, text, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setIgn(null);
+    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, ignOut, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setIgn(null);
   };
   return (
     <>
@@ -557,7 +559,7 @@ export function MaterialsScreen(p: CourseProps) {
               org={course.org} repo={repo} branch={branch} kinds={Object.fromEntries(kinds.map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} withheldWord="withheld" releasedWord="released to students" />
           )}
           <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
-          <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ign === null || ign === ignText} file={{ org: course.org, repo, path: '.releaseignore' }} />
+          <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ignFile.kind === 'loading' || (ignFile.kind === 'ready' && ignOut === ignText)} file={{ org: course.org, repo, path: '.releaseignore' }} />
           <Lives org={course.org} repo={repo} path=".releaseignore" />
         </section>
       </div>

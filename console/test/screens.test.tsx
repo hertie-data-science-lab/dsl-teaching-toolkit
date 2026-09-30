@@ -374,6 +374,9 @@ describe('S2 course and S17 template', () => {
     expect(out).toContain('<span>Not ready: a problem below needs fixing.</span></p>');
     expect(out).not.toContain('class="lede"');
     expect(out.indexOf('class="page-note"')).toBeLessThan(out.indexOf('class="verdict'));
+    // Above the read-only banner too: the verdict sits directly under the note.
+    const ro = html(<CourseScreen {...cp} course={{ ...course, write: false }} />);
+    expect(ro.indexOf('class="verdict')).toBeLessThan(ro.indexOf('class="ro-banner"'));
     const fine: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, ready: true } }, sha: 's', stale: [] };
     const ok = html(<CourseScreen {...cp} loaded={fine} />);
     expect(ok).toContain('<p class="verdict ok"><svg');
@@ -383,11 +386,11 @@ describe('S2 course and S17 template', () => {
     const out = html(<CourseScreen {...cp} />);
     expect(out).toContain('Setup &amp; To do');
     expect(out).toContain('<h3 class="todo-head">To do</h3>');
-    expect(out).toContain('<span class="slug">course-materials-f2026</span> The session list has not been generated yet. <a class="textlink" href="#materials-course-materials-f2026">Open settings</a>');
+    expect(out).toContain('<span class="slug">course-materials-f2026</span> The session list has not been generated yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a>');
     const none: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [] } }, sha: 's', stale: [] };
     expect(text(<CourseScreen {...cp} loaded={none} />)).toContain('Nothing to do.');
     const tpl: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.' }] } }, sha: 's', stale: [] };
-    expect(html(<CourseScreen {...cp} loaded={tpl} />)).toContain('href="#template-a">Open settings</a>');
+    expect(html(<CourseScreen {...cp} loaded={tpl} />)).toContain('href="#template-a" aria-label="Open a settings">Open settings</a>');
   });
   it('shows every course fact in Course details, the institution’s in grey', () => {
     const t = text(<CourseScreen {...cp} />);
