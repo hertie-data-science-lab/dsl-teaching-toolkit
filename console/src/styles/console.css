@@ -564,12 +564,6 @@ input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-sof
 .modal { background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 12px; box-shadow: var(--shadow); width: min(720px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
 .modal:focus { outline: none; }
 .modal .entry-body { min-height: 0; }
-.ext-links { display: grid; gap: 8px; }
-.ext-links a { display: flex; gap: 10px; align-items: center; padding: 10px 12px; min-height: 44px; border: 1px solid var(--rule); border-radius: 8px; color: var(--ink); text-decoration: none; font-weight: 600; }
-.ext-links a:hover { border-color: var(--ink-2); }
-.ext-links .lbl-row > a { flex: 1; }
-.ext-links a span { font-weight: 400; font-size: 13px; color: var(--muted); }
-.ext-links .n { width: 22px; height: 22px; border-radius: 50%; background: var(--sunk); display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 12px; flex: none; }
 .setup-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 @media (max-width: 760px) { .setup-cards { grid-template-columns: minmax(0, 1fr); } }
 .scard { border: 1px solid var(--rule); border-radius: 10px; padding: 14px; display: grid; gap: 8px; align-content: start; background: var(--surface); }

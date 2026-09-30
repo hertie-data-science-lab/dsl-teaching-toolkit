@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import rules from '../schemas/materials.json';
-import { badgeFiles, withheldPaths } from '../src/edit/badges';
+import { badgeFiles } from '../src/edit/badges';
+import { compileAll, withheldBy } from '../src/edit/glob';
 import { aliasKind, inferKind, landingSection, readDeclared } from '../src/model/materialsRules';
 
 describe('the withhold rule', () => {
+  const withheldPaths = (files: string[], lines: string[]) => files.filter((f) => withheldBy(compileAll(lines), f) !== null);
+
   // The engine answered each case (`releaseignore`, git's rule); the console must agree.
   for (const c of rules.cases)
     it(`agrees with the engine: ${c.name}`, () => {
