@@ -116,7 +116,7 @@ export function OrgWhy({ doc }: { doc: string }) {
  * Owner. The install link opens in this tab, since GitHub sends the person back to the
  * console afterwards; `back` is the step it reopens.
  */
-export function OrgSteps({ org, check, busy, run, back, doc, slug = APP_SLUG }: { org: string; check: OrgCheck | null; busy: boolean; run: () => void; back: string; doc?: string; slug?: string }) {
+export function OrgSteps({ org, check, busy, run, back, doc, slug = APP_SLUG }: { org: string; check: OrgCheck | null; busy: boolean; run: () => void; back: string; doc: string; slug?: string }) {
   const exists = check?.checks[0]?.ok === true;
   const id = check?.id ?? null;
   const how = (

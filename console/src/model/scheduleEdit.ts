@@ -256,11 +256,7 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
  * (`lecture-3-b`), never a digit: a digit at the end of a key is its number (decision 0020).
  */
 export function freshId(doc: Raw, block: Block, stem: string): string {
-  const taken = takenKeys(doc);
-  const base = kebab(stem) || block.slice(0, -1);
-  let id = base, n = 1;
-  while (taken.has(id)) id = `${base}-${letters(++n)}`;
-  return id;
+  return unique(doc, kebab(stem) || block.slice(0, -1));
 }
 
 /**
@@ -270,8 +266,12 @@ export function freshId(doc: Raw, block: Block, stem: string): string {
  * letter (`readings-b`).
  */
 export function unnumberedId(doc: Raw, kind: string, title: string): string {
+  return unique(doc, kebab(`${kind} ${title}`).replace(/[-\d]+$/, '') || kebab(kind) || 'entry');
+}
+
+/** `base`, or `base-b`, `base-c`... when taken: a letter, since a trailing digit is a number. */
+function unique(doc: Raw, base: string): string {
   const taken = takenKeys(doc);
-  const base = kebab(`${kind} ${title}`).replace(/[-\d]+$/, '') || kebab(kind) || 'entry';
   let id = base, n = 1;
   while (taken.has(id)) id = `${base}-${letters(++n)}`;
   return id;

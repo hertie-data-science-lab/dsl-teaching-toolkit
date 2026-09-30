@@ -111,9 +111,8 @@ def seed_text(oc: OpenCourse | None = None) -> str:
     choice. A website already on (the migration, from an earlier publish) keeps its empty
     list, or its next publish would take files off a live site."""
     oc = oc or OpenCourse()
-    default = () if oc.enabled else DEFAULT_WITHHOLD
     withhold = yaml.safe_dump(
-        {"withhold": list(oc.withhold or default)},
+        {"withhold": list(oc.withhold or (() if oc.enabled else DEFAULT_WITHHOLD))},
         default_flow_style=False,
         allow_unicode=True,
     )

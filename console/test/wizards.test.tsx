@@ -309,7 +309,7 @@ describe('live checks against GitHub', () => {
   it('renders the three links, the name and the bot handle to copy, and no Check button', () => {
     const org = 'hertie-deep-learning-e2345';
     const check = { id: 42, checks: [{ text: 'a', ok: true }, { text: 'b', ok: false }, { text: 'c', ok: false, hint: 'Invited. The DSL team registers new courses; the bot then joins by itself.' }] };
-    const html = render(<OrgSteps org={org} check={check} busy={false} run={() => {}} back="#new-course-1" slug="dsl-teaching-toolkit" />);
+    const html = render(<OrgSteps org={org} check={check} busy={false} run={() => {}} back="#new-course-1" doc="01-new-course-org.md" slug="dsl-teaching-toolkit" />);
     expect(html).toContain('href="https://github.com/account/organizations/new?plan=free"');
     expect(html).toContain('href="https://github.com/apps/dsl-teaching-toolkit/installations/new/permissions?target_id=42"');
     expect(html).toContain(`href="https://github.com/orgs/${org}/people"`);
@@ -319,7 +319,7 @@ describe('live checks against GitHub', () => {
     expect(html).toContain('Check again');
     expect(html).not.toContain('proposed');
     // Before the org exists there is nothing to install on or invite to.
-    const before = render(<OrgSteps org={org} check={{ id: null, checks: [{ text: 'a', ok: false }, { text: 'b', ok: false }, { text: 'c', ok: false }] }} busy={false} run={() => {}} back="#new-course-1" slug="dsl-teaching-toolkit" />);
+    const before = render(<OrgSteps org={org} check={{ id: null, checks: [{ text: 'a', ok: false }, { text: 'b', ok: false }, { text: 'c', ok: false }] }} busy={false} run={() => {}} back="#new-course-1" doc="01-new-course-org.md" slug="dsl-teaching-toolkit" />);
     expect(before).not.toContain('/installations/new');
     expect(before).not.toContain('/people"');
   });
