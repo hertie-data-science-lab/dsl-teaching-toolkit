@@ -899,7 +899,7 @@ def test_assignment_dates_read_the_schedule():
             )
         }
     )
-    found = schedule_mod.entry_for_repo(sched, "assignment-1-f2026")
+    found = ("assignment-1", sched.assignments["assignment-1"])
     due, handout = site._assignment_dates(found, date(2026, 1, 1))
     assert due == datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN)
     assert handout == datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN)
@@ -1328,8 +1328,8 @@ def test_an_assignment_in_the_plan_gets_rows_before_its_template_is_staged(
 def test_two_plan_entries_citing_one_template_stay_two_assignments(
     monkeypatch, tmp_path
 ):
-    # `schedule.entry_for_repo` maps a repo to the FIRST entry citing it, so resolving the
-    # entry from the repo gave both of these the same slug, the same dates and one
+    # Mapping a repo to the FIRST entry citing it, resolving the entry from the repo gave
+    # both of these the same slug, the same dates and one
     # collection file - the second assignment simply vanished.
     sched = Schedule(
         assignments={
@@ -1956,15 +1956,15 @@ def test_an_assignment_kept_off_the_site_gets_no_page_and_no_rows(
         }
     )
     pages = _plan(monkeypatch, tmp_path, sched).collections["_assignments"]
-    # `02-`, not `01-`: the hidden one's ordinal stays spent (below).
+    # `02-`: its key's own number, whatever is hidden (below).
     assert list(pages) == ["02-assignment-2.md"]
 
 
 def test_hiding_one_assignment_leaves_the_others_where_they_were(monkeypatch, tmp_path):
-    # The ordinal is counted over the FULL plan, so hiding one mid-term must not renumber
-    # the assignments after it: their pages are published URLs students have bookmarked
-    # and the gradebook links, and `03-...` becoming `02-...` breaks every one. Keys with
-    # no number of their own, so the position by due date is what numbers them.
+    # Hiding one mid-term must not renumber the assignments after it: their pages are
+    # published URLs students have bookmarked and the gradebook links. Numbers are
+    # explicit (decision 0020), so nothing is counted; an entry with none keeps its
+    # name as its URL.
     def plan(hide_the_middle_one: bool):
         sched = Schedule(
             semester_start=date(2026, 9, 1),
@@ -1977,11 +1977,12 @@ def test_hiding_one_assignment_leaves_the_others_where_they_were(monkeypatch, tm
                 for key, day in (("regression", 6), ("trees", 20), ("nets", 27))
             },
         )
+        sched.assignments["nets"].number = 3
         return _plan(monkeypatch, tmp_path, sched).collections["_assignments"]
 
     shown, hidden = plan(False), plan(True)
-    assert list(shown) == ["01-regression.md", "02-trees.md", "03-nets.md"]
-    assert list(hidden) == ["01-regression.md", "03-nets.md"]
+    assert list(shown) == ["regression.md", "trees.md", "03-nets.md"]
+    assert list(hidden) == ["regression.md", "03-nets.md"]
     # Same page, byte for byte: the hidden neighbour changed nothing about it.
     assert hidden["03-nets.md"] == shown["03-nets.md"]
 

@@ -11,8 +11,8 @@ lifecycle, `events` are display-only calendar rows.
         event_datetime: 2026-09-15T10:00   # deploy_datetime (default: the event itself).
         title: Linear regression           # the session's name - the site's TITLE column
         details: Least squares by hand     # its DETAILS column, and the session's own page
-        number: 2                          # optional: the row's number (default:
-                                           # the label's, else its position).
+        number: 2                          # the row's number; without it, the
+                                           # label's (lecture_02). One is required.
         kind: lecture                      # optional: a policy kind (lecture, lab,
                                            # readings, ...). Omitted, inferred from
                                            # the folder the first copy lands in.
@@ -26,8 +26,8 @@ lifecycle, `events` are display-only calendar rows.
     assignments:                     # each assignment's TIMINGS. The key is a label;
       assignment-1:                  # course_source_repo names the COURSE-org repo
         course_source_repo: assignment-neural-nets   # it hands out from, and is REQUIRED.
-        number: 1                    # optional: its ordinal (default: the key's, else
-                                     # its position by due date).
+        number: 1                    # its number; without it, the key's
+                                     # (assignment-1). One is required.
         details: Fit it by hand      # the DETAILS column, on its hand-out and due rows
         handout_datetime: 2026-09-22T09:00  # A bare due_datetime is END of day (23:59:59)
         due_datetime: 2026-10-13     # - "due on the 13th" closes at day's end. The late
@@ -326,7 +326,7 @@ class Release:
     # section its first copy lands in (`schedule_plan.entry_kind`).
     kind: str = ""
     # The row's number ("Lecture 3"), when the entry writes one; else the label's own
-    # number, else its position (`schedule_plan.site_rows`).
+    # number, else none (decision 0020: never a position, `schedule_plan.own_number`).
     number: int | None = None
     # `tbc: true` next to a REAL date = a provisional sketch: everything fires at that
     # date as normal, but the site marks it "(TBC)" to signal it may still move.
@@ -337,6 +337,8 @@ class Release:
     # all it landed is root files (the syllabus), which are course documents.
     # Default true: an entry says what it is on the schedule unless faculty opt out.
     show_on_site: bool = True
+    # The line each of this entry's keys is written on - see `Deploy.lines`.
+    lines: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
 
     @property
     def is_event_only(self) -> bool:
@@ -423,7 +425,7 @@ class AssignmentEntry:
     # `{event_datetime: ..., show_on_site: true}` - the date is internal by default.
     marks_return_on_site: bool = False
     # Its ordinal ("Assignment 3"), when the entry writes one; else the key's own number,
-    # else its position by due date (`assignment_pages`, decision 0013 rule 1).
+    # else none (decision 0020: never a position, `assignment_pages`).
     number: int | None = None
     # The line each of this entry's keys is written on - see `Deploy.lines`.
     lines: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
@@ -1096,7 +1098,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
                     where,
                     "number",
                     entry["number"],
-                    "the row is numbered from its label or its position instead",
+                    "the row is numbered from its label instead",
                     lines,
                 )
         out.append(
@@ -1118,6 +1120,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
                     "this entry's session row is shown on the site anyway",
                     lines,
                 ),
+                lines=lines,
             )
         )
     # Undated (TBC) entries sort to the end of the plan.
@@ -1784,27 +1787,11 @@ def entries_for_repo(sched: Schedule, repo: str) -> list[tuple[str, AssignmentEn
     ]
 
 
-def entry_for_repo(sched: Schedule, repo: str) -> tuple[str, AssignmentEntry] | None:
-    """The FIRST `(slug, entry)` handing out from `repo`, or None.
-
-    Callers that start from a REPO name - the autograder, the website - must find its
-    schedule entry by matching `course_source_repo`, never by deriving a slug from the
-    repo name. The slug is now a free label, so `wk3-regression-f2026` may legitimately be
-    keyed `regression`; deriving would silently miss it, and the symptoms are quiet ones
-    (no due date on the site, a group assignment provisioned per student).
-
-    For a repo two entries cite, this answers with the first and says nothing about the
-    second: only use it where ANY of them will do. Anything that writes semester-side state
-    goes through `entries_for_repo` and refuses the ambiguity."""
-    found = entries_for_repo(sched, repo)
-    return found[0] if found else None
-
-
 class AssignmentPage(NamedTuple):
     """One assignment's page on the semester site: its ordinal, its semester-side name, the
     course template it is drawn from, and its plan entry."""
 
-    number: int
+    number: int | None
     name: str
     repo: str
     hit: tuple[str, AssignmentEntry] | None
@@ -1817,7 +1804,10 @@ class AssignmentPage(NamedTuple):
     @property
     def stem(self) -> str:
         """`03-assignment-3` - the page's file under `_assignments/` is this plus `.md`,
-        and its URL this plus `.html`, so the file and the link cannot disagree."""
+        and its URL this plus `.html`, so the file and the link cannot disagree. An
+        assignment with no number is its name alone, which no number can move."""
+        if self.number is None:
+            return self.name
         return f"{self.number:02d}-{self.name}"
 
     def url(self, semester_org: str) -> str:
@@ -1839,25 +1829,23 @@ def label_number(label: str) -> int | None:
 def assignment_pages(sched: Schedule) -> list[AssignmentPage]:
     """Every assignment of the plan, numbered - the ONE place that numbering is decided,
     because the team-formation mail, the lock and the Join-team form all link a page, and
-    the site dates an entry off it.
+    the site dates an entry off it. In due-date order.
 
-    Decision 0013 rule 1, applied to assignment entries (decision 0014): the entry's
-    `number:`, else its key's own number (`assignment-3`), else its position among the
-    plan's assignments by due date. So `assignment-10` is 10 and comes after
-    `assignment-2`, and re-dating one entry renumbers nobody with a number of their own.
+    Decision 0020: the entry's `number:`, else its key's own number (`assignment-3`),
+    else none - never a position, so re-dating, hiding or adding an entry moves nobody's
+    number. An entry with none is a problem the status names, and is not handed out.
 
     From the plan only: an assignment is handed out from a schedule entry or not at all.
-    HIDDEN ones are included (`show_on_site: false`): a hidden entry keeps its position,
-    so hiding one mid-term moves nobody else's number."""
+    HIDDEN ones are included (`show_on_site: false`)."""
     by_due = sorted(sched.assignments.items(), key=lambda kv: kv[1].due_datetime)
     return [
         AssignmentPage(
-            entry.number or label_number(key) or position,
+            entry.number or label_number(key),
             semester_name(key, entry),
             entry.course_source_repo,
             (key, entry),
         )
-        for position, (key, entry) in enumerate(by_due, start=1)
+        for key, entry in by_due
     ]
 
 

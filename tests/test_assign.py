@@ -266,7 +266,6 @@ def test_an_unusable_solution_branch_does_not_block_provisioning(
     )
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.schedule.load", lambda org: citing(*TEMPLATES))
-    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
     recorded = []
     monkeypatch.setattr(
@@ -301,7 +300,6 @@ def test_a_handout_that_skipped_every_repo_syncs_no_site(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.schedule.load", lambda org: citing(*TEMPLATES))
-    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
     synced: list[tuple] = []
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a: synced.append(a))
 
@@ -338,7 +336,6 @@ def _marker_run(
     monkeypatch.setattr(assign, "provision_one", lambda *a, **k: status)
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.schedule.load", lambda org: citing(*TEMPLATES))
-    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
 
     def sync(*a, **k):
         if site_raises:

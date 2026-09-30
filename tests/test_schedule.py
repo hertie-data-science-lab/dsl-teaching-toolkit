@@ -1139,26 +1139,6 @@ def test_semester_dest_repo_comes_from_assignments_yml_and_defaults_to_the_slug(
     assert semester_name("blank", sched.assignments["blank"]) == "blank"
 
 
-def test_entry_for_repo_matches_on_course_source_repo_not_the_slug():
-    from dsl_course.schedule import entry_for_repo
-
-    sched = parse(
-        {
-            "assignments": {
-                "regression": {
-                    "course_source_repo": "wk3-regression-f2026",
-                    "due_datetime": "2026-11-10",
-                }
-            }
-        }
-    )
-    # the slug is a free label, so consumers that start from a REPO name must match on
-    # course_source_repo - deriving a slug from the repo would miss this entry entirely
-    found = entry_for_repo(sched, "wk3-regression-f2026")
-    assert found is not None and found[0] == "regression"
-    assert entry_for_repo(sched, "regression-f2026") is None
-
-
 def test_an_unknown_timezone_is_reported_rather_than_silently_swapped():
     sched = parse(
         {"timezone": "Europe/Berlyn", "events": {"e": {"event_datetime": "2026-11-03"}}}
@@ -3084,9 +3064,8 @@ def _entry(repo: str, day: int, **kw) -> schedule.AssignmentEntry:
 
 
 def test_assignment_pages_are_numbered_by_the_plan():
-    # Decision 0013 rule 1 on assignment entries (decision 0014): `number:`, else the
-    # key's own number, else the position by due date. Hidden ones are numbered too, so
-    # hiding one moves nobody.
+    # Decision 0020: `number:`, else the key's own number, else none - never a position.
+    # Hidden ones are numbered too.
     sched = schedule.Schedule(
         assignments={
             "assignment-10": _entry("assignment-trees", 20),
@@ -3099,10 +3078,12 @@ def test_assignment_pages_are_numbered_by_the_plan():
     assert [(p.number, p.name, p.key) for p in pages] == [
         (2, "assignment-2", "assignment-2"),
         (10, "assignment-10", "assignment-10"),  # after 2, never before it
-        (3, "team-project", "project"),  # third by due date
+        (None, "team-project", "project"),  # no number, never its position
         (7, "capstone", "capstone"),  # its own `number:`
     ]
-    assert pages[2].stem == "03-team-project"
+    # Without a number the page is its name alone, which no re-dating can move.
+    assert pages[2].stem == "team-project"
+    assert pages[3].stem == "07-capstone"
     assert pages[2].repo == "assignment-nets"
     # Every page's link is the semester's Join screen in the student console.
     assert pages[2].url("Semester-F2026") == policy.console_link(
@@ -3132,7 +3113,7 @@ def test_an_assignment_entry_takes_a_number():
     # A number that is not one is dropped with a line, and the entry still runs.
     assert sched.assignments["nets"].number is None
     assert any("nets" in d and "number" in d for d in sched.dropped)
-    assert [p.number for p in schedule.assignment_pages(sched)] == [3, 2]
+    assert [p.number for p in schedule.assignment_pages(sched)] == [3, None]
 
 
 # ------------------------------------------------ the solution notice (--previous)

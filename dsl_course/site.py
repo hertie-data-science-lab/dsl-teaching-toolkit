@@ -984,8 +984,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # a written offset into the semester timezone), so the renderers below just print it.
         start = sched.semester_start or _semester_start(semester_org)
         # Every assignment of the plan, numbered as every link to one numbers it
-        # (`schedule.assignment_pages`, hidden ones included so a hidden one keeps its
-        # ordinal unspent).
+        # (`schedule.assignment_pages`, hidden ones included).
         pages = schedule.assignment_pages(sched)
 
         def shown(hit: tuple[str, schedule.AssignmentEntry] | None) -> bool:
@@ -1130,19 +1129,18 @@ def sync_site(course_org: str, semester_org: str) -> int:
             # assignment slug), else a synthesised fortnightly cadence.
             collections={
                 "_lectures": rows,
-                # Named by the ordinal and the semester-side name, so every assignment
-                # keeps its URL for the whole term. A pending one
-                # is a placeholder rather than an absence - see `_assignment_entry`.
-                # A hidden one is SKIPPED, not renumbered around: its ordinal stays spent,
-                # so hiding one mid-term leaves every other assignment's URL - and every
-                # synthesised fallback date - exactly where it was.
+                # Named by the number and the semester-side name (the name alone
+                # without a number), so every assignment keeps its URL for the whole
+                # term. A pending one is a placeholder rather than an absence - see
+                # `_assignment_entry`. A hidden one is SKIPPED: numbers are explicit, so
+                # hiding one moves nobody else's URL.
                 "_assignments": {
                     f"{page.stem}.md": _assignment_entry(
                         course_org,
                         semester_org,
                         page.repo,
                         *_assignment_dates(
-                            page.hit, start + timedelta(days=page.number * 14)
+                            page.hit, start + timedelta(days=(page.number or 0) * 14)
                         ),
                         found=page.hit,
                         handed_out=handed_out,
