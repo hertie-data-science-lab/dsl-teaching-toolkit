@@ -169,7 +169,8 @@ Things whose *literal spelling* is depended on from outside Python:
 
 ## A student who switched GitHub account
 
-Faculty edit the row's `github_handle` and nothing else; `relink.sync`, first in each
+Faculty edit the row's `github_handle` and nothing else (the console's Students grid
+lets them on a joined row, after checking the account exists); `relink.sync`, first in each
 semester's Sync membership pass, moves every handle-keyed thing - repos, grants,
 `teams.csv`, sheet keys, `distributed.csv` email rows, `.system/autograde/` files, the
 `join` throttle issues -
