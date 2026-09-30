@@ -6,12 +6,32 @@
 
 import { parse } from 'yaml';
 import type { GitHubClient } from '../github/client';
-import { CENTRAL } from '../wizards/central';
+import { CENTRAL } from './central';
 import { COURSE_META_PATH, parseRegistry, REGISTRY_PATH, termOf, type Course } from './discovery';
 import { str } from './format';
 import { COURSE_REPO, STUDENT_STATUS_PATH } from './names';
 
 export const ORGS_PATH = 'orgs.yml';
+/** Most catalogue reads in flight at once. */
+export const POOL = 6;
+
+type Run = <T>(task: () => Promise<T>) => Promise<T>;
+
+/** At most `size` tasks running at once; the rest wait their turn. Each task is one request, so none waits on another. */
+function pool(size: number): Run {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  return async (task) => {
+    if (active >= size) await new Promise<void>((go) => queue.push(go));
+    active++;
+    try {
+      return await task();
+    } finally {
+      active--;
+      queue.shift()?.();
+    }
+  };
+}
 
 export interface CatalogueSemester {
   org: string;
@@ -43,31 +63,35 @@ export function parseOrgs(text: string): string[] {
 }
 
 /** A semester the person cannot see, by its public `.github`; null when it has none (not set up yet). */
-async function readSemester(client: GitHubClient, org: string): Promise<CatalogueSemester | null> {
+async function readSemester(client: GitHubClient, run: Run, org: string): Promise<CatalogueSemester | null> {
   const termLabel = termOf(org).label;
-  const repo = await client.getRepo(org, COURSE_REPO).catch(() => undefined);
+  const repo = await run(() => client.getRepo(org, COURSE_REPO)).catch(() => undefined);
   if (repo === null) return null;
   if (!repo) return { org, termLabel };
   if (repo.archived) return { org, termLabel, archived: true };
-  const end = await client
-    .getContents(org, COURSE_REPO, STUDENT_STATUS_PATH)
-    .then((f) => (f ? str((JSON.parse(f.text) as { archive_datetime?: unknown }).archive_datetime) : ''))
+  const end = await run(() => client.getContents(org, COURSE_REPO, STUDENT_STATUS_PATH))
+    .then((f) => {
+      const v = f ? (JSON.parse(f.text) as { archive_datetime?: unknown } | null)?.archive_datetime : undefined;
+      return typeof v === 'string' ? v : '';
+    })
     .catch(() => '');
   return { org, termLabel, archived: false, ...(end ? { end } : {}) };
 }
 
 /** A course org the person has no role in; its org name alone when its `.github` cannot be read. */
-async function readCourse(client: GitHubClient, org: string): Promise<CatalogueCourse> {
-  const bare: CatalogueCourse = { org, name: org, code: '', semesters: [], mine: false };
-  try {
-    const [meta, registry] = await Promise.all([client.getContents(org, COURSE_REPO, COURSE_META_PATH), client.getContents(org, COURSE_REPO, REGISTRY_PATH)]);
-    const m: unknown = meta ? parse(meta.text) : null;
-    const d = m && typeof m === 'object' ? (m as Record<string, unknown>) : {};
-    const semesters = (await Promise.all(parseRegistry(registry?.text).map((s) => readSemester(client, s)))).filter((s): s is CatalogueSemester => s !== null);
-    return { org, name: str(d.course_name) || org, code: str(d.course_code), semesters, mine: false };
-  } catch {
-    return bare;
-  }
+async function readCourse(client: GitHubClient, run: Run, org: string): Promise<CatalogueCourse> {
+  const [d, registry] = await Promise.all([
+    run(() => client.getContents(org, COURSE_REPO, COURSE_META_PATH))
+      .then((f) => {
+        const m: unknown = f ? parse(f.text) : null;
+        return m && typeof m === 'object' ? (m as Record<string, unknown>) : {};
+      })
+      .catch(() => ({}) as Record<string, unknown>),
+    // Its own read: a registry that fails leaves the course named, with no semesters.
+    run(() => client.getContents(org, COURSE_REPO, REGISTRY_PATH)).catch(() => null),
+  ]);
+  const semesters = (await Promise.all(parseRegistry(registry?.text).map((s) => readSemester(client, run, s)))).filter((s): s is CatalogueSemester => s !== null);
+  return { org, name: str(d.course_name) || org, code: str(d.course_code), semesters, mine: false };
 }
 
 const mineOf = (course: Course): CatalogueCourse => ({
@@ -82,6 +106,7 @@ const mineOf = (course: Course): CatalogueCourse => ({
 interface Cache {
   orgs: Promise<string[]>;
   courses: Map<string, Promise<CatalogueCourse>>;
+  run: Run;
 }
 
 /** One read per org per page load, whoever asks. */
@@ -99,7 +124,7 @@ export async function loadCatalogue(client: GitHubClient, estate: Course[] = [],
       if (!f) throw new Error('orgs.yml is missing');
       return parseOrgs(f.text);
     });
-    cache = { orgs, courses: new Map() };
+    cache = { orgs, courses: new Map(), run: pool(POOL) };
     caches.set(client, cache);
     orgs.catch(() => caches.delete(client)); // a failed read is tried again on the next load
   }
@@ -111,7 +136,7 @@ export async function loadCatalogue(client: GitHubClient, estate: Course[] = [],
   await Promise.all(
     others.map(async (org) => {
       let p = c.courses.get(org.toLowerCase());
-      if (!p) c.courses.set(org.toLowerCase(), (p = readCourse(client, org)));
+      if (!p) c.courses.set(org.toLowerCase(), (p = readCourse(client, c.run, org)));
       list.push(await p);
       onUpdate?.([...list]);
     }),
