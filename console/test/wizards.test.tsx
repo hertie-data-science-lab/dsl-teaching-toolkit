@@ -381,7 +381,7 @@ describe('the wizard screens', () => {
       saveDraft(`new-assignment:${COURSE_ORG}`, { v: { ...initialValues(null), name: 'Assignment 3: Regression' }, verified: {} });
       const out = render(<NewAssignmentScreen {...cp()} step={1} />);
       expect(out).toContain('Repo: <code>assignment-3-regression</code>');
-      expect(out).toContain("The number is set when the assignment joins a semester's schedule: the third assignment becomes assignment-3, and each student's copy assignment-3-&lt;handle>. Keep the number in the name anyway?");
+      expect(out).toContain("The number is set when the assignment joins a semester's schedule: an assignment numbered 3 becomes assignment-3, and each student's copy assignment-3-&lt;handle>. Keep the number in the name anyway?");
       expect(out).toContain('Keep the number');
       expect(out).toMatch(/<button class="btn" type="button" disabled[^>]*>Continue/);
       saveDraft(`new-assignment:${COURSE_ORG}`, { v: { ...initialValues(null), name: 'Regression' }, verified: {} });
