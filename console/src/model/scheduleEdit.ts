@@ -307,11 +307,16 @@ export function nextNumber(doc: Raw, kind: string, kindOf: KindOf = spelledKind)
   return n;
 }
 
-/** A new entry's draft with its number proposed, when it needs one and has none yet; any other draft as it is. */
-export function withNumber<T extends Draft>(d: T, doc: Raw, kindOf: KindOf = spelledKind): T {
-  if ((d.kind !== 'assignments' && d.kind !== 'releases') || d.id || d.number !== undefined) return d;
-  const kind = d.kind === 'assignments' ? 'assignment' : d.type || 'lecture';
-  return kind === 'readings' ? d : { ...d, number: nextNumber(doc, kind, kindOf) };
+/**
+ * A new entry's draft with its number proposed, when it needs one and has none yet; any other
+ * draft as it is. `kind` is a release's kind as the engine will read it (its own, else the one
+ * inferred from its folder). A new readings entry carries no number: one would join a lecture.
+ */
+export function withNumber<T extends Draft>(d: T, doc: Raw, kindOf: KindOf = spelledKind, kind?: string): T {
+  if ((d.kind !== 'assignments' && d.kind !== 'releases') || d.id) return d;
+  const k = d.kind === 'assignments' ? 'assignment' : kind || d.type || 'lecture';
+  if (k === 'readings') return d.number === undefined ? d : { ...d, number: undefined };
+  return d.number !== undefined ? d : { ...d, number: nextNumber(doc, k, kindOf) };
 }
 
 export function blankDraft(type: string, defaults: { repo: string }): ReleaseDraft | AssignmentDraft | EventDraft {

@@ -438,7 +438,10 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
     const lab = blankDraft('lab', { repo: 'm' }) as ReleaseDraft;
     expect(withNumber(lab, doc, kindOf).number).toBe(4);
     // Readings are numbered only to join a lecture: nothing is proposed.
-    expect(withNumber(blankDraft('readings', { repo: 'm' }) as ReleaseDraft, doc, kindOf).number).toBeUndefined();
+    expect(withNumber(blankDraft('readings', { repo: 'm' }) as ReleaseDraft, doc, kindOf).number).toBeUndefined();    // A draft whose kind is inferred takes that kind's number; inferred readings drop one held.
+    const inferred = { ...(blankDraft('lecture', { repo: 'm' }) as ReleaseDraft), type: '' };
+    expect(withNumber(inferred, doc, kindOf, 'lab').number).toBe(4);
+    expect(withNumber({ ...inferred, number: 8 }, doc, kindOf, 'readings').number).toBeUndefined();
   });
 
   it('shows a saved entry its number, and requires one where the site shows the row', () => {

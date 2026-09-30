@@ -146,7 +146,7 @@ function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDr
         <F id="e-type" k="type" d={d} set={set} t={{ tier: 'default', label: 'Kind', widget: 'select', defaultLabel: 'default: inferred from where it lands', reason: 'Sets the row’s tab, colour and name.', options: [{ value: '', label: `${KIND_LABEL[inferred] ?? inferred} (inferred)` }, ...kinds.map((k) => ({ value: k, label: KIND_LABEL[k] ?? k }))] }} />
         <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'from the folder name', reason: 'The name, shown after the identifier. Plain text.' }} />
       </div>
-      {(d.type || inferred) === 'readings' ? <p class="footnote">On the student site, numbered readings (readings-3, or number: 3) join that lecture’s row; other readings are their own row.</p>
+      {(d.type || inferred) === 'readings' ? <p class="footnote">On the student site, numbered readings (readings-3, or number: 3) join that lecture's row; other readings are their own row.</p>
         : <NumberField d={d} set={set as Setter<ReleaseDraft | AssignmentDraft>} errors={errors} kind={d.type || inferred} />}
       <div class="row-2">
         <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: `Automation releases at this time, ${tz}.` }} />
@@ -361,12 +361,12 @@ function ArchiveForm({ d, set, errors }: { d: ArchiveDraft; set: Setter<ArchiveD
 const NEW_TYPES: [string, string, string][] = [['lecture', 'lecture', 'lec'], ['lab', 'lab', 'lab'], ['readings', 'readings', 'lec'], ['handout', 'hand out', 'asg'], ['exam', 'exam', 'exam'], ['special_event', 'event', 'evt']];
 
 /** A new entry's identifier, from the number it will be written with (decision 0020); a saved entry's is its row's. */
-function identOf(d: Draft, row: Row | undefined): string {
+function identOf(d: Draft, row: Row | undefined, kind: string): string {
   if (row) return row.ident;
   if (d.kind === 'assignments') return d.number ? `Assignment ${d.number}` : 'Assignment';
   if (d.kind === 'events') return d.type === 'exam' ? 'Exam' : 'Event';
   if (d.kind === 'releases') {
-    const word = KIND_LABEL[d.type || 'lecture'] ?? d.type;
+    const word = KIND_LABEL[kind] ?? kind;
     return d.number ? `${word} ${d.number}` : word;
   }
   return '';
@@ -400,8 +400,10 @@ function View(p: ReadyProps) {
   // Each entry's kind as the engine reads it (inferred where the file names none).
   const statusKind = Object.fromEntries((status.releases ?? []).map((r) => [r.id, r.kind]));
   const kindOf: KindOf = (k, e) => statusKind[k] ?? (String((e as { kind?: unknown })?.kind ?? '') || 'lecture');
+  // A release's kind as the engine will read it: its own, else the one its folder implies.
+  const kindFor = (d: Draft): string | undefined => (d.kind === 'releases' ? d.type || inferredKind(p, d) : undefined);
   // A new entry shows the number it will get until one is typed (decision 0020).
-  const prefill = (d: Draft): Draft => withNumber(d, doc, kindOf);
+  const prefill = (d: Draft): Draft => withNumber(d, doc, kindOf, kindFor(d));
   const draftOf = (k: string): Draft | null => (drafts[k] ? prefill(drafts[k]) : baseOf(k));
   const dirtyKeys = Object.keys(drafts).filter((k) => k === 'new' || !deepEqual(drafts[k], baseOf(k)));
   const dirty = dirtyKeys.length + Object.keys(removed).length;
@@ -432,7 +434,7 @@ function View(p: ReadyProps) {
     const days = resolve('late_window_days', isNew ? { ...layers, assignment: usableBlock(newRunFor(d)) } : layers).value;
     return cutoffOf(d.dueDate, d.dueTime, typeof days === 'number' ? days : 0);
   };
-  const errorsOf = (d: Draft) => draftErrors(prefill(d), { templateUsers, doc, kind: d.kind === 'releases' ? d.type || inferredKind(p, d) : undefined }, cutoffFor(d));
+  const errorsOf = (d: Draft) => draftErrors(prefill(d), { templateUsers, doc, kind: kindFor(d) }, cutoffFor(d));
   const newRunErrors = (d: Draft): Record<string, string> => {
     if (d.kind !== 'assignments') return {};
     const cfg = d.template ? gradingConfig(p, d.template) : {};
@@ -452,7 +454,7 @@ function View(p: ReadyProps) {
     for (const k of dirtyKeys) {
       const d = prefill(drafts[k]);
       if (k === 'new' && (d.kind === 'releases' || d.kind === 'assignments' || d.kind === 'events')) {
-        const stem = d.kind === 'releases' ? `${d.type || 'lecture'}${d.number ? `-${d.number}` : ''}` : d.title || 'event';
+        const stem = d.kind === 'releases' ? `${kindFor(d)}${d.number ? `-${d.number}` : ''}` : d.title || 'event';
         newId = d.kind === 'assignments' ? assignmentKey(d.number) : freshId(doc, d.kind, stem);
         writeDraft(y, { ...d, id: newId }, doc);
       } else writeDraft(y, d, doc);
@@ -542,13 +544,14 @@ function View(p: ReadyProps) {
       const errors = key in drafts ? errorsOf(d) : {};
       const set = <T,>(patch: Partial<T>) => {
         let next = { ...(d as object), ...patch } as unknown as Draft;
-        // A new release whose kind changes takes the next number of its new kind, unless one was typed.
-        if (key === 'new' && d.kind === 'releases' && next.kind === 'releases' && 'type' in patch && d.number === nextNumber(doc, d.type || 'lecture', kindOf)) next = { ...next, number: undefined };
+        // A new release holds only a typed number: the proposed one follows its kind (chosen, or
+        // inferred from the folder), so a kind or folder change takes that kind's next number.
+        if (key === 'new' && d.kind === 'releases' && next.kind === 'releases' && d.number === nextNumber(doc, kindFor(d)!, kindOf)) next = { ...next, number: undefined };
         setDraft(key, next);
       };
       const rel = d.kind === 'releases' && key !== 'new' ? (status.releases ?? []).find((x) => x.id === key) : undefined;
       const ref = rel ? releaseRef(rel, tz, year) : null;
-      const ident = identOf(d, current);
+      const ident = identOf(d, current, kindFor(d) ?? '');
       const title = d.kind === 'semester' ? <>Semester dates</> : d.kind === 'archive' ? <><b>Archive</b>: {d.title || 'Semester archived'}</> : <><b>{ident}</b>: {d.title || (current?.name ?? 'Untitled')}</>;
       const eyebrow = d.kind === 'semester' ? 'Semester' : d.kind === 'archive' ? 'Archive' : d.kind === 'assignments' ? 'Assignment entry' : `${TYPE_LABEL[d.kind === 'releases' ? d.type || 'lecture' : d.type] ?? ''}${d.date ? `, ${fmtDay(d.date, tz, year)}${d.time ? ` ${d.time}` : ''}` : ''}`;
       const probs = (status.problems ?? []).filter((x) => x.fix?.entry === key && x.fix.path === 'schedule.yml');
