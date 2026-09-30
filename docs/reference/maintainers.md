@@ -95,8 +95,8 @@ Things whose *literal spelling* is depended on from outside Python:
   predates the window keeps forming teams.
   `tests/test_join_templates.py` runs the SHIPPED scanner over the writer's real output;
   keep that pairing.
-- **An assignment page's URL** - `schedule.AssignmentPage` (`<nn>-<semester name>`, ordinal
-  from `schedule.assignment_pages`) names the site's `_assignments/` file AND every link to
+- **An assignment page's URL** - `schedule.AssignmentPage` (`<nn>-<semester name>`, or the
+  name alone for an entry with no number; the number from `schedule.assignment_pages`) names the site's `_assignments/` file AND every link to
   it: the team-formation mail, the lock's `team_formation_page:` (which the Join-team form's
   header and refusals link) and the site itself. That page is the one list of a window's
   teams - names and counts only. Never build the URL anywhere else.
@@ -887,7 +887,7 @@ Promote.
 | an `assignment-*` name on a GitHub template as the mark of an assignment template; `assignment-<n>-<semester>`, CLI `scaffold assignment --number`, `--semester`, `--copy-from` | the `dsl-assignment` topic; `assignment-<name>`, `--name` (decision 0014: the number is the schedule entry's, access follows the schedule's citations) | course org; the course step "assignment topic" adds the topic (live templates keep their names); an untopicked one is NOT_MIGRATED in status.json |
 | a materials repo's `publish.yml`; the public site repo's `_publish-config.yml` | the course's `.github/opencourse.yml` (decision 0016) | every materials repo; the course step "public website" deletes each `publish.yml` and seeds `opencourse.yml` from `_publish-config.yml` (else off); the next publish deletes `_publish-config.yml` |
 | semester site Assignments, All Materials and Your Profile tabs, assignment pages, hosted copies under `files/`, team lists and member digests | none: the site is a public calendar (decision 0011 rule 5); the student console reads `student-status.json` | the site sync removes them (`site_repo.retired_sections`) |
-| semester site rows keyed by the `NN_` folder ordinal; the `readings` section | one row per shown `releases:` entry, of its kind, numbered by `number:`, else the label, else position; numbered readings joined to the lecture of that number, others their own row (`schedule_plan.site_rows`, decision 0013); unplanned kind folders as undated tab rows; tabs per kind; the pinned syllabus by `materials.yml` declaration, else the old root-file rule | every semester site, on its next sync |
+| semester site rows keyed by the `NN_` folder ordinal; the `readings` section | one row per shown `releases:` entry, of its kind, numbered by `number:`, else the label (never a position, decision 0020); numbered readings joined to the lecture of that number, others their own row (`schedule_plan.site_rows`, decision 0013); unplanned kind folders as undated tab rows; tabs per kind; the pinned syllabus by `materials.yml` declaration, else the old root-file rule | every semester site, on its next sync |
 | semester topic `dsl-cohort` on an ARCHIVED semester | kept for ever: archived semesters are never migrated, and every sweep skips them (`discovery.semester_is_live`, `seed.refresh`) | - |
 | console op ids `cohort.check`, `cohort.preview_automation`, `cohort.archive`, `cohort.bootstrap`; op scope `cohort` | `semester.*`; scope `semester` | `console/schemas/ops.json` |
 | status `fix.screen: staff` | `instructors` | `dsl.status/1` |
@@ -965,7 +965,10 @@ pause, rename repos (each old name must redirect), layout (records into `.system
 checked against the old file before anything is committed, the seeded skeleton replaced by
 the new one, the pointer moved in, samples deleted - one `migrate: layout` commit), keys
 (`schedule.yml` loses the keys that left it and `assignments.yml` gains what they and the
-templates said, in one commit, both re-read with this engine: zero `NOT_MIGRATED`), proposed
+templates said, in one commit, both re-read with this engine: zero `NOT_MIGRATED`), explicit
+numbers (decision 0020: `number:` written on each entry whose number was its position, with
+that number, so nothing a student sees moves; label-numbered entries and stand-alone readings
+left alone; a flow-mapped entry named for a hand fix), proposed
 releases (decision 0013: for folders of a kind section that no entry copies, a `releases:`
 plan dated by the commit that first landed each folder, written to
 `semester-config/.system/proposed-releases.yml` for faculty to copy by hand - never into

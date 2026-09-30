@@ -159,6 +159,7 @@ from .log import (
     log_step,
 )
 from .repos import default_branch, repo_missing
+from .schedule_plan import refuse_unnumbered, unnumbered_assignment
 
 AUTOGRADE_DIR = records.path("autograde")  # <it>/<slug>/<key>.json
 GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST write
@@ -3820,6 +3821,18 @@ def main() -> int:
     )
     add_preview_flag(parser, "Report what would be collected; write nothing (default).")
     args = parser.parse_args()
+    # A manual collection of an entry with no number is refused (decision 0020 rule 3);
+    # the scheduled freeze is not, so a missing number never costs a submission.
+    # A read helper that couldn't reach the API raises; in an Actions log a one-line
+    # error beats a traceback, and the run still goes red.
+    try:
+        sched = schedule.load(args.semester_org)
+    except RuntimeError as exc:
+        log_err(str(exc))
+        return 1
+    refusal = unnumbered_assignment(sched, args.template, args.assignment)
+    if refusal:
+        return refuse_unnumbered(refusal)
     if args.refresh_only:
         return refresh_assignment_sheet(
             args.course_org,

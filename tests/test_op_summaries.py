@@ -425,6 +425,7 @@ def test_the_new_codes_sentence_counts_and_never_names():
 
 
 def _deploy_main(monkeypatch, *extra) -> Summary:
+    monkeypatch.setattr(deploy.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(
         sys,
         "argv",

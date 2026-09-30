@@ -138,6 +138,36 @@ describe('Save on the Overview form', () => {
   });
 });
 
+describe('Save on the schedule’s new release, its kind inferred from the folder', () => {
+  const sched = 'timezone: Europe/Berlin\nreleases:\n  lab-2:\n    event_datetime: 2026-09-15T10:00\n    kind: lab\n    deploy:\n      - course_source_repo: course-materials-f2026\n        course_source_path: labs/02_x\n';
+  async function addRelease(gh: FakeGitHub, f: StaticFiles, folder: string) {
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new' })} />);
+    await click(button('lecture'));
+    await type('#e-type', '', 'change');
+    await type('#e-d0-folder', folder);
+    await type('#e-date', '2026-10-01');
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    return parse(body(puts(gh, 'schedule.yml')[0])).releases;
+  }
+
+  it('prefills the next lab number and keys the entry lab-<n>, never a lecture', async () => {
+    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
+    const out = await addRelease(gh, f, 'labs/03_trees');
+    expect(Object.keys(out)).toEqual(['lab-2', 'lab-3']);
+    expect(out['lab-3'].number).toBe(3);
+    expect(out['lab-3'].kind).toBeUndefined();
+  });
+
+  it('writes no number for a readings folder', async () => {
+    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
+    const out = await addRelease(gh, f, 'readings/week_3');
+    const [key] = Object.keys(out).filter((k) => k !== 'lab-2');
+    expect(key).toMatch(/^readings/);
+    expect(out[key]).not.toHaveProperty('number');
+  });
+});
+
 describe('Save on the schedule’s new assignment entry', () => {
   async function addEntry(gh: FakeGitHub, f: StaticFiles) {
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026' })} />);

@@ -83,6 +83,8 @@ export interface Release {
 
 export interface Assignment {
   slug: string;
+  /** The entry's own number (decision 0020); null: it has none. Absent in an older status. */
+  number?: number | null;
   title: string;
   template: string;
   state: AssignmentState;

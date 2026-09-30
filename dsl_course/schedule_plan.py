@@ -13,7 +13,10 @@ from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from . import schedule
+from . import policy, schedule
+from .faults import ConfigFault
+from .gh_contents import line_of
+from .log import Summary, log_err
 from .materials import (
     DEFAULT_KIND,
     DEFAULT_SYLLABUS,
@@ -24,9 +27,9 @@ from .materials import (
 )
 from .schedule import label_number
 
-# A source repo -> its `materials.yml` folder aliases. The caller reads them; the plan
-# stays pure.
-Aliases = Callable[[str], Mapping[str, str]]
+# A source repo -> its `materials.yml` folder aliases (None: the file does not parse).
+# The caller reads them; the plan stays pure.
+Aliases = Callable[[str], Mapping[str, str] | None]
 
 
 def _no_aliases(_repo: str) -> Mapping[str, str]:
@@ -128,41 +131,236 @@ class SiteRow:
     readings: list[PlannedRow] = field(default_factory=list)
 
 
-def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
-    """The rows the site shows, in date order (decision 0013).
+def own_number(number: int | None, key: str) -> int | None:
+    """An entry's number (decision 0020): its `number:`, else the number its label or key
+    carries (`lecture_03`, `assignment-3`: the instructor typed it). Never a position."""
+    return number or label_number(key)
 
-    - A shown row's number: the entry's `number:`, else its label's number, else its
-      position among the shown rows of its kind. The syllabus reads the same numbers.
+
+def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
+    """The rows the site shows, in date order (decisions 0013, 0020).
+
+    - A shown row's number: `own_number`, else none (the row says "Lecture" alone).
+      Re-dating, hiding or adding an entry moves nobody's number. The syllabus reads the
+      same numbers.
     - A `readings` entry with a number (`number:`, else its label's, `readings_03`)
       joins the shown lecture with that number. Nothing is inferred from dates: any
       other readings entry, or one whose number no lecture carries, is its own row.
     - A silent (`show_on_site: false`) entry is no row, unless it is readings: an
       unjoined one is a row of the Readings tab, unnumbered."""
-
-    def own_number(r: PlannedRow) -> int | None:
-        return r.number or label_number(r.key)
-
     lecture_numbers: dict[int, str] = {}
-    position = 0
     for r in rows:
-        if r.shown and r.kind == "lecture":
-            position += 1
-            lecture_numbers.setdefault(own_number(r) or position, r.key)
+        if r.shown and r.kind == "lecture" and (n := own_number(r.number, r.key)):
+            lecture_numbers.setdefault(n, r.key)
     attached: dict[str, list[PlannedRow]] = {}
     own = []
     for r in rows:
-        if r.kind == "readings" and (host := lecture_numbers.get(own_number(r))):
+        n = own_number(r.number, r.key)
+        if r.kind == "readings" and n and (host := lecture_numbers.get(n)):
             attached.setdefault(host, []).append(r)
         elif r.shown or r.kind == "readings":
             own.append(r)
-    out, counts = [], {}
-    for r in own:
-        number = None
-        if r.shown:
-            counts[r.kind] = counts.get(r.kind, 0) + 1
-            number = own_number(r) or counts[r.kind]
-        out.append(SiteRow(r, number, attached.get(r.key, [])))
+    return [
+        SiteRow(
+            r,
+            own_number(r.number, r.key) if r.shown else None,
+            attached.get(r.key, []),
+        )
+        for r in own
+    ]
+
+
+# ------------------------------------------------------------------ explicit numbers
+# Decision 0020: a number is explicit. An entry of a numbered kind with none is a problem,
+# and its release or hand-out is refused with this sentence, on every path.
+NOT_NUMBERED = "NOT_NUMBERED"
+
+
+def give_a_number(key: str) -> str:
+    """The one sentence an entry with no number earns, wherever it is refused."""
+    return f"Give {key} a number first."
+
+
+def needs_number(release: schedule.Release, kind: str) -> bool:
+    """Whether a `releases:` entry must carry a number: every row the site shows, except
+    readings - a readings number means "join that lecture" (decision 0013 rule 3), so a
+    stand-alone readings row is rightly unnumbered."""
+    return release.show_on_site and kind != "readings"
+
+
+def kind_unknown(release: schedule.Release, aliases: Aliases = _no_aliases) -> bool:
+    """Whether `release`'s kind is only inferred, from a repo whose `materials.yml` does
+    not parse: the kind is a guess, so no number is required of it on its strength."""
+    return (
+        not release.kind
+        and bool(release.deploy)
+        and aliases(release.deploy[0].course_source_repo) is None
+    )
+
+
+def _first_fire(release: schedule.Release) -> datetime | None:
+    """The earliest moment any copy of `release` ships: its own `deploy_datetime`, else
+    the entry's `event_datetime`."""
+    moments = [d.deploy_datetime or release.when for d in release.deploy]
+    return min((m for m in moments if m is not None), default=release.when)
+
+
+@dataclass(frozen=True)
+class Unnumbered:
+    """An entry of a numbered kind with no number: `block` is `releases` or
+    `assignments`, `fires` the release or hand-out it holds up (None: none is dated),
+    `line` the schedule.yml line to fix."""
+
+    block: str
+    key: str
+    kind: str
+    fires: datetime | None
+    line: int | None
+    copies: bool = True  # False: a release row with nothing to copy
+
+
+def unnumbered(
+    sched: schedule.Schedule, aliases: Aliases = _no_aliases
+) -> list[Unnumbered]:
+    """Every entry that needs a number and has none, releases first, in plan order. A
+    release whose kind is unknown (`kind_unknown`) needs none until it is known."""
+    out = []
+    for r in sched.releases:
+        kind, _ = entry_kind(r, aliases)
+        if kind_unknown(r, aliases):
+            continue
+        if needs_number(r, kind) and own_number(r.number, r.label) is None:
+            out.append(
+                Unnumbered(
+                    "releases",
+                    r.label,
+                    kind,
+                    _first_fire(r),
+                    line_of(r.lines, "number"),
+                    bool(r.deploy),
+                )
+            )
+    for key, entry in sched.assignments.items():
+        if own_number(entry.number, key) is None:
+            out.append(
+                Unnumbered(
+                    "assignments",
+                    key,
+                    "assignment",
+                    entry.handout_datetime,
+                    line_of(entry.lines, "number"),
+                )
+            )
     return out
+
+
+def duplicate_numbers(
+    sched: schedule.Schedule, aliases: Aliases = _no_aliases
+) -> list[tuple[str, int, list[str]]]:
+    """`(kind, number, keys)` for every number two or more entries of one kind share."""
+    groups: dict[tuple[str, int], list[str]] = {}
+    for r in sched.releases:
+        kind, _ = entry_kind(r, aliases)
+        if kind_unknown(r, aliases):
+            continue
+        if needs_number(r, kind) and (n := own_number(r.number, r.label)):
+            groups.setdefault((kind, n), []).append(r.label)
+    for key, entry in sched.assignments.items():
+        if n := own_number(entry.number, key):
+            groups.setdefault(("assignment", n), []).append(key)
+    return [(kind, n, keys) for (kind, n), keys in groups.items() if len(keys) > 1]
+
+
+def kind_plural(kind: str) -> str:
+    """`lectures`, `labs`, `assignments`: the kind's label, as a plural noun."""
+    label = next((k["label"] for k in policy.kinds() if k["key"] == kind), kind)
+    return f"{label.lower()}s"
+
+
+def duplicate_text(kind: str, n: int, keys: list[str]) -> str:
+    """ "Two lectures are numbered 3: lecture-a, lecture-b"."""
+    count = {2: "Two", 3: "Three"}.get(len(keys), str(len(keys)))
+    return f"{count} {kind_plural(kind)} are numbered {n}: {', '.join(keys)}"
+
+
+def number_faults(
+    sched: schedule.Schedule, aliases: Aliases = _no_aliases
+) -> list[ConfigFault]:
+    """One fault per entry with no number, for the schedule.yml digest: on the clock of
+    the release or hand-out it stops, like a source that is not found."""
+    out = []
+    for m in unnumbered(sched, aliases):
+        if m.block == "assignments":
+            cost = "the hand out is skipped until it has one"
+        elif m.copies:
+            cost = "the release is skipped until it has one"
+        else:
+            cost = "its row on the site has no number until it has one"
+        out.append(
+            ConfigFault(
+                f"{m.block}.{m.key}",
+                f"{m.key} has no number",
+                fires=m.fires if m.block == "assignments" or m.copies else None,
+                field="number",
+                lineno=m.line,
+                file=schedule.SCHEDULE_PATH,
+                fix_text="give the entry a `number:`",
+                consequence=cost,
+                noun=("entry without a number", "entries without a number"),
+                plain=f"Give {m.key} a number.",
+            )
+        )
+    return out
+
+
+def refuse_unnumbered(text: str) -> Summary:
+    """A manual run's refusal of an entry with no number: `text` is `give_a_number`'s,
+    which names a schedule key and nobody."""
+    log_err(text)
+    return Summary(text, reasons=[{"code": NOT_NUMBERED, "text": text}], code=1)
+
+
+def unnumbered_assignment(
+    sched: schedule.Schedule, template: str, slug: str = ""
+) -> str | None:
+    """The refusal for a manual run on the assignment entry `template` hands out (the
+    entry `slug`, when given) when that entry has no number; None when it has one. With
+    no slug and two entries citing `template`, which one is meant is not known: None, and
+    `schedule.resolve_target` refuses the run, naming the remedy."""
+    entries = schedule.entries_for_repo(sched, template)
+    if slug:
+        entries = [(key, entry) for key, entry in entries if key == slug]
+    elif len(entries) > 1:
+        return None
+    for key, entry in entries:
+        if own_number(entry.number, key) is None:
+            return give_a_number(key)
+    return None
+
+
+def unnumbered_release(
+    sched: schedule.Schedule,
+    repo: str,
+    paths: Iterable[str],
+    aliases: Aliases = _no_aliases,
+) -> str | None:
+    """The refusal for a manual release of `paths` from `repo` that a numbered entry of
+    the plan copies, itself or inside a requested folder, and that entry has no number;
+    None otherwise (an entry with a number, or a copy the plan does not name)."""
+    wanted = {p.strip("/") for p in paths}
+    held = {m.key for m in unnumbered(sched, aliases) if m.block == "releases"}
+
+    def asked(path: str) -> bool:
+        path = path.strip("/")
+        return any(not w or path == w or path.startswith(f"{w}/") for w in wanted)
+
+    for r in sched.releases:
+        if r.label in held and any(
+            d.course_source_repo == repo and asked(d.course_source_path)
+            for d in r.deploy
+        ):
+            return give_a_number(r.label)
+    return None
 
 
 def declared_syllabus(

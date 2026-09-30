@@ -24,6 +24,8 @@ export interface ReleaseDraft {
   kind: 'releases';
   id: string;
   type: string;
+  /** The row's number (decision 0020). Undefined until proposed; '' while the box is empty. */
+  number?: number | '';
   title: string;
   date: string;
   time: string;
@@ -37,7 +39,7 @@ export interface AssignmentDraft {
   kind: 'assignments';
   id: string;
   template: string;
-  /** A new entry's number: its key is `assignment-<number>`. Undefined until proposed; '' while the box is empty. */
+  /** Its number (decision 0020); a new entry's key is `assignment-<number>`. Undefined until proposed; '' while the box is empty. */
   number?: number | '';
   title: string;
   manual: boolean;
@@ -135,6 +137,7 @@ export function readDraft(doc: Raw, key: string): Draft | null {
   if (!b) return null;
   const e = obj(obj(doc[b])[key]);
   const common = { id: key, title: s(e.title), details: s(e.details), show: e.show_on_site !== false, tbc: e.tbc === true };
+  const number = entryNumber(key, e) ?? '';
   if (b === 'releases') {
     const [date, time] = splitWhen(e.event_datetime);
     const deploys = (Array.isArray(e.deploy) ? e.deploy : []).map((d: unknown) => {
@@ -142,14 +145,14 @@ export function readDraft(doc: Raw, key: string): Draft | null {
       const [atDate, atTime] = splitWhen(x.deploy_datetime);
       return { repo: s(x.course_source_repo), folder: s(x.course_source_path), dest: s(x.semester_dest_repo), path: s(x.semester_dest_path), diff: !!x.deploy_datetime, atDate, atTime };
     });
-    return { kind: 'releases', ...common, type: s(e.kind), date, time, deploys };
+    return { kind: 'releases', ...common, type: s(e.kind), number, date, time, deploys };
   }
   if (b === 'assignments') {
     const [handoutDate, handoutTime] = splitWhen(e.handout_datetime);
     const [dueDate, dueTime] = splitWhen(e.due_datetime);
     const [solutionDate, solutionTime] = splitWhen(e.solution_datetime);
     return {
-      kind: 'assignments', ...common, template: s(e.course_source_repo), manual: !e.handout_datetime, handoutDate, handoutTime, dueDate, dueTime,
+      kind: 'assignments', ...common, template: s(e.course_source_repo), number, manual: !e.handout_datetime, handoutDate, handoutTime, dueDate, dueTime,
       solutionOn: !!e.solution_datetime, solutionDate, solutionTime,
     };
   }
@@ -168,15 +171,27 @@ function display(raw: Raw, d: { title: string; details: string; show: boolean; t
   return { title: text(d.title), details: text(d.details), show_on_site: keep(raw.show_on_site, d.show, true), tbc: keep(raw.tbc, d.tbc, false) };
 }
 
-/** The entry as it goes into the file, merged over what the file has. */
+/**
+ * The `number:` to write (decision 0020): always on a new entry, and on one that already
+ * spells it; else only when it differs from the number the key carries, so a
+ * label-numbered entry is left as it is written.
+ */
+function numberValue(d: ReleaseDraft | AssignmentDraft, raw: Raw, fresh: boolean): number | undefined {
+  if (d.number === undefined || d.number === '') return undefined;
+  return fresh || 'number' in raw || d.number !== labelNumber(d.id) ? d.number : undefined;
+}
+
+/** The entry as it goes into the file, merged over what the file has (none: a new entry). */
 export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEntry: unknown): Raw {
   const raw = obj(rawEntry);
+  const fresh = rawEntry === undefined;
   if (d.kind === 'releases') {
     const rawDeploys = Array.isArray(raw.deploy) ? raw.deploy : [];
     return {
       ...raw,
       event_datetime: whenOf(raw.event_datetime, d.date, d.time),
       kind: text(d.type),
+      number: numberValue(d, raw, fresh),
       ...display(raw, d),
       deploy: d.deploys.length
         ? d.deploys.map((dp, i) => {
@@ -196,7 +211,7 @@ export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEn
       // late cutoff are assignments.yml's. None is written here, and a retired key the
       // file still carries is left exactly as it is: the engine faults it and the
       // migration moves it.
-      ...raw, ...display(raw, d), title: raw.title, course_source_repo: d.template,
+      ...raw, ...display(raw, d), title: raw.title, course_source_repo: d.template, number: numberValue(d, raw, fresh),
       handout_datetime: d.manual ? undefined : whenOf(raw.handout_datetime, d.handoutDate, d.handoutTime),
       due_datetime: whenOf(raw.due_datetime, d.dueDate, d.dueTime),
       solution_datetime: d.solutionOn && !d.manual ? whenOf(raw.solution_datetime, d.solutionDate, d.solutionTime) : undefined,
@@ -233,7 +248,7 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
     });
     return;
   }
-  y.assign([d.kind, d.id], entryValue(d, obj(obj(doc[d.kind])[d.id])));
+  y.assign([d.kind, d.id], entryValue(d, obj(doc[d.kind])[d.id]));
 }
 
 /** A fresh id in `block`: `lecture-6`, `lab-4`, `assignment-2`, `midterm-exam`. */
@@ -258,23 +273,50 @@ function takenKeys(doc: Raw): Set<string> {
 /** The key of a new assignment entry numbered `n` (decision 0014: the ordinal is the schedule's). */
 export const assignmentKey = (n: number | '' | undefined) => `assignment-${n === undefined || n === '' ? 'N' : n}`;
 
+/** The number an entry carries (decision 0020): its `number:`, else its key's own (`lecture_03`). Never a position. */
+export function entryNumber(key: string, entry: unknown): number | null {
+  const n = obj(entry).number;
+  return Number.isInteger(n) && (n as number) > 0 ? (n as number) : labelNumber(key);
+}
+
+/** A `releases:` entry's kind as the file spells it; the engine's inferred kind is the caller's. */
+export type KindOf = (key: string, entry: unknown) => string;
+const spelledKind: KindOf = (_key, entry) => s(obj(entry).kind) || 'lecture';
+
 /**
- * The number to propose for a new assignment entry: one more than the highest number an entry
- * carries (its `number:`, else its key's own number; a key without one adds nothing), stepped
- * past a key already taken. The engine numbers an entry the same way, so this is the number
- * students see.
+ * Whether an entry must carry a number (decision 0020): every assignment, and every release
+ * row the site shows except readings, where a number joins that lecture.
  */
-export function nextAssignmentNumber(doc: Raw): number {
+export function needsNumber(d: ReleaseDraft | AssignmentDraft, kind: string): boolean {
+  return d.kind === 'assignments' || (d.show && kind !== 'readings');
+}
+
+/**
+ * The number to propose for a new entry of `kind`: one more than the highest number an entry
+ * of that kind carries (its `number:`, else its key's own number; one without adds nothing).
+ * For an assignment, stepped past a key already taken, since its key is `assignment-<n>`.
+ */
+export function nextNumber(doc: Raw, kind: string, kindOf: KindOf = spelledKind): number {
+  if (kind !== 'assignment') {
+    const nums = Object.entries(obj(doc.releases)).filter(([k, e]) => kindOf(k, e) === kind).map(([k, e]) => entryNumber(k, e) ?? 0);
+    return 1 + Math.max(0, ...nums);
+  }
   const taken = takenKeys(doc);
-  const nums = Object.entries(obj(doc.assignments)).flatMap(([key, e]) => [obj(e).number, labelNumber(key)]);
-  let n = 1 + Math.max(0, ...nums.filter((x): x is number => Number.isInteger(x) && (x as number) > 0));
+  let n = 1 + Math.max(0, ...Object.entries(obj(doc.assignments)).map(([k, e]) => entryNumber(k, e) ?? 0));
   while (taken.has(assignmentKey(n))) n++;
   return n;
 }
 
-/** A new assignment draft with its number proposed, when it has none yet; any other draft as it is. */
-export function withNumber<T extends Draft>(d: T, doc: Raw): T {
-  return d.kind === 'assignments' && !d.id && d.number === undefined ? { ...d, number: nextAssignmentNumber(doc) } : d;
+/**
+ * A new entry's draft with its number proposed, when it needs one and has none yet; any other
+ * draft as it is. `kind` is a release's kind as the engine will read it (its own, else the one
+ * inferred from its folder). A new readings entry carries no number: one would join a lecture.
+ */
+export function withNumber<T extends Draft>(d: T, doc: Raw, kindOf: KindOf = spelledKind, kind?: string): T {
+  if ((d.kind !== 'assignments' && d.kind !== 'releases') || d.id) return d;
+  const k = d.kind === 'assignments' ? 'assignment' : kind || d.type || 'lecture';
+  if (k === 'readings') return d.number === undefined ? d : { ...d, number: undefined };
+  return d.number !== undefined ? d : { ...d, number: nextNumber(doc, k, kindOf) };
 }
 
 export function blankDraft(type: string, defaults: { repo: string }): ReleaseDraft | AssignmentDraft | EventDraft {
@@ -295,8 +337,15 @@ function moment(when: string, endOfDay = false): string {
  * What is wrong with a draft, by field; empty when it can be saved. `cutoff` is an assignment's
  * late cutoff as `cutoffOf` gives it: a solution shown before it is refused, as the engine does.
  */
-export function draftErrors(d: Draft, others?: { templateUsers?: (template: string) => number; doc?: Raw }, cutoff?: string | null): Record<string, string> {
+export function draftErrors(d: Draft, others?: { templateUsers?: (template: string) => number; doc?: Raw; kind?: string }, cutoff?: string | null): Record<string, string> {
   const e: Record<string, string> = {};
+  if (d.kind === 'releases' || d.kind === 'assignments') {
+    const kind = d.kind === 'assignments' ? 'assignment' : others?.kind ?? (d.type || 'lecture');
+    if (d.number === '' || d.number === undefined) {
+      if (needsNumber(d, kind)) e.number = 'A number is needed.';
+    } else if (!(Number.isInteger(d.number) && d.number >= 1 && d.number <= 999)) e.number = 'A whole number from 1 to 999.';
+    else if (d.kind === 'assignments' && !d.id && others?.doc && takenKeys(others.doc).has(assignmentKey(d.number))) e.number = `${assignmentKey(d.number)} is already in this schedule.`;
+  }
   if (d.kind === 'releases') {
     if (!d.date) e.date = 'When is needed.';
     d.deploys.forEach((dp, i) => {
@@ -306,10 +355,6 @@ export function draftErrors(d: Draft, others?: { templateUsers?: (template: stri
     });
   } else if (d.kind === 'assignments') {
     if (!d.template) e.template = 'Choose the template.';
-    if (!d.id && d.number !== undefined) {
-      if (!(Number.isInteger(d.number) && (d.number as number) >= 1 && (d.number as number) <= 999)) e.number = 'A whole number from 1 to 999.';
-      else if (others?.doc && takenKeys(others.doc).has(assignmentKey(d.number))) e.number = `${assignmentKey(d.number)} is already in this schedule.`;
-    }
     if (!d.dueDate) e.due = 'Due is needed.';
     if (!d.manual && !d.handoutDate) e.handout = 'Give the hand out date, or choose to hand out manually.';
     const h = joinWhen(d.handoutDate, d.handoutTime) ?? '';

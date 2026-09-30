@@ -97,7 +97,7 @@ export function ordinalInName(name: unknown): boolean {
 }
 
 export const ORDINAL_WARNING =
-  "Numbers are added automatically when an assignment joins a semester's schedule: the third assignment becomes assignment-3, and each student's copy assignment-3-<handle>. Keep the number in the name anyway?";
+  "The number is set when the assignment joins a semester's schedule: an assignment numbered 3 becomes assignment-3, and each student's copy assignment-3-<handle>. Keep the number in the name anyway?";
 
 /** A semester key's order: newest first (f2026 before s2026 before f2025). */
 const termRank = (term: string) => {

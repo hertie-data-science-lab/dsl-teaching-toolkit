@@ -161,8 +161,12 @@ assignments:
   assignment-1: # this is the name students will see
     course_source_repo: assignment-linear-regression  # required: the template it hands out from
     due_datetime: 2026-10-13          # the due date students see
-    number: 1                         # optional: the key's own number, else its place by due date
+    number: 1                         # the number students see; without it, the key's own
 ```
+
+- **The number** ("Assignment 1") is `number:`, else the number in the key (`assignment-1`). It is
+  never counted from the dates. An entry with neither is a problem, and it is not handed out
+  until you give it one. The console fills in the next number when you add an entry.
 
 - **The date students see** (semester site + the brief's "due" event) is `assignments[slug].due_datetime`
   (23:59 that day). Edit → commit to `main` - **Sync site** fires automatically on the push.

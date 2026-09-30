@@ -135,6 +135,7 @@ from .repos import (
     set_visibility,
     topic_name,
 )
+from .schedule_plan import refuse_unnumbered, unnumbered_assignment
 from .workflows_place import NEVER_IN_STUDENT_REPOS
 
 # Fire-once sentinel for the SCHEDULED solution push, in semester-config. Needed because
@@ -1299,7 +1300,12 @@ def main() -> int:
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
+        sched = schedule.load(args.semester_org)
         if args.patch_path:
+            # Decision 0020 rule 3: an entry with no number is refused, as on hand out.
+            refusal = unnumbered_assignment(sched, args.template, args.assignment)
+            if refusal:
+                return refuse_unnumbered(refusal)
             return patch_released(
                 args.course_org,
                 args.template,
@@ -1312,14 +1318,16 @@ def main() -> int:
         # A manual hand out needs the schedule entry the plan numbers and dates the
         # assignment by (decision 0014): refused here with the console's sentence, before
         # anything is read or recorded.
-        if not schedule.entries_for_repo(
-            schedule.load(args.semester_org), args.template
-        ):
+        if not schedule.entries_for_repo(sched, args.template):
             text = schedule.not_scheduled(args.template)
             log_err(text)
             return Summary(
                 text, reasons=[{"code": NOT_SCHEDULED, "text": text}], code=1
             )
+        # ... and a number (decision 0020 rule 3), refused the same way.
+        refusal = unnumbered_assignment(sched, args.template)
+        if refusal:
+            return refuse_unnumbered(refusal)
         if when == SOLUTION_NOW and not args.preview:
             refused = preview_first(args.semester_org, args.template, preview=False)
             if refused is not None:

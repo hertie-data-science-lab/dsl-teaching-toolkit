@@ -4,7 +4,7 @@ import { useState } from 'preact/hooks';
 import {
   ASSIGNMENT_WORD, TYPE_CLASS, TYPE_LABEL, addDays, ago, assignmentTitle, daysBetween, fmtDate, fmtDay, fmtDays, fmtShort, fmtTime, fmtWhen, releaseIdent,
 } from '../model/format';
-import { inWeeks, parseSchedule, scheduleRows, weekOf, type Row, type Schedule, type Term, type WeekKey, termOf } from '../model/schedule';
+import { inWeeks, needsANumber, parseSchedule, scheduleRows, weekOf, type Row, type Schedule, type Term, type WeekKey, termOf } from '../model/schedule';
 import type { Assignment, Problem, Status } from '../model/types';
 import { checkAccess, releaseEarly, type ReleaseRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
@@ -187,8 +187,8 @@ function Timeline({ rows, term, tz, year }: { rows: Row[]; term: Term; tz: strin
 }
 
 /** A release as an operation names it; null while there is nothing to release (no deploy block, so no source). */
-export function releaseRef(r: Release, all: Release[], tz: string, year: number): ReleaseRef | null {
-  return r.source ? { id: r.id, ident: releaseIdent(r, all), title: r.title, when: fmtWhen(r.when, tz, year), source: r.source } : null;
+export function releaseRef(r: Release, tz: string, year: number): ReleaseRef | null {
+  return r.source ? { id: r.id, ident: releaseIdent(r), title: r.title, when: fmtWhen(r.when, tz, year), source: r.source } : null;
 }
 
 /** The line a release with no deploy block shows instead of its actions. */
@@ -199,9 +199,9 @@ function RowItem({ r, status, p }: { r: Row; status: Status; p: CohortProps }) {
   let chip = TYPE_LABEL[r.type] ?? r.type, cls = TYPE_CLASS[r.type] ?? 'evt', detail = '', buttons = null;
   if (r.block === 'releases') {
     const rel = releases.find((x) => x.id === r.entry);
-    const ref = rel && r.when ? releaseRef(rel, releases, tz, Number(r.when.slice(0, 4))) : null;
+    const ref = rel && r.when ? releaseRef(rel, tz, Number(r.when.slice(0, 4))) : null;
     chip = 'Release';
-    detail = rel && !rel.source ? `${NOTHING_TO_RELEASE}.` : rel?.state === 'will_be_skipped' ? 'Will be skipped: its folder was not found.' : rel?.state === 'released' ? 'Released.' : 'Goes to students at its time; the site row goes live.';
+    detail = rel && !rel.source ? `${NOTHING_TO_RELEASE}.` : rel?.state === 'will_be_skipped' ? (needsANumber(status, rel.id) ? 'Will be skipped: it has no number.' : 'Will be skipped: its folder was not found.') : rel?.state === 'released' ? 'Released.' : 'Goes to students at its time; the site row goes live.';
     buttons = (
       <>
         {ref && rel?.state === 'planned' ? <OpButtons def={releaseEarly(cohortScope(p), ref)} small label={`Release ${r.ident} early`} /> : null}
@@ -399,7 +399,7 @@ function Overview(p: ReadyProps) {
           <section class="panel section">
             <div class="section-head"><h2>{name}</h2>{selected.length === 1 ? <span class="meta">{fmtDay(weekStart(term, selected[0]), tz).replace(/ \w+$/, '')} to {fmtDay(addDays(weekStart(term, selected[0]), 6), tz, year)}</span> : null}</div>
             <WeekRows status={status} p={p} rows={rows} term={term} selected={selected} name={name} />
-            <p class="overdue">{late.length ? `${late.length} release${late.length > 1 ? 's are' : ' is'} late: ${late.map((r) => releaseIdent(r, status.releases ?? [])).join(', ')}.` : 'Nothing overdue.'}</p>
+            <p class="overdue">{late.length ? `${late.length} release${late.length > 1 ? 's are' : ' is'} late: ${late.map((r) => releaseIdent(r)).join(', ')}.` : 'Nothing overdue.'}</p>
           </section>
           <section class="panel section">
             <div class="section-head"><h2>Assignments</h2><a class="btn small quiet" href="#assignments">All assignments</a></div>

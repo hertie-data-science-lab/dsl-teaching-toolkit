@@ -109,7 +109,10 @@ def build(course_org: str, semester_org: str) -> tuple[str, int]:
     for sr in lectures:
         row = sr.row
         out += [
-            f"### Session {sr.number}{f': {row.subtitle}' if row.subtitle else ''}",
+            (
+                f"### Session{f' {sr.number}' if sr.number else ''}"
+                f"{f': {row.subtitle}' if row.subtitle else ''}"
+            ),
             "",
         ]
         if row.details:

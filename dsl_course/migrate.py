@@ -90,6 +90,7 @@ from .discovery import (
 )
 from .faults import NOT_MIGRATED, NotMigrated
 from .gh_contents import (
+    LINES,
     blob_sha,
     get_file_content,
     load_yaml_lines,
@@ -106,7 +107,7 @@ from .grades import (
     team_lock_content,
 )
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
-from .materials import MATERIALS_TOPIC, is_materials_repo
+from .materials import MATERIALS_TOPIC, is_materials_repo, kinds_reader
 from .opencourse import OPENCOURSE_FILE, READINGS_MODES, OpenCourse
 from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
@@ -117,7 +118,15 @@ from .repos import (
     set_repo_topics,
 )
 from .scaffold import materials_system_files
-from .schedule_plan import label_number, offplan_folders
+from .schedule_plan import (
+    Aliases,
+    entry_kind,
+    label_number,
+    needs_number,
+    offplan_folders,
+    own_number,
+    planned_rows,
+)
 from .setting_readers import RENAMED_SETTINGS, read_settings
 from .settings import ASSIGNMENT_DEFAULTS_KEY, RUN_KEYS
 from .sync_faculty import retired_course_faults
@@ -861,6 +870,19 @@ def seeded_wording(ref: str) -> dict[str, str]:
             "# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the SEMESTER "
             "sites, link ONLY"
         ),
+        # The old pointer at the retired `publish.yml` (decision 0016), in both of the
+        # spellings a live course carries: it names `opencourse.yml` now.
+        **dict.fromkeys(
+            (
+                f"#   # WHICH of those files the {word} site hosts publicly, so an HTML "
+                "deck opens rendered"
+                for word in ("cohort", "semester")
+            ),
+            "#   # WHICH files the public website shows, and how, is `opencourse.yml` "
+            "beside this",
+        ),
+        "#   # instead of showing as source, is `publish.yml` in the materials repo - "
+        "not here.": "#   # file - not here.",
         "# `course_name`, `course_code` and `course_description` are what reach the "
         "cohort": (
             "# `course_name`, `course_code` and `course_description` are what reach the "
@@ -1095,6 +1117,86 @@ def proposed_entries(
 # `{org: {repo name: listing row}}`: each org is listed once, and listed again only after
 # a step has written (`_forget`) - a rename or a topic changes what the listing says.
 _LISTINGS: dict[str, dict[str, dict]] = {}
+
+
+# ------------------------------------------------------------------ explicit numbers
+# Decision 0020 rule 6: a number is explicit, so every entry whose number was its POSITION
+# gets that number written as `number:`, and nothing a student sees moves. Entries whose
+# label carries the number are left alone.
+NUMBERS_COMMIT = "migrate: explicit numbers"
+
+
+def position_numbers(
+    sched: schedule.Schedule, aliases: Aliases
+) -> dict[tuple[str, str], int]:
+    """`{(block, key): n}` for every entry the engine before decision 0020 numbered by its
+    position, with that number: a shown release row of a numbered kind among the shown
+    rows of its kind in date order, and an assignment among the plan's by due date.
+    A readings row is not stamped: a number there joins it to that lecture."""
+    out: dict[tuple[str, str], int] = {}
+    rows = planned_rows(sched, aliases)
+    lectures: set[int] = set()
+    position = 0
+    for r in rows:
+        if r.shown and r.kind == "lecture":
+            position += 1
+            lectures.add(own_number(r.number, r.key) or position)
+    counts: dict[str, int] = {}
+    for r in rows:
+        n = own_number(r.number, r.key)
+        if not r.shown or (r.kind == "readings" and n in lectures):
+            continue  # silent, or readings joined to a lecture: no row of its own
+        counts[r.kind] = counts.get(r.kind, 0) + 1
+        if n is None and r.kind != "readings":
+            out["releases", r.key] = counts[r.kind]
+    by_due = sorted(sched.assignments.items(), key=lambda kv: kv[1].due_datetime)
+    for position, (key, entry) in enumerate(by_due, start=1):
+        if own_number(entry.number, key) is None:
+            out["assignments", key] = position
+    return out
+
+
+def undated_unnumbered(sched: schedule.Schedule, aliases: Aliases) -> list[str]:
+    """The shown `releases:` keys of a numbered kind that are undated (`tbc`) and carry
+    no number: no position numbered them, so there is nothing to stamp, and each will be a
+    problem until it is dated and numbered."""
+    return [
+        r.label
+        for r in sched.releases
+        if r.when is None
+        and needs_number(r, entry_kind(r, aliases)[0])
+        and own_number(r.number, r.label) is None
+    ]
+
+
+def stamp_numbers(
+    text: str, stamps: dict[tuple[str, str], int]
+) -> tuple[str, dict[str, str]]:
+    """`text` with `number: <n>` written as the first key of each stamped entry, at its
+    own indent - every other line, comment and order kept - and `{key: why}` for each
+    entry it could not stamp (empty, or written as a flow mapping), for a person to fix
+    by hand."""
+    meta = load_yaml_lines(text) or {}
+    lines = text.splitlines(keepends=True)
+    inserts: list[tuple[int, str]] = []
+    declined: dict[str, str] = {}
+    for (block, key), n in stamps.items():
+        mapping = meta.get(block) if isinstance(meta, dict) else None
+        entry = mapping.get(key) if isinstance(mapping, dict) else None
+        at = (mapping or {}).get(LINES, {}).get(key)
+        own = entry.get(LINES, {}) if isinstance(entry, dict) else {}
+        children = [line for k, line in own.items() if k]
+        if not at or not children or min(children) <= at:
+            empty = entry is None or (isinstance(entry, dict) and not children)
+            declined[key] = "empty" if empty else "written as a flow mapping"
+            continue
+        first = lines[min(children) - 1]
+        indent = first[: len(first) - len(first.lstrip())]
+        eol = "\r\n" if lines[at - 1].endswith("\r\n") else "\n"
+        inserts.append((at, f"{indent}number: {n}{eol}"))
+    for at, line in sorted(inserts, reverse=True):
+        lines.insert(at, line)
+    return "".join(lines), declined
 
 
 def _listing(org: str) -> dict[str, dict]:
@@ -2350,6 +2452,60 @@ class Semester:
             and _schedule_clean(text, instance)
         )
 
+    # explicit numbers --------------------------------------------------------
+    def numbers_work(
+        self,
+    ) -> tuple[str | None, str | None, dict, dict[str, str], list[str]]:
+        """`(schedule.yml now, as this step leaves it, {(block, key): n}, declined,
+        undated)`, over the schedule as the keys step leaves it."""
+        text, keyed = self.keys_text()
+        if keyed is None:
+            return text, None, {}, {}, []
+        sched = schedule.parse(
+            load_yaml_lines(keyed) or {}, settings.parse_instance(self.instance_text())
+        )
+        aliases = kinds_reader(self.course)
+        stamps = position_numbers(sched, aliases)
+        new, declined = stamp_numbers(keyed, stamps)
+        return text, new, stamps, declined, undated_unnumbered(sched, aliases)
+
+    def numbers_done(self) -> bool:
+        return self.keys_done() and not self.numbers_work()[2]
+
+    def numbers_plan(self) -> list[str]:
+        _, _, stamps, declined, undated = self.numbers_work()
+        return [
+            (
+                f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: write `number:` on each entry "
+                f"numbered by its position, with the number it shows today"
+            ),
+            *(f"  {key}: {n}" for (_, key), n in stamps.items()),
+            *(
+                f"  {key}: {why} - add `number:` by hand"
+                for key, why in declined.items()
+            ),
+            *(
+                f"  {key}: undated: will show as a problem until dated and numbered"
+                for key in undated
+            ),
+        ]
+
+    def numbers(self) -> bool:
+        text, new, _, declined, _ = self.numbers_work()
+        for key in declined:
+            log_err(f"{schedule.SCHEDULE_PATH} {key}: add `number:` by hand")
+        if not self.keys_done() or text is None or new is None:
+            return False
+        if new != text and not move_files(
+            self.org,
+            self.config(),
+            {},
+            NUMBERS_COMMIT,
+            files={schedule.SCHEDULE_PATH: new.encode()},
+        ):
+            return False
+        return not declined
+
     # proposed releases -------------------------------------------------------
     def offplan(self) -> list[tuple[str, str, str]]:
         """`(repo, folder, kind)` for each folder of the semester's release repos that no
@@ -2522,6 +2678,17 @@ class Semester:
                 rollback=(
                     f"git revert the '{KEYS_COMMIT}' commit in {repo} (it holds "
                     f"{schedule.SCHEDULE_PATH} and {ASSIGNMENTS_FILE})"
+                ),
+            ),
+            Step(
+                "explicit numbers",
+                done=self.numbers_done,
+                plan=self.numbers_plan,
+                do=self.numbers,
+                verify=self.numbers_done,
+                rollback=(
+                    f"git revert the '{NUMBERS_COMMIT}' commit in {repo} (it holds "
+                    f"only {schedule.SCHEDULE_PATH})"
                 ),
             ),
             Step(

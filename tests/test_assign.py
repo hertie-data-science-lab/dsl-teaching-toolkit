@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import dataclasses
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
 import yaml
 
 from dsl_course import assign, collect, course, grades, settings, workflows_place
-from dsl_course.schedule import Schedule
+from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER, repo_row
 from tests.plans import citing
 
@@ -266,7 +266,6 @@ def test_an_unusable_solution_branch_does_not_block_provisioning(
     )
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.schedule.load", lambda org: citing(*TEMPLATES))
-    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
     recorded = []
     monkeypatch.setattr(
@@ -301,7 +300,6 @@ def test_a_handout_that_skipped_every_repo_syncs_no_site(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.schedule.load", lambda org: citing(*TEMPLATES))
-    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
     synced: list[tuple] = []
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a: synced.append(a))
 
@@ -338,7 +336,6 @@ def _marker_run(
     monkeypatch.setattr(assign, "provision_one", lambda *a, **k: status)
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.schedule.load", lambda org: citing(*TEMPLATES))
-    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
 
     def sync(*a, **k):
         if site_raises:
@@ -2860,6 +2857,95 @@ def test_the_manual_hand_out_refuses_an_uncited_template_with_the_sentence(
         "Add it to the schedule first."
     )
     assert out.reasons == [{"code": "NOT_SCHEDULED", "text": out.text}]
+
+
+def _unnumbered_project() -> Schedule:
+    return Schedule(
+        assignments={
+            "project": AssignmentEntry(
+                course_source_repo="assignment-trees",
+                due_datetime=datetime(2026, 11, 1, 23, 59, tzinfo=timezone.utc),
+            )
+        }
+    )
+
+
+@pytest.mark.parametrize("patch", [False, True])
+def test_a_manual_run_refuses_an_entry_with_no_number(monkeypatch, patch):
+    # Decision 0020 rule 3: hand out and update every copy refuse an entry with no
+    # number, the way an uncited template is refused.
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: _unnumbered_project())
+
+    def boom(*a, **k):
+        raise AssertionError("an unnumbered entry is never handed out or patched")
+
+    monkeypatch.setattr(assign, "provision_all", boom)
+    monkeypatch.setattr(assign, "patch_released", boom)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["assign", "--course-org", "C", "--course-source-repo", "assignment-trees",
+         "--semester-org", "S", "--no-preview",
+         *(["--patch-path", "README.md"] if patch else [])],
+    )  # fmt: skip
+    out = assign.main()
+    assert out == 1
+    assert out.text == "Give project a number first."
+    assert out.reasons == [{"code": "NOT_NUMBERED", "text": out.text}]
+
+
+def _two_entries_one_numbered() -> Schedule:
+    due = datetime(2026, 11, 1, 23, 59, tzinfo=timezone.utc)
+    return Schedule(
+        assignments={
+            "project": AssignmentEntry(
+                course_source_repo="assignment-trees", due_datetime=due
+            ),
+            "assignment-2": AssignmentEntry(
+                course_source_repo="assignment-trees", due_datetime=due
+            ),
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("argv", "refused"),
+    [
+        (["--patch-path", "README.md", "--assignment", "assignment-2"], False),
+        (["--patch-path", "README.md", "--assignment", "project"], True),
+        # No slug on a hand out: which entry is meant is not known, so the number is
+        # not what refuses it (provision_all refuses a template two entries cite).
+        ([], False),
+    ],
+)
+def test_a_template_cited_twice_is_refused_only_for_the_unnumbered_entry(
+    monkeypatch, argv, refused
+):
+    monkeypatch.setattr(
+        "dsl_course.schedule.load", lambda org: _two_entries_one_numbered()
+    )
+    ran: list = []
+    monkeypatch.setattr(
+        assign, "provision_all", lambda *a, **k: ran.append("hand out") or (1, False)
+    )
+    monkeypatch.setattr(
+        assign, "patch_released", lambda *a, **k: ran.append("patch") or 0
+    )
+    monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["assign", "--course-org", "C", "--course-source-repo", "assignment-trees",
+         "--semester-org", "S", "--no-preview", *argv],
+    )  # fmt: skip
+    out = assign.main()
+    if refused:
+        assert out.reasons == [
+            {"code": "NOT_NUMBERED", "text": "Give project a number first."}
+        ]
+        assert ran == []
+    else:
+        assert len(ran) == 1
 
 
 # ------------------------------------------------- an assignment handed out in the open
