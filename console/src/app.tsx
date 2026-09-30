@@ -46,6 +46,11 @@ import { forgetRendered } from './ui/rendered';
 import { Footer, Sidenav, StudentNav, Topbar } from './ui/shell';
 import { CONFIG_REPO, COURSE_REPO } from './model/names';
 
+/** App-level pages: about no course or semester. */
+const APP_SCREENS = ['home', 'help', 'profile'];
+/** App-level pages that render full width, without the side nav. */
+const FULL_WIDTH = ['help', 'profile'];
+
 export interface AppDeps {
   auth: ConsoleAuth;
   client: GitHubClient;
@@ -86,9 +91,14 @@ export function App({ state: s }: { state: AppState }) {
     };
   }, []);
 
-  const route = parseHash(s.hash.value);
+  // A semester's student screens keep their own `#setup` (Set up); only instructor links rename.
+  // Until discovery answers, a `?semester=` URL is taken as the student screens' (nothing is
+  // rewritten yet); after, only when the person holds a role in that semester.
+  const asked = parseSearch(s.search.value);
+  const studentHash = !!asked.semester && (!s.estate.value || !!studentContext(s.estate.value, asked));
+  const route = parseHash(s.hash.value, studentHash);
   // An old `#teams-<slug>` / `#marks-<slug>` link: show the tab, and write its new hash.
-  const moved = movedHash(s.hash.value);
+  const moved = movedHash(s.hash.value, studentHash);
   useEffect(() => {
     if (moved) {
       replaceHash(moved);
@@ -107,7 +117,7 @@ export function App({ state: s }: { state: AppState }) {
   if (!user) {
     return (
       <>
-        <Topbar user={null} navOpen={false} onMenu={() => {}} />
+        <Topbar user={null} />
         <div class="shell" style="grid-template-columns:minmax(0,1fr)">
           <main>{s.restoring.value ? <Loading what="Signing in" /> : <SignInScreen auth={auth} onSignedIn={s.signedIn} />}</main>
         </div>
@@ -120,7 +130,7 @@ export function App({ state: s }: { state: AppState }) {
   if (!estate) {
     return (
       <>
-        <Topbar user={user} navOpen={false} onMenu={() => {}} onSignOut={s.signOut} />
+        <Topbar user={user} onSignOut={s.signOut} />
         <div class="shell" style="grid-template-columns:minmax(0,1fr)">
           <main>{s.error.value ? <div class="check-line bad"><span>{s.error.value}</span></div> : <Loading what="Finding your courses" />}</main>
         </div>
@@ -137,18 +147,19 @@ export function App({ state: s }: { state: AppState }) {
   if (sel.join) {
     return (
       <EnvCtx.Provider value={s.env(user)}>
-        <Topbar user={user} title="Student view" navOpen={false} onMenu={() => {}} onSignOut={s.signOut} />
+        <Topbar user={user} title="Student view" onSignOut={s.signOut} />
         <div class="shell" style="grid-template-columns:minmax(0,1fr)"><main id="view" tabindex={-1}><ScreenBoundary key={s.search.value}><JoinCourseScreen org={sel.join} /></ScreenBoundary></main></div>
         <Footer />
       </EnvCtx.Provider>
     );
   }
 
-  const stu = studentContext(estate, sel, s.archivedOf);
+  // Profile and Guide are app-level: a semester in the query does not turn them into student screens.
+  const stu = FULL_WIDTH.includes(route.screen) ? null : studentContext(estate, sel, s.archivedOf);
   if (stu?.pending) {
     return (
       <>
-        <Topbar user={user} title={title} navOpen={false} onMenu={() => {}} onSignOut={s.signOut} />
+        <Topbar user={user} title={title} onSignOut={s.signOut} />
         <div class="shell" style="grid-template-columns:minmax(0,1fr)"><main><Loading what="Opening the semester" /></main></div>
         <Footer />
       </>
@@ -180,8 +191,8 @@ export function App({ state: s }: { state: AppState }) {
   // An org still on retired names gets one screen, before anything of it is read. Only the
   // orgs the page is about are checked: a semester only when one of its screens opens.
   const nav = s.search.value + s.hash.value;
-  const aboutCourse = !!ctx.course && !['home', 'help', 'setup'].includes(screen) && wiz?.name !== 'new-course';
-  const semesterPage = !!ctx.cohort && !!ctx.course?.write && !wiz && !['home', 'help', 'setup'].includes(screen) && !(screen in COURSE_SCREENS);
+  const aboutCourse = !!ctx.course && !APP_SCREENS.includes(screen) && wiz?.name !== 'new-course';
+  const semesterPage = !!ctx.cohort && !!ctx.course?.write && !wiz && !APP_SCREENS.includes(screen) && !(screen in COURSE_SCREENS);
   const courseLeft = aboutCourse ? s.leftovers('course', ctx.course!.org, nav) : [];
   const semLeft = semesterPage ? s.leftovers('semester', ctx.cohort!.org, nav) : [];
   const failed = courseLeft === 'failed' ? { what: 'course' as const, org: ctx.course!.org } : semLeft === 'failed' ? { what: 'semester' as const, org: ctx.cohort!.org } : null;
@@ -206,8 +217,13 @@ export function App({ state: s }: { state: AppState }) {
     body = <NewCourseScreen files={s.files} step={wiz.step} />;
   } else if (screen === 'help') {
     body = <HelpScreen />;
-  } else if (screen === 'setup') {
-    body = <SetupScreen org={ctx.course?.org} />;
+  } else if (screen === 'profile') {
+    // The course's repos, for Profile's "Clone every repo" (the `repos` prop lands with WP-S4).
+    const loaded = ctx.course?.write ? s.statuses.course(ctx.course.org).value : undefined;
+    const cs = loaded?.kind === 'ready' ? loaded.status.course : undefined;
+    const repos = cs ? [...cs.materials.map((m) => m.repo), ...cs.templates.map((t) => t.repo)] : undefined;
+    const Profile = SetupScreen as (p: { org?: string; repos?: string[] }) => preact.JSX.Element;
+    body = <Profile org={ctx.course?.org} repos={repos} />;
   } else if (screen === 'home') {
     body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {
@@ -248,19 +264,23 @@ export function App({ state: s }: { state: AppState }) {
     body = (screens[screen] ?? screens.dashboard)();
   }
 
+  // Two levels (decision 0021): Profile and Guide are app-level, full width without the side nav.
+  const appLevel = FULL_WIDTH.includes(screen);
   return (
     <EnvCtx.Provider value={s.env(user)}>
-      <Topbar user={user} title={title} course={ctx.course} cohort={ctx.cohort} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} setup />
-      <div class="shell">
-        <aside class="sidenav" id="sidenav-wrap" aria-label="Console navigation">
-          <Sidenav courses={courses} semesters={semesters} course={ctx.course} cohort={ctx.cohort} cohortStates={cohortStates} current={navKey} problems={problems} />
-        </aside>
+      <Topbar user={user} title={title} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={appLevel ? undefined : s.toggleNav} />
+      <div class="shell" style={appLevel ? 'grid-template-columns:minmax(0,1fr)' : undefined}>
+        {appLevel ? null : (
+          <aside class="sidenav" id="sidenav-wrap" aria-label="Console navigation">
+            <Sidenav courses={courses} semesters={semesters} course={ctx.course} cohort={ctx.cohort} cohortStates={cohortStates} current={navKey} problems={problems} />
+          </aside>
+        )}
         <main id="view" tabindex={-1}>
           {sel.wizard && ctx.course && !wiz ? <p class="note" style="margin-bottom:18px"><a href={`?course=${ctx.course.org}#${sel.wizard}`}>Back to the {sel.wizard.startsWith('new-semester') ? 'New semester' : 'wizard'}</a> when you are done here.</p> : null}
           <ScreenBoundary key={s.search.value + s.hash.value}>{body}</ScreenBoundary>
         </main>
       </div>
-      <Footer course={ctx.course} cohort={ctx.cohort} />
+      {appLevel ? <Footer /> : <Footer course={ctx.course} cohort={ctx.cohort} />}
       <OpPanel />
     </EnvCtx.Provider>
   );

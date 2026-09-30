@@ -628,13 +628,6 @@ input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-sof
 
 /* ================= v3 additions ================= */
 .prop { display: inline-flex; align-items: center; font-family: var(--font-body); font-weight: 600; font-size: 10.5px; line-height: 1.5; letter-spacing: 0.02em; padding: 0 6px; border-radius: 4px; border: 1px dashed var(--rule-strong); color: var(--muted); background: transparent; white-space: nowrap; vertical-align: 0.1em; margin-left: 6px; text-transform: none; }
-.ro-chip { font-family: var(--font-display); font-weight: 700; font-size: 11.5px; padding: 1px 9px; border-radius: 999px; background: rgba(255,255,255,0.18); color: var(--on-brand); border: 1px solid rgba(255,255,255,0.6); white-space: nowrap; }
-.hdr-links { display: flex; gap: 4px; align-items: center; margin-left: 18px; }
-.hdr-links a { color: var(--on-brand); text-decoration: none; font-size: 13.5px; padding: 5px 9px; min-height: 32px; display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; opacity: 0.92; }
-.hdr-links a:hover { background: rgba(255,255,255,0.14); opacity: 1; }
-@media (max-width: 1100px) { .hdr-links { display: none; } }
-.nav-links { display: none; }
-@media (max-width: 1100px) { .nav-links { display: grid; } }
 
 /* switcher: two levels */
 .popmenu .sub-toggle { justify-content: space-between; }
@@ -859,6 +852,15 @@ fieldset.field { border: 0; margin: 0; padding: 0; }
 .invitations { margin-bottom: 18px; }
 .invitations ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
 .invitations li { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+
+/* WP-S1 */
+/* The token form: label, input, hint, button and footnote spaced as on other forms. The form
+   carries the spacing, not .fold-body: the same form also stands alone, outside the fold. */
+.signin form { display: grid; gap: 14px; }
+/* The person in the top bar is the link to Profile; pills are buttons, not underlined links. */
+a.who { color: var(--on-brand); text-decoration: none; border-radius: 999px; padding: 2px 8px 2px 2px; }
+a.who:hover { background: rgba(255,255,255,0.14); }
+a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center; }
 
 /* WP-S4 */
 .folder-check .saved { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
