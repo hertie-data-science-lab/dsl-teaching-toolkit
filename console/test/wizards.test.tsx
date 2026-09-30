@@ -365,7 +365,7 @@ describe('the wizard screens', () => {
     const out = render(<NewAssignmentScreen {...cp()} step={5} />);
     expect(out).toContain('Question 1 of 4');
     expect(out).toContain('Four questions, then a check');
-    expect(out).toContain('The assignment’s title.');
+    expect(out).toContain("The assignment's title.");
     expect(out).toContain('Start from');
     expect(out).toContain('A template of this course');
     expect(out).toContain('A repo the console can read');
@@ -381,7 +381,7 @@ describe('the wizard screens', () => {
       saveDraft(`new-assignment:${COURSE_ORG}`, { v: { ...initialValues(null), name: 'Assignment 3: Regression' }, verified: {} });
       const out = render(<NewAssignmentScreen {...cp()} step={1} />);
       expect(out).toContain('Repo: <code>assignment-3-regression</code>');
-      expect(out).toContain('Numbers are added automatically when an assignment joins a semester’s schedule: the third assignment becomes assignment-3, and each student’s copy assignment-3-&lt;handle>. Keep the number in the name anyway?');
+      expect(out).toContain("Numbers are added automatically when an assignment joins a semester's schedule: the third assignment becomes assignment-3, and each student's copy assignment-3-&lt;handle>. Keep the number in the name anyway?");
       expect(out).toContain('Keep the number');
       expect(out).toMatch(/<button class="btn" type="button" disabled[^>]*>Continue/);
       saveDraft(`new-assignment:${COURSE_ORG}`, { v: { ...initialValues(null), name: 'Regression' }, verified: {} });
@@ -401,8 +401,8 @@ describe('the wizard screens', () => {
       saveDraft(`new-assignment:${COURSE_ORG}`, { v, verified: { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3) } });
       const out = render(<NewAssignmentScreen {...cp()} step={4} />);
       expect(out).toContain('Question 4 of 4');
-      expect(out).toContain('you can fill it in later');
-      expect(out).toContain('no total is shown');
+      expect(out).toContain('Skip it if the assignment is not written yet. You can fill it in later');
+      expect(out).toContain('The marks page then shows no total.');
       expect(out).toContain('>Skip</button>');
     } finally {
       vi.unstubAllGlobals();
@@ -456,7 +456,7 @@ describe('the wizard screens', () => {
     expect(out).toContain(`<option value="${tpl}" selected>Group project</option>`);
     expect(out).toMatch(/<input id="e-num" type="number" min="1" max="999" value="2"/);
     expect(out).toContain('The number students see. Change it if this is not the next assignment.');
-    expect(out).toContain('Each student’s repo is assignment-2-&lt;handle>.');
+    expect(out).toContain("Each student's repo is assignment-2-&lt;handle>.");
     expect(out).toContain('<b>Assignment 2</b>');
   });
 });

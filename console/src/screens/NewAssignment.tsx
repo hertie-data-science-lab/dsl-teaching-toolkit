@@ -177,7 +177,7 @@ function ImportPicker({ src, read, busy, lines, set }: { src: SourceRepo; read: 
     <>
       <BranchPicker
         title={`Files from ${read.main.branch}, for students`} b={read.main} lines={lines.main} set={(main) => set({ ...lines, main })} fixed={sourceFixed('main', read.main.entries)}
-        note="Students get everything copied here. Solutions, tests, grading files and .env start unticked."
+        note="These files go on the template's main branch, which students receive at hand out. Solutions, tests, grading files and .env start unticked."
       />
       {read.solution ? (
         <BranchPicker
@@ -274,7 +274,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   }, [copyNow]);
 
   let heading = '', body, foot;
-  const createdNote = created && step < 5 ? <p class="note">{repo} is created. Change its settings on the <a href={`#template-${repo}`}>assignment template’s settings</a>.</p> : null;
+  const createdNote = created && step < 5 ? <p class="note">{repo} is created. Change its settings on the <a href={`#template-${repo}`}>assignment template's settings</a>.</p> : null;
   if (step === 1) {
     heading = 'What is the assignment?';
     const warn = ordinalInName(v.name);
@@ -338,7 +338,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     body = (
       <>
         {createdNote}
-        <p class="note">Optional. Skip it if the assignment is not written yet: you can fill it in later on the template’s settings. With none set, each student gets one mark and no total is shown.</p>
+        <p class="note">Optional. Skip it if the assignment is not written yet. You can fill it in later on the template's settings. With none set, each student gets one mark. The marks page then shows no total.</p>
         <Questions rows={rows} set={(r) => setV({ ...v, questions: r })} files={files} />
       </>
     );

@@ -246,7 +246,7 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: Ready
           <span class="label"><label for="e-num">Number</label> <Hint label="About the number">The number students see. Change it if this is not the next assignment.</Hint></span>
           <input id="e-num" type="number" min="1" max="999" value={d.number ?? ''} aria-invalid={errors.number ? 'true' : undefined} style="max-width:110px"
             onInput={(e) => { const t = (e.target as HTMLInputElement).value; set({ number: t === '' ? '' : Number(t) }); }} />
-          {errors.number ? <Invalid>{errors.number}</Invalid> : <p class="why">Each student’s repo is {assignmentKey(d.number)}-&lt;handle&gt;.</p>}
+          {errors.number ? <Invalid>{errors.number}</Invalid> : <p class="why">Each student's repo is {assignmentKey(d.number)}-&lt;handle&gt;.</p>}
         </div>
       ) : null}
       <div class="field">

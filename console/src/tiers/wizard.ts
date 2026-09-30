@@ -39,7 +39,7 @@ export function cohortOrg(terms: string[]): Tiers {
 export function assignmentName(): Tiers {
   return {
     name: {
-      tier: 'ask', label: 'Name', reason: 'The assignment’s title.',
+      tier: 'ask', label: 'Name', reason: "The assignment's title.",
       check: (x) => (!x || !String(x).trim() ? 'Needed.' : templateRepo(x) ? null : 'Needs a word or a number besides “assignment”.'),
     },
   };

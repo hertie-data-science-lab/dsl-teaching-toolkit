@@ -158,6 +158,7 @@ describe('New assignment: import', () => {
     const ticks = [...root.querySelectorAll<HTMLInputElement>('input.ft-tick')].map((i) => [i.getAttribute('aria-label'), i.checked]);
     expect(ticks).toEqual([['Include data/', true], ['Include data/x.csv', true], ['Include tests/', false], ['Include tests/test_x.py', false], ['Include README.md', true]]);
     expect(root.textContent).toContain('2 of 4 files ticked');
+    expect(root.textContent).toContain("These files go on the template's main branch, which students receive at hand out.");
     const vendor = [...root.querySelectorAll('li')].find((li) => li.textContent?.startsWith('vendor'))!;
     expect(vendor.textContent).toContain('not copied');
     expect(vendor.querySelector('input')).toBeNull();
