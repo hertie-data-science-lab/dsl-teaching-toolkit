@@ -760,7 +760,15 @@ def _plan_with_guest(monkeypatch):
 
 @pytest.mark.parametrize(
     ("path", "refused"),
-    [("lectures/guest", True), ("lectures/02", False), ("x", False)],
+    [
+        ("lectures/guest", True),
+        ("lectures/02", False),
+        ("x", False),
+        # A requested folder holding a planned unnumbered copy releases it too.
+        ("lectures", True),
+        ("lectures/", True),
+        ("lecture", False),
+    ],
 )
 def test_release_now_refuses_a_copy_of_an_entry_with_no_number(
     monkeypatch, path, refused

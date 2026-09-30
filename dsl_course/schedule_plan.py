@@ -338,13 +338,18 @@ def unnumbered_release(
     aliases: Aliases = _no_aliases,
 ) -> str | None:
     """The refusal for a manual release of `paths` from `repo` that a numbered entry of
-    the plan copies and that entry has no number; None otherwise (an entry with a number,
-    or a copy the plan does not name)."""
+    the plan copies, itself or inside a requested folder, and that entry has no number;
+    None otherwise (an entry with a number, or a copy the plan does not name)."""
     wanted = {p.strip("/") for p in paths}
     held = {m.key for m in unnumbered(sched, aliases) if m.block == "releases"}
+
+    def asked(path: str) -> bool:
+        path = path.strip("/")
+        return any(not w or path == w or path.startswith(f"{w}/") for w in wanted)
+
     for r in sched.releases:
         if r.label in held and any(
-            d.course_source_repo == repo and d.course_source_path.strip("/") in wanted
+            d.course_source_repo == repo and asked(d.course_source_path)
             for d in r.deploy
         ):
             return give_a_number(r.label)
