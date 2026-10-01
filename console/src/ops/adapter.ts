@@ -10,7 +10,7 @@
 import type { ValidateFunction } from 'ajv/dist/2020';
 import outcomeSchema from '../../schemas/outcome.schema.json';
 import requestSchema from '../../schemas/request.schema.json';
-import type { GitHubClient, Job } from '../github/client';
+import { GitHubError, type GitHubClient, type Job } from '../github/client';
 import type { Outcome } from '../model/types';
 import { validator } from '../model/validate';
 import { opSpec } from './registry';
@@ -154,10 +154,16 @@ const STEP_WORDS: [RegExp, string][] = [
   [/^Run the request$/, ''], // named by the caller: the op's own running sentence
 ];
 
-/** The job's steps an instructor reads, in their words. Setup, teardown and reporting steps are left out. */
+/**
+ * The job's steps an instructor reads, in their words. Setup, teardown and reporting steps
+ * are left out, and so are the post steps GitHub adds for each action ("Post Run
+ * actions/checkout@..."): their names match the action's own, so they read as a second
+ * "Preparing" and "Getting the engine" that only ever tick at the end.
+ */
 export function stepsOf(job: Job | undefined, running: string): Step[] {
   const out: Step[] = [];
   for (const s of job?.steps ?? []) {
+    if (/^Post /.test(s.name)) continue;
     const m = STEP_WORDS.find(([re]) => re.test(s.name));
     if (!m) continue;
     const state: StepState =
@@ -218,7 +224,12 @@ export class DispatchAdapter implements Adapter {
     return { outcome, people, leaked: pub ? leakedHandles(pub, people) : [] };
   }
 
+  /** Cancel the run (Actions cancel API). A run that has already ended answers 409: nothing left to stop. */
   async cancel(h: Handle): Promise<void> {
-    await this.client.cancelRun(h.courseOrg, CONSOLE_REPO, h.runId);
+    try {
+      await this.client.cancelRun(h.courseOrg, CONSOLE_REPO, h.runId);
+    } catch (e) {
+      if (!(e instanceof GitHubError && e.status === 409)) throw e;
+    }
   }
 }

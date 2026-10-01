@@ -41,8 +41,9 @@ def fit(x, y):
 
 Then run **Derive student version** (the template's settings, or course org → `.github` →
 Actions). It writes `solution/starter.ipynb` onto `main` as `starter.ipynb`, and never
-writes to `solution`. Run it after every change to the solution. `preview` is on by
-default and lists the files and counts, never their content.
+writes to `solution`. Run it after every change to the solution. In the console it runs
+straight away; once it ends, **See on GitHub** opens `main`. On the Actions tab `preview`
+is on by default and lists the files and counts, never their content.
 
 Derive refuses, rather than publish the answer:
 

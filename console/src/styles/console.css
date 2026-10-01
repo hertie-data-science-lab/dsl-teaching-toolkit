@@ -969,3 +969,11 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .all-courses-head .my-only input { margin-top: 0; }
 .setup .s-kinds .k-mark { display: inline-grid; place-items: center; width: 14px; margin-right: 4px; color: var(--ok); vertical-align: -1px; }
 .setup .s-kinds .k-mark svg { width: 10px; height: 10px; }
+
+/* WP-U4: the run popup resizes by its bottom-left grip; generated text is small monospace */
+.drawer-grip { position: absolute; left: 0; bottom: 0; width: 18px; height: 18px; cursor: nesw-resize; touch-action: none; border-bottom-left-radius: 14px; background: linear-gradient(45deg, transparent 45%, var(--rule-strong) 45%, var(--rule-strong) 55%, transparent 55%, transparent 70%, var(--rule-strong) 70%, var(--rule-strong) 80%, transparent 80%); opacity: 0.7; }
+.drawer-grip:hover { opacity: 1; }
+.drawer.sized { max-height: none; max-width: none; }
+.drawer.sized .drawer-body { flex: 1 1 auto; }
+.drawer .outcome-details { margin: 0; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.45; white-space: pre-wrap; overflow: auto; }
+@media (max-width: 520px) { .drawer-grip { display: none; } }
