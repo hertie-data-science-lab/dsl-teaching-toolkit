@@ -16,7 +16,7 @@ import { StatusStore } from '../src/model/status';
 import type { Adapter, Handle } from '../src/ops/adapter';
 import { generateSyllabus } from '../src/ops/defs';
 import { OpsSession } from '../src/ops/session';
-import { MaterialsScreen, changedLine, syllabusChoices } from '../src/screens/CourseEdit';
+import { CopyPlan, MaterialsScreen, changedLine, syllabusChoices } from '../src/screens/CourseEdit';
 import { OtherRepoRow } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { PatternTree } from '../src/ui/PatternTree';
@@ -66,14 +66,18 @@ async function settle(until: () => boolean) {
 }
 
 describe('Treat as handout materials', () => {
-  const repo: GhRepo = { name: 'lecture-code', topics: ['python'] } as GhRepo;
+  // The listing carries no topics: the button reads them from GitHub just before it writes.
+  const repo: GhRepo = { name: 'lecture-code' } as GhRepo;
   const row = (write = true) => <ul class="rows"><OtherRepoRow org={ORG} repo={repo} write={write} /></ul>;
 
   it('adds the dsl-materials topic to the repo’s own, then says when it shows', async () => {
-    const gh = new FakeGitHub().on('PUT', `/repos/${ORG}/lecture-code/topics`, { names: ['python', 'dsl-materials'] });
+    const gh = new FakeGitHub()
+      .on('GET', `/repos/${ORG}/lecture-code/topics`, { names: ['python'] })
+      .on('PUT', `/repos/${ORG}/lecture-code/topics`, { names: ['python', 'dsl-materials'] });
     await mount(envOf(gh), row());
     await act(() => button('Treat as handout materials')!.click());
     await settle(() => root!.textContent!.includes('Added.'));
+    expect(gh.seen.map((s) => s.method)).toEqual(['GET', 'PUT']);
     const put = gh.seen.find((s) => s.method === 'PUT')!;
     expect(put.url).toBe(`https://api.github.com/repos/${ORG}/lecture-code/topics`);
     expect(put.body).toEqual({ names: ['python', 'dsl-materials'] });
@@ -82,7 +86,7 @@ describe('Treat as handout materials', () => {
   });
 
   it('keeps the button and says why when GitHub refuses', async () => {
-    const gh = new FakeGitHub().on('PUT', /\/topics$/, () => json({ message: 'Must have admin rights to Repository.' }, 403));
+    const gh = new FakeGitHub().on('GET', /\/topics$/, { names: [] }).on('PUT', /\/topics$/, () => json({ message: 'Must have admin rights to Repository.' }, 403));
     await mount(envOf(gh), row());
     await act(() => button('Treat as handout materials')!.click());
     await settle(() => !!root!.querySelector('.check-line.bad'));
@@ -134,13 +138,26 @@ describe('the weekly plan’s Copy', () => {
     expect(ops.lastBlock(def)).toBe('## Course sessions and readings\n- Session 1');
     expect(ops.lastBlock(generateSyllabus({ courseOrg: ORG, cohortOrg: 'hertie-dsl-demo-f2026', where: 'Fall 2026' }, 'other-repo'))).toBeNull();
   });
+
+  it('says what to do when the browser refuses the clipboard', async () => {
+    const ops = new OpsSession(new DispatchStub('## Sessions'), { pollMs: 0, sleep: async () => {} });
+    const def = generateSyllabus({ courseOrg: ORG, cohortOrg: 'hertie-dsl-demo-f2026', where: 'Fall 2026' }, MAT);
+    ops.open(def);
+    await ops.start('preview');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } });
+    await mount(envOf(new FakeGitHub(), ops), <CopyPlan def={def} />);
+    await act(() => button('Copy')!.click());
+    await settle(() => !!root!.querySelector('.check-line.bad'));
+    expect(root!.querySelector('.check-line.bad')!.textContent).toContain('Could not copy. Select the preview text instead.');
+  });
 });
 
 describe('the withheld tree', () => {
-  it('says which line a click added or removed', () => {
+  it('says which line a click added or changed, and nothing for a removal', () => {
     expect(changedLine(['a/', 'b/'], ['a/', 'b/', 'c/'])).toBe(2);
-    expect(changedLine(['a/', 'b/', 'c/'], ['a/', 'c/'])).toBe(1);
-    expect(changedLine(['a/'], [])).toBe(0);
+    expect(changedLine(['a/', 'b/'], ['a/', '!b/x'])).toBe(1);
+    expect(changedLine(['a/', 'b/', 'c/'], ['a/', 'c/'])).toBeNull();
+    expect(changedLine(['a/'], [])).toBeNull();
     expect(changedLine(['a/'], ['a/'])).toBeNull();
   });
 

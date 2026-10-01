@@ -51,7 +51,8 @@ type TreatState = { kind: 'idle' | 'busy' | 'done' } | { kind: 'bad'; text: stri
 
 /**
  * One Other repos row (decision 0026 rule 2): Open, and on a course the person can change,
- * "Treat as handout materials", which adds the `dsl-materials` topic to the repo's own topics.
+ * "Treat as handout materials", which adds the `dsl-materials` topic to the repo's topics as
+ * GitHub has them at the click.
  */
 export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; write: boolean }) {
   const env = useEnv();
@@ -60,7 +61,9 @@ export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; 
     if (!env) return;
     setSt({ kind: 'busy' });
     try {
-      await env.client.setTopics(org, repo.name, [...new Set([...(repo.topics ?? []), MATERIALS_TOPIC])]);
+      // Read the topics just before the write: the repo list may be old, and a PUT replaces them all.
+      const topics = await env.client.getRepoTopics(org, repo.name);
+      await env.client.setTopics(org, repo.name, [...new Set([...topics, MATERIALS_TOPIC])]);
       setSt({ kind: 'done' });
     } catch (e) {
       setSt({ kind: 'bad', text: `Could not add the topic: ${e instanceof Error ? e.message : String(e)}` });

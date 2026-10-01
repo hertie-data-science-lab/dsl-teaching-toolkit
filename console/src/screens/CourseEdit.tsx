@@ -306,12 +306,13 @@ function Unmatched({ rules, total, loading, partial }: { rules: string[]; total:
 const linesOf = (text: string) => text.split('\n');
 const textOf = (lines: string[]) => lines.join('\n');
 
-/** The line a tree click added or removed: the first index where the two lists differ, or null when they are the same. */
+/** The line a tree click added or changed: the first index where the two lists differ; null when nothing changed or a line was removed (nothing to show). */
 export function changedLine(before: string[], after: string[]): number | null {
+  if (after.length < before.length) return null;
   if (before.length === after.length && before.every((l, i) => l === after[i])) return null;
   let i = 0;
-  while (i < before.length && i < after.length && before[i] === after[i]) i++;
-  return Math.max(0, Math.min(i, after.length - 1));
+  while (i < before.length && before[i] === after[i]) i++;
+  return i;
 }
 
 /** A line to flash in the pattern box; `n` counts clicks, so the same line flashes again. */
@@ -550,16 +551,24 @@ export function CopyPlan({ def }: { def: OpDef }) {
   const env = useEnv();
   const block = env?.ops.lastBlock(def) ?? null;
   const [copied, setCopied] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const copy = async () => {
     if (!block) return;
     try {
       await navigator.clipboard.writeText(block);
       setCopied(block);
+      setFailed(false);
     } catch {
       setCopied(null);
+      setFailed(true);
     }
   };
-  return <button class="btn small outline" type="button" disabled={!block} title={block ? undefined : 'Preview first'} onClick={() => void copy()}>{copied && copied === block ? 'Copied' : 'Copy'}</button>;
+  return (
+    <>
+      <button class="btn small outline" type="button" disabled={!block} title={block ? undefined : 'Preview first'} onClick={() => void copy()}>{copied && copied === block ? 'Copied' : 'Copy'}</button>
+      {failed ? <CheckLine cls="bad">Could not copy. Select the preview text instead.</CheckLine> : null}
+    </>
+  );
 }
 
 export function MaterialsScreen(p: CourseProps) {
