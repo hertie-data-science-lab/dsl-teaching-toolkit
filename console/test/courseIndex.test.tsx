@@ -9,12 +9,13 @@ import type { Course } from '../src/model/discovery';
 import { StaticFiles, type Files } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
-import { CourseScreen, materialsWhys } from '../src/screens/Course';
+import { CourseScreen, MaterialsChecklist, materialsWhys } from '../src/screens/Course';
 import { HomeScreen } from '../src/screens/Home';
 import { MaterialsScreen, WebsiteScreen, folderKinds, resetLabel, writeHolds } from '../src/screens/CourseEdit';
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { REVIEWED_MARK, withMark } from '../src/model/materialsRules';
+import { EditFile, Lives, newFileUrl } from '../src/ui/bits';
 import { Sidenav } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
 
@@ -105,10 +106,10 @@ describe('index screens', () => {
     expect(materialsWhys(m)).toEqual([]);
     const checks = m.checks!.map((c) => (c.id === 'syllabus' || c.id === 'all_mapped' ? { ...c, done: false, why: `${c.id} is missing.` } : c));
     const todo = { ...m, state: 'todo', checks };
-    expect(materialsWhys(todo)).toEqual(['syllabus is missing.', 'all_mapped is missing.']);
+    expect(materialsWhys(todo)).toEqual(['all_mapped is missing.', 'syllabus is missing.']);
     const st: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...STATUS.course!, materials: [todo] } }, sha: 's', stale: [] };
     for (const v of [<MaterialsIndexScreen {...cp({ loaded: st })} />, <CourseScreen {...cp({ loaded: st })} />])
-      expect(render(v)).toContain('<ul class="r-sub unmet"><li>syllabus is missing.</li><li>all_mapped is missing.</li></ul>');
+      expect(render(v)).toContain('<ul class="r-sub unmet"><li>all_mapped is missing.</li><li>syllabus is missing.</li></ul>');
     // The ready fixture shows the chip and no sentence.
     const out = render(<MaterialsIndexScreen {...cp()} />);
     expect(out).toContain('<span class="chip ok">Ready</span>');
@@ -173,14 +174,16 @@ describe('materials settings file tree', () => {
     expect(t).not.toContain('Kind of solutions');
     expect(render(<MaterialsScreen {...cp({ entry: MAT })} />)).not.toContain('aria-label="Kind of solutions"');
   });
-  it('badges every file, flags the rule that matches nothing and links each file to its editor', () => {
+  it('badges every file and flags the rule that matches nothing, with no edit link per row', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
     const t = text(<MaterialsScreen {...cp({ entry: MAT })} />);
     expect(t).not.toContain('for the public website');
     expect(t).toContain('withheld');
     expect(t).toContain('released to students');
     expect(t).toContain('*.key matches no file');
-    expect(out).toContain(`https://github.com/${COURSE_ORG}/${MAT}/edit/main/lectures/05_trees/slides.html`);
+    // Decision 0024 rule 10: the tree only withholds; editing is the Open button's job.
+    expect(out).not.toContain(`/edit/main/lectures/05_trees/slides.html`);
+    expect(out).not.toContain('Edit on GitHub');
     expect(out).not.toContain('class="file-list"');
     expect(t).not.toContain('only part of this repo');
   });
@@ -288,5 +291,44 @@ describe('materials settings: syllabus file and folder kinds', () => {
     expect(t).toContain('Off Off: the site stays as last published and no longer updates.');
     expect(t).toContain('Description');
     expect(t).toContain('Not set');
+  });
+});
+
+describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () => {
+  const checks = STATUS.course!.materials[0].checks!;
+
+  it('gives every line a ?, and folds the kinds found under the content-kind line', () => {
+    const out = render(<MaterialsChecklist checks={checks} />);
+    expect(out.match(/aria-label="About this check"/g)).toHaveLength(checks.length);
+    expect(out).toContain('A repo with nothing of a content kind has nothing to release.');
+    expect(out).toContain('Saving the list once, even empty, marks it reviewed.');
+    // Collapsed: no `open`. Each kind with its folders, or none.
+    expect(out).toContain('<details class="fold s-kinds"><summary>Kinds found</summary>');
+    expect(out).toContain('<li><b>Lecture</b>: lectures/</li>');
+    expect(out).toContain('<li><b>Readings</b>: none</li>');
+    // Kinds first, then the syllabus, then the two lines that do not block.
+    const t = text(<MaterialsChecklist checks={checks} />);
+    expect(t.indexOf('Every top folder has a kind')).toBeLessThan(t.indexOf('At least one folder of a content kind'));
+    expect(t.indexOf('At least one folder of a content kind')).toBeLessThan(t.indexOf('Syllabus written'));
+    expect(t.indexOf('Syllabus written')).toBeLessThan(t.indexOf('Withheld patterns reviewed'));
+  });
+
+  it('points an edit link at GitHub’s new-file page while the file does not exist', () => {
+    expect(newFileUrl('o', 'r', 'materials.yml', 'trunk')).toBe('https://github.com/o/r/new/trunk?filename=materials.yml');
+    const absent = render(<EditFile org="o" repo="r" path="materials.yml" exists={false} />);
+    expect(absent).toContain('href="https://github.com/o/r/new/main?filename=materials.yml"');
+    expect(absent).toContain('Create the file on GitHub');
+    expect(render(<EditFile org="o" repo="r" path="materials.yml" />)).toContain('href="https://github.com/o/r/edit/main/materials.yml"');
+    expect(render(<Lives org="o" repo="r" path=".releaseignore" exists={false} />)).toContain('href="https://github.com/o/r/new/main?filename=.releaseignore"');
+    expect(render(<Lives org="o" repo="r" path=".releaseignore" />)).toContain('href="https://github.com/o/r/blob/main/.releaseignore"');
+  });
+
+  it('on the settings screen: new-file links for an absent materials.yml, the editor for a present .releaseignore', () => {
+    const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
+    expect(out).toContain(`href="https://github.com/${COURSE_ORG}/${MAT}/new/main?filename=materials.yml"`);
+    expect(out).not.toContain(`/edit/main/materials.yml`);
+    expect(out).toContain(`href="https://github.com/${COURSE_ORG}/${MAT}/edit/main/.releaseignore"`);
+    // SYLLABUS.md is in the tree, though its text is not loaded: it exists.
+    expect(out).toContain(`/edit/main/SYLLABUS.md`);
   });
 });

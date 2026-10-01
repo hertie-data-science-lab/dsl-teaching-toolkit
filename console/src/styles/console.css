@@ -237,10 +237,8 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .file-tree summary { cursor: pointer; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .file-tree .ft-file { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .file-tree .ft-name { font-family: var(--font-code); font-size: 12.5px; overflow-wrap: anywhere; }
-.file-tree .ft-file .textlink { font-size: 12px; margin-left: auto; }
 .file-tree .ft-toggle { min-height: 0; padding: 1px 8px; font-size: 12px; }
 .file-tree .ft-file .ft-toggle { margin-left: auto; }
-.file-tree .ft-file .ft-toggle + .textlink { margin-left: 0; }
 .file-tree .ft-tick { margin: 0; }
 .file-tree .ft-note { flex-basis: 100%; font-size: 12.5px; color: var(--amber-ink); }
 .file-tree + .pattern-grid { margin-top: 12px; }
@@ -891,3 +889,10 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .switch input[role="switch"]:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .switch input[role="switch"]:disabled { opacity: 0.5; cursor: default; }
 .web-switch .check-line { flex-basis: 100%; }
+
+/* T3: materials checklist kinds fold; withheld tree toggles right-aligned on folders too */
+.setup .s-kinds { grid-column: 2; border-top: 0; padding-top: 2px; }
+.setup .s-kinds > summary { min-height: 0; font-size: 13px; }
+.setup .s-kinds .fold-body { list-style: none; margin: 0; padding: 4px 0 0; gap: 2px; font-size: 13.5px; color: var(--ink-2); }
+.setup .s-kinds li { display: block; padding: 0; }
+.file-tree:not(.select) summary .ft-toggle { margin-left: auto; }

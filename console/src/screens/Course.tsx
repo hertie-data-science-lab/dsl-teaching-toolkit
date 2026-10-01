@@ -7,7 +7,7 @@ import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
-import { STAGE_WORD, templateName } from '../model/format';
+import { KIND_LABEL, STAGE_WORD, templateName } from '../model/format';
 import { checkNow, derive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
@@ -145,6 +145,15 @@ export function Whys({ m }: { m: MaterialsState }) {
   return whys.length ? <ul class="r-sub unmet">{whys.map((w) => <li>{w}</li>)}</ul> : null;
 }
 
+/** What each materials check is, for its `?` (decision 0024 rule 8). */
+const CHECK_HINT: Record<string, string> = {
+  all_mapped: 'The student site and the public website show materials by kind (lectures, labs, readings…), so every top folder a release can copy needs one. Folder names like lectures/ set it; anything else you set under Folder kinds.',
+  kind_folder: 'A repo with nothing of a content kind has nothing to release.',
+  syllabus: 'The file the student site pins as the syllabus. Still the template text until you write it.',
+  withheld: 'The whole repo is released as it stands unless a line here withholds it. Saving the list once, even empty, marks it reviewed.',
+  sessions: 'A paste-ready block of sessions and readings built from the semester schedule; optional.',
+};
+
 /** A materials repo's whole checklist, ticks included: the settings screen's head. */
 export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
   return (
@@ -152,8 +161,16 @@ export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
       {checks.map((c) => (
         <li class={c.done ? 'done' : 'open'}>
           <span class="s-mark" aria-hidden="true">{c.done ? <Check /> : null}</span>
-          <span class="s-name">{c.label}{c.blocks ? <span class="s-need">required</span> : null}<span class="sr">: {c.done ? 'Done' : 'To do'}</span></span>
+          <span class="s-name">{c.label}{c.blocks ? <span class="s-need">required</span> : null}<span class="sr">: {c.done ? 'Done' : 'To do'}</span>{CHECK_HINT[c.id] ? <> <Hint label="About this check">{CHECK_HINT[c.id]}</Hint></> : null}</span>
           {!c.done && c.why ? <span class="s-why">{c.why}</span> : null}
+          {c.detail ? (
+            <details class="fold s-kinds">
+              <summary>Kinds found</summary>
+              <ul class="fold-body">
+                {c.detail.map((d) => <li><b>{KIND_LABEL[d.kind] ?? d.kind}</b>: {d.folders.length ? d.folders.map((f) => `${f}/`).join(', ') : 'none'}</li>)}
+              </ul>
+            </details>
+          ) : null}
         </li>
       ))}
     </ul>

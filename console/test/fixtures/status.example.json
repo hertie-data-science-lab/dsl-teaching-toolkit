@@ -28,22 +28,52 @@
         "state": "ready",
         "checks": [
           {
-            "id": "syllabus",
-            "label": "Syllabus written",
+            "id": "all_mapped",
+            "label": "Every top folder has a kind",
             "done": true,
             "why": null,
             "blocks": true
           },
           {
             "id": "kind_folder",
-            "label": "At least one folder of a known kind (lectures, labs, readings…)",
+            "label": "At least one folder of a content kind",
             "done": true,
             "why": null,
-            "blocks": true
+            "blocks": true,
+            "detail": [
+              {
+                "kind": "lecture",
+                "folders": [
+                  "lectures"
+                ]
+              },
+              {
+                "kind": "lab",
+                "folders": [
+                  "labs"
+                ]
+              },
+              {
+                "kind": "readings",
+                "folders": []
+              },
+              {
+                "kind": "exam",
+                "folders": []
+              },
+              {
+                "kind": "drop-in",
+                "folders": []
+              },
+              {
+                "kind": "other",
+                "folders": []
+              }
+            ]
           },
           {
-            "id": "all_mapped",
-            "label": "Every top folder has a kind",
+            "id": "syllabus",
+            "label": "Syllabus written",
             "done": true,
             "why": null,
             "blocks": true

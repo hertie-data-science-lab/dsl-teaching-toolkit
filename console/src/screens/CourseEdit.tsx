@@ -308,16 +308,16 @@ const linesOf = (text: string) => text.split('\n');
 const textOf = (lines: string[]) => lines.join('\n');
 
 /** The withhold tree over a repo, with the pattern box beneath it (two-way) and the rules that match nothing. */
-function WithholdEditor({ id, label, files, text, onText, loading, partial, org, repo, branch, kinds, withheldWord, releasedWord, fixed }: {
+function WithholdEditor({ id, label, files, text, onText, loading, partial, kinds, withheldWord, releasedWord, fixed }: {
   id: string; label: string; files: string[]; text: string; onText: (t: string) => void; loading: boolean; partial: boolean;
-  org: string; repo: string; branch: string | null; kinds?: Record<string, string>; withheldWord: string; releasedWord: string; fixed?: (path: string) => string | null;
+  kinds?: Record<string, string>; withheldWord: string; releasedWord: string; fixed?: (path: string) => string | null;
 }) {
   const b = badgeFiles(files, linesOf(text));
   return (
     <>
       {partial ? <CheckLine cls="bad">GitHub returned only part of this repo’s file list; badges may be incomplete.</CheckLine> : null}
       {loading ? <Loading what="Reading the repo" /> : (
-        <PatternTree files={files} patterns={linesOf(text)} onChange={(l) => onText(textOf(l))} org={org} repo={repo} branch={branch} kinds={kinds} withheldWord={withheldWord} releasedWord={releasedWord} fixed={fixed} />
+        <PatternTree files={files} patterns={linesOf(text)} onChange={(l) => onText(textOf(l))} kinds={kinds} withheldWord={withheldWord} releasedWord={releasedWord} fixed={fixed} />
       )}
       <div class="pattern-grid">
         <div class="field">
@@ -408,7 +408,6 @@ export function WebsiteScreen(p: CourseProps) {
   const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir).map((x) => x.path) : [];
   const gh = p.files.repos(course.org);
   const siteExists = gh.kind === 'ready' && gh.repos.some((r) => r.name.toLowerCase() === `${course.org}.github.io`.toLowerCase());
-  const branch = (gh.kind === 'ready' ? gh.repos.find((r) => r.name === src)?.default_branch : undefined) ?? null;
   const doSave = async () => {
     if (y?.errors.length) return;
     if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
@@ -451,7 +450,7 @@ export function WebsiteScreen(p: CourseProps) {
         <section class="panel section">
           <h2>Kept off the website <Hint label="About keeping files off the website">Click a file or folder to keep it off the public website; click again to put it back. A course whose website is off starts with the system folder kept off, and anything whose name has the word solution, exam, grade, marks or private in it. Files withheld from students, solutions, tests and grading files never appear anyway.</Hint></h2>
           <WithholdEditor id="ws-withhold" label="Kept-off patterns" files={files} text={d.withhold} onText={(t) => set({ withhold: t })} loading={tree.kind === 'loading'} partial={tree.kind === 'ready' && tree.truncated}
-            org={course.org} repo={src} branch={branch} withheldWord="kept off" releasedWord="public" fixed={(f) => (neverMaterial(f) || denylisted(f) ? 'never public' : null)} />
+            withheldWord="kept off" releasedWord="public" fixed={(f) => (neverMaterial(f) || denylisted(f) ? 'never public' : null)} />
         </section>
       ) : null}
       <section class="panel section">
@@ -530,7 +529,10 @@ export function MaterialsScreen(p: CourseProps) {
   // The syllabus line of the checklist; a status without one reads it off `ready`.
   const sylDone = m ? (m.checks?.find((c) => c.id === 'syllabus')?.done ?? m.state === 'ready') : false;
   const repos = p.files.repos(course.org);
-  const branch = (repos.kind === 'ready' ? repos.repos.find((r) => r.name === repo)?.default_branch : undefined) ?? null;
+  const branch = (repos.kind === 'ready' ? repos.repos.find((r) => r.name === repo)?.default_branch : undefined);
+  // Each file's link: the editor while it exists, GitHub's new-file page while it does not (0024 rule 9).
+  const matRef = { org: course.org, repo, path: MATERIALS_FILE, branch, exists: matFile.kind !== 'absent' };
+  const ignRef = { org: course.org, repo, path: '.releaseignore', branch, exists: ignFile.kind !== 'absent' };
   const partial = tree.kind === 'ready' && tree.truncated;
   const setKind = (folder: string, kind: string) => {
     const next = { ...curKinds };
@@ -565,9 +567,9 @@ export function MaterialsScreen(p: CourseProps) {
           </section>
         ) : null}
         <section class="panel section">
-          <h2>Syllabus</h2>
+          <h2>Syllabus <Hint label="About the syllabus">The syllabus is one file at the repo’s top level that the student site pins. Pick which file it is here; the default is SYLLABUS.md. The session list is an optional block generated from the schedule for you to paste into it.</Hint></h2>
           {m ? (sylDone ? <div class="check-line ok"><Check /><span>Written.</span></div> : sylFile.kind === 'ready' ? <CheckLine cls="bad">Still the template text. Students would see the placeholder at the first release.</CheckLine> : sylFile.kind === 'absent' ? <CheckLine cls="bad">There is no {syllabus} yet.</CheckLine> : <p class="footnote">Not ready yet.</p>) : <p class="footnote">Not checked yet.</p>}
-          <div class="actions"><EditFile org={course.org} repo={repo} path={syllabus} /></div>
+          <div class="actions"><EditFile org={course.org} repo={repo} path={syllabus} branch={branch} exists={sylFile.kind !== 'absent' || files.includes(syllabus)} /></div>
           <div class="field">
             <label for="m-syl">Syllabus file <span class="default">default: {DEFAULT_SYLLABUS}</span></label>
             <input type="text" id="m-syl" list="m-syl-files" placeholder={DEFAULT_SYLLABUS} value={syl ?? baseSyl} onInput={(e) => setSyl((e.target as HTMLInputElement).value)} />
@@ -575,7 +577,7 @@ export function MaterialsScreen(p: CourseProps) {
             <p class="hint">The file the student site pins as the syllabus, at the repo’s top level.</p>
           </div>
           {declared === null ? <CheckLine cls="bad">{MATERIALS_FILE} does not parse; fix it with Edit the file directly.</CheckLine> : null}
-          <SaveBar state={sylSave} onSave={() => void saveMat({ syllabus: syl ?? baseSyl, kinds: baseKinds }, runSyl, setSylSave, () => setSyl(null))} small disabled={syl === null || syl === baseSyl || declared === null} file={{ org: course.org, repo, path: MATERIALS_FILE }} />
+          <SaveBar state={sylSave} onSave={() => void saveMat({ syllabus: syl ?? baseSyl, kinds: baseKinds }, runSyl, setSylSave, () => setSyl(null))} small disabled={syl === null || syl === baseSyl || declared === null} file={matRef} />
           {scope ? (
             <>
               <p class="footnote">Builds a paste-ready ‘Course sessions and readings’ block from the semester schedule and its readings entries. Write saves it as <code>SYLLABUS.sessions.md</code> in this repo; <code>{syllabus}</code> is yours and is never touched.</p>
@@ -584,7 +586,7 @@ export function MaterialsScreen(p: CourseProps) {
           ) : null}
         </section>
         <section class="panel section">
-          <h2>Folder kinds <Hint label="About folder kinds">A release that names no kind takes the kind of the top folder its files land in. A folder named lectures, labs, readings or similar is that kind; anything else counts as a lecture unless you change it here.</Hint></h2>
+          <h2>Folder kinds <Hint label="About folder kinds">Each top folder gets a kind: it decides where its files appear on the student site and the public website, and which releases can take them. A folder named lectures, labs, readings or similar is that kind by name. Set the rest here; a folder that is never released needs none.</Hint></h2>
           {tree.kind === 'loading' ? <Loading /> : kinds.length ? (
             <table class="grid kinds">
               <thead><tr><th>Folder</th><th>Kind, and why</th><th>Change</th></tr></thead>
@@ -602,18 +604,18 @@ export function MaterialsScreen(p: CourseProps) {
               </tbody>
             </table>
           ) : <p class="footnote">No folders yet.</p>}
-          <SaveBar state={kindSave} onSave={() => void saveMat({ syllabus: baseSyl, kinds: curKinds }, runKind, setKindSave, () => setKindsDraft(null))} small disabled={kindsDraft === null || deepEqual(kindsDraft, baseKinds) || declared === null} file={{ org: course.org, repo, path: MATERIALS_FILE }} />
-          <Lives org={course.org} repo={repo} path={MATERIALS_FILE} />
+          <SaveBar state={kindSave} onSave={() => void saveMat({ syllabus: baseSyl, kinds: curKinds }, runKind, setKindSave, () => setKindsDraft(null))} small disabled={kindsDraft === null || deepEqual(kindsDraft, baseKinds) || declared === null} file={matRef} />
+          <Lives {...matRef} />
         </section>
         <section class="panel section">
-          <h2>Withheld from students <Hint label="About withheld files">Withheld files and folders are never copied to a semester, so students never see them. Click one in the tree to withhold it; click again to release it.</Hint></h2>
+          <h2>Withheld from students <Hint label="About withheld files">Everything in this repo is released to students as it stands, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
           {tree.kind === 'absent' ? <p class="footnote">Could not read the repo’s files.</p> : (
             <WithholdEditor id="ign-pat" label="Withheld patterns" files={files} text={ign ?? ignText} onText={setIgn} loading={tree.kind === 'loading'} partial={partial}
-              org={course.org} repo={repo} branch={branch} kinds={Object.fromEntries(kinds.map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} withheldWord="withheld" releasedWord="released to students" />
+              kinds={Object.fromEntries(kinds.map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} withheldWord="withheld" releasedWord="released to students" />
           )}
           <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
-          <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ignFile.kind === 'loading' || (ignFile.kind === 'ready' && ignOut === ignText)} file={{ org: course.org, repo, path: '.releaseignore' }} />
-          <Lives org={course.org} repo={repo} path=".releaseignore" />
+          <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ignFile.kind === 'loading' || (ignFile.kind === 'ready' && ignOut === ignText)} file={ignRef} />
+          <Lives {...ignRef} />
         </section>
       </div>
     </>

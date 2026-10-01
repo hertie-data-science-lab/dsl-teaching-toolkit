@@ -50,6 +50,8 @@ export interface MaterialsCheck {
   /** What is missing, one sentence; null once done. */
   why?: string | null;
   blocks: boolean;
+  /** On `kind_folder`: every content kind, with the top folders of that kind. */
+  detail?: { kind: string; folders: string[] }[];
 }
 
 export interface MaterialsState {

@@ -17,6 +17,11 @@ export function editUrl(org: string, repo: string, path: string, branch = 'main'
   return `https://github.com/${org}/${repo}/edit/${branch}/${path}${line ? `#L${line}` : ''}`;
 }
 
+/** GitHub's new-file page with the name filled in: where an edit link goes while the file does not exist yet. */
+export function newFileUrl(org: string, repo: string, path: string, branch = 'main'): string {
+  return `https://github.com/${org}/${repo}/new/${branch}?filename=${encodeURIComponent(path)}`;
+}
+
 /** One workflow run of `repo` (`owner/name`). */
 export function runUrl(repo: string, runId: number): string {
   return `https://github.com/${repo}/actions/runs/${runId}`;
@@ -52,18 +57,24 @@ export function Soon({ label, cls = 'btn', title = SOON }: { label: ComponentChi
 
 export const Prop = () => <span class="prop" title="Not in the engine today">proposed</span>;
 
-export function EditFile({ org, repo, path, branch = 'main', line }: { org: string; repo: string; path: string; branch?: string; line?: number }) {
+/** "Edit the file directly"; while the file does not exist (`exists` false), GitHub's new-file page instead. */
+export function EditFile({ org, repo, path, branch = 'main', line, exists = true }: { org: string; repo: string; path: string; branch?: string; line?: number; exists?: boolean }) {
   return (
-    <a class="edit-file" href={editUrl(org, repo, path, branch, line)} target="_blank" rel="noopener">
-      Edit the file directly <Ext />
+    <a class="edit-file" href={exists ? editUrl(org, repo, path, branch, line) : newFileUrl(org, repo, path, branch)} target="_blank" rel="noopener">
+      {exists ? 'Edit the file directly' : 'Create the file on GitHub'} <Ext />
     </a>
   );
 }
 
-export function Lives({ org, repo, path, branch = 'main' }: { org: string; repo: string; path?: string; branch?: string }) {
+export function Lives({ org, repo, path, branch = 'main', exists = true }: { org: string; repo: string; path?: string; branch?: string; exists?: boolean }) {
+  const where = `${org}/${repo}${path ? `/${path}` : ''}`;
   return (
     <p class="lives">
-      <a href={ghUrl(org, repo, path, branch)} target="_blank" rel="noopener">Lives in {`${org}/${repo}${path ? `/${path}` : ''}`}</a>
+      {path && !exists ? (
+        <a href={newFileUrl(org, repo, path, branch)} target="_blank" rel="noopener">Create {where} on GitHub</a>
+      ) : (
+        <a href={ghUrl(org, repo, path, branch)} target="_blank" rel="noopener">Lives in {where}</a>
+      )}
     </p>
   );
 }

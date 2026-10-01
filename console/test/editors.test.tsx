@@ -410,7 +410,9 @@ describe('editing screens', () => {
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
     expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">withheld<\/span><span class="footnote">withheld by <code>solutions\/<\/code><\/span>/);
     expect(out).toContain('Write the session list');
-    expect(out).not.toContain('public website');
+    // No public-website setting here: that list is the Public website tab's.
+    expect(out).not.toContain('kept off');
+    expect(out).not.toContain('opencourse.yml');
   });
   it('materials settings releases every file when nothing is withheld', () => {
     const none = new StaticFiles({}, {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html'] });
