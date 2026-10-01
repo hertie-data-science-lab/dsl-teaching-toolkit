@@ -1,11 +1,14 @@
 // The folder check (decision 0023): where the browser has the File System Access API (Chrome,
 // Edge), the person picks their repos folder once and the console tells, per repo, whether
-// `<folder>/<org>/<repo>` exists, so the Open button offers Open or Clone, not both. Only
+// it is in its course folder (`<folder>/<org>/<repo>`, or the course's own folder from
+// Profile when that sits inside the picked one; decision 0027), so the Open button offers
+// Open or Clone, not both. Only
 // folder names are looked up; no file is read. The handle is kept in this browser
 // (IndexedDB), per login, and kept across sign-out like the rest of Profile. Read permission
 // lapses on reload; `askFolderOnce` asks again from a click.
 
 import { signal } from '@preact/signals';
+import { courseFolder, lastSegment, overrideOf, type Setup } from './open';
 
 /** Where the handles are kept: IndexedDB in the page, a map in tests. */
 export interface HandleStore {
@@ -125,27 +128,47 @@ export async function askFolderOnce(login: string): Promise<void> {
 /** No folder of that name: nothing there (NotFoundError), or a file (TypeMismatchError). */
 const isNotThere = (e: unknown) => ['NotFoundError', 'TypeMismatchError'].includes((e as { name?: string } | null)?.name ?? '');
 
+const parts = (folder: string) => folder.split(/[\\/]+/).filter(Boolean);
+
 /**
- * Whether `<handle>/<org>/<repo>` is a folder. A handle already named for the org is the
- * course folder itself (as `courseFolder` treats a typed path). Undefined when the browser
- * does not grant read, or answers something else than "not there".
+ * The folders from the picked one (named `picked`, taken as Profile's root) down to `org`'s
+ * course folder: none when the picked folder is the course folder itself, `[org]` for
+ * `<root>/<org>`, the path below the root for a course folder of its own inside it. Null for
+ * a course folder elsewhere: the picked folder cannot see it.
  */
-export async function clonedIn(handle: FileSystemDirectoryHandle, org: string, repo: string): Promise<boolean | undefined> {
+export function courseSteps(picked: string, setup: Setup | null, org: string): string[] | null {
+  if (lastSegment(courseFolder(setup, org) || org).toLowerCase() === picked.toLowerCase()) return [];
+  const own = overrideOf(setup, org);
+  if (!own) return [org];
+  const root = parts(setup?.folder ?? '');
+  const below = parts(own);
+  const inside = root.length > 0 && below.length > root.length && root.every((s, i) => s.toLowerCase() === below[i].toLowerCase());
+  return inside ? below.slice(root.length) : null;
+}
+
+/**
+ * Whether `repo` is a folder in `org`'s course folder under `handle` (see `courseSteps`).
+ * Undefined when the browser does not grant read, when the course folder is outside the
+ * picked one, or when it answers something else than "not there".
+ */
+export async function clonedIn(handle: FileSystemDirectoryHandle, org: string, repo: string, setup: Setup | null = null): Promise<boolean | undefined> {
+  const steps = courseSteps(handle.name, setup, org);
+  if (!steps) return undefined;
   try {
     if (handle.queryPermission && (await handle.queryPermission({ mode: 'read' })) !== 'granted') return undefined;
-    const course = handle.name.toLowerCase() === org.toLowerCase() ? handle : await handle.getDirectoryHandle(org);
-    await course.getDirectoryHandle(repo);
+    let dir = handle;
+    for (const step of [...steps, repo]) dir = await dir.getDirectoryHandle(step);
     return true;
   } catch (e) {
     return isNotThere(e) ? false : undefined;
   }
 }
 
-/** Whether `repo` of `org` is cloned in `login`'s picked folder; undefined when the console cannot tell. */
-export async function isCloned(login: string, org: string, repo: string): Promise<boolean | undefined> {
+/** Whether `repo` is cloned in `org`'s course folder in `login`'s picked folder; undefined when the console cannot tell. */
+export async function isCloned(login: string, org: string, repo: string, setup: Setup | null = null): Promise<boolean | undefined> {
   // Safari and Firefox: no check, and no IndexedDB database made for nothing.
   if (!canCheckFolders()) return undefined;
   const h = await folderHandle(login);
-  return h ? clonedIn(h, org, repo) : undefined;
+  return h ? clonedIn(h, org, repo, setup) : undefined;
 }
 

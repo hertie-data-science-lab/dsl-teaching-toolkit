@@ -1,9 +1,11 @@
-// The Open split button (decision 0017), modelled on GitHub's Code button: the main part
-// does the last choice made (remembered per login in this browser), the arrow opens every
-// choice: on GitHub, on github.dev, in VS Code, in GitHub Desktop, in the editor Profile
-// names, or the clone command to copy. Where the folder check can tell (decision 0023), it
-// offers Open or Clone, whichever applies; it renders with both and narrows once it knows,
-// and the arrow's click asks for read permission after a reload. Clone and Open in VS Code
+// The Open split button (decision 0017), modelled on GitHub's Code button, on the instructor
+// screens and the student Set up page alike (decision 0027): the main part does the last
+// choice made (remembered per login in this browser), the arrow opens every choice: on
+// GitHub, on github.dev, in VS Code, in GitHub Desktop, in the editor Profile names, or the
+// clone command to copy. Where the folder check can tell (decision 0023), it offers Open or
+// Clone, whichever applies, and the main part reads "Clone" or "Open"; it renders with both
+// and "Open or clone" and narrows once it knows, and the arrow's click asks for read
+// permission after a reload. Clone and Open in VS Code
 // carry a `?` (decision 0024 rule 7), the clone's holding the command. A menu button in the
 // WAI-ARIA sense: the arrow opens it from the keyboard (Enter, Space, Down, Up), arrows move
 // through its items, Escape closes it and gives focus back. A `?` is not an item: off the
@@ -12,7 +14,7 @@
 import { signal } from '@preact/signals';
 import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { defaultItem, isWeb, openItems, profileHref, type OpenItem, type RepoRef, type Setup } from '../model/open';
+import { courseFolder, defaultItem, isWeb, mainLabel, openItems, profileHref, type OpenItem, type RepoRef, type Setup } from '../model/open';
 import { askFolderOnce, folderChanged, isCloned } from '../model/localFolder';
 import { rememberOpen, yourSetup } from '../model/prefs';
 import { Hint } from './Hint';
@@ -30,21 +32,23 @@ function useSetup(login: string): [Setup | null, (item: OpenItem) => void] {
 }
 
 /**
- * Whether the folder check finds `repo` cloned; undefined until it first answers, or when it
- * cannot tell. A recheck of the same repo keeps the last answer until the new one comes.
+ * Whether the folder check finds `repo` in `home`'s course folder; undefined until it first
+ * answers, or when it cannot tell. A recheck of the same repo keeps the last answer until the
+ * new one comes.
  */
-function useCloned(login: string, org: string, repo: string, folder: boolean): boolean | undefined {
-  const key = `${login}/${org}/${repo}`;
+function useCloned(login: string, home: string, repo: string, setup: Setup | null): boolean | undefined {
+  const key = `${login}/${home}/${repo}`;
   const [answer, setAnswer] = useState<{ key: string; cloned?: boolean }>({ key });
   const version = folderChanged.value;
+  const folder = courseFolder(setup, home);
   useEffect(() => {
     if (!login || !folder) return setAnswer({ key });
     let live = true;
-    void isCloned(login, org, repo).then((cloned) => live && setAnswer({ key, cloned }));
+    void isCloned(login, home, repo, setup).then((cloned) => live && setAnswer({ key, cloned }));
     return () => {
       live = false;
     };
-  }, [key, folder, version]);
+  }, [key, folder, setup?.folder, version]);
   // An answer about another repo (the props changed) is no answer.
   return answer.key === key ? answer.cloned : undefined;
 }
@@ -73,9 +77,11 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
   const env = useEnv();
   const login = env?.user.login ?? '';
   const [setup, remember] = useSetup(login);
-  const cloned = useCloned(login, ref.org, ref.repo, !!setup?.folder.trim());
+  const home = ref.home ?? ref.org;
+  const cloned = useCloned(login, home, ref.repo, setup);
   const items = openItems(ref, setup, cloned);
-  const main = defaultItem(items, setup);
+  const main = defaultItem(items, setup, cloned);
+  const label = mainLabel(main, cloned);
   const [open, setOpen] = useState(false);
   const [focusAt, setFocusAt] = useState<'first' | 'last' | null>(null);
   const [note, setNote] = useFlash();
@@ -171,7 +177,7 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
       <button type="button" onClick={() => choose(item)} {...extra}>{children}</button>
     );
   const command = items.find((i) => i.copy)?.copy;
-  const folder = !!setup?.folder.trim();
+  const folder = !!courseFolder(setup, home);
   const hints = {
     open: <Hint label="About opening in VS Code">Opens the repo’s folder on your computer. Clone it first if it is not there yet.</Hint>,
     clone: <Hint label="About cloning in VS Code">VS Code asks where to put it{folder ? '; choose your course folder' : ''}.{command ? <> Or run: <code class="pm-cmd">{command}</code></> : null}</Hint>,
@@ -192,7 +198,8 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
   const local = items.filter((i) => i.group === 'local');
   return (
     <div class={`split${small ? ' small' : ''}`} ref={wrap}>
-      {link(main, { class: `${cls} split-main`, ...(small ? { title: main.label, 'aria-label': main.label } : {}) }, <>{note === 'Copied' && main.copy ? note : small ? 'Open' : main.label}{main.href && isWeb(main.href) ? <Ext /> : null}</>)}
+      {/* The small button keeps one short word; its title and name carry the whole label. */}
+      {link(main, { class: `${cls} split-main`, ...(small ? { title: label, 'aria-label': label } : {}) }, <>{note === 'Copied' && main.copy ? note : small ? (main.copy ? 'Copy' : cloned === false ? 'Clone' : 'Open') : label}{main.href && isWeb(main.href) ? <Ext /> : null}</>)}
       <button ref={caret} type="button" class={`${cls} split-caret`} aria-haspopup="menu" aria-expanded={open} aria-controls={id} aria-label={`More ways to open ${ref.repo}`}
         onClick={() => (open ? setOpen(false) : show('first'))} onKeyDown={onCaretKey} onKeyUp={onCaretKeyUp}>
         <span class="caret" aria-hidden="true" />
@@ -204,7 +211,7 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
         <div class="pm-h" role="presentation">On your computer</div>
         {local.map(entry)}
         <hr />
-        <a href={profileHref(ref.org)} role="menuitem" tabIndex={-1} onClick={() => setOpen(false)}>
+        <a href={profileHref(home, !!ref.home)} role="menuitem" tabIndex={-1} onClick={() => setOpen(false)}>
           <span>{folder ? 'Change your profile' : 'Set up a local folder'}</span>
         </a>
       </div>

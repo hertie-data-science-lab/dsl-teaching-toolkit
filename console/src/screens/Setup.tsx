@@ -1,15 +1,16 @@
-// Profile (`#profile`, from the avatar; decisions 0017, 0021 rule 3, 0024 rule 6): the folder
-// a person keeps the course repos in and the editor the Open button uses. Kept per login in
-// this browser only (`model/prefs.ts`), never sent anywhere, and kept across sign-out. The
-// login is known from sign-in, so there is no handle field; instructors push to the course
-// repos, so there is no fork step. A saved setup shows as text with a pencil; the form shows
-// while editing or while no folder is saved, and nothing is stored until Save. Where the
-// browser allows it, the folder check (decision 0023) shows in both.
+// Profile (`#profile`, from the avatar; decisions 0017, 0021 rule 3, 0024 rule 6, 0027): the
+// root folder a person keeps the course repos in, each course's folder inside it (or one of
+// its own), and the editor the Open button uses. One Profile for instructors and students.
+// Kept per login in this browser only (`model/prefs.ts`), never sent anywhere, and kept
+// across sign-out. The login is known from sign-in, so there is no handle field. A saved
+// setup shows as text with a pencil; the form shows while editing or while no folder is
+// saved, and nothing is stored until Save. Where the browser allows it, the folder check
+// (decision 0023) shows in both; elsewhere a footnote says where it would.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { canCheckFolders, folderHandle, forgetFolder, pickFolder } from '../model/localFolder';
-import { folderExample, lastSegment, platformOf, schemeOk, type Editor, type Setup } from '../model/open';
+import { courseFolder, folderExample, lastSegment, platformOf, schemeOk, withOverride, type Editor, type Setup } from '../model/open';
 import { saveYourSetup, yourSetup } from '../model/prefs';
 
 const EDITOR_WORD: Record<Editor, string> = { vscode: 'VS Code', desktop: 'GitHub Desktop', other: 'Another editor' };
@@ -20,7 +21,7 @@ const draftOf = (s: Setup | null): Draft => ({ folder: s?.folder ?? '', editor: 
 const same = (a: Draft, b: Draft) => a.folder.trim() === b.folder.trim() && a.editor === b.editor && (a.editor !== 'other' || a.scheme.trim() === b.scheme.trim());
 
 /** The picked repos folder: pick it, see its name, forget it. Chrome and Edge only. */
-function FolderCheck({ login, typed, org }: { login: string; typed: string; org?: string }) {
+function FolderCheck({ login, typed, org, courses, saved }: { login: string; typed: string; org?: string; courses: ProfileCourse[]; saved: Setup | null }) {
   const [name, setName] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
@@ -39,8 +40,10 @@ function FolderCheck({ login, typed, org }: { login: string; typed: string; org?
   };
   const end = lastSegment(typed).toLowerCase();
   const picked = name?.toLowerCase();
-  // Picking the course's own folder under the typed one is a setup `courseFolder` supports.
-  const differs = !!end && !!picked && end !== picked && picked !== org?.toLowerCase();
+  // Picking a course's own folder (under the typed one, or the one Profile names for it) is a
+  // setup the folder check supports.
+  const courseEnds = [...courses.map((c) => c.org), ...(org ? [org] : [])].map((o) => lastSegment(courseFolder(saved, o)).toLowerCase());
+  const differs = !!end && !!picked && end !== picked && !courseEnds.includes(picked);
   return (
     <div class="field folder-check">
       {name ? (
@@ -58,14 +61,58 @@ function FolderCheck({ login, typed, org }: { login: string; typed: string; org?
   );
 }
 
+/** A course in the person's list: its org and the name it shows under. */
+export interface ProfileCourse {
+  org: string;
+  name: string;
+}
+
+/** One course's folder, and "Use a different folder" to give it one of its own. */
+// While the root folder is being edited the row only shows: its own folder is saved against the saved root.
+function CourseRow({ course, setup, editable, onSave }: { course: ProfileCourse; setup: Setup | null; editable: boolean; onSave: (org: string, folder: string) => void }) {
+  const folder = courseFolder(setup, course.org);
+  const [draft, setDraft] = useState<string | null>(null);
+  const id = `ys-course-${course.org}`;
+  if (draft === null) {
+    return (
+      <li>
+        <b>{course.name}</b>
+        {folder ? <code>{folder}</code> : <span class="footnote">Set the folder above.</span>}
+        {editable ? <button class="textlink" type="button" onClick={() => setDraft(folder)}>Use a different folder</button> : null}
+      </li>
+    );
+  }
+  return (
+    <li>
+      <label for={id}><b>{course.name}</b></label>
+      <input type="text" id={id} value={draft} spellcheck={false} autocomplete="off" autocapitalize="off" onInput={(e) => setDraft((e.target as HTMLInputElement).value)} />
+      <span class="actions">
+        <button class="btn small" type="button" onClick={() => (onSave(course.org, draft), setDraft(null))}>Save</button>
+        <button class="textlink" type="button" onClick={() => setDraft(null)}>Cancel</button>
+      </span>
+      <p class="hint">Leave it empty to use the folder above.</p>
+    </li>
+  );
+}
+
+/** "Your courses": each course's folder, resolved from `root` (the saved folder, or the one being typed). */
+function CourseFolders({ courses, setup, root, editable, onSave }: { courses: ProfileCourse[]; setup: Setup | null; root: string; editable: boolean; onSave: (org: string, folder: string) => void }) {
+  if (!courses.length) return null;
+  const shown: Setup = { ...(setup ?? { editor: 'vscode' }), folder: root };
+  return (
+    <div class="field course-folders">
+      <h2 class="label">Your courses</h2>
+      <ul class="plain-list">{courses.map((c) => <CourseRow key={c.org} course={c} setup={shown} editable={editable} onSave={onSave} />)}</ul>
+    </div>
+  );
+}
 
 const Pencil = () => (
   <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5l2.5 2.5L5.5 13H3v-2.5z" /><path d="M9.5 4l2.5 2.5" /></svg>
 );
 
-// `repos` is still passed by the App (the course's repos, for the clone block 0024 removed);
-// it is not used.
-export function SetupScreen({ org }: { org?: string; repos?: string[] }) {
+/** `courses`: the person's courses and semesters, for their folders (the App passes them). */
+export function SetupScreen({ org, courses = [] }: { org?: string; courses?: ProfileCourse[] }) {
   const env = useEnv();
   const login = env?.user.login ?? '';
   const [saved, setSaved] = useState<Setup | null>(() => yourSetup(login));
@@ -106,6 +153,7 @@ export function SetupScreen({ org }: { org?: string; repos?: string[] }) {
     const keepLast = saved?.lastOpen && saved.folder === draft.folder.trim() && saved.editor === draft.editor;
     const next: Setup = { ...(keepLast ? { lastOpen: saved.lastOpen } : {}), folder: draft.folder.trim(), editor: draft.editor };
     if (draft.editor === 'other') next.scheme = draft.scheme.trim();
+    if (saved?.overrides) next.overrides = saved.overrides;
     setDone(saveYourSetup(login, next) ? 'stored' : 'kept');
     setSaved(next);
     if (next.folder) switchTo(false);
@@ -113,7 +161,14 @@ export function SetupScreen({ org }: { org?: string; repos?: string[] }) {
   const status = done === 'stored' ? <span class="valid-msg" role="status">Saved.</span> : done === 'kept' ? <span class="footnote" role="status">This browser does not keep it: it lasts until you reload.</span> : null;
   const shown = editing ? draft.folder : saved?.folder ?? '';
   const view = !editing && !!saved;
-  const check = shown.trim() && canCheckFolders() ? <FolderCheck login={login} typed={shown} org={org} /> : null;
+  const check = shown.trim() && canCheckFolders() ? <FolderCheck login={login} typed={shown} org={org} courses={courses} saved={saved} /> : null;
+  // A course's own folder is stored at once, beside whatever else is saved.
+  const saveCourse = (course: string, folder: string) => {
+    const next = withOverride(saved ?? { folder: '', editor: 'vscode' }, course, folder);
+    setDone(saveYourSetup(login, next) ? 'stored' : 'kept');
+    setSaved(next);
+  };
+  const folders = <CourseFolders courses={courses} setup={saved} root={shown} editable={!editing} onSave={saveCourse} />;
   return (
     <>
       <div class="page-head">
@@ -129,6 +184,7 @@ export function SetupScreen({ org }: { org?: string; repos?: string[] }) {
               <dt>Folder for your course repos</dt><dd><code>{saved.folder}</code></dd>
               <dt>Editor</dt><dd>{EDITOR_WORD[saved.editor]}{saved.editor === 'other' && saved.scheme ? <>, <code>{saved.scheme}</code></> : null}</dd>
             </dl>
+            {folders}
           </>
         ) : (
           <div class="setup-form">
@@ -138,6 +194,7 @@ export function SetupScreen({ org }: { org?: string; repos?: string[] }) {
                 onInput={(e) => change({ folder: (e.target as HTMLInputElement).value })} />
               <p class="hint">Each course gets a folder inside it, named after its organisation.</p>
             </div>
+            {folders}
             <fieldset class="field">
               <legend class="label">Editor</legend>
               <div class="choices" role="radiogroup" aria-label="Editor">
@@ -165,6 +222,7 @@ export function SetupScreen({ org }: { org?: string; repos?: string[] }) {
         {view && status ? <p>{status}</p> : null}
       </section>
       <p class="footnote">Kept in this browser, for your GitHub login.</p>
+      {canCheckFolders() ? null : <p class="footnote">In Chrome or Edge the console can see which repos you have cloned and offer only the step that applies.</p>}
     </>
   );
 }

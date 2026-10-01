@@ -1,9 +1,9 @@
 // Per-viewer settings kept in this browser (localStorage): which semesters the student
 // groups show, when the student last opened each semester (for "new since your last visit"),
-// the local folders the Set up screen writes its commands for, and a person's Profile
-// (folder, editor, the Open button's last choice). Storage can be missing or refuse (a
-// private window, blocked site data); the console then shows every semester, calls nothing
-// new, forgets the folders on reload, and keeps Your setup in memory until reload.
+// and a person's Profile (root folder, per-course folders, editor, the Open button's last
+// choice), one for both roles (decision 0027). Storage can be missing or refuse (a private
+// window, blocked site data); the console then shows every semester, calls nothing new, and
+// keeps Profile in memory until reload.
 
 import { EDITORS, OPEN_CHOICES, type Editor, type OpenChoice, type Setup } from './open';
 
@@ -79,9 +79,8 @@ export function markVisit(login: string, org: string, now: number, store: PrefSt
 export const resetVisits = () => visits.clear();
 
 /**
- * On sign-out: every visit time and remembered student folder of `login` in this browser, and
- * this load's answers. Profile (Your setup) is kept: a folder and an editor are not secrets
- * (decision 0021).
+ * On sign-out: every visit time of `login` in this browser (and the old student folders), and this load's answers. Profile
+ * is kept: a folder and an editor are not secrets (decision 0021).
  */
 export function forgetStudentPrefs(login: string, store: PrefStore | null = localStore()): void {
   visits.clear();
@@ -90,7 +89,9 @@ export function forgetStudentPrefs(login: string, store: PrefStore | null = loca
     const mine = [];
     for (let i = 0; i < store.length; i++) {
       const k = store.key(i);
-      if (k && (k.startsWith(`dsl-console-visit:${login}:`) || k === pathsKey(login))) mine.push(k);
+      // `dsl-console-paths:` held the student folders Set up had before Profile served both
+      // roles (decision 0027): removed here once, so an old browser does not keep them.
+      if (k && (k.startsWith(`dsl-console-visit:${login}:`) || k === `dsl-console-paths:${login}`)) mine.push(k);
     }
     for (const k of mine) store.removeItem(k);
   } catch {
@@ -98,39 +99,14 @@ export function forgetStudentPrefs(login: string, store: PrefStore | null = loca
   }
 }
 
-/** The local folders a student keeps their clones in. */
-export interface LocalPaths {
-  materials: string;
-  assignments: string;
-}
-
-const pathsKey = (login: string) => `dsl-console-paths:${login}`;
-
-export function localPaths(login: string, store: PrefStore | null = localStore()): LocalPaths {
-  try {
-    const v = JSON.parse(store?.getItem(pathsKey(login)) ?? '{}') as Partial<LocalPaths>;
-    return { materials: typeof v.materials === 'string' ? v.materials : '', assignments: typeof v.assignments === 'string' ? v.assignments : '' };
-  } catch {
-    return { materials: '', assignments: '' };
-  }
-}
-
-export function saveLocalPaths(login: string, paths: LocalPaths, store: PrefStore | null = localStore()): void {
-  try {
-    store?.setItem(pathsKey(login), JSON.stringify(paths));
-  } catch {
-    /* storage unavailable: the folders last until reload */
-  }
-}
-
 const setupKey = (login: string) => `dsl-console-setup:${login}`;
-/** Your setup per login when storage refuses it: it then lasts until reload. */
+/** Profile per login when storage refuses it: it then lasts until reload. */
 const kept = new Map<string, Setup>();
 
 /** Forget the in-memory copies kept when storage refused (tests). */
 export const resetKeptSetups = () => kept.clear();
 
-/** `login`'s Your setup, or null when nothing is stored (and nothing kept since storage refused). */
+/** `login`'s Profile, or null when nothing is stored (and nothing kept since storage refused). */
 export function yourSetup(login: string, store: PrefStore | null = localStore()): Setup | null {
   try {
     const raw = store?.getItem(setupKey(login));
@@ -142,6 +118,8 @@ export function yourSetup(login: string, store: PrefStore | null = localStore())
     };
     if (typeof v.scheme === 'string' && v.scheme) setup.scheme = v.scheme;
     if (OPEN_CHOICES.includes(v.lastOpen as OpenChoice)) setup.lastOpen = v.lastOpen as OpenChoice;
+    const overrides = v.overrides && typeof v.overrides === 'object' ? Object.entries(v.overrides).filter((e): e is [string, string] => typeof e[1] === 'string' && !!e[1].trim()) : [];
+    if (overrides.length) setup.overrides = Object.fromEntries(overrides);
     return setup;
   } catch {
     return kept.get(login) ?? null;

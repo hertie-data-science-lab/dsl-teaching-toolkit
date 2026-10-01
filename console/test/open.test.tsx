@@ -7,7 +7,7 @@ import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
-import { courseFolder, defaultItem, folderExample, openItems, platformOf, schemeOk, type RepoRef, type Setup } from '../src/model/open';
+import { courseFolder, defaultItem, folderExample, mainLabel, openItems, orgFolder, platformOf, schemeOk, withOverride, type RepoRef, type Setup } from '../src/model/open';
 import { forgetStudentPrefs, rememberOpen, resetKeptSetups, saveYourSetup, yourSetup, type PrefStore } from '../src/model/prefs';
 import { SetupScreen } from '../src/screens/Setup';
 import { OpenButton } from '../src/ui/OpenButton';
@@ -36,7 +36,7 @@ describe('Your setup in this browser', () => {
     store.setItem(`dsl-console-visit:${LOGIN}:${ORG}`, '1');
     store.setItem(`dsl-console-paths:${LOGIN}`, '{}');
     forgetStudentPrefs(LOGIN, store);
-    // Visit times and student folders go; Profile stays (decision 0021 rule 3).
+    // Visit times and the old student folders go; Profile stays (decision 0021 rule 3).
     expect([...store.data.keys()].sort()).toEqual([`dsl-console-setup:${LOGIN}`, 'dsl-console-setup:b-example']);
     expect(yourSetup(LOGIN, store)?.folder).toBe('/Users/a/repos');
   });
@@ -79,8 +79,9 @@ describe('where each choice opens', () => {
     expect(h.clone).toBe(`git clone ${GH}.git "/Users/a b/repos/${ORG}/assignment-2-f2026"`);
     expect(openItems(REF, setup).find((i) => i.choice === 'vscode')!.label).toBe('Open in VS Code');
     // A folder already named for the course org is not nested again.
-    expect(courseFolder(`/Users/a/${ORG}`, ORG)).toBe(`/Users/a/${ORG}`);
-    expect(courseFolder('', ORG)).toBe('');
+    expect(orgFolder(`/Users/a/${ORG}`, ORG)).toBe(`/Users/a/${ORG}`);
+    expect(orgFolder('', ORG)).toBe('');
+    expect(courseFolder(null, ORG)).toBe('');
   });
 
   it('joins a Windows folder with backslashes and keeps the drive letter in the editor links', () => {
@@ -124,7 +125,7 @@ describe('where each choice opens', () => {
   });
 
   it('keeps the remembered choice while offered, else takes its opposite', () => {
-    const pick = (s: Setup, c?: boolean) => defaultItem(openItems(REF, s, c), s).choice;
+    const pick = (s: Setup, c?: boolean) => defaultItem(openItems(REF, s, c), s, c).choice;
     const vs: Setup = { folder: '/r', editor: 'vscode' };
     expect(pick({ ...vs, lastOpen: 'vsclone' })).toBe('vsclone');
     expect(pick({ ...vs, lastOpen: 'vscode' }, false)).toBe('vsclone');
@@ -137,6 +138,45 @@ describe('where each choice opens', () => {
     expect(pick({ ...vs, lastOpen: 'desktop' }, false)).toBe('desktop');
     expect(pick(vs, false)).toBe('vsclone');
     expect(pick(vs, true)).toBe('vscode');
+  });
+
+  it('gives a course its own folder when Profile names one, and drops one that is empty or the default', () => {
+    const base: Setup = { folder: '/Users/a/repos', editor: 'vscode' };
+    const own = withOverride(base, ORG.toUpperCase(), '/Users/a/teaching/ml/');
+    expect(own.overrides).toEqual({ [ORG]: '/Users/a/teaching/ml' });
+    expect(courseFolder(own, ORG)).toBe('/Users/a/teaching/ml');
+    expect(courseFolder(own, 'another-org')).toBe('/Users/a/repos/another-org');
+    expect(hrefs(own).vscode).toBe('vscode://file/Users/a/teaching/ml/assignment-2-f2026');
+    expect(hrefs(own).clone).toBe(`git clone ${GH}.git "/Users/a/teaching/ml/assignment-2-f2026"`);
+    expect(withOverride(own, ORG, '')).toEqual(base);
+    expect(withOverride(own, ORG, `/Users/a/repos/${ORG}`)).toEqual(base);
+    // A course folder alone, with no root, is enough to open there.
+    expect(courseFolder(withOverride({ folder: '', editor: 'vscode' }, ORG, '/x'), ORG)).toBe('/x');
+    // A student's fork goes in its semester's folder, not one named for the login.
+    expect(hrefs(base, { org: LOGIN, repo: 'materials', home: ORG }).vscode).toBe(`vscode://file/Users/a/repos/${ORG}/materials`);
+    const store = memStore();
+    saveYourSetup(LOGIN, own, store);
+    expect(yourSetup(LOGIN, store)).toEqual(own);
+    store.setItem(`dsl-console-setup:${LOGIN}`, JSON.stringify({ ...base, overrides: { [ORG]: 3, b: ' ' } }));
+    expect(yourSetup(LOGIN, store)).toEqual(base);
+  });
+
+  it('labels the button Clone, Open, or Open or clone by what the folder check tells', () => {
+    const at = (s: Setup | null, c?: boolean) => {
+      const main = defaultItem(openItems(REF, s, c), s, c);
+      return [main.choice, mainLabel(main, c)];
+    };
+    const vs: Setup = { folder: '/r', editor: 'vscode' };
+    expect(at(vs, false)).toEqual(['vsclone', 'Clone']);
+    expect(at(vs, true)).toEqual(['vscode', 'Open']);
+    expect(at(vs)).toEqual(['vscode', 'Open or clone']);
+    // A remembered web choice stays, with its own label, whatever the state.
+    for (const c of [false, true, undefined]) expect(at({ ...vs, lastOpen: 'githubdev' }, c)).toEqual(['githubdev', 'Open on github.dev']);
+    expect(at({ ...vs, lastOpen: 'github' }, false)).toEqual(['github', 'Open on GitHub']);
+    expect(at({ folder: '/r', editor: 'desktop' }, false)).toEqual(['desktop', 'Clone']);
+    expect(at({ ...vs, lastOpen: 'clone' }, false)).toEqual(['clone', 'Copy the clone command']);
+    expect(at({ folder: '/r', editor: 'other', scheme: 'zed://file/{path}' }, true)).toEqual(['editor', 'Open']);
+    expect(at(null)).toEqual(['github', 'Open on GitHub']);
   });
 
   it('checks an editor link and spells the example folder for the platform', () => {
@@ -218,7 +258,8 @@ describe('the Open button', () => {
     saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'vscode' });
     await mount(<OpenButton {...REF} />);
     const main = q<HTMLAnchorElement>('.split-main');
-    expect(main.textContent).toBe('Open in VS Code');
+    // Without the folder check the button cannot tell which step applies.
+    expect(main.textContent).toBe('Open or clone');
     expect(main.getAttribute('href')).toBe(`vscode://file/Users/a/repos/${ORG}/assignment-2-f2026`);
     expect(main.hasAttribute('target')).toBe(false);
     expect(items().at(-1)!.textContent).toBe('Change your profile');
@@ -256,6 +297,17 @@ describe('the Open button', () => {
     const rows = [...root!.querySelectorAll<HTMLElement>('.open-menu .pm-row')];
     expect(rows).toHaveLength(1);
     expect(rows[0].querySelector('.hint-pop')!.textContent).toBe(`VS Code asks where to put it. Or run: git clone ${GH}.git`);
+  });
+
+  it('says Copy on the small button for the clone command, and links a student’s Profile by semester', async () => {
+    rememberOpen(LOGIN, 'clone');
+    await mount(<><OpenButton org={ORG} repo="materials" small /><OpenButton org={LOGIN} repo="materials" home="hertie-nlp-f2026" small /></>);
+    const [a, b] = [...root!.querySelectorAll<HTMLElement>('.split')];
+    expect(a.querySelector('.split-main')!.textContent).toBe('Copy');
+    expect(a.querySelector('.split-main')!.getAttribute('aria-label')).toBe('Copy the clone command');
+    const last = (el: Element) => [...el.querySelectorAll('[role="menuitem"]')].at(-1)!.getAttribute('href');
+    expect(last(a)).toBe(`?course=${ORG}#profile`);
+    expect(last(b)).toBe('?cohort=hertie-nlp-f2026#profile');
   });
 
   it('shows the clone command under its entry when copying fails, and keeps the button label', async () => {
@@ -338,6 +390,37 @@ describe('Profile', () => {
     // Editing again starts from what is saved, not the discarded draft.
     await act(() => button('Edit').click());
     expect(q<HTMLInputElement>('#ys-folder').value).toBe('/Users/a/repos');
+  });
+
+  it('lists the courses with their folders, and stores a course’s own folder', async () => {
+    saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'vscode' });
+    const courses = [{ org: ORG, name: 'Machine Learning' }, { org: 'hertie-nlp-f2026', name: 'Natural Language Processing' }];
+    await mount(<SetupScreen org={ORG} courses={courses} />);
+    const rows = () => [...root!.querySelectorAll<HTMLElement>('.course-folders li')];
+    expect(root!.querySelector('.course-folders h2')!.textContent).toBe('Your courses');
+    expect(rows().map((r) => r.querySelector('code')!.textContent)).toEqual([`/Users/a/repos/${ORG}`, '/Users/a/repos/hertie-nlp-f2026']);
+    await act(() => button('Use a different folder').click());
+    const input = q<HTMLInputElement>(`#ys-course-${ORG}`);
+    expect(input.value).toBe(`/Users/a/repos/${ORG}`);
+    await type(input, '/Users/a/teaching/ml');
+    await act(() => button('Save').click());
+    expect(yourSetup(LOGIN)?.overrides).toEqual({ [ORG]: '/Users/a/teaching/ml' });
+    expect(rows()[0].querySelector('code')!.textContent).toBe('/Users/a/teaching/ml');
+    // Editing the root keeps the course's own folder; the other course follows the root. A
+    // row cannot take its own folder meanwhile: it would be saved against the draft root.
+    await act(() => button('Edit').click());
+    expect(button('Use a different folder')).toBeUndefined();
+    expect(rows().map((r) => r.querySelector('code')!.textContent)).toEqual(['/Users/a/teaching/ml', '/Users/a/repos/hertie-nlp-f2026']);
+    await type(q<HTMLInputElement>('#ys-folder'), '/Users/a/code');
+    expect(rows()[1].querySelector('code')!.textContent).toBe('/Users/a/code/hertie-nlp-f2026');
+    await act(() => button('Save').click());
+    expect(yourSetup(LOGIN)).toEqual({ folder: '/Users/a/code', editor: 'vscode', overrides: { [ORG]: '/Users/a/teaching/ml' } });
+  });
+
+  it('says where the folder check works, in a browser without it', async () => {
+    await mount(<SetupScreen org={ORG} />);
+    expect(root!.textContent).toContain('In Chrome or Edge the console can see which repos you have cloned and offer only the step that applies.');
+    expect(root!.querySelector('.course-folders')).toBeNull();
   });
 
   it('makes the editor the default again when the folder or editor changes', async () => {

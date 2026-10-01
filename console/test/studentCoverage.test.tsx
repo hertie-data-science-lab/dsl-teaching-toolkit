@@ -9,7 +9,7 @@ import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, type GhTeam } from '../src/github/client';
 import { discoverEstate, invitationUrl, pendingOrgs, type Semester } from '../src/model/discovery';
 import { forgetMyTeams, knownAuditor, parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
-import { forgetStudentPrefs, lastVisit, localPaths, markVisit, resetVisits, saveLocalPaths, type PrefStore } from '../src/model/prefs';
+import { forgetStudentPrefs, lastVisit, markVisit, resetVisits, type PrefStore } from '../src/model/prefs';
 import { SiteSource, homeText, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
 import { ArchivedSemester, AboutView, AssignmentsView, AuditorNote, InstructorsView, MarksView, ScheduleView, WeekList } from '../src/screens/Student';
@@ -176,7 +176,7 @@ describe('3. the whole receipts thread', () => {
     resetVisits();
   });
 
-  it('forgets every visit time and folder of the signed-out person, and no one else’s', () => {
+  it('forgets every visit time and the old student folders of the signed-out person, and no one else’s', () => {
     const data = new Map<string, string>([
       [`dsl-console-visit:${LOGIN}:${ORG}`, '1'], [`dsl-console-visit:${LOGIN}:other-f2026`, '2'], [`dsl-console-paths:${LOGIN}`, '{}'],
       ['dsl-console-visit:someone:x', '3'], ['dsl-console-paths:someone', '{}'], ['console-theme', 'dark'],
@@ -436,7 +436,7 @@ describe('12. Set up', () => {
     expect(await forkOf(client(fake), LOGIN, ORG, 'absent')).toEqual({ kind: 'none' });
   });
 
-  it('writes the clone command and the editor link for the saved folder, Windows included', () => {
+  it('writes the clone command (the Clone ?) and the editor link for a folder, Windows included', () => {
     expect(joinPath('/Users/jane/hertie/', 'materials')).toBe('/Users/jane/hertie/materials');
     expect(joinPath('C:\\Users\\jane\\hertie', 'materials')).toBe('C:\\Users\\jane\\hertie\\materials');
     expect(vscodeFolder('/Users/jane/hertie/materials')).toBe('vscode://file/Users/jane/hertie/materials');
@@ -445,22 +445,15 @@ describe('12. Set up', () => {
     expect(cloneCommand('https://github.com/jane/materials', '', 'materials')).toBe('git clone https://github.com/jane/materials.git');
   });
 
-  it('remembers the folders in this browser only, and survives blocked storage', () => {
-    const store = memStore();
-    saveLocalPaths(LOGIN, { materials: '/m', assignments: '/a' }, store);
-    expect(localPaths(LOGIN, store)).toEqual({ materials: '/m', assignments: '/a' });
-    expect(localPaths('someone-else', store)).toEqual({ materials: '', assignments: '' });
-    expect(() => saveLocalPaths(LOGIN, { materials: '/m', assignments: '' }, refusing)).not.toThrow();
-    expect(localPaths(LOGIN, refusing)).toEqual({ materials: '', assignments: '' });
-  });
-
-  it('lists the student’s own assignment repos to clone, and nothing personal in the Student view', async () => {
+  it('lists the student’s own assignment repos with an Open button each, and nothing personal in the Student view', async () => {
     const f = await facts();
-    const t = text(<SetupView org={ORG} facts={f} mine={mine()} studentView={false} />);
-    expect(t).toContain(`git clone https://github.com/${ORG}/assignment-2-octo-student.git`);
-    expect(t).toContain('Your local folders');
+    const html = render(<SetupView org={ORG} facts={f} mine={mine()} studentView={false} />);
+    expect(text(<SetupView org={ORG} facts={f} mine={mine()} studentView={false} />)).toContain('assignment-2-octo-student');
+    // The clone command lives only in the Open menu's Clone ?, not in a block on the page.
+    expect(html).not.toContain('<pre');
+    expect(html).toContain('class="split small"');
     const sv = text(<SetupView org={ORG} facts={f} mine={null} studentView />);
-    expect(sv).toContain('A student sets up their fork');
+    expect(sv).toContain('A student checks here that they have forked each materials repo');
     expect(sv).not.toContain('git clone');
   });
 });
