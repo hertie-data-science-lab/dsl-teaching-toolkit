@@ -473,7 +473,7 @@ describe('S2 course and S17 template', () => {
     expect(out).toMatch(/<h3>How it is marked <span class="hint"><button[^>]*aria-label="About marking"/);
     expect(out).toMatch(/Points per question <span class="hint"><button[^>]*aria-label="About points per question"/);
     expect(out).toMatch(/<h3>Student version <span class="hint"><button[^>]*aria-label="About the student version"/);
-    expect(out).toContain('Derive builds main from the solution branch, removing the marked answers.');
+    expect(out).toContain('Derive builds the main branch, the copy students get, from the solution branch, removing the marked answers.');
     // One place for the student-version sentence: the ?, not a paragraph under it too.
     expect(out).not.toContain('Builds the student starter on main');
   });

@@ -444,7 +444,7 @@ export function TemplateScreen(p: CourseProps) {
               <p class="lives"><a href={ghUrl(course.org, repo, 'grading_config.yml', 'solution')} target="_blank" rel="noopener">Lives in {`${course.org}/${repo}/grading_config.yml`}</a> on the solution branch.</p>
             </div>
             <div class="form-section">
-              <h3>Student version <Hint label="About the student version">Students get a copy of the main branch at hand out. Derive builds main from the solution branch, removing the marked answers. Run it after every change to the solution.</Hint></h3>
+              <h3>Student version <Hint label="About the student version">Derive builds the main branch, the copy students get, from the solution branch, removing the marked answers. Run it after every change to the solution.</Hint></h3>
               <div class="actions"><OpButtons def={derive(scope, repo, repo, heading)} small /></div>
             </div>
             <div class="form-section">
