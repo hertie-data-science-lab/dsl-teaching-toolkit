@@ -139,7 +139,7 @@ export type CatalogueSection = 'courses' | 'now' | 'past';
  * not followed (round 4).
  */
 const myCoursesKey = (login: string, section: CatalogueSection) => `dsl-console-mine:${login}:${section}`;
-/** The keys of earlier builds, page-wide and per section: deleted when first read, never followed. */
+/** The keys of earlier builds, page-wide and per section: deleted when first read, never followed (added 2026-10-01, round 4; can go once every browser has loaded it). */
 const oldMyCoursesKeys = (login: string) => [`dsl-console-my-courses:${login}`, ...(['courses', 'now', 'past'] as const).map((s) => `dsl-console-my-courses:${login}:${s}`)];
 
 /** Whether `login` chose to see only their own rows in `section` of All courses; on unless that section was switched off. */

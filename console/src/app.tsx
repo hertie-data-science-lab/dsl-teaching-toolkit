@@ -8,6 +8,7 @@ import { useEffect } from 'preact/hooks';
 import { createAuth, type ConsoleAuth } from './auth/console';
 import { GitHubClient, type GhUser } from './github/client';
 import { discoverEstate, isInstructor, studentSemesters, type Estate, type Mode } from './model/discovery';
+import { semesterOver } from './model/catalogue';
 import { LiveFiles } from './model/files';
 import { forgetMyTeams } from './model/mine';
 import { forgetStudentPrefs } from './model/prefs';
@@ -148,7 +149,7 @@ export function App({ state: s }: { state: AppState }) {
   const semesters = studentSemesters(estate);
   const asks = parseSearch(s.search.value);
   // A URL naming no page or org lands a person who teaches nothing in their one live semester.
-  const one = !route.screen && !asks.semester && !asks.cohort && !asks.course && !asks.join ? studentLanding(estate) : null;
+  const one = !route.screen && !asks.semester && !asks.cohort && !asks.course && !asks.join ? studentLanding(estate, s.now.value) : null;
   const sel = one ? { ...asks, semester: one } : asks;
   const title = s.mode.value === 'student' ? 'Student view' : 'Instructor view';
   // Guide explains the instructor console: only a person with an instructor role sees it.
@@ -189,7 +190,7 @@ export function App({ state: s }: { state: AppState }) {
           </aside>
           <main id="view" tabindex={-1}>
             {estate.invited?.length ? <Invitations invited={estate.invited} kind={estate.kind} /> : null}
-            <StudentBanner semester={stu.semester} studentView={stu.studentView} chip={semesterChip({ live: !stu.semester.archived })} now={s.now.value} />
+            <StudentBanner semester={stu.semester} studentView={stu.studentView} chip={semesterChip({ live: !stu.semester.archived, ended: semesterOver(stu.semester, s.now.value) })} now={s.now.value} />
             <ScreenBoundary key={s.search.value + s.hash.value}><StudentScreen semester={stu.semester} screen={key} studentView={stu.studentView} entry={route.entry} now={s.now.value} /></ScreenBoundary>
           </main>
         </div>

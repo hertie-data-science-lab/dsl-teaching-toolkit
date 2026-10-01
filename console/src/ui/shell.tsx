@@ -5,6 +5,7 @@ import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { GhUser } from '../github/client';
 import { cohortName, semesterName, type Course, type CohortRef, type Semester } from '../model/discovery';
+import { semesterOver } from '../model/catalogue';
 import { knownAuditor } from '../model/mine';
 import { STUDENT_SCREENS, studentHref } from '../router';
 import type { Loaded } from '../model/status';
@@ -166,11 +167,15 @@ function Switcher({ courses, course, cohort, cohortStates, semesters = [], semes
           <>
             <hr />
             <div class="nav-h">Your semesters</div>
-            {semesters.map((k) => (
-              <a href={studentHref(k.org)} role="menuitem" class={`${k.archived ? 'ro' : ''}${semester?.org === k.org ? ' cur' : ''}`}>
-                {semesterName(k)}<span class="pm-sub">{k.archived ? 'archived' : 'student'}</span>
-              </a>
-            ))}
+            {semesters.map((k) => {
+              // Ended as Your semesters judges it (decision 0031); the semester key gives the end here.
+              const over = semesterOver(k, Date.now());
+              return (
+                <a href={studentHref(k.org)} role="menuitem" class={`${over ? 'ro' : ''}${semester?.org === k.org ? ' cur' : ''}`}>
+                  {semesterName(k)}<span class="pm-sub">{k.archived ? 'archived' : over ? 'ended' : 'student'}</span>
+                </a>
+              );
+            })}
           </>
         ) : null}
       </div>

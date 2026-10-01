@@ -12,7 +12,7 @@ import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient } from '../src/github/client';
 import { endedNow, loadCatalogue, parseOrgs, pool, runningNow, termRank } from '../src/model/catalogue';
 import type { Loaded } from '../src/model/status';
-import type { Course, Semester } from '../src/model/discovery';
+import { discoverEstate, studentSemesters, type Course, type Semester } from '../src/model/discovery';
 import { myCoursesOnly, saveMyCoursesOnly, type PrefStore } from '../src/model/prefs';
 import { HomeScreen } from '../src/screens/Home';
 import { StaticFiles } from '../src/model/files';
@@ -28,8 +28,7 @@ const ORGS = `# comment\ncourse_orgs:\n  - ${MINE}\n  - ${NLP}\n  - ${BROKEN}\n`
 const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
 const course: Course = { org: 'Hertie-DSL-Demo-Course-E1234', name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [], meta: null };
 
-function catalogueFake(orgs: string | null = ORGS) {
-  const f = new FakeGitHub();
+function catalogueFake(orgs: string | null = ORGS, f = new FakeGitHub()) {
   if (orgs !== null) f.on('GET', ORGS_URL, fileBody('orgs.yml', orgs));
   return f
     .on('GET', `/repos/${NLP}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Natural Language Processing\ncourse_code: E1282\n'))
@@ -498,16 +497,33 @@ describe('All courses', () => {
     expect(greyed(section(h, 'h-courses') as HTMLElement).find((g) => g.textContent?.startsWith(BROKEN))!.querySelector('.cc-code')).toBeNull();
   });
 
-  it('shows a semester the person studies in once, under Your semesters, even when its course is one of theirs read only', async () => {
-    // An instructor elsewhere who studies in a read-only course's semester.
-    const sem = { org: 'hertie-nlp-f2026', term: 'f2026', termLabel: 'Fall 2026' };
-    const ro: Course = { ...course, org: NLP, name: 'Natural Language Processing', code: 'E1282', write: false, cohorts: [sem] };
-    const studied: Semester = { ...sem, courseOrg: NLP, courseName: 'Natural Language Processing', archived: false, role: 'student' };
-    const h = mount(catalogueFake(), { courses: [course, ro], semesters: [studied] });
+  it('an instructor who studies in another course’s semester sees it once, and that course greyed as theirs to study (end to end from discovery)', async () => {
+    // Instructor of MINE; a member of NLP's course org without push, and a student of its Fall 2026.
+    const SEM = 'hertie-nlp-f2026';
+    const f = new FakeGitHub()
+      .on('GET', '/user/orgs?per_page=100&page=1', [])
+      .on('GET', '/user/memberships/orgs?state=active&per_page=100&page=1', [MINE, NLP, SEM].map((login) => ({ state: 'active', role: 'member', organization: { login } })))
+      .on('GET', `/repos/${MINE}/.github`, { name: '.github', topics: ['dsl-course-hub'], permissions: { push: true } })
+      .on('GET', `/repos/${MINE}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Machine Learning\ncourse_code: E1234\n'))
+      .on('GET', `/repos/${NLP}/.github`, { name: '.github', topics: ['dsl-course-hub'], permissions: { push: false, pull: true } })
+      .on('GET', `/repos/${SEM}/.github`, { name: '.github', topics: ['dsl-semester'], archived: false, permissions: { push: false, pull: true } });
+    catalogueFake(ORGS, f);
+    const e = await discoverEstate(client(f), { kind: 'classic', login: user.login });
+    expect(e.courses.map((c) => c.org)).toEqual([MINE]);
+    const semesters = studentSemesters(e);
+    expect(semesters.map((s) => [s.org, s.courseOrg])).toEqual([[SEM, NLP]]);
+    saveMyCoursesOnly(user.login, 'courses', false);
+    saveMyCoursesOnly(user.login, 'now', false);
+    const h = mount(f, { courses: e.courses, semesters });
     await flush();
-    const rows = [...h.querySelectorAll(`a[href*="${sem.org}"]`)];
-    expect(rows.map((a) => a.getAttribute('href'))).toEqual([`?semester=${sem.org}#week`]);
-    expect(rows[0].closest('section')!.getAttribute('aria-labelledby')).toBe('h-semesters');
+    // The semester: once, under Your semesters, never a greyed row of This semester.
+    expect([...h.querySelectorAll(`a[href*="${SEM}"]`)].map((a) => a.closest('section')!.getAttribute('aria-labelledby'))).toEqual(['h-semesters']);
+    expect(names(section(h, 'h-live'))).not.toContain('Natural Language Processing, Fall 2026');
+    // Its course, greyed in DSL courses, says what the person is there.
+    const nlp = greyed(section(h, 'h-courses') as HTMLElement).find((g) => g.textContent?.startsWith('Natural Language Processing'))!;
+    expect(nlp.querySelector('.cc-sub')!.textContent).toBe('You are a student');
+    const broken = greyed(section(h, 'h-courses') as HTMLElement).find((g) => g.textContent?.startsWith(BROKEN))!;
+    expect(broken.querySelector('.cc-sub')!.textContent).toBe('Not one of your courses');
   });
 
   it('says it is reading the catalogue only while DSL courses shows the others', async () => {

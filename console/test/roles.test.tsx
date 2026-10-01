@@ -151,6 +151,19 @@ describe('mode and the student shell', () => {
     expect(modeOf(estate([], [NLP], [[NLP.org, 'student']]), parseSearch(''))).toBe('student');
   });
 
+  it('a student whose older semester ended unarchived lands on the running one’s This week (decision 0031)', () => {
+    const now = Date.parse('2026-10-01T12:00:00Z');
+    const f2025 = sem('hertie-dsl-demo-f2025', { term: 'f2025', termLabel: 'Fall 2025' });
+    const f2026 = sem('hertie-dsl-demo-f2026');
+    expect(studentLanding(estate([], [f2026, f2025], [[f2026.org, 'student'], [f2025.org, 'student']]), now)).toBe(f2026.org);
+  });
+
+  it('the student nav marks a semester that ended unarchived as ended', () => {
+    const old = sem('hertie-nlp-f2024', { term: 'f2024', termLabel: 'Fall 2024' });
+    const nav = render(<StudentNav courses={[]} cohortStates={{}} semesters={[old]} semester={old} current="week" />);
+    expect(nav).toMatch(/class="ro cur"[^>]*>Natural Language Processing, Fall 2024<span class="pm-sub">ended<\/span>/);
+  });
+
   it('the student nav lists the eight screens', () => {
     const nav = render(<StudentNav courses={[]} cohortStates={{}} semesters={[NLP]} semester={NLP} current="marks" />);
     const labels = [...nav.matchAll(/<li><a href="\?semester=hertie-nlp-f2026#(\w+)"[^>]*>([^<]+)</g)].map((m) => [m[1], m[2]]);

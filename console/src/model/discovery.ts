@@ -179,7 +179,7 @@ export interface Estate {
   /**
    * The person's role per org, keyed by the lower-cased login (read it with roleOf). Instructor
    * wins over student. An org absent here carries no role: a course the person can read but not
-   * change is still in `courses`, shown read only.
+   * change is still in `courses`, shown read only, unless they only study in it (decision 0031).
    */
   roles: Map<string, Role>;
   kind: TokenKind;

@@ -13,7 +13,7 @@ import { FINE_GRAINED_SETTINGS_URL, NEW_FINE_GRAINED_URL, NEW_TOKEN_URL } from '
 import type { GhUser } from '../github/client';
 import { useEnv } from '../env';
 import { cohortName, invitationUrl, semesterName, type Course, type CohortRef, type Invitation, type Semester, type TokenKind } from '../model/discovery';
-import { endedNow, loadCatalogue, runningNow, termRank, type CatalogueCourse } from '../model/catalogue';
+import { endedNow, loadCatalogue, runningNow, semesterOver, termRank, type CatalogueCourse } from '../model/catalogue';
 import type { Files } from '../model/files';
 import { fmtWhen } from '../model/format';
 import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
@@ -123,13 +123,14 @@ function CardRow({ c }: { c: Card }) {
 }
 
 const NOT_MINE = 'Not one of your courses';
+const STUDENT = 'You are a student';
 
-/** A catalogue row the person has no role in: greyed, and not a link. */
-function OffRow({ name, code }: { name: string; code: string }) {
+/** A catalogue row the person teaches nothing in: greyed, and not a link; `studies` when they are a student of one of its semesters. */
+function OffRow({ name, code, studies = false }: { name: string; code: string; studies?: boolean }) {
   return (
     <li>
       <div class="cohort-card ro off" aria-disabled="true">
-        <CardName name={name} code={code} sub={NOT_MINE} />
+        <CardName name={name} code={code} sub={studies ? STUDENT : NOT_MINE} />
         <span class="cc-week" />
         <span />
         <span class="cc-next" />
@@ -191,18 +192,8 @@ function useCatalogue(courses: Course[]): CatalogueState {
   return st;
 }
 
-const DAY = 86_400_000;
-
-/**
- * Whether a semester the person studies in is over: archived, or past its last day
- * (`semester_end` from its facts); with no facts (not read yet, or unreadable), by its key's
- * approximate end, as the instructor's cards judge theirs (decision 0030).
- */
-export function studentPast(s: Semester, facts: SemesterFacts | null | undefined, now: number): boolean {
-  if (s.archived) return true;
-  if (facts?.end) return Date.parse(facts.end) + DAY <= now;
-  return endedNow({ org: s.org, termLabel: s.termLabel }, now);
-}
+/** Whether a semester the person studies in is over, by its facts' last day once read (`semesterOver`). */
+export const studentPast = (s: Semester, facts: SemesterFacts | null | undefined, now: number) => semesterOver(s, now, facts?.end);
 
 /** A semester the person studies in, as the instructor's cards show theirs: its week and what comes next, once its facts are read. */
 function semesterCard(s: Semester, facts: SemesterFacts | null | undefined, now: number): Card {
@@ -212,7 +203,7 @@ function semesterCard(s: Semester, facts: SemesterFacts | null | undefined, now:
     key: s.org,
     name: semesterName({ ...s, courseName: s.courseName || facts?.courseName || '' }),
     code: s.courseCode ?? '',
-    sub: s.archived ? 'Archived; your work stays yours to read' : 'You are a student',
+    sub: s.archived ? 'Archived; your work stays yours to read' : STUDENT,
     week: live ? semesterLine(facts, now).week ?? '' : '',
     status: <span class="chip">{s.archived ? 'Archived' : past ? 'Ended' : 'Current'}</span>,
     next: live ? [['', nextLine(facts, now)]] : [],
@@ -370,6 +361,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
   }));
   // A semester the person studies in shows only under Your semesters: never also as a row here (decision 0031 rule 1).
   const studying = new Set(semesters.map((s) => s.org.toLowerCase()));
+  const studiedCourses = new Set(semesters.map((s) => s.courseOrg.toLowerCase()).filter(Boolean));
   const cards = courses.flatMap((course) => course.cohorts.filter((c) => !studying.has(c.org.toLowerCase())).map((c) => cardOf(course, c, cohortStates[c.org], subs.get(course.org)!, now)));
   const live = cards.filter((c) => !c.past).sort((a, b) => b.urgency - a.urgency);
   const past = cards.filter((c) => c.past);
@@ -411,7 +403,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
               {mine.map((c) => (
                 <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><CardName name={c.name} code={c.code} sub={subs.get(c.org)!} /><span class="cc-week" /><span /><span class="cc-next" /></a></li>
               ))}
-              {only.courses ? null : foreign.map((c) => <OffRow name={c.name} code={c.code} />)}
+              {only.courses ? null : foreign.map((c) => <OffRow name={c.name} code={c.code} studies={studiedCourses.has(c.org.toLowerCase())} />)}
             </ul>
             {catalogue.state === 'loading' && !only.courses ? <p class="footnote">Reading the catalogue…</p> : catalogue.state === 'failed' ? <p class="footnote">The catalogue could not be read.</p> : null}
           </section>

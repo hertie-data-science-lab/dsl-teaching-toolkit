@@ -101,20 +101,22 @@ from the toolkit's public `orgs.yml`, in three sections, **DSL courses**, **This
 time with Show more; always shown, saying so when the person has none). A semester whose end
 cannot be read ends on a date its key implies (a fall semester on 1 February, spring 1 August,
 summer 1 October, winter 1 April). The person's own rows are in colour and ordered by what needs
-them, each card with the course code on a quiet line under its title and naming their role (course admin from `dsl-course.yml`, else instructor or
-teaching assistant from the newest running semester's `instructors.yml`, else "you teach on this
-course"); the others are greyed, not links, and say "Not one of your courses". Each section has
-its own **My courses** checkbox (the first one in the page head, left of New course), on by
-default and kept in this browser per account and section; while it is on, the head says how many
-rows it hides ("+2 others"). Then **Your semesters** (one card per semester the
-person is a student of, past ones greyed; such a semester shows only here, never also as a row
-above, decision 0031). For a student-only
-account it is its own page, laid out as the instructor's (decision 0029): **This semester** (the
-live ones, each card with its week and "Next: ...") and **Past semesters** (archived, or past their last day; with no
-dates read yet, by the date their key implies), which a **Current
-only** checkbox in the page head hides (kept in this browser, per account). A student-only
-account with exactly one live semester lands on its This week instead. The top bar's Guide
-explains the instructor console, so only a person with an instructor role sees it.
+them, each card with the course code on a quiet line under its title and naming their role
+(course admin from `dsl-course.yml`, else instructor or teaching assistant from the newest
+running semester's `instructors.yml`, else "you teach on this course"); the others are greyed,
+not links, and say "Not one of your courses" ("You are a student" for a course the person
+studies in). Each section has its own **My courses** checkbox (the first one in the page head,
+left of New course), on by default and kept in this browser per account and section; while it is
+on, the head says how many rows it hides ("+2 others"). Then **Your semesters** (one card per
+semester the person is a student of, past ones greyed; such a semester shows only here, never
+also as a row above, decision 0031). For a student-only account it is its own page, laid out as
+the instructor's (decision 0029): **This semester** (the live ones, each card with its week and
+"Next: ...") and **Past semesters** (archived, or past their last day; with no dates read yet,
+by the date their key implies), which a **Current only** checkbox in the page head hides (kept
+in this browser, per account). A student-only account with exactly one live semester (neither
+archived nor ended, judged by its key) lands on its This week instead; the student nav and the
+semester banner call an ended semester ended by the same rule. The top bar's Guide explains the
+instructor console, so only a person with an instructor role sees it.
 
 The mode picks the shell. `?semester=<org>` opens that semester's student screens (This
 week, Schedule, Assignments, Marks, Materials, Join, Instructors). For a
