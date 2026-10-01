@@ -521,7 +521,7 @@
       },
       "counts_doc": "",
       "doc": "docs/07-schedule-releases.md",
-      "help": "Write the syllabus's session list from the semester's schedule.",
+      "help": "Write the syllabus's weekly plan from the semester's schedule.",
       "name": "assignment.generate_syllabus",
       "preview": true,
       "required_team": "instructors",

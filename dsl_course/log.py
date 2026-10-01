@@ -91,7 +91,7 @@ class Summary(int):
     `counts` are integers only, `reasons` are `{"code", "text"}` pairs (a code in
     UPPER_SNAKE, always with its sentence), `details` are one line per thing the run
     touched (a file derived), for the console to list, `block` is generated text the
-    console shows verbatim (the syllabus session list), and `conclusion` is set only to say
+    console shows verbatim (the syllabus weekly plan), and `conclusion` is set only to say
     a run that exited 0 did nothing (`nothing_to_do`) or was passed over (`skipped`)."""
 
     text: str

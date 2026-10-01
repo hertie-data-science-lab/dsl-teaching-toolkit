@@ -339,7 +339,7 @@ def test_a_huge_block_is_cut_to_fit_the_annotation_and_still_parses():
         actor="prof",
         preview=True,
         conclusion="previewed",
-        summary="Built the session list: 12 sessions; nothing was written.",
+        summary="Built the weekly plan: 12 sessions; nothing was written.",
         details=["solution/a.py -> a.py"],
         block="### Session 1: 100% theory\n" * 8000,  # ~200 KB, % and newlines escape
     )

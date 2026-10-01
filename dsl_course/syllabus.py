@@ -153,7 +153,7 @@ def main() -> int:
             f"{sessions} session(s) - paste the block above, or re-run with --no-preview"
         )
         return Summary(
-            f"Built the session list: {listed}; nothing was written.",
+            f"Built the weekly plan: {listed}; nothing was written.",
             counts,
             block=body,
         )
@@ -171,7 +171,7 @@ def main() -> int:
         (header + body).encode(),
         "docs: regenerate the syllabus sessions block",
     ):
-        text = f"The session list could not be written to {target}."
+        text = f"The weekly plan could not be written to {target}."
         return Summary(
             text,
             counts,
@@ -180,9 +180,7 @@ def main() -> int:
             block=body,
         )
     log_ok(f"{sessions} session(s) -> {target}")
-    return Summary(
-        f"Wrote the session list ({listed}) to {target}.", counts, block=body
-    )
+    return Summary(f"Wrote the weekly plan ({listed}) to {target}.", counts, block=body)
 
 
 if __name__ == "__main__":

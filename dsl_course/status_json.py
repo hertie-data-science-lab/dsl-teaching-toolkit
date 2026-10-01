@@ -1672,7 +1672,7 @@ def _declaration(org: str, repo: str) -> Declared:
 def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
     """A materials repo's C4 facts: its declared syllabus (markdown read, anything else
     only looked for), its top folders and declared kinds, its `.releaseignore` and whether
-    the session list was generated. The top is listed, never the whole tree: a repo too
+    the weekly plan was generated. The top is listed, never the whole tree: a repo too
     large for one recursive listing must not fail the course's status."""
     declared = _declaration(course_org, repo)
     path = declared.syllabus

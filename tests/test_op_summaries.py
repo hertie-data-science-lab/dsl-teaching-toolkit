@@ -196,7 +196,7 @@ def test_the_session_list_reaches_the_outcome(monkeypatch, capsys, engine):
     monkeypatch.setattr(
         syllabus,
         "main",
-        lambda: Summary("Built the session list: 1 session.", block="## Sessions\n"),
+        lambda: Summary("Built the weekly plan: 1 session.", block="## Sessions\n"),
     )
     body = _run(
         monkeypatch,
