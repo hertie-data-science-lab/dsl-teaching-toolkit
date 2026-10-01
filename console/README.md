@@ -115,7 +115,8 @@ The **course overview** is a status board in two columns: Setup & To do, Semeste
 its next automatic event), Assignment templates; then Problems (the course's, then each live
 semester's, tagged), Course details (with the public website's indicator and Publish button),
 Recent activity (the last five operations across the course and its live semesters; who ran
-each comes from its outcome file) and Materials.
+each comes from its outcome file) and Handout materials. The Dashboard's line under its title
+says only what the banner does not: the exams and the archive date.
 
 ## Student screens and their sources
 

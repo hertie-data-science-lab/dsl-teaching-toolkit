@@ -62,20 +62,15 @@ export function AsgRows({ status, now }: { status: Status; now: number }) {
 }
 
 /**
- * "Fall 2026, 14 Sep to 18 Dec. Week 3 of 15. Exams 8 and 15 Dec. Archive 12 Jan 2027."
- * Each sentence only when its facts are known; before week 1, "Starts 14 Sep." when the
- * range is not already shown. Years are said when they are not the start's (`thisYear`
- * without a start).
+ * The Dashboard's line under its title: what the semester banner does not say (its name, dates
+ * and week are there). The start while the semester has no end date yet, the exams, the archive.
  */
 export function headerLine(status: Status, sched: Schedule | null, rows: Row[], tz: string, thisYear: number): string {
   const sem = status.semester;
   const start = sem?.start ?? sched?.start ?? null, end = sem?.end ?? sched?.end ?? null;
   const year = start ? Number(start.slice(0, 4)) : thisYear;
   const out: string[] = [];
-  const dates = start && end ? `${fmtDate(start, tz, year)} to ${fmtDate(end, tz, year)}` : '';
-  if (sem?.label || dates) out.push(`${[sem?.label, dates].filter(Boolean).join(', ')}.`);
-  if (sem?.week === 0) { if (start && !dates) out.push(`Starts ${fmtDate(start, tz, year)}.`); }
-  else if (sem?.week && sem.weeks) out.push(`Week ${sem.week} of ${sem.weeks}.`);
+  if (sem?.week === 0 && start && !end) out.push(`Starts ${fmtDate(start, tz, year)}.`);
   const exams = rows.filter((r) => r.type === 'exam' && r.when).map((r) => r.when!);
   if (exams.length) out.push(`${exams.length > 1 ? 'Exams' : 'Exam'} ${fmtDays(exams, tz, year)}.`);
   if (sem?.archive_date) out.push(`Archive ${fmtDate(sem.archive_date, tz, year)}.`);

@@ -59,7 +59,7 @@ export const SETUP_STEPS: { id: string; name: string; need?: 'required' }[] = [
   { id: 'C1', name: 'Course org read', need: 'required' },
   { id: 'C2', name: 'Course set up on GitHub', need: 'required' },
   { id: 'C3', name: 'Course details filled in', need: 'required' },
-  { id: 'C4', name: 'First materials repo' },
+  { id: 'C4', name: 'First handout materials repo' },
   { id: 'C5', name: 'First assignment template' },
   { id: 'C6', name: 'Public website' },
 ];
@@ -90,7 +90,7 @@ export function stepLink(id: string, c: CourseStatus): { href: string; label: st
     case 'C1': return { href: ghUrl(org), label: 'Open on GitHub', ext: true };
     case 'C2': return { href: ghUrl(org, COURSE_REPO), label: 'Open .github', ext: true };
     case 'C3': return { href: '#details', label: 'Edit course details' };
-    case 'C4': return c.materials?.length ? { href: '#materials', label: 'Open materials' } : { href: `?course=${org}#new-materials`, label: 'New materials' };
+    case 'C4': return c.materials?.length ? { href: '#materials', label: 'Open handout materials' } : { href: `?course=${org}#new-materials`, label: 'New handout materials' };
     case 'C5': return c.templates?.length ? { href: '#templates', label: 'Open templates' } : { href: `?course=${org}#new-assignment-1`, label: 'New assignment' };
     default: return { href: '#website', label: 'Set up the public website' };
   }
@@ -163,7 +163,7 @@ const CHECK_HINT: Record<string, string> = {
   kind_folder: 'A repo with nothing of a content kind has nothing to release.',
   syllabus: 'The file the student site pins as the syllabus. Still the template text until you write it.',
   withheld: 'The whole repo is released as it stands unless a line here withholds it. Saving the list once, even empty, marks it reviewed.',
-  sessions: 'A paste-ready block of sessions and readings built from the semester schedule; optional.',
+  sessions: 'A block of sessions and readings built from the semester schedule, for pasting into your syllabus. Optional.',
 };
 
 /** A materials repo's whole checklist, ticks included: the settings screen's head. */
@@ -446,7 +446,7 @@ export function CourseScreen(p: CourseProps) {
           </section>
           <RecentActivity p={p} lists={ops} newest={live[0]?.ref.org} />
           <section class="panel section" id="sec-materials">
-            <div class="section-head"><h2>Materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New materials</a></div>
+            <div class="section-head"><h2>Handout materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New handout materials</a></div>
             {v.course?.materials?.length ? (
               <ul class="rows">
                 {v.course.materials.map((m) => (

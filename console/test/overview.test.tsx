@@ -132,7 +132,7 @@ describe('Recent activity', () => {
     const env = { ops: { runs, current: signal(null) }, user: { login: 'octo' } } as unknown as Env;
     const at = { ...STATUS, operations: [{ ...STATUS.operations![0], finished: '2026-09-23T05:00:00Z' }] };
     const out = render(<EnvCtx.Provider value={env}><CourseScreen course={course} loaded={{ kind: 'absent' }} cohortStates={{ [COHORT_ORG]: ready(at) }} files={files} now={NOW} /></EnvCtx.Provider>);
-    const panel = out.slice(out.indexOf('<h2>Recent activity'), out.indexOf('<h2>Materials'));
+    const panel = out.slice(out.indexOf('<h2>Recent activity'), out.indexOf('<h2>Handout materials'));
     expect(panel).toContain(`<a class="textlink" href="?cohort=${COHORT_ORG}#operations">All operations</a>`);
     const t = panel.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
     expect(t).toContain('Update site just now course · you');
@@ -155,7 +155,7 @@ describe('Recent activity', () => {
   });
   it('says Nothing has run yet, with no All operations link without a live semester', () => {
     const out = render(<CourseScreen course={{ ...course, cohorts: [] }} loaded={{ kind: 'absent' }} cohortStates={{}} files={new StaticFiles()} now={NOW} />);
-    const panel = out.slice(out.indexOf('<h2>Recent activity'), out.indexOf('<h2>Materials'));
+    const panel = out.slice(out.indexOf('<h2>Recent activity'), out.indexOf('<h2>Handout materials'));
     expect(panel).toContain('Nothing has run yet.');
     expect(panel).not.toContain('All operations');
   });

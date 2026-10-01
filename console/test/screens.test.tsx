@@ -131,7 +131,9 @@ describe('S4 cohort overview', () => {
   const t = text(<CohortScreen {...props()} />);
   it('leads with the header, term strip, problems, this week and assignments', () => {
     expect(html(<CohortScreen {...props()} />)).not.toContain('class="crumbs"'); // the semester banner replaces them
-    expect(t).toContain('Fall 2026, 7 Sep to 18 Dec. Week 3 of 15. Exam 22 Oct. Archive 31 Jan 2027.');
+    expect(t).toContain('Dashboard ? What this semester has planned');
+    expect(t).toContain('Exam 22 Oct. Archive 31 Jan 2027.');
+    expect(t).not.toContain('Week 3 of 15');
     expect(t).toContain('Setup done, but 2 stages have a problem');
     expect(out).toContain('class="term-strip"');
     expect((out.match(/class="wk[ "]/g) ?? []).length).toBe(15);
@@ -456,7 +458,7 @@ describe('S2 course and S17 template', () => {
     const out = html(<CourseScreen {...cp} />);
     expect((out.match(/class="grid-2/g) ?? []).length).toBe(1);
     const cols = out.slice(out.indexOf('class="grid-2 cols"'));
-    const order = ['<h2>Setup', '<h2>Semesters</h2>', '<h2>Assignment templates</h2>', '<h2>Problems', '<h2>Course details</h2>', '<h3>Public website', '<h2>Recent activity</h2>', '<h2>Materials</h2>'].map((h) => cols.indexOf(h));
+    const order = ['<h2>Setup', '<h2>Semesters</h2>', '<h2>Assignment templates</h2>', '<h2>Problems', '<h2>Course details</h2>', '<h3>Public website', '<h2>Recent activity</h2>', '<h2>Handout materials</h2>'].map((h) => cols.indexOf(h));
     expect(out).not.toContain('<h2>Public website');
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -487,7 +489,7 @@ describe('S2 course and S17 template', () => {
     expect(stepLink('C5', waiting).label).toBe('Open .github');
     expect(stepLink('C6', waiting).label).toBe('Open .github');
     expect(stepLink('C6', withWhy)).toEqual({ href: '#website', label: 'Set up the public website' });
-    expect(stepLink('C4', { ...withWhy, materials: [{ repo: 'm', state: 'todo' }] }).label).toBe('Open materials');
+    expect(stepLink('C4', { ...withWhy, materials: [{ repo: 'm', state: 'todo' }] }).label).toBe('Open handout materials');
     expect(stepLink('C5', { ...withWhy, stages: { ...withWhy.stages, C5: 'todo' }, templates: [{ repo: 't', slug: 't', state: 'todo' }] }).label).toBe('Open templates');
     expect(html(<SetupList course={base} />)).toContain('href="#course-problems">See the problem</a>');
   });

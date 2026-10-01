@@ -87,19 +87,19 @@ describe('term weeks', () => {
 });
 
 describe('the header line', () => {
-  it('reads semester, dates, week, exams and archive', () => {
+  it('reads exams and archive; the semester, dates and week are the banner’s', () => {
     const s = { ...STATUS, semester: { ...STATUS.semester!, archive_date: '2027-01-12' } };
-    expect(headerLine(s, sched, rows, TZ, 2026)).toBe('Fall 2026, 7 Sep to 18 Dec. Week 3 of 15. Exams 22 Oct and 15 Dec. Archive 12 Jan 2027.');
+    expect(headerLine(s, sched, rows, TZ, 2026)).toBe('Exams 22 Oct and 15 Dec. Archive 12 Jan 2027.');
   });
 
-  it('says Starts before week 1 only without the range, and leaves out what is not known', () => {
+  it('says Starts before week 1 only without an end date, and leaves out what is not known', () => {
     const s = { ...STATUS, semester: { ...STATUS.semester!, week: 0, archive_date: null } };
-    expect(headerLine(s, sched, [], TZ, 2026)).toBe('Fall 2026, 7 Sep to 18 Dec.');
+    expect(headerLine(s, sched, [], TZ, 2026)).toBe('');
     const open = { ...STATUS, semester: { ...STATUS.semester!, week: 0, end: null, archive_date: null } };
-    expect(headerLine(open, null, [], TZ, 2026)).toBe('Fall 2026. Starts 7 Sep.');
+    expect(headerLine(open, null, [], TZ, 2026)).toBe('Starts 7 Sep.');
     // No start date: the year is said against this year.
     const bare = { ...STATUS, semester: { ...STATUS.semester!, start: null, end: null, archive_date: '2027-01-12' } };
-    expect(headerLine(bare, null, [], TZ, 2026)).toBe('Fall 2026. Week 3 of 15. Archive 12 Jan 2027.');
+    expect(headerLine(bare, null, [], TZ, 2026)).toBe('Archive 12 Jan 2027.');
   });
 
   it('names a month once', () => {
