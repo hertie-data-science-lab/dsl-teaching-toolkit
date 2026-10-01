@@ -177,6 +177,17 @@ describe('New assignment: import', () => {
     expect(gh.seen.find((x) => x.method === 'POST' && x.url.endsWith('/git/trees'))!.body).toMatchObject({ base_tree: 'tr1', tree: [{ path: 'README.md' }, { path: 'data/x.csv' }] });
     expect(root.textContent).toContain('Created. Nothing reaches students until you add it to a schedule.');
     expect(root.textContent).toContain('Add to the Fall 2026 schedule');
+    // Written by hand: nothing to derive. Derived: Derive is offered straight away.
+    expect(root.textContent).not.toContain('Derive the student version now');
+    const key = `dsl-console:wizard:new-assignment:${COURSE}`;
+    const saved = JSON.parse(localStorage.getItem(key)!);
+    const dv = { ...v, starter: 'derived' };
+    localStorage.setItem(key, JSON.stringify({ ...saved, v: dv, verified: { ...saved.verified, 4: signature(dv, S4) } }));
+    render(null, root);
+    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={6} /></EnvCtx.Provider>, root!));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(root.textContent).toContain('Created.');
+    expect([...root.querySelectorAll('button')].some((b) => b.textContent === 'Derive the student version now')).toBe(true);
   });
 
   it('never says Created while the source cannot be read: the check fails with its sentence and a way to read it again', async () => {

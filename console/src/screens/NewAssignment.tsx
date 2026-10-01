@@ -15,7 +15,8 @@ import { YamlText, deepEqual } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { authorOf, copyFiles, type CopyResult } from '../github/client';
 import { validator } from '../model/validate';
-import { createAssignment } from '../ops/defs';
+import { createAssignment, derive } from '../ops/defs';
+import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
 import { labelOf } from '../model/labels';
 import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
@@ -103,6 +104,12 @@ export function withStart(prev: Values, next: Values, fresh: Values): Values {
   if (imports(next) && !imports(prev)) return { ...next, formats: ['none'] };
   if (!imports(next) && imports(prev) && deepEqual(next.formats, ['none'])) return { ...next, formats: fresh.formats };
   return next;
+}
+
+/** `next` after a change on step 3: a new tests answer drops the starter choice, so the
+ *  starter default keeps following the tests answer (decision 0028 rule 1). */
+export function withAutograde(prev: Values, next: Values): Values {
+  return next.autograde !== prev.autograde ? { ...next, starter: undefined } : next;
 }
 
 /** Step 1 cannot continue while the name carries a number nobody said to keep. */
@@ -329,7 +336,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
         {createdNote}
         {step === 3 ? <FormatPicker v={v} set={setV} fallback={courseFormats.length ? { formats: courseFormats, source: 'course' } : undefined} /> : null}
         {step === 3 && imports(v) ? <p class="why">The imported files are the starter, so No starter file starts ticked.</p> : null}
-        <SchemaForm id={`na${step}`} schema={null} tiers={tiers} values={v} onChange={setV} />
+        <SchemaForm id={`na${step}`} schema={null} tiers={tiers} values={v} onChange={(nv) => setV(withAutograde(v, nv))} />
       </>
     );
     foot = (
@@ -350,7 +357,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     );
     foot = (
       <button class="btn" type="button" onClick={() => {
-        set({ v: sv, verified: { ...d.verified, '4': signature(sv, S4) } });
+        set({ verified: { ...d.verified, '4': signature(v, S4) } });
         go(5);
       }}>Continue</button>
     );
@@ -417,6 +424,11 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
             <div class="actions">
               <OpenButton org={course.org} repo={repo} /><a class="btn outline" href={`https://github.com/${course.org}/${repo}/upload/main`} target="_blank" rel="noopener">Upload files on GitHub <Ext /></a>
             </div>
+            {starterChoice(v) === 'derived' ? (
+              <div class="actions">
+                <OpButtons def={derive(courseScope(p), repo, repo, name)} small label="Derive the student version now" />
+              </div>
+            ) : null}
             <div class="actions">
               {pick ? (
                 <>

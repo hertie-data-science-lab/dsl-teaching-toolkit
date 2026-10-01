@@ -12,7 +12,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { validateArgs } from '../src/ops/adapter';
 import { FormatPicker } from '../src/forms/FormatPicker';
-import { NewAssignmentScreen, withStart, copySentences, extrasOf, initialValues, linesFor, naDone, ordinalUnconfirmed, sourceOf, S1, S2, S3, S4, S5, withExtras } from '../src/screens/NewAssignment';
+import { NewAssignmentScreen, withAutograde, withStart, copySentences, extrasOf, initialValues, linesFor, naDone, ordinalUnconfirmed, sourceOf, S1, S2, S3, S4, S5, withExtras } from '../src/screens/NewAssignment';
 import { NewCohortScreen, cardsDone, nkDone } from '../src/screens/NewCohort';
 import { NewCourseScreen, ncDone, ncOrg } from '../src/screens/NewCourse';
 import { NewMaterialsScreen } from '../src/screens/NewMaterials';
@@ -419,6 +419,12 @@ describe('the wizard screens', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('keeps the starter choice only until the tests answer changes, so the default follows it', () => {
+    const v = { ...initialValues(null), autograde: 'false', starter: 'derived' };
+    expect(withAutograde(v, { ...v, grader_pdf: true }).starter).toBe('derived');
+    expect(withAutograde(v, { ...v, autograde: 'true' }).starter).toBeUndefined();
   });
 
   it('New assignment asks how students get the starter, defaulting from the tests answer', () => {
