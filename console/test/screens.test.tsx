@@ -130,7 +130,7 @@ describe('S4 cohort overview', () => {
   const out = html(<CohortScreen {...props()} />);
   const t = text(<CohortScreen {...props()} />);
   it('leads with the header, term strip, problems, this week and assignments', () => {
-    expect(t).toContain('Machine Learning, Fall 2026');
+    expect(html(<CohortScreen {...props()} />)).not.toContain('class="crumbs"'); // the semester banner replaces them
     expect(t).toContain('Fall 2026, 7 Sep to 18 Dec. Week 3 of 15. Exam 22 Oct. Archive 31 Jan 2027.');
     expect(t).toContain('Setup done, but 2 stages have a problem');
     expect(out).toContain('class="term-strip"');

@@ -10,12 +10,12 @@ import { collect, handout, returnMarks, updateCopies, type AsgRef } from '../ops
 import { OpButtons, OpOpen } from '../ops/Panel';
 import { useEffect } from 'preact/hooks';
 import { replaceHash, tabHref, type AssignmentTab } from '../router';
-import { Crumbs, ProblemCards } from '../ui/bits';
+import { ProblemCards } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { asgSummary } from './Cohort';
 import { MarksTab, TeamsTab } from './Marking';
 import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
-import { WithStatus, cohortCrumbs, cohortName, cohortScope, tzOf, yearOf } from './common';
+import { WithStatus, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
 
@@ -57,7 +57,6 @@ function Index(p: ReadyProps) {
   const marking = list.filter((a) => a.state === 'marking').length;
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, 'Assignments')} />
       <div class="page-head">
         <div>
           <h2 class="h1">Assignments <Hint doc="09-release-assignment-to-cohort.md">An assignment opens at hand out, has a late window after the due date, then is marked and returned; dates live in the schedule. This semester’s defaults are below the list.</Hint></h2>
@@ -98,7 +97,7 @@ function Index(p: ReadyProps) {
 }
 
 export function AssignmentsScreen(p: CohortProps) {
-  return <WithStatus props={p} title="Assignments" crumbs={cohortCrumbs(p, 'Assignments')}>{(r) => <Index {...r} />}</WithStatus>;
+  return <WithStatus props={p} title="Assignments">{(r) => <Index {...r} />}</WithStatus>;
 }
 
 // --------------------------------------------------------------------------- detail
@@ -269,7 +268,7 @@ function Overview(p: TabProps) {
 export function AssignmentScreen(p: CohortProps) {
   const title = p.entry ? assignmentIdent(p.entry) : 'Assignment';
   return (
-    <WithStatus props={p} title={title} crumbs={cohortCrumbs(p, title, [{ t: 'Assignments', href: '#assignments' }])}>
+    <WithStatus props={p} title={title}>
       {(r) => {
         const a = (r.status.assignments ?? []).find((x) => x.slug === p.entry);
         if (!a) return <NotFound {...r} what={`No assignment called ${p.entry} in ${cohortName(p)}.`} back="#assignments" />;
@@ -279,7 +278,6 @@ export function AssignmentScreen(p: CohortProps) {
         return (
           <>
             {moved ? <Rehash to={moved} /> : null}
-            <Crumbs items={cohortCrumbs(p, tab === 'overview' ? assignmentTitle(a) : TAB_NAME[tab], [{ t: 'Assignments', href: '#assignments' }, ...(tab === 'overview' ? [] : [{ t: assignmentTitle(a), href: tabHref(a.slug, 'overview') }])])} />
             {tab === 'teams' ? <TeamsTab {...tp} /> : tab === 'marks' ? <MarksTab {...tp} /> : <Overview {...tp} />}
           </>
         );

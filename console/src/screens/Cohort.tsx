@@ -9,9 +9,9 @@ import type { Assignment, Problem, Status } from '../model/types';
 import { checkAccess, releaseEarly, type ReleaseRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { Release } from '../model/types';
-import { Crumbs, Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
+import { Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
 import { Hint } from '../ui/Hint';
-import { CheckNow, MoreMenu, WithStatus, cohortName, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
+import { CheckNow, MoreMenu, WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
 
@@ -337,7 +337,6 @@ function Overview(p: ReadyProps) {
   const shown = problemGroups(problems, selected, isThisWeek, term, tz);
   return (
     <>
-      <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: cohortName(p) }]} />
       <div class="page-head">
         <div>
           <h2 class="h1">Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h2>
@@ -433,7 +432,7 @@ function Overview(p: ReadyProps) {
 
 export function CohortScreen(p: CohortProps) {
   return (
-    <WithStatus props={p} title="Dashboard" crumbs={[{ t: 'All courses', href: '#home' }, { t: cohortName(p) }]}>
+    <WithStatus props={p} title="Dashboard">
       {(r) => <Overview {...r} />}
     </WithStatus>
   );

@@ -19,7 +19,7 @@ import { lastVisit, markVisit } from '../model/prefs';
 import { IMG_HOSTS, MY_STATE_WORD, STUDENT_CHOICE, StatusFileSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
 import { weekItems, type WeekItem } from '../model/week';
 import { STUDENT_SCREENS, studentHref } from '../router';
-import { CheckLine, Crumbs, Loading, Md, ghUrl } from '../ui/bits';
+import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
 import { useLoad } from '../ui/load';
 import { Ext } from '../ui/icons';
 import { GhMd, LazyFold } from '../ui/rendered';
@@ -71,7 +71,6 @@ export function StudentScreen({ semester, screen, studentView, entry, now = Date
   const label = STUDENT_SCREENS.find(([k]) => k === screen)?.[1] ?? 'This week';
   return (
     <>
-      <Crumbs items={[{ t: 'Your semesters', href: '#home' }, { t: semesterName(semester), href: studentHref(semester.org) }, { t: label }]} />
       {studentView ? <StudentViewBanner semester={semester} /> : null}
       <div class="page-head"><div><h2 class="h1">{label}</h2></div></div>
       {semester.archived ? <ArchivedSemester semester={semester} studentView={studentView} /> : <SemesterBody semester={semester} screen={screen} studentView={studentView} entry={entry} now={now} />}

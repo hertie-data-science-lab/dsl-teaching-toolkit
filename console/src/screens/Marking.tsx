@@ -17,12 +17,12 @@ import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { studentHref, tabHref } from '../router';
-import { CheckLine, Crumbs, Lives, Loading } from '../ui/bits';
+import { CheckLine, Lives, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { Check, Lock } from '../ui/icons';
 import type { TabProps } from './Assignments';
-import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
+import { WithStatus, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO, LEDGER_PATH } from '../model/names';
 
@@ -411,7 +411,6 @@ function MarksOverview(p: ReadyProps) {
   const toMark = list.reduce((n, a) => n + (sheets.has(`${sheetName(p, a.slug)}.yml`) ? a.marks.total - a.marks.filled : 0), 0);
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, 'Marks')} />
       <div class="page-head">
         <div>
           <h2 class="h1">Marks <Hint doc="10-grade-and-return-assignments.md">This page only reads. Open an assignment to enter and return its marks.</Hint></h2>
@@ -441,5 +440,5 @@ function MarksOverview(p: ReadyProps) {
 }
 
 export function MarksOverviewScreen(p: CohortProps) {
-  return <WithStatus props={p} title="Marks" crumbs={cohortCrumbs(p, 'Marks')}>{(r) => <MarksOverview {...r} />}</WithStatus>;
+  return <WithStatus props={p} title="Marks">{(r) => <MarksOverview {...r} />}</WithStatus>;
 }

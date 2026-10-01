@@ -107,8 +107,9 @@ console is in instructor mode for anyone who teaches somewhere, and in student m
 
 Every semester page, in either console, opens with the **semester banner** (decision 0025):
 the course name, the semester as the page's one h1, its state, week and dates, and the
-semester on GitHub. The page's own title is an h2 styled as a heading. Course pages have no
-banner.
+semester on GitHub. It replaces the breadcrumbs there; the page's own title is an h2 styled
+as a heading. Course pages have no banner and keep their breadcrumbs. On a phone the preview's
+top-bar link reads "Preview".
 
 The **course overview** is a status board in two columns: Setup & To do, Semesters (each with
 its next automatic event), Assignment templates; then Problems (the course's, then each live
