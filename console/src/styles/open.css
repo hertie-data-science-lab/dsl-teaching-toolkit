@@ -6,13 +6,23 @@
 .split-caret .caret { width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); margin-top: -4px; }
 .split .open-menu { left: auto; right: 0; top: calc(100% + 6px); width: 320px; max-width: calc(100vw - 32px); }
 .open-menu [role="menuitem"]:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--sunk); }
-.open-menu .pm-copy { display: grid; justify-items: start; gap: 3px; }
-.open-menu .pm-cmd { font-family: var(--font-code); font-size: 12px; color: var(--muted); white-space: normal; overflow-wrap: anywhere; user-select: all; }
+/* A row with a ?: the item takes the width, the ? sits at its right (not a menu item). */
+.open-menu .pm-row { display: flex; align-items: center; gap: 4px; }
+.open-menu .pm-row > [role="menuitem"] { flex: 1; min-width: 0; }
+.open-menu .pm-row .hint { margin: 0 6px 0 0; }
+.open-menu .hint-btn { width: 20px; min-height: 0; height: 20px; padding: 0; display: grid; place-items: center; border: 1.5px solid var(--rule-strong); border-radius: 50%; background: var(--surface); font-family: var(--font-display); font-size: 12px; color: var(--ink-2); }
+.open-menu .hint-btn:hover { background: var(--surface); }
+.open-menu .pm-cmd { display: block; margin-top: 6px; font-family: var(--font-code); font-size: 12px; white-space: normal; overflow-wrap: anywhere; user-select: all; }
 .open-menu svg { width: 12px; height: 12px; color: var(--muted); flex: none; }
 
 /* ================= Your setup (screens/Setup.tsx) ================= */
 .setup-form { display: grid; gap: 22px; max-width: 640px; }
 .setup-form .saved { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
 .setup-form .scheme { margin-top: 6px; }
+/* The saved setup as text, the pencil at the panel's top right. */
+.setup-view { position: relative; display: grid; gap: 16px; }
+.setup-view .kv { padding-right: 48px; }
+.setup-view .setup-edit { position: absolute; top: 12px; right: 12px; padding: 0; width: 32px; }
+.setup-view .setup-edit svg { width: 14px; height: 14px; }
 /* A row's buttons sit at the left on a phone: the menu opens rightwards from there. */
 @media (max-width: 560px) { .rows .split .open-menu { left: 0; right: auto; } }

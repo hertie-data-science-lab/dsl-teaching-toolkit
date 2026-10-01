@@ -3,9 +3,11 @@
 // choice: on GitHub, on github.dev, in VS Code, in GitHub Desktop, in the editor Profile
 // names, or the clone command to copy. Where the folder check can tell (decision 0023), it
 // offers Open or Clone, whichever applies; it renders with both and narrows once it knows,
-// and the arrow's click asks for read permission after a reload. A menu button in the
+// and the arrow's click asks for read permission after a reload. Clone and Open in VS Code
+// carry a `?` (decision 0024 rule 7), the clone's holding the command. A menu button in the
 // WAI-ARIA sense: the arrow opens it from the keyboard (Enter, Space, Down, Up), arrows move
-// through it, Escape closes it and gives focus back.
+// through its items, Escape closes it and gives focus back. A `?` is not an item: off the
+// arrow keys and the tab order, it opens on hover or a tap.
 
 import { signal } from '@preact/signals';
 import { useEffect, useId, useRef, useState } from 'preact/hooks';
@@ -13,6 +15,7 @@ import { useEnv } from '../env';
 import { defaultItem, isWeb, openItems, profileHref, type OpenItem, type RepoRef, type Setup } from '../model/open';
 import { askFolderOnce, folderChanged, isCloned } from '../model/localFolder';
 import { rememberOpen, yourSetup } from '../model/prefs';
+import { Hint } from './Hint';
 import { Ext } from './icons';
 
 /** Bumped when a choice is remembered, so every Open button on the page takes the new default. */
@@ -88,6 +91,10 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [open]);
+  // A `?` in the menu is not one of its items (decision 0024): out of the tab order.
+  useEffect(() => {
+    wrap.current?.querySelectorAll<HTMLElement>('.open-menu .hint-btn').forEach((b) => (b.tabIndex = -1));
+  });
   useEffect(() => {
     if (!open || !focusAt) return;
     const all = menuItems();
@@ -111,7 +118,7 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
     if (open) shut();
     if (item.copy) {
       void copyText(item.copy).then((ok) => {
-        setNote(ok ? 'Copied' : 'Could not copy: select it below');
+        setNote(ok ? 'Copied' : 'Could not copy: the ? beside Clone in VS Code shows it');
         if (!ok) setOpen(true);
       });
     }
@@ -153,13 +160,21 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
     ) : (
       <button type="button" onClick={() => choose(item)} {...extra}>{children}</button>
     );
-  const entry = (item: OpenItem) =>
-    link(item, { role: 'menuitem', tabIndex: -1, class: item.copy ? 'pm-copy' : undefined }, (
+  const command = items.find((i) => i.copy)?.copy;
+  const hints: Record<string, preact.ComponentChildren> = {
+    'Open in VS Code': <Hint label="About opening in VS Code">Opens the repo’s folder on your computer. Clone it first if it is not there yet.</Hint>,
+    'Clone in VS Code': <Hint label="About cloning in VS Code">VS Code asks where to put it; choose your course folder.{command ? <> Or run: <code class="pm-cmd">{command}</code></> : null}</Hint>,
+  };
+  const entry = (item: OpenItem) => {
+    const row = link(item, { role: 'menuitem', tabIndex: -1 }, (
       <>
         <span>{item.label}</span>
-        {item.copy ? <code class="pm-cmd">{item.copy}</code> : item.href && isWeb(item.href) ? <Ext /> : null}
+        {item.href && isWeb(item.href) ? <Ext /> : null}
       </>
     ));
+    const hint = hints[item.label];
+    return hint ? <div class="pm-row" role="none">{row}{hint}</div> : row;
+  };
   const online = items.filter((i) => i.group === 'online');
   const local = items.filter((i) => i.group === 'local');
   const folder = !!setup?.folder.trim();

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-// The Open split button and Your setup (decision 0017): the setup kept per login, every
-// choice's link with and without a folder (Windows included), the remembered default, the
-// menu from the keyboard, and the setup screen's Save.
+// The Open split button and Your setup (decisions 0017, 0024): the setup kept per login,
+// every choice's link with and without a folder (Windows included), the remembered default,
+// the menu from the keyboard and its `?`s, and Profile's view, edit and Save.
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
@@ -114,7 +114,8 @@ describe('where each choice opens', () => {
   it('with a folder offers both Open and Clone in VS Code; the folder check keeps the one that applies', () => {
     const setup: Setup = { folder: '/r', editor: 'other', scheme: 'zed://file/{path}' };
     const menu = (c?: boolean) => openItems(REF, setup, c).filter((i) => i.group === 'local').map((i) => i.label);
-    expect(menu()).toEqual(['Open in VS Code', 'Clone in VS Code', 'Open in GitHub Desktop', 'Open in your editor', 'Copy the clone command']);
+    // Clone entries before Open entries, the clone command last.
+    expect(menu()).toEqual(['Clone in VS Code', 'Open in VS Code', 'Open in GitHub Desktop', 'Open in your editor', 'Copy the clone command']);
     expect(hrefs(setup).vsclone).toBe(`vscode://vscode.git/clone?url=${encodeURIComponent(GH)}`);
     expect(menu(true)).toEqual(['Open in VS Code', 'Open in GitHub Desktop', 'Open in your editor']);
     expect(menu(false)).toEqual(['Clone in VS Code', 'Open in GitHub Desktop', 'Copy the clone command']);
@@ -222,52 +223,94 @@ describe('the Open button', () => {
     expect(main.hasAttribute('target')).toBe(false);
     expect(items().at(-1)!.textContent).toBe('Change your profile');
   });
+
+  it('puts a ? on Clone and Open in VS Code, the clone command in it, and keeps the ? off the arrow keys', async () => {
+    saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'vscode' });
+    await mount(<OpenButton {...REF} />);
+    const rows = [...root!.querySelectorAll<HTMLElement>('.open-menu .pm-row')];
+    expect(rows.map((r) => r.querySelector('[role="menuitem"]')!.textContent)).toEqual(['Clone in VS Code', 'Open in VS Code']);
+    const [clone, open] = rows.map((r) => r.querySelector<HTMLButtonElement>('.hint-btn')!);
+    expect(open.getAttribute('aria-label')).toBe('About opening in VS Code');
+    expect(clone.getAttribute('aria-label')).toBe('About cloning in VS Code');
+    expect(rows[1].textContent).toContain('Opens the repo’s folder on your computer. Clone it first if it is not there yet.');
+    expect(rows[0].querySelector('.hint-pop')!.textContent).toBe(`VS Code asks where to put it; choose your course folder. Or run: git clone ${GH}.git "/Users/a/repos/${ORG}/assignment-2-f2026"`);
+    // The command no longer sits under the menu row.
+    expect(items().find((i) => i.textContent === 'Copy the clone command')!.querySelector('code')).toBeNull();
+    // Not an item: out of the tab order and skipped by the arrows.
+    expect(clone.tabIndex).toBe(-1);
+    expect(items().some((i) => i.classList.contains('hint-btn'))).toBe(false);
+    await key(q('.split-caret'), 'ArrowDown');
+    for (let i = 0; i < 3; i++) await key(document.activeElement!, 'ArrowDown');
+    expect(document.activeElement?.textContent).toBe('Open in VS Code');
+    await key(document.activeElement!, 'ArrowDown');
+    expect(document.activeElement?.textContent).toBe('Open in GitHub Desktop');
+    // Hover still opens it.
+    await act(() => void rows[0].querySelector('.hint')!.dispatchEvent(new MouseEvent('mouseenter')));
+    expect(rows[0].querySelector<HTMLElement>('.hint-pop')!.hidden).toBe(false);
+  });
 });
 
-describe('the Your setup screen', () => {
-  it('stores the folder and the editor on Save, and says what is stored', async () => {
+const button = (text: string) => [...root!.querySelectorAll('button')].find((b) => (b.textContent || b.getAttribute('aria-label')) === text)!;
+const type = (el: HTMLInputElement, value: string) =>
+  act(() => {
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+describe('Profile', () => {
+  it('shows the form while nothing is saved, stores on Save, then shows what is saved as text', async () => {
     await mount(<SetupScreen org={ORG} />);
-    expect(root!.textContent).toContain('No folder stored');
     expect(q('h1').textContent).toBe('Profile');
+    expect(root!.querySelector('.lede')).toBeNull();
+    expect(root!.textContent).toContain('Each course gets a folder inside it, named after its organisation.');
     expect(root!.textContent).toContain('Kept in this browser, for your GitHub login.');
-    // No course repos passed, no File System Access API: neither block.
+    // No clone block, no File System Access API, no Cancel with nothing saved.
     expect(root!.textContent).not.toContain('Clone every repo');
     expect(root!.textContent).not.toContain('which repos are cloned');
-    const folder = q<HTMLInputElement>('#ys-folder');
-    await act(() => {
-      folder.value = '/Users/a/repos';
-      folder.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    expect(root!.textContent).toContain(`/Users/a/repos/${ORG}`);
+    expect(button('Cancel')).toBeUndefined();
+    await type(q<HTMLInputElement>('#ys-folder'), '/Users/a/repos');
     const radios = [...root!.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
     await act(() => radios[2].click());
-    const save = [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Save')!;
-    const scheme = q<HTMLInputElement>('#ys-scheme');
-    await act(() => {
-      scheme.value = 'zed://file';
-      scheme.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    const save = button('Save') as HTMLButtonElement;
+    await type(q<HTMLInputElement>('#ys-scheme'), 'zed://file');
     expect(save.disabled).toBe(true);
-    await act(() => {
-      scheme.value = 'zed://file/{path}';
-      scheme.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    await type(q<HTMLInputElement>('#ys-scheme'), 'zed://file/{path}');
     await act(() => save.click());
     expect(yourSetup(LOGIN)).toEqual({ folder: '/Users/a/repos', editor: 'other', scheme: 'zed://file/{path}' });
-    expect(root!.textContent).toContain('Stored: /Users/a/repos');
-    expect(root!.textContent).toContain('Stored: another editor, zed://file/{path}');
-    expect(save.disabled).toBe(true);
+    expect(root!.querySelector('#ys-folder')).toBeNull();
+    expect([...root!.querySelectorAll('.setup-view dt')].map((d) => d.textContent)).toEqual(['Folder for your course repos', 'Editor']);
+    expect([...root!.querySelectorAll('.setup-view dd')].map((d) => d.textContent)).toEqual(['/Users/a/repos', 'Another editor, zed://file/{path}']);
+    expect(root!.querySelector('.setup-view dd code')!.textContent).toBe('/Users/a/repos');
+    expect(root!.textContent).toContain('Saved.');
+    expect(document.activeElement).toBe(button('Edit'));
+  });
+
+  it('switches to the form with the pencil, and Cancel discards the draft', async () => {
+    saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'desktop' });
+    await mount(<SetupScreen org={ORG} />);
+    expect(root!.querySelector('#ys-folder')).toBeNull();
+    expect(root!.querySelectorAll('.setup-view button[aria-label="Edit"]')).toHaveLength(1);
+    expect([...root!.querySelectorAll('.setup-view dd')].map((d) => d.textContent)).toEqual(['/Users/a/repos', 'GitHub Desktop']);
+    await act(() => button('Edit').click());
+    const folder = q<HTMLInputElement>('#ys-folder');
+    expect(folder.value).toBe('/Users/a/repos');
+    expect(document.activeElement).toBe(folder);
+    await type(folder, '/elsewhere');
+    await act(() => button('Cancel').click());
+    expect(root!.querySelector('#ys-folder')).toBeNull();
+    expect(root!.querySelector('.setup-view dd')!.textContent).toBe('/Users/a/repos');
+    expect(yourSetup(LOGIN)).toEqual({ folder: '/Users/a/repos', editor: 'desktop' });
+    // Editing again starts from what is saved, not the discarded draft.
+    await act(() => button('Edit').click());
+    expect(q<HTMLInputElement>('#ys-folder').value).toBe('/Users/a/repos');
   });
 
   it('makes the editor the default again when the folder or editor changes', async () => {
     rememberOpen(LOGIN, 'github');
     await mount(<SetupScreen org={ORG} />);
-    const folder = q<HTMLInputElement>('#ys-folder');
-    await act(() => {
-      folder.value = '/Users/a/repos';
-      folder.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await act(() => [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Save')!.click());
+    // The remembered choice alone names no folder: the form shows.
+    await type(q<HTMLInputElement>('#ys-folder'), '/Users/a/repos');
+    await act(() => button('Save').click());
     expect(yourSetup(LOGIN)).toEqual({ folder: '/Users/a/repos', editor: 'vscode' });
   });
 });
