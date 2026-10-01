@@ -60,6 +60,8 @@ const ROLE_SUB: Record<string, string> = { instructor: 'you are an instructor', 
  */
 function roleSub(course: Course, user: GhUser, live: CohortRef | undefined, files: Files | undefined): string {
   if (course.admins.includes(user.login)) return 'you are a course admin';
+  // Read only: the card says so, and instructors.yml is not read.
+  if (!course.write) return '';
   const f = live && files ? files.file(live.org, CONFIG_REPO, INSTRUCTORS_FILE) : undefined;
   const me = f?.kind === 'ready' ? parseInstructors(f.text).find((p) => p.handle.toLowerCase() === user.login.toLowerCase()) : undefined;
   return ROLE_SUB[me?.role ?? ''] ?? 'you teach on this course';

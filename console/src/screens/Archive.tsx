@@ -42,5 +42,5 @@ function Archive(p: ReadyProps) {
 }
 
 export function ArchiveScreen(p: CohortProps) {
-  return <WithStatus props={p} title={`Archive ${p.cohort.termLabel}`}>{(r) => <Archive {...r} />}</WithStatus>;
+  return <WithStatus props={p} title="Archive">{(r) => <Archive {...r} />}</WithStatus>;
 }

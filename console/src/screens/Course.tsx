@@ -515,6 +515,7 @@ export function TemplateScreen(p: CourseProps) {
   const repo = entry ?? '';
   const v = courseView(p);
   const file = p.files.file(course.org, repo, 'grading_config.yml', 'solution');
+  const gradingExists = file.kind !== 'absent';
   const tree = p.files.tree(course.org, repo);
   const problems = v.problems.filter((x) => x.fix?.entry === repo);
   const [values, setValues] = useState<Values | null>(null);
@@ -593,7 +594,7 @@ export function TemplateScreen(p: CourseProps) {
               <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['autograde', 'tests', 'starter'])} values={cur} onChange={change} />
               <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} files={files} />
               <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf'])} values={cur} onChange={change} />
-              <p class="lives"><a href={ghUrl(course.org, repo, 'grading_config.yml', 'solution')} target="_blank" rel="noopener">Lives in {`${course.org}/${repo}/grading_config.yml`}</a> on the solution branch.</p>
+              <Lives org={course.org} repo={repo} path="grading_config.yml" branch="solution" exists={gradingExists} />
             </div>
             {cur.starter === 'derived' ? (
               <div class="form-section">
@@ -607,7 +608,7 @@ export function TemplateScreen(p: CourseProps) {
               </div>
             )}
             <div class="form-section">
-              <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: course.org, repo, path: 'grading_config.yml', branch: 'solution' }} />
+              <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: course.org, repo, path: 'grading_config.yml', branch: 'solution', exists: gradingExists }} />
             </div>
           </div>
         </div>
