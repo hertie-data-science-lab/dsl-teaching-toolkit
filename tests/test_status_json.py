@@ -1854,6 +1854,11 @@ def test_a_shown_entry_landing_in_a_kindless_folder_is_a_problem():
         "    deploy:\n"
         "    - course_source_repo: cm\n"
         "      course_source_path: quiz/01\n"
+        "  slides-2:\n"
+        "    event_datetime: 2026-09-08T10:00\n"
+        "    deploy:\n"
+        "    - course_source_repo: cm\n"
+        "      course_source_path: Slides/02_y\n"
         "  setup:\n"
         "    event_datetime: 2026-09-01T09:00\n"
         "    show_on_site: false\n"
@@ -1864,18 +1869,26 @@ def test_a_shown_entry_landing_in_a_kindless_folder_is_a_problem():
     facts = _semester(sched=sched)
     problems = status_json.kindless_entry_problems(facts)
     assert {p["id"]: p["text"] for p in problems} == {
+        # Copied into a folder the source repo does not have: only the entry can say.
         "kinds:lecture-9": (
-            "lecture-9 lands in code/, which has no kind; set its kind under Folder "
-            "kinds, or give the entry a kind."
+            "lecture-9 lands in code/, which has no kind; give the entry a kind."
         ),
         "kinds:intro": (
-            "intro lands in the top of materials, which has no kind; set its kind "
-            "under Folder kinds, or give the entry a kind."
+            "intro lands in the top of materials, which has no kind; give the entry a "
+            "kind."
+        ),
+        # Mirrored from the source repo's own top folder: Folder kinds can say too.
+        "kinds:slides-2": (
+            "slides-2 lands in Slides/, which has no kind; set its kind under Folder "
+            "kinds, or give the entry a kind."
         ),
     }
     assert all(p["scope"] == "semester" for p in problems)
     # The source repo's alias settles it.
-    facts.aliases = {"code-f2026": {"code": "lecture"}, "cm": {"materials": "other"}}
+    facts.aliases = {
+        "code-f2026": {"code": "lecture"},
+        "cm": {"materials": "other", "slides": "lecture"},
+    }
     assert status_json.kindless_entry_problems(facts) == []
 
 

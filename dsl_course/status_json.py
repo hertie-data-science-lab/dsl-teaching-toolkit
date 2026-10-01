@@ -883,15 +883,19 @@ def kindless_entry_problems(facts: SemesterFacts) -> list[dict]:
             if "/" in deploy_dest(first)
             else f"the top of {first.semester_dest_repo}"
         )
+        # Folder kinds lists the source repo's top folders: it can settle this only when
+        # the copy lands in a folder of the same name. Otherwise only the entry can.
+        source_top, sep, _ = first.course_source_path.strip("/").partition("/")
+        if sep and source_top.lower() == section.lower():
+            fix = "set its kind under Folder kinds, or give the entry a kind"
+        else:
+            fix = "give the entry a kind"
         out.append(
             {
                 "id": f"kinds:{_slugify(r.label)}",
                 "scope": "semester",
                 "stage": "K4",
-                "text": (
-                    f"{r.label} lands in {where}, which has no kind; set its kind under "
-                    "Folder kinds, or give the entry a kind."
-                ),
+                "text": f"{r.label} lands in {where}, which has no kind; {fix}.",
                 "stops": "It gets no row on the student site.",
                 "fix": _schedule_fix(facts.org, r.label, line_of(r.lines, "kind")),
             }
