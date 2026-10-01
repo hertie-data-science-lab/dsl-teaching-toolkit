@@ -9,8 +9,11 @@ The syllabus is a faculty document, so a write touches ONLY the block between
 `<!-- dsl:weekly-plan -->` and `<!-- /dsl:weekly-plan -->` in the chosen Markdown file
 (decision 0031 rule 9). Where the markers are absent they are appended, under a
 `## Weekly plan` heading, at the end; the course team may move the marked block anywhere in
-the file and the next write updates it in place. A syllabus that is not Markdown (a PDF)
-is never written: the preview hands the block over to paste.
+the file and the next write updates it in place. Markers in any other state (one alone,
+out of order, twice) refuse the write: appending then would leave a stray marker that the
+next write treats as the block's edge, deleting the faculty's text in between. A syllabus
+that is not Markdown (a PDF), not UTF-8, or too large to read is never written: the
+preview hands the block over to paste.
 
 Readings are read from the COURSE org's source repos, not from what has been released: a
 syllabus is written before the term starts, when nothing has shipped yet. Sessions, their
@@ -30,10 +33,18 @@ Usage:
 
 from __future__ import annotations
 
+import re
 import sys
 
 from . import schedule
-from .gh_contents import get_file_content, get_file_with_sha, put_file, repo_tree
+from .faults import Unusable
+from .gh_contents import (
+    blob_sha,
+    get_file_content,
+    get_file_with_sha,
+    put_file,
+    repo_tree,
+)
 from .log import (
     CLIParser,
     Summary,
@@ -57,21 +68,33 @@ _READINGS_SHIFT = 3
 PLAN_HEADING = "## Weekly plan"
 
 
-def place(text: str, body: str) -> str:
-    """`text` (the syllabus) with `body` between the plan markers: the block replaced
-    where both markers stand in order, else the markers and block appended at the end
-    under `## Weekly plan`. Nothing outside the markers changes."""
-    block = f"{PLAN_START}\n{body.strip()}\n{PLAN_END}"
-    start = text.find(PLAN_START)
-    end = text.find(PLAN_END, start + len(PLAN_START)) if start >= 0 else -1
-    if start >= 0 and end >= 0:
-        return text[:start] + block + text[end + len(PLAN_END) :]
-    head = text.rstrip("\n")
-    return (
-        f"{head}\n\n{PLAN_HEADING}\n\n{block}\n"
-        if head
-        else f"{PLAN_HEADING}\n\n{block}\n"
-    )
+def _marker_line(marker: str) -> re.Pattern[str]:
+    """A line that is the marker and nothing else (blanks around it allowed): a marker
+    quoted inside a sentence is prose, not a marker."""
+    return re.compile(rf"^[ \t]*{re.escape(marker)}[ \t]*(?=\r?$)", re.MULTILINE)
+
+
+_START_LINE = _marker_line(PLAN_START)
+_END_LINE = _marker_line(PLAN_END)
+
+
+def place(text: str, body: str) -> str | None:
+    """`text` (the syllabus) with `body` between the plan markers, in the file's own line
+    endings. Exactly one start line followed by exactly one end line: the block between
+    them is replaced. No marker at all: the markers and block are appended at the end
+    under `## Weekly plan`. Anything else (one marker alone, the two out of order, either
+    twice) is None: which text the plan owns is not known, so nothing may be written.
+    Nothing outside the markers ever changes."""
+    nl = "\r\n" if "\r\n" in text else "\n"
+    block = nl.join([PLAN_START, *body.strip().splitlines(), PLAN_END])
+    starts, ends = list(_START_LINE.finditer(text)), list(_END_LINE.finditer(text))
+    if not starts and not ends:
+        head = text.rstrip("\r\n")
+        lead = f"{head}{nl}{nl}" if head else ""
+        return f"{lead}{PLAN_HEADING}{nl}{nl}{block}{nl}"
+    if len(starts) != 1 or len(ends) != 1 or ends[0].start() < starts[0].end():
+        return None
+    return text[: starts[0].start()] + block + text[ends[0].end() :]
 
 
 def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
@@ -145,6 +168,16 @@ def build(course_org: str, semester_org: str) -> tuple[str, int]:
     return "\n".join(out).rstrip() + "\n", len(lectures)
 
 
+def _unusable(exc: Unusable, counts: dict | None = None, body: str = "") -> Summary:
+    """A refusal for a source repo's `materials.yml` that does not parse: its kinds and
+    its syllabus are not known, so nothing is built or written on a guess."""
+    text = f"{exc}. Fix it and run this again."
+    log_err(text)
+    return Summary(
+        text, counts, [{"code": "MATERIALS_UNUSABLE", "text": text}], code=1, block=body
+    )
+
+
 def main() -> int:
     ap = CLIParser(description=__doc__)
     ap.add_argument("--course-org", required=True)
@@ -159,7 +192,10 @@ def main() -> int:
     a = ap.parse_args()
 
     log_step(f"Building the weekly plan from {a.semester_org}'s schedule.yml")
-    body, sessions = build(a.course_org, a.semester_org)
+    try:
+        body, sessions = build(a.course_org, a.semester_org)
+    except Unusable as exc:
+        return _unusable(exc)
     if not sessions:
         log_err(
             f"{a.semester_org}'s schedule.yml names no dated sessions, so there is nothing "
@@ -179,33 +215,59 @@ def main() -> int:
             counts,
             block=body,
         )
-    path = (
-        a.syllabus.strip().strip("/")
-        or read_materials(a.course_org, a.course_source_repo).syllabus
-    )
-    target = f"{a.course_source_repo}/{path}"
 
     def refuse(code: str, text: str) -> Summary:
         log_err(text)
         return Summary(text, counts, [{"code": code, "text": text}], code=1, block=body)
 
+    try:
+        path = (
+            a.syllabus.strip().strip("/")
+            or read_materials(a.course_org, a.course_source_repo).syllabus
+        )
+    except Unusable as exc:
+        return _unusable(exc, counts, body)
+    target = f"{a.course_source_repo}/{path}"
     if not path.lower().endswith((".md", ".markdown")):
         return refuse(
             "NOT_MARKDOWN",
             f"{target} is not a Markdown file, so the plan cannot be written into it. "
             "Copy it and paste it in.",
         )
-    current = get_file_with_sha(a.course_org, a.course_source_repo, path)
+    try:
+        current = get_file_with_sha(a.course_org, a.course_source_repo, path)
+    except UnicodeDecodeError:
+        return refuse(
+            "NOT_UTF8",
+            f"{target} is not UTF-8 text, so the plan cannot be written into it. "
+            "Copy it and paste it in.",
+        )
     if current is None:
         return refuse(
             "NO_SYLLABUS", f"There is no {target} yet. Write the syllabus first."
         )
     text, sha = current
+    if not text and sha != blob_sha(b""):
+        # The Contents API sends no content for a file over 1 MB: writing the plan into
+        # "" would replace the whole syllabus with it.
+        return refuse(
+            "TOO_LARGE",
+            f"{target} is too large to be read here, so the plan cannot be written into "
+            "it. Copy it and paste it in.",
+        )
+    placed = place(text, body)
+    if placed is None:
+        return refuse(
+            "MARKERS_BROKEN",
+            f"{target} has the weekly-plan markers out of place: there must be one "
+            f"{PLAN_START} line and, after it, one {PLAN_END} line. Fix them and run "
+            "this again.",
+        )
     if not put_file(
         a.course_org,
         a.course_source_repo,
         path,
-        place(text, body).encode(),
+        placed.encode(),
         f"docs: write the weekly plan into {path}",
         expected_sha=sha,
     ):

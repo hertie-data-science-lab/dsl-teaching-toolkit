@@ -151,11 +151,50 @@ def test_place_replaces_only_between_the_markers_wherever_they_were_moved():
     assert syllabus.place(out, BLOCK) == out
 
 
-def test_place_appends_when_the_markers_are_out_of_order_or_half_there():
-    for text in (f"{PLAN_END}\nx\n{PLAN_START}\n", f"# S\n{PLAN_START}\nx\n"):
-        out = syllabus.place(text, BLOCK)
-        assert out.startswith(text.rstrip("\n"))
-        assert out.endswith(f"## Weekly plan\n\n{PLAN_START}\n{BLOCK}{PLAN_END}\n")
+BROKEN = {
+    "start alone": f"# Syl\n{PLAN_START}\nImportant prose\n",
+    "end alone": f"# Syl\nImportant prose\n{PLAN_END}\n",
+    "out of order": f"# Syl\n{PLAN_END}\nImportant prose\n{PLAN_START}\n",
+    "two starts": f"{PLAN_START}\nx\n{PLAN_START}\nImportant prose\n{PLAN_END}\n",
+    "two ends": f"{PLAN_START}\nx\n{PLAN_END}\nImportant prose\n{PLAN_END}\n",
+}
+
+
+@pytest.mark.parametrize("name", BROKEN)
+def test_place_refuses_markers_in_any_state_but_one_start_then_one_end(name):
+    # The data loss this pins: a half-marked file used to get a block appended, and the
+    # next write treated the stray marker as the block's edge and deleted the prose.
+    assert syllabus.place(BROKEN[name], BLOCK) is None
+
+
+def test_a_marker_inside_a_sentence_is_prose():
+    text = f"# Syl\n\nWe keep the plan between {PLAN_START} and {PLAN_END} lines.\n"
+    once = syllabus.place(text, BLOCK)
+    assert once.startswith(text.rstrip("\n"))
+    assert once.endswith(f"## Weekly plan\n\n{PLAN_START}\n{BLOCK}{PLAN_END}\n")
+    # Written again: the block is found, the sentence untouched.
+    assert syllabus.place(once, BLOCK) == once
+    # Indented markers on their own lines are markers.
+    spaced = f"# Syl\n  {PLAN_START}  \nold\n\t{PLAN_END}\nEnd.\n"
+    assert (
+        syllabus.place(spaced, BLOCK)
+        == f"# Syl\n{PLAN_START}\n{BLOCK}{PLAN_END}\nEnd.\n"
+    )
+
+
+def test_place_keeps_the_files_own_line_endings():
+    text = f"# Syl\r\n\r\n{PLAN_START}\r\nold\r\n{PLAN_END}\r\nEnd.\r\n"
+    out = syllabus.place(text, "### Session 1\n\nNew.\n")
+    assert (
+        out
+        == f"# Syl\r\n\r\n{PLAN_START}\r\n### Session 1\r\n\r\nNew.\r\n{PLAN_END}\r\nEnd.\r\n"
+    )
+    assert "\n" not in out.replace("\r\n", "")
+    appended = syllabus.place("# Syl\r\nText.\r\n", BLOCK)
+    assert appended == (
+        f"# Syl\r\nText.\r\n\r\n## Weekly plan\r\n\r\n{PLAN_START}\r\n"
+        f"### Session 1\r\n\r\nNew.\r\n{PLAN_END}\r\n"
+    )
 
 
 SYLLABUS_TEXT = "# Syllabus\n\nWritten by the course team.\n"
@@ -267,6 +306,70 @@ def test_a_failed_write_still_shows_the_block(monkeypatch, wired):
     out = syllabus.main()
     assert out == 1 and out.block
     assert [r["code"] for r in out.reasons] == ["WRITE_FAILED"]
+
+
+@pytest.mark.parametrize("name", BROKEN)
+def test_a_write_over_broken_markers_is_refused_and_writes_nothing(
+    monkeypatch, wired, name
+):
+    # The second Write of the reported repro, and every other broken state.
+    written = _writable(monkeypatch, text=BROKEN[name])
+    _argv(monkeypatch, "--no-preview")
+    out = syllabus.main()
+    assert out == 1 and written == {} and out.block
+    assert [r["code"] for r in out.reasons] == ["MARKERS_BROKEN"]
+    assert out.text.startswith(
+        "cm/SYLLABUS.md has the weekly-plan markers out of place"
+    )
+
+
+def test_two_writes_keep_the_faculty_text(monkeypatch, wired):
+    text = "# Syl\n\nImportant prose.\n"
+    for _ in range(2):
+        written = _writable(monkeypatch, text=text)
+        _argv(monkeypatch, "--no-preview")
+        assert syllabus.main() == 0
+        text = written["SYLLABUS.md"]
+    assert text.startswith("# Syl\n\nImportant prose.\n\n## Weekly plan\n")
+    assert text.count(PLAN_START) == text.count(PLAN_END) == 1
+
+
+def test_a_syllabus_too_large_or_not_utf8_is_refused(monkeypatch, wired):
+    # Over 1 MB the Contents API sends no content: "" with a real sha is not empty.
+    written = _writable(monkeypatch, text="")
+    _argv(monkeypatch, "--no-preview")
+    out = syllabus.main()
+    assert out == 1 and written == {}
+    assert [r["code"] for r in out.reasons] == ["TOO_LARGE"]
+    # A truly empty file is written into.
+    monkeypatch.setattr(
+        syllabus, "get_file_with_sha", lambda o, r, p: ("", syllabus.blob_sha(b""))
+    )
+    assert syllabus.main() == 0 and written["SYLLABUS.md"].startswith("## Weekly plan")
+
+    def latin1(o, r, p):
+        raise UnicodeDecodeError("utf-8", b"\xe9", 0, 1, "invalid continuation byte")
+
+    monkeypatch.setattr(syllabus, "get_file_with_sha", latin1)
+    out = syllabus.main()
+    assert out == 1
+    assert [r["code"] for r in out.reasons] == ["NOT_UTF8"]
+
+
+def test_a_broken_materials_yml_is_a_refusal_not_a_traceback(monkeypatch, wired):
+    def unusable(o, r):
+        raise syllabus.Unusable("cm/materials.yml is not valid YAML")
+
+    monkeypatch.setattr(syllabus, "read_materials", unusable)
+    written = _writable(monkeypatch)
+    for extra in ((), ("--no-preview",)):
+        _argv(monkeypatch, *extra)
+        out = syllabus.main()
+        assert out == 1 and written == {}
+        assert [r["code"] for r in out.reasons] == ["MATERIALS_UNUSABLE"]
+        assert (
+            out.text == "cm/materials.yml is not valid YAML. Fix it and run this again."
+        )
 
 
 def test_a_titleless_entry_does_not_blank_a_session_the_site_names(wired, monkeypatch):
