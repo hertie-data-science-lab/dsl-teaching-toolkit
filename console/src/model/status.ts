@@ -136,8 +136,9 @@ export interface NextEvent {
 }
 
 /**
- * The semester's next automatic event after `now`: a planned release, a hand out, a solution
- * shown, or the archive. Null when none is scheduled. A release automation will skip is not
+ * The semester's next automatic event after `now`: a planned release, the hand out of an
+ * assignment not handed out yet, a solution shown (when the engine holds it, the held date),
+ * or the archive. Null when none is scheduled. A release automation will skip is not
  * one; marks expected is not in the status, so it is not one either.
  */
 export function nextEvent(s: Status, now: number): NextEvent | null {
@@ -146,10 +147,12 @@ export function nextEvent(s: Status, now: number): NextEvent | null {
   for (const r of s.releases ?? []) if (r.state === 'planned') all.push({ title: releaseIdent(r), word: 'release', when: r.when });
   for (const a of s.assignments ?? []) {
     const title = assignmentIdent(a.slug, a.title, a.number);
-    if (a.handout) all.push({ title, word: 'hand out', when: a.handout });
-    if (a.solution_shown) all.push({ title, word: 'solution shown', when: a.solution_shown });
+    if (a.handout && (a.state === 'declared' || a.state === 'teams_forming')) all.push({ title, word: 'hand out', when: a.handout });
+    // Before the late cutoff the engine holds the solution until then.
+    const shown = a.solution_held_until ?? a.solution_shown;
+    if (shown) all.push({ title, word: 'solution shown', when: shown });
   }
-  if (s.semester?.archive_date) all.push({ title: '', word: 'Archive', when: s.semester.archive_date });
+  if (s.semester?.archive_date) all.push({ title: '', word: 'archive', when: s.semester.archive_date });
   const ahead = all.map((e) => ({ e, at: instant(e.when, tz) })).filter((x) => x.at > now).sort((a, b) => a.at - b.at);
   return ahead[0]?.e ?? null;
 }

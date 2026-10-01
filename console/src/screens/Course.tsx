@@ -280,9 +280,9 @@ export function SiteLive({ org, published, last, running, now }: { org: string; 
   );
 }
 
-/** Who started a semester's operation, from its private outcome file when that is this run's; undefined while not known. */
-function actorOf(files: CourseProps['files'], org: string, o: Operation): string | undefined {
-  const f = files.file(org, CONFIG_REPO, outcomePath(o.op));
+/** Who started an operation, from its outcome file in `owner/repo` when that is this run's; undefined while not known. */
+function actorOf(files: CourseProps['files'], owner: string, repo: string, o: Operation): string | undefined {
+  const f = files.file(owner, repo, outcomePath(o.op));
   if (f.kind !== 'ready') return undefined;
   try {
     const oc = JSON.parse(f.text) as Outcome;
@@ -304,7 +304,7 @@ function courseOperations(p: CourseProps, live: { ref: CohortRef; status: Status
 export function RecentActivity({ p, lists, newest }: { p: CourseProps; lists: Activity[][]; newest?: string }) {
   const env = useEnv();
   const login = env?.user.login ?? '';
-  const rows = recentActivity(lists).map((a) => (a.actor === undefined && a.org ? { ...a, actor: actorOf(p.files, a.org, a) } : a));
+  const rows = recentActivity(lists).map((a) => (a.actor !== undefined ? a : { ...a, actor: a.org ? actorOf(p.files, a.org, CONFIG_REPO, a) : actorOf(p.files, p.course.org, COURSE_REPO, a) }));
   return (
     <section class="panel section">
       <div class="section-head"><h2>Recent activity</h2>{newest ? <a class="textlink" href={`?cohort=${newest}#operations`}>All operations</a> : null}</div>
@@ -341,7 +341,8 @@ export function CourseScreen(p: CourseProps) {
   const live = liveSemesters(p);
   const problems = rollUpProblems(v.problems, live.map(({ ref, status }) => ({ org: ref.org, label: ref.termLabel, problems: status.problems ?? [] })));
   const ops = courseOperations(p, live, env?.ops.runs.value ?? [], env?.user.login ?? '');
-  const lastPublish = recentActivity(ops.map((l) => l.filter((o) => o.op === 'course.publish_website')), 1)[0];
+  // A previewed run published nothing: the age is the last real publish's.
+  const lastPublish = recentActivity(ops.map((l) => l.filter((o) => o.op === 'course.publish_website' && o.conclusion !== 'previewed')), 1)[0];
   const cur = env?.ops.current.value;
   const publishing = cur?.phase === 'running' && cur.def.op === 'course.publish_website' && cur.def.courseOrg === course.org;
   const ready = v.course ? v.course.ready : false;

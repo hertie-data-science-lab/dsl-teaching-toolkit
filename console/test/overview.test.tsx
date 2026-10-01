@@ -57,14 +57,18 @@ describe('a semester’s next automatic event', () => {
   const s: Status = {
     ...STATUS,
     releases: [{ ...STATUS.releases![0], id: 's7', number: 7, when: '2026-10-08T10:00:00+02:00', state: 'planned' }, { ...STATUS.releases![0], when: '2026-09-30T10:00:00+02:00', state: 'will_be_skipped' }],
-    assignments: [{ ...STATUS.assignments![0], slug: 'assignment-2', number: 2, handout: '2026-10-06T10:00:00+02:00', solution_shown: '2026-12-01T10:00:00+01:00' }],
+    assignments: [{ ...STATUS.assignments![0], slug: 'assignment-2', number: 2, state: 'declared', handout: '2026-10-06T10:00:00+02:00', solution_shown: '2026-12-01T10:00:00+01:00' }],
   };
   it('is the earliest future release, hand out, solution shown or archive', () => {
     expect(nextEvent(s, NOW)).toEqual({ title: 'Assignment 2', word: 'hand out', when: '2026-10-06T10:00:00+02:00' });
     expect(nextEventWords(nextEvent(s, NOW), 'Europe/Berlin', 2026)).toBe('Next: Assignment 2 hand out, Tue 6 Oct');
     // A release automation will skip is not one; past the hand out, the planned release is next.
     expect(nextEvent(s, Date.parse('2026-10-07T00:00:00+02:00'))?.title).toBe('Lecture 7');
-    expect(nextEventWords(nextEvent(s, Date.parse('2026-12-02T00:00:00+01:00')), 'Europe/Berlin', 2026)).toBe('Next: Archive, Sun 31 Jan 2027');
+    expect(nextEventWords(nextEvent(s, Date.parse('2026-12-02T00:00:00+01:00')), 'Europe/Berlin', 2026)).toBe('Next: archive, Sun 31 Jan 2027');
+  });
+  it('skips the hand out of an assignment already handed out, and takes the held solution date', () => {
+    const out: Status = { ...s, releases: [], assignments: [{ ...s.assignments![0], state: 'open', solution_shown: '2026-10-01T10:00:00+02:00', solution_held_until: '2026-10-20T23:59:00+02:00' }] };
+    expect(nextEvent(out, NOW)).toEqual({ title: 'Assignment 2', word: 'solution shown', when: '2026-10-20T23:59:00+02:00' });
   });
   it('says Nothing scheduled when none is ahead', () => {
     expect(nextEventWords(nextEvent({ ...s, semester: { ...s.semester!, archive_date: null } }, Date.parse('2027-03-01T00:00:00Z')))).toBe('Nothing scheduled');
@@ -135,6 +139,19 @@ describe('Recent activity', () => {
     expect(t).toContain('Release 3 h ago Fall 2026 · you');
     expect(panel).toContain(`href="https://github.com/${COURSE_ORG}/.github/actions/runs/4821"`);
     expect(panel).toContain('class="mark fail"');
+  });
+  it('reads who ran a course operation from the course’s own outcome file', () => {
+    const outcome = JSON.stringify({ schema: 'dsl.outcome/1', op: 'course.publish_website', run_id: 50, actor: 'a-example', preview: false, conclusion: 'done', summary: 'x' });
+    const files = new StaticFiles({ [`${COURSE_ORG}/.github/.system/outcomes/course.publish_website.json`]: outcome });
+    const own = ready({ ...STATUS, operations: [op(50, '2026-09-23T06:00:00Z', { op: 'course.publish_website' })] });
+    const t = text(<CourseScreen course={{ ...course, cohorts: [] }} loaded={own} cohortStates={{}} files={files} now={NOW} />);
+    expect(t).toContain('Publish website 2 h ago course · a-example');
+  });
+  it('dates the website from the last real publish, not a preview', () => {
+    const pub = { ...STATUS, course: { ...STATUS.course!, stages: { ...STATUS.course!.stages, C6: 'done' as const } } };
+    const sem = ready({ ...pub, operations: [op(60, '2026-09-23T05:00:00Z', { op: 'course.publish_website' }), op(61, '2026-09-23T07:00:00Z', { op: 'course.publish_website', conclusion: 'previewed' })] });
+    const t = text(<CourseScreen course={course} loaded={{ kind: 'absent' }} cohortStates={{ [COHORT_ORG]: sem }} files={new StaticFiles()} now={NOW} />);
+    expect(t).toContain('Live · updated 3 h ago');
   });
   it('says Nothing has run yet, with no All operations link without a live semester', () => {
     const out = render(<CourseScreen course={{ ...course, cohorts: [] }} loaded={{ kind: 'absent' }} cohortStates={{}} files={new StaticFiles()} now={NOW} />);
