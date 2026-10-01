@@ -280,8 +280,8 @@ export function DetailsScreen(p: CourseProps) {
               <LinkKindsField id="cdk" value={d.links} onInput={(links) => set({ links })} />
             </div>
             <div class="form-section">
-              <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml' }} />
-              <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
+              <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml', exists: file.kind !== 'absent' }} />
+              <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={file.kind !== 'absent'} />
             </div>
           </div>
         </div>
@@ -495,8 +495,8 @@ export function WebsiteScreen(p: CourseProps) {
         </section>
       ) : null}
       <section class="panel section">
-        <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false || !!y?.errors.length} file={{ org: course.org, repo: COURSE_REPO, path: OPENCOURSE_FILE }} />
-        <Lives org={course.org} repo={COURSE_REPO} path={OPENCOURSE_FILE} />
+        <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false || !!y?.errors.length} file={{ org: course.org, repo: COURSE_REPO, path: OPENCOURSE_FILE, exists: file.kind !== 'absent' }} />
+        <Lives org={course.org} repo={COURSE_REPO} path={OPENCOURSE_FILE} exists={file.kind !== 'absent'} />
       </section>
     </>
   );

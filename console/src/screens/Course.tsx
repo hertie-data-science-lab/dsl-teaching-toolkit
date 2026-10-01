@@ -439,7 +439,7 @@ export function CourseScreen(p: CourseProps) {
               <dt>Late work <Hint small label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>
               <dt>Max team size <Hint small label="About max team size">This course’s default. Each assignment can set its own.</Hint></dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
             </dl>
-            <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
+            <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={p.files.file(course.org, COURSE_REPO, 'dsl-course.yml').kind !== 'absent'} />
             <div class="website-block">
               <h3>Public website <Hint label="About the public website">Optional: an open course version of your materials accessible to anyone on the internet, updated daily.</Hint></h3>
               <SiteLive org={course.org} published={pub} last={lastPublish} running={publishing} now={p.now} />
@@ -577,7 +577,7 @@ export function TemplateScreen(p: CourseProps) {
             <div class="form-section">
               <h3>What it is</h3>
               <SchemaForm id="g1" schema={null} tiers={pick(tiers, ['title'])} values={cur} onChange={change} />
-              <Lives org={course.org} repo={repo} path="README.md" />
+              <Lives org={course.org} repo={repo} path="README.md" exists={tree.kind !== 'ready' || tree.paths.some((x) => x.path === 'README.md')} />
             </div>
             <div class="form-section">
               <h3>How students work on it</h3>
