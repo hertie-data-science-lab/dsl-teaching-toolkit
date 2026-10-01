@@ -28,13 +28,6 @@
         "state": "ready",
         "checks": [
           {
-            "id": "all_mapped",
-            "label": "Every top folder has a kind",
-            "done": true,
-            "why": null,
-            "blocks": true
-          },
-          {
             "id": "kind_folder",
             "label": "At least one folder of a content kind",
             "done": true,
@@ -80,9 +73,9 @@
           },
           {
             "id": "sessions",
-            "label": "Weekly plan generated",
+            "label": "Weekly plan in the syllabus",
             "done": false,
-            "why": "The weekly plan has not been generated yet.",
+            "why": "The weekly plan is not in SYLLABUS.md yet.",
             "blocks": false
           },
           {
@@ -110,7 +103,7 @@
         "id": "materials:course-materials-f2026:sessions",
         "kind": "materials",
         "repo": "course-materials-f2026",
-        "text": "The weekly plan has not been generated yet.",
+        "text": "The weekly plan is not in SYLLABUS.md yet.",
         "screen": "materials",
         "entry": "course-materials-f2026"
       }

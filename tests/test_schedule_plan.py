@@ -108,7 +108,8 @@ def test_a_declared_kind_wins_over_any_folder():
     assert _kind(Deploy("cm", "labs/01"), kind="drop-in") == ("drop-in", False)
 
 
-def test_the_built_in_aliases_and_the_lecture_default():
+def test_the_built_in_aliases_and_the_supporting_files_default():
+    # Decision 0031 rule 10: a folder no alias names is supporting files (was lecture).
     for section, kind in {
         "labs": "lab",
         "lab": "lab",
@@ -118,8 +119,10 @@ def test_the_built_in_aliases_and_the_lecture_default():
         "literature": "readings",
         "Readings": "readings",
         "lectures": "lecture",
-        "quiz": "lecture",
-        "code": "lecture",
+        "Lecture": "lecture",
+        "quiz": "assets",
+        "code": "assets",
+        "data": "assets",
     }.items():
         assert _kind(Deploy("cm", f"{section}/01")) == (kind, True), section
 
@@ -136,7 +139,7 @@ def test_a_repo_alias_wins_over_the_built_in_one():
     )
     # Another repo's aliases are not this one's.
     assert _kind(Deploy("x", "quiz/q1.pdf"), aliases=lambda r: aliases(r, {})) == (
-        "lecture",
+        "assets",
         True,
     )
 

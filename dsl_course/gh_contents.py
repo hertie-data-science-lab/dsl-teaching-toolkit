@@ -384,16 +384,16 @@ def file_exists(org: str, repo: str, path: str) -> bool:
     return code == 0
 
 
-def top_level(org: str, repo: str) -> dict[str, str]:
+def top_level(org: str, repo: str, folder: str = "") -> dict[str, str]:
     """`{name: type}` ("file", "dir", ...) for the entries at the root of `org/repo`'s
-    default branch - ONE Contents read, not recursive, so no repo is too large for it.
-    `{}` for a repo that is not there or has no commits yet; any other failure raises,
-    get_file_content's rule."""
+    default branch (or of its `folder`) - ONE Contents read, not recursive, so no repo is
+    too large for it. `{}` for a repo or folder that is not there or has no commits yet;
+    any other failure raises, get_file_content's rule."""
     code, out = _read(
         org,
         repo,
         "api",
-        f"repos/{org}/{repo}/contents/",
+        f"repos/{org}/{repo}/contents/{folder.strip('/')}",
         "--jq",
         ".[] | [.name, .type] | @tsv",
     )

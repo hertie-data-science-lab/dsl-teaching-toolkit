@@ -309,11 +309,14 @@ def _derive(request: Request) -> list[str]:
 
 
 def _syllabus(request: Request) -> list[str]:
-    return [
+    argv = [
         *_course_semester(request),
         "--course-source-repo",
         _a(request, "course_source_repo"),
     ]
+    if syllabus := _a(request, "syllabus"):
+        argv += ["--syllabus", syllabus]
+    return argv
 
 
 def _new_materials(request: Request) -> list[str]:
@@ -657,10 +660,15 @@ _OPS = (
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
-            {"course_source_repo": _string(REPO_PATTERN, "Repo holding the syllabus")},
+            {
+                "course_source_repo": _string(
+                    REPO_PATTERN, "Repo holding the syllabus"
+                ),
+                "syllabus": _string(PATH_PATTERN, "The syllabus file to write into"),
+            },
             required=("course_source_repo",),
         ),
-        help="Write the syllabus's weekly plan from the semester's schedule.",
+        help="Write the weekly plan into the syllabus, from the semester's schedule.",
         done_text="Weekly plan written.",
         doc="docs/07-schedule-releases.md",
         module="syllabus",

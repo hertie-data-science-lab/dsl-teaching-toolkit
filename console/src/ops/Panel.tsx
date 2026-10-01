@@ -276,7 +276,7 @@ export function OpPanel() {
       ) : (
         <>
           <div class="actions">
-            <button class="btn" type="button" disabled={invalid} onClick={() => void ops.start('preview')}>{c.dry ? 'Preview again' : 'Preview'}</button>
+            <button class="btn" type="button" disabled={invalid} onClick={() => void ops.start('preview')}>{d.previewLabel ?? (c.dry ? 'Preview again' : 'Preview')}</button>
             {d.previewProposed ? <Prop /> : null}
             {verb}
           </div>
@@ -310,7 +310,7 @@ export function OpPanel() {
  * The buttons a screen shows for an operation: Preview (filled) and the verb, which a gated
  * op keeps disabled until this session has previewed it; a direct op shows only the verb.
  */
-export function OpButtons({ def, small, label, previewLabel = 'Preview', verbCls, hint = true }: { def: OpDef; small?: boolean; label?: string; previewLabel?: string; verbCls?: string; hint?: boolean }) {
+export function OpButtons({ def, small, label, previewLabel = def.previewLabel ?? 'Preview', verbCls, hint = true }: { def: OpDef; small?: boolean; label?: string; previewLabel?: string; verbCls?: string; hint?: boolean }) {
   const env = useEnv();
   const ops = env?.ops;
   const mode = modeOf(def.op);

@@ -155,6 +155,16 @@ describe('Materials', () => {
     expect(out).not.toContain('Nothing released yet');
   });
 
+  it('folds only the folders named as supporting files, never one the instructor may have set a kind on', () => {
+    // `code/` is supporting files by default (decision 0031), but the student's status
+    // carries no repo's kinds: a course that set it to a lecture must still see it.
+    const tree: TreeEntry[] = ['code/run.py', 'static/s.css'].map((path) => ({ path, mode: '100644', type: 'blob', sha: path, size: 1 }));
+    const out = html(<MaterialsTree org={ORG} trees={[['materials', tree]]} />);
+    const main = out.slice(0, out.indexOf('Supporting files'));
+    expect(main).toContain('code/');
+    expect(main).not.toContain('static/');
+  });
+
   it('puts supporting folders last, folded, under Supporting files', () => {
     const tree: TreeEntry[] = ['data/x.csv', 'lectures/01/slides.pdf', 'img/a.png', 'SYLLABUS.md'].map((path) => ({ path, mode: '100644', type: 'blob', sha: path, size: 1 }));
     const out = html(<MaterialsTree org={ORG} trees={[['materials', tree]]} />);

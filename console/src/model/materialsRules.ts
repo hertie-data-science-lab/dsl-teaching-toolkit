@@ -10,7 +10,14 @@ import { POLICY } from './policy';
 export const MATERIALS_TOPIC = rules.topic;
 export const MATERIALS_FILE = rules.file;
 export const DEFAULT_SYLLABUS = rules.default_syllabus;
+/** The kind of a folder no alias names: supporting files (decision 0031 rule 10). */
 export const DEFAULT_KIND = rules.default_kind;
+/** Supporting files: released, never a row or a page. */
+export const ASSETS_KIND = rules.assets_kind;
+/** The kind of a release entry that names none and copies nothing yet (`schedule_plan.entry_kind`). */
+export const EMPTY_ENTRY_KIND = rules.empty_entry_kind;
+/** The kinds a folder may be set to (decision 0031 rule 10), in row order: the rest are schedule kinds. */
+export const FOLDER_KINDS: string[] = rules.folder_kinds;
 const ALIASES: Record<string, string> = rules.aliases;
 /** The line a `.releaseignore` carries when somebody looked and chose to withhold nothing. */
 export const REVIEWED_MARK: string = rules.reviewed_mark;

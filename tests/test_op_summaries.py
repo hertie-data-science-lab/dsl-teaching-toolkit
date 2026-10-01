@@ -266,6 +266,29 @@ def test_semester_check_writes_status_json():
     )
 
 
+def test_the_weekly_plan_passes_the_chosen_syllabus_only_when_given():
+    def argv(args: dict) -> list[str]:
+        return REGISTRY["assignment.generate_syllabus"].argv(
+            request_mod.parse_request(
+                json.dumps(
+                    {
+                        "schema": "dsl.request/1",
+                        "op": "assignment.generate_syllabus",
+                        "actor": "prof",
+                        "course_org": COURSE,
+                        "semester_org": SEMESTER,
+                        "args": args,
+                        "preview": False,
+                    }
+                )
+            )
+        )
+
+    chosen = argv({"course_source_repo": "cm", "syllabus": "E1282.md"})
+    assert chosen[chosen.index("--syllabus") + 1] == "E1282.md"
+    assert "--syllabus" not in argv({"course_source_repo": "cm"})
+
+
 # ------------------------------------------------------------------ per CLI
 
 

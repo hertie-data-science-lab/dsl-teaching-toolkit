@@ -13,7 +13,8 @@ say, and is absent for the default layout:
 A release entry that declares no `kind` takes one from the section its first copy lands in:
 the top folder of the DESTINATION path, or the destination repo itself when the copy lands
 at its root. The source repo's `kinds:` first, then the built-in aliases, both matched
-case-insensitively, else `lecture`.
+case-insensitively, else supporting files (`assets`, decision 0031 rule 10): a folder not
+named lectures, labs or readings (or a synonym) is released, never shown.
 """
 
 from __future__ import annotations
@@ -33,11 +34,26 @@ from .schema_check import validate
 MATERIALS_TOPIC = "dsl-materials"
 MATERIALS_FILE = "materials.yml"
 DEFAULT_SYLLABUS = "SYLLABUS.md"
-DEFAULT_KIND = "lecture"
+# The weekly plan's block in a Markdown syllabus (`syllabus.place`): a write owns what lies
+# between these two lines and nothing else in the file.
+PLAN_START = "<!-- dsl:weekly-plan -->"
+PLAN_END = "<!-- /dsl:weekly-plan -->"
+# The kind whose folders are released but get no row or tab on either site.
+ASSETS_KIND = "assets"
+# The kind of a folder no alias names (decision 0031 rule 10; it was `lecture`).
+DEFAULT_KIND = ASSETS_KIND
+# The kinds a folder may be set to (the console's Folder kinds dropdown), in row order;
+# the policy's other kinds belong to schedule entries, not folders.
+FOLDER_KINDS = ("lecture", "lab", "readings", ASSETS_KIND)
+# The kind of a `releases:` entry that names none and copies nothing yet: there is no
+# folder to infer from, so it stays the row it always was.
+EMPTY_ENTRY_KIND = "lecture"
 
 # The folder names every course gets for free. A folder of one of these names that no
 # schedule entry releases still gets its rows (`site`'s off-plan rows), except a
-# supporting-files one (`ASSETS_KIND`), which is released and never shown.
+# supporting-files one (`ASSETS_KIND`), which is released and never shown. The
+# supporting-files names add nothing to the default; they record that such a folder got
+# no row under the old `lecture` default either (`status_json.kindless_problems`).
 BUILTIN_ALIASES = {
     "lecture": "lecture",
     "lectures": "lecture",
@@ -56,8 +72,6 @@ BUILTIN_ALIASES = {
     "src": "assets",
     "static": "assets",
 }
-# The kind whose folders are released but get no row or tab on either site.
-ASSETS_KIND = "assets"
 
 SCHEMA = {
     "type": "object",
@@ -134,7 +148,7 @@ def known_kind(kind: str) -> str:
 
 def infer_kind(section: str, aliases: Mapping[str, str] | None = None) -> str:
     """The kind a section implies: the repo's own alias, else the built-in one, else
-    `lecture`."""
+    supporting files."""
     return alias_kind(section, aliases) or DEFAULT_KIND
 
 

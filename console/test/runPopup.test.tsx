@@ -32,7 +32,7 @@ const ALL: OpDef[] = [
   defs.releaseNow(scope, rel), defs.releaseAdhoc(scope, ['course-materials-f2026']), defs.handout(scope, asg), defs.updateCopies(scope, asg, ['README.md']),
   defs.collect(scope, asg), defs.returnMarks(scope, asg, 10, 'assignment-2'), defs.sendCodes(scope, 3), defs.updateSite(scope), defs.checkAccess(scope),
   defs.archive(scope, null, true), defs.publishWebsite(course, true), defs.teamsWindow(scope, { ...asg, group: true }, 'Fri 9 Oct'),
-  defs.derive(course, 'assignment-2-f2026', 'assignment-2-f2026', 'Assignment 2'), defs.generateSyllabus(scope, 'course-materials-f2026'),
+  defs.derive(course, 'assignment-2-f2026', 'assignment-2-f2026', 'Assignment 2'), defs.generateSyllabus(scope, 'course-materials-f2026', 'SYLLABUS.md'),
   defs.bootstrapCohort({ ...scope, cohortOrg: COHORT }, 'Deep Learning'), defs.createAssignment(course, 'assignment-9-f2026', 'Assignment 9', { title: 'Assignment 9' }),
   defs.createMaterials(course, 'course-materials-s2027', {}),
 ];
@@ -295,7 +295,7 @@ describe('See on GitHub', () => {
   });
 
   it('names a place for every op that changes something on GitHub, and none for a look or an email', () => {
-    const none = new Set(['semester.check', 'semester.preview_automation', 'roster.send_codes', 'teams.open_window', 'assignment.generate_syllabus']);
+    const none = new Set(['semester.check', 'semester.preview_automation', 'roster.send_codes', 'teams.open_window']);
     for (const def of ALL) {
       const t = targetOf(def, def.args);
       if (none.has(def.op)) expect(t, def.op).toBeNull();
