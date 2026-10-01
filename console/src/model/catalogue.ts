@@ -13,6 +13,12 @@ import { ORG_NAME_RE } from './policy';
 import { COURSE_REPO, STUDENT_STATUS_PATH } from './names';
 
 const ORGS_PATH = 'orgs.yml';
+/**
+ * The toolkit ref whose `orgs.yml` this console reads: the one it was built from
+ * (`VITE_TOOLKIT_REF`, set by the Pages build), so a console built from a branch reads that
+ * branch's registry; `main` otherwise.
+ */
+export const REGISTRY_REF: string = (import.meta.env as { VITE_TOOLKIT_REF?: string } | undefined)?.VITE_TOOLKIT_REF || CENTRAL.ref;
 /** Most catalogue reads in flight at once. */
 const POOL = 6;
 
@@ -124,7 +130,7 @@ const caches = new WeakMap<GitHubClient, Cache>();
 export async function loadCatalogue(client: GitHubClient, estate: Course[] = [], onUpdate?: (list: CatalogueCourse[]) => void): Promise<CatalogueCourse[]> {
   let cache = caches.get(client);
   if (!cache) {
-    const orgs = client.getContents(CENTRAL.owner, CENTRAL.repo, ORGS_PATH, CENTRAL.ref).then((f) => {
+    const orgs = client.getContents(CENTRAL.owner, CENTRAL.repo, ORGS_PATH, REGISTRY_REF).then((f) => {
       if (!f) throw new Error('orgs.yml is missing');
       return parseOrgs(f.text);
     });

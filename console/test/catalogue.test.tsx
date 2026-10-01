@@ -6,7 +6,7 @@
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient } from '../src/github/client';
 import { loadCatalogue, parseOrgs, pool, runningNow } from '../src/model/catalogue';
@@ -155,6 +155,23 @@ describe('loading the catalogue', () => {
       .on('GET', `/repos/${NLP}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Natural Language Processing\n'));
     const list = await loadCatalogue(client(f), [course]);
     expect(list.map((c) => c.name)).toEqual(['Machine Learning', other, 'Natural Language Processing']);
+  });
+
+  it('reads orgs.yml at the ref the console was built from, so a branch build sees its own registry', async () => {
+    // The demo's console is built from the feature branch, whose orgs.yml main does not have yet.
+    vi.stubEnv('VITE_TOOLKIT_REF', 'feature/instructor-console');
+    vi.resetModules();
+    try {
+      const m = await import('../src/model/catalogue');
+      expect(m.REGISTRY_REF).toBe('feature/instructor-console');
+      const f = new FakeGitHub().on('GET', ORGS_URL.replace('ref=main', 'ref=feature%2Finstructor-console'), fileBody('orgs.yml', `course_orgs:\n  - ${NLP}\n`))
+        .on('GET', `/repos/${NLP}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Natural Language Processing\n'));
+      const list = await m.loadCatalogue(client(f), [course]);
+      expect(list.map((c) => c.name)).toEqual(['Machine Learning', 'Natural Language Processing']);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 
   it('fails as a whole only when orgs.yml cannot be read', async () => {
