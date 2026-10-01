@@ -3,7 +3,7 @@
 The group "access" half, mirroring sync_roster for enrolment. `teams.csv` (in the cohort's
 private classroom-config) is the single source of truth for who is in which project team for
 which assignment; this reconciles a GitHub Team `<assignment>-<team>` from each row so the
-team's repo access + @mentions track the CSV. Idempotent.
+team's repo access tracks the CSV. Idempotent.
 
 The Teams are a DOWNSTREAM PROJECTION of the CSV, never authoritative, so they can't drift -
 a re-sync overwrites them to match. Provisioning a group assignment grants the matching team
@@ -65,6 +65,12 @@ def desired_teams(per: dict[str, dict[str, list[str]]]) -> dict[str, set[str]]:
 # What `ensure_team` stamps on every team it creates - and so the mark of a team this module
 # owns. `emptied_teams` touches nothing without it.
 PROJECT_TEAM_DESCRIPTION = "Project team (auto-managed from teams.csv)"
+# `secret`, not `closed`: GitHub shows every org member a "Request to join" button on a
+# visible team, which goes around the Join team form, mails the owners with no context, and
+# is undone by the next pruning sync if approved. A secret team is visible only to its own
+# members and to org owners; the assignment's site page is where students see the teams.
+# A team made `closed` before this converges on its next `ensure_team`.
+PROJECT_TEAM_PRIVACY = "secret"
 
 
 def emptied_teams(
@@ -106,7 +112,9 @@ def ensure_team(org: str, slug: str, members: set[str], prune: bool) -> bool:
 
     A team this call made is reconciled without reading it back: GitHub's REST API 404s a
     new team for up to minutes, and its membership is known (see `just_created`)."""
-    outcome = create_team_outcome(org, slug, description=PROJECT_TEAM_DESCRIPTION)
+    outcome = create_team_outcome(
+        org, slug, description=PROJECT_TEAM_DESCRIPTION, privacy=PROJECT_TEAM_PRIVACY
+    )
     if outcome is None:
         return False
     return (

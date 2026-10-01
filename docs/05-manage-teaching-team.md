@@ -95,7 +95,7 @@ Worked example: [`example-course/cohort-org/people.yml`](../example-course/cohor
 
 - **Time-boxed:** do nothing, or bring the `end` date forward.
 - **Immediately:** delete their entry (or set `end` to yesterday) and push. The dispatch on that push revokes within a minute or two.
-- **Do not use the GitHub Teams UI.** A hand-add to `course-admin`, `instructors` or `instructors-<tag>` is reverted by the next sync, and a hand-*removal* of someone still named in the config is re-added. The file is the truth.
+- **Do not use the GitHub Teams UI.** A hand-add to `course-admin`, `instructors` or `instructors-<tag>` is reverted by the next sync, and a hand-*removal* of someone still named in the config is re-added. The file is the truth. Assignment teams are secret, so only org owners see them there; the assignment's page on the cohort site lists them.
 
 ## What the access actually reaches
 

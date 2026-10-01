@@ -857,7 +857,7 @@ def provision_one(
     Individual assignments pass a single-element `handles` list (a team of one) and no
     `team`, so each member is added as a collaborator. Group assignments also pass the
     GitHub Team slug: the team is materialised from `handles` and granted on the repo, so
-    membership changes propagate to access (and members get @mentions + a team space)."""
+    membership changes propagate to access."""
     # ONE answer for both arms below, off the vocabulary's own predicate rather than the
     # word: a group repo whose team could not publish it would leave a student_choice
     # assignment half-owned, and that is exactly the kind of drift two spellings buy.
