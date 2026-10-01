@@ -289,6 +289,15 @@ describe('the operation panel', () => {
     expect(render(<EnvCtx.Provider value={env}><OpPanel /></EnvCtx.Provider>)).toContain('class="opbar"');
   });
 
+  it('names the weekly plan’s preview Copy in the panel too, never Preview', () => {
+    const env = saveEnv(new FakeGitHub());
+    env.ops.open(defs.generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026', 'SYLLABUS.md'));
+    const out = render(<EnvCtx.Provider value={env}><OpPanel /></EnvCtx.Provider>);
+    expect(out).toContain('<button class="btn" type="button">Copy</button>');
+    expect(out).not.toContain('>Preview</button>');
+    expect(out).toContain('>Write the weekly plan</button>');
+  });
+
   it('shows the return-marks channels, the always-on ones locked', () => {
     const env = saveEnv(new FakeGitHub());
     env.ops.open(defs.returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'assignment-2', title: 'Assignment 2: Regression', template: 'assignment-2-f2026', units: 48, group: false, when: 'Marking' }, 40, 'assignment-2'));
@@ -429,10 +438,22 @@ describe('editing screens', () => {
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
     expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">withheld<\/span><span class="footnote">withheld by <code>solutions\/<\/code><\/span>/);
     expect(out).toContain('Weekly plan for the syllabus');
-    expect(out).toContain('>Preview</button>');
+    // Copy opens the plan to copy; Write puts it into the syllabus (decision 0031 rule 9).
+    expect(out).toContain('>Copy</button>');
     expect(out).toContain('>Write</button>');
-    // Copy waits for a preview in this session.
-    expect(out).toContain('disabled title="Preview first">Copy</button>');
+    expect(out).not.toContain('>Preview</button>');
+    expect(out).toContain('aria-label="About Write"');
+    // A syllabus that is not Markdown cannot be written into: Copy alone, and why.
+    const pdf = new StaticFiles({ ...FILES, [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'syllabus: E1282.pdf\n' }, {}, TREES);
+    const onlyCopy = html(<MaterialsScreen {...cp} files={pdf} entry="course-materials-f2026" />);
+    expect(onlyCopy).toContain('>Copy</button>');
+    expect(onlyCopy).not.toContain('>Write</button>');
+    expect(onlyCopy).toContain('E1282.pdf is not Markdown, so the plan cannot be written into it: copy it and paste it in.');
+    // A Markdown syllabus that is not there yet: nothing to write into either.
+    const absent = new StaticFiles({ ...FILES, [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'syllabus: E1282.md\n' }, {}, TREES);
+    const noFile = html(<MaterialsScreen {...cp} files={absent} entry="course-materials-f2026" />);
+    expect(noFile).not.toContain('>Write</button>');
+    expect(noFile).toContain('There is no E1282.md yet: write the syllabus first, or copy the plan.');
     // No public-website setting here: that list is the Public website tab's.
     expect(out).not.toContain('kept off');
     expect(out).not.toContain('opencourse.yml');

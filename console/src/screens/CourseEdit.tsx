@@ -11,11 +11,10 @@ import { invalidText, useSave } from '../edit/save';
 import { YamlText, compact, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { KIND_LABEL } from '../model/format';
-import { CONTENT_KINDS, DEFAULT_SYLLABUS, MATERIALS_FILE, NOTHING_DECLARED, inferKind, readDeclared, withMark } from '../model/materialsRules';
+import { ASSETS_KIND, DEFAULT_SYLLABUS, FOLDER_KINDS, MATERIALS_FILE, NOTHING_DECLARED, inferKind, readDeclared, withMark } from '../model/materialsRules';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import type { OpDef } from '../ops/session';
 import { ABOUT, COURSE_FACTS, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
@@ -510,26 +509,53 @@ interface Holds {
   kinds: Record<string, string>;
 }
 
-/** Each top-level folder's kind, and where it came from: `materials.yml`, the folder's name, or the default. */
+/** A kind's place in the Folder kinds table: lectures, labs, readings, any other declared kind, then supporting files. */
+const kindRank = (kind: string) => {
+  const i = FOLDER_KINDS.indexOf(kind);
+  return kind === ASSETS_KIND ? FOLDER_KINDS.length : i < 0 ? FOLDER_KINDS.length - 1 : i;
+};
+
+/** Each top-level folder's kind, and where it came from: `materials.yml`, the folder's name, or the default (supporting files). Ordered by kind (decision 0031 rule 10), then name. */
 export function folderKinds(folders: string[], kinds: Record<string, string>): { folder: string; kind: string; from: 'declared' | 'name' | 'default' }[] {
-  const all = [...new Set([...folders, ...Object.keys(kinds)])].sort((a, b) => a.localeCompare(b));
-  return all.map((folder) => {
-    const declared = kinds[folder.toLowerCase()];
-    if (declared) return { folder, kind: declared, from: 'declared' as const };
-    const { kind, named } = inferKind(folder);
-    return { folder, kind, from: named ? ('name' as const) : ('default' as const) };
-  });
+  const all = [...new Set([...folders, ...Object.keys(kinds)])];
+  return all
+    .map((folder) => {
+      const declared = kinds[folder.toLowerCase()];
+      if (declared) return { folder, kind: declared, from: 'declared' as const };
+      const { kind, named } = inferKind(folder);
+      return { folder, kind, from: named ? ('name' as const) : ('default' as const) };
+    })
+    .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.folder.localeCompare(b.folder));
 }
 
-const FROM_WORD = { declared: 'set here', name: 'from its name' };
-/** A folder whose kind only the fallback gives: the check counts it as unmapped, so it is said so. */
-const NO_KIND = 'No kind yet';
+const FROM_WORD = { declared: 'set here', name: 'from its name', default: 'by default' };
 
-/** The override's "not set here" option: the kind the folder gets by its name, or that it has none yet. */
+/** The override's "not set here" option: the kind the folder gets by its name, or by default. */
 export function resetLabel(folder: string): string {
   const { kind, named } = inferKind(folder);
-  return named ? `${KIND_LABEL[kind] ?? kind} (${FROM_WORD.name})` : NO_KIND;
+  return `${KIND_LABEL[kind] ?? kind} (${named ? FROM_WORD.name : FROM_WORD.default})`;
 }
+
+/**
+ * The kinds the dropdown offers a folder (decision 0031 rule 10): lecture, lab, readings,
+ * supporting files, less the one its name already gives it; a kind `materials.yml` already
+ * declares stays offered. A folder whose kind is only the default is offered Supporting files
+ * explicitly: choosing it writes the kind, which settles the course's problem about it.
+ */
+export function kindChoices(folder: string, declared?: string): string[] {
+  const { kind, named } = inferKind(folder);
+  const extra = declared && !FOLDER_KINDS.includes(declared) ? [declared] : [];
+  return [...FOLDER_KINDS, ...extra].filter((k) => !named || k !== kind);
+}
+
+/** The "not set here" option is selected: nothing declared, or the kind its name gives anyway. */
+const resetSelected = (k: { folder: string; kind: string; from: string }) => {
+  const own = inferKind(k.folder);
+  return k.from !== 'declared' || (own.named && k.kind === own.kind);
+};
+
+/** A syllabus the weekly plan can be written into. */
+const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
 
 /** `materials.yml` with the syllabus and kinds written: blank syllabus and no kinds remove the keys. */
 export function writeHolds(text: string | null, h: Holds): string | null {
@@ -544,31 +570,6 @@ export function writeHolds(text: string | null, h: Holds): string | null {
 export function syllabusChoices(files: string[], current: string): string[] {
   const md = files.filter((f) => !f.includes('/') && /\.md$/i.test(f)).sort((a, b) => a.localeCompare(b));
   return [...new Set([DEFAULT_SYLLABUS, ...md, ...(current ? [current] : [])])];
-}
-
-/** Copy the weekly plan the last preview built; disabled until a preview ran in this session. */
-export function CopyPlan({ def }: { def: OpDef }) {
-  const env = useEnv();
-  const block = env?.ops.lastBlock(def) ?? null;
-  const [copied, setCopied] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  const copy = async () => {
-    if (!block) return;
-    try {
-      await navigator.clipboard.writeText(block);
-      setCopied(block);
-      setFailed(false);
-    } catch {
-      setCopied(null);
-      setFailed(true);
-    }
-  };
-  return (
-    <>
-      <button class="btn small outline" type="button" disabled={!block} title={block ? undefined : 'Preview first'} onClick={() => void copy()}>{copied && copied === block ? 'Copied' : 'Copy'}</button>
-      {failed ? <CheckLine cls="bad">Could not copy. Select the preview text instead.</CheckLine> : null}
-    </>
-  );
 }
 
 export function MaterialsScreen(p: CourseProps) {
@@ -596,6 +597,12 @@ export function MaterialsScreen(p: CourseProps) {
   const savedSyl = baseSyl.trim() || DEFAULT_SYLLABUS;
   const syllabus = syl ?? savedSyl;
   const sylFile = p.files.file(course.org, repo, syllabus);
+  // Why Write is not offered (Copy still is): a file the plan cannot go into.
+  const noWrite = !isMarkdown(syllabus)
+    ? `${syllabus} is not Markdown, so the plan cannot be written into it: copy it and paste it in.`
+    : sylFile.kind === 'absent' && !files.includes(syllabus)
+      ? `There is no ${syllabus} yet: write the syllabus first, or copy the plan.`
+      : null;
   const ignText = ignFile.kind === 'ready' ? ignFile.text : '';
   const [ign, setIgn] = useState<string | null>(null);
   const [ignSave, runIgn] = useSave(env);
@@ -652,13 +659,25 @@ export function MaterialsScreen(p: CourseProps) {
           <div class="actions"><EditFile org={course.org} repo={repo} path={syllabus} branch={branch} exists={sylFile.kind !== 'absent' || files.includes(syllabus)} /></div>
           {declared === null ? <CheckLine cls="bad">{MATERIALS_FILE} does not parse; fix it with Edit the file directly.</CheckLine> : null}
           <SaveBar state={sylSave} onSave={() => void saveMat({ syllabus: syllabus === DEFAULT_SYLLABUS ? '' : syllabus, kinds: baseKinds }, runSyl, setSylSave, () => setSyl(null))} small disabled={syl === null || syl === savedSyl || declared === null} file={matRef} />
-          <h3>Weekly plan for the syllabus <Hint label="About the weekly plan">Built from the semester schedule: every session with its date and readings. Preview it, then paste it into your syllabus. It is written to .system/SYLLABUS.sessions.md in this repo; your syllabus file is never touched.</Hint></h3>
+          <h3>Weekly plan for the syllabus <Hint label="About the weekly plan">Built from the semester schedule: every session with its date and readings. Copy shows it to paste anywhere; Write puts it into your syllabus file.</Hint></h3>
           {scope ? (
-            <div class="actions"><OpButtons def={generateSyllabus(scope, repo)} small previewLabel="Preview" label="Write" /><CopyPlan def={generateSyllabus(scope, repo)} /></div>
+            <div class="actions">
+              {noWrite === null ? (
+                <>
+                  <OpButtons def={generateSyllabus(scope, repo, syllabus)} small label="Write" />
+                  <Hint label="About Write">Write puts the plan into {syllabus} between the lines &lt;!-- dsl:weekly-plan --&gt; and &lt;!-- /dsl:weekly-plan --&gt;, adding them under “## Weekly plan” at the end the first time. Move the marked block anywhere in the file and Write updates it there; nothing else changes.</Hint>
+                </>
+              ) : (
+                <>
+                  <button class="btn small" type="button" onClick={() => env?.ops.open(generateSyllabus(scope, repo, syllabus), 'preview')}>Copy</button>
+                  <span class="footnote">{noWrite}</span>
+                </>
+              )}
+            </div>
           ) : <p class="footnote">Needs a semester: the plan is built from its schedule.</p>}
         </section>
         <section class="panel section">
-          <h2>Folder kinds <Hint label="About folder kinds">Each top folder gets a kind: it decides where its files appear on the student site and the public website. A folder named lectures, labs, readings, data, img or similar is that kind by name; set the rest here. Supporting files are released but get no page.</Hint></h2>
+          <h2>Folder kinds <Hint label="About folder kinds">Each top folder gets a kind: it decides where its files appear on the student console and the public website. A folder named lectures, labs or readings is that kind by default; any other folder is Supporting files: released to students’ GitHub repos but with no page of its own. Set a kind here if you name your folders differently.</Hint></h2>
           {tree.kind === 'loading' ? <Loading /> : kinds.length ? (
             <table class="grid kinds">
               <thead><tr><th>Folder</th><th>Kind, and why</th><th>Change</th></tr></thead>
@@ -666,10 +685,10 @@ export function MaterialsScreen(p: CourseProps) {
                 {kinds.map((k) => (
                   <tr>
                     <td><code>{k.folder}/</code></td>
-                    <td>{k.from === 'default' ? <span class="chip">{NO_KIND}</span> : <><span class="chip">{KIND_LABEL[k.kind] ?? k.kind}</span> <span class="footnote">{FROM_WORD[k.from]}</span></>}</td>
+                    <td><span class="chip">{KIND_LABEL[k.kind] ?? k.kind}</span> <span class="footnote">{FROM_WORD[k.from]}</span></td>
                     <td><select aria-label={`Kind of ${k.folder}`} onChange={(e) => setKind(k.folder, (e.target as HTMLSelectElement).value)}>
-                      <option value="" selected={k.from !== 'declared' || (inferKind(k.folder).named && k.kind === inferKind(k.folder).kind)}>{resetLabel(k.folder)}</option>
-                      {CONTENT_KINDS.filter((x) => !inferKind(k.folder).named || x !== inferKind(k.folder).kind).map((x) => <option value={x} selected={k.from === 'declared' && k.kind === x}>{KIND_LABEL[x] ?? x}</option>)}
+                      <option value="" selected={resetSelected(k)}>{resetLabel(k.folder)}</option>
+                      {kindChoices(k.folder, k.from === 'declared' ? k.kind : undefined).map((x) => <option value={x} selected={k.from === 'declared' && k.kind === x}>{KIND_LABEL[x] ?? x}</option>)}
                     </select></td>
                   </tr>
                 ))}
@@ -683,7 +702,7 @@ export function MaterialsScreen(p: CourseProps) {
           <h2>Withheld from students <Hint label="About withheld files">Everything in this repo is released to students as it stands, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
           {tree.kind === 'absent' ? <p class="footnote">Could not read the repo’s files.</p> : (
             <WithholdEditor id="ign-pat" label="Withheld patterns" files={files} text={ign ?? ignText} onText={setIgn} loading={tree.kind === 'loading'} partial={partial}
-              kinds={Object.fromEntries(kinds.filter((k) => k.from !== 'default').map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} withheldWord="withheld" releasedWord="released to students" />
+              kinds={Object.fromEntries(kinds.map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} withheldWord="withheld" releasedWord="released to students" />
           )}
           <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
           <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ignFile.kind === 'loading' || (ignFile.kind === 'ready' && ignOut === ignText)} file={ignRef} />

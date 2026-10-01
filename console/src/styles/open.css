@@ -10,7 +10,8 @@
 .open-menu .pm-row { display: flex; align-items: center; gap: 4px; }
 .open-menu .pm-row > [role="menuitem"] { flex: 1; min-width: 0; }
 .open-menu .pm-row .hint-wrap { margin: 0 6px 0 0; }
-.open-menu .hint-btn { width: 20px; min-height: 0; height: 20px; padding: 0; display: grid; place-items: center; border: 1.5px solid var(--rule-strong); border-radius: 50%; background: var(--surface); font-family: var(--font-display); font-weight: 700; font-size: 12px; line-height: 1; color: var(--ink-2); cursor: help; }
+/* `.popmenu button` sets justify-content: space-between, which parks a one-track grid at the left: centre the track too. */
+.open-menu .hint-btn { width: 20px; min-height: 0; height: 20px; padding: 0; display: grid; place-items: center; justify-content: center; flex: none; border: 1.5px solid var(--rule-strong); border-radius: 50%; background: var(--surface); font-family: var(--font-display); font-weight: 700; font-size: 12px; line-height: 1; color: var(--ink-2); cursor: help; }
 .open-menu .hint-btn:hover { background: var(--surface); }
 .open-menu .hint-wrap:hover .hint-btn, .open-menu .hint-btn:focus-visible { border-color: var(--ink-2); color: var(--ink); }
 .open-menu .pm-cmd { display: block; margin-top: 6px; font-family: var(--font-code); font-size: 12px; white-space: normal; overflow-wrap: anywhere; user-select: all; }

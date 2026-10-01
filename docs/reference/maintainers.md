@@ -513,7 +513,8 @@ archive grace, release destination repo), `kinds` (ordered row kinds with label,
 colour and row colour; `assignment`, `term`, `archive` are `system: true` and `other` is
 required; the non-system kinds are what a release entry's `kind:` may say, and each one a
 semester has rows of gets a tab on its site; `assets`, "Supporting files", is released but
-never a row or a tab on either site, `schedule_plan.site_rows` and `public_site.shown_sections`
+never a row or a tab on either site, and is the kind of any folder no alias names
+(`materials.DEFAULT_KIND`, decision 0031; an entry with no copies stays `lecture`), `schedule_plan.site_rows` and `public_site.shown_sections`
 drop it; the public website neither hosts nor links its files, since it hosts by section), `institution` (the site block), `contact` (the last fault address, after
 `DSL_MAINTAINER_EMAIL` and `GRAPH_SENDER`), `licences` (the open site's choices, default
 first).
@@ -908,7 +909,7 @@ Promote.
 | semester `.github/dsl-course.yml` (the course pointer) | `semester-config/.system/dsl-course.yml` | semester org; the four dispatchers read it there |
 | `semester-config/*.sample`, `grading_sheets/*.yml.sample` | none - the scaffolds and docs link `example-course/semester-org/` | deleted by the tool |
 | course `.github/.github/.last-refresh`, `.github/.github/.missing-cohorts` | `.github/.system/last-refresh`, `.github/.system/missing-semesters` | course org |
-| materials `MAINTAINING.md`, `SYLLABUS.md.sample`, `SYLLABUS.sessions.md` | `.system/MAINTAINING.md`, `.system/SYLLABUS.md.sample`, `.system/SYLLABUS.sessions.md`; a whole-repo release skips `.system/` | every `course-materials-*` repo |
+| materials `MAINTAINING.md`, `SYLLABUS.md.sample`, `SYLLABUS.sessions.md` | `.system/MAINTAINING.md`, `.system/SYLLABUS.md.sample`, `.system/SYLLABUS.sessions.md` (no longer written: the weekly plan now goes between markers in the syllabus itself, decision 0031); a whole-repo release skips `.system/` | every `course-materials-*` repo |
 | a `course-materials-*` name as the mark of a materials repo | the `dsl-materials` topic (the name stays the scaffold's default) | course org; the course step "materials topic" adds it |
 | an `assignment-*` name on a GitHub template as the mark of an assignment template; `assignment-<n>-<semester>`, CLI `scaffold assignment --number`, `--semester`, `--copy-from` | the `dsl-assignment` topic; `assignment-<name>`, `--name` (decision 0014: the number is the schedule entry's, access follows the schedule's citations) | course org; the course step "assignment topic" adds the topic (live templates keep their names); an untopicked one is NOT_MIGRATED in status.json |
 | a materials repo's `publish.yml`; the public site repo's `_publish-config.yml` | the course's `.github/opencourse.yml` (decision 0016) | every materials repo; the course step "public website" deletes each `publish.yml` and seeds `opencourse.yml` from `_publish-config.yml` (else off); the next publish deletes `_publish-config.yml` |

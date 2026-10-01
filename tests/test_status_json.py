@@ -30,7 +30,7 @@ from dsl_course import (
 )
 from dsl_course.faults import ConfigFault, FaultKind, header_fault
 from dsl_course.gh_contents import load_yaml_lines
-from dsl_course.materials import Declared
+from dsl_course.materials import PLAN_END, PLAN_START, Declared
 from dsl_course.ops.request import validate
 from tests.conftest import repo_row
 
@@ -1709,47 +1709,74 @@ def _unmet(m: status_json.MaterialsFacts) -> list[str]:
     ("over", "unmet", "state"),
     [
         ({}, [], "ready"),
-        ({"syllabus": None}, ["syllabus"], "todo"),
-        ({"syllabus": "<!-- dsl-stub: syllabus -->"}, ["syllabus"], "todo"),
-        # A PDF syllabus that is there counts as written.
-        ({"syllabus": ""}, [], "ready"),
-        # No folder at all: none of a known kind, and none unmapped either.
+        # No syllabus, or the stub: no weekly plan in it either.
+        ({"syllabus": None}, ["syllabus", "sessions"], "todo"),
+        ({"syllabus": "<!-- dsl-stub: syllabus -->"}, ["syllabus", "sessions"], "todo"),
+        # A PDF syllabus that is there counts as written; its plan is pasted by hand.
+        ({"syllabus": ""}, ["sessions"], "ready"),
+        # No folder at all: none of a known kind.
         ({"folders": ()}, ["kind_folder"], "todo"),
-        # A folder on the default fallback blocks, though another has a kind.
-        ({"folders": ("lectures", "code")}, ["all_mapped"], "todo"),
-        ({"folders": ("code",)}, ["all_mapped", "kind_folder"], "todo"),
-        # Supporting files have a kind by name, but on their own make nothing to show.
+        # A folder no kind names is supporting files (decision 0031): it blocks nothing.
+        ({"folders": ("lectures", "code")}, [], "ready"),
+        ({"folders": ("code",)}, ["kind_folder"], "todo"),
+        # Supporting files, by name or by default, on their own make nothing to show.
         ({"folders": ("lectures", "img")}, [], "ready"),
         ({"folders": ("data",)}, ["kind_folder"], "todo"),
         # A declared kind maps the folder, matched case-insensitively.
         ({"folders": ("Tutorien",), "kinds": {"tutorien": "lab"}}, [], "ready"),
         # The two non-blocking lines never stop ready.
-        ({"releaseignore": None, "sessions": False}, ["sessions", "withheld"], "ready"),
+        (
+            {"syllabus": "# Syllabus", "releaseignore": None},
+            ["sessions", "withheld"],
+            "ready",
+        ),
         ({"topic": False}, [], "problem"),
     ],
 )
 def test_the_materials_checklist_and_its_state(over, unmet, state):
-    base = {"releaseignore": "solutions/\n", "sessions": True}
+    base = {"syllabus": PLANNED, "releaseignore": "solutions/\n"}
     m = _materials("course-materials-f2026", **{**base, **over})
     assert _unmet(m) == unmet
     assert status_json.materials_state(m) == state
 
 
+# A written syllabus carrying the weekly plan's marked block.
+PLANNED = f"# Syllabus\n\n## Weekly plan\n\n{PLAN_START}\n### Session 1\n{PLAN_END}\n"
+
+
+def test_the_weekly_plan_line_reads_the_markers_in_the_syllabus():
+    def why(syllabus):
+        (c,) = [
+            c
+            for c in status_json.materials_checks(_materials("m", syllabus))
+            if c["id"] == "sessions"
+        ]
+        return c["why"]
+
+    assert why(PLANNED) is None
+    assert why("# Syllabus") == "The weekly plan is not in SYLLABUS.md yet."
+    assert why(None) == "The weekly plan is not in SYLLABUS.md yet."
+    # A PDF syllabus cannot be written into: it is pasted by hand.
+    assert (
+        why("") == "SYLLABUS.md is not Markdown: copy the weekly plan and paste it in."
+    )
+
+
 def test_the_checklist_order_and_what_blocks():
     # Folder kinds first, then the syllabus, the weekly plan right after it, and the
-    # withheld patterns.
+    # withheld patterns. No "every folder has a kind": since decision 0031 each has one.
     checks = status_json.materials_checks(_materials("m", None))
     assert [(c["id"], c["blocks"]) for c in checks] == [
-        ("all_mapped", True),
         ("kind_folder", True),
         ("syllabus", True),
         ("sessions", False),
         ("withheld", False),
     ]
     # A done check carries no why; an unmet one names what is missing.
-    assert [c["why"] is None for c in checks] == [True, True, False, False, False]
-    assert checks[2]["why"] == "There is no SYLLABUS.md yet."
-    assert checks[1]["label"] == "At least one folder of a content kind"
+    assert [c["why"] is None for c in checks] == [True, False, False, False]
+    assert checks[1]["why"] == "There is no SYLLABUS.md yet."
+    assert checks[0]["label"] == "At least one folder of a content kind"
+    assert checks[2]["label"] == "Weekly plan in the syllabus"
 
 
 def test_kind_folder_lists_the_content_kinds_found_with_their_folders():
@@ -1782,18 +1809,137 @@ def test_the_seeded_releaseignore_is_not_reviewed_and_a_pattern_or_the_mark_is()
         # Looked at, and nothing withheld: the mark the console writes.
         (f"{stub}{releaseignore.REVIEWED_MARK}\n", True),
     ):
-        m = _materials("m", releaseignore=text, sessions=True)
+        m = _materials("m", releaseignore=text)
         assert ("withheld" not in _unmet(m)) is reviewed
 
 
-def test_the_unmapped_folders_are_named_and_never_released_ones_skipped():
-    m = _materials("m", folders=("lectures", "code", "misc", "solution", "tests"))
-    (why,) = [
-        c["why"] for c in status_json.materials_checks(m) if c["id"] == "all_mapped"
-    ]
-    assert (
-        why == "The folders code/, misc/ have no kind yet; set them under Folder kinds."
+def test_a_numbered_folder_no_kind_names_is_a_problem_until_its_kind_is_set():
+    # Decision 0031 rule 10: `quiz/01_x/` made rows under the old lecture default.
+    m = _materials("cm", folders=("lectures", "quiz", "code"), numbered=("quiz",))
+    (p,) = status_json.kindless_problems(m, COURSE)
+    assert p["id"] == "kinds:cm:quiz"
+    assert (p["scope"], p["stage"]) == ("course", "C4")
+    assert p["text"] == (
+        "quiz/ in cm has numbered folders but no kind; set its kind under Folder kinds."
     )
+    assert p["fix"]["screen"] == "materials" and p["fix"]["entry"] == "cm"
+    # Set, in any case: no problem.
+    kinded = _materials(
+        "cm", folders=("Quiz",), numbered=("Quiz",), kinds={"quiz": "lab"}
+    )
+    assert status_json.kindless_problems(kinded, COURSE) == []
+    # It stands in the course's problems, so the course is not ready while it does.
+    block, problems = status_json.render_course(_course(materials=[m]), NOW)
+    assert "kinds:cm:quiz" in [q["id"] for q in problems]
+    assert block["ready"] is False
+
+
+def test_only_unkinded_folders_with_numbered_subfolders_are_read_and_flagged(
+    monkeypatch,
+):
+    listed = []
+
+    def top_level(org, repo, folder=""):
+        listed.append(folder)
+        return {
+            "": {"lectures": "dir", "quiz": "dir", "code": "dir", "data": "dir"},
+            "quiz": {"01_first": "dir", "notes.md": "file"},
+            "code": {"helpers": "dir", "run.py": "file"},
+        }[folder]
+
+    monkeypatch.setattr(status_json, "top_level", top_level)
+    monkeypatch.setattr(status_json, "_declaration", lambda org, repo: Declared())
+    monkeypatch.setattr(status_json, "get_file_content", lambda org, repo, path: None)
+    m = status_json._materials_facts(COURSE, "cm")
+    assert m.numbered == ("quiz",)
+    # The named folders (lectures/, data/) are never listed.
+    assert sorted(listed) == ["", "code", "quiz"]
+
+
+def test_a_folder_withheld_from_release_is_never_a_kinds_problem(monkeypatch):
+    # quiz/ never reaches students, so it cannot have lost rows.
+    tops = {
+        "": {"quiz": "dir", "drafts": "dir", ".releaseignore": "file"},
+        "quiz": {"01_first": "dir"},
+        "drafts": {"01_x": "dir"},
+    }
+    monkeypatch.setattr(status_json, "top_level", lambda o, r, folder="": tops[folder])
+    monkeypatch.setattr(status_json, "_declaration", lambda org, repo: Declared())
+    monkeypatch.setattr(
+        status_json,
+        "get_file_content",
+        lambda org, repo, path: "quiz/\n" if path == ".releaseignore" else None,
+    )
+    m = status_json._materials_facts(COURSE, "cm")
+    assert m.numbered == ("drafts",)
+    assert m.releaseignore == "quiz/\n"
+
+
+def test_a_shown_entry_landing_in_a_kindless_folder_is_a_problem():
+    sched = _sched(
+        "timezone: Europe/Berlin\n"
+        "releases:\n"
+        "  lecture-9:\n"
+        "    event_datetime: 2026-09-29T10:00\n"
+        "    deploy:\n"
+        "    - course_source_repo: code-f2026\n"
+        "      course_source_path: x.py\n"
+        "      semester_dest_path: code/x.py\n"
+        "  intro:\n"
+        "    event_datetime: 2026-09-01T10:00\n"
+        "    deploy:\n"
+        "    - course_source_repo: cm\n"
+        "      course_source_path: SYLLABUS.md\n"
+        "  lecture-1:\n"
+        "    event_datetime: 2026-09-01T10:00\n"
+        "    deploy:\n"
+        "    - course_source_repo: cm\n"
+        "      course_source_path: lectures/01_x\n"
+        "  quiz-1:\n"
+        "    event_datetime: 2026-09-02T10:00\n"
+        "    kind: other\n"
+        "    deploy:\n"
+        "    - course_source_repo: cm\n"
+        "      course_source_path: quiz/01\n"
+        "  slides-2:\n"
+        "    event_datetime: 2026-09-08T10:00\n"
+        "    deploy:\n"
+        "    - course_source_repo: cm\n"
+        "      course_source_path: Slides/02_y\n"
+        "  setup:\n"
+        "    event_datetime: 2026-09-01T09:00\n"
+        "    show_on_site: false\n"
+        "    deploy:\n"
+        "    - course_source_repo: cm\n"
+        "      course_source_path: env/requirements.txt\n"
+    )
+    facts = _semester(sched=sched)
+    problems = status_json.kindless_entry_problems(facts)
+    assert {p["id"]: p["text"] for p in problems} == {
+        # Copied into a folder the source repo does not have: only the entry can say.
+        "kinds:lecture-9": (
+            "lecture-9 lands in code/, which has no kind; give the entry a kind."
+        ),
+        "kinds:intro": (
+            "intro lands in the top of materials, which has no kind; give the entry a "
+            "kind."
+        ),
+        # Mirrored from the source repo's own top folder: Folder kinds can say too.
+        "kinds:slides-2": (
+            "slides-2 lands in Slides/, which has no kind; set its kind under Folder "
+            "kinds, or give the entry a kind."
+        ),
+    }
+    assert all(p["scope"] == "semester" for p in problems)
+    # The source repo's alias settles it.
+    facts.aliases = {
+        "code-f2026": {"code": "lecture"},
+        "cm": {"materials": "other", "slides": "lecture"},
+    }
+    assert status_json.kindless_entry_problems(facts) == []
+
+
+def test_the_kind_folder_why_and_never_released_folders_skipped():
     # Only never-released folders: as good as none.
     only = _materials("m", folders=("solution",))
     (kind,) = [
@@ -1803,18 +1949,14 @@ def test_the_unmapped_folders_are_named_and_never_released_ones_skipped():
         "There is no lectures/, labs/ or readings/ folder yet; add one or set a "
         "folder's kind under Folder kinds."
     )
-    code = _materials("m", folders=("code",))
-    (kind,) = [
-        c for c in status_json.materials_checks(code) if c["id"] == "kind_folder"
-    ]
-    assert kind["why"] == "No top folder has a kind yet; set one under Folder kinds."
-    data = _materials("m", folders=("data",))
-    (kind,) = [
-        c for c in status_json.materials_checks(data) if c["id"] == "kind_folder"
-    ]
-    assert kind["why"] == (
-        "Only supporting files so far; set a folder's kind under Folder kinds."
-    )
+    for folders in (("code",), ("data",), ("code", "data", "solution")):
+        m = _materials("m", folders=folders)
+        (kind,) = [
+            c for c in status_json.materials_checks(m) if c["id"] == "kind_folder"
+        ]
+        assert kind["why"] == (
+            "Only supporting files so far; set a folder's kind under Folder kinds."
+        ), folders
 
 
 def test_c4_and_c5_are_done_once_any_one_is_ready():

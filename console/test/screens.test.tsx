@@ -254,7 +254,7 @@ describe('S6 schedule and S11 release', () => {
 
 describe('operation outcome', () => {
   it('shows the generated text directly, and what the op touched in the details fold', () => {
-    const def = generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026');
+    const def = generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026', 'SYLLABUS.md');
     const outcome = { schema: 'dsl.outcome/1' as const, op: def.op, run_id: 7, actor: 'a', preview: true, conclusion: 'previewed' as const, summary: 'Preview: the weekly plan.', reasons: [{ code: 'NO_SOLUTION_REGION', text: 'solution.py\nhas no region' }], details: ['main/solution.py', 'main/README.md'], block: '## Course sessions and readings\n- Session 1: Intro' };
     const out = html(<OutcomeView result={{ outcome, people: [], leaked: [] }} def={def} />);
     expect(out).toContain('<summary>Details</summary>');
@@ -394,9 +394,9 @@ describe('S2 course and S17 template', () => {
     const todo = out.slice(out.indexOf('>To do</span>'), out.indexOf('</details>', out.indexOf('>To do</span>')));
     // The same markup as the setup list: an open line, its check's label and ?, why and the link.
     expect(todo).toContain('<ul class="setup"><li class="open"><span class="s-mark" aria-hidden="true"></span>');
-    expect(todo).toContain('Weekly plan generated<span class="s-need slug">course-materials-f2026</span><span class="sr">: To do</span>');
-    expect(todo).toContain('A block of sessions and readings built from the semester schedule');
-    expect(todo).toContain('<span class="s-why">The weekly plan has not been generated yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a></span>');
+    expect(todo).toContain('Weekly plan in the syllabus<span class="s-need slug">course-materials-f2026</span><span class="sr">: To do</span>');
+    expect(todo).toContain('Every session with its date and readings, built from the semester schedule');
+    expect(todo).toContain('<span class="s-why">The weekly plan is not in SYLLABUS.md yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a></span>');
     const none: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [] } }, sha: 's', stale: [] };
     expect(text(<CourseScreen {...cp} loaded={none} />)).toContain('Nothing to do.');
     const tpl: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.' }] } }, sha: 's', stale: [] };
