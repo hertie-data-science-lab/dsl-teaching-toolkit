@@ -34,6 +34,8 @@ export interface OpDef {
   needsCheck?: { label: string; sub: string; arg?: string };
   proposed?: boolean;
   previewProposed?: boolean;
+  /** The preview's button in the panel and on the screen, where it is not a preview to the user ("Copy"). */
+  previewLabel?: string;
   /** An information panel with no operation behind it (Export). */
   info?: ComponentChildren;
   /** Where on GitHub the verb's change shows (a repo, branch or file): "See on GitHub" once it has run. A function reads the run's args. */

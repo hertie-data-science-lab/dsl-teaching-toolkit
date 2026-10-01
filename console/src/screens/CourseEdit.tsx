@@ -667,7 +667,7 @@ export function MaterialsScreen(p: CourseProps) {
             <div class="actions">
               {noWrite === null ? (
                 <>
-                  <OpButtons def={generateSyllabus(scope, repo, syllabus)} small previewLabel="Copy" label="Write" />
+                  <OpButtons def={generateSyllabus(scope, repo, syllabus)} small label="Write" />
                   <Hint label="About Write">Write puts the plan into {syllabus} between the lines &lt;!-- dsl:weekly-plan --&gt; and &lt;!-- /dsl:weekly-plan --&gt;, adding them under “## Weekly plan” at the end the first time. Move the marked block anywhere in the file and Write updates it there; nothing else changes.</Hint>
                 </>
               ) : (

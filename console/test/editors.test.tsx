@@ -289,6 +289,15 @@ describe('the operation panel', () => {
     expect(render(<EnvCtx.Provider value={env}><OpPanel /></EnvCtx.Provider>)).toContain('class="opbar"');
   });
 
+  it('names the weekly plan’s preview Copy in the panel too, never Preview', () => {
+    const env = saveEnv(new FakeGitHub());
+    env.ops.open(defs.generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026', 'SYLLABUS.md'));
+    const out = render(<EnvCtx.Provider value={env}><OpPanel /></EnvCtx.Provider>);
+    expect(out).toContain('<button class="btn" type="button">Copy</button>');
+    expect(out).not.toContain('>Preview</button>');
+    expect(out).toContain('>Write the weekly plan</button>');
+  });
+
   it('shows the return-marks channels, the always-on ones locked', () => {
     const env = saveEnv(new FakeGitHub());
     env.ops.open(defs.returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'assignment-2', title: 'Assignment 2: Regression', template: 'assignment-2-f2026', units: 48, group: false, when: 'Marking' }, 40, 'assignment-2'));

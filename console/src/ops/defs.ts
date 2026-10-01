@@ -233,7 +233,7 @@ export function generateSyllabus(s: Scope, repo: string, syllabus: string): OpDe
     ...base(s, 'assignment.generate_syllabus', repo), name: 'Weekly plan', title: syllabus, where: `From ${s.where}’s schedule`,
     intro: `Every session with its date and readings, from the semester’s schedule. Write puts it into ${syllabus} between the weekly-plan markers; nothing else in the file changes.`,
     verb: 'Write the weekly plan', running: 'Writing the weekly plan', cancel: 'Stop', args: { course_source_repo: repo, syllabus },
-    target: file,
+    target: file, previewLabel: 'Copy',
   };
 }
 
