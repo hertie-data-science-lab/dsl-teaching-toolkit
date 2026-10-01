@@ -112,14 +112,25 @@ export function SetupScreen({ org }: { org?: string; repos?: string[] }) {
   };
   const status = done === 'stored' ? <span class="valid-msg" role="status">Saved.</span> : done === 'kept' ? <span class="footnote" role="status">This browser does not keep it: it lasts until you reload.</span> : null;
   const shown = editing ? draft.folder : saved?.folder ?? '';
+  const view = !editing && !!saved;
   const check = shown.trim() && canCheckFolders() ? <FolderCheck login={login} typed={shown} org={org} /> : null;
   return (
     <>
       <div class="page-head">
         <div><h1>Profile</h1></div>
       </div>
-      {editing || !saved ? (
-        <section class="panel section">
+      {/* One section and one folder check for both views, so the check does not remount (and
+          flash its pick button) on Edit, Save or Cancel. */}
+      <section class={`panel section${view ? ' setup-view' : ''}`}>
+        {view && saved ? (
+          <>
+            <button ref={pencil} class="btn small quiet setup-edit" type="button" aria-label="Edit" title="Edit" onClick={edit}><Pencil /></button>
+            <dl class="kv">
+              <dt>Folder for your course repos</dt><dd><code>{saved.folder}</code></dd>
+              <dt>Editor</dt><dd>{EDITOR_WORD[saved.editor]}{saved.editor === 'other' && saved.scheme ? <>, <code>{saved.scheme}</code></> : null}</dd>
+            </dl>
+          </>
+        ) : (
           <div class="setup-form">
             <div class="field">
               <label for="ys-folder">Folder for your course repos</label>
@@ -127,7 +138,6 @@ export function SetupScreen({ org }: { org?: string; repos?: string[] }) {
                 onInput={(e) => change({ folder: (e.target as HTMLInputElement).value })} />
               <p class="hint">Each course gets a folder inside it, named after its organisation.</p>
             </div>
-            {check}
             <fieldset class="field">
               <legend class="label">Editor</legend>
               <div class="choices" role="radiogroup" aria-label="Editor">
@@ -150,18 +160,10 @@ export function SetupScreen({ org }: { org?: string; repos?: string[] }) {
               {status}
             </div>
           </div>
-        </section>
-      ) : (
-        <section class="panel section setup-view">
-          <button ref={pencil} class="btn small quiet setup-edit" type="button" aria-label="Edit" title="Edit" onClick={edit}><Pencil /></button>
-          <dl class="kv">
-            <dt>Folder for your course repos</dt><dd><code>{saved.folder}</code></dd>
-            <dt>Editor</dt><dd>{EDITOR_WORD[saved.editor]}{saved.editor === 'other' && saved.scheme ? <>, <code>{saved.scheme}</code></> : null}</dd>
-          </dl>
-          {check}
-          {status ? <p>{status}</p> : null}
-        </section>
-      )}
+        )}
+        {check}
+        {view && status ? <p>{status}</p> : null}
+      </section>
       <p class="footnote">Kept in this browser, for your GitHub login.</p>
     </>
   );
