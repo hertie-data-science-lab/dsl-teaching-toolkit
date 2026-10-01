@@ -279,7 +279,9 @@ describe('materials settings: syllabus file and folder kinds', () => {
     const t = text(<MaterialsScreen {...cp({ entry: MAT, files: withYml })} />);
     expect(t).toContain('quiz/ Exam set here');
     expect(t).toContain('Tutorials/ Lab from its name');
-    expect(t).toContain('datasets/ Lecture the default');
+    // A folder only the fallback gives a kind is unmapped, and says so.
+    expect(t).toContain('datasets/ No kind yet');
+    expect(t).not.toContain('Lecture the default');
     expect(out).toContain('<table class="grid kinds">');
     expect(out).toContain('<th>Kind, and why</th>');
     expect(out).toContain('value="E1282.pdf"');
@@ -292,10 +294,11 @@ describe('materials settings: syllabus file and folder kinds', () => {
     expect(sel('Tutorials').startsWith('<option value selected>Lab (from its name)</option>')).toBe(true);
     expect(sel('Tutorials')).not.toContain('value="lab"');
     expect(sel('quiz')).toContain('<option value="exam" selected>');
-    expect(sel('quiz')).not.toContain('value="lecture"');
+    // quiz has no kind by its name: every kind is offered, lecture too.
+    expect(sel('quiz')).toContain('value="lecture"');
   });
-  it('names the kind a folder falls back to, and why', () => {
-    expect(resetLabel('quiz')).toBe('Lecture (the default)');
+  it('names the kind a folder gets by its name, or that it has none yet', () => {
+    expect(resetLabel('quiz')).toBe('No kind yet');
     expect(resetLabel('Tutorials')).toBe('Lab (from its name)');
   });
   it('writes materials.yml with only what is declared', () => {
@@ -323,15 +326,19 @@ describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () 
     expect(out.match(/aria-label="About this check"/g)).toHaveLength(checks.length);
     expect(out).toContain('A repo with nothing of a content kind has nothing to release.');
     expect(out).toContain('Saving the list once, even empty, marks it reviewed.');
-    // Collapsed: no `open`. Only the kinds a folder has (decision 0026 rule 3).
+    // Collapsed: no `open`. Every content kind but supporting files: a tick and its folders when present, nothing when not.
     expect(out).toContain('<details class="fold s-kinds"><summary>Kinds found</summary>');
-    expect(out).toContain('<li><b>Lecture</b>: lectures/</li>');
-    expect(out).not.toContain('<b>Readings</b>');
-    // Kinds first, then the syllabus, then the two lines that do not block.
+    const kinds = out.split('<summary>Kinds found</summary>')[1].split('</details>')[0];
+    expect(kinds.match(/<li/g)).toHaveLength(6);
+    expect(kinds).toMatch(/<li class="found"><span class="k-mark" aria-hidden="true"><svg[^]*?<\/svg><\/span><b>Lecture<\/b>: lectures\/<\/li>/);
+    expect(kinds).toContain('<li><span class="k-mark" aria-hidden="true"></span><b>Readings</b><span class="sr">: none</span></li>');
+    expect(kinds).not.toContain('Supporting');
+    // Kinds first, then the syllabus, the weekly plan right after it, then the withheld patterns.
     const t = text(<MaterialsChecklist checks={checks} />);
     expect(t.indexOf('Every top folder has a kind')).toBeLessThan(t.indexOf('At least one folder of a content kind'));
     expect(t.indexOf('At least one folder of a content kind')).toBeLessThan(t.indexOf('Syllabus written'));
-    expect(t.indexOf('Syllabus written')).toBeLessThan(t.indexOf('Withheld patterns reviewed'));
+    expect(t.indexOf('Syllabus written')).toBeLessThan(t.indexOf('Weekly plan generated'));
+    expect(t.indexOf('Weekly plan generated')).toBeLessThan(t.indexOf('Withheld patterns reviewed'));
   });
 
   it('points an edit link at GitHub’s new-file page while the file does not exist', () => {

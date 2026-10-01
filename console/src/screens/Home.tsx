@@ -1,6 +1,6 @@
 // S1 Home (All courses: the institution's catalogue in three sections, DSL courses, This
 // semester and Past semesters, the person's own rows in colour and ordered by what needs them,
-// each section with its own My courses checkbox, decisions 0021 rule 5 and 0030; Your semesters: the semesters the person
+// each section with its own My courses checkbox (the first in the page head), decisions 0021 rule 5 and 0030; Your semesters: the semesters the person
 // is a student of, This semester then Past semesters as the instructor's page has them,
 // decision 0029 rule 3), S0 Sign in, and the read-only view.
 
@@ -11,7 +11,10 @@ import type { GhUser } from '../github/client';
 import { useEnv } from '../env';
 import { cohortName, invitationUrl, semesterName, type Course, type CohortRef, type Invitation, type Semester, type TokenKind } from '../model/discovery';
 import { endedNow, loadCatalogue, runningNow, termRank, type CatalogueCourse } from '../model/catalogue';
+import type { Files } from '../model/files';
 import { fmtWhen } from '../model/format';
+import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
+import { parseInstructors } from '../model/people';
 import { currentOnly, myCoursesOnly, saveCurrentOnly, saveMyCoursesOnly, type CatalogueSection } from '../model/prefs';
 import type { Loaded } from '../model/status';
 import type { SemesterFacts } from '../model/student';
@@ -38,31 +41,60 @@ interface Card {
   urgency: number;
 }
 
-/** "E1234; you are a course admin". */
-function courseSub(course: Course, user: GhUser): string {
-  const who = course.admins.includes(user.login) ? 'you are a course admin' : 'you are an instructor';
-  return `${course.code ? `${course.code}; ` : ''}${course.write ? who : 'read only'}`;
+/**
+ * Whether one of the person's semesters is over (decision 0030): archived, or past its end by
+ * its status; with no status (not read yet, or no write access), by its key's approximate end.
+ */
+function isPast(c: CohortRef, l: Loaded | undefined, now: number): boolean {
+  const s = l?.kind === 'ready' ? l.status.semester : undefined;
+  if (s?.live === false) return true;
+  return s?.ended ?? endedNow({ org: c.org, termLabel: c.termLabel }, now);
 }
 
-function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, user: GhUser): Card {
+const ROLE_SUB: Record<string, string> = { instructor: 'you are an instructor', teaching_assistant: 'you are a teaching assistant' };
+
+/**
+ * The person's role on `course`: course admin from `dsl-course.yml`; else their entry in the
+ * newest running semester's `instructors.yml` (the status carries no roles); else, while that
+ * is unread or names no role, that they teach on it.
+ */
+function roleSub(course: Course, user: GhUser, live: CohortRef | undefined, files: Files | undefined): string {
+  if (course.admins.includes(user.login)) return 'you are a course admin';
+  // Read only: the card says so, and instructors.yml is not read.
+  if (!course.write) return '';
+  const f = live && files ? files.file(live.org, CONFIG_REPO, INSTRUCTORS_FILE) : undefined;
+  const me = f?.kind === 'ready' ? parseInstructors(f.text).find((p) => p.handle.toLowerCase() === user.login.toLowerCase()) : undefined;
+  return ROLE_SUB[me?.role ?? ''] ?? 'you teach on this course';
+}
+
+/** "E1234; you are a course admin". */
+const courseSub = (course: Course, role: string) => `${course.code ? `${course.code}; ` : ''}${course.write ? role : 'read only'}`;
+
+function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, sub: string, now: number): Card {
   const name = cohortName({ course, cohort: c });
-  const base = { key: c.org, name, href: `?cohort=${c.org}#dashboard` };
-  const sub = courseSub(course, user);
+  const base = { key: c.org, name, href: `?cohort=${c.org}#dashboard`, sub, past: isPast(c, l, now) };
   if (!course.write)
-    return { ...base, sub, week: '', status: <span class="chip">read only</span>, next: [['', 'Problems and dates need write access']], ro: true, past: false, urgency: -1 };
-  if (!l || l.kind === 'loading') return { ...base, sub, week: '…', status: <span class="chip">Reading</span>, next: [], ro: false, past: false, urgency: 0 };
+    return { ...base, week: '', status: <span class="chip">read only</span>, next: [['', 'Problems and dates need write access']], ro: true, urgency: -1 };
+  if (!l || l.kind === 'loading') return { ...base, week: '…', status: <span class="chip">Reading</span>, next: [], ro: false, urgency: 0 };
   if (l.kind !== 'ready')
-    return { ...base, sub, week: '', status: <span class="chip">{l.kind === 'absent' ? 'Not computed yet' : 'Unreadable'}</span>, next: [['', l.kind === 'absent' ? 'Open it and press Refresh.' : 'The status file could not be read.']], ro: false, past: false, urgency: 0 };
+    return { ...base, week: '', status: <span class="chip">{l.kind === 'absent' ? 'Not computed yet' : 'Unreadable'}</span>, next: [['', l.kind === 'absent' ? 'Open it and press Refresh.' : 'The status file could not be read.']], ro: false, urgency: 0 };
   const s = l.status, tz = s.semester?.timezone, n = (s.problems ?? []).length;
-  const past = s.semester?.live === false;
+  if (s.semester?.live === false)
+    return {
+      ...base,
+      sub: s.semester.archive_date ? `Archived ${fmtWhen(s.semester.archive_date, tz)}` : sub,
+      week: 'Finished',
+      status: <span class="probs none">Archived</span>,
+      next: [['', 'Students keep access. Nothing was deleted.']],
+      ro: false,
+      urgency: n,
+    };
   return {
     ...base,
-    sub: past && s.semester?.archive_date ? `Archived ${fmtWhen(s.semester.archive_date, tz)}` : sub,
-    week: past ? 'Finished' : s.semester ? `Week ${s.semester.week} of ${s.semester.weeks}` : '',
-    status: past ? <span class="probs none">Archived</span> : <Probs n={n} />,
-    next: past ? [['', 'Students keep access. Nothing was deleted.']] : (s.this_week ?? []).slice(0, 2).map((w) => [fmtWhen(w.when, tz), w.title] as [string, string]),
+    week: base.past ? 'Ended, not archived' : s.semester ? `Week ${s.semester.week} of ${s.semester.weeks}` : '',
+    status: <Probs n={n} />,
+    next: base.past ? [] : (s.this_week ?? []).slice(0, 2).map((w) => [fmtWhen(w.when, tz), w.title] as [string, string]),
     ro: false,
-    past,
     urgency: n,
   };
 }
@@ -99,12 +131,18 @@ function OffRow({ name }: { name: string }) {
 /** Past semesters shown at once, and added by each Show more. */
 const PAGE = 10;
 
-/** A section's head: its title, how many rows My courses hides, and the checkbox (only when the section has rows that are not the person's). */
-function SectionHead({ id, title, others = 0, only = true, onFlip }: { id: string; title: string; others?: number; only?: boolean; onFlip?: () => void }) {
+/** The My courses checkbox of one section. */
+const MyOnly = ({ only, onFlip }: { only: boolean; onFlip?: () => void }) => <label class="check my-only"><input type="checkbox" checked={only} onChange={onFlip} /><span>My courses</span></label>;
+
+/**
+ * A section's head: its title, how many rows My courses hides, and the checkbox (only when the
+ * section has rows that are not the person's); `inHead` when the page head carries it instead.
+ */
+function SectionHead({ id, title, others = 0, only = true, onFlip, inHead = false }: { id: string; title: string; others?: number; only?: boolean; onFlip?: () => void; inHead?: boolean }) {
   return (
     <div class="section-head">
       <h2 id={id}>{title}{only && others ? <span class="meta"> (+{others} {others === 1 ? 'other' : 'others'})</span> : null}</h2>
-      {others ? <label class="check my-only"><input type="checkbox" checked={only} onChange={onFlip} /><span>My courses</span></label> : null}
+      {others && !inHead ? <MyOnly only={only} onFlip={onFlip} /> : null}
     </div>
   );
 }
@@ -276,6 +314,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
   const [only, setOnly] = useState<Record<CatalogueSection, boolean>>(() => ({ courses: myCoursesOnly(user.login, 'courses'), now: myCoursesOnly(user.login, 'now'), past: myCoursesOnly(user.login, 'past') }));
   const [pastShown, setPastShown] = useState(PAGE);
   const [current, setCurrent] = useState(() => currentOnly(user.login));
+  const env = useEnv();
   const catalogue = useCatalogue(courses);
   // An invitation whose role cannot be told is most likely a student's.
   if (!courses.length && (semesters.length || (invited.length && invited.every((i) => i.role === null)))) {
@@ -298,7 +337,13 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
       </>
     );
   }
-  const cards = courses.flatMap((course) => course.cohorts.map((c) => cardOf(course, c, cohortStates[c.org], user)));
+  // Each course's newest running semester, whose instructors.yml tells the person's role.
+  const files = env?.files;
+  const subs = new Map(courses.map((course) => {
+    const live = course.cohorts.filter((c) => !isPast(c, cohortStates[c.org], now)).sort((a, b) => termRank(b.org) - termRank(a.org))[0];
+    return [course.org, courseSub(course, roleSub(course, user, live, files))];
+  }));
+  const cards = courses.flatMap((course) => course.cohorts.map((c) => cardOf(course, c, cohortStates[c.org], subs.get(course.org)!, now)));
   const live = cards.filter((c) => !c.past).sort((a, b) => b.urgency - a.urgency);
   const past = cards.filter((c) => c.past);
   const courseOnly = courses.filter((c) => !c.cohorts.length);
@@ -326,8 +371,9 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
     <>
       <Crumbs items={[{ t: 'All courses' }]} />
       <div class="page-head all-courses-head">
-        <div><h1>All courses <Hint doc="01-new-course-org.md">A course org is a standing staging area for the materials and assignment templates you are working on, for every semester. Each semester runs in its own org: students join it, and materials are released, assignments handed out and marks returned there.</Hint></h1><p class="lede">Every course the lab runs, ordered by what needs your attention.</p></div>
-        <div class="actions"><a class="btn" href="#new-course-1">New course</a></div>
+        <div><h1>All courses <Hint doc="01-new-course-org.md">A course org acts as a persistent staging area to hold your in-development materials and assignment templates for every semester. Each semester runs in its own org, which students join and to which materials are released, assignments handed out and marks returned.</Hint></h1><p class="lede">Every course the lab runs, ordered by what needs your attention.</p></div>
+        {/* The first section's My courses sits here, on New course's baseline. */}
+        <div class="actions">{courses.length && foreign.length ? <MyOnly only={only.courses} onFlip={flip('courses')} /> : null}<a class="btn" href="#new-course-1">New course</a></div>
       </div>
       <Invitations invited={invited} kind={kind} />
       {!courses.length ? (
@@ -335,10 +381,10 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
       ) : (
         <div class="stack all-courses">
           <section class="section" aria-labelledby="h-courses">
-            <SectionHead id="h-courses" title="DSL courses" others={foreign.length} only={only.courses} onFlip={flip('courses')} />
+            <SectionHead id="h-courses" title="DSL courses" others={foreign.length} only={only.courses} inHead />
             <ul class="cohort-list">
               {mine.map((c) => (
-                <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{courseSub(c, user)}</span></span><span class="cc-week" /><span /><span class="cc-next" /></a></li>
+                <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{subs.get(c.org)}</span></span><span class="cc-week" /><span /><span class="cc-next" /></a></li>
               ))}
               {only.courses ? null : foreign.map((c) => <OffRow name={c.name} />)}
             </ul>
@@ -355,13 +401,12 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
               <p class="footnote">{othersNow.length ? 'None of your semesters is running.' : 'No semester is running.'}</p>
             )}
           </section>
-          {pastRows.length ? (
-            <section class="section" aria-labelledby="h-past">
-              <SectionHead id="h-past" title="Past semesters" others={pastOthers} only={only.past} onFlip={flip('past')} />
-              {pastShownRows.length ? <ul class="cohort-list">{pastShownRows.slice(0, pastShown).map((r) => r.el)}</ul> : <p class="footnote">None of your semesters has ended.</p>}
-              {pastShownRows.length > pastShown ? <div class="actions"><button class="btn outline small" type="button" onClick={() => setPastShown(pastShown + PAGE)}>Show more</button></div> : null}
-            </section>
-          ) : null}
+          <section class="section" aria-labelledby="h-past">
+            <SectionHead id="h-past" title="Past semesters" others={pastOthers} only={only.past} onFlip={flip('past')} />
+            {past.length ? null : <p class="footnote">You have no past semesters yet.</p>}
+            {pastShownRows.length ? <ul class="cohort-list">{pastShownRows.slice(0, pastShown).map((r) => r.el)}</ul> : null}
+            {pastShownRows.length > pastShown ? <div class="actions"><button class="btn outline small" type="button" onClick={() => setPastShown(pastShown + PAGE)}>Show more</button></div> : null}
+          </section>
           {courseOnly.length ? (
             <section class="section">
               <h2>Courses with no semester yet</h2>
@@ -430,7 +475,7 @@ export function SignInScreen({ auth, onSignedIn }: { auth: ConsoleAuth; onSigned
   const problem = error ? <div class="invalid-msg"><span /><span>{error}</span></div> : null;
   return (
     <div class="signin">
-      <div class="page-head" style="margin-bottom:0"><div><h1>Sign in to the DSL Teaching Console</h1><p class="lede">Where instructors run their courses and semesters, and students find their materials, assignments and marks. Everything lives on GitHub; the console is the one place to work it from.</p></div></div>
+      <div class="page-head" style="margin-bottom:0"><div><h1>Sign in to the DSL Teaching Console</h1><p class="lede">A single central console for both instructors and students to manage their GitHub-based DSL courses.</p></div></div>
       {who ? (
         <section class="panel section">
           <div class="who-card"><img src={who.avatar_url} alt="" /><div><b>{who.name || who.login}</b><div class="footnote">Signed in as {who.login}</div></div></div>

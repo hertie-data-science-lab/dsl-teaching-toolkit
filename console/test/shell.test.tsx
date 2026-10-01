@@ -126,7 +126,7 @@ describe('sign-in page', () => {
     const app = new AppAuth({ clientId: 'Iv1.x', relayUrl: 'https://relay.example', redirectUri: 'https://c.example/', store: null });
     const out = render(<SignInScreen auth={new ConsoleAuth(new PatAuth({ store: null }), app)} onSignedIn={() => {}} />);
     const t = text(<SignInScreen auth={new ConsoleAuth(new PatAuth({ store: null }), app)} onSignedIn={() => {}} />);
-    expect(t).toContain('Where instructors run their courses and semesters, and students find their materials, assignments and marks.');
+    expect(t).toContain('A single central console for both instructors and students to manage their GitHub-based DSL courses.');
     expect(t).toContain(LINE);
     expect(t).not.toContain('approve the lab');
     expect(out.indexOf('>Sign in with GitHub</button>')).toBeGreaterThan(-1);

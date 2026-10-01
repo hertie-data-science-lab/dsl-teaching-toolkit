@@ -346,6 +346,15 @@ describe('editing screens', () => {
     expect(out).toContain('Check instructor access');
     expect(out).toContain('>Edit<');
   });
+  it('points every link to a file that does not exist yet at GitHub’s new-file page, never a 404', () => {
+    const none = new StaticFiles();
+    for (const [screen, path] of [[<StudentsScreen {...props({ files: none })} />, 'students.csv'], [<InstructorsScreen {...props({ files: none })} />, 'instructors.yml']] as const) {
+      const out = html(screen);
+      expect(out).toContain(`/new/main?filename=${path}`);
+      expect(out).not.toContain(`/edit/main/${path}`);
+      expect(out).not.toContain(`/blob/main/${path}`);
+    }
+  });
   it('teams shows the window, the team size from assignments.yml and who has no team', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams' })} />);
     expect(out).toContain('<h2 class="h1">Assignment 3: Group project <span class="hint-wrap">');

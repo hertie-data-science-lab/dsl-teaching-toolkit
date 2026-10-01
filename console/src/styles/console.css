@@ -962,3 +962,10 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .all-courses .section-head h2 .meta { font-family: var(--font-body); font-weight: 400; font-size: 13px; color: var(--muted); }
 .all-courses .section-head .my-only { margin: 0; min-height: 0; align-items: center; }
 .all-courses .section-head .my-only input { margin-top: 0; }
+
+/* T11: the first section's My courses sits left of New course, on one line */
+.all-courses-head .actions { gap: 8px 16px; }
+.all-courses-head .my-only { min-height: 0; align-items: center; }
+.all-courses-head .my-only input { margin-top: 0; }
+.setup .s-kinds .k-mark { display: inline-grid; place-items: center; width: 14px; margin-right: 4px; color: var(--ok); vertical-align: -1px; }
+.setup .s-kinds .k-mark svg { width: 10px; height: 10px; }

@@ -125,6 +125,8 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 }
 
 function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; draft: Values | null; setDraft: (v: Values | null) => void }) {
+  // Absent, the form edits the stub, and the edit link goes to GitHub's new-file page.
+  const exists = p.files.file(p.cohort.org, CONFIG_REPO, ASSIGNMENTS_FILE).kind !== 'absent';
   const env = useEnv();
   const [save, runSave, setSave] = useSave(env);
   const layers = semesterLayers(p, f.doc);
@@ -147,10 +149,10 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
       {f.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({f.error}); fix it with Edit the file directly.</CheckLine> : (
         <>
           <SchemaForm id="sd" schema={null} tiers={tiers} values={cur} onChange={(v) => { setDraft(v); setSave({ kind: 'idle' }); }} />
-          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }} />
+          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE, exists }} />
         </>
       )}
-      <Lives org={p.cohort.org} repo={CONFIG_REPO} path={ASSIGNMENTS_FILE} />
+      <Lives org={p.cohort.org} repo={CONFIG_REPO} path={ASSIGNMENTS_FILE} exists={exists} />
     </>
   );
 }
@@ -384,7 +386,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
           </details>
         </div>
         <div class="form-section">
-          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirtyT && !dirtyR} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: dirtyR && !dirtyT ? ASSIGNMENTS_FILE : 'schedule.yml' }} />
+          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirtyT && !dirtyR} file={dirtyR && !dirtyT ? { org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE, exists: p.files.file(p.cohort.org, CONFIG_REPO, ASSIGNMENTS_FILE).kind !== 'absent' } : { org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
           <p class="lives">Dates live in <code>{CONFIG_REPO}/schedule.yml</code>; run settings in <code>{CONFIG_REPO}/{ASSIGNMENTS_FILE}</code>.</p>
         </div>
       </div>

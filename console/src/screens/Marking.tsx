@@ -367,8 +367,8 @@ export function TeamsTab(p: TabProps) {
           {empty.length && dirty ? <p class="footnote">{empty.length} empty team{empty.length > 1 ? 's are' : ' is'} kept only until you leave this page.</p> : null}
         </section>
         <div class="panel" style="display:grid;gap:10px">
-          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv' }} note={dirty ? 'Unsaved changes' : undefined} />
-          <Lives org={p.cohort.org} repo={CONFIG_REPO} path="teams.csv" />
+          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv', exists: file.kind !== 'absent' }} note={dirty ? 'Unsaved changes' : undefined} />
+          <Lives org={p.cohort.org} repo={CONFIG_REPO} path="teams.csv" exists={file.kind !== 'absent'} />
         </div>
       </div>
     </>

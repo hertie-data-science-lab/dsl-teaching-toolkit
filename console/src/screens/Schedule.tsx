@@ -387,6 +387,7 @@ function View(p: ReadyProps) {
   const [save, setSave] = useState<SaveState>({ kind: 'idle' });
   const file = useSchedFile(p);
   const sf = file && file !== 'loading' ? file : null;
+  const schedExists = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml').kind !== 'absent';
   const doc = sf?.doc ?? {};
   const sched = useMemo(() => (sf && !sf.error ? parseSchedule(sf.text) : null), [sf?.text]);
   const rows = scheduleRows(status, sched, now, tz);
@@ -596,7 +597,7 @@ function View(p: ReadyProps) {
             <SaveLine state={save} />
             <div class="savebar">
               <button class="btn" type="button" disabled={save.kind === 'busy' || !dirty} onClick={() => void doSave()}>Save</button>
-              <EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" line={key !== 'new' && key !== 'semester' ? lineOf(sf.text, key, key === 'archive' ? 0 : 2) : undefined} />
+              <EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} line={key !== 'new' && key !== 'semester' ? lineOf(sf.text, key, key === 'archive' ? 0 : 2) : undefined} />
               {key !== 'new' && key !== 'semester' && key !== 'archive' && blockOf(doc, key) && !removed[key] ? (
                 <button class="btn small quiet" type="button" style="margin-left:auto" onClick={() => { setRemoved({ ...removed, [key]: blockOf(doc, key)! }); if (typeof location !== 'undefined') location.hash = '#schedule'; }}>Remove</button>
               ) : null}
@@ -654,12 +655,12 @@ function View(p: ReadyProps) {
               <div class="savebar"><span class="footnote">See what automation’s next scheduled release run would do.</span><OpOpen def={scheduledPreview(scope)} cls="btn small outline" label="Preview scheduled releases" /></div>
             </div>
           </details>
-          <div style="margin-top:14px"><Lives org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" /></div>
+          <div style="margin-top:14px"><Lives org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} /></div>
         </div>
         {sheet}
       </div>
       {!key ? <SaveLine state={save} /> : null}
-      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved({}); setSave({ kind: 'idle' }); }} onSave={() => void doSave()} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
+      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved({}); setSave({ kind: 'idle' }); }} onSave={() => void doSave()} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
     </>
   );
 }

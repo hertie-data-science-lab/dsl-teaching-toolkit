@@ -57,7 +57,7 @@ export function NewMaterialsScreen(p: CourseProps) {
             <>
               <Verified>Created. Write its syllabus, then add its folders to a semester’s schedule.</Verified>
               <div class="actions">
-                <EditFile org={course.org} repo={repo} path="SYLLABUS.md" />
+                <EditFile org={course.org} repo={repo} path="SYLLABUS.md" exists={p.files.file(course.org, repo, 'SYLLABUS.md').kind !== 'absent'} />
                 <a class="btn outline" href={`#materials-${repo}`}>Handout materials settings</a>
                 <button class="btn small quiet" type="button" onClick={clear}>Start another</button>
               </div>

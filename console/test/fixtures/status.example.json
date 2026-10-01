@@ -52,6 +52,22 @@
                 "folders": [
                   "labs"
                 ]
+              },
+              {
+                "kind": "readings",
+                "folders": []
+              },
+              {
+                "kind": "exam",
+                "folders": []
+              },
+              {
+                "kind": "drop-in",
+                "folders": []
+              },
+              {
+                "kind": "other",
+                "folders": []
               }
             ]
           },
@@ -63,17 +79,17 @@
             "blocks": true
           },
           {
-            "id": "withheld",
-            "label": "Withheld patterns reviewed",
-            "done": true,
-            "why": null,
-            "blocks": false
-          },
-          {
             "id": "sessions",
             "label": "Weekly plan generated",
             "done": false,
             "why": "The weekly plan has not been generated yet.",
+            "blocks": false
+          },
+          {
+            "id": "withheld",
+            "label": "Withheld patterns reviewed",
+            "done": true,
+            "why": null,
             "blocks": false
           }
         ]

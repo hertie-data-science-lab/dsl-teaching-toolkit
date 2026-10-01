@@ -16,6 +16,7 @@ import pytest
 
 from dsl_course import (
     grades,
+    policy,
     releaseignore,
     roster,
     scaffold,
@@ -1133,7 +1134,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     (m,) = course["course"]["materials"]
     assert (m["repo"], m["state"]) == ("course-materials-f2026", "ready")
     # Read off the one tree: its folder has a kind; no withhold list, no session list.
-    assert [c["id"] for c in m["checks"] if not c["done"]] == ["withheld", "sessions"]
+    assert [c["id"] for c in m["checks"] if not c["done"]] == ["sessions", "withheld"]
 
 
 def test_every_render_validates_against_the_exported_schema():
@@ -1695,7 +1696,7 @@ def _unmet(m: status_json.MaterialsFacts) -> list[str]:
         # A declared kind maps the folder, matched case-insensitively.
         ({"folders": ("Tutorien",), "kinds": {"tutorien": "lab"}}, [], "ready"),
         # The two non-blocking lines never stop ready.
-        ({"releaseignore": None, "sessions": False}, ["withheld", "sessions"], "ready"),
+        ({"releaseignore": None, "sessions": False}, ["sessions", "withheld"], "ready"),
         ({"topic": False}, [], "problem"),
     ],
 )
@@ -1707,15 +1708,15 @@ def test_the_materials_checklist_and_its_state(over, unmet, state):
 
 
 def test_the_checklist_order_and_what_blocks():
-    # Decision 0024 rule 8: folder kinds first, then the syllabus, then the two
-    # non-blocking lines.
+    # Folder kinds first, then the syllabus, the weekly plan right after it, and the
+    # withheld patterns.
     checks = status_json.materials_checks(_materials("m", None))
     assert [(c["id"], c["blocks"]) for c in checks] == [
         ("all_mapped", True),
         ("kind_folder", True),
         ("syllabus", True),
-        ("withheld", False),
         ("sessions", False),
+        ("withheld", False),
     ]
     # A done check carries no why; an unmet one names what is missing.
     assert [c["why"] is None for c in checks] == [True, True, False, False, False]
@@ -1734,12 +1735,13 @@ def test_kind_folder_lists_the_content_kinds_found_with_their_folders():
     assert [c["id"] for c in checks if "detail" in c] == ["kind_folder"]
     (kind,) = [c for c in checks if c["id"] == "kind_folder"]
     found = {d["kind"]: d["folders"] for d in kind["detail"]}
-    # Only the kinds some folder names, in the policy's order (decision 0026 rule 3); an
-    # unmapped or never-released folder is under none.
-    assert found == {
+    # Every content kind but supporting files, in the policy's order, a kind no folder
+    # has with none; an unmapped or never-released folder is under none.
+    kinds = [k for k in policy.content_kinds() if k != "assets"]
+    assert [d["kind"] for d in kind["detail"]] == kinds
+    assert {k: v for k, v in found.items() if v} == {
         "lecture": ["Lectures"],
         "lab": ["tutorials", "Tutorien"],
-        "assets": ["img"],
     }
 
 
@@ -1827,8 +1829,8 @@ def test_the_todo_list_is_every_unmet_check_and_every_unwritten_brief():
     assert [t["id"] for t in todo] == [
         "materials:course-materials-a:sessions",
         "materials:course-materials-b:syllabus",
-        "materials:course-materials-b:withheld",
         "materials:course-materials-b:sessions",
+        "materials:course-materials-b:withheld",
         "template:assignment-2:brief",
     ]
     assert todo[-1] == {

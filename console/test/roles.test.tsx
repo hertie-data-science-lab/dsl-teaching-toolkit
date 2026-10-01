@@ -136,7 +136,7 @@ describe('mode and the student shell', () => {
 
   it('Student view shows a banner, the instructor’s own identity only, and a way back', () => {
     const s = studentContext(both, parseSearch(`?semester=${cohort.org}`))!.semester;
-    expect(text(<StudentScreen semester={s} screen="week" studentView />)).toContain('Student view. What a student of Machine Learning, Fall 2026 sees, shown with your own account: no student’s repos or marks.');
+    expect(text(<StudentScreen semester={s} screen="week" studentView />)).toContain('Student view. What a student of this semester sees, shown with your own account: no student’s repos or marks.');
     const banner = render(<SemesterBanner courseName={s.courseName} termLabel={s.termLabel} org={s.org} view="back" />);
     expect(banner).toContain(`<a class="textlink" href="?cohort=${cohort.org}#dashboard">Back to instructor view</a>`);
     expect(banner).not.toContain('Student view');

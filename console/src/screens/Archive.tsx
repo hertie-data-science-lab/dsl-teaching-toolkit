@@ -15,11 +15,10 @@ function Archive(p: ReadyProps) {
   const when = date ? fmtDay(date, tz, year) : null;
   const passed = !!date && date.slice(0, 10) <= today;
   const archived = status.semester?.live === false;
-  const t = p.cohort.termLabel;
   return (
     <>
       <div class="page-head">
-        <div><h2 class="h1">Archive {t} <Hint doc="10-grade-and-return-assignments.md">Archiving makes every repo read-only. Students keep access and nothing is deleted.</Hint></h2><p class="lede">{archived ? 'Archived: every repo is read-only.' : `Scheduled for ${when ?? 'never'}.`}</p></div>
+        <div><h2 class="h1">Archive <Hint doc="10-grade-and-return-assignments.md">Archiving makes every repo read-only. Students keep access and nothing is deleted.</Hint></h2><p class="lede">{archived ? 'Archived: every repo is read-only.' : `Scheduled for ${when ?? 'never'}.`}</p></div>
         <div class="actions">{archived ? null : <OpButtons def={archive(cohortScope(p), when, passed)} />}</div>
       </div>
       <div class="grid-2">
@@ -43,5 +42,5 @@ function Archive(p: ReadyProps) {
 }
 
 export function ArchiveScreen(p: CohortProps) {
-  return <WithStatus props={p} title={`Archive ${p.cohort.termLabel}`}>{(r) => <Archive {...r} />}</WithStatus>;
+  return <WithStatus props={p} title="Archive">{(r) => <Archive {...r} />}</WithStatus>;
 }

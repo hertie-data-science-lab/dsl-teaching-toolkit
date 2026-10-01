@@ -114,8 +114,8 @@ function Site(p: ReadyProps) {
           {home.kind === 'loading' ? <Loading what="Reading the home page" /> : home.kind === 'ready' ? (
             <Field id="site-home" k="home" t={{ tier: 'ask', label: 'Home page', widget: 'markdown', reason: 'The first thing students read.' }} value={shown} values={{}} set={(_, v) => setBody(String(v ?? ''))} />
           ) : <p class="footnote">No home page yet: it appears when the site is set up.</p>}
-          <SaveBar state={homeSave} onSave={() => void saveHome()} small disabled={body === null || body === homeText} file={{ org: p.cohort.org, repo, path: 'index.md' }} />
-          <Lives org={p.cohort.org} repo={repo} path="index.md" />
+          <SaveBar state={homeSave} onSave={() => void saveHome()} small disabled={body === null || body === homeText} file={{ org: p.cohort.org, repo, path: 'index.md', exists: home.kind !== 'absent' }} />
+          <Lives org={p.cohort.org} repo={repo} path="index.md" exists={home.kind !== 'absent'} />
         </section>
         <section class="panel section">
           <div class="section-head"><h2>Announcements</h2><span class="meta">Shown in the Updates box with released sessions and hand outs</span></div>
@@ -130,8 +130,8 @@ function Site(p: ReadyProps) {
               <span />
             </div>
           </div>
-          <SaveBar state={annSave} onSave={() => void addAnn()} label="Add an announcement" small disabled={!newAnn.text.trim()} file={{ org: p.cohort.org, repo, path: '_announcements' }} />
-          <Lives org={p.cohort.org} repo={repo} path="_announcements" />
+          <SaveBar state={annSave} onSave={() => void addAnn()} label="Add an announcement" small disabled={!newAnn.text.trim()} file={{ org: p.cohort.org, repo, path: '_announcements/', exists: false }} />
+          <Lives org={p.cohort.org} repo={repo} path="_announcements/" exists={ann.kind !== 'absent'} />
         </section>
         <section class="panel section">
           <h2>Instructor photos</h2>
@@ -152,7 +152,7 @@ function Site(p: ReadyProps) {
             <dt>Semester</dt><dd>{p.cohort.termLabel} <span class="footnote">rewritten</span></dd>
             <dt>GitHub org</dt><dd>{p.cohort.org} <span class="footnote">rewritten</span></dd>
           </dl>
-          <Lives org={p.cohort.org} repo={repo} path="_config.yml" />
+          <Lives org={p.cohort.org} repo={repo} path="_config.yml" exists={p.files.file(p.cohort.org, repo, '_config.yml').kind !== 'absent'} />
         </section>
       </div>
     </>
@@ -179,7 +179,7 @@ function Operations(p: ReadyProps) {
   return (
     <>
       <div class="page-head">
-        <div><h2 class="h1">All operations <Hint doc="reference/actions-reference.md">Each line says what happened and how many. Open Details for the reasons behind a count and the run on GitHub.</Hint></h2><p class="lede">Everything automation and you have done in {p.cohort.termLabel}, newest first. Outcomes stay here after the panel closes.</p></div>
+        <div><h2 class="h1">All operations <Hint doc="reference/actions-reference.md">Each line says what happened and how many. Open Details for the reasons behind a count and the run on GitHub.</Hint></h2><p class="lede">Everything automation and you have done in this semester, newest first. Outcomes stay here after the panel closes.</p></div>
       </div>
       <section class="panel"><OpsList list={ops} now={p.now} full runRepo={`${p.course.org}/.github`} outcomes={outcomes} /></section>
     </>

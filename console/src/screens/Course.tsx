@@ -157,13 +157,13 @@ export function Whys({ m }: { m: MaterialsState }) {
   return whys.length ? <ul class="r-sub unmet">{whys.map((w) => <li>{w}</li>)}</ul> : null;
 }
 
-/** What each materials check is, for its `?` (decision 0024 rule 8). */
+/** What each materials check is, for its `?`, in the checklist's order. */
 const CHECK_HINT: Record<string, string> = {
   all_mapped: 'The student site and the public website show materials by kind (lectures, labs, readings…), so every top folder a release can copy needs one. Folder names like lectures/ set it; anything else you set under Folder kinds.',
   kind_folder: 'A repo with nothing of a content kind has nothing to release.',
   syllabus: 'The file the student site pins as the syllabus. Still the template text until you write it.',
-  withheld: 'The whole repo is released as it stands unless a line here withholds it. Saving the list once, even empty, marks it reviewed.',
   sessions: 'A block of sessions and readings built from the semester schedule, for pasting into your syllabus. Optional.',
+  withheld: 'The whole repo is released as it stands unless a line here withholds it. Saving the list once, even empty, marks it reviewed.',
 };
 
 /** A materials repo's whole checklist, ticks included: the settings screen's head. */
@@ -179,7 +179,13 @@ export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
             <details class="fold s-kinds">
               <summary>Kinds found</summary>
               <ul class="fold-body">
-                {c.detail.map((d) => <li><b>{KIND_LABEL[d.kind] ?? d.kind}</b>: {d.folders.length ? d.folders.map((f) => `${f}/`).join(', ') : 'none'}</li>)}
+                {/* Every content kind: a tick and its folders when present, nothing when not. */}
+                {c.detail.map((d) => (
+                  <li class={d.folders.length ? 'found' : undefined}>
+                    <span class="k-mark" aria-hidden="true">{d.folders.length ? <Check /> : null}</span>
+                    <b>{KIND_LABEL[d.kind] ?? d.kind}</b>{d.folders.length ? `: ${d.folders.map((f) => `${f}/`).join(', ')}` : <span class="sr">: none</span>}
+                  </li>
+                ))}
               </ul>
             </details>
           ) : null}
@@ -210,11 +216,11 @@ export function StateChip({ state, todo }: { state: string; todo: string }) {
   return state === 'problem' ? <span class="chip bad">Has a problem</span> : state === 'ready' ? <span class="chip ok">Ready</span> : <span class="chip">{todo}</span>;
 }
 
-/** The overview's head: New semester, the one primary action. */
-export function CourseHeaderActions({ course, ready }: { course: CourseProps['course']; ready: boolean }) {
+/** The overview's head: New semester, the one primary action, always the black button. */
+export function CourseHeaderActions({ course }: { course: CourseProps['course'] }) {
   return (
     <div class="actions">
-      <a class={ready ? 'btn' : 'btn quiet'} href={`?course=${course.org}#new-semester-1`}>New semester</a>
+      <a class="btn" href={`?course=${course.org}#new-semester-1`}>New semester</a>
     </div>
   );
 }
@@ -345,7 +351,6 @@ export function CourseScreen(p: CourseProps) {
   const lastPublish = recentActivity(ops.map((l) => l.filter((o) => o.op === 'course.publish_website' && o.conclusion !== 'previewed')), 1)[0];
   const cur = env?.ops.current.value;
   const publishing = cur?.phase === 'running' && cur.def.op === 'course.publish_website' && cur.def.courseOrg === course.org;
-  const ready = v.course ? v.course.ready : false;
   const layers = courseLayers(p);
   const lateDays = resolve('late_window_days', layers), latePen = resolve('late_penalty_per_day', layers);
   const team = resolve('max_team_size', layers);
@@ -360,7 +365,7 @@ export function CourseScreen(p: CourseProps) {
         <div>
           <h1>{course.name} <Hint doc="02-add-materials-to-course.md">Materials are staged here privately until a release copies them in whole or in part to a semester. Selected materials can also be published on the course’s optional public website.</Hint></h1>
         </div>
-        <CourseHeaderActions course={course} ready={ready} />
+        <CourseHeaderActions course={course} />
       </div>
       <CourseSubActions course={course} loaded={p.loaded} files={p.files} now={p.now} computed={v.computed} />
       <p class="page-note">Materials and assignment templates are prepared here, for every semester. Students get only what a semester releases or hands out, from that semester’s page.</p>
@@ -434,9 +439,9 @@ export function CourseScreen(p: CourseProps) {
               <dt>Late work <Hint small label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>
               <dt>Max team size <Hint small label="About max team size">This course’s default. Each assignment can set its own.</Hint></dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
             </dl>
-            <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
+            <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={p.files.file(course.org, COURSE_REPO, 'dsl-course.yml').kind !== 'absent'} />
             <div class="website-block">
-              <h3>Public website <Hint label="About the public website">Optional: an open version of your materials for anyone on the internet, updated daily.</Hint></h3>
+              <h3>Public website <Hint label="About the public website">Optional: an open course version of your materials accessible to anyone on the internet, updated daily.</Hint></h3>
               <SiteLive org={course.org} published={pub} last={lastPublish} running={publishing} now={p.now} />
               <div class="actions">
                 {course.write ? <OpButtons def={publishWebsite(courseScope({ course }), pub)} small verbCls="btn small outline" /> : null}
@@ -510,6 +515,7 @@ export function TemplateScreen(p: CourseProps) {
   const repo = entry ?? '';
   const v = courseView(p);
   const file = p.files.file(course.org, repo, 'grading_config.yml', 'solution');
+  const gradingExists = file.kind !== 'absent';
   const tree = p.files.tree(course.org, repo);
   const problems = v.problems.filter((x) => x.fix?.entry === repo);
   const [values, setValues] = useState<Values | null>(null);
@@ -572,7 +578,7 @@ export function TemplateScreen(p: CourseProps) {
             <div class="form-section">
               <h3>What it is</h3>
               <SchemaForm id="g1" schema={null} tiers={pick(tiers, ['title'])} values={cur} onChange={change} />
-              <Lives org={course.org} repo={repo} path="README.md" />
+              <Lives org={course.org} repo={repo} path="README.md" exists={tree.kind !== 'ready' || tree.paths.some((x) => x.path === 'README.md')} />
             </div>
             <div class="form-section">
               <h3>How students work on it</h3>
@@ -588,7 +594,7 @@ export function TemplateScreen(p: CourseProps) {
               <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['autograde', 'tests', 'starter'])} values={cur} onChange={change} />
               <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} files={files} />
               <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf'])} values={cur} onChange={change} />
-              <p class="lives"><a href={ghUrl(course.org, repo, 'grading_config.yml', 'solution')} target="_blank" rel="noopener">Lives in {`${course.org}/${repo}/grading_config.yml`}</a> on the solution branch.</p>
+              <Lives org={course.org} repo={repo} path="grading_config.yml" branch="solution" exists={gradingExists} />
             </div>
             {cur.starter === 'derived' ? (
               <div class="form-section">
@@ -602,7 +608,7 @@ export function TemplateScreen(p: CourseProps) {
               </div>
             )}
             <div class="form-section">
-              <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: course.org, repo, path: 'grading_config.yml', branch: 'solution' }} />
+              <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: course.org, repo, path: 'grading_config.yml', branch: 'solution', exists: gradingExists }} />
             </div>
           </div>
         </div>

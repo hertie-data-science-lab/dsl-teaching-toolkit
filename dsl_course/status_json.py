@@ -725,14 +725,15 @@ def _unmapped_why(folders: list[str]) -> str:
 
 
 def _kinds_found(m: MaterialsFacts) -> list[dict]:
-    """The content kinds the released top folders name, in the policy's order, each with
-    its folders; a kind no folder names is left out (decision 0026 rule 3)."""
+    """Every content kind but supporting files, in the policy's order, each with the
+    released top folders of that kind; empty for a kind no folder has, so the console shows
+    which kinds are present and which are not."""
     named = {f: alias_kind(f, m.kinds) for f in _released_folders(m)}
-    found = [
+    return [
         {"kind": kind, "folders": [f for f, k in named.items() if k == kind]}
         for kind in policy.content_kinds()
+        if kind != ASSETS_KIND
     ]
-    return [d for d in found if d["folders"]]
 
 
 def _shown_folders(m: MaterialsFacts) -> list[str]:
@@ -757,7 +758,8 @@ def _kind_folder_why(released: list[str], unmapped: list[str]) -> str:
 
 
 def materials_checks(m: MaterialsFacts) -> list[dict]:
-    """Decision 0022 rule 5, in the order of 0024 rule 8: a materials repo's checklist.
+    """Decision 0022 rule 5: a materials repo's checklist, folder kinds first, then the
+    syllabus, the weekly plan it carries, and the withheld patterns.
     `blocks` marks the checks `ready` needs; `why` names what is missing, None once the
     check is done; `kind_folder` carries `detail`, the folders found per content kind."""
     unmapped = _unmapped(m)
@@ -779,18 +781,18 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
         ),
         ("syllabus", "Syllabus written", True, _syllabus_written(m), _syllabus_why(m)),
         (
-            "withheld",
-            "Withheld patterns reviewed",
-            False,
-            _reviewed(m.releaseignore),
-            "Nothing is withheld from students yet; review the withheld patterns.",
-        ),
-        (
             "sessions",
             "Weekly plan generated",
             False,
             m.sessions,
             "The weekly plan has not been generated yet.",
+        ),
+        (
+            "withheld",
+            "Withheld patterns reviewed",
+            False,
+            _reviewed(m.releaseignore),
+            "Nothing is withheld from students yet; review the withheld patterns.",
         ),
     )
     return [

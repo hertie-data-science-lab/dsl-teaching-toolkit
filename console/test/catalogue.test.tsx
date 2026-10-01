@@ -15,6 +15,8 @@ import type { Loaded } from '../src/model/status';
 import type { Course, Semester } from '../src/model/discovery';
 import { myCoursesOnly, saveMyCoursesOnly, type PrefStore } from '../src/model/prefs';
 import { HomeScreen } from '../src/screens/Home';
+import { StaticFiles } from '../src/model/files';
+import { CONFIG_REPO, INSTRUCTORS_FILE } from '../src/model/names';
 import { FakeGitHub, fileBody, json } from './fake';
 
 const NOW = Date.parse('2026-10-01T12:00:00Z');
@@ -227,13 +229,12 @@ describe('the My courses pref', () => {
     expect(myCoursesOnly('octo', 'past', refusing)).toBe(true);
     expect(myCoursesOnly('octo', 'past', null)).toBe(true);
   });
-  it('reads the old page-wide choice as every section’s until that section is saved', () => {
+  it('ignores the old page-wide choice and deletes it when first read', () => {
     const { m, store } = memory();
+    store.removeItem = (k: string) => void m.delete(k);
     m.set('dsl-console-my-courses:octo', '0');
-    for (const s of ['courses', 'now', 'past'] as const) expect(myCoursesOnly('octo', s, store)).toBe(false);
-    saveMyCoursesOnly('octo', 'now', true, store);
-    expect(myCoursesOnly('octo', 'now', store)).toBe(true);
-    expect(myCoursesOnly('octo', 'past', store)).toBe(false);
+    for (const s of ['courses', 'now', 'past'] as const) expect(myCoursesOnly('octo', s, store)).toBe(true);
+    expect(m.has('dsl-console-my-courses:octo')).toBe(false);
   });
 });
 
@@ -249,8 +250,8 @@ afterEach(() => {
 
 const flush = () => act(async () => { for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0)); });
 
-function mount(f: FakeGitHub, { courses = [course], semesters = [], cohortStates = {} }: { courses?: Course[]; semesters?: Semester[]; cohortStates?: Record<string, Loaded> } = {}) {
-  const env = { client: client(f), user } as unknown as Env;
+function mount(f: FakeGitHub, { courses = [course], semesters = [], cohortStates = {}, files }: { courses?: Course[]; semesters?: Semester[]; cohortStates?: Record<string, Loaded>; files?: StaticFiles } = {}) {
+  const env = { client: client(f), user, files } as unknown as Env;
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => render(<EnvCtx.Provider value={env}><HomeScreen courses={courses} semesters={semesters} cohortStates={cohortStates} now={NOW} user={user} /></EnvCtx.Provider>, host!));
@@ -260,7 +261,8 @@ const greyed = (h: HTMLElement) => [...h.querySelectorAll('.cohort-card.off')];
 const section = (h: HTMLElement, id: string) => h.querySelector(`[aria-labelledby="${id}"]`)!;
 
 const names = (el: Element) => [...el.querySelectorAll('.cc-name')].map((n) => n.firstChild?.textContent);
-const boxOf = (h: HTMLElement, id: string) => section(h, id).querySelector<HTMLInputElement>('.my-only input')!;
+// The first section's checkbox sits in the page head, beside New course.
+const boxOf = (h: HTMLElement, id: string) => (id === 'h-courses' ? h.querySelector('.page-head') : section(h, id))!.querySelector<HTMLInputElement>('.my-only input')!;
 const head = (h: HTMLElement, id: string) => section(h, id).querySelector('.section-head')!.textContent;
 
 describe('All courses', () => {
@@ -268,9 +270,10 @@ describe('All courses', () => {
     const h = mount(catalogueFake());
     await flush();
     expect(h.querySelector('.page-head .lede')!.textContent).toBe('Every course the lab runs, ordered by what needs your attention.');
-    // The page head holds New course alone: the checkboxes sit in the section heads.
-    expect([...h.querySelectorAll('.page-head .actions > *')].map((e) => e.textContent)).toEqual(['New course']);
-    expect([...h.querySelectorAll('.section-head .my-only')].length).toBe(3);
+    // The first section's My courses sits left of New course; the others in their section heads.
+    expect([...h.querySelectorAll('.page-head .actions > *')].map((e) => e.textContent)).toEqual(['My courses', 'New course']);
+    expect([...h.querySelectorAll('.section-head .my-only')].length).toBe(2);
+    expect(section(h, 'h-courses').querySelector('.my-only')).toBeNull();
   });
 
   it('shows only the person’s rows by default, and says how many others each section hides', async () => {
@@ -405,7 +408,7 @@ describe('All courses', () => {
   it('explains what a course org is, and puts no Open the course on the cards', async () => {
     const h = mount(catalogueFake());
     await flush();
-    expect(h.querySelector('h1 .hint-pop')!.textContent).toContain('A course org is a standing staging area for the materials and assignment templates you are working on, for every semester. Each semester runs in its own org: students join it, and materials are released, assignments handed out and marks returned there.');
+    expect(h.querySelector('h1 .hint-pop')!.textContent).toContain('A course org acts as a persistent staging area to hold your in-development materials and assignment templates for every semester. Each semester runs in its own org, which students join and to which materials are released, assignments handed out and marks returned.');
     expect(h.textContent).not.toContain('Open the course');
   });
 
@@ -415,6 +418,64 @@ describe('All courses', () => {
     expect(h.textContent).toContain('The catalogue could not be read.');
     expect(greyed(h)).toEqual([]);
     expect(h.querySelector('a.cohort-card')?.getAttribute('href')).toBe(`?course=${course.org}#course`);
+  });
+
+  it('puts the person’s own semester that ended but is not archived under Past semesters', async () => {
+    const ended = { org: 'hertie-dsl-demo-f2025', term: 'f2025', termLabel: 'Fall 2025' };
+    const st = { kind: 'ready', status: { semester: { live: true, ended: true, week: 15, weeks: 15, archive_date: null, timezone: 'Europe/Berlin' }, problems: [], this_week: [] } } as unknown as Loaded;
+    const h = mount(catalogueFake(), { courses: [{ ...course, cohorts: [ended] }], cohortStates: { [ended.org]: st } });
+    await flush();
+    expect(section(h, 'h-live').querySelector(`a[href="?cohort=${ended.org}#dashboard"]`)).toBeNull();
+    const own = section(h, 'h-past').querySelector(`a[href="?cohort=${ended.org}#dashboard"]`)!;
+    expect(own.textContent).toContain('Ended, not archived');
+    expect(section(h, 'h-past').textContent).not.toContain('You have no past semesters yet.');
+  });
+
+  it('judges a semester with no status by its key: Fall 2025 has ended by October 2026', async () => {
+    const old = { org: 'hertie-dsl-demo-f2025', term: 'f2025', termLabel: 'Fall 2025' };
+    const h = mount(catalogueFake(), { courses: [{ ...course, cohorts: [old] }] });
+    await flush();
+    expect(section(h, 'h-past').querySelector(`a[href="?cohort=${old.org}#dashboard"]`)).not.toBeNull();
+  });
+
+  it('always shows Past semesters, saying when the person has none, with the others greyed once My courses is off', async () => {
+    const h = mount(catalogueFake());
+    await flush();
+    expect(section(h, 'h-past').textContent).toContain('You have no past semesters yet.');
+    await act(async () => boxOf(h, 'h-past').click());
+    expect(section(h, 'h-past').textContent).toContain('You have no past semesters yet.');
+    expect(greyed(section(h, 'h-past') as HTMLElement)).toHaveLength(4);
+    render(null, h);
+    // Every course is the person's: no others, no checkbox, the section still there.
+    const alone = mount(catalogueFake('course_orgs:\n  - hertie-dsl-demo-course-e1234\n'));
+    await flush();
+    expect(section(alone, 'h-past').querySelector('.my-only')).toBeNull();
+    expect(section(alone, 'h-past').querySelector('.footnote')!.textContent).toBe('You have no past semesters yet.');
+  });
+
+  describe('the role on a course card', () => {
+    const sem = { org: 'hertie-dsl-demo-f2026', term: 'f2026', termLabel: 'Fall 2026' };
+    const yml = (role: string) => new StaticFiles({ [`${sem.org}/${CONFIG_REPO}/${INSTRUCTORS_FILE}`]: `instructors:\n  - github_handle: Octo\n    name: Octo Cat\n    role: ${role}\n` });
+    const sub = (h: HTMLElement) => section(h, 'h-courses').querySelector('.cc-name span')!.textContent;
+    it('is course admin from dsl-course.yml', async () => {
+      const h = mount(catalogueFake(), { courses: [{ ...course, admins: ['octo'], cohorts: [sem] }], files: yml('teaching_assistant') });
+      await flush();
+      expect(sub(h)).toBe('E1234; you are a course admin');
+    });
+    it('is the role in the newest running semester’s instructors.yml otherwise', async () => {
+      const h = mount(catalogueFake(), { courses: [{ ...course, cohorts: [sem] }], files: yml('instructor') });
+      await flush();
+      expect(sub(h)).toBe('E1234; you are an instructor');
+      render(null, h);
+      const ta = mount(catalogueFake(), { courses: [{ ...course, cohorts: [sem] }], files: yml('teaching_assistant') });
+      await flush();
+      expect(sub(ta)).toBe('E1234; you are a teaching assistant');
+    });
+    it('says the person teaches on it when no running semester names their role', async () => {
+      const h = mount(catalogueFake(), { courses: [{ ...course, cohorts: [sem] }], files: new StaticFiles() });
+      await flush();
+      expect(sub(h)).toBe('E1234; you teach on this course');
+    });
   });
 
   it('says it is reading the catalogue only while DSL courses shows the others', async () => {
