@@ -1,7 +1,7 @@
 // Course-side editors: S3 Course details (dsl-course.yml), S20 Public website
-// (opencourse.yml), S19 Materials repo settings (materials.yml, .releaseignore).
+// (opencourse.yml), S19 Handout materials repo settings (materials.yml, .releaseignore).
 
-import { useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import courseSchema from '../../schemas/dsl_course.schema.json';
 import materialsSchema from '../../schemas/materials.schema.json';
 import opencourseSchema from '../../schemas/opencourse.schema.json';
@@ -15,6 +15,7 @@ import { CONTENT_KINDS, DEFAULT_SYLLABUS, MATERIALS_FILE, NOTHING_DECLARED, infe
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
+import type { OpDef } from '../ops/session';
 import { ABOUT, COURSE_FACTS, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
@@ -305,25 +306,63 @@ function Unmatched({ rules, total, loading, partial }: { rules: string[]; total:
 const linesOf = (text: string) => text.split('\n');
 const textOf = (lines: string[]) => lines.join('\n');
 
-/** The withhold tree over a repo, with the pattern box beneath it (two-way) and the rules that match nothing. */
+/** The line a tree click added or removed: the first index where the two lists differ, or null when they are the same. */
+export function changedLine(before: string[], after: string[]): number | null {
+  if (before.length === after.length && before.every((l, i) => l === after[i])) return null;
+  let i = 0;
+  while (i < before.length && i < after.length && before[i] === after[i]) i++;
+  return Math.max(0, Math.min(i, after.length - 1));
+}
+
+/** A line to flash in the pattern box; `n` counts clicks, so the same line flashes again. */
+export interface Flash {
+  line: number;
+  n: number;
+}
+
+/** The pattern textarea over a mirror of its lines, where the line a tree click changed flashes (decision 0026 rule 5). */
+function PatternBox({ id, text, onText, flash }: { id: string; text: string; onText: (t: string) => void; flash: Flash | null }) {
+  const mirror = useRef<HTMLPreElement>(null);
+  return (
+    <div class="pattern-box">
+      <pre class="pattern-mirror" aria-hidden="true" ref={mirror}>
+        {linesOf(text).map((l, i) => (flash?.line === i ? <span key={`f${flash.n}`} class="pm-line flash">{l || ' '}</span> : <span key={`l${i}`} class="pm-line">{l || ' '}</span>))}
+      </pre>
+      <textarea class="code" id={id} value={text} onInput={(e) => onText((e.target as HTMLTextAreaElement).value)}
+        onScroll={(e) => { if (mirror.current) mirror.current.scrollTop = (e.target as HTMLTextAreaElement).scrollTop; }} />
+    </div>
+  );
+}
+
+/** The withhold tree over a repo beside its pattern box (two-way; stacked on narrow screens), and the rules that match nothing. */
 function WithholdEditor({ id, label, files, text, onText, loading, partial, kinds, withheldWord, releasedWord, fixed }: {
   id: string; label: string; files: string[]; text: string; onText: (t: string) => void; loading: boolean; partial: boolean;
   kinds?: Record<string, string>; withheldWord: string; releasedWord: string; fixed?: (path: string) => string | null;
 }) {
+  const [flash, setFlash] = useState<Flash | null>(null);
   const b = badgeFiles(files, linesOf(text));
+  const fromTree = (lines: string[]) => {
+    const line = changedLine(linesOf(text), lines);
+    if (line !== null) setFlash({ line, n: (flash?.n ?? 0) + 1 });
+    onText(textOf(lines));
+  };
   return (
     <>
       {partial ? <CheckLine cls="bad">GitHub returned only part of this repo’s file list; badges may be incomplete.</CheckLine> : null}
-      {loading ? <Loading what="Reading the repo" /> : (
-        <PatternTree files={files} patterns={linesOf(text)} onChange={(l) => onText(textOf(l))} kinds={kinds} withheldWord={withheldWord} releasedWord={releasedWord} fixed={fixed} />
-      )}
-      <div class="pattern-grid">
-        <div class="field">
-          <label for={id}>{label}</label>
-          <textarea class="code" id={id} onInput={(e) => onText((e.target as HTMLTextAreaElement).value)} value={text} />
-          <p class="hint">One pattern per line, as in .gitignore. Clicking the tree writes them here.</p>
+      <div class="grid-2 withhold">
+        <div>
+          {loading ? <Loading what="Reading the repo" /> : (
+            <PatternTree files={files} patterns={linesOf(text)} onChange={fromTree} kinds={kinds} withheldWord={withheldWord} releasedWord={releasedWord} fixed={fixed} />
+          )}
         </div>
-        <div class="field"><span class="label">Rules</span><Unmatched rules={b.unmatched} total={b.rules} loading={loading} partial={partial} /></div>
+        <div>
+          <div class="field">
+            <label for={id}>{label}</label>
+            <PatternBox id={id} text={text} onText={(t) => { setFlash(null); onText(t); }} flash={flash} />
+            <p class="hint">One pattern per line, as in .gitignore. Clicking the tree writes them here.</p>
+          </div>
+          <div class="field"><span class="label">Rules</span><Unmatched rules={b.unmatched} total={b.rules} loading={loading} partial={partial} /></div>
+        </div>
       </div>
     </>
   );
@@ -500,6 +539,29 @@ export function writeHolds(text: string | null, h: Holds): string | null {
   return y.text;
 }
 
+/** The syllabus select's choices: the default, the repo's top-level Markdown files, and the current value if it is neither. */
+export function syllabusChoices(files: string[], current: string): string[] {
+  const md = files.filter((f) => !f.includes('/') && /\.md$/i.test(f)).sort((a, b) => a.localeCompare(b));
+  return [...new Set([DEFAULT_SYLLABUS, ...md, ...(current ? [current] : [])])];
+}
+
+/** Copy the weekly plan the last preview built; disabled until a preview ran in this session. */
+export function CopyPlan({ def }: { def: OpDef }) {
+  const env = useEnv();
+  const block = env?.ops.lastBlock(def) ?? null;
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = async () => {
+    if (!block) return;
+    try {
+      await navigator.clipboard.writeText(block);
+      setCopied(block);
+    } catch {
+      setCopied(null);
+    }
+  };
+  return <button class="btn small outline" type="button" disabled={!block} title={block ? undefined : 'Preview first'} onClick={() => void copy()}>{copied && copied === block ? 'Copied' : 'Copy'}</button>;
+}
+
 export function MaterialsScreen(p: CourseProps) {
   const { course, entry } = p;
   const repo = entry ?? '';
@@ -521,7 +583,9 @@ export function MaterialsScreen(p: CourseProps) {
   // The top folders a release can copy (`status_json._released_folders`): never-released ones need no kind.
   const folders = tree.kind === 'ready' ? tree.paths.filter((x) => x.dir && !x.path.includes('/') && !x.path.startsWith('.') && !neverMaterial(x.path) && !denylisted(x.path)).map((x) => x.path) : [];
   const kinds = folderKinds(folders, curKinds);
-  const syllabus = (syl ?? baseSyl).trim() || DEFAULT_SYLLABUS;
+  // The chosen file: the draft, else the declared one, else the default. Choosing the default writes no key.
+  const savedSyl = baseSyl.trim() || DEFAULT_SYLLABUS;
+  const syllabus = syl ?? savedSyl;
   const sylFile = p.files.file(course.org, repo, syllabus);
   const ignText = ignFile.kind === 'ready' ? ignFile.text : '';
   const [ign, setIgn] = useState<string | null>(null);
@@ -555,9 +619,9 @@ export function MaterialsScreen(p: CourseProps) {
   };
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Materials', href: '#materials' }, { t: repo }]} />
+      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Handout materials', href: '#materials' }, { t: repo }]} />
       <div class="page-head">
-        <div><h1>{repo} <Hint doc="02-add-materials-to-course.md">Materials stay here, private to instructors, until a scheduled release copies them to a semester. Files withheld here never reach students.</Hint></h1><p class="lede">Materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
+        <div><h1>{repo} <Hint doc="02-add-materials-to-course.md">Handout materials stay here, private to instructors, until a scheduled release copies them to a semester. Files withheld here never reach students.</Hint></h1><p class="lede">Handout materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
         <div class="actions"><OpenButton org={course.org} repo={repo} quiet /></div>
       </div>
       <div class="stack">
@@ -568,26 +632,25 @@ export function MaterialsScreen(p: CourseProps) {
           </section>
         ) : null}
         <section class="panel section">
-          <h2>Syllabus <Hint label="About the syllabus">The syllabus is one file at the repo’s top level that the student site pins. Pick which file it is here; the default is SYLLABUS.md. The session list is an optional block generated from the schedule for you to paste into it.</Hint></h2>
-          {m ? (sylDone ? <div class="check-line ok"><Check /><span>Written.</span></div> : sylFile.kind === 'ready' ? <CheckLine cls="bad">Still the template text. Students would see the placeholder at the first release.</CheckLine> : sylFile.kind === 'absent' ? <CheckLine cls="bad">There is no {syllabus} yet.</CheckLine> : <p class="footnote">Not ready yet.</p>) : <p class="footnote">Not checked yet.</p>}
-          <div class="actions"><EditFile org={course.org} repo={repo} path={syllabus} branch={branch} exists={sylFile.kind !== 'absent' || files.includes(syllabus)} /></div>
+          <h2>Syllabus <Hint label="About the syllabus">The syllabus is one file at the repo’s top level that the student site pins. Pick which file it is here; the default is SYLLABUS.md.</Hint></h2>
           <div class="field">
             <label for="m-syl">Syllabus file <span class="default">default: {DEFAULT_SYLLABUS}</span></label>
-            <input type="text" id="m-syl" list="m-syl-files" placeholder={DEFAULT_SYLLABUS} value={syl ?? baseSyl} onInput={(e) => setSyl((e.target as HTMLInputElement).value)} />
-            <datalist id="m-syl-files">{files.filter((f) => !f.includes('/')).map((f) => <option value={f} />)}</datalist>
-            <p class="hint">The file the student site pins as the syllabus, at the repo’s top level.</p>
+            <select id="m-syl" onChange={(e) => setSyl((e.target as HTMLSelectElement).value)}>
+              {syllabusChoices(files, savedSyl).map((f) => <option value={f} selected={f === syllabus}>{f}</option>)}
+            </select>
+            <p class="hint">The Markdown file at the repo’s top level that the student site pins as the syllabus.</p>
           </div>
+          {m ? (sylDone ? <div class="check-line ok"><Check /><span>Written.</span></div> : sylFile.kind === 'ready' ? <CheckLine cls="bad">Still the template text. Students would see the placeholder at the first release.</CheckLine> : sylFile.kind === 'absent' ? <CheckLine cls="bad">There is no {syllabus} yet.</CheckLine> : <p class="footnote">Not ready yet.</p>) : <p class="footnote">Not checked yet.</p>}
+          <div class="actions"><EditFile org={course.org} repo={repo} path={syllabus} branch={branch} exists={sylFile.kind !== 'absent' || files.includes(syllabus)} /></div>
           {declared === null ? <CheckLine cls="bad">{MATERIALS_FILE} does not parse; fix it with Edit the file directly.</CheckLine> : null}
-          <SaveBar state={sylSave} onSave={() => void saveMat({ syllabus: syl ?? baseSyl, kinds: baseKinds }, runSyl, setSylSave, () => setSyl(null))} small disabled={syl === null || syl === baseSyl || declared === null} file={matRef} />
+          <SaveBar state={sylSave} onSave={() => void saveMat({ syllabus: syllabus === DEFAULT_SYLLABUS ? '' : syllabus, kinds: baseKinds }, runSyl, setSylSave, () => setSyl(null))} small disabled={syl === null || syl === savedSyl || declared === null} file={matRef} />
+          <h3>Weekly plan for the syllabus <Hint label="About the weekly plan">Built from the semester schedule: every session with its date and readings. Preview it, then paste it into your syllabus. It is written to .system/SYLLABUS.sessions.md in this repo; your syllabus file is never touched.</Hint></h3>
           {scope ? (
-            <>
-              <p class="footnote">Builds a paste-ready ‘Course sessions and readings’ block from the semester schedule and its readings entries. Write saves it as <code>SYLLABUS.sessions.md</code> in this repo; <code>{syllabus}</code> is yours and is never touched.</p>
-              <div class="actions"><OpButtons def={generateSyllabus(scope, repo)} small previewLabel="Preview the session list" /></div>
-            </>
-          ) : null}
+            <div class="actions"><OpButtons def={generateSyllabus(scope, repo)} small previewLabel="Preview" label="Write" /><CopyPlan def={generateSyllabus(scope, repo)} /></div>
+          ) : <p class="footnote">Needs a semester: the plan is built from its schedule.</p>}
         </section>
         <section class="panel section">
-          <h2>Folder kinds <Hint label="About folder kinds">Each top folder gets a kind: it decides where its files appear on the student site and the public website, and which releases can take them. A folder named lectures, labs, readings or similar is that kind by name. Set the rest here; a folder that is never released needs none.</Hint></h2>
+          <h2>Folder kinds <Hint label="About folder kinds">Each top folder gets a kind: it decides where its files appear on the student site and the public website. A folder named lectures, labs, readings, data, img or similar is that kind by name; set the rest here. Supporting files are released but get no page.</Hint></h2>
           {tree.kind === 'loading' ? <Loading /> : kinds.length ? (
             <table class="grid kinds">
               <thead><tr><th>Folder</th><th>Kind, and why</th><th>Change</th></tr></thead>

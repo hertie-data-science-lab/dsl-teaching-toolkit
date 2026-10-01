@@ -414,7 +414,11 @@ describe('editing screens', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
     expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">withheld<\/span><span class="footnote">withheld by <code>solutions\/<\/code><\/span>/);
-    expect(out).toContain('Write the session list');
+    expect(out).toContain('Weekly plan for the syllabus');
+    expect(out).toContain('>Preview</button>');
+    expect(out).toContain('>Write</button>');
+    // Copy waits for a preview in this session.
+    expect(out).toContain('disabled title="Preview first">Copy</button>');
     // No public-website setting here: that list is the Public website tab's.
     expect(out).not.toContain('kept off');
     expect(out).not.toContain('opencourse.yml');

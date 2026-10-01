@@ -85,6 +85,8 @@ export class OpsSession {
   readonly runs = signal<(Operation & { cohort?: string; course: string })[]>([]);
   /** The gate: per op and scope, the args its last good preview in this session ran with. */
   readonly previewed = signal<Record<string, string>>({});
+  /** Per op and scope, the generated text its last good preview carried (`outcome.block`). */
+  readonly blocks = signal<Record<string, string>>({});
   readonly notice = signal<string | null>(null);
   private readonly pollMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -109,6 +111,11 @@ export class OpsSession {
    */
   isPreviewed(def: OpDef, values: Record<string, unknown> = def.args, checked = false): boolean {
     return this.previewed.value[this.gateKey(def)] === argsKey(requestArgs(def, values, checked));
+  }
+
+  /** The text the last good preview of `def` in this session generated, or null. */
+  lastBlock(def: OpDef): string | null {
+    return this.blocks.value[this.gateKey(def)] ?? null;
   }
 
   /** Whether the verb may run now: gated ops need this session's preview, a check box its tick. */
@@ -234,6 +241,7 @@ export class OpsSession {
     ];
     const ok = !!o && o.conclusion !== 'failed';
     if (preview && ok) this.previewed.value = { ...this.previewed.value, [this.gateKey(def)]: argsKey(args) };
+    if (preview && ok && o.block) this.blocks.value = { ...this.blocks.value, [this.gateKey(def)]: o.block };
     if (this.current.value?.handle === handle) {
       this.patch(preview ? { phase: 'ready', running: null, dry: result } : { phase: 'done', running: null, result });
     }

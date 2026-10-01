@@ -1,12 +1,15 @@
 // A repo's files as a clickable tree over one withhold list (decision 0016). A click on a file
 // or folder adds or removes its exact line; a path a broader line withholds says which, and a
 // click re-includes it with `!path` only where git allows it. The badges follow the draft.
-// `exclude` mode (Materials, Public website) has a right-aligned button per row; `select` mode (the import
-// picker) has a tick per row, everything ticked until a line leaves it out.
+// `exclude` mode (Handout materials, Public website) has a right-aligned button per row; `select` mode
+// (the import picker) has a tick per row, everything ticked until a line leaves it out. It reads as a
+// file tree (decision 0026 rule 5): indent guides, folder and file icons, withheld rows greyed with
+// the name struck through (`ft-out`), the kind chip on top folders.
 
 import { useState } from 'preact/hooks';
 import { buildTree, neverMaterial, standing, toggle, type Standing, type TreeNode } from '../edit/badges';
 import { compileAll, withheldBy, type Rule } from '../edit/glob';
+import { File, Folder } from './icons';
 
 export interface PatternTreeProps {
   files: string[];
@@ -73,8 +76,9 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
   if (!dir) {
     const word = fixed ?? (out ? c.withheldWord : c.releasedWord);
     return (
-      <li class="ft-file">
+      <li class={`ft-file${fixed || out ? ' ft-out' : ''}`}>
         {c.mode === 'select' ? control : null}
+        <File />
         <span class="ft-name">{n.name}</span>
         <span class={`chip ${fixed || out ? 'amber' : ''}`}>{word}</span>
         <Why s={s} word={c.withheldWord} />
@@ -85,10 +89,11 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
   }
   const count = withheldCount(n, c);
   return (
-    <li class="ft-dir">
+    <li class={`ft-dir${out ? ' ft-out' : ''}`}>
       <details open={depth === 0}>
         <summary>
           {c.mode === 'select' ? control : null}
+          <span class="ft-closed"><Folder /></span><span class="ft-opened"><Folder open /></span>
           <span class="ft-name">{n.name}/</span>
           {depth === 0 && c.kinds[n.name] ? <span class="chip">{c.kinds[n.name]}</span> : null}
           {out ? <span class="chip amber">{c.withheldWord}</span> : count ? <span class="chip amber">{count} {c.withheldWord}</span> : null}
