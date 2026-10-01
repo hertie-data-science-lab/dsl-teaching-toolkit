@@ -99,10 +99,22 @@ lands on Your semesters, with This week across the semesters it shows.
 
 The mode picks the shell. `?semester=<org>` opens that semester's student screens (This
 week, Schedule, Assignments, Marks, Materials, Join, Instructors). For a
-semester the person teaches, that is the **Student view** (the Student view link in the
-semester nav): the same screens with the instructor's own identity and a banner, never a
-student's repos or marks (rule 7). Anywhere else the console is in instructor mode for anyone
-who teaches somewhere, and in student mode otherwise.
+semester the person teaches, that is the **Student view** (the Student view pill in the
+semester banner): the same screens with the instructor's own identity and a note, never a
+student's repos or marks (rule 7). Its top bar reads "Student view (preview)", a link back to
+the semester's Dashboard, as is "Back to instructor view" in its banner. Anywhere else the
+console is in instructor mode for anyone who teaches somewhere, and in student mode otherwise.
+
+Every semester page, in either console, opens with the **semester banner** (decision 0025):
+the course name, the semester as the page's one h1, its state, week and dates, and the
+semester on GitHub. The page's own title is an h2 styled as a heading. Course pages have no
+banner.
+
+The **course overview** is a status board in two columns: Setup & To do, Semesters (each with
+its next automatic event), Assignment templates; then Problems (the course's, then each live
+semester's, tagged), Course details (with the public website's indicator and Publish button),
+Recent activity (the last five operations across the course and its live semesters; who ran
+each comes from its outcome file) and Materials.
 
 ## Student screens and their sources
 

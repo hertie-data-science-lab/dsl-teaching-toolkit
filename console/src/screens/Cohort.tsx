@@ -340,7 +340,7 @@ function Overview(p: ReadyProps) {
       <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: cohortName(p) }]} />
       <div class="page-head">
         <div>
-          <h1>Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h1>
+          <h2 class="h1">Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h2>
           <p class="lede">
             <span>{headerLine(status, sched, rows, tz, year)}</span>
             {amber ? <span class="amber">Setup done, but {amber} {amber > 1 ? 'stages have a problem' : 'stage has a problem'}.</span> : <span>Setup complete.</span>}

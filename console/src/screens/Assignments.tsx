@@ -60,7 +60,7 @@ function Index(p: ReadyProps) {
       <Crumbs items={cohortCrumbs(p, 'Assignments')} />
       <div class="page-head">
         <div>
-          <h1>Assignments <Hint doc="09-release-assignment-to-cohort.md">An assignment opens at hand out, has a late window after the due date, then is marked and returned; dates live in the schedule. This semester’s defaults are below the list.</Hint></h1>
+          <h2 class="h1">Assignments <Hint doc="09-release-assignment-to-cohort.md">An assignment opens at hand out, has a late window after the due date, then is marked and returned; dates live in the schedule. This semester’s defaults are below the list.</Hint></h2>
           <p class="lede">
             {list.length === 1 ? 'One' : list.length} this semester.{open ? ` ${open === 1 ? 'One is' : `${open} are`} open.` : ''}{marking ? ` ${marking === 1 ? 'One is' : `${marking} are`} being marked.` : ''}
           </p>
@@ -187,12 +187,12 @@ function Overview(p: TabProps) {
   return (
     <>
       <div class="page-head">
-        <div><h1>{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">{a.state === 'open' || a.state === 'late_window'
+        <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">{a.state === 'open' || a.state === 'late_window'
             ? 'Students push to their own repo until the due date. Late work is accepted with the penalty until the late cutoff.'
             : a.state === 'marking' ? 'Marks and feedback go to students; your private notes do not. Return marks previews first.'
             : a.state === 'teams_forming' ? 'Students form teams on the Join screen until late work closes, and you can assign the rest. Students without a team get no repo.'
             : a.state === 'blocked' ? 'Assign this assignment’s teams on the Teams tab; each team gets its repo once saved. Students without a team get none.'
-            : 'Hands out at the scheduled time, or now. Preview never changes anything students see.'}</Hint></h1><p class="lede">{lede}</p></div>
+            : 'Hands out at the scheduled time, or now. Preview never changes anything students see.'}</Hint></h2><p class="lede">{lede}</p></div>
       </div>
       {p.tabs}
       <div class="stack">

@@ -134,7 +134,7 @@ const problemsText = (h: HTMLElement) => [...h.querySelectorAll('.problem .p-say
 describe('the Dashboard', () => {
   it('opens on This week: week 3 pressed, its rows, its problems and every undated one', () => {
     const h = mount();
-    expect(h.querySelector('h1')!.textContent).toMatch(/^Dashboard \?/);
+    expect(h.querySelector('h2.h1')!.textContent).toMatch(/^Dashboard \?/);
     expect(h.querySelector('.section-head h2')!.textContent).toContain('A red number counts that week');
     expect(cell(h, 3).getAttribute('aria-pressed')).toBe('true');
     expect(cell(h, 5).getAttribute('aria-pressed')).toBe('false');

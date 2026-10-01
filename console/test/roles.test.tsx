@@ -10,7 +10,7 @@ import { hiddenSemesters, saveHiddenSemesters, type PrefStore } from '../src/mod
 import { modeOf, parseSearch, studentContext } from '../src/router';
 import { HomeScreen } from '../src/screens/Home';
 import { StudentScreen, studentScreen } from '../src/screens/Student';
-import { Sidenav, StudentNav } from '../src/ui/shell';
+import { SemesterBanner, Sidenav, StudentNav, Topbar } from '../src/ui/shell';
 import { FakeGitHub, json } from './fake';
 
 const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
@@ -123,17 +123,31 @@ describe('mode and the student shell', () => {
 
   it('Student view shows a banner, the instructor’s own identity only, and a way back', () => {
     const s = studentContext(both, parseSearch(`?semester=${cohort.org}`))!.semester;
-    const out = render(<StudentScreen semester={s} screen="week" studentView />);
     expect(text(<StudentScreen semester={s} screen="week" studentView />)).toContain('Student view. What a student of Machine Learning, Fall 2026 sees, shown with your own account: no student’s repos or marks.');
-    expect(out).toContain(`href="?cohort=${cohort.org}#dashboard"`);
+    const banner = render(<SemesterBanner courseName={s.courseName} termLabel={s.termLabel} org={s.org} view="back" />);
+    expect(banner).toContain(`<a class="textlink" href="?cohort=${cohort.org}#dashboard">Back to instructor view</a>`);
+    expect(banner).not.toContain('Student view');
   });
 
-  it('the instructor nav offers Student view on a semester they teach', () => {
+  it('the Student view is entered from the semester banner’s pill, not the side nav', () => {
     const nav = render(<Sidenav courses={[course]} semesters={[NLP]} course={course} cohort={cohort} cohortStates={{}} current="dashboard" problems={0} />);
-    expect(nav).toContain(`href="?semester=${cohort.org}#week">Student view`);
+    expect(nav).not.toContain('Student view');
+    expect(nav).not.toContain('Semester on GitHub');
     expect(nav).toContain(`href="?semester=${NLP.org}#week"`);
-    const ro = render(<Sidenav courses={[{ ...course, write: false }]} course={{ ...course, write: false }} cohort={cohort} cohortStates={{}} current="dashboard" problems={0} />);
-    expect(ro).not.toContain('Student view');
+    const banner = render(<SemesterBanner courseName="Machine Learning" termLabel="Fall 2026" org={cohort.org} view="student" />);
+    expect(banner).toContain(`<a class="btn small quiet" href="?semester=${cohort.org}#week">Student view</a>`);
+    expect(banner).toContain('<h1>Fall 2026</h1>');
+    expect(banner).toContain('<p class="banner-course">Machine Learning</p>');
+    expect(banner).toContain(`href="https://github.com/${cohort.org}"`);
+  });
+
+  it('the top bar’s view is a link back only in an instructor’s preview', () => {
+    const user = { login: 'a', id: 1, name: 'A', email: null, avatar_url: '' };
+    const preview = render(<Topbar user={user} title="Student view (preview)" titleHref={`?cohort=${cohort.org}#dashboard`} />);
+    expect(preview).toContain(`<a class="app-view" href="?cohort=${cohort.org}#dashboard">Student view (preview)</a>`);
+    const real = render(<Topbar user={user} title="Student view" />);
+    expect(real).toContain('DSL Teaching Console<small>Student view</small></a>');
+    expect(real).not.toContain('app-view');
   });
 });
 

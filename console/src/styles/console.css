@@ -913,3 +913,25 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .sidenav .nav-chev[aria-expanded="true"] .arrow { transform: rotate(45deg); }
 .sidenav .nav-sub { padding-left: 12px; }
 .sidenav .nav-sub a { font-size: 13.5px; min-height: 30px; padding: 4px 10px; overflow-wrap: anywhere; }
+
+/* T5: overview status board, semester banner, Student view entry (decision 0025) */
+.page-head h2.h1 { font-size: 30px; font-weight: 600; }
+.sem-banner { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 24px; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--rule); }
+.sem-banner .banner-course { margin: 0; font-size: 13px; color: var(--muted); }
+.sem-banner h1 { font-size: 20px; }
+.sem-banner .sb-line { margin: 4px 0 0; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 13.5px; color: var(--ink-2); }
+.sem-banner .sb-side { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13.5px; }
+.app-view { font-size: 13px; color: var(--on-brand); opacity: 0.9; }
+@media (max-width: 860px) { .app-view { display: none; } }
+.problems-head .count-badge { min-width: 22px; height: 22px; font-size: 12px; }
+.problem .p-where .p-tag { text-decoration: none; }
+.rows .r-sub.next-event { color: var(--ink-2); }
+.website-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--rule); display: grid; gap: 8px; }
+.website-block p { margin: 0; }
+.site-live { display: flex; align-items: center; gap: 8px; }
+.site-live .dot { width: 9px; height: 9px; box-shadow: none; }
+.site-address { font-size: 14px; }
+.ops.activity > li:first-child { border-top: 0; }
+.ops .o-who { grid-column: 2; margin: 0; font-size: 13.5px; color: var(--muted); }
+.ops .o-head a { color: inherit; text-decoration: none; }
+.ops .o-head a:hover b { text-decoration: underline; }

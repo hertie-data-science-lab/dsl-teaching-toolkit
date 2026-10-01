@@ -1,6 +1,7 @@
 // The frame every screen sits in: the app-level top bar, the course-level switcher and side
-// nav, the footer.
+// nav, the semester banner above every semester page, the footer.
 
+import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { GhUser } from '../github/client';
 import { cohortName, semesterName, type Course, type CohortRef, type Semester } from '../model/discovery';
@@ -42,12 +43,15 @@ function useTheme(): [boolean, () => void] {
  * The app-level bar (decision 0021): the product name (a Home link) with the view, the person
  * (a link to Profile), Guide, theme, Sign out. Nothing course- or semester-specific; the Menu
  * button only where there is a side nav to open. Its links start `?`: app-level pages are about
- * no course or semester, so they clear the query.
+ * no course or semester, so they clear the query. With `titleHref` (an instructor previewing a
+ * semester's Student view, decision 0025) the view is a link of its own, back to that semester.
  */
-export function Topbar({ user, onSignOut, navOpen = false, onMenu, title }: {
+export function Topbar({ user, onSignOut, navOpen = false, onMenu, title, titleHref }: {
   user: GhUser | null;
-  /** The view after sign-in: Instructor view or Student view. */
+  /** The view after sign-in: Instructor view, Student view, or Student view (preview). */
   title?: string;
+  /** Where the view links to; plain text without it. */
+  titleHref?: string;
   onSignOut?: () => void;
   navOpen?: boolean;
   onMenu?: () => void;
@@ -57,7 +61,8 @@ export function Topbar({ user, onSignOut, navOpen = false, onMenu, title }: {
     <header class="topbar">
       <div class="topbar-inner">
         {user && onMenu ? <button class="pill-ghost menu-btn" type="button" aria-expanded={navOpen} aria-controls="sidenav-wrap" onClick={onMenu}>Menu</button> : null}
-        <a class="app-name" href="?#home">DSL Teaching Console{user && title ? <small>{title}</small> : null}</a>
+        <a class="app-name" href="?#home">DSL Teaching Console{user && title && !titleHref ? <small>{title}</small> : null}</a>
+        {user && title && titleHref ? <a class="app-view" href={titleHref}>{title}</a> : null}
         <div class="topbar-right">
           {user ? (
             <a class="who" href="?#profile" aria-label="Your profile">
@@ -311,9 +316,7 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
         <div>
           <hr />
           <ul>
-            {cohort && course.write ? <li><a href={studentHref(cohort.org)}>Student view</a></li> : null}
             {cohort ? <li><a href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Public site <Ext /></a></li> : null}
-            {cohort ? <li><a href={ghUrl(cohort.org)} target="_blank" rel="noopener">Semester on GitHub <Ext /></a></li> : null}
             <li><a href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a></li>
           </ul>
         </div>
@@ -325,7 +328,7 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
 /** Screens an auditor has no use for: they get no marks and join no team. */
 const AUDITOR_HIDDEN = ['marks', 'join'];
 
-/** The student shell's nav: the switcher, one semester's screens, and the semester on GitHub. An auditor's omits Marks and Join. */
+/** The student shell's nav: the switcher and one semester's screens (the semester on GitHub is in its banner). An auditor's omits Marks and Join. */
 export function StudentNav({ courses, cohortStates, semesters, semester, current }: {
   courses: Course[];
   cohortStates: Record<string, Loaded>;
@@ -339,10 +342,38 @@ export function StudentNav({ courses, cohortStates, semesters, semester, current
       <ul>
         {STUDENT_SCREENS.filter(([k]) => !(knownAuditor(semester.org) && AUDITOR_HIDDEN.includes(k))).map(([k, t]) => <li><a href={studentHref(semester.org, k)} aria-current={k === current ? 'page' : undefined}>{t}</a></li>)}
       </ul>
-      <div>
-        <hr />
-        <ul><li><a href={ghUrl(semester.org)} target="_blank" rel="noopener">Semester on GitHub <Ext /></a></li></ul>
-      </div>
     </nav>
+  );
+}
+
+/**
+ * The compact banner above every semester page (decision 0025 rule 6), instructor and student
+ * alike: the course name small, the semester as the page's one h1, a line with the state chip,
+ * "Week N of M" and the dates (each left out when not known), and on the right the way to the
+ * other view and the semester on GitHub. `view` is the Student view pill on an instructor's
+ * page, "Back to instructor view" in an instructor's preview, nothing for a student.
+ */
+export function SemesterBanner({ courseName, termLabel, org, chip, week, dates, view }: {
+  courseName: string;
+  termLabel: string;
+  org: string;
+  chip?: ComponentChildren;
+  week?: string;
+  dates?: string;
+  view?: 'student' | 'back';
+}) {
+  return (
+    <div class="sem-banner">
+      <div class="sb-main">
+        {courseName ? <p class="banner-course">{courseName}</p> : null}
+        <h1>{termLabel}</h1>
+        {chip || week || dates ? <p class="sb-line">{chip}{week ? <span>{week}</span> : null}{dates ? <span>{dates}</span> : null}</p> : null}
+      </div>
+      <div class="sb-side">
+        {view === 'student' ? <a class="btn small quiet" href={studentHref(org)}>Student view</a> : null}
+        {view === 'back' ? <a class="textlink" href={`?cohort=${org}#dashboard`}>Back to instructor view</a> : null}
+        <a class="textlink" href={ghUrl(org)} target="_blank" rel="noopener">Semester on GitHub <Ext /></a>
+      </div>
+    </div>
   );
 }

@@ -129,7 +129,7 @@ export function NotComputed({ title, crumbs, p }: { title: string; crumbs: { t: 
       <Crumbs items={crumbs} />
       <div class="page-head">
         <div>
-          <h1>{title}</h1>
+          <h2 class="h1">{title}</h2>
           <p class="lede">Status not computed yet.</p>
         </div>
         <div class="actions"><CheckNow p={p} /></div>
@@ -165,7 +165,7 @@ export function WithStatus({
     return (
       <>
         <Crumbs items={crumbs} />
-        <div class="page-head"><div><h1>{title}</h1></div><div class="actions"><CheckNow p={props} /></div></div>
+        <div class="page-head"><div><h2 class="h1">{title}</h2></div><div class="actions"><CheckNow p={props} /></div></div>
         <section class="panel section">
           <CheckLine cls="bad">
             {l.kind === 'invalid' ? `The semester's status file does not match the expected shape: ${l.errors.slice(0, 3).join('; ')}.` : `Could not read the semester's status: ${l.message}`}

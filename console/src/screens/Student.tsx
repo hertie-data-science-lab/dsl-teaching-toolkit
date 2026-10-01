@@ -63,7 +63,6 @@ export function StudentViewBanner({ semester }: { semester: Semester }) {
     <div class="ro-banner" role="status">
       <b>Student view.</b>
       <span>What a student of {semesterName(semester)} sees, shown with your own account: no student’s repos or marks.</span>
-      <a href={`?cohort=${semester.org}#dashboard`}>Back to the instructor screens</a>
     </div>
   );
 }
@@ -74,7 +73,7 @@ export function StudentScreen({ semester, screen, studentView, entry, now = Date
     <>
       <Crumbs items={[{ t: 'Your semesters', href: '#home' }, { t: semesterName(semester), href: studentHref(semester.org) }, { t: label }]} />
       {studentView ? <StudentViewBanner semester={semester} /> : null}
-      <div class="page-head"><div><h1>{label}</h1><p class="lede">{semesterName(semester)}{semester.archived ? '; archived' : ''}</p></div></div>
+      <div class="page-head"><div><h2 class="h1">{label}</h2></div></div>
       {semester.archived ? <ArchivedSemester semester={semester} studentView={studentView} /> : <SemesterBody semester={semester} screen={screen} studentView={studentView} entry={entry} now={now} />}
     </>
   );

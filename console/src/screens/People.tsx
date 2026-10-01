@@ -106,7 +106,7 @@ function Students(p: ReadyProps) {
     <>
       <Crumbs items={cohortCrumbs(p, 'Students')} />
       <div class="page-head">
-        <div><h1>Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h1><p class="lede">{s.rows} on the roster. {s.codes_sent} codes sent; {s.joined} joined.</p></div>
+        <div><h2 class="h1">Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h2><p class="lede">{s.rows} on the roster. {s.codes_sent} codes sent; {s.joined} joined.</p></div>
         <div class="actions">
           <button class="btn quiet" type="button" aria-expanded={upload.open} onClick={() => setUpload({ ...upload, open: !upload.open })}>Replace from CSV</button>
           <OpButtons def={sendCodes(scope, waiting)} label="Send new codes to students who have not joined" />
@@ -288,7 +288,7 @@ function Instructors(p: ReadyProps) {
       <Crumbs items={cohortCrumbs(p, 'Instructors')} />
       <div class="page-head">
         <div>
-          <h1>Instructors <Hint doc="05-manage-teaching-team.md">Handles here get the instructor buttons for this semester, and emails here get the problem emails. Check instructor access makes GitHub match this list; it never removes access.</Hint></h1>
+          <h2 class="h1">Instructors <Hint doc="05-manage-teaching-team.md">Handles here get the instructor buttons for this semester, and emails here get the problem emails. Check instructor access makes GitHub match this list; it never removes access.</Hint></h2>
           <p class="lede">{ins} instructor{ins === 1 ? '' : 's'} and {tas} teaching assistant{tas === 1 ? '' : 's'}.{st && !st.synced ? ' GitHub access does not match this list yet.' : ''}{admins.length ? ` Course admins (${admins.join(', ')}) also have access; they are set on Course details.` : ''}</p>
         </div>
         <div class="actions">

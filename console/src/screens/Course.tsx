@@ -1,4 +1,4 @@
-// S2 Course overview and S17 Template settings (read).
+// S2 Course overview (a status board, decision 0025) and S17 Template settings (read).
 
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
@@ -7,7 +7,7 @@ import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
-import { KIND_LABEL, STAGE_WORD, ago, templateName } from '../model/format';
+import { KIND_LABEL, STAGE_WORD, ago, opLabel, templateName } from '../model/format';
 import { checkNow, derive, publishWebsite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
@@ -16,17 +16,20 @@ import { DEFAULT_FORMATS, POLICY } from '../model/policy';
 import { formatsList, fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
-import type { CourseStatus, MaterialsCheck, MaterialsState, Problem, SemesterStatus, Todo } from '../model/types';
+import type { CourseStatus, MaterialsCheck, MaterialsState, Operation, Outcome, Problem, SemesterStatus, Status, Todo } from '../model/types';
+import { nextEvent, nextEventWords, recentActivity, rollUpProblems, whoWord, type Activity } from '../model/status';
+import type { CohortRef } from '../model/discovery';
+import { outcomePath } from '../ops/adapter';
 import { validator } from '../model/validate';
-import { CheckLine, Crumbs, Lives, Loading, ProblemCards, Probs, Soon, ghUrl } from '../ui/bits';
+import { CheckLine, Crumbs, Lives, Loading, OpMark, ProblemCards, Probs, Soon, ghUrl, runUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Check, Ext, Fail } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { formatError } from '../wizards/model';
-import { courseScope, detailsOf, newestScope, websiteUrl, websiteWord } from './CourseEdit';
+import { courseScope, detailsOf, newestScope, websiteUrl } from './CourseEdit';
 import type { CourseProps } from './types';
-import { COURSE_REPO, STATUS_PATH } from '../model/names';
-import { REFRESH_HINT } from './common';
+import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from '../model/names';
+import { REFRESH_HINT, tzOf, yearOf } from './common';
 
 /** The course block and course-scoped problems: from the course's own status, else a semester's. */
 export function courseView(p: Pick<CourseProps, 'loaded' | 'cohortStates'>): { course: CourseStatus | null; problems: Problem[]; computed: boolean } {
@@ -41,6 +44,14 @@ export function courseView(p: Pick<CourseProps, 'loaded' | 'cohortStates'>): { c
 function problemsOf(p: CourseProps, cohortOrg: string): number | null {
   const l = p.cohortStates[cohortOrg];
   return l && l.kind === 'ready' ? (l.status.problems ?? []).length : null;
+}
+
+/** The course's live semesters whose status is read, newest first: what the overview rolls up. */
+export function liveSemesters(p: Pick<CourseProps, 'course' | 'cohortStates'>): { ref: CohortRef; status: Status }[] {
+  return p.course.cohorts.flatMap((ref) => {
+    const l = p.cohortStates[ref.org];
+    return l?.kind === 'ready' && l.status.semester?.live !== false ? [{ ref, status: l.status }] : [];
+  });
 }
 
 /** The course's setup steps (C1-C6). The first three are what a new semester needs (decision 0019). */
@@ -187,8 +198,8 @@ export function templateTitle(files: CourseProps['files'], org: string, repo: st
   return typeof t === 'string' ? t : '';
 }
 
-/** A semester row's state: live, ended but not archived, or archived. */
-export function semesterChip(s: SemesterStatus | undefined): ComponentChildren {
+/** A semester's state: live, ended but not archived, or archived. */
+export function semesterChip(s: Pick<SemesterStatus, 'live' | 'ended'> | undefined): ComponentChildren {
   if (s?.live === false) return <span class="chip">Archived</span>;
   if (s?.ended) return <span class="chip amber">Ended, not archived</span>;
   return <span class="chip ok">Live</span>;
@@ -239,6 +250,82 @@ export function CourseSubActions({ course, loaded, files, now, computed }: Pick<
   );
 }
 
+/** The public website's indicator: what the last publish did, and whether one is running. */
+export type SiteLiveState = 'live' | 'publishing' | 'failed' | 'off';
+
+export function siteLiveState(published: boolean, last: Operation | undefined, running: boolean): SiteLiveState {
+  if (running) return 'publishing';
+  if (last?.conclusion === 'failed') return 'failed';
+  return published ? 'live' : 'off';
+}
+
+const SITE_DOT: Record<SiteLiveState, string> = { live: 'ok', publishing: 'amber', failed: 'bad', off: 'idle' };
+
+/**
+ * The website block's indicator and address: green "Live · updated 3 h ago" (the age of the
+ * last publish that succeeded; "Live" alone when this session and the statuses hold none),
+ * amber while a publish runs, red linking to the run when the last one failed, else grey.
+ */
+export function SiteLive({ org, published, last, running, now }: { org: string; published: boolean; last?: Operation; running: boolean; now: number }) {
+  const st = siteLiveState(published, last, running);
+  const says = st === 'live' ? (last?.conclusion === 'done' ? `Live · updated ${ago(last.finished, now)}` : 'Live')
+    : st === 'publishing' ? 'Publishing…'
+    : st === 'failed' ? <a class="textlink" href={runUrl(`${org}/${COURSE_REPO}`, last!.run_id)} target="_blank" rel="noopener">Last publish failed <Ext /></a>
+    : 'Not published';
+  return (
+    <>
+      <p class="site-live"><span class={`dot ${SITE_DOT[st]}`} aria-hidden="true" /><span>{says}</span></p>
+      {published ? <p class="site-address"><a class="textlink" href={websiteUrl(org)} target="_blank" rel="noopener">{org}.github.io <Ext /></a></p> : null}
+    </>
+  );
+}
+
+/** Who started a semester's operation, from its private outcome file when that is this run's; undefined while not known. */
+function actorOf(files: CourseProps['files'], org: string, o: Operation): string | undefined {
+  const f = files.file(org, CONFIG_REPO, outcomePath(o.op));
+  if (f.kind !== 'ready') return undefined;
+  try {
+    const oc = JSON.parse(f.text) as Outcome;
+    return oc.run_id === o.run_id ? oc.actor : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Every operation the overview knows of: this session's runs, the course status's, each live semester's. */
+function courseOperations(p: CourseProps, live: { ref: CohortRef; status: Status }[], runs: (Operation & { cohort?: string; course: string })[], login: string): Activity[][] {
+  const where = (org?: string) => (org ? p.course.cohorts.find((k) => k.org === org)?.termLabel ?? org : 'course');
+  const session = runs.filter((r) => r.course === p.course.org).map((r) => ({ ...r, org: r.cohort, where: where(r.cohort), actor: login }));
+  const course = (p.loaded.kind === 'ready' ? p.loaded.status.operations ?? [] : []).map((o) => ({ ...o, where: 'course' }));
+  return [session, course, ...live.map(({ ref, status }) => (status.operations ?? []).map((o) => ({ ...o, org: ref.org, where: ref.termLabel })))];
+}
+
+/** The last five operations across the course and its live semesters, each linking to its run. */
+export function RecentActivity({ p, lists, newest }: { p: CourseProps; lists: Activity[][]; newest?: string }) {
+  const env = useEnv();
+  const login = env?.user.login ?? '';
+  const rows = recentActivity(lists).map((a) => (a.actor === undefined && a.org ? { ...a, actor: actorOf(p.files, a.org, a) } : a));
+  return (
+    <section class="panel section">
+      <div class="section-head"><h2>Recent activity</h2>{newest ? <a class="textlink" href={`?cohort=${newest}#operations`}>All operations</a> : null}</div>
+      {rows.length ? (
+        <ul class="ops activity">
+          {rows.map((a) => (
+            <li key={a.run_id}>
+              <OpMark conclusion={a.conclusion} />
+              <div class="o-head">
+                <a href={runUrl(`${p.course.org}/${COURSE_REPO}`, a.run_id)} target="_blank" rel="noopener"><b>{opLabel(a.op)}</b></a>
+                <span>{ago(a.finished, p.now)}</span>
+              </div>
+              <p class="o-who">{[a.where, whoWord(a.actor, login)].filter(Boolean).join(' · ')}</p>
+            </li>
+          ))}
+        </ul>
+      ) : <p class="footnote">Nothing has run yet.</p>}
+    </section>
+  );
+}
+
 /** The course layer over the institution's: what an assignment gets when its semester says nothing. */
 export function courseLayers(p: Pick<CourseProps, 'course' | 'files'>): Layers {
   return { assignment: {}, semester: {}, course: courseBlock(p.files, p.course.org, p.course.meta), institution: institutionLayer() };
@@ -249,7 +336,14 @@ const whose = (s: string) => (s === 'course' ? 'this course' : 'institution');
 
 export function CourseScreen(p: CourseProps) {
   const { course } = p;
+  const env = useEnv();
   const v = courseView(p);
+  const live = liveSemesters(p);
+  const problems = rollUpProblems(v.problems, live.map(({ ref, status }) => ({ org: ref.org, label: ref.termLabel, problems: status.problems ?? [] })));
+  const ops = courseOperations(p, live, env?.ops.runs.value ?? [], env?.user.login ?? '');
+  const lastPublish = recentActivity(ops.map((l) => l.filter((o) => o.op === 'course.publish_website')), 1)[0];
+  const cur = env?.ops.current.value;
+  const publishing = cur?.phase === 'running' && cur.def.op === 'course.publish_website' && cur.def.courseOrg === course.org;
   const ready = v.course ? v.course.ready : false;
   const layers = courseLayers(p);
   const lateDays = resolve('late_window_days', layers), latePen = resolve('late_penalty_per_day', layers);
@@ -290,11 +384,13 @@ export function CourseScreen(p: CourseProps) {
                 {course.cohorts.map((c) => {
                   const l = p.cohortStates[c.org];
                   const n = problemsOf(p, c.org);
-                  const sem = l && l.kind === 'ready' ? l.status.semester : undefined;
+                  const st = l && l.kind === 'ready' ? l.status : undefined;
+                  const sem = st?.semester;
                   return (
                     <li>
                       <span class="r-title">{c.termLabel} {semesterChip(sem)}</span>
-                      <span class="r-sub">{l && l.kind === 'ready' && l.status.semester ? `Week ${l.status.semester.week} of ${l.status.semester.weeks}` : l?.kind === 'absent' ? 'Status not computed yet' : c.termLabel}</span>
+                      <span class="r-sub">{sem ? `Week ${sem.week} of ${sem.weeks}` : l?.kind === 'absent' ? 'Status not computed yet' : c.termLabel}</span>
+                      {st && sem?.live !== false ? <span class="r-sub next-event">{nextEventWords(nextEvent(st, p.now), tzOf(st), yearOf(p.now, tzOf(st)))}</span> : null}
                       <span class="r-side">{n !== null ? <Probs n={n} /> : null}<a class="btn small quiet" href={`?cohort=${c.org}#dashboard`}>Open</a></span>
                     </li>
                   );
@@ -322,8 +418,8 @@ export function CourseScreen(p: CourseProps) {
         </div>
         <div class="stack">
           <section class="panel section" id="course-problems">
-            <div class="problems-head"><h2>Problems <Hint label="About course problems">Things that broke and need fixing. They also appear on every semester they will affect. Unfinished work is a to-do on the left, not a problem.</Hint></h2></div>
-            {!v.computed ? <p class="footnote">Status not computed yet.</p> : v.problems.length ? <ProblemCards list={v.problems} /> : <div class="no-problems"><Check /><span>No problems.</span></div>}
+            <div class="problems-head"><h2>Problems <Hint label="About course problems">Things that broke and need fixing: the course’s first, then each live semester’s, tagged with the semester. Unfinished work is a to-do on the left, not a problem.</Hint></h2>{problems.length ? <span class="count-badge" aria-label={`${problems.length} problems`}>{problems.length}</span> : null}</div>
+            {!v.computed && !live.length ? <p class="footnote">Status not computed yet.</p> : problems.length ? <ProblemCards list={problems} /> : <div class="no-problems"><Check /><span>No problems.</span></div>}
           </section>
           <section class="panel section">
             <div class="section-head"><h2>Course details</h2><a class="btn small quiet" href="#details">Edit course details</a></div>
@@ -336,15 +432,18 @@ export function CourseScreen(p: CourseProps) {
               <dt>Admins <Hint small label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, every semester. A semester’s instructors and TAs are set on that semester’s Instructors page. In dsl-course.yml.</Hint></dt><dd>{course.admins.join(', ') || 'none'}</dd>
               <dt>Late work <Hint small label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>
               <dt>Max team size <Hint small label="About max team size">This course’s default. Each assignment can set its own.</Hint></dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
-              <dt>Public website <Hint small label="About the public website setting">Whether the open version of your materials is published. In opencourse.yml.</Hint></dt><dd>{websiteWord(p.files, course.org)} <a class="textlink" href="#website">Manage</a></dd>
             </dl>
             <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
+            <div class="website-block">
+              <h3>Public website <Hint label="About the public website">Optional: an open version of your materials for anyone on the internet, updated daily.</Hint></h3>
+              <SiteLive org={course.org} published={pub} last={lastPublish} running={publishing} now={p.now} />
+              <div class="actions">
+                {course.write ? <OpButtons def={publishWebsite(courseScope({ course }), pub)} small verbCls="btn small outline" /> : null}
+                <a class="btn small quiet" href="#website">Edit website details</a>
+              </div>
+            </div>
           </section>
-          <section class="panel section">
-            <div class="section-head"><h2>Public website <Hint label="About the public website">Optional: an open version of your materials for anyone on the internet, updated daily.</Hint></h2><a class="btn small quiet" href="#website">Edit website details</a></div>
-            <p><span class={`chip ${pub ? 'ok' : ''}`}>{pub ? 'Published' : 'Not published'}</span> {pub ? <a class="textlink" href={websiteUrl(course.org)} target="_blank" rel="noopener">{course.org}.github.io <Ext /></a> : null}</p>
-            {course.write ? <div class="actions"><OpButtons def={publishWebsite(courseScope({ course }), pub)} small verbCls="btn small outline" /></div> : null}
-          </section>
+          <RecentActivity p={p} lists={ops} newest={live[0]?.ref.org} />
           <section class="panel section" id="sec-materials">
             <div class="section-head"><h2>Materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New materials</a></div>
             {v.course?.materials?.length ? (

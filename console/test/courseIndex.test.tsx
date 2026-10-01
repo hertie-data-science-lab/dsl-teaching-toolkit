@@ -237,14 +237,15 @@ describe('course nav and overview', () => {
     expect(t).toContain('Fall 2026 Live Fall 2026');
     expect(t).not.toContain(OLD_ORG);
   });
-  it('shows course problems only, then each cohort with its count', () => {
+  it('rolls up the course’s problems, then each live semester’s, and gives each semester its count', () => {
     const t = text(<CourseScreen {...cp({ loaded: ready })} />);
     expect(t).toContain('Problems');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).not.toContain('Everything automatic will happen on time');
     expect(t).toContain('Fall 2025');
     expect(t).toContain('2 problems');
-    const none = text(<CourseScreen {...cp({ loaded: { kind: 'ready', status: { ...STATUS, problems: [] }, sha: 's', stale: [] } })} />);
+    const calm: Loaded = { kind: 'ready', status: { ...STATUS, problems: [] }, sha: 's', stale: [] };
+    const none = text(<CourseScreen {...cp({ loaded: calm, cohortStates: { [COHORT_ORG]: calm, [OLD_ORG]: archived } })} />);
     expect(none).toContain('No problems.');
   });
   it('a semester with no problems reads No problems, with no count badge, on the course page and Home', () => {

@@ -97,9 +97,9 @@ describe('switcher and side nav', () => {
   it('reads All courses on Home', () => {
     expect(render(<Sidenav courses={[course]} cohortStates={{}} current="home" problems={0} />)).toContain('<span>All courses</span>');
   });
-  it('orders the external links Student view, Public site, Semester, Course', () => {
+  it('orders the external links Public site, Course (Student view and the semester on GitHub are in the banner)', () => {
     const t = text(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{}} current="dashboard" problems={0} />);
-    const at = ['Student view', 'Public site', 'Semester on GitHub', 'Course on GitHub'].map((l) => t.indexOf(l));
+    const at = ['Public site', 'Course on GitHub'].map((l) => t.indexOf(l));
     expect(at.every((i) => i >= 0)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
     expect(t).not.toContain('Student site');

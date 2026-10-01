@@ -399,10 +399,9 @@ describe('S2 course and S17 template', () => {
     expect(t).toContain('Description ? One paragraph about the course, shown on the public website. In dsl-course.yml. Not set');
     expect(t).toMatch(/Contact \? Who students and the lab write to about the course\. In dsl-course\.yml; the institution’s contact when unset\. \S+@\S+, from the institution/);
     expect(t).toContain(', from the institution');
-    expect(t).toContain('Whether the open version of your materials is published. In opencourse.yml. Off. Manage');
     expect(t).toContain('In dsl-course.yml. a-example');
     // Every fact carries the small ?.
-    expect((html(<CourseScreen {...cp} />).match(/<dt>[^<]*<span class="hint small">/g) ?? []).length).toBe(9);
+    expect((html(<CourseScreen {...cp} />).match(/<dt>[^<]*<span class="hint small">/g) ?? []).length).toBe(8);
     expect(t).toContain('The course’s code in the catalogue, as students know it.');
     expect(t).toContain('A semester’s instructors and TAs are set on that semester’s Instructors page.');
     expect(t).toContain('This course’s default. Each assignment can set its own.');
@@ -445,7 +444,7 @@ describe('S2 course and S17 template', () => {
     expect(text(<CourseScreen {...cp} loaded={fine} files={dated} />)).toContain('Updated 3 h ago · Refresh');
     // A Refresh this session that changed nothing still reads just now.
     const runs = signal([{ run_id: 1, op: 'semester.check', conclusion: 'ok', summary: '', finished: new Date(NOW).toISOString(), course: COURSE_ORG }]);
-    const env = { ops: { runs } } as unknown as Env;
+    const env = { ops: { runs, current: signal(null) }, user: { login: 'a-example' } } as unknown as Env;
     expect(text(<EnvCtx.Provider value={env}><CourseScreen {...cp} loaded={fine} files={dated} /></EnvCtx.Provider>)).toContain('Updated just now · Refresh');
     // Read only: the GitHub link stays; no age, no Refresh.
     const ro = html(<CourseScreen {...cp} course={{ ...course, write: false }} />);
@@ -457,7 +456,8 @@ describe('S2 course and S17 template', () => {
     const out = html(<CourseScreen {...cp} />);
     expect((out.match(/class="grid-2/g) ?? []).length).toBe(1);
     const cols = out.slice(out.indexOf('class="grid-2 cols"'));
-    const order = ['<h2>Setup', '<h2>Semesters</h2>', '<h2>Assignment templates</h2>', '<h2>Problems', '<h2>Course details</h2>', '<h2>Public website', '<h2>Materials</h2>'].map((h) => cols.indexOf(h));
+    const order = ['<h2>Setup', '<h2>Semesters</h2>', '<h2>Assignment templates</h2>', '<h2>Problems', '<h2>Course details</h2>', '<h3>Public website', '<h2>Recent activity</h2>', '<h2>Materials</h2>'].map((h) => cols.indexOf(h));
+    expect(out).not.toContain('<h2>Public website');
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     const right = cols.indexOf('id="course-problems"');
@@ -551,7 +551,6 @@ describe('read only and the shell', () => {
     expect(nav).toContain('aria-current="page"');
     expect(nav).toContain('2 problems');
     expect(nav).toContain(`https://${COHORT_ORG}.github.io`);
-    expect(nav).toContain('Semester on GitHub');
     expect(nav).toContain('Course on GitHub');
     const top = html(<Topbar user={{ login: 'a', id: 1, name: 'A', email: null, avatar_url: '' }} navOpen={false} onMenu={() => {}} />);
     expect(top).not.toContain('github.io');

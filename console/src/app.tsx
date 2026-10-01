@@ -1,6 +1,6 @@
 // The console's root: sign-in, discovery, the route, and which screen renders: the
 // instructor screens, or a semester's student screens (a student's own, or an instructor's
-// Student view).
+// Student view). Every semester page, in either console, opens with the semester banner.
 
 import { computed, signal } from '@preact/signals';
 import { EnvCtx, type Env } from './env';
@@ -23,7 +23,7 @@ import { takeInstallReturn } from './wizards/drafts';
 import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, landing, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
-import { CourseScreen, TemplateScreen, courseView, templateTitle } from './screens/Course';
+import { CourseScreen, TemplateScreen, courseView, semesterChip, templateTitle } from './screens/Course';
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from './screens/CourseIndex';
 import { HomeScreen, Invitations, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { InstructorsScreen, StudentsScreen } from './screens/People';
@@ -43,7 +43,10 @@ import type { CohortProps, CourseProps } from './screens/types';
 import { Loading, ghUrl } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
 import { forgetRendered } from './ui/rendered';
-import { Footer, Sidenav, StudentNav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
+import { Footer, SemesterBanner, Sidenav, StudentNav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
+import { fmtDay } from './model/format';
+import { DEFAULT_TIMEZONE } from './model/policy';
+import type { SemesterStatus } from './model/types';
 import type { Files } from './model/files';
 import type { Course } from './model/discovery';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from './model/names';
@@ -169,15 +172,17 @@ export function App({ state: s }: { state: AppState }) {
   }
   if (stu) {
     const key = studentScreen(route.screen);
+    const back = `?cohort=${stu.semester.org}#dashboard`;
     return (
       <EnvCtx.Provider value={s.env(user)}>
-        <Topbar user={user} title={title} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} />
+        <Topbar user={user} title={stu.studentView ? 'Student view (preview)' : title} titleHref={stu.studentView ? back : undefined} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} />
         <div class="shell">
           <aside class="sidenav" id="sidenav-wrap" aria-label="Semester navigation">
             <StudentNav courses={courses} cohortStates={{}} semesters={semesters} semester={stu.semester} current={key} />
           </aside>
           <main id="view" tabindex={-1}>
             {estate.invited?.length ? <Invitations invited={estate.invited} kind={estate.kind} /> : null}
+            <SemesterBanner courseName={stu.semester.courseName} termLabel={stu.semester.termLabel} org={stu.semester.org} chip={semesterChip({ live: !stu.semester.archived })} view={stu.studentView ? 'back' : undefined} />
             <ScreenBoundary key={s.search.value + s.hash.value}><StudentScreen semester={stu.semester} screen={key} studentView={stu.studentView} entry={route.entry} now={s.now.value} /></ScreenBoundary>
           </main>
         </div>
@@ -211,6 +216,7 @@ export function App({ state: s }: { state: AppState }) {
   const sub = navCourse ? (wanted: SubWanted) => subPages(navCourse, s.statuses.course(navCourse.org).value, cohortStates, s.files, { ...wanted, titles: !ctx.cohort }) : undefined;
 
   let body;
+  let banner = null;
   if (unmigrated) {
     body = <NotMigratedScreen what={unmigrated.what} org={unmigrated.org} leftovers={unmigrated.list} />;
   } else if (failed) {
@@ -222,6 +228,7 @@ export function App({ state: s }: { state: AppState }) {
   } else if (screen === 'help') {
     body = <HelpScreen />;
   } else if (screen === 'profile') {
+    // TODO(#365): pass courses={[...courses.map(({ org, name }) => ({ org, name })), ...semesters.map((k) => ({ org: k.org, name: k.courseName || k.termLabel }))]} once SetupScreen takes it.
     body = <SetupScreen org={ctx.course?.org} />;
   } else if (screen === 'home') {
     body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
@@ -261,6 +268,8 @@ export function App({ state: s }: { state: AppState }) {
       archive: () => <ArchiveScreen {...cp} />,
     };
     body = (screens[screen] ?? screens.dashboard)();
+    const sem = cohortLoaded?.kind === 'ready' ? cohortLoaded.status.semester : undefined;
+    banner = <SemesterBanner courseName={ctx.course.name} termLabel={ctx.cohort.termLabel} org={ctx.cohort.org} view="student" {...bannerLine(sem)} />;
   }
 
   // Two levels (decision 0021): Profile and Guide are app-level, full width without the side nav.
@@ -276,6 +285,7 @@ export function App({ state: s }: { state: AppState }) {
         )}
         <main id="view" tabindex={-1}>
           {sel.wizard && ctx.course && !wiz ? <p class="note" style="margin-bottom:18px"><a href={`?course=${ctx.course.org}#${sel.wizard}`}>Back to the {sel.wizard.startsWith('new-semester') ? 'New semester' : 'wizard'}</a> when you are done here.</p> : null}
+          {banner}
           <ScreenBoundary key={s.search.value + s.hash.value}>{body}</ScreenBoundary>
         </main>
       </div>
@@ -283,6 +293,18 @@ export function App({ state: s }: { state: AppState }) {
       <OpPanel />
     </EnvCtx.Provider>
   );
+}
+
+/** The semester banner's line from the semester's status: state, week and dates, each only when known. */
+export function bannerLine(sem: SemesterStatus | undefined): { chip?: preact.ComponentChildren; week?: string; dates?: string } {
+  if (!sem) return {};
+  const tz = sem.timezone || DEFAULT_TIMEZONE;
+  const year = sem.start ? Number(sem.start.slice(0, 4)) : undefined;
+  return {
+    chip: semesterChip(sem),
+    week: sem.week && sem.weeks ? `Week ${sem.week} of ${sem.weeks}` : undefined,
+    dates: sem.start && sem.end ? `${fmtDay(sem.start, tz, year)} to ${fmtDay(sem.end, tz, year)}` : undefined,
+  };
 }
 
 /**

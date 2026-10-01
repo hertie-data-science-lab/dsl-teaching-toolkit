@@ -95,7 +95,7 @@ function Site(p: ReadyProps) {
     <>
       <Crumbs items={cohortCrumbs(p, 'Site')} />
       <div class="page-head">
-        <div><h1>Student site <Hint doc="11-configure-cohort-site.md">The home text and announcements are yours. The schedule, lectures, assignments and instructors pages are rewritten on every update.</Hint></h1><p class="lede">Students’ single page for the semester. Almost everything on it comes from the schedule, instructors and materials.</p></div>
+        <div><h2 class="h1">Student site <Hint doc="11-configure-cohort-site.md">The home text and announcements are yours. The schedule, lectures, assignments and instructors pages are rewritten on every update.</Hint></h2><p class="lede">Students’ single page for the semester. Almost everything on it comes from the schedule, instructors and materials.</p></div>
         <div class="actions">
           <OpButtons def={updateSite(cohortScope(p))} verbCls="btn outline" />
           <a class="btn quiet" href={url} target="_blank" rel="noopener">Open the student site <Ext /></a>
@@ -181,7 +181,7 @@ function Operations(p: ReadyProps) {
     <>
       <Crumbs items={cohortCrumbs(p, 'All operations')} />
       <div class="page-head">
-        <div><h1>All operations <Hint doc="reference/actions-reference.md">Each line says what happened and how many. Open Details for the reasons behind a count and the run on GitHub.</Hint></h1><p class="lede">Everything automation and you have done in {p.cohort.termLabel}, newest first. Outcomes stay here after the panel closes.</p></div>
+        <div><h2 class="h1">All operations <Hint doc="reference/actions-reference.md">Each line says what happened and how many. Open Details for the reasons behind a count and the run on GitHub.</Hint></h2><p class="lede">Everything automation and you have done in {p.cohort.termLabel}, newest first. Outcomes stay here after the panel closes.</p></div>
       </div>
       <section class="panel"><OpsList list={ops} now={p.now} full runRepo={`${p.course.org}/.github`} outcomes={outcomes} /></section>
     </>

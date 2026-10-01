@@ -26,9 +26,8 @@ afterEach(() => {
   history.replaceState(null, '', '/');
 });
 
-async function mount(url: string) {
+async function mount(url: string, gh = new FakeGitHub()) {
   history.replaceState(null, '', url);
-  const gh = new FakeGitHub();
   const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: new GitHubClient({ token: () => 't', fetch: gh.fetch }) });
   s.user.value = user;
   s.estate.value = { courses: [course], semesters: [NLP], roles: new Map([[NLP.org, 'student' as const], [cohort.org, 'instructor' as const]]), kind: 'classic' };
@@ -64,6 +63,51 @@ describe('the shell on a real URL', () => {
   it('treats ?semester= of a semester the person has no role in as instructor screens', async () => {
     await mount('/?semester=hertie-other-f2026#setup');
     expect(location.hash).toBe('#profile');
+  });
+});
+
+describe('the semester banner (decision 0025)', () => {
+  // The course's names check reads its .github tree; an empty one is a migrated course.
+  const migrated = () => new FakeGitHub().on('GET', new RegExp(`^/repos/${course.org}/\\.github/git/trees/HEAD`), { sha: 'r', truncated: false, tree: [] });
+  const settle = async () => { for (let i = 0; i < 5; i++) await act(async () => {}); };
+  it('opens every instructor semester page with the banner: one h1, the Student view pill and the semester on GitHub', async () => {
+    const el = await mount(`/?cohort=${cohort.org}#schedule`, migrated());
+    await settle();
+    const banner = el.querySelector('#view .sem-banner');
+    expect(banner).not.toBeNull();
+    expect(banner!.querySelector('h1')?.textContent).toBe('Fall 2026');
+    expect(banner!.querySelector('.banner-course')?.textContent).toBe('Machine Learning');
+    expect(banner!.querySelector(`a[href="?semester=${cohort.org}#week"]`)?.textContent).toBe('Student view');
+    expect(banner!.textContent).toContain('Semester on GitHub');
+    expect(el.querySelectorAll('h1')).toHaveLength(1);
+    expect(el.querySelector('.topbar .app-view')).toBeNull();
+  });
+
+  it('keeps the course pages’ own h1 and no banner', async () => {
+    const el = await mount(`/?course=${course.org}#course`);
+    expect(el.querySelector('.sem-banner')).toBeNull();
+  });
+
+  it('in an instructor’s preview, the top bar’s view and the banner lead back to the Dashboard', async () => {
+    const el = await mount(`/?semester=${cohort.org}#week`);
+    await settle();
+    const back = `?cohort=${cohort.org}#dashboard`;
+    expect(el.querySelector('.topbar a.app-view')?.getAttribute('href')).toBe(back);
+    expect(el.querySelector('.topbar a.app-view')?.textContent).toBe('Student view (preview)');
+    expect(el.querySelector(`.sem-banner a[href="${back}"]`)?.textContent).toBe('Back to instructor view');
+    expect(el.querySelector('.sem-banner')?.textContent).not.toContain('Student view');
+    expect(el.querySelectorAll('h1')).toHaveLength(1);
+  });
+
+  it('for a real student the view is plain text and the banner has no way to the instructor view', async () => {
+    const el = await mount(`/?semester=${NLP.org}#week`);
+    expect(el.querySelector('.topbar .app-view')).toBeNull();
+    expect(el.querySelector('.topbar .app-name small')?.textContent).toBe('Student view');
+    const banner = el.querySelector('.sem-banner')!;
+    expect(banner.querySelector('h1')?.textContent).toBe('Fall 2026');
+    expect(banner.querySelector('.banner-course')?.textContent).toBe('Natural Language Processing');
+    expect(banner.textContent).not.toContain('instructor view');
+    expect(banner.textContent).toContain('Semester on GitHub');
   });
 });
 

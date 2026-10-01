@@ -614,7 +614,7 @@ function View(p: ReadyProps) {
       <Crumbs items={cohortCrumbs(p, 'Schedule')} />
       <div class="page-head">
         <div>
-          <h1>Schedule <Hint doc="07-schedule-releases.md">The schedule drives everything automatic: releases, hand outs, collection and the student site’s calendar. Dates are in the semester’s timezone.</Hint></h1>
+          <h2 class="h1">Schedule <Hint doc="07-schedule-releases.md">The schedule drives everything automatic: releases, hand outs, collection and the student site’s calendar. Dates are in the semester’s timezone.</Hint></h2>
           <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {skipped ? `${skipped === 1 ? 'One release' : `${skipped} releases`} will be skipped as it stands.` : 'Every release has its folder.'}</p>
         </div>
         <div class="actions"><CheckNow p={p} label="Check" /><a class="btn outline" href="#schedule-new">Add entry</a></div>
@@ -684,7 +684,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         <Crumbs items={cohortCrumbs(p, ident, [{ t: 'Schedule', href: '#schedule' }])} />
         <div class="page-head">
           <div>
-            <h1><b>{ident}</b>: {rel.title}</h1>
+            <h2 class="h1"><b>{ident}</b>: {rel.title}</h2>
             <p class="lede">{NOTHING_TO_RELEASE}.</p>
           </div>
           <div class="actions"><a class="btn" href={`#schedule-${rel.id}`}>Edit entry</a></div>
@@ -700,11 +700,11 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
       <Crumbs items={cohortCrumbs(p, ident, [{ t: 'Schedule', href: '#schedule' }])} />
       <div class="page-head">
         <div>
-          <h1><b>{ident}</b>: {rel.title} <Hint doc="08-release-materials-to-cohort.md">{st === 'released'
+          <h2 class="h1"><b>{ident}</b>: {rel.title} <Hint doc="08-release-materials-to-cohort.md">{st === 'released'
             ? 'Edits students should see: push to the semester copy, or release again after fixing the course copy. Edits future semesters should keep: keep for future semesters.'
             : st === 'will_be_skipped' ? (needsANumber(status, rel.id) ? 'Automation will skip this until it has a number.' : 'Automation will skip this until the folder exists.')
             : st === 'late' ? 'Reason codes tell you whether the source, the schedule or the scheduler was at fault.'
-            : 'Nothing to do; it goes out at the scheduled time. You can release it early.'}</Hint></h1>
+            : 'Nothing to do; it goes out at the scheduled time. You can release it early.'}</Hint></h2>
           <p class="lede"><span class={`chip ${st === 'will_be_skipped' ? 'bad' : st === 'released' ? 'ok' : ''}`}>{RELEASE_WORD[st]}</span>{fmtWhen(rel.when, tz, year)}</p>
         </div>
         <div class="actions"><a class="btn quiet" href={`#schedule-${rel.id}`}>Edit entry</a></div>
