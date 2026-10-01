@@ -187,9 +187,6 @@ main { min-width: 0; }
 button.wk { font: inherit; text-align: left; cursor: pointer; align-content: start; }
 .wk[aria-pressed="true"] { opacity: 1; border-color: var(--link); box-shadow: 0 0 0 2px var(--link); }
 .wk .wk-count { position: absolute; top: -7px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: var(--bad); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 11px; display: grid; place-items: center; line-height: 1; }
-.wk-filters { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.wk-filters .toggle[aria-pressed="false"] { opacity: 1; text-decoration: none; }
-.wk-filters .toggle[aria-pressed="true"] { background: var(--sunk); }
 .wk-timeline { display: grid; gap: 12px; padding-top: 12px; }
 .wk-timeline .week-h { font-size: 14px; margin: 0 0 6px; }
 .wk-empty { font-size: 12.5px; color: var(--muted); margin: 0; padding: 2px 0; border-top: 1px solid var(--rule); }

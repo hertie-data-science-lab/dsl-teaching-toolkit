@@ -166,6 +166,10 @@ status has loaded the columns keep a fixed layout (`SETTLING_COLUMNS`), so panel
 each arrives. The Dashboard's line under its title
 says only what the banner does not: the exams and the archive date.
 
+The Dashboard's week strip is its only filter: This week on load, any set of weeks picked,
+none picked for all of them. The Problems heading names the selection ("Problems in weeks 3
+and 5") with a "Show all weeks" link while a filter is on.
+
 ## Student screens and their sources
 
 The semester's `status.json` is private (in `semester-config`), so a student cannot read it.

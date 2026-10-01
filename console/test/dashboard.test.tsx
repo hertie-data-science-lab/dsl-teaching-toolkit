@@ -129,6 +129,8 @@ function mount(status: Status = STATUS, now = NOW) {
 const cell = (h: HTMLElement, w: number) => h.querySelectorAll<HTMLButtonElement>('.term-strip button.wk')[w - 1];
 const button = (h: HTMLElement, label: string) => [...h.querySelectorAll('button')].find((b) => b.textContent === label)!;
 const click = (b: HTMLElement) => act(() => b.click());
+const problemsHead = (h: HTMLElement) => h.querySelector('.problems-head h2')!.textContent;
+const showAll = (h: HTMLElement) => button(h, 'Show all weeks');
 const problemsText = (h: HTMLElement) => [...h.querySelectorAll('.problem .p-say')].map((p) => p.textContent);
 
 describe('the Dashboard', () => {
@@ -138,8 +140,13 @@ describe('the Dashboard', () => {
     expect(h.querySelector('.section-head h2')!.textContent).toContain('A red number counts that week');
     expect(cell(h, 3).getAttribute('aria-pressed')).toBe('true');
     expect(cell(h, 5).getAttribute('aria-pressed')).toBe('false');
-    expect(button(h, 'This week').getAttribute('aria-pressed')).toBe('true');
-    expect(button(h, 'All weeks').getAttribute('aria-pressed')).toBe('false');
+    // The strip is the only picker: no This week / All weeks buttons, no ? beside Refresh.
+    expect(button(h, 'This week')).toBeUndefined();
+    expect(button(h, 'All weeks')).toBeUndefined();
+    expect(h.querySelector('.page-head .actions .hint-btn')).toBeNull();
+    expect(h.querySelector('.page-head .actions')!.textContent).toContain('Refresh');
+    expect(problemsHead(h)).toBe('Problems this week');
+    expect(showAll(h)).toBeDefined();
     // s5's problem is dated week 5: the strip counts it there, the list leaves it out.
     expect(cell(h, 5).querySelector('.wk-count')!.textContent).toBe('1');
     expect(cell(h, 3).querySelector('.wk-count')).toBeNull();
@@ -151,27 +158,31 @@ describe('the Dashboard', () => {
     expect(h.textContent).toContain('37 of 48 submitted so far.');
   });
 
-  it('filters rows and problems to two selected weeks, and All weeks shows the buckets', () => {
+  it('filters rows and problems to two selected weeks, and Show all weeks shows the buckets', () => {
     const h = mount();
     click(cell(h, 5));
     expect(cell(h, 3).getAttribute('aria-pressed')).toBe('true');
     expect(cell(h, 5).getAttribute('aria-pressed')).toBe('true');
-    expect(button(h, 'This week').getAttribute('aria-pressed')).toBe('false');
     expect(h.textContent).toContain('Weeks 3 and 5');
+    expect(problemsHead(h)).toBe('Problems in weeks 3 and 5');
     expect(problemsText(h).some((t) => t!.includes('Session 5 cites'))).toBe(true);
     const listed = h.querySelector('.grid-2 .panel')!.textContent!;
     expect(listed).toContain('Trees and ensembles');
     expect(listed).toContain('37 of 48 submitted so far.');
     expect(listed).not.toContain('Midterm');
     expect(listed).not.toContain('Before the semester');
-    click(button(h, 'All weeks'));
+    click(showAll(h));
+    expect(problemsHead(h)).toBe('Problems');
+    expect(showAll(h)).toBeUndefined();
     const all = h.querySelector('.grid-2 .panel')!.textContent!;
     expect(all).toContain('Midterm');
     expect(all).toContain('Before the semester');
     expect(all).toContain('After the semester');
     click(cell(h, 3));
-    click(cell(h, 3)); // off again: nothing selected is All weeks
-    expect(button(h, 'All weeks').getAttribute('aria-pressed')).toBe('true');
+    expect(problemsHead(h)).toBe('Problems this week'); // week 3 is this week
+    click(cell(h, 3)); // off again: nothing selected is all weeks
+    expect(problemsHead(h)).toBe('Problems');
+    expect(cell(h, 3).getAttribute('aria-pressed')).toBe('false');
   });
 
   it('gives a hand out its chip, detail and Open assignment', () => {
@@ -215,8 +226,11 @@ describe('the Dashboard', () => {
     expect(h.querySelector('.p-overdue')).toBeNull();
     expect(h.textContent).toContain('No problems in week 4. 2 in other weeks.');
     expect(h.textContent).toContain('Nothing scheduled in week 4.');
-    click(button(h, 'Show all weeks'));
-    expect(button(h, 'All weeks').getAttribute('aria-pressed')).toBe('true');
+    // One Show all weeks, beside the heading; the empty line does not repeat it.
+    expect([...h.querySelectorAll('button')].filter((b) => b.textContent === 'Show all weeks').length).toBe(1);
+    click(showAll(h));
+    expect(problemsHead(h)).toBe('Problems');
+    expect(cell(h, 4).getAttribute('aria-pressed')).toBe('false');
   });
 
   it('never says no problems this week while the only ones are undated', () => {
@@ -225,15 +239,16 @@ describe('the Dashboard', () => {
     expect(h.querySelector('.p-anytime')).not.toBeNull();
   });
 
-  it('selects week 1 before the semester and All weeks after it', () => {
+  it('selects week 1 before the semester and all weeks after it', () => {
     const before = mount({ ...STATUS, semester: { ...STATUS.semester!, week: 0 } }, Date.parse('2026-09-01T10:00:00+02:00'));
     expect(cell(before, 1).getAttribute('aria-pressed')).toBe('true');
-    expect(button(before, 'This week').getAttribute('aria-pressed')).toBe('true');
+    expect(problemsHead(before)).toBe('Problems this week');
     expect(before.textContent).not.toContain('Before the semester');
     render(null, before);
     before.remove();
     const after = mount(STATUS, Date.parse('2027-01-20T10:00:00+01:00'));
-    expect(button(after, 'All weeks').getAttribute('aria-pressed')).toBe('true');
+    expect(problemsHead(after)).toBe('Problems');
+    expect(showAll(after)).toBeUndefined();
     expect(after.textContent).toContain('After the semester');
   });
 });

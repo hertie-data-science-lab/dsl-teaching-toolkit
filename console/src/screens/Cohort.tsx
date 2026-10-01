@@ -6,12 +6,12 @@ import {
 } from '../model/format';
 import { inWeeks, needsANumber, parseSchedule, scheduleRows, weekOf, type Row, type Schedule, type Term, type WeekKey, termOf } from '../model/schedule';
 import type { Assignment, Problem, Status } from '../model/types';
-import { checkAccess, releaseEarly, type ReleaseRef } from '../ops/defs';
+import { checkAccess, checkNow, releaseEarly, type ReleaseRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { Release } from '../model/types';
 import { Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
 import { Hint } from '../ui/Hint';
-import { CheckNow, MoreMenu, WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
+import { MoreMenu, WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
 
@@ -313,7 +313,7 @@ function Overview(p: ReadyProps) {
   const [showSetup, setShowSetup] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const thisWeek = thisWeekOf(current);
-  // The weeks the page is filtered to; empty is All weeks. This week on load.
+  // The weeks the page is filtered to, picked in the strip; empty is all weeks. This week on load.
   const [selected, setSelected] = useState<number[]>(thisWeek);
   const problems = status.problems ?? [];
   const stages = status.semester?.stages ?? {};
@@ -341,7 +341,7 @@ function Overview(p: ReadyProps) {
             <button class="textlink" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>{showSetup ? 'Hide setup' : 'Show setup'}</button>
           </p>
         </div>
-        <div class="actions"><Probs n={problems.length} /><CheckNow p={p} /><MoreMenu p={p} /></div>
+        <div class="actions"><Probs n={problems.length} /><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
       </div>
       <div class="stack">
         {showSetup ? (
@@ -358,11 +358,7 @@ function Overview(p: ReadyProps) {
             {/* The chevron before the heading (decision 0031 rule 11), as in the side nav. */}
             <span class="lead">
               <button type="button" class="chev" aria-expanded={expanded} aria-controls="dash-weeks" aria-label={expanded ? 'Show the week strip' : 'Show every week as a list'} onClick={() => setExpanded(!expanded)}><span class="arrow" aria-hidden="true" /></button>
-              <h2>Semester <Hint label="About the weeks">Pick one or more weeks to show only what falls in them. A red number counts that week's problems.</Hint></h2>
-            </span>
-            <span class="wk-filters" role="group" aria-label="Show weeks">
-              <button type="button" class="toggle" aria-pressed={isThisWeek} onClick={() => setSelected(thisWeek)}>This week</button>
-              <button type="button" class="toggle" aria-pressed={!selected.length} onClick={() => setSelected([])}>All weeks</button>
+              <h2>Semester <Hint label="About the weeks">Pick one or more weeks to show only what falls in them; unpick them all to show every week. A red number counts that week's problems.</Hint></h2>
             </span>
           </div>
           <div id="dash-weeks">
@@ -372,7 +368,11 @@ function Overview(p: ReadyProps) {
           </div>
         </section>
         <section class="section">
-          <div class="problems-head"><h2>Problems</h2><span class="footnote">What will not happen until you fix it.</span></div>
+          <div class="problems-head">
+            <h2>{selected.length ? `Problems ${inPhrase(name)}` : 'Problems'}</h2>
+            {selected.length ? <button class="textlink" type="button" onClick={() => setSelected([])}>Show all weeks</button> : null}
+            <span class="footnote">What will not happen until you fix it.</span>
+          </div>
           {!problems.length ? <ProblemCards list={[]} cohort /> : null}
           {shown.overdue.length ? (
             <div class="p-overdue">
@@ -382,10 +382,7 @@ function Overview(p: ReadyProps) {
           ) : null}
           {shown.dated.length ? <ProblemCards list={shown.dated} cohort /> : null}
           {!shown.overdue.length && !shown.dated.length && shown.elsewhere ? (
-            <p class="footnote">
-              No problems {inPhrase(name)}. {shown.elsewhere} in other weeks.{' '}
-              <button class="textlink" type="button" onClick={() => setSelected([])}>Show all weeks</button>
-            </p>
+            <p class="footnote">No problems {inPhrase(name)}. {shown.elsewhere} in other weeks.</p>
           ) : null}
           {shown.undated.length ? (
             <div class="p-anytime">
