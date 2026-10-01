@@ -23,8 +23,8 @@ import { takeInstallReturn } from './wizards/drafts';
 import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, landing, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
-import { CourseScreen, TemplateScreen } from './screens/Course';
-import { MaterialsIndexScreen, TemplatesIndexScreen } from './screens/CourseIndex';
+import { CourseScreen, TemplateScreen, courseView, templateTitle } from './screens/Course';
+import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from './screens/CourseIndex';
 import { HomeScreen, Invitations, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { InstructorsScreen, StudentsScreen } from './screens/People';
 import { ReleaseScreen, ScheduleScreen } from './screens/Schedule';
@@ -40,11 +40,13 @@ import { MigrationUnknownScreen, NotMigratedScreen } from './screens/NotMigrated
 import { StudentScreen, forgetStudentData, studentScreen } from './screens/Student';
 import { JoinCourseScreen } from './screens/StudentJoin';
 import type { CohortProps, CourseProps } from './screens/types';
-import { Loading } from './ui/bits';
+import { Loading, ghUrl } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
 import { forgetRendered } from './ui/rendered';
-import { Footer, Sidenav, StudentNav, Topbar } from './ui/shell';
-import { CONFIG_REPO, COURSE_REPO } from './model/names';
+import { Footer, Sidenav, StudentNav, Topbar, type CourseSubPages } from './ui/shell';
+import type { Files } from './model/files';
+import type { Course } from './model/discovery';
+import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from './model/names';
 
 /** App-level pages: about no course or semester. */
 const APP_SCREENS = ['home', 'help', 'profile'];
@@ -205,6 +207,7 @@ export function App({ state: s }: { state: AppState }) {
   const cohortLoaded = ctx.cohort && ctx.course?.write && !blocked ? s.statuses.cohort(ctx.cohort.org).value : undefined;
   const problems = cohortLoaded?.kind === 'ready' ? (cohortLoaded.status.problems ?? []).length : 0;
   const navKey = COHORT_SCREENS[screen] ?? COURSE_SCREENS[screen] ?? (wiz ? WIZARD_NAV[wiz.name] : undefined) ?? screen;
+  const sub = ctx.course?.write && !blocked && !APP_SCREENS.includes(screen) ? subPages(ctx.course, s.statuses.course(ctx.course.org).value, cohortStates, s.files) : undefined;
 
   let body;
   if (unmigrated) {
@@ -218,11 +221,7 @@ export function App({ state: s }: { state: AppState }) {
   } else if (screen === 'help') {
     body = <HelpScreen />;
   } else if (screen === 'profile') {
-    // The course's repos, for Profile's "Clone every repo".
-    const loaded = ctx.course?.write ? s.statuses.course(ctx.course.org).value : undefined;
-    const cs = loaded?.kind === 'ready' ? loaded.status.course : undefined;
-    const repos = cs ? [...cs.materials.map((m) => m.repo), ...cs.templates.map((t) => t.repo)] : undefined;
-    body = <SetupScreen org={ctx.course?.org} repos={repos} />;
+    body = <SetupScreen org={ctx.course?.org} />;
   } else if (screen === 'home') {
     body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {
@@ -271,7 +270,7 @@ export function App({ state: s }: { state: AppState }) {
       <div class="shell" style={appLevel ? 'grid-template-columns:minmax(0,1fr)' : undefined}>
         {appLevel ? null : (
           <aside class="sidenav" id="sidenav-wrap" aria-label="Console navigation">
-            <Sidenav courses={courses} semesters={semesters} course={ctx.course} cohort={ctx.cohort} cohortStates={cohortStates} current={navKey} problems={problems} />
+            <Sidenav courses={courses} semesters={semesters} course={ctx.course} cohort={ctx.cohort} cohortStates={cohortStates} current={navKey} problems={problems} sub={sub} entry={route.entry} />
           </aside>
         )}
         <main id="view" tabindex={-1}>
@@ -283,6 +282,27 @@ export function App({ state: s }: { state: AppState }) {
       <OpPanel />
     </EnvCtx.Provider>
   );
+}
+
+/**
+ * The course nav's sub-pages, from the course status (or a semester's copy of it): every
+ * materials repo, then the other releasable repos (on GitHub), and every template by its
+ * title (its repo name until the title is read).
+ */
+function subPages(course: Course, loaded: Loaded, cohortStates: Record<string, Loaded>, files: Files): CourseSubPages | undefined {
+  const c = courseView({ loaded, cohortStates }).course;
+  if (!c) return undefined;
+  const repos = files.repos(course.org);
+  const materials = c.materials ?? [], templates = c.templates ?? [];
+  const known = [...materials.map((m) => m.repo), ...templates.map((t) => t.repo)];
+  const others = repos.kind === 'ready' ? otherRepos(course.org, repos.repos, known) : [];
+  return {
+    materials: [
+      ...materials.map((m) => ({ repo: m.repo, label: m.repo, href: `#materials-${m.repo}` })),
+      ...others.map((r) => ({ repo: r.name, label: r.name, href: r.html_url || ghUrl(course.org, r.name), ext: true })),
+    ],
+    templates: templates.map((t) => ({ repo: t.repo, label: templateTitle(files, course.org, t.repo) || t.repo, href: `#template-${t.repo}` })),
+  };
 }
 
 // --------------------------------------------------------------------------- state
@@ -303,6 +323,7 @@ export function createState({ auth, client }: AppDeps) {
         files.refresh(def.cohortOrg, CONFIG_REPO, outcomePath(def.op));
       }
       void statuses.reload(def.courseOrg, COURSE_REPO);
+      files.refresh(def.courseOrg, COURSE_REPO, STATUS_PATH);
     },
   });
   const estate = signal<Estate | null>(null);

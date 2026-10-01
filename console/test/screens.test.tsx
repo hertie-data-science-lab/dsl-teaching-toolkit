@@ -147,8 +147,8 @@ describe('S4 cohort overview', () => {
     expect(t).toMatch(/Checked \d+ min ago/);
     expect(t).toContain('Released Session 3: 7 files to materials.');
   });
-  it('has Re-check and More in the header, with the More items live', () => {
-    expect(out).toMatch(/<button class="btn" type="button">Re-check<\/button>/);
+  it('has Refresh and More in the header, with the More items live', () => {
+    expect(out).toMatch(/<button class="btn" type="button">Refresh<\/button>/);
     expect(t).toContain('Preview the next automatic run');
     expect(t).toContain('Keep for future semesters');
     expect(out).not.toMatch(/role="menuitem" disabled/);
@@ -160,7 +160,7 @@ describe('S4 cohort overview', () => {
   it('shows Status not computed yet when the file is absent', () => {
     const a = html(<CohortScreen {...props({ loaded: { kind: 'absent' } })} />);
     expect(a).toContain('Status not computed yet');
-    expect(a).toMatch(/<button class="btn" type="button">Re-check/);
+    expect(a).toMatch(/<button class="btn" type="button">Refresh/);
   });
 });
 
@@ -394,18 +394,21 @@ describe('S2 course and S17 template', () => {
   });
   it('shows every course fact in Course details, the institution’s in grey', () => {
     const t = text(<CourseScreen {...cp} />);
-    expect(t).toContain('Description Not set');
-    expect(t).toMatch(/Contact \S+@\S+, from the institution/);
+    expect(t).toContain('Description ? One paragraph about the course, shown on the public website. In dsl-course.yml. Not set');
+    expect(t).toMatch(/Contact \? Who students and the lab write to about the course\. In dsl-course\.yml; the institution’s contact when unset\. \S+@\S+, from the institution/);
     expect(t).toContain(', from the institution');
-    expect(t).toContain('Public website Off. Manage');
+    expect(t).toContain('Whether the open version of your materials is published. In opencourse.yml. Off. Manage');
+    expect(t).toContain('In dsl-course.yml. a-example');
+    // Every fact carries the small ?.
+    expect((html(<CourseScreen {...cp} />).match(/<dt>[^<]*<span class="hint small">/g) ?? []).length).toBe(9);
     expect(t).toContain('The course’s code in the catalogue, as students know it.');
     expect(t).toContain('A semester’s instructors and TAs are set on that semester’s Instructors page.');
     expect(t).toContain('This course’s default. Each assignment can set its own.');
     const own = { ...course, meta: { ...course.meta, course_description: 'Learning from data.', contact: 'ml@example.org', licence: 'CC BY 4.0' } };
     const mine = text(<CourseScreen {...cp} course={own} />);
-    expect(mine).toContain('Description Learning from data.');
-    expect(mine).toContain('Contact ml@example.org');
-    expect(mine).toContain('Licence CC BY 4.0');
+    expect(mine).toContain('In dsl-course.yml. Learning from data.');
+    expect(mine).toContain('when unset. ml@example.org');
+    expect(mine).toContain('when unset. CC BY 4.0');
     expect(mine).not.toContain(', from the institution');
   });
   it('links the live public website once it is published', () => {
@@ -413,7 +416,41 @@ describe('S2 course and S17 template', () => {
     const pub: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, stages: { ...base.stages, C6: 'done' } } }, sha: 's', stale: [] };
     const out = html(<CourseScreen {...cp} loaded={pub} />);
     expect(out).toContain(`href="https://${COURSE_ORG}.github.io"`);
-    expect(text(<CourseScreen {...cp} loaded={pub} />)).toContain('Optional: an open version of your materials for anyone, updated daily.');
+    const t = text(<CourseScreen {...cp} loaded={pub} />);
+    expect(t).toContain('Optional: an open version of your materials for anyone on the internet, updated daily.');
+    expect(t).toContain('Edit website details');
+    expect(t).not.toContain('Public website settings');
+    expect(out).toContain('<button class="btn small outline" type="button">Republish website</button>');
+    expect(html(<CourseScreen {...cp} />)).toContain('<button class="btn small outline" type="button">Publish website</button>');
+  });
+  it('keeps only New semester in the head; the status line, Refresh and the course on GitHub sit under it', () => {
+    const out = html(<CourseScreen {...cp} />);
+    const head = out.slice(out.indexOf('class="page-head"'), out.indexOf('class="actions sub-actions"'));
+    expect(head).toContain('>New semester</a>');
+    expect(head).not.toContain('Publish');
+    expect(head).not.toContain('Refresh');
+    expect(head).not.toContain('on GitHub');
+    const sub = out.slice(out.indexOf('class="actions sub-actions"'), out.indexOf('class="page-note"'));
+    // The course's own status is absent here (a semester's copy fills the page), so no age.
+    expect(text(<CourseScreen {...cp} />)).toContain('New semester Refresh ? Reads the course and its semesters from GitHub again');
+    expect(sub).toContain('<button class="textlink" type="button">Refresh</button>');
+    expect(sub).toContain(`href="https://github.com/${COURSE_ORG}"`);
+    const none = text(<CourseScreen {...cp} cohortStates={{}} />);
+    expect(none).toContain('Not computed yet · Refresh');
+    const dated = new StaticFiles({}, {}, {});
+    dated.lastChange = () => new Date(NOW - 3 * 3600000).toISOString();
+    const fine: Loaded = { kind: 'ready', status: STATUS, sha: 's', stale: [] };
+    expect(text(<CourseScreen {...cp} loaded={fine} files={dated} />)).toContain('Updated 3 h ago · Refresh');
+  });
+  it('lays the overview out as two columns of stacked panels', () => {
+    const out = html(<CourseScreen {...cp} />);
+    expect((out.match(/class="grid-2/g) ?? []).length).toBe(1);
+    const cols = out.slice(out.indexOf('class="grid-2 cols"'));
+    const order = ['<h2>Setup', '<h2>Semesters</h2>', '<h2>Assignment templates</h2>', '<h2>Problems', '<h2>Course details</h2>', '<h2>Public website', '<h2>Materials</h2>'].map((h) => cols.indexOf(h));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    const right = cols.indexOf('id="course-problems"');
+    expect(cols.lastIndexOf('<div class="stack">', right)).toBeGreaterThan(cols.indexOf('id="sec-templates"'));
   });
   it('renders the setup checklist from stage_why: ticks, the why and one link each', () => {
     const out = html(<SetupList course={withWhy} />);

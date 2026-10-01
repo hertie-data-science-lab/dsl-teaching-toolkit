@@ -5,13 +5,14 @@ import type { GhRepo } from '../github/client';
 import { TEMPLATE_TOPIC, termOf } from '../model/discovery';
 import type { Files } from '../model/files';
 import { ago, fmtDay, templateName } from '../model/format';
+import { MATERIALS_TOPIC } from '../model/materialsRules';
 import { DEFAULT_FORMATS } from '../model/policy';
 import { formatWord, formatsList } from '../tiers/grading';
-import { Crumbs, Loading, ghUrl } from '../ui/bits';
+import { Crumbs, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
-import { CourseHeaderActions, StateChip, Whys, courseView } from './Course';
+import { StateChip, Whys, courseView } from './Course';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
 
@@ -33,6 +34,9 @@ export function otherRepos(org: string, repos: GhRepo[], known: string[]): GhRep
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** The org's repo list on GitHub, filtered to one topic. */
+export const topicUrl = (org: string, topic: string) => `https://github.com/orgs/${org}/repositories?q=${encodeURIComponent(`topic:${topic}`)}`;
+
 function repoOf(files: Files, org: string, name: string): GhRepo | undefined {
   const r = files.repos(org);
   return r.kind === 'ready' ? r.repos.find((x) => x.name === name) : undefined;
@@ -51,8 +55,8 @@ export function MaterialsIndexScreen(p: CourseProps) {
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Materials' }]} />
       <div class="page-head">
-        <div><h1>Materials <Hint doc="02-add-materials-to-course.md">Materials live here privately until a scheduled release copies them to a semester. Files can be withheld from students.</Hint></h1><p class="lede">The course’s materials repos. A scheduled release copies their folders to a semester.</p></div>
-        <CourseHeaderActions course={course} ready={v.course?.ready ?? false} />
+        <div><h1>Materials <Hint doc="02-add-materials-to-course.md">Materials live here privately until a scheduled release copies them to a semester. Files can be withheld from students.</Hint></h1><p class="lede">The course’s materials repos. A scheduled or manual release copies their folders to a semester. This page checks that the set-up files are in place, not their content; change content by pushing to the repo’s main branch.</p></div>
+        <div class="actions"><a class="btn quiet" href={topicUrl(course.org, MATERIALS_TOPIC)} target="_blank" rel="noopener">See on GitHub <Ext /></a></div>
       </div>
       <div class="stack">
         <section class="panel section">
@@ -82,8 +86,8 @@ export function MaterialsIndexScreen(p: CourseProps) {
               {others.map((r) => (
                 <li>
                   <span class="r-title">{r.name}</span>
-                  <span class="r-sub">Can be released to a semester from the schedule.</span>
-                  <span class="r-side"><a class="btn small quiet" href={r.html_url || ghUrl(course.org, r.name)} target="_blank" rel="noopener">Open on GitHub <Ext /></a></span>
+                  <span class="r-sub">Not a materials repo, so nothing to set up here. Can be released to a semester from the schedule.</span>
+                  <span class="r-side"><OpenButton org={course.org} repo={r.name} small quiet /></span>
                 </li>
               ))}
             </ul>
@@ -116,8 +120,8 @@ export function TemplatesIndexScreen(p: CourseProps) {
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates' }]} />
       <div class="page-head">
-        <div><h1>Assignment templates <Hint label="About templates and semesters">{VERSIONS_HINT}</Hint></h1><p class="lede">One template per assignment. Students get a copy at hand out; marking reads its solution branch.</p></div>
-        <CourseHeaderActions course={course} ready={v.course?.ready ?? false} />
+        <div><h1>Assignment templates <Hint label="About templates and semesters">{VERSIONS_HINT}</Hint></h1><p class="lede">The course’s assignment templates. A scheduled or manual hand out gives students a copy in a semester. This page checks how each assignment is worked and marked, not its content; change content by pushing to the repo.</p></div>
+        <div class="actions"><a class="btn quiet" href={topicUrl(course.org, TEMPLATE_TOPIC)} target="_blank" rel="noopener">See on GitHub <Ext /></a></div>
       </div>
       <section class="panel section">
         <div class="section-head"><h2>Templates</h2><a class="btn small outline" href={`?course=${course.org}#new-assignment-1`}>New assignment</a></div>

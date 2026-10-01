@@ -7,8 +7,8 @@ import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
-import { KIND_LABEL, STAGE_WORD, templateName } from '../model/format';
-import { checkNow, derive } from '../ops/defs';
+import { KIND_LABEL, STAGE_WORD, ago, templateName } from '../model/format';
+import { checkNow, derive, publishWebsite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
 import { courseBlock, institutionLayer, lateWord, resolve, valueWord, type Layers } from '../model/cascade';
@@ -23,12 +23,13 @@ import { Hint } from '../ui/Hint';
 import { Check, Ext, Fail } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { formatError } from '../wizards/model';
-import { Fact, courseScope, detailsOf, newestScope, websiteUrl, websiteWord } from './CourseEdit';
+import { courseScope, detailsOf, newestScope, websiteUrl, websiteWord } from './CourseEdit';
 import type { CourseProps } from './types';
-import { COURSE_REPO } from '../model/names';
+import { COURSE_REPO, STATUS_PATH } from '../model/names';
+import { REFRESH_HINT } from './common';
 
 /** The course block and course-scoped problems: from the course's own status, else a semester's. */
-export function courseView(p: CourseProps): { course: CourseStatus | null; problems: Problem[]; computed: boolean } {
+export function courseView(p: Pick<CourseProps, 'loaded' | 'cohortStates'>): { course: CourseStatus | null; problems: Problem[]; computed: boolean } {
   if (p.loaded.kind === 'ready' && p.loaded.status.course)
     return { course: p.loaded.status.course, problems: (p.loaded.status.problems ?? []).filter((x) => x.scope === 'course'), computed: true };
   for (const l of Object.values(p.cohortStates))
@@ -198,13 +199,31 @@ export function StateChip({ state, todo }: { state: string; todo: string }) {
   return state === 'problem' ? <span class="chip bad">Has a problem</span> : state === 'ready' ? <span class="chip ok">Ready</span> : <span class="chip">{todo}</span>;
 }
 
+/** The overview's head: New semester, the one primary action. */
 export function CourseHeaderActions({ course, ready }: { course: CourseProps['course']; ready: boolean }) {
   return (
     <div class="actions">
       <a class={ready ? 'btn' : 'btn quiet'} href={`?course=${course.org}#new-semester-1`}>New semester</a>
-      <a class="btn outline" href="#website">Publish website</a>
-      {newestScope({ course }) ? <OpButtons def={{ ...checkNow(newestScope({ course })!), where: course.name }} /> : <Soon label="Re-check" title="Re-check runs on a semester; this course has none yet." />}
-      <a class="btn quiet" href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
+    </div>
+  );
+}
+
+/**
+ * Under the overview's head, quiet: how old the course's status is, Refresh, and the course on
+ * GitHub. The age is when the status file last changed.
+ */
+export function CourseSubActions({ course, loaded, files, now, computed }: Pick<CourseProps, 'course' | 'loaded' | 'files' | 'now'> & { computed: boolean }) {
+  const scope = newestScope({ course });
+  const changed = loaded.kind === 'ready' ? files.lastChange(course.org, COURSE_REPO, STATUS_PATH) : null;
+  const age = !computed ? 'Not computed yet' : loaded.kind === 'ready' && changed ? `Updated ${ago(changed, now)}` : null;
+  return (
+    <div class="actions sub-actions">
+      {age ? <span class="footnote">{age}</span> : null}
+      {age ? <span aria-hidden="true">·</span> : null}
+      {scope ? <OpButtons def={{ ...checkNow(scope), where: course.name }} verbCls="textlink" /> : <Soon label="Refresh" cls="textlink" title="Refresh runs on a semester; this course has none yet." />}
+      <Hint label="About Refresh">{REFRESH_HINT}</Hint>
+      <span class="sep" aria-hidden="true">|</span>
+      <a class="textlink" href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
     </div>
   );
 }
@@ -226,6 +245,7 @@ export function CourseScreen(p: CourseProps) {
   const team = resolve('max_team_size', layers);
   const pub = v.course?.stages?.C6 === 'done';
   const about = detailsOf(course.meta ?? {}).about;
+  const description = typeof about.course_description === 'string' ? about.course_description.trim() : '';
   const fallback = (value: unknown, institution: string) => (value ? String(value) : <span class="footnote">{institution}, from the institution</span>);
   return (
     <>
@@ -236,11 +256,12 @@ export function CourseScreen(p: CourseProps) {
         </div>
         <CourseHeaderActions course={course} ready={ready} />
       </div>
+      {course.write ? <CourseSubActions course={course} loaded={p.loaded} files={p.files} now={p.now} computed={v.computed} /> : null}
       <p class="page-note">Materials and assignment templates are prepared here, for every semester. Students get only what a semester releases or hands out, from that semester’s page.</p>
       <Verdict course={v.course} />
       {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
-      <div class="stack">
-        <div class="grid-2">
+      <div class="grid-2 cols">
+        <div class="stack">
           <section class="panel section">
             <h2>Setup &amp; To do <Hint label="Setup, to-dos and problems">Setup steps are the one-time things a course needs. To-dos are work started but not finished. Problems, on the right, are things that broke.</Hint></h2>
             {v.course ? (
@@ -251,12 +272,6 @@ export function CourseScreen(p: CourseProps) {
               </>
             ) : <p class="footnote">Status not computed yet.</p>}
           </section>
-          <section class="panel section" id="course-problems">
-            <div class="problems-head"><h2>Problems <Hint label="About course problems">Things that broke and need fixing. They also appear on every semester they will affect. Unfinished work is a to-do on the left, not a problem.</Hint></h2></div>
-            {!v.computed ? <p class="footnote">Status not computed yet.</p> : v.problems.length ? <ProblemCards list={v.problems} /> : <div class="no-problems"><Check /><span>No problems.</span></div>}
-          </section>
-        </div>
-        <div class="grid-2">
           <section class="panel section">
             <h2>Semesters</h2>
             {course.cohorts.length ? (
@@ -276,30 +291,6 @@ export function CourseScreen(p: CourseProps) {
               </ul>
             ) : <p class="footnote">No semesters yet.</p>}
           </section>
-          <div class="stack">
-            <section class="panel section">
-              <div class="section-head"><h2>Course details</h2><a class="btn small quiet" href="#details">Edit course details</a></div>
-              <dl class="kv">
-                <dt>Name</dt><dd>{course.name}</dd>
-                <dt>Code <Hint label="About the code">The course’s code in the catalogue, as students know it.</Hint></dt><dd>{course.code || 'not set'}</dd>
-                <Fact label="Description" value={about.course_description} />
-                <dt>Contact</dt><dd>{fallback(about.contact, POLICY.contact)}</dd>
-                <dt>Licence</dt><dd>{fallback(about.licence, POLICY.licences[0].name)}</dd>
-                <dt>Admins <Hint label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, every semester. A semester’s instructors and TAs are set on that semester’s Instructors page.</Hint></dt><dd>{course.admins.join(', ') || 'none'}</dd>
-                <dt>Late work <Hint label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>
-                <dt>Max team size <Hint label="About max team size">This course’s default. Each assignment can set its own.</Hint></dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
-                <dt>Public website</dt><dd>{websiteWord(p.files, course.org)} <a class="textlink" href="#website">Manage</a></dd>
-              </dl>
-              <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
-            </section>
-            <section class="panel section">
-              <div class="section-head"><h2>Public website <Hint label="About the public website">Optional: an open version of your materials for anyone, updated daily.</Hint></h2><span class={`chip ${pub ? 'ok' : ''}`}>{pub ? 'Published' : 'Not published'}</span></div>
-              {pub ? <p><a class="textlink" href={websiteUrl(course.org)} target="_blank" rel="noopener">{course.org}.github.io <Ext /></a></p> : null}
-              <a class="textlink" href="#website">Public website settings</a>
-            </section>
-          </div>
-        </div>
-        <div class="grid-2">
           <section class="panel section" id="sec-templates">
             <div class="section-head"><h2>Assignment templates</h2><a class="btn small outline" href={`?course=${course.org}#new-assignment-1`}>New assignment</a></div>
             {v.course?.templates?.length ? (
@@ -316,6 +307,32 @@ export function CourseScreen(p: CourseProps) {
                 })}
               </ul>
             ) : <p class="footnote">{v.computed ? 'No assignment templates yet.' : 'Assignment templates appear once the course has been checked.'}</p>}
+          </section>
+        </div>
+        <div class="stack">
+          <section class="panel section" id="course-problems">
+            <div class="problems-head"><h2>Problems <Hint label="About course problems">Things that broke and need fixing. They also appear on every semester they will affect. Unfinished work is a to-do on the left, not a problem.</Hint></h2></div>
+            {!v.computed ? <p class="footnote">Status not computed yet.</p> : v.problems.length ? <ProblemCards list={v.problems} /> : <div class="no-problems"><Check /><span>No problems.</span></div>}
+          </section>
+          <section class="panel section">
+            <div class="section-head"><h2>Course details</h2><a class="btn small quiet" href="#details">Edit course details</a></div>
+            <dl class="kv">
+              <dt>Name <Hint small label="About the name">The course’s name, as the console and the student site show it. In dsl-course.yml.</Hint></dt><dd>{course.name}</dd>
+              <dt>Code <Hint small label="About the code">The course’s code in the catalogue, as students know it. In dsl-course.yml.</Hint></dt><dd>{course.code || 'not set'}</dd>
+              <dt>Description <Hint small label="About the description">One paragraph about the course, shown on the public website. In dsl-course.yml.</Hint></dt><dd>{description || <span class="footnote">Not set</span>}</dd>
+              <dt>Contact <Hint small label="About the contact">Who students and the lab write to about the course. In dsl-course.yml; the institution’s contact when unset.</Hint></dt><dd>{fallback(about.contact, POLICY.contact)}</dd>
+              <dt>Licence <Hint small label="About the licence">The licence the public website shows for your materials. In dsl-course.yml; the institution’s default when unset.</Hint></dt><dd>{fallback(about.licence, POLICY.licences[0].name)}</dd>
+              <dt>Admins <Hint small label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, every semester. A semester’s instructors and TAs are set on that semester’s Instructors page. In dsl-course.yml.</Hint></dt><dd>{course.admins.join(', ') || 'none'}</dd>
+              <dt>Late work <Hint small label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>
+              <dt>Max team size <Hint small label="About max team size">This course’s default. Each assignment can set its own.</Hint></dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
+              <dt>Public website <Hint small label="About the public website setting">Whether the open version of your materials is published. In opencourse.yml.</Hint></dt><dd>{websiteWord(p.files, course.org)} <a class="textlink" href="#website">Manage</a></dd>
+            </dl>
+            <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
+          </section>
+          <section class="panel section">
+            <div class="section-head"><h2>Public website <Hint label="About the public website">Optional: an open version of your materials for anyone on the internet, updated daily.</Hint></h2><a class="btn small quiet" href="#website">Edit website details</a></div>
+            <p><span class={`chip ${pub ? 'ok' : ''}`}>{pub ? 'Published' : 'Not published'}</span> {pub ? <a class="textlink" href={websiteUrl(course.org)} target="_blank" rel="noopener">{course.org}.github.io <Ext /></a> : null}</p>
+            {course.write ? <div class="actions"><OpButtons def={publishWebsite(courseScope({ course }), pub)} small verbCls="btn small outline" /></div> : null}
           </section>
           <section class="panel section" id="sec-materials">
             <div class="section-head"><h2>Materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New materials</a></div>

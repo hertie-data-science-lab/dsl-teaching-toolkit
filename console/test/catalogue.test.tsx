@@ -146,6 +146,17 @@ describe('loading the catalogue', () => {
     expect(f.seen.length).toBe(n);
   });
 
+  it('shows an org running another toolkit by its name, and keeps the rest', async () => {
+    const other = 'hertie-intro-to-data-science-c11';
+    const f = new FakeGitHub()
+      .on('GET', ORGS_URL, fileBody('orgs.yml', `course_orgs:\n  - ${other}\n  - ${NLP}\n`))
+      .on('GET', `/repos/${other}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', '- not\n- a mapping\n'))
+      .on('GET', `/repos/${other}/.github/contents/semesters.yml`, fileBody('semesters.yml', 'semesters: {'))
+      .on('GET', `/repos/${NLP}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Natural Language Processing\n'));
+    const list = await loadCatalogue(client(f), [course]);
+    expect(list.map((c) => c.name)).toEqual(['Machine Learning', other, 'Natural Language Processing']);
+  });
+
   it('fails as a whole only when orgs.yml cannot be read', async () => {
     await expect(loadCatalogue(client(catalogueFake(null)), [course])).rejects.toThrow();
   });
@@ -251,6 +262,13 @@ describe('All courses', () => {
     act(() => render(<EnvCtx.Provider value={env}><HomeScreen courses={[]} semesters={[]} cohortStates={{}} now={NOW} user={user} /></EnvCtx.Provider>, h));
     await flush();
     expect(f.seen).toEqual([]);
+  });
+
+  it('explains what a course org is, and puts no Open the course on the cards', async () => {
+    const h = mount(catalogueFake());
+    await flush();
+    expect(h.querySelector('h1 .hint-pop')!.textContent).toContain('A course org is a standing staging area for the materials and assignment templates you are working on, for every semester. Each semester runs in its own org: students join it, and materials are released, assignments handed out and marks returned there.');
+    expect(h.textContent).not.toContain('Open the course');
   });
 
   it('says so when the catalogue cannot be read, and still shows the person’s courses', async () => {

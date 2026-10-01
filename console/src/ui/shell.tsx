@@ -203,7 +203,50 @@ function CohortsNav({ course, cohortStates }: { course: Course; cohortStates: Re
   );
 }
 
-export function Sidenav({ courses, course, cohort, cohortStates, current, problems, semesters }: {
+/** One sub-page under a course nav item: a repo's settings page, or a repo on GitHub (`ext`). */
+export interface SubPage {
+  repo: string;
+  label: string;
+  href: string;
+  ext?: boolean;
+}
+
+/** The course's sub-pages, from its status: materials and other releasable repos, and templates. */
+export interface CourseSubPages {
+  materials: SubPage[];
+  templates: SubPage[];
+}
+
+/**
+ * A course nav item with its sub-pages: the link goes to the index; the chevron button opens a
+ * nested list. Collapsed unless the open page is one of them, or until the chevron is pressed.
+ */
+function NavGroup({ href, t, here, pages, entry }: { href: string; t: string; here: boolean; pages: SubPage[]; entry?: string }) {
+  const inside = here && !!entry && pages.some((x) => !x.ext && x.repo === entry);
+  const [open, setOpen] = useState<boolean | null>(null);
+  const shown = open ?? inside;
+  const id = `nav-${href.slice(1)}`;
+  return (
+    <li class="nav-group">
+      <span class="nav-row">
+        <a href={href} aria-current={here && !inside ? 'page' : undefined}>{t}</a>
+        {pages.length ? <button class="nav-chev" type="button" aria-expanded={shown} aria-controls={id} aria-label={`${shown ? 'Hide' : 'Show'} the ${t.toLowerCase()} pages`} onClick={() => setOpen(!shown)}><span class="arrow" aria-hidden="true" /></button> : null}
+      </span>
+      {pages.length ? (
+        <ul class="nav-sub" id={id} hidden={!shown}>
+          {pages.map((x) => (
+            <li>
+              {x.ext ? <a href={x.href} target="_blank" rel="noopener">{x.label} <Ext /></a>
+                : <a href={x.href} aria-current={inside && x.repo === entry ? 'page' : undefined}>{x.label}</a>}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
+export function Sidenav({ courses, course, cohort, cohortStates, current, problems, semesters, sub, entry }: {
   courses: Course[];
   semesters?: Semester[];
   course?: Course;
@@ -211,6 +254,10 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
   cohortStates: Record<string, Loaded>;
   current: string;
   problems: number;
+  /** The course's materials and templates, for the nav's sub-pages; none until its status is read. */
+  sub?: CourseSubPages;
+  /** The open page's entry (a repo on `#materials-<repo>` or `#template-<repo>`). */
+  entry?: string;
 }) {
   const item = (href: string, t: string, key: string, extra?: preact.ComponentChildren) => (
     <li><a href={href} aria-current={key === current ? 'page' : undefined}>{t}{extra}</a></li>
@@ -240,8 +287,8 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
           <ul>
             {!cohort ? item('#course', 'Overview', 'course') : null}
             {item('#details', 'Course details', 'details')}
-            {item('#materials', 'Materials', 'materials')}
-            {item('#templates', 'Assignment templates', 'templates')}
+            <NavGroup href="#materials" t="Materials" here={current === 'materials'} pages={sub?.materials ?? []} entry={entry} />
+            <NavGroup href="#templates" t="Assignment templates" here={current === 'templates'} pages={sub?.templates ?? []} entry={entry} />
             {item('#website', 'Public website', 'website')}
           </ul>
           <CohortsNav course={course} cohortStates={cohortStates} />

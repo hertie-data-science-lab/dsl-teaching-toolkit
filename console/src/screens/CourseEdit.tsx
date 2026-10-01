@@ -19,13 +19,13 @@ import { ABOUT, COURSE_FACTS, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
-import { CheckLine, Crumbs, EditFile, Lives, Loading } from '../ui/bits';
+import { CheckLine, Crumbs, EditFile, Lives, Loading, editUrl, newFileUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { PatternTree } from '../ui/PatternTree';
 import { Check, Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
-import { courseView, CourseHeaderActions, MaterialsChecklist, StateChip } from './Course';
+import { courseView, MaterialsChecklist, StateChip } from './Course';
 import type { CourseProps } from './types';
 import { COURSE_REPO, OPENCOURSE_FILE } from '../model/names';
 
@@ -226,7 +226,6 @@ export function DetailsScreen(p: CourseProps) {
   const meta = y && !y.errors.length ? obj(y.toJS()) : {};
   const before = detailsOf(meta);
   const d = draft ?? before;
-  const ready = courseView(p).course?.ready ?? false;
   const set = (patch: Partial<Details>) => {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
@@ -250,7 +249,7 @@ export function DetailsScreen(p: CourseProps) {
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Course details' }]} />
       <div class="page-head">
         <div><h1>Course details <Hint doc="01-new-course-org.md">Every semester of the course starts from these settings. Each semester and each assignment can set its own defaults.</Hint></h1><p class="lede">What every semester’s student site shows about the course, and the course’s defaults.</p></div>
-        <CourseHeaderActions course={course} ready={ready} />
+        <div class="actions"><a class="btn quiet" href={editUrl(course.org, COURSE_REPO, 'dsl-course.yml')} target="_blank" rel="noopener">Edit on GitHub <Ext /></a></div>
       </div>
       {file.kind === 'loading' ? <Loading what="Reading dsl-course.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no dsl-course.yml in {course.org}/.github.</CheckLine> : null}
@@ -408,6 +407,8 @@ export function WebsiteScreen(p: CourseProps) {
   const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir).map((x) => x.path) : [];
   const gh = p.files.repos(course.org);
   const siteExists = gh.kind === 'ready' && gh.repos.some((r) => r.name.toLowerCase() === `${course.org}.github.io`.toLowerCase());
+  // The default branch of .github, for Edit on GitHub; main until the repo list is read.
+  const branch = (gh.kind === 'ready' ? gh.repos.find((r) => r.name === COURSE_REPO)?.default_branch : undefined) ?? 'main';
   const doSave = async () => {
     if (y?.errors.length) return;
     if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
@@ -425,7 +426,10 @@ export function WebsiteScreen(p: CourseProps) {
           <h1>Public website <Hint doc="reference/actions-reference.md">An open version of one materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h1>
           <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : siteExists && !before.enabled ? 'Off' : 'Not published'}</span>{published ? 'Updates daily.' : siteExists && !before.enabled ? WEBSITE_OFF_LIVE : 'Optional: an open version of your materials for anyone.'}</p>
         </div>
-        <div class="actions"><OpButtons def={publishWebsite(courseScope(p), published)} /></div>
+        <div class="actions">
+          <OpButtons def={publishWebsite(courseScope(p), published)} />
+          <a class="btn quiet" href={file.kind === 'absent' ? newFileUrl(course.org, COURSE_REPO, OPENCOURSE_FILE, branch) : editUrl(course.org, COURSE_REPO, OPENCOURSE_FILE, branch)} target="_blank" rel="noopener">Edit on GitHub <Ext /></a>
+        </div>
       </div>
       {file.kind === 'loading' ? <Loading what={`Reading ${OPENCOURSE_FILE}`} /> : null}
       {y?.errors.length ? <CheckLine cls="bad">{OPENCOURSE_FILE} does not parse ({y.errors[0]}); fix it with Edit the file directly.</CheckLine> : null}

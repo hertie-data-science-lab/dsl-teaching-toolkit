@@ -47,7 +47,7 @@ function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, user: GhUse
     return { ...base, sub, week: '', status: <span class="chip">read only</span>, next: [['', 'Problems and dates need write access']], ro: true, past: false, urgency: -1 };
   if (!l || l.kind === 'loading') return { ...base, sub, week: '…', status: <span class="chip">Reading</span>, next: [], ro: false, past: false, urgency: 0 };
   if (l.kind !== 'ready')
-    return { ...base, sub, week: '', status: <span class="chip">{l.kind === 'absent' ? 'Not computed yet' : 'Unreadable'}</span>, next: [['', l.kind === 'absent' ? 'Open it and press Re-check.' : 'The status file could not be read.']], ro: false, past: false, urgency: 0 };
+    return { ...base, sub, week: '', status: <span class="chip">{l.kind === 'absent' ? 'Not computed yet' : 'Unreadable'}</span>, next: [['', l.kind === 'absent' ? 'Open it and press Refresh.' : 'The status file could not be read.']], ro: false, past: false, urgency: 0 };
   const s = l.status, tz = s.semester?.timezone, n = (s.problems ?? []).length;
   const past = s.semester?.live === false;
   return {
@@ -272,7 +272,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
     <>
       <Crumbs items={[{ t: 'All courses' }]} />
       <div class="page-head">
-        <div><h1>All courses <Hint doc="01-new-course-org.md">A course holds your materials and assignment templates for every semester; each semester runs in its own org, which students join. The console offers only what your GitHub account can do.</Hint></h1><p class="lede">Every course the lab runs; yours in colour, ordered by what needs your attention</p></div>
+        <div><h1>All courses <Hint doc="01-new-course-org.md">A course org is a standing staging area for the materials and assignment templates you are working on, for every semester. Each semester runs in its own org: students join it, and materials are released, assignments handed out and marks returned there.</Hint></h1><p class="lede">Every course the lab runs; yours in colour, ordered by what needs your attention</p></div>
         <div class="actions">
           {foreign.length ? <label class="check my-only"><input type="checkbox" checked={only} onChange={flipOnly} /><span>My courses</span></label> : null}
           <a class="btn" href="#new-course-1">New course</a>
@@ -287,7 +287,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
             <h2 id="h-courses">Courses</h2>
             <ul class="cohort-list">
               {mine.map((c) => (
-                <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{courseSub(c, user)}</span></span><span class="cc-week" /><span /><span class="cc-next">Open the course</span></a></li>
+                <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{courseSub(c, user)}</span></span><span class="cc-week" /><span /><span class="cc-next" /></a></li>
               ))}
               {others.map((c) => <OffRow name={c.name} />)}
             </ul>
@@ -315,7 +315,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
               <h2>Courses with no semester yet</h2>
               <ul class="cohort-list">
                 {courseOnly.map((c) => (
-                  <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{c.code}</span></span><span class="cc-week" /><span /><span class="cc-next">Open the course</span></a></li>
+                  <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{c.code}</span></span><span class="cc-week" /><span /><span class="cc-next" /></a></li>
                 ))}
               </ul>
             </section>

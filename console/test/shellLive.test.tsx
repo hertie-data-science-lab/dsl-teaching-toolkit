@@ -10,6 +10,7 @@ import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import { GitHubClient } from '../src/github/client';
 import type { Course, Semester } from '../src/model/discovery';
+import { Sidenav } from '../src/ui/shell';
 import { FakeGitHub } from './fake';
 
 const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
@@ -63,5 +64,51 @@ describe('the shell on a real URL', () => {
   it('treats ?semester= of a semester the person has no role in as instructor screens', async () => {
     await mount('/?semester=hertie-other-f2026#setup');
     expect(location.hash).toBe('#profile');
+  });
+});
+
+describe('the course nav’s sub-pages', () => {
+  const sub = {
+    materials: [
+      { repo: 'course-materials-f2026', label: 'course-materials-f2026', href: '#materials-course-materials-f2026' },
+      { repo: 'lecture-code', label: 'lecture-code', href: 'https://github.com/x/lecture-code', ext: true },
+    ],
+    templates: [{ repo: 'assignment-3-f2026', label: 'Group project', href: '#template-assignment-3-f2026' }],
+  };
+  const show = (current: string, entry?: string) => {
+    root = document.createElement('div');
+    document.body.append(root);
+    act(() => render(<Sidenav courses={[course]} course={course} cohortStates={{}} current={current} problems={0} sub={sub} entry={entry} />, root!));
+    return root;
+  };
+  const group = (h: HTMLElement, label: string) => [...h.querySelectorAll('.nav-group')].find((g) => g.querySelector('.nav-row a')?.textContent === label)!;
+  it('is collapsed by default, and the chevron opens and closes it', () => {
+    const h = show('course');
+    const mat = group(h, 'Materials');
+    const chev = mat.querySelector<HTMLButtonElement>('button.nav-chev')!;
+    expect(chev.getAttribute('aria-expanded')).toBe('false');
+    expect(mat.querySelector<HTMLElement>('ul.nav-sub')!.hidden).toBe(true);
+    act(() => chev.click());
+    expect(chev.getAttribute('aria-expanded')).toBe('true');
+    expect(mat.querySelector<HTMLElement>('ul.nav-sub')!.hidden).toBe(false);
+    const links = [...mat.querySelectorAll('ul.nav-sub a')];
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['#materials-course-materials-f2026', 'https://github.com/x/lecture-code']);
+    expect(links[1].getAttribute('target')).toBe('_blank');
+    act(() => chev.click());
+    expect(mat.querySelector<HTMLElement>('ul.nav-sub')!.hidden).toBe(true);
+  });
+  it('opens on a page inside it and marks that page, not the index', () => {
+    const h = show('templates', 'assignment-3-f2026');
+    const tpl = group(h, 'Assignment templates');
+    expect(tpl.querySelector('button.nav-chev')!.getAttribute('aria-expanded')).toBe('true');
+    expect(tpl.querySelector('.nav-row a')!.getAttribute('aria-current')).toBeNull();
+    const cur = tpl.querySelector('ul.nav-sub a[aria-current="page"]')!;
+    expect(cur.textContent).toBe('Group project');
+    expect(group(h, 'Materials').querySelector('button.nav-chev')!.getAttribute('aria-expanded')).toBe('false');
+    // On the index itself, the index is the current page.
+    render(null, root!);
+    root!.remove();
+    const idx = show('templates');
+    expect(group(idx, 'Assignment templates').querySelector('.nav-row a')!.getAttribute('aria-current')).toBe('page');
   });
 });
