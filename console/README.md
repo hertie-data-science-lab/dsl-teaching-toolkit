@@ -134,11 +134,17 @@ as a heading, with its `?`. A student's banner takes the week and the dates from
 The footer names the course and the semester. Course pages have no banner and keep their breadcrumbs. On a phone the preview's
 top-bar link reads "Preview".
 
-The **course overview** is a status board in two columns: Setup & To do, Semesters (each with
-its next automatic event), Assignment templates; then Problems (the course's, then each live
-semester's, tagged), Course details (with the public website's indicator and Publish button),
+The **course overview** is a status board in two columns. Setup & To do heads the left: two
+folds, Initial setup (folded once every step but the optional website is done) and To do (open
+while it has items), the same checklist with a `?` on each line. Problems heads the right (the
+course's, then each live semester's, tagged). The other panels, Semesters (each with its next
+automatic event), Course details (with the public website's indicator and Publish button),
 Recent activity (the last five operations across the course and its live semesters; who ran
-each comes from its outcome file) and Handout materials. The Dashboard's line under its title
+each comes from its outcome file) and Handout materials followed by Assignment templates as one
+block, go wherever the two columns come out closest in height (`splitColumns`, from each
+panel's estimated height, problems counted up to four). Until the course's and every semester's
+status has loaded the columns keep a fixed layout (`SETTLING_COLUMNS`), so panels do not move as
+each arrives. The Dashboard's line under its title
 says only what the banner does not: the exams and the archive date.
 
 ## Student screens and their sources

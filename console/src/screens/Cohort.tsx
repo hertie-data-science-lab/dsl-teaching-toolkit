@@ -407,7 +407,7 @@ function Overview(p: ReadyProps) {
             {s ? (
               <p class="footnote">
                 {s.codes_sent - s.joined} students have a code but have not joined.
-                {s.rows > s.codes_sent ? ` ${s.rows - s.codes_sent} ${s.rows - s.codes_sent > 1 ? 'have' : 'has'} no code (see Problems).` : ''}
+                {s.rows > s.codes_sent ? ` ${s.rows - s.codes_sent} ${s.rows - s.codes_sent > 1 ? 'have' : 'has'} no code.` : ''}
               </p>
             ) : null}
           </section>

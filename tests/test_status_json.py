@@ -1562,6 +1562,34 @@ def test_an_assignments_yml_that_is_not_yaml_is_a_problem_not_a_crash(monkeypatc
     assert [p["id"] for p in problems] == ["assignments:file:ASSIGNMENTS"]
 
 
+def _window(shut: bool) -> status_json.team_formation.Window:
+    return status_json.team_formation.Window(
+        key="assignment-2",
+        name="assignment-2",
+        title="Assignment 2",
+        closes=NOW + timedelta(days=4),
+        sizes=(("team-a", 2),),
+        waiting=(roster.Student("s@x.edu", "S", "s", "1"),),
+        enrolled=3,
+        cap=3,
+        shut=shut,
+    )
+
+
+def test_students_without_a_team_are_a_problem_only_once_the_window_shuts():
+    # Decision 0031 rule 3: joining a team is the student's step while the window is open;
+    # once it has shut only an instructor can place them.
+    sched = _sched()
+    assert status_json.faculty_window_faults(sched, [_window(shut=False)]) == []
+    assert status_json.faculty_window_faults(sched, None) == []
+    shut = status_json.faculty_window_faults(
+        sched, [_window(shut=False), _window(shut=True)]
+    )
+    texts = [status_json.problem_from_fault(f, SEMESTER, NOW)["text"] for f in shut]
+    assert len(texts) == 1
+    assert "has closed" in texts[0]
+
+
 # ------------------------------------------------------------ explicit numbers (0020)
 
 UNNUMBERED = """\
