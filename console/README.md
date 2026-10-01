@@ -90,7 +90,10 @@ may hold both across organisations:
 - **instructor** of an org: push on its `.github` repo, or the org is a semester registered by a
   course the person can write to;
 - **student** of a semester org: an active member with no push on its `.github`;
-- anything else is not shown (a course the person can read but not change still shows read only).
+- anything else is not shown (a course the person can read but not change still shows read only,
+  unless they only study in it: then they reach it through their semesters, decision 0031). A
+  student cannot read a semester's pointer, so its course is the known course whose registry
+  lists it.
 
 An instructor always lands on **All courses** (decision 0030): every course the lab runs, read
 from the toolkit's public `orgs.yml`, in three sections, **DSL courses**, **This semester**
@@ -98,18 +101,22 @@ from the toolkit's public `orgs.yml`, in three sections, **DSL courses**, **This
 time with Show more; always shown, saying so when the person has none). A semester whose end
 cannot be read ends on a date its key implies (a fall semester on 1 February, spring 1 August,
 summer 1 October, winter 1 April). The person's own rows are in colour and ordered by what needs
-them, each course card naming their role (course admin from `dsl-course.yml`, else instructor or
-teaching assistant from the newest running semester's `instructors.yml`, else "you teach on this
-course"); the others are greyed, not links, and say "Not one of your courses". Each section has
-its own **My courses** checkbox (the first one in the page head, left of New course), on by
-default and kept in this browser per account and section; while it is on, the head says how many
-rows it hides ("+2 others"). Then **Your semesters** (one card per semester the
-person is a student of, archived ones greyed; such a semester is never a greyed row above). For a student-only
-account it is its own page, laid out as the instructor's (decision 0029): **This semester** (the
-live ones, each card with its week and "Next: ...") and **Past semesters**, which a **Current
-only** checkbox in the page head hides (kept in this browser, per account). A student-only
-account with exactly one live semester lands on its This week instead. The top bar's Guide
-explains the instructor console, so only a person with an instructor role sees it.
+them, each card with the course code on a quiet line under its title and naming their role
+(course admin from `dsl-course.yml`, else instructor or teaching assistant from the newest
+running semester's `instructors.yml`, else "you teach on this course"); the others are greyed,
+not links, and say "Not one of your courses" ("You are a student" for a course the person
+studies in). Each section has its own **My courses** checkbox (the first one in the page head,
+left of New course), on by default and kept in this browser per account and section; while it is
+on, the head says how many rows it hides ("+2 others"). Then **Your semesters** (one card per
+semester the person is a student of, past ones greyed; such a semester shows only here, never
+also as a row above, decision 0031). For a student-only account it is its own page, laid out as
+the instructor's (decision 0029): **This semester** (the live ones, each card with its week and
+"Next: ...") and **Past semesters** (archived, or past their last day; with no dates read yet,
+by the date their key implies), which a **Current only** checkbox in the page head hides (kept
+in this browser, per account). A student-only account with exactly one live semester (neither
+archived nor ended, judged by its key) lands on its This week instead; the student nav and the
+semester banner call an ended semester ended by the same rule. The top bar's Guide explains the
+instructor console, so only a person with an instructor role sees it.
 
 The mode picks the shell. `?semester=<org>` opens that semester's student screens (This
 week, Schedule, Assignments, Marks, Materials, Join, Instructors). For a
@@ -127,11 +134,17 @@ as a heading, with its `?`. A student's banner takes the week and the dates from
 The footer names the course and the semester. Course pages have no banner and keep their breadcrumbs. On a phone the preview's
 top-bar link reads "Preview".
 
-The **course overview** is a status board in two columns: Setup & To do, Semesters (each with
-its next automatic event), Assignment templates; then Problems (the course's, then each live
-semester's, tagged), Course details (with the public website's indicator and Publish button),
+The **course overview** is a status board in two columns. Setup & To do heads the left: two
+folds, Initial setup (folded once every step but the optional website is done) and To do (open
+while it has items), the same checklist with a `?` on each line. Problems heads the right (the
+course's, then each live semester's, tagged). The other panels, Semesters (each with its next
+automatic event), Course details (with the public website's indicator and Publish button),
 Recent activity (the last five operations across the course and its live semesters; who ran
-each comes from its outcome file) and Handout materials. The Dashboard's line under its title
+each comes from its outcome file) and Handout materials followed by Assignment templates as one
+block, go wherever the two columns come out closest in height (`splitColumns`, from each
+panel's estimated height, problems counted up to four). Until the course's and every semester's
+status has loaded the columns keep a fixed layout (`SETTLING_COLUMNS`), so panels do not move as
+each arrives. The Dashboard's line under its title
 says only what the banner does not: the exams and the archive date.
 
 ## Student screens and their sources

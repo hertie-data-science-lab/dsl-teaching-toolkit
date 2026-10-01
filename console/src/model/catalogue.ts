@@ -188,6 +188,19 @@ export function endedNow(s: CatalogueSemester, now: number): boolean {
   return !!end && Date.parse(end) <= now;
 }
 
+const DAY = 86_400_000;
+
+/**
+ * Whether a semester the person studies in is over (decision 0031): archived; else past `end`
+ * (its `semester_end`, the last day, yyyy-mm-dd) when known; else past its key's approximate
+ * end. The one rule for Your semesters, the student nav, the banner and the landing.
+ */
+export function semesterOver(s: { org: string; termLabel: string; archived: boolean }, now: number, end?: string): boolean {
+  if (s.archived) return true;
+  if (end) return Date.parse(end) + DAY <= now;
+  return endedNow({ org: s.org, termLabel: s.termLabel }, now);
+}
+
 const SEASON_ORDER: Record<string, number> = { s: 1, u: 2, f: 3, w: 4 };
 
 /** A semester org's place in time from its key: larger is newer; 0 for a name without one. */
