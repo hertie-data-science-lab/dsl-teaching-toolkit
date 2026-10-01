@@ -8,7 +8,8 @@ import { PatAuth } from '../src/auth/pat';
 import type { Course, Estate, Role, Semester } from '../src/model/discovery';
 import { currentOnly, saveCurrentOnly, type PrefStore } from '../src/model/prefs';
 import { modeOf, parseSearch, studentContext, studentLanding } from '../src/router';
-import { HomeScreen } from '../src/screens/Home';
+import { HomeScreen, studentPast } from '../src/screens/Home';
+import type { SemesterFacts } from '../src/model/student';
 import { StudentScreen, studentScreen } from '../src/screens/Student';
 import { SemesterBanner, Sidenav, StudentNav, Topbar } from '../src/ui/shell';
 import { FakeGitHub, json } from './fake';
@@ -43,6 +44,35 @@ describe('Home groups', () => {
     expect(out).toMatch(/cohort-card past" href="\?semester=hertie-nlp-f2025#week"/);
     expect(out).toMatch(/cohort-card" href="\?semester=hertie-nlp-f2026#week"/);
     expect(text(<HomeScreen courses={[]} semesters={[NLP_OLD]} cohortStates={{}} now={0} user={user} />)).toContain('Archived');
+  });
+
+  it('a student in two semesters sees each once: the running one under This semester, the ended one under Past semesters (decision 0031)', () => {
+    // The demo's test student: Fall 2025 ended but is not archived; no catalogue sections.
+    const now = Date.parse('2026-10-01T12:00:00Z');
+    const f2025 = sem('hertie-dsl-demo-f2025', { term: 'f2025', termLabel: 'Fall 2025', courseOrg: COURSE_ORG, courseName: 'Deep Learning', courseCode: 'E1234' });
+    const f2026 = sem('hertie-dsl-demo-f2026', { courseOrg: COURSE_ORG, courseName: 'Deep Learning', courseCode: 'E1234' });
+    const out = render(<HomeScreen courses={[]} semesters={[f2026, f2025]} cohortStates={{}} now={now} user={user} />);
+    for (const org of [f2025.org, f2026.org]) expect(out.split(`href="?semester=${org}#week"`)).toHaveLength(2);
+    expect(out.indexOf('This semester')).toBeLessThan(out.indexOf(`${f2026.org}#week`));
+    expect(out.indexOf(`${f2026.org}#week`)).toBeLessThan(out.indexOf('Past semesters'));
+    expect(out.indexOf('Past semesters')).toBeLessThan(out.indexOf(`${f2025.org}#week`));
+    expect(out).toContain(`cohort-card past" href="?semester=${f2025.org}#week"`);
+    expect(out).not.toContain('DSL courses');
+    expect(out).not.toContain('read only');
+    expect(out).toContain('<span class="cc-code">E1234</span>');
+    expect(text(<HomeScreen courses={[]} semesters={[f2026, f2025]} cohortStates={{}} now={now} user={user} />)).toContain('Ended');
+    // Its past semester offers Current only, though nothing is archived.
+    expect(out).toContain('Current only');
+  });
+
+  it('judges a student’s semester past by archive, then its last day, then its key', () => {
+    const end = { end: '2026-12-19' } as SemesterFacts;
+    expect(studentPast(NLP, end, Date.parse('2026-12-19T22:00:00Z'))).toBe(false);
+    expect(studentPast(NLP, end, Date.parse('2026-12-20T01:00:00Z'))).toBe(true);
+    expect(studentPast(NLP_OLD, null, 0)).toBe(true);
+    // No facts: Fall 2026's key ends it on 1 February 2027.
+    expect(studentPast(NLP, undefined, Date.parse('2027-01-31T00:00:00Z'))).toBe(false);
+    expect(studentPast(NLP, undefined, Date.parse('2027-02-02T00:00:00Z'))).toBe(true);
   });
 
   it('a person with both roles sees All courses, then Your semesters', () => {

@@ -90,7 +90,10 @@ may hold both across organisations:
 - **instructor** of an org: push on its `.github` repo, or the org is a semester registered by a
   course the person can write to;
 - **student** of a semester org: an active member with no push on its `.github`;
-- anything else is not shown (a course the person can read but not change still shows read only).
+- anything else is not shown (a course the person can read but not change still shows read only,
+  unless they only study in it: then they reach it through their semesters, decision 0031). A
+  student cannot read a semester's pointer, so its course is the known course whose registry
+  lists it.
 
 An instructor always lands on **All courses** (decision 0030): every course the lab runs, read
 from the toolkit's public `orgs.yml`, in three sections, **DSL courses**, **This semester**
@@ -98,15 +101,17 @@ from the toolkit's public `orgs.yml`, in three sections, **DSL courses**, **This
 time with Show more; always shown, saying so when the person has none). A semester whose end
 cannot be read ends on a date its key implies (a fall semester on 1 February, spring 1 August,
 summer 1 October, winter 1 April). The person's own rows are in colour and ordered by what needs
-them, each course card naming their role (course admin from `dsl-course.yml`, else instructor or
+them, each card with the course code on a quiet line under its title and naming their role (course admin from `dsl-course.yml`, else instructor or
 teaching assistant from the newest running semester's `instructors.yml`, else "you teach on this
 course"); the others are greyed, not links, and say "Not one of your courses". Each section has
 its own **My courses** checkbox (the first one in the page head, left of New course), on by
 default and kept in this browser per account and section; while it is on, the head says how many
 rows it hides ("+2 others"). Then **Your semesters** (one card per semester the
-person is a student of, archived ones greyed; such a semester is never a greyed row above). For a student-only
+person is a student of, past ones greyed; such a semester shows only here, never also as a row
+above, decision 0031). For a student-only
 account it is its own page, laid out as the instructor's (decision 0029): **This semester** (the
-live ones, each card with its week and "Next: ...") and **Past semesters**, which a **Current
+live ones, each card with its week and "Next: ...") and **Past semesters** (archived, or past their last day; with no
+dates read yet, by the date their key implies), which a **Current
 only** checkbox in the page head hides (kept in this browser, per account). A student-only
 account with exactly one live semester lands on its This week instead. The top bar's Guide
 explains the instructor console, so only a person with an instructor role sees it.
