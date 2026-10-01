@@ -468,6 +468,15 @@ describe('S2 course and S17 template', () => {
     expect(out).toContain('/edit/solution/grading_config.yml');
     expect(out).toContain('Derive student version');
   });
+  it('explains marking, points per question and the student version with a ?', () => {
+    const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
+    expect(out).toMatch(/<h3>How it is marked <span class="hint"><button[^>]*aria-label="About marking"/);
+    expect(out).toMatch(/Points per question <span class="hint"><button[^>]*aria-label="About points per question"/);
+    expect(out).toMatch(/<h3>Student version <span class="hint"><button[^>]*aria-label="About the student version"/);
+    expect(out).toContain('Derive builds main from the solution branch, removing the marked answers.');
+    // One place for the student-version sentence: the ?, not a paragraph under it too.
+    expect(out).not.toContain('Builds the student starter on main');
+  });
   it('shows a question marked from another file by its points', () => {
     const tagged = new StaticFiles(
       { [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: GRADING.replace('analysis: 30', 'analysis: {points: 30, file: report.tex}') },

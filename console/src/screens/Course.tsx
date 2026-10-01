@@ -329,7 +329,7 @@ export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: 
   const edit = (i: number, patch: Partial<QuestionRow>) => set(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
     <div class="field">
-      <span class="label">Points per question</span>
+      <span class="label">Points per question <Hint label="About points per question">Optional. With questions set, the mark sheet has one column per question with its maximum, totals add up for you, and students see their score per question. Leave it empty for one flat score.</Hint></span>
       {rows.length ? (
         <table class="qtable">
           <thead><tr><th>Question</th><th>Points</th><th>Marked from <span class="default">optional</span></th><th /></tr></thead>
@@ -351,7 +351,7 @@ export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: 
       ) : <div class="readonly">Not set: the mark sheet takes one flat score.</div>}
       <datalist id="q-files">{files.map((f) => <option value={f} />)}</datalist>
       <div><button class="btn small quiet" type="button" onClick={() => set([...rows, { name: `Q${rows.length + 1}`, points: '', file: '' }])}>Add a question</button></div>
-      <p class="why">The mark sheet gets one column per question. A question marked from another file (a LaTeX write-up, say) names it; the mark sheet shows it beside the maximum.</p>
+      <p class="why">A question marked from another file (a LaTeX write-up, say) names it; the mark sheet shows it beside the maximum.</p>
     </div>
   );
 }
@@ -436,7 +436,7 @@ export function TemplateScreen(p: CourseProps) {
               </p>
             </div>
             <div class="form-section">
-              <h3>How it is marked</h3>
+              <h3>How it is marked <Hint label="About marking">Marking builds a mark sheet per student or team from these settings: the formats to read, whether tests run, and the questions below. You fill the sheet in Marks; totals and late penalties are worked out.</Hint></h3>
               <FormatPicker id="g-fmt" v={cur} set={change} fallback={fallbackFormats.length ? { formats: fallbackFormats, source: 'course' } : undefined} />
               <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['autograde', 'tests'])} values={cur} onChange={change} />
               <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} files={files} />
@@ -444,8 +444,7 @@ export function TemplateScreen(p: CourseProps) {
               <p class="lives"><a href={ghUrl(course.org, repo, 'grading_config.yml', 'solution')} target="_blank" rel="noopener">Lives in {`${course.org}/${repo}/grading_config.yml`}</a> on the solution branch.</p>
             </div>
             <div class="form-section">
-              <h3>Student version</h3>
-              <p style="font-size:14px;color:var(--ink-2)">Builds the student starter on main from the solution branch, removing marked answers.</p>
+              <h3>Student version <Hint label="About the student version">Students get a copy of the main branch at hand out. Derive builds main from the solution branch, removing the marked answers. Run it after every change to the solution.</Hint></h3>
               <div class="actions"><OpButtons def={derive(scope, repo, repo, heading)} small /></div>
             </div>
             <div class="form-section">
