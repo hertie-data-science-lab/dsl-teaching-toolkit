@@ -93,7 +93,7 @@ describe('the course banner (decision 0031 rule 11)', () => {
     expect(el.querySelector('#view .course-banner .btn.small.quiet')?.textContent).toBe('Student view');
   });
 
-  it('heads the course overview with New semester and no semester line; the anchor is the current page', async () => {
+  it('heads the course overview with New semester and no semester line; Overview is the current page', async () => {
     const el = await mount(`/?course=${course.org}#course`, migrated());
     await settle();
     const banner = el.querySelector('#view .course-banner')!;
@@ -104,8 +104,10 @@ describe('the course banner (decision 0031 rule 11)', () => {
     expect(el.querySelectorAll('h1')).toHaveLength(1);
     expect(el.querySelector('#view .page-head')).toBeNull();
     expect(crumbs(el)).toEqual([['All courses', '?#home'], ['Machine Learning', null]]);
-    expect(el.querySelector('.sidenav .nav-anchor')?.getAttribute('aria-current')).toBe('page');
-    expect(el.querySelectorAll('.sidenav [aria-current]')).toHaveLength(1);
+    expect(el.querySelector('.sidenav .nav-anchor')?.getAttribute('aria-current')).toBeNull();
+    const cur = el.querySelectorAll('.sidenav [aria-current]');
+    expect(cur).toHaveLength(1);
+    expect(cur[0].textContent).toBe('Overview');
   });
 
   it('heads Course details with the course banner, no right side, and the page title as an h2', async () => {

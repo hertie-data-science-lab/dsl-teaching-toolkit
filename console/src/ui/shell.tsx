@@ -229,9 +229,13 @@ export function NavTree({ root, rootCurrent = false, anchor, children }: { root:
   );
 }
 
-/** The anchor: bold, a link when it has a page (a course), plain text when not (a student's semester). */
-export function NavAnchor({ href, current = false, children }: { href?: string; current?: boolean; children: ComponentChildren }) {
-  return href ? <a class="nav-anchor" href={href} aria-current={current ? 'page' : undefined}>{children}</a> : <span class="nav-anchor">{children}</span>;
+/**
+ * The anchor: bold, a link when it has a page (a course), plain text when not (a student's
+ * semester). It never carries aria-current: the page it opens is also the first leaf under it
+ * (Overview), which does.
+ */
+export function NavAnchor({ href, children }: { href?: string; children: ComponentChildren }) {
+  return href ? <a class="nav-anchor" href={href}>{children}</a> : <span class="nav-anchor">{children}</span>;
 }
 
 /** A semester's name in the tree: the live dot before it, "ended" or "archived" after it. */
@@ -284,7 +288,8 @@ export type SubWanted = { materials: boolean; templates: boolean };
 
 /**
  * The instructor's side nav (decision 0031 rule 11): one course, anchored. The root link (All
- * courses), the course as the anchor (its overview), the course's pages (Handout materials and
+ * courses), the course as the anchor (a link to its overview), the course's pages (Overview first,
+ * where the anchor goes, as a semester's Dashboard is where its name goes; Handout materials and
  * Assignment templates open on a page inside them, or with their chevron), then its semesters as
  * nodes: being set up first, every live one, then past ones newest first to three rows and the
  * rest under Older semesters. The open semester is expanded to its pages, else on a course page
@@ -354,10 +359,11 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
   ];
   const expanded = cohort?.org ?? ordered.find((k) => !flags(k).over)?.org ?? null;
   return (
-    <NavTree root={root} anchor={<NavAnchor href={`?course=${course.org}#course`} current={current === 'course'}>{course.name}</NavAnchor>}>
+    <NavTree root={root} anchor={<NavAnchor href={`?course=${course.org}#course`}>{course.name}</NavAnchor>}>
       {course.write ? (
         <>
           <ul class="tree">
+            {leaf('course', `?course=${course.org}#course`, 'Overview')}
             {leaf('details', '#details', 'Course details')}
             {group('materials', '#materials', 'Handout materials', 'the handout materials repos')}
             {group('templates', '#templates', 'Assignment templates', 'the assignment templates')}

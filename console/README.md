@@ -128,7 +128,8 @@ console is in instructor mode for anyone who teaches somewhere, and in student m
 
 The **side nav** is one tree in both consoles (decision 0031 rule 11), with the chevron before
 what it expands. An instructor's is anchored on the open course: "All courses" above it, the
-course name (its overview), the course's pages, then its semesters as nodes: being set up
+course name (a link to its overview), the course's pages (Overview first, where the name
+goes, as a semester's Dashboard is where its name goes), then its semesters as nodes: being set up
 first, every live one (a green dot), then past ones ("ended" or "archived") newest first to
 three rows, the rest under "Older semesters (n)". The open semester is expanded to its nine
 pages, else on a course page the newest live one; one at a time. Other courses are reached
