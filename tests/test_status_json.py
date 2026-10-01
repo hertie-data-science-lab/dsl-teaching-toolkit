@@ -16,7 +16,6 @@ import pytest
 
 from dsl_course import (
     grades,
-    policy,
     releaseignore,
     roster,
     scaffold,
@@ -1654,8 +1653,11 @@ def _unmet(m: status_json.MaterialsFacts) -> list[str]:
         # No folder at all: none of a known kind, and none unmapped either.
         ({"folders": ()}, ["kind_folder"], "todo"),
         # A folder on the default fallback blocks, though another has a kind.
-        ({"folders": ("lectures", "img")}, ["all_mapped"], "todo"),
-        ({"folders": ("img",)}, ["all_mapped", "kind_folder"], "todo"),
+        ({"folders": ("lectures", "code")}, ["all_mapped"], "todo"),
+        ({"folders": ("code",)}, ["all_mapped", "kind_folder"], "todo"),
+        # Supporting files have a kind by name, but on their own make nothing to show.
+        ({"folders": ("lectures", "img")}, [], "ready"),
+        ({"folders": ("data",)}, ["kind_folder"], "todo"),
         # A declared kind maps the folder, matched case-insensitively.
         ({"folders": ("Tutorien",), "kinds": {"tutorien": "lab"}}, [], "ready"),
         # The two non-blocking lines never stop ready.
@@ -1687,10 +1689,10 @@ def test_the_checklist_order_and_what_blocks():
     assert checks[1]["label"] == "At least one folder of a content kind"
 
 
-def test_kind_folder_lists_every_content_kind_with_its_folders():
+def test_kind_folder_lists_the_content_kinds_found_with_their_folders():
     m = _materials(
         "m",
-        folders=("Lectures", "tutorials", "Tutorien", "img", "solution"),
+        folders=("Lectures", "tutorials", "Tutorien", "img", "code", "solution"),
         kinds={"tutorien": "lab"},
     )
     checks = status_json.materials_checks(m)
@@ -1698,12 +1700,13 @@ def test_kind_folder_lists_every_content_kind_with_its_folders():
     assert [c["id"] for c in checks if "detail" in c] == ["kind_folder"]
     (kind,) = [c for c in checks if c["id"] == "kind_folder"]
     found = {d["kind"]: d["folders"] for d in kind["detail"]}
-    # Every content kind of the policy, in its order; an unmapped or never-released
-    # folder is under none.
-    assert list(found) == list(policy.content_kinds())
-    assert found["lecture"] == ["Lectures"]
-    assert found["lab"] == ["tutorials", "Tutorien"]
-    assert found["readings"] == []
+    # Only the kinds some folder names, in the policy's order (decision 0026 rule 3); an
+    # unmapped or never-released folder is under none.
+    assert found == {
+        "lecture": ["Lectures"],
+        "lab": ["tutorials", "Tutorien"],
+        "assets": ["img"],
+    }
 
 
 def test_the_seeded_releaseignore_is_not_reviewed_and_a_pattern_or_the_mark_is():
@@ -1720,12 +1723,12 @@ def test_the_seeded_releaseignore_is_not_reviewed_and_a_pattern_or_the_mark_is()
 
 
 def test_the_unmapped_folders_are_named_and_never_released_ones_skipped():
-    m = _materials("m", folders=("lectures", "data", "img", "solution", "tests"))
+    m = _materials("m", folders=("lectures", "code", "misc", "solution", "tests"))
     (why,) = [
         c["why"] for c in status_json.materials_checks(m) if c["id"] == "all_mapped"
     ]
     assert (
-        why == "The folders data/, img/ have no kind yet; set them under Folder kinds."
+        why == "The folders code/, misc/ have no kind yet; set them under Folder kinds."
     )
     # Only never-released folders: as good as none.
     only = _materials("m", folders=("solution",))
@@ -1736,9 +1739,18 @@ def test_the_unmapped_folders_are_named_and_never_released_ones_skipped():
         "There is no lectures/, labs/ or readings/ folder yet; add one or set a "
         "folder's kind under Folder kinds."
     )
-    img = _materials("m", folders=("img",))
-    (kind,) = [c for c in status_json.materials_checks(img) if c["id"] == "kind_folder"]
+    code = _materials("m", folders=("code",))
+    (kind,) = [
+        c for c in status_json.materials_checks(code) if c["id"] == "kind_folder"
+    ]
     assert kind["why"] == "No top folder has a kind yet; set one under Folder kinds."
+    data = _materials("m", folders=("data",))
+    (kind,) = [
+        c for c in status_json.materials_checks(data) if c["id"] == "kind_folder"
+    ]
+    assert kind["why"] == (
+        "Only supporting files so far; set a folder's kind under Folder kinds."
+    )
 
 
 def test_c4_and_c5_are_done_once_any_one_is_ready():

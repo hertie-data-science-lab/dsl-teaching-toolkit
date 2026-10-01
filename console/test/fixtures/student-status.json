@@ -51,6 +51,11 @@
       "colour": "#8f4a1c",
       "background": "#fbe3d6"
     },
+    "assets": {
+      "label": "Supporting files",
+      "colour": "#4a5560",
+      "background": "#eceff1"
+    },
     "other": {
       "label": "Event",
       "colour": "#7d6230",

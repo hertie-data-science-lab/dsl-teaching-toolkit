@@ -95,6 +95,7 @@ from .gh_contents import (
 from .gh_teams import get_team_members
 from .ghcli import gh
 from .materials import (
+    ASSETS_KIND,
     DEFAULT_SYLLABUS,
     MATERIALS_TOPIC,
     Declared,
@@ -710,12 +711,35 @@ def _unmapped_why(folders: list[str]) -> str:
 
 
 def _kinds_found(m: MaterialsFacts) -> list[dict]:
-    """Every content kind the policy knows, with the released top folders that name it."""
+    """The content kinds the released top folders name, in the policy's order, each with
+    its folders; a kind no folder names is left out (decision 0026 rule 3)."""
     named = {f: alias_kind(f, m.kinds) for f in _released_folders(m)}
-    return [
+    found = [
         {"kind": kind, "folders": [f for f, k in named.items() if k == kind]}
         for kind in policy.content_kinds()
     ]
+    return [d for d in found if d["folders"]]
+
+
+def _shown_folders(m: MaterialsFacts) -> list[str]:
+    """The released top folders of a kind the sites show: a supporting-files folder is
+    released but gets no page, so on its own it does not make a repo releasable."""
+    return [
+        f
+        for f in _released_folders(m)
+        if alias_kind(f, m.kinds) not in (None, ASSETS_KIND)
+    ]
+
+
+def _kind_folder_why(released: list[str], unmapped: list[str]) -> str:
+    if not released:
+        return (
+            "There is no lectures/, labs/ or readings/ folder yet; add one or set a "
+            "folder's kind under Folder kinds."
+        )
+    if len(unmapped) < len(released):
+        return "Only supporting files so far; set a folder's kind under Folder kinds."
+    return "No top folder has a kind yet; set one under Folder kinds."
 
 
 def materials_checks(m: MaterialsFacts) -> list[dict]:
@@ -736,15 +760,8 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
             "kind_folder",
             "At least one folder of a content kind",
             True,
-            len(unmapped) < len(released),
-            (
-                "No top folder has a kind yet; set one under Folder kinds."
-                if released
-                else (
-                    "There is no lectures/, labs/ or readings/ folder yet; add one or "
-                    "set a folder's kind under Folder kinds."
-                )
-            ),
+            bool(_shown_folders(m)),
+            _kind_folder_why(released, unmapped),
         ),
         ("syllabus", "Syllabus written", True, _syllabus_written(m), _syllabus_why(m)),
         (
@@ -756,10 +773,10 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
         ),
         (
             "sessions",
-            "Session list generated",
+            "Weekly plan generated",
             False,
             m.sessions,
-            "The session list has not been generated yet.",
+            "The weekly plan has not been generated yet.",
         ),
     )
     return [

@@ -62,6 +62,7 @@ from .discovery import (
 from .gh_contents import get_file_content, repo_tree
 from .grades import load_grading_spec, spoken_day
 from .log import CLIParser, log_err, log_step
+from .materials import ASSETS_KIND
 from .materials import read as read_materials
 from .public_site import publish as publish_public_site
 from .readings import demote_headings, is_reading_overlay
@@ -524,7 +525,8 @@ def _offplan_rows(
     """`(key, row)` for each off-plan folder (`schedule_plan.offplan_folders`; decision
     0013: it keeps a row, on its kind's tab): unnumbered, undated, named for its folder. A
     readings folder joins the lecture folder of the same `NN_` ordinal, as such folders
-    always did; the rest are rows of their own."""
+    always did; a supporting-files folder is no row (decision 0026); the rest are rows of
+    their own."""
 
     def land(repo: str, folder: str, readings: bool) -> list[_Landed]:
         deploy = schedule.Deploy("", folder, repo)
@@ -542,6 +544,8 @@ def _offplan_rows(
     joined: dict[tuple[str, str], list[_Landed]] = {}
     out = []
     for repo, folder, kind in folders:
+        if kind == ASSETS_KIND:
+            continue
         n = session_number(folder.rsplit("/", 1)[-1])
         if kind == "readings" and n in lectures:
             joined.setdefault(lectures[n], []).extend(land(repo, folder, True))

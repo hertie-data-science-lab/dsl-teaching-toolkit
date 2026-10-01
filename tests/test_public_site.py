@@ -43,6 +43,8 @@ def _seed_source(root: Path) -> None:
         "readings/01_first-lab/paper.pdf": "%PDF-1.4 copyrighted",
         "readings/03_third-session/READINGS.md": "- Jones 2021, ch.3",
         "README.md": "# materials",  # not a section
+        # Supporting files (decision 0026): a section, but never a row.
+        "data/01_first-lab/rows.csv": "a,b",
         # What a faculty member keeps beside the lab, and the public must never see.
         "labs/01_first-lab/solution/answers.ipynb": "the answers",
         "labs/01_first-lab/grading_config.yml": "points: 10",
@@ -382,3 +384,13 @@ def test_a_symlink_cannot_smuggle_a_denied_file_onto_the_public_site(published):
     files = published(readings_mode="actual-readings")
     assert f"{SERVED}/session-1/labs/lab.ipynb" in files
     assert "the answers" not in files.get(f"{SERVED}/session-1/labs/handout.pdf", "")
+
+
+def test_supporting_files_sections_are_no_row(published):
+    files = published(readings_mode="none")
+    assert not [p for p in files if p.startswith(f"{SERVED}/session-1/data/")]
+    # Session 1 has labs and data only: still no lecture row.
+    assert "_lectures/session-01.md" not in files
+    assert public_site.shown_sections(["labs", "Data", "quiz"], {"quiz": "assets"}) == [
+        "labs"
+    ]

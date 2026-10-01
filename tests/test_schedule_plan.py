@@ -347,3 +347,16 @@ def test_the_console_s_key_for_a_new_readings_pack_joins_no_lecture():
         ("readings-week", None, []),
         ("readings-b", None, []),
     ]
+
+
+def test_a_supporting_files_entry_is_no_row():
+    # Decision 0026 rule 3: released with the rest, never a row (nor a weekly-plan line).
+    rows = _rows(
+        [
+            Release("lecture-1", _at(1), [Deploy("cm", "lectures/a")]),
+            Release("data", _at(1), [Deploy("cm", "data/week1")]),
+            Release("figs", _at(2), [Deploy("cm", "lectures/a")], kind="assets"),
+        ]
+    )
+    assert [r.kind for r in rows] == ["lecture", "assets", "assets"]
+    assert _shown(schedule_plan.site_rows(rows)) == [("lecture-1", 1, [])]

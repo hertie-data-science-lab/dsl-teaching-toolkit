@@ -20,6 +20,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
+import yaml
+
 from .course import (
     discover_local_sessions,
     discover_sections,
@@ -30,6 +32,8 @@ from .faults import Unusable
 from .fs import copy_tree, union_deny
 from .ghcli import clone
 from .log import Summary, log, log_err, log_step
+from .materials import ASSETS_KIND, MATERIALS_FILE, Declared, alias_kind
+from .materials import parse as parse_materials
 from .opencourse import OPENCOURSE_FILE, OpenCourse
 from .opencourse import read as read_opencourse
 from .readings import readings_block
@@ -68,6 +72,23 @@ PUBLIC_MATERIALS_DIR = "public-materials"
 # one section that makes a lab row. The semester site reads kinds from the schedule.
 READINGS_SECTION = "readings"
 LAB_SECTION = "labs"
+
+
+def _declared(src: Path) -> Declared:
+    """The clone's own `materials.yml`; none, or one that does not parse, is the defaults
+    (its problem is reported on the course page, not here)."""
+    try:
+        return parse_materials(
+            yaml.safe_load((src / MATERIALS_FILE).read_text(encoding="utf-8"))
+        )
+    except (OSError, yaml.YAMLError, Unusable):
+        return Declared()
+
+
+def shown_sections(sections: list[str], kinds: dict[str, str]) -> list[str]:
+    """The sections that get rows: a supporting-files one (`data/`, `img/`, ...) never
+    does (decision 0026 rule 3)."""
+    return [s for s in sections if alias_kind(s, kinds) != ASSETS_KIND]
 
 
 def row_kind(section: str) -> str:
@@ -264,8 +285,12 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             # use), not a hardcoded lectures/readings pair - a course whose content lives
             # in `labs/` publishes labs. `readings` is the one section with special
             # semantics (`readings_mode`, below); `include_lectures` gates all the others.
+            # Supporting-files sections are never rows here either.
             file_sections = (
-                [sec for sec in discover_sections(src) if sec != READINGS_SECTION]
+                shown_sections(
+                    [sec for sec in discover_sections(src) if sec != READINGS_SECTION],
+                    dict(_declared(src).kinds),
+                )
                 if include_lectures
                 else []
             )

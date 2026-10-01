@@ -488,7 +488,9 @@ Blocks: `defaults` (late pair, team cap, visibility, team formation, formats, ti
 archive grace, release destination repo), `kinds` (ordered row kinds with label, label
 colour and row colour; `assignment`, `term`, `archive` are `system: true` and `other` is
 required; the non-system kinds are what a release entry's `kind:` may say, and each one a
-semester has rows of gets a tab on its site), `institution` (the site block), `contact` (the last fault address, after
+semester has rows of gets a tab on its site; `assets`, "Supporting files", is released but
+never a row or a tab on either site, `schedule_plan.site_rows` and `public_site.shown_sections`
+drop it), `institution` (the site block), `contact` (the last fault address, after
 `DSL_MAINTAINER_EMAIL` and `GRAPH_SENDER`), `licences` (the open site's choices, default
 first).
 

@@ -18,6 +18,7 @@ from .faults import ConfigFault
 from .gh_contents import line_of
 from .log import Summary, log_err
 from .materials import (
+    ASSETS_KIND,
     DEFAULT_KIND,
     DEFAULT_SYLLABUS,
     Declared,
@@ -147,7 +148,9 @@ def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
       joins the shown lecture with that number. Nothing is inferred from dates: any
       other readings entry, or one whose number no lecture carries, is its own row.
     - A silent (`show_on_site: false`) entry is no row, unless it is readings: an
-      unjoined one is a row of the Readings tab, unnumbered."""
+      unjoined one is a row of the Readings tab, unnumbered.
+    - A supporting-files (`assets`) entry is never a row: it is released, not shown
+      (decision 0026 rule 3)."""
     lecture_numbers: dict[int, str] = {}
     for r in rows:
         if r.shown and r.kind == "lecture" and (n := own_number(r.number, r.key)):
@@ -156,6 +159,8 @@ def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
     own = []
     for r in rows:
         n = own_number(r.number, r.key)
+        if r.kind == ASSETS_KIND:
+            continue
         if r.kind == "readings" and n and (host := lecture_numbers.get(n)):
             attached.setdefault(host, []).append(r)
         elif r.shown or r.kind == "readings":
