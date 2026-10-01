@@ -116,7 +116,7 @@ export function termOfFacts(facts: Pick<SemesterFacts, 'start' | 'end'>): Term |
 }
 
 /**
- * The semester banner's line for a student, as the instructor's (the engine's `semester_weeks`):
+ * The course banner's semester line for a student, as the instructor's (the engine's `semester_weeks`):
  * "Week N of M", clamped to the last week and absent before week 1, and the dates. Each is
  * left out when the facts do not carry the dates (an older file, or the site).
  */

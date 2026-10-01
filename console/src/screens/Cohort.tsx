@@ -62,7 +62,7 @@ export function AsgRows({ status, now }: { status: Status; now: number }) {
 }
 
 /**
- * The Dashboard's line under its title: what the semester banner does not say (its name, dates
+ * The Dashboard's line under its title: what the course banner does not say (its name, dates
  * and week are there). The start while the semester has no end date yet, the exams, the archive.
  */
 export function headerLine(status: Status, sched: Schedule | null, rows: Row[], tz: string, thisYear: number): string {
