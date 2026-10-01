@@ -25,7 +25,8 @@ by accident:
 
 1. **A file with nothing fenced is never written.** No markers and no `solution` tag means
    the derived file WOULD BE the model answer, byte for byte, published as the starter.
-   That is reported per file and reds the run rather than being written.
+   That is reported per file and reds the run rather than being written. A blank file
+   (an empty `__init__.py`) has no answer in it and is copied as it is.
 2. **An unbalanced fence is refused**, not guessed at. A `BEGIN` with no `END` could as
    easily mean "the rest of this cell is the answer" as "the marker is a typo", and one of
    those two readings publishes it.
@@ -466,13 +467,32 @@ def derivable_sources(tree: tuple[str, ...] | list[str]) -> list[str]:
 
 
 def _missing_fences(path: str, tick: str) -> str:
-    """The fences a file with none could have used, in its own vocabulary."""
-    if PurePosixPath(path).suffix.lower() == ".tex":
+    """The fences a file with none could have used, in its own vocabulary: a `.py` file
+    cannot carry a cell tag or a chunk option, so naming them only misleads."""
+    suffix = PurePosixPath(path).suffix.lower()
+    if suffix == ".tex":
         return f"{tick}{TEX_BEGIN_SOLUTION}{tick} region"
-    return (
-        f"{tick}BEGIN SOLUTION{tick} region, no {tick}{SOLUTION_TAG}{tick} cell tag "
-        f"and no {tick}solution=TRUE{tick} chunk"
-    )
+    region = f"{tick}BEGIN SOLUTION{tick} region"
+    if suffix == ".ipynb":
+        return f"{region} and no {tick}{SOLUTION_TAG}{tick} cell tag"
+    if suffix in (".rmd", ".qmd"):
+        return f"{region} and no {tick}{SOLUTION_CHUNK_OPT}{tick} chunk"
+    return region
+
+
+def _how_to_fence(path: str) -> str:
+    """What a faculty member does about a file with nothing fenced, in its vocabulary."""
+    suffix = PurePosixPath(path).suffix.lower()
+    if suffix == ".tex":
+        lines = f"{TEX_BEGIN_SOLUTION} and {TEX_END_SOLUTION}"
+    else:
+        lines = f"{BEGIN_SOLUTION} and {END_SOLUTION}"
+    extra = {
+        ".ipynb": f", or tag each answer cell {SOLUTION_TAG}",
+        ".rmd": f", or add {SOLUTION_CHUNK_OPT} to each answer chunk",
+        ".qmd": f", or add {SOLUTION_CHUNK_OPT} to each answer chunk",
+    }.get(suffix, "")
+    return f"Put {lines} lines around each answer{extra}, then derive again."
 
 
 def _refused(code: str, text: str) -> dict:
@@ -541,7 +561,9 @@ def derive_student_version(
             log_err(f"  ! {exc}")
             reasons.append(_refused("SOLUTION_REGION_BROKEN", f"{exc}."))
             continue
-        if not stripped.replaced:
+        # A blank file (a package's empty `__init__.py`) has no answer to hide, and no
+        # fence can be put in it, so refusing it left a template that could never derive.
+        if not stripped.replaced and text.strip():
             log_err(
                 f"  ! {path} has no {_missing_fences(path, '`')} - NOT written, because "
                 f"the starter derived from it would be the model answer itself"
@@ -550,7 +572,7 @@ def derive_student_version(
                 _refused(
                     "NO_SOLUTION_REGION",
                     f"{path} has no {_missing_fences(path, '')}, so the starter would be "
-                    f"the model answer.",
+                    f"the model answer. {_how_to_fence(path)}",
                 )
             )
             continue

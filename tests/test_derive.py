@@ -556,6 +556,37 @@ def test_an_unfenced_write_up_is_refused_naming_the_latex_fence(monkeypatch, cap
     assert out == 1
     assert out.reasons[0]["text"] == (
         "solution/report.tex has no % BEGIN SOLUTION region, so the starter would be "
-        "the model answer."
+        "the model answer. Put % BEGIN SOLUTION and % END SOLUTION lines around each "
+        "answer, then derive again."
     )
     assert "no `% BEGIN SOLUTION` region - NOT written" in capsys.readouterr().err
+
+
+def test_an_unfenced_python_file_names_only_the_fence_python_can_carry(monkeypatch):
+    # The demo's assignment 1 (1 Oct): `solution/solution.py` is an unfenced model
+    # answer. The refusal named a cell tag and an Rmd chunk option, neither of which a
+    # `.py` file can hold, and said nothing about what to do.
+    _Repo({"solution/solution.py": "def fit():\n    return 1\n"}).install(monkeypatch)
+    out = derive.derive_student_version("Course", "assignment-1-f2026", True)
+    assert out.reasons[0]["text"] == (
+        "solution/solution.py has no BEGIN SOLUTION region, so the starter would be "
+        "the model answer. Put ### BEGIN SOLUTION and ### END SOLUTION lines around "
+        "each answer, then derive again."
+    )
+    _Repo({"solution/a.ipynb": json.dumps({"cells": []})}).install(monkeypatch)
+    text = derive.derive_student_version("Course", "t", True).reasons[0]["text"]
+    assert "no solution cell tag" in text and "tag each answer cell solution" in text
+    assert "chunk" not in text
+
+
+def test_a_blank_file_is_copied_rather_than_blocking_the_derive(monkeypatch):
+    # The demo's project templates: `solution/src/__init__.py` is empty. No fence can go
+    # in it and it holds no answer, yet it was refused, so the template could never
+    # derive however well the other files were fenced.
+    repo = _Repo(
+        {"solution/src/__init__.py": "", "solution/src/pipeline.py": FENCED_PY}
+    ).install(monkeypatch)
+    out = derive.derive_student_version("Course", "assignment-3-f2026", False)
+    assert out == 0 and out.reasons == []
+    assert repo.written["src/__init__.py"] == b""
+    assert derive.PY_PLACEHOLDER in repo.written["src/pipeline.py"].decode()
