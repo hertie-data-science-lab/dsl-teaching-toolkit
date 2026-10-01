@@ -972,8 +972,9 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 
 /* WP-U4: the run popup resizes by its bottom-left grip; generated text is small monospace */
 .drawer-grip { position: absolute; left: 0; bottom: 0; width: 18px; height: 18px; cursor: nesw-resize; touch-action: none; border-bottom-left-radius: 14px; background: linear-gradient(45deg, transparent 45%, var(--rule-strong) 45%, var(--rule-strong) 55%, transparent 55%, transparent 70%, var(--rule-strong) 70%, var(--rule-strong) 80%, transparent 80%); opacity: 0.7; }
-.drawer-grip:hover { opacity: 1; }
-.drawer.sized { max-height: none; max-width: none; }
+.drawer-grip:hover, .drawer-grip:focus-visible { opacity: 1; }
+.drawer-grip:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 1px; }
+.drawer.sized { max-width: calc(100vw - 32px); max-height: calc(100vh - 80px); }
 .drawer.sized .drawer-body { flex: 1 1 auto; }
 .drawer .outcome-details { margin: 0; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.45; white-space: pre-wrap; overflow: auto; }
-@media (max-width: 520px) { .drawer-grip { display: none; } }
+@media (max-width: 520px) { .drawer-grip { display: none; } .drawer.sized { width: 100% !important; height: auto !important; max-width: none; max-height: calc(100vh - 80px); } }

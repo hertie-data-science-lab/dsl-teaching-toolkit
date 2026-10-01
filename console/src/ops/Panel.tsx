@@ -154,30 +154,50 @@ function Options({ c, ops }: { c: Current; ops: OpsSession }) {
 type Size = { w: number; h: number } | null;
 const MIN_W = 320, MIN_H = 240;
 
+const STEP = 24; // px per arrow key press
+
+/** A size clamped between a usable minimum and the viewport (the drawer sits `top` px down). */
+function clamp(w: number, h: number, top: number): { w: number; h: number } {
+  return {
+    w: Math.round(Math.min(Math.max(w, MIN_W), window.innerWidth - 32)),
+    h: Math.round(Math.min(Math.max(h, MIN_H), window.innerHeight - top - 16)),
+  };
+}
+
 /**
  * The bottom-left grip: the drawer is anchored top-right, so dragging left widens it and
- * dragging down makes it taller. Clamped between a usable minimum and the viewport.
+ * dragging down makes it taller. The pointer is captured for the drag; the arrow keys
+ * resize it too (left/right the width, up/down the height).
  */
 function Grip({ box, set }: { box: { current: HTMLElement | null }; set: (s: Size) => void }) {
   const down = (e: PointerEvent) => {
     const el = box.current;
+    const grip = e.currentTarget as HTMLElement;
     if (!el) return;
     e.preventDefault();
     const r = el.getBoundingClientRect();
     const x0 = e.clientX, y0 = e.clientY;
-    const move = (m: PointerEvent) => {
-      const w = Math.min(Math.max(r.width + (x0 - m.clientX), MIN_W), window.innerWidth - 32);
-      const h = Math.min(Math.max(r.height + (m.clientY - y0), MIN_H), window.innerHeight - r.top - 16);
-      set({ w: Math.round(w), h: Math.round(h) });
+    grip.setPointerCapture?.(e.pointerId);
+    const move = (m: PointerEvent) => set(clamp(r.width + (x0 - m.clientX), r.height + (m.clientY - y0), r.top));
+    const end = (u: PointerEvent) => {
+      grip.releasePointerCapture?.(u.pointerId);
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', end);
+      grip.removeEventListener('pointercancel', end);
     };
-    const up = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', end);
+    grip.addEventListener('pointercancel', end);
   };
-  return <span class="drawer-grip" aria-hidden="true" title="Drag to resize" onPointerDown={down} />;
+  const key = (e: KeyboardEvent) => {
+    const el = box.current;
+    const d = { ArrowLeft: [STEP, 0], ArrowRight: [-STEP, 0], ArrowDown: [0, STEP], ArrowUp: [0, -STEP] }[e.key];
+    if (!el || !d) return;
+    e.preventDefault();
+    const r = el.getBoundingClientRect();
+    set(clamp(r.width + d[0], r.height + d[1], r.top));
+  };
+  return <span class="drawer-grip" role="separator" tabindex={0} aria-label="Resize the panel: drag, or use the arrow keys" title="Drag to resize" onPointerDown={down} onKeyDown={key} />;
 }
 
 /** Where "See on GitHub" goes for this run, or null when the op names no place. */
