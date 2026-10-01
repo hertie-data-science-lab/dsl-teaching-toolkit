@@ -130,7 +130,7 @@ each, the team's on a group sheet). See [10](10-grade-and-return-assignments.md)
 
 Live example: [`example-course/semester-org/teams.csv`](../example-course/semester-org/teams.csv).
 
-Teams are formed in one of two ways - both end up in `semester-config/teams.csv` (`assignment, team, github_handle`), and **Sync membership** turns each into a GitHub team on push. A team need not exist before the hand-out: the release provisions one shared repo per team that exists, and a scheduled hand-out re-fires every tick, so a team formed on day three gets its repo then.
+Teams are formed in one of two ways - both end up in `semester-config/teams.csv` (`assignment, team, github_handle`), and **Sync membership** turns each into a secret GitHub team on push (visible only to its members and org owners; the student console's Join screen is the list). A team need not exist before the hand-out: the release provisions one shared repo per team that exists, and a scheduled hand-out re-fires every tick, so a team formed on day three gets its repo then.
 
 Which of the two an assignment uses is the semester's - `team_formation` in `semester-config/assignments.yml`:
 

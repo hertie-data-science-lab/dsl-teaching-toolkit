@@ -2,7 +2,8 @@
 
 The gh wiring (create/add/remove team) is not tested - only the pure mapping from the
 parsed roster of project teams to {team_slug: members}, which decides what gets created,
-plus ensure_team's prune guard (the membership primitives stubbed, no live calls).
+plus ensure_team's prune guard and the privacy it asks for (the gh primitives stubbed, no
+live calls).
 """
 
 from __future__ import annotations
@@ -124,6 +125,19 @@ def test_ensure_team_stops_when_the_team_could_not_be_made(stub_team, monkeypatc
     monkeypatch.setattr(sync_teams, "create_team_outcome", lambda *a, **k: None)
     assert not sync_teams.ensure_team("org", "team-x", {"anna-adams"}, prune=True)
     assert stub_team["added"] == []
+
+
+def test_ensure_team_asks_for_a_secret_team(stub_team, monkeypatch):
+    # A visible team carries GitHub's own "Request to join" button, which goes around the
+    # Join team form. The same ask converges a team that already exists `closed`.
+    asked = []
+    monkeypatch.setattr(
+        sync_teams,
+        "create_team_outcome",
+        lambda *a, **k: asked.append(k) or gh_teams.EXISTED,
+    )
+    assert sync_teams.ensure_team("org", "team-x", {"anna-adams"}, prune=False)
+    assert [k["privacy"] for k in asked] == ["secret"]
 
 
 def test_ensure_team_without_prune_only_adds(stub_team):

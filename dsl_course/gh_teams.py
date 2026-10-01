@@ -18,7 +18,7 @@ from .ghcli import (
     is_missing_resource,
     start_budget,
 )
-from .log import log, log_err, log_ok, log_person, log_skip
+from .log import log, log_err, log_err_person, log_ok, log_person, log_skip
 
 # GitHub usernames: 1-39 chars, ASCII alphanumerics or single hyphens, no leading/
 # trailing hyphen and no consecutive hyphens. Used to reject a typo'd faculty handle
@@ -84,12 +84,13 @@ def create_team_outcome(
 def _converge_team_privacy(org: str, name: str, privacy: str | None) -> None:
     """Correct an existing team's privacy, but only when it is actually wrong.
 
-    A team keeps the privacy it was made with, and nothing else revisits it - `students`
-    and `auditors` are `secret` so a student cannot read the class list off the team page,
-    and every semester created before that decision still has them `closed`. Converged here,
-    at the one place a duplicate is seen. The read comes first because create_team runs
-    once per team per sync, every hour: an unconditional PATCH spent that whole allowance
-    of the write governor re-setting privacy that was already right."""
+    A team keeps the privacy it was made with, and nothing else revisits it - `students`,
+    `auditors` and every project team are `secret` (course.SEMESTER_TEAMS,
+    sync_teams.PROJECT_TEAM_PRIVACY), and every one made before those decisions is still
+    `closed`. Converged here, at the one place a duplicate is seen. The read comes first
+    because create_team runs once per team per sync, every hour: an unconditional PATCH
+    spent that whole allowance of the write governor re-setting privacy that was already
+    right."""
     if privacy is None:
         log_skip(f"team {name}")
         return
@@ -109,8 +110,11 @@ def _converge_team_privacy(org: str, name: str, privacy: str | None) -> None:
         log_skip(f"team {name}")
     else:
         # The team exists either way, which is what create_team returns; only its privacy
-        # could not be corrected.
-        log_err(f"team {name}: privacy not set to {privacy}: {out[:120]}")
+        # could not be corrected. A project team's NAME says who is grouped with whom.
+        log_err_person(
+            f"a team's privacy was not set to {privacy}",
+            f"team {name}: privacy not set to {privacy}: {out[:120]}",
+        )
 
 
 def create_role_teams(org: str, teams: Iterable[tuple[str, str, str]]) -> int:
