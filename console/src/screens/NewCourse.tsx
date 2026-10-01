@@ -198,10 +198,10 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     body = (
       <>
         <Checks list={[...(orgChecks ?? []), ...(setUp ?? []), ...summary]} busy={orgLive.busy || setupLive.busy} />
-        <ul class="checks"><li><span class="ck todo" /><span>No materials yet</span></li><li><span class="ck todo" /><span>No assignment templates yet</span></li></ul>
-        <p>The course is set up. It is ready for a semester once it has materials and at least one assignment template.</p>
+        <ul class="checks"><li><span class="ck todo" /><span>No handout materials yet</span></li><li><span class="ck todo" /><span>No assignment templates yet</span></li></ul>
+        <p>The course is set up. It is ready for a semester once it has handout materials and at least one assignment template.</p>
         <div class="actions">
-          <a class="btn" href={`?course=${org}#new-materials`}>Add materials</a>
+          <a class="btn" href={`?course=${org}#new-materials`}>Add handout materials</a>
           <a class="btn outline" href={`?course=${org}#new-assignment-1`}>New assignment</a>
         </div>
       </>

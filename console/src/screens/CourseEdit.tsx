@@ -460,7 +460,7 @@ export function WebsiteScreen(p: CourseProps) {
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Public website' }]} />
       <div class="page-head">
         <div>
-          <h1>Public website <Hint doc="reference/actions-reference.md">An open version of one materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h1>
+          <h1>Public website <Hint doc="reference/actions-reference.md">An open version of one handout materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h1>
           <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : siteExists && !before.enabled ? 'Off' : 'Not published'}</span>{published ? 'Updates daily.' : siteExists && !before.enabled ? WEBSITE_OFF_LIVE : 'Optional: an open version of your materials for anyone.'}</p>
         </div>
         <div class="actions">
@@ -473,7 +473,7 @@ export function WebsiteScreen(p: CourseProps) {
       <div class="grid-2">
         <section class="panel section">
           <h2>Settings</h2>
-          {repos.length ? <SchemaForm id="ws" schema={null} tiers={publishTiers(repos, siteExists)} values={values} onChange={onForm} /> : <p class="footnote">No materials repo yet: create one first.</p>}
+          {repos.length ? <SchemaForm id="ws" schema={null} tiers={publishTiers(repos, siteExists)} values={values} onChange={onForm} /> : <p class="footnote">No handout materials repo yet: create one first.</p>}
           {before.enabled ? null : <p class="footnote">The website is off: Publish refuses until it is on and saved.</p>}
         </section>
         <section class="panel section">

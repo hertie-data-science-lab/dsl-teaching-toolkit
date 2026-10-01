@@ -221,7 +221,7 @@ describe('S6 schedule and S11 release', () => {
   it('lists the materials repos and the Other repos to release from', () => {
     const listed = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE }, {}, TREE, { [COURSE_ORG]: [{ name: '.github' }, { name: 'course-materials-f2026' }, { name: 'lecture-code-f2026' }, { name: 'assignment-3-f2026' }] });
     const out = html(<ScheduleScreen {...props({ entry: 's5', files: listed })} />);
-    expect(out).toMatch(/<optgroup label="Materials repos"><option value="course-materials-f2026" selected>/);
+    expect(out).toMatch(/<optgroup label="Handout materials repos"><option value="course-materials-f2026" selected>/);
     expect(out).toContain('<optgroup label="Other repos"><option value="lecture-code-f2026">lecture-code-f2026</option></optgroup>');
   });
   it('renders a release with its source, destination and problem', () => {

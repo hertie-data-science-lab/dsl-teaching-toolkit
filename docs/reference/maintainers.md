@@ -490,7 +490,7 @@ colour and row colour; `assignment`, `term`, `archive` are `system: true` and `o
 required; the non-system kinds are what a release entry's `kind:` may say, and each one a
 semester has rows of gets a tab on its site; `assets`, "Supporting files", is released but
 never a row or a tab on either site, `schedule_plan.site_rows` and `public_site.shown_sections`
-drop it), `institution` (the site block), `contact` (the last fault address, after
+drop it; the public website neither hosts nor links its files, since it hosts by section), `institution` (the site block), `contact` (the last fault address, after
 `DSL_MAINTAINER_EMAIL` and `GRAPH_SENDER`), `licences` (the open site's choices, default
 first).
 
