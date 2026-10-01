@@ -388,13 +388,16 @@ targets (scheduler, Sync membership, Send enrolment codes, Sync site) rewrites t
 every Console run rewrites its semester's and the course's (`status.write_after_op`). It records
 the git shas of its inputs, never a timestamp, so an unchanged render makes no commit.
 
-`.system/student-status.json` (`dsl.student-status/1`, `student_status`) is written by the same
+`.system/student-status.json` (`dsl.student-status/2`, `student_status`) is written by the same
 `status.write`, for a live semester, into the SEMESTER org's public `.github`: what the student
 console reads instead of the site. It is public, so its shape is an allow-list, closed at every
 level (`console/schemas/student-status.schema.json`, `tests/test_student_status.py`): no roster,
 marks, handles, enrol codes or team membership (a team is its name, headcount and cap), an
 email only where `show_email: true`, a brief and shape note only once handed out, and no
 assignment with `show_on_site: false`. A key added to it is added to the allow-list first.
+Unlike `status.json` it carries one moment, `generated_at`, for the student's "Updated <age>":
+`student_status.settle` keeps the published file's moment when nothing else changed, so an
+unchanged semester still makes no commit. The console reads `/1` files too (no dates, no age).
 
 The join workflows route a Join issue on its form's label OR on a hidden first line
 (`course.JOIN_COURSE_MARKER`, `JOIN_TEAM_MARKER`, exported in `names.json`): the console opens

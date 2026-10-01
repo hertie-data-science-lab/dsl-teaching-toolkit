@@ -186,6 +186,9 @@
     "course_name": {
       "type": "string"
     },
+    "generated_at": {
+      "type": "string"
+    },
     "home_markdown": {
       "type": "string"
     },
@@ -418,11 +421,23 @@
     },
     "schema": {
       "enum": [
-        "dsl.student-status/1"
+        "dsl.student-status/2"
       ]
     },
     "semester": {
       "type": "string"
+    },
+    "semester_end": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "semester_start": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "syllabus": {
       "additionalProperties": false,
@@ -455,6 +470,9 @@
     "semester",
     "course_name",
     "term_label",
+    "semester_start",
+    "semester_end",
+    "generated_at",
     "timezone",
     "archive_datetime",
     "home_markdown",

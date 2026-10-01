@@ -174,6 +174,16 @@ export function landing(courses: Course[]): string {
   return writable.length === 1 ? 'dashboard' : 'home';
 }
 
+/**
+ * Where a URL that names no page lands a person who teaches nothing (decision 0029 rule 3):
+ * the org of their one live semester, whose This week opens; null (Your semesters) otherwise.
+ */
+export function studentLanding(estate: Estate): string | null {
+  if (estate.courses.length || isInstructor(estate)) return null;
+  const live = estate.semesters.filter((s) => s.role === 'student' && !s.archived);
+  return live.length === 1 ? live[0].org : null;
+}
+
 /** The student screens, in nav order, with their labels; `week` is where a semester opens. */
 export const STUDENT_SCREENS: [string, string][] = [
   ['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['materials', 'Materials'], ['setup', 'Set up'], ['join', 'Join'], ['instructors', 'Instructors'],

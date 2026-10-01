@@ -75,9 +75,9 @@ main { min-width: 0; }
 .menu-wrap .popmenu { left: auto; right: 0; top: calc(100% + 6px); width: 260px; }
 
 /* ================= hint: the one help pattern, a ? with a popover ================= */
-.hint { position: relative; display: inline-flex; vertical-align: middle; margin-left: 6px; font-family: var(--font-body); font-weight: 400; font-size: 14px; line-height: 1.45; text-wrap: wrap; }
+.hint-wrap { position: relative; display: inline-flex; vertical-align: middle; margin-left: 6px; font-family: var(--font-body); font-weight: 400; font-size: 14px; line-height: 1.45; text-wrap: wrap; }
 .hint-btn { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--rule-strong); background: var(--surface); color: var(--ink-2); font-family: var(--font-display); font-weight: 700; font-size: 12px; line-height: 1; padding: 0; display: grid; place-items: center; cursor: help; }
-.hint:hover .hint-btn, .hint-btn:focus-visible { border-color: var(--ink-2); color: var(--ink); }
+.hint-wrap:hover .hint-btn, .hint-btn:focus-visible { border-color: var(--ink-2); color: var(--ink); }
 .hint-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 35; width: max-content; max-width: min(320px, calc(100vw - 32px)); padding: 10px 12px; background: var(--surface); color: var(--ink-2); border: 1px solid var(--rule-strong); border-radius: 8px; box-shadow: var(--shadow); text-align: left; }
 .hint-pop[hidden] { display: none; }
 .hint-pop::before { content: ""; position: absolute; left: 0; right: 0; top: -9px; height: 9px; }
@@ -897,8 +897,8 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .file-tree:not(.select) summary .ft-toggle { margin-left: auto; }
 
 /* T2: course chrome (decision 0024 rules 1-5) */
-.hint.small { margin-left: 4px; }
-.hint.small .hint-btn { width: 14px; height: 14px; font-size: 10px; border-width: 1px; }
+.hint-wrap.small { margin-left: 4px; }
+.hint-wrap.small .hint-btn { width: 14px; height: 14px; font-size: 10px; border-width: 1px; }
 .sub-actions { justify-content: flex-end; gap: 4px 8px; margin: -10px 0 14px; font-size: 13.5px; color: var(--muted); }
 .sub-actions .footnote { margin: 0; }
 .sub-actions .sep { color: var(--rule-strong); }
@@ -952,3 +952,7 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .pattern-box .pm-line { display: block; border-radius: 3px; }
 .pattern-box .pm-line.flash { animation: pm-flash 1.2s ease-out forwards; }
 @keyframes pm-flash { from { background: var(--amber-soft); box-shadow: 0 0 0 2px var(--amber); } to { background: transparent; box-shadow: none; } }
+
+/* WP-T8: student parity (decision 0029) */
+.fold.supporting { margin-top: 12px; }
+.fold.supporting .file-tree { margin-top: 8px; }

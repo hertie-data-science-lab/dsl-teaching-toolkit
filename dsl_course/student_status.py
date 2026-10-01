@@ -60,7 +60,7 @@ from .schedule_plan import (
 from .site_repo import people_cards, yaml_file
 from .status_json import CourseFacts, SemesterFacts
 
-SCHEMA = "dsl.student-status/1"
+SCHEMA = "dsl.student-status/2"
 # In the SEMESTER org's `.github`, which is public.
 REPO = ".github"
 PATH = records.path("student_status")
@@ -74,6 +74,9 @@ TOP_KEYS = (
     "semester",
     "course_name",
     "term_label",
+    "semester_start",
+    "semester_end",
+    "generated_at",
     "timezone",
     "archive_datetime",
     "home_markdown",
@@ -189,6 +192,8 @@ def json_schema() -> dict:
         ),
     }
     top_types = {
+        "semester_start": _SN,
+        "semester_end": _SN,
         "archive_datetime": _SN,
         "syllabus": _closed({k: _S for k in SYLLABUS_KEYS}, nullable=True),
         "kinds": {
@@ -695,6 +700,11 @@ def render(
         "semester": facts.org,
         "course_name": str((course.meta or {}).get("course_name") or ""),
         "term_label": semester_label(tag) or "",
+        # schedule.yml's dates, so the console counts "Week N of M" as the instructor's does.
+        "semester_start": _iso(sched.semester_start),
+        "semester_end": _iso(sched.semester_end),
+        # When the facts below last changed: `settle` keeps the old moment otherwise.
+        "generated_at": now.isoformat(timespec="seconds"),
         "timezone": sched.timezone,
         # Always, whatever `show_on_site` says: a student loses write access either way.
         "archive_datetime": _iso(sched.archive.when if sched.archive else None),
@@ -806,6 +816,23 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
         extra.home = facts.site_home or ""
         extra.announcements = _announcements(org, site)
     return extra
+
+
+def settle(doc: dict, old_text: str | None) -> dict:
+    """`doc`, with the `generated_at` of the file it replaces when nothing else differs: the
+    moment says when the facts last changed, and an unchanged semester still makes no commit
+    on every refresh. A file that does not parse, or another schema's, is simply replaced."""
+    try:
+        old = json.loads(old_text) if old_text else None
+    except ValueError:
+        old = None
+    if not isinstance(old, dict) or not old.get("generated_at"):
+        return doc
+    new = json.loads(dumps(doc))  # as it will read back: tuples are lists
+    same = {k: v for k, v in old.items() if k != "generated_at"} == {
+        k: v for k, v in new.items() if k != "generated_at"
+    }
+    return {**doc, "generated_at": old["generated_at"]} if same else doc
 
 
 def dumps(doc: dict) -> bytes:

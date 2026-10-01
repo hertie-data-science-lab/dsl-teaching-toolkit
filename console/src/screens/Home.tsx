@@ -1,6 +1,7 @@
 // S1 Home (All courses: the institution's catalogue, the person's own courses in colour and
 // ordered by what needs them, decision 0021 rule 5; Your semesters: the semesters the person
-// is a student of), S0 Sign in, and the read-only view.
+// is a student of, This semester then Past semesters as the instructor's page has them,
+// decision 0029 rule 3), S0 Sign in, and the read-only view.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ConsoleAuth } from '../auth/console';
@@ -10,13 +11,16 @@ import { useEnv } from '../env';
 import { cohortName, invitationUrl, semesterName, type Course, type CohortRef, type Invitation, type Semester, type TokenKind } from '../model/discovery';
 import { loadCatalogue, runningNow, type CatalogueCourse } from '../model/catalogue';
 import { fmtWhen } from '../model/format';
-import { hiddenSemesters, myCoursesOnly, saveHiddenSemesters, saveMyCoursesOnly } from '../model/prefs';
+import { currentOnly, myCoursesOnly, saveCurrentOnly, saveMyCoursesOnly } from '../model/prefs';
 import type { Loaded } from '../model/status';
+import type { SemesterFacts } from '../model/student';
+import { nextLine, semesterLine } from '../model/week';
 import { studentHref } from '../router';
 import { Crumbs, Probs, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
-import { StudentWeekHome } from './Student';
+import { useLoad } from '../ui/load';
+import { studentData } from './Student';
 import { JoinStart } from './StudentJoin';
 import type { HomeProps } from './types';
 
@@ -116,14 +120,16 @@ function useCatalogue(courses: Course[]): CatalogueState {
   return st;
 }
 
-function semesterCard(s: Semester): Card {
+/** A semester the person studies in, as the instructor's cards show theirs: its week and what comes next, once its facts are read. */
+function semesterCard(s: Semester, facts: SemesterFacts | null | undefined, now: number): Card {
+  const live = !s.archived && facts;
   return {
     key: s.org,
     name: semesterName(s),
     sub: s.archived ? 'Archived; your work stays yours to read' : 'You are a student',
-    week: '',
+    week: live ? semesterLine(facts, now).week ?? '' : '',
     status: <span class="chip">{s.archived ? 'Archived' : 'Current'}</span>,
-    next: [['', 'Open the semester']],
+    next: live ? [['', nextLine(facts, now)]] : [],
     href: studentHref(s.org),
     ro: false,
     past: s.archived,
@@ -189,27 +195,37 @@ export function Invitations({ invited, kind }: { invited: Invitation[]; kind?: T
   );
 }
 
-/** Your semesters, and the per-viewer choice of which of them show. */
-function SemestersGroup({ semesters, login, lead, hidden, setHidden }: { semesters: Semester[]; login: string; lead: boolean; hidden: Set<string>; setHidden: (h: Set<string>) => void }) {
-  const flip = (org: string) => {
-    const next = new Set(hidden);
-    if (!next.delete(org)) next.add(org);
-    saveHiddenSemesters(login, next);
-    setHidden(next);
-  };
-  const shown = semesters.filter((s) => !hidden.has(s.org));
+/** The shared facts of each live semester in `semesters`, for their cards; {} until read. */
+function useSemesterFacts(semesters: Semester[]): Record<string, SemesterFacts | null> {
+  const env = useEnv();
+  const live = semesters.filter((s) => !s.archived);
+  const load = useLoad(
+    env && live.length ? async () => Object.fromEntries(await Promise.all(live.map(async (s) => [s.org, await studentData(env.client).facts(s.org).catch(() => null)] as const))) : null,
+    [live.map((s) => s.org).join(',')],
+  );
+  return load.kind === 'ready' ? load.value : {};
+}
+
+/** Your semesters as cards: the live ones first, then (unless `currentOnly`) the archived ones; under their own headings when `sections`. */
+function SemesterCards({ semesters, now, sections, current = false }: { semesters: Semester[]; now: number; sections: boolean; current?: boolean }) {
+  const facts = useSemesterFacts(semesters);
+  const card = (s: Semester) => <CardRow c={semesterCard(s, facts[s.org], now)} />;
+  const live = semesters.filter((s) => !s.archived);
+  const past = current ? [] : semesters.filter((s) => s.archived);
+  if (!sections) return <ul class="cohort-list">{[...live, ...past].map(card)}</ul>;
   return (
-    <section class="section" aria-labelledby="h-semesters">
-      {lead ? null : <h2 id="h-semesters">Your semesters</h2>}
-      {shown.length ? <ul class="cohort-list">{shown.map((s) => <CardRow c={semesterCard(s)} />)}</ul> : <p class="footnote">Every semester is hidden; choose which to show below.</p>}
-      <details class="fold" style="margin-top:12px">
-        <summary>Show these semesters</summary>
-        {semesters.map((s) => (
-          <label class="check"><input type="checkbox" checked={!hidden.has(s.org)} onChange={() => flip(s.org)} /><span>{semesterName(s)}</span></label>
-        ))}
-        <p class="footnote">Kept in this browser only.</p>
-      </details>
-    </section>
+    <>
+      <section class="section" aria-labelledby="h-live">
+        <h2 id="h-live">This semester</h2>
+        {live.length ? <ul class="cohort-list">{live.map(card)}</ul> : <p class="footnote">None of your semesters is running.</p>}
+      </section>
+      {past.length ? (
+        <section class="section" aria-labelledby="h-past">
+          <h2 id="h-past">Past semesters</h2>
+          <ul class="cohort-list">{past.map(card)}</ul>
+        </section>
+      ) : null}
+    </>
   );
 }
 
@@ -234,19 +250,25 @@ function NothingFound({ kind }: { kind?: TokenKind }) {
 }
 
 export function HomeScreen({ courses, semesters = [], invited = [], kind, cohortStates, user, now }: HomeProps) {
-  const [hidden, setHidden] = useState(() => hiddenSemesters(user.login));
   const [only, setOnly] = useState(() => myCoursesOnly(user.login));
+  const [current, setCurrent] = useState(() => currentOnly(user.login));
   const catalogue = useCatalogue(courses);
   // An invitation whose role cannot be told is most likely a student's.
   if (!courses.length && (semesters.length || (invited.length && invited.every((i) => i.role === null)))) {
+    const flipCurrent = () => {
+      saveCurrentOnly(user.login, !current);
+      setCurrent(!current);
+    };
     return (
       <>
         <Crumbs items={[{ t: 'Your semesters' }]} />
-        <div class="page-head"><div><h1>Your semesters</h1><p class="lede">Every semester you are a student of; archived ones stay here as history</p></div></div>
+        <div class="page-head">
+          <div><h1>Your semesters <Hint>Every semester you are a student of. Archived ones stay as history.</Hint></h1></div>
+          {semesters.some((x) => x.archived) ? <div class="actions"><label class="check my-only"><input type="checkbox" checked={current} onChange={flipCurrent} /><span>Current only</span></label></div> : null}
+        </div>
         <div class="stack">
           <Invitations invited={invited} kind={kind} />
-          <StudentWeekHome semesters={semesters.filter((x) => !hidden.has(x.org))} now={now} />
-          {semesters.length ? <SemestersGroup semesters={semesters} login={user.login} lead hidden={hidden} setHidden={setHidden} /> : null}
+          {semesters.length ? <SemesterCards semesters={semesters} now={now} sections current={current} /> : null}
           <JoinStart />
         </div>
       </>
@@ -320,7 +342,12 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
               </ul>
             </section>
           ) : null}
-          {semesters.length ? <SemestersGroup semesters={semesters} login={user.login} lead={false} hidden={hidden} setHidden={setHidden} /> : null}
+          {semesters.length ? (
+            <section class="section" aria-labelledby="h-semesters">
+              <h2 id="h-semesters">Your semesters</h2>
+              <SemesterCards semesters={semesters} now={now} sections={false} />
+            </section>
+          ) : null}
         </div>
       )}
     </>

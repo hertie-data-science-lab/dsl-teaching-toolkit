@@ -872,10 +872,18 @@ def test_a_problem_is_dated_by_the_moment_it_bites_and_a_roster_one_is_not(
 # ---------------------------------------------------------------------------- writer
 
 
-def _stub_write(monkeypatch, doc: dict, results=(True,), student: dict | None = None):
+def _stub_write(
+    monkeypatch,
+    doc: dict,
+    results=(True,),
+    student: dict | None = None,
+    published: str | None = None,
+):
     puts: list[tuple] = []
     answers = iter(results)
     monkeypatch.setattr(status, "_documents", lambda course, semester: (doc, student))
+    # The student file as it stands in the semester's .github (None: not written yet).
+    monkeypatch.setattr(status, "get_file_content", lambda *a, **k: published)
     monkeypatch.setattr(
         status,
         "put_file",
@@ -912,6 +920,27 @@ def test_write_puts_the_student_file_into_the_semester_dot_github(monkeypatch):
         (SEMESTER, "semester-config", ".system/status.json"),
         (SEMESTER, ".github", ".system/student-status.json"),
     ]
+    assert puts[1][3] == student_status.dumps(student)
+
+
+def test_an_unchanged_student_file_keeps_its_moment(monkeypatch):
+    student = {"schema": "dsl.student-status/2", "generated_at": "2026-09-23T09:15"}
+    before = {**student, "generated_at": "2026-09-20T08:00"}
+    published = student_status.dumps(before).decode()
+    puts = _stub_write(monkeypatch, _render(), (True, True), student, published)
+    assert status.write(COURSE, SEMESTER) == 0
+    assert puts[1][3] == published.encode()
+
+
+def test_a_failed_read_of_the_published_student_file_still_writes_it(monkeypatch):
+    student = {"schema": "dsl.student-status/2", "generated_at": "2026-09-23T09:15:00"}
+    puts = _stub_write(monkeypatch, _render(), (True, True), student)
+
+    def refused(*a, **k):
+        raise RuntimeError("could not read: 502")
+
+    monkeypatch.setattr(status, "get_file_content", refused)
+    assert status.write(COURSE, SEMESTER) == 0
     assert puts[1][3] == student_status.dumps(student)
 
 

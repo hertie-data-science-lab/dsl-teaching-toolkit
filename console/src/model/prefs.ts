@@ -1,5 +1,5 @@
-// Per-viewer settings kept in this browser (localStorage): which semesters the student
-// groups show, when the student last opened each semester (for "new since your last visit"),
+// Per-viewer settings kept in this browser (localStorage): whether Your semesters shows the
+// current ones only, when the student last opened each semester (for "new since your last visit"),
 // and a person's Profile (root folder, per-course folders, editor, the Open button's last
 // choice), one for both roles (decision 0027). Storage can be missing or refuse (a private
 // window, blocked site data); the console then shows every semester, calls nothing new, and
@@ -15,31 +15,11 @@ export interface PrefStore {
   key?(index: number): string | null;
 }
 
-const hiddenKey = (login: string) => `dsl-console-hidden-semesters:${login}`;
-
 function localStore(): PrefStore | null {
   try {
     return globalThis.localStorage ?? null;
   } catch {
     return null;
-  }
-}
-
-/** The semester orgs `login` chose not to show. */
-export function hiddenSemesters(login: string, store: PrefStore | null = localStore()): Set<string> {
-  try {
-    const v: unknown = JSON.parse(store?.getItem(hiddenKey(login)) ?? '[]');
-    return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
-  } catch {
-    return new Set();
-  }
-}
-
-export function saveHiddenSemesters(login: string, hidden: Set<string>, store: PrefStore | null = localStore()): void {
-  try {
-    store?.setItem(hiddenKey(login), JSON.stringify([...hidden].sort()));
-  } catch {
-    /* storage unavailable: the choice lasts until reload */
   }
 }
 
@@ -162,6 +142,27 @@ export function myCoursesOnly(login: string, store: PrefStore | null = localStor
 export function saveMyCoursesOnly(login: string, on: boolean, store: PrefStore | null = localStore()): void {
   try {
     store?.setItem(myCoursesKey(login), on ? '1' : '0');
+  } catch {
+    /* storage unavailable: the choice lasts until reload */
+  }
+}
+
+// --------------------------------------------------------------------------- Current only (decision 0029)
+
+const currentKey = (login: string) => `dsl-console-current-only:${login}`;
+
+/** Whether `login` chose to see only their current semesters on Your semesters; off by default. */
+export function currentOnly(login: string, store: PrefStore | null = localStore()): boolean {
+  try {
+    return store?.getItem(currentKey(login)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveCurrentOnly(login: string, on: boolean, store: PrefStore | null = localStore()): void {
+  try {
+    store?.setItem(currentKey(login), on ? '1' : '0');
   } catch {
     /* storage unavailable: the choice lasts until reload */
   }

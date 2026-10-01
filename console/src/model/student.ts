@@ -139,6 +139,11 @@ export interface SemesterFacts {
   syllabus: FileLink | null;
   /** The institution's row kinds (label and colours), when the source carries them. */
   kinds?: Record<string, RowKind>;
+  /** `semester_start` / `semester_end` (yyyy-mm-dd), when the source carries them: week 1 starts on `start`. */
+  start?: string;
+  end?: string;
+  /** When the engine last found the facts changed (an ISO instant); absent when the source does not say. */
+  generatedAt?: string;
 }
 
 export interface RowKind {
@@ -464,8 +469,10 @@ export class SiteSource implements StudentData {
 
 // --------------------------------------------------------------------------- the status file
 
-/** `student-status.json` (`dsl.student-status/1`), as the engine writes it (`dsl_course/student_status.py`). */
-export const STUDENT_STATUS_SCHEMA = 'dsl.student-status/1';
+/** `student-status.json` (`dsl.student-status/2`), as the engine writes it (`dsl_course/student_status.py`). */
+export const STUDENT_STATUS_SCHEMA = 'dsl.student-status/2';
+/** The schemas read: /1 lacks the semester dates and `generated_at`, which are then unknown. */
+const READ_SCHEMAS = ['dsl.student-status/1', STUDENT_STATUS_SCHEMA];
 
 type Obj = Record<string, unknown>;
 const arr = (v: unknown): Obj[] => (Array.isArray(v) ? (v as Obj[]) : []);
@@ -546,6 +553,9 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
     announcements: arr(doc.announcements).map((a) => ({ when: str(a.when), title: str(a.title), details: str(a.details) })).sort((a, b) => instant(b.when) - instant(a.when)),
     syllabus: syl && syllabusPath ? { name: syllabusPath.split('/').pop() ?? syllabusPath, repo: str(syl.repo), path: syllabusPath, url: `https://github.com/${org}/${str(syl.repo)}/blob/HEAD/${syllabusPath}` } : null,
     kinds,
+    ...(doc.semester_start ? { start: str(doc.semester_start) } : {}),
+    ...(doc.semester_end ? { end: str(doc.semester_end) } : {}),
+    ...(doc.generated_at ? { generatedAt: str(doc.generated_at) } : {}),
   };
 }
 
@@ -587,7 +597,7 @@ export class StatusFileSource implements StudentData {
     } catch {
       doc = null;
     }
-    if (!doc || doc.schema !== STUDENT_STATUS_SCHEMA) return this.site.facts(org);
+    if (!doc || !READ_SCHEMAS.includes(str(doc.schema))) return this.site.facts(org);
     return factsFromStatus(doc);
   }
 }

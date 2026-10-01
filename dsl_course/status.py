@@ -47,7 +47,7 @@ from . import (
 from .central import CENTRAL_REF, MissingCentralRef, resolve_central_ref
 from .discovery import org_meta
 from .faults import Unusable
-from .gh_contents import put_file
+from .gh_contents import get_file_content, put_file
 from .issues import open_titles
 from .log import CLIParser, Summary, add_preview_flag, log_err, log_ok, log_step, plural
 from .repos import default_branch
@@ -533,10 +533,17 @@ def write(course_org: str, semester_org: str | None = None) -> int:
 
 
 def _write_student(org: str, doc: dict) -> bool:
-    """`student-status.json` into the semester's `.github`, tried twice like status.json."""
-    content = student_status.dumps(doc)
-    message = "ci: refresh student-status.json"
+    """`student-status.json` into the semester's `.github`, tried twice like status.json.
+    Its `generated_at` moves only when something else in it did (`student_status.settle`).
+    A read of the published file that fails is no reason to stop: the render is written as
+    it is, its moment perhaps newer than it had to be."""
     repo, path = student_status.REPO, student_status.PATH
+    try:
+        old = get_file_content(org, repo, path)
+    except RuntimeError:
+        old = None
+    content = student_status.dumps(student_status.settle(doc, old))
+    message = "ci: refresh student-status.json"
     if put_file(org, repo, path, content, message) or put_file(
         org, repo, path, content, message
     ):

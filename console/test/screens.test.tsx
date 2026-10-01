@@ -403,7 +403,7 @@ describe('S2 course and S17 template', () => {
     expect(t).toContain(', from the institution');
     expect(t).toContain('In dsl-course.yml. a-example');
     // Every fact carries the small ?.
-    expect((html(<CourseScreen {...cp} />).match(/<dt>[^<]*<span class="hint small">/g) ?? []).length).toBe(8);
+    expect((html(<CourseScreen {...cp} />).match(/<dt>[^<]*<span class="hint-wrap small">/g) ?? []).length).toBe(8);
     expect(t).toContain('The course’s code in the catalogue, as students know it.');
     expect(t).toContain('A semester’s instructors and TAs are set on that semester’s Instructors page.');
     expect(t).toContain('This course’s default. Each assignment can set its own.');
@@ -507,7 +507,7 @@ describe('S2 course and S17 template', () => {
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
-    expect(out).toContain('<h1>Group project <span class="hint">');
+    expect(out).toContain('<h1>Group project <span class="hint-wrap">');
     expect(out).toContain('<span>Group project</span></div>');
     expect(out).toContain('value="Group project"');
     expect(out).toMatch(/value="group" checked/);
@@ -520,9 +520,9 @@ describe('S2 course and S17 template', () => {
   });
   it('explains marking, points per question and the student version with a ?', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
-    expect(out).toMatch(/<h3>How it is marked <span class="hint"><button[^>]*aria-label="About marking"/);
-    expect(out).toMatch(/Points per question <span class="hint"><button[^>]*aria-label="About points per question"/);
-    expect(out).toMatch(/<h3>Student version <span class="hint"><button[^>]*aria-label="About the student version"/);
+    expect(out).toMatch(/<h3>How it is marked <span class="hint-wrap"><button[^>]*aria-label="About marking"/);
+    expect(out).toMatch(/Points per question <span class="hint-wrap"><button[^>]*aria-label="About points per question"/);
+    expect(out).toMatch(/<h3>Student version <span class="hint-wrap"><button[^>]*aria-label="About the student version"/);
     expect(out).toContain('Derive builds the main branch, the copy students get, from the solution branch, removing the marked answers.');
     // One place for the student-version sentence: the ?, not a paragraph under it too.
     expect(out).not.toContain('Builds the student starter on main');
@@ -557,7 +557,9 @@ describe('read only and the shell', () => {
     const top = html(<Topbar user={{ login: 'a', id: 1, name: 'A', email: null, avatar_url: '' }} navOpen={false} onMenu={() => {}} />);
     expect(top).not.toContain('github.io');
     expect(top).not.toContain('on GitHub');
-    const foot = text(<Footer course={course} cohort={cohort} />);
+    const foot = text(<Footer title={course.name} sub={cohort.termLabel} />);
+    expect(foot).toContain('Machine Learning Fall 2026');
+    expect(text(<Footer sub="Your semesters" />)).toContain('DSL Teaching Console Your semesters');
     expect(foot).toContain('Friedrichstraße 180');
     expect(foot).toContain('Part of the Hertie Data Science Lab.');
   });

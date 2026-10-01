@@ -288,7 +288,7 @@ describe('the Open button', () => {
     await key(document.activeElement!, 'ArrowDown');
     expect(document.activeElement?.textContent).toBe('Open in GitHub Desktop');
     // Hover still opens it.
-    await act(() => void rows[0].querySelector('.hint')!.dispatchEvent(new MouseEvent('mouseenter')));
+    await act(() => void rows[0].querySelector('.hint-wrap')!.dispatchEvent(new MouseEvent('mouseenter')));
     expect(rows[0].querySelector<HTMLElement>('.hint-pop')!.hidden).toBe(false);
   });
 
