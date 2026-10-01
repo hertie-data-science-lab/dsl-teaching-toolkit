@@ -390,7 +390,7 @@ describe('S2 course and S17 template', () => {
     const out = html(<CourseScreen {...cp} />);
     expect(out).toContain('Setup &amp; To do');
     expect(out).toContain('<h3 class="todo-head">To do</h3>');
-    expect(out).toContain('<span class="slug">course-materials-f2026</span> The session list has not been generated yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a>');
+    expect(out).toContain('<span class="slug">course-materials-f2026</span> The weekly plan has not been generated yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a>');
     const none: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [] } }, sha: 's', stale: [] };
     expect(text(<CourseScreen {...cp} loaded={none} />)).toContain('Nothing to do.');
     const tpl: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.' }] } }, sha: 's', stale: [] };

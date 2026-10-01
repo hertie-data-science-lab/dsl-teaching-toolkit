@@ -2,7 +2,7 @@
 // side nav): what persists in the course, what belongs to one semester, and where each
 // thing lives. Inline SVG, drawn with the theme's tokens so both themes read.
 
-const COURSE_ITEMS = ['Course details', 'Materials', 'Assignment templates', 'Public website'];
+const COURSE_ITEMS = ['Course details', 'Handout materials', 'Assignment templates', 'Public website'];
 const COHORT_ITEMS = ['Schedule', 'Instructors', 'Roster', 'Assignments: teams, marks', 'Student site'];
 
 const WHERE = [

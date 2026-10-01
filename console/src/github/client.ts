@@ -397,6 +397,11 @@ export class GitHubClient {
     return r?.names ?? [];
   }
 
+  /** Replace a repo's topics (PUT, the whole list). */
+  async setTopics(owner: string, repo: string, topics: string[]): Promise<void> {
+    await this.send('PUT', `/repos/${owner}/${repo}/topics`, { names: topics });
+  }
+
   /** A file's text and blob sha, or null when it is absent. */
   async getContents(owner: string, repo: string, path: string, ref?: string): Promise<FileContent | null> {
     const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';

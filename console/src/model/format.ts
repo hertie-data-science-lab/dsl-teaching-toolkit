@@ -140,13 +140,13 @@ export const COHORT_STAGES: [string, string][] = [
   ['K1', 'Org'], ['K2', 'Setup'], ['K3', 'Instructors'], ['K4', 'Schedule'], ['K5', 'Students'], ['K6', 'Site'], ['K7', 'Archive'],
 ];
 export const COURSE_STAGES: [string, string][] = [
-  ['C1', 'Org'], ['C2', 'Setup'], ['C3', 'Details'], ['C4', 'Materials'], ['C5', 'Assignment templates'], ['C6', 'Website'],
+  ['C1', 'Org'], ['C2', 'Setup'], ['C3', 'Details'], ['C4', 'Handout materials'], ['C5', 'Assignment templates'], ['C6', 'Website'],
 ];
 
 /** Where a problem sits, as the problem card's bold first word. */
 export const PROBLEM_AREA: Record<string, string> = {
   K1: 'Org', K2: 'Setup', K3: 'Instructors', K4: 'Schedule', K5: 'Roster', K6: 'Site', K7: 'Archive',
-  C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Materials', C5: 'Template', C6: 'Public website',
+  C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Handout materials', C5: 'Template', C6: 'Public website',
 };
 
 export const ASSIGNMENT_WORD: Record<AssignmentState, string> = {
@@ -177,8 +177,8 @@ export const OP_LABEL: Record<string, string> = {
   'semester.archive': 'Archive',
   'course.publish_website': 'Publish website',
   'assignment.derive_starter': 'Derive student version',
-  'assignment.generate_syllabus': 'Generate syllabus',
-  'materials.create': 'New materials',
+  'assignment.generate_syllabus': 'Generate the weekly plan',
+  'materials.create': 'New handout materials',
   'assignment.create': 'New assignment',
   'semester.bootstrap': 'New semester',
   'teams.open_window': 'Email students without a team',

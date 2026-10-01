@@ -230,8 +230,8 @@ a first visit, mostly free 304s after).
 - Automation's heartbeat: the course's Scheduled release run list.
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
   `students.csv`, `instructors.yml`, a template's `grading_config.yml`, the site's `index.md`.
-- Materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and last
-  changes; a materials repo's recursive tree, badged from its `.releaseignore`.
+- Handout materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and
+  last changes; a materials repo's recursive tree, badged from its `.releaseignore`.
 
 ## What it changes
 
@@ -240,7 +240,8 @@ a first visit, mostly free 304s after).
   `teams.csv`, `grading_sheets/<slug>.yml`, `.github/dsl-course.yml`, a template's
   `grading_config.yml` (on `solution`), a materials repo's `materials.yml` and `.releaseignore`,
   the course's `.github/opencourse.yml` (the public website),
-  the site's `index.md` and `_announcements/`. YAML is edited in place (`src/edit/yamlText.ts`):
+  the site's `index.md` and `_announcements/`. "Treat as handout materials" on an Other repos
+  row adds the `dsl-materials` topic to that repo (`PUT /repos/{o}/{r}/topics`). YAML is edited in place (`src/edit/yamlText.ts`):
   only the changed values' bytes move, so comments and their columns survive. After a write the
   console follows the commit's checks and says what they found.
 - Operations, through the course org's Console workflow (`.github/.github/workflows/console.yml`,
@@ -249,7 +250,7 @@ a first visit, mostly free 304s after).
   private outcome file. Hand out, return marks, archive, update every copy and send new codes
   unlock only after a preview in the same session; publishing the public website, which has no
   engine preview, asks for a confirmation instead.
-- Wizards: New course, New semester, New assignment, New materials. Each step checks live state
+- Wizards: New course, New semester, New assignment, New handout materials. Each step checks live state
   before it lets you continue (the org exists, `hertie-dsl-bot` is an owner, the set-up left
   its repos, the template has both branches and a settings file that parses), and unfinished
   answers stay in this browser so leaving loses nothing. Setting up a course is the one
