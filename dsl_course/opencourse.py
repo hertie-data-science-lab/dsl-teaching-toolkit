@@ -10,7 +10,7 @@ Org (and by the migration, from a site's leftover `_publish-config.yml`):
     withhold:                         # kept off the site; `.releaseignore` syntax
       - "labs/**/solutions/"
 
-Both the Publish public website operation and the daily update read it; neither takes an
+Both the Publish website operation and the daily update read it; neither takes an
 input of its own. `withhold` patterns match the source repo's paths from its root and add
 to what the repo's own `.releaseignore` and the publication denylist already keep back.
 Licence, contact and description are course facts in `dsl-course.yml`, not here.

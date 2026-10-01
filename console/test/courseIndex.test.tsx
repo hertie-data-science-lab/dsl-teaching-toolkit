@@ -86,6 +86,20 @@ describe('other repos', () => {
 });
 
 describe('index screens', () => {
+  it('heads Materials and Assignment templates with one See on GitHub, filtered by topic, and no course actions', () => {
+    const m = render(<MaterialsIndexScreen {...cp()} />);
+    const head = (out: string) => out.slice(out.indexOf('class="page-head"'), out.indexOf('</div></div>', out.indexOf('class="page-head"')));
+    expect(head(m)).toContain(`<a class="btn quiet" href="https://github.com/orgs/${COURSE_ORG}/repositories?q=topic%3Adsl-materials" target="_blank" rel="noopener">See on GitHub`);
+    expect(text(<MaterialsIndexScreen {...cp()} />)).toContain('A scheduled or manual release copies their folders to a semester. This page checks that the set-up files are in place, not their content; change content by pushing to the repo’s main branch.');
+    const t = render(<TemplatesIndexScreen {...cp()} />);
+    expect(head(t)).toContain(`href="https://github.com/orgs/${COURSE_ORG}/repositories?q=topic%3Adsl-assignment"`);
+    for (const out of [m, t]) {
+      expect(out).not.toContain('New semester');
+      expect(out).not.toContain('Refresh');
+      expect(out).not.toContain('Course on GitHub');
+      expect(out).not.toContain('Publish website');
+    }
+  });
   it('lists materials with state, term, last change and Other repos', () => {
     const t = text(<MaterialsIndexScreen {...cp()} />);
     expect(t).toContain(MAT);
@@ -95,7 +109,11 @@ describe('index screens', () => {
     expect(t).toContain('Last change');
     expect(t).toContain('New materials');
     expect(t).toContain('lecture-code-f2026');
-    expect(t).toContain('Can be released to a semester from the schedule.');
+    expect(t).toContain('Not a materials repo, so nothing to set up here. Can be released to a semester from the schedule.');
+    // Other repos get the Open button, not a GitHub link.
+    const other = render(<MaterialsIndexScreen {...cp()} />).split('<li>').find((li) => li.includes('lecture-code-f2026'))!;
+    expect(other).toContain('aria-label="More ways to open lecture-code-f2026"');
+    expect(other).not.toContain('<a class="btn small quiet"');
     expect(t).not.toContain('assignment-9-draft');
     expect(t).not.toContain('old-thing');
     expect(render(<MaterialsIndexScreen {...cp()} />)).toContain(`href="#materials-${MAT}"`);

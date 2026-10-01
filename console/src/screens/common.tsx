@@ -11,12 +11,16 @@ import { checkNow, keepFuture, previewNext, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { mergeOperations, type OpDef } from '../ops/session';
 import { CheckLine, Crumbs, Loading, Soon } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import type { CohortProps, ReadyProps } from './types';
 
 export { cohortName };
 
-export const CHECK_NOW_SOON = 'Sign in to re-check.';
+export const CHECK_NOW_SOON = 'Sign in to refresh.';
+
+/** The `?` beside every Refresh. */
+export const REFRESH_HINT = 'Reads the course and its semesters from GitHub again and re-runs every check. Automation does the same every night.';
 
 export const tzOf = (s: Status) => s.semester?.timezone ?? DEFAULT_TIMEZONE;
 export const yearOf = (now: number, tz: string) => zoned(new Date(now).toISOString(), tz).y;
@@ -53,10 +57,11 @@ export function cohortScope(p: Pick<CohortProps, 'course' | 'cohort'>): Scope {
   return { courseOrg: p.course.org, cohortOrg: p.cohort.org, where: p.cohort.termLabel };
 }
 
-/** Re-check: refresh the status and re-run every check (semester.check). */
+/** Refresh: read everything again and re-run every check (semester.check), with its `?`. */
 export function CheckNow({ small, p, label }: { small?: boolean; p?: Pick<CohortProps, 'course' | 'cohort'>; label?: string }) {
-  if (!p) return <Soon label="Re-check" cls={small ? 'btn small' : 'btn'} title={CHECK_NOW_SOON} />;
-  return <OpButtons def={checkNow(cohortScope(p))} small={small} label={label} />;
+  const hint = <Hint label="About Refresh">{REFRESH_HINT}</Hint>;
+  if (!p) return <><Soon label="Refresh" cls={small ? 'btn small' : 'btn'} title={CHECK_NOW_SOON} />{hint}</>;
+  return <><OpButtons def={checkNow(cohortScope(p))} small={small} label={label} />{hint}</>;
 }
 
 /** The operations of this semester: the status file's record plus this session's runs. */
@@ -112,7 +117,7 @@ export function StaleNote({ stale }: { stale: string[] }) {
   const files = stale.map((s) => s.replace(/^course\//, '')).join(', ');
   return (
     <p class="note" style="margin-bottom:18px">
-      <b>Not yet checked.</b> {files} changed since this semester was last checked, so what you see may be out of date. Re-check brings it up to date.
+      <b>Not yet checked.</b> {files} changed since this semester was last checked, so what you see may be out of date. Refresh brings it up to date.
     </p>
   );
 }
@@ -132,7 +137,7 @@ export function NotComputed({ title, crumbs, p }: { title: string; crumbs: { t: 
       <section class="panel section stub">
         <h2>Status not computed yet</h2>
         <p>This semester has not been checked since it moved to the console's engine, so there is no status to show: no problems list, no semester strip, no counts.</p>
-        <p>Re-check computes it. Automation also computes it at the next nightly refresh.</p>
+        <p>Refresh computes it. Automation also computes it every night.</p>
       </section>
     </>
   );

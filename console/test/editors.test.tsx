@@ -376,6 +376,11 @@ describe('editing screens', () => {
   const cp = { course, loaded: { kind: 'absent' } as Loaded, cohortStates: { [COHORT_ORG]: ready }, files, now: NOW };
   it('course details edits admins with emails and the defaults', () => {
     const out = html(<DetailsScreen {...cp} />);
+    expect(out).toContain(`<div class="actions"><a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/dsl-course.yml" target="_blank" rel="noopener">Edit on GitHub`);
+    expect(out).not.toContain('New semester');
+    // On .github's own default branch; GitHub's new-file page while dsl-course.yml does not exist.
+    const trunk = new StaticFiles({}, {}, {}, { [COURSE_ORG]: [{ name: '.github', default_branch: 'trunk' }] });
+    expect(html(<DetailsScreen {...cp} files={trunk} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/trunk?filename=dsl-course.yml"`);
     expect(out).toContain('value="Machine Learning"');
     expect(out).toContain('value="a@staff.example.org"');
     expect(out).toContain('Defaults for this course’s assignments');
@@ -423,7 +428,11 @@ describe('editing screens', () => {
   });
   it('the public website edits opencourse.yml and asks for the confirmation the engine’s missing preview needs', () => {
     const out = html(<WebsiteScreen {...cp} />);
-    expect(out).toContain('Publish public website');
+    expect(out).toContain('<button class="btn" type="button">Publish website</button>');
+    expect(out).toContain(`<a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/opencourse.yml" target="_blank" rel="noopener">Edit on GitHub`);
+    expect(out).not.toContain('New semester');
+    // No opencourse.yml yet: Edit on GitHub opens GitHub's new-file page with the name filled in.
+    expect(html(<WebsiteScreen {...cp} files={new StaticFiles({}, {}, {})} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/main?filename=opencourse.yml"`);
     expect(out).toContain('Source materials');
     expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">kept off<\/span>/);
     expect(out).toContain('Keep the website updated');

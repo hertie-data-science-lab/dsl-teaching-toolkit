@@ -16,9 +16,9 @@ const base = (s: Scope, op: string, key: string) => ({ op, key, courseOrg: s.cou
 
 export function checkNow(s: Scope): OpDef {
   return {
-    ...base(s, 'semester.check', 'cohort'), name: 'Re-check', title: 'Every check', where: s.where,
+    ...base(s, 'semester.check', 'cohort'), name: 'Refresh', title: 'Every check', where: s.where,
     intro: 'Re-reads every file and re-runs every check now instead of at the next automatic check.',
-    verb: 'Re-check', running: 'Checking everything', cancel: 'Stop', args: {},
+    verb: 'Refresh', running: 'Checking everything', cancel: 'Stop', args: {},
   };
 }
 
@@ -172,9 +172,9 @@ export function archive(s: Scope, scheduled: string | null, passed: boolean): Op
 
 export function publishWebsite(s: Scope, published: boolean): OpDef {
   return {
-    ...base(s, 'course.publish_website', 'website'), name: 'Publish public website', title: `${s.courseOrg}.github.io`, where: s.where,
+    ...base(s, 'course.publish_website', 'website'), name: 'Publish website', title: `${s.courseOrg}.github.io`, where: s.where,
     intro: 'Publishes the public website as its saved settings say. A daily update keeps it current.',
-    verb: published ? 'Publish again' : 'Publish public website', running: 'Publishing the public website', cancel: 'Stop; nothing is public until the last step',
+    verb: published ? 'Republish website' : 'Publish website', running: 'Publishing the public website', cancel: 'Stop; nothing is public until the last step',
     args: {},
     needsCheck: { label: 'This replaces the live public site', sub: 'Publishing has no preview, so confirm instead.' },
   };

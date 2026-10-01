@@ -7,7 +7,8 @@ import { DOCS } from './bits';
 
 const GAP = 8; // between the ? and the popover, and the popover and the viewport's edge
 
-export function Hint({ children, doc, label = 'About this page' }: { children: ComponentChildren; doc?: string; label?: string }) {
+/** `small` sets it beside a fact in a list rather than a heading. */
+export function Hint({ children, doc, label = 'About this page', small = false }: { children: ComponentChildren; doc?: string; label?: string; small?: boolean }) {
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
   const [place, setPlace] = useState<{ cls: string; maxWidth?: number }>({ cls: '' });
@@ -43,7 +44,7 @@ export function Hint({ children, doc, label = 'About this page' }: { children: C
     if (!wrap.current?.contains(e.relatedTarget as Node | null)) setFocus(false);
   };
   return (
-    <span class="hint" ref={wrap} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocusIn={() => setFocus(true)} onFocusOut={blur}>
+    <span class={small ? 'hint small' : 'hint'} ref={wrap} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocusIn={() => setFocus(true)} onFocusOut={blur}>
       <button class="hint-btn" type="button" aria-label={label} aria-describedby={id}>?</button>
       <span class={`hint-pop${place.cls}`} id={id} ref={pop} hidden={!open} style={place.maxWidth ? { maxWidth: `${place.maxWidth}px` } : undefined}>
         {children}

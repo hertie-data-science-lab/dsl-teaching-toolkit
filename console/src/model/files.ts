@@ -69,8 +69,10 @@ export class LiveFiles implements Files {
 
   refresh(owner: string, repo: string, path: string, ref?: string): void {
     this.files.delete(this.fileKey(owner, repo, path, ref));
-    this.changes.delete(`${owner}/${repo}/${path}`);
     this.dirs.delete(`${owner}/${repo}/${path}`);
+    // The date is read again into the same signal, keeping the old one until it answers: no flicker.
+    const c = this.changes.get(`${owner}/${repo}/${path}`);
+    if (c) this.client.lastCommitDate(owner, repo, path).then((v) => (c.value = v), () => {});
   }
 
   tree(owner: string, repo: string, ref = 'HEAD'): TreeState {

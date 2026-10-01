@@ -160,7 +160,7 @@ export const RELEASE_WORD: Record<ReleaseState, string> = {
 
 /** Registry op names as the operations list names them. */
 export const OP_LABEL: Record<string, string> = {
-  'semester.check': 'Check',
+  'semester.check': 'Refresh',
   'semester.preview_automation': 'Preview the next automatic run',
   'release.now': 'Release',
   'release.early': 'Release early',
