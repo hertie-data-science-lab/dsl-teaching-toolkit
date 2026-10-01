@@ -14,7 +14,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { CohortScreen } from '../src/screens/Cohort';
-import { CourseScreen, SetupList, TemplateScreen, overviewHeights, readyWords, semesterChip, setupComplete, splitColumns, stepLink } from '../src/screens/Course';
+import { CourseScreen, SETTLING_COLUMNS, SetupList, TemplateScreen, overviewHeights, readyWords, semesterChip, setupComplete, splitColumns, stepLink } from '../src/screens/Course';
 import { HomeScreen, ReadonlyScreen, SignInScreen } from '../src/screens/Home';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
@@ -389,9 +389,9 @@ describe('S2 course and S17 template', () => {
   it('lists the to-dos under Setup & To do as a checklist like Initial setup, each with where it is done', () => {
     const out = html(<CourseScreen {...cp} />);
     expect(out).toContain('Setup &amp; To do');
-    expect(out).toContain('<summary><h3>Initial setup</h3>');
-    expect(out).toContain('<summary><h3>To do</h3><span class="cnt">1</span></summary>');
-    const todo = out.slice(out.indexOf('<h3>To do</h3>'), out.indexOf('</details>', out.indexOf('<h3>To do</h3>')));
+    expect(out).toContain('<summary><span class="fold-title">Initial setup</span>');
+    expect(out).toContain('<summary><span class="fold-title">To do</span><span class="cnt">1 open</span></summary>');
+    const todo = out.slice(out.indexOf('>To do</span>'), out.indexOf('</details>', out.indexOf('>To do</span>')));
     // The same markup as the setup list: an open line, its check's label and ?, why and the link.
     expect(todo).toContain('<ul class="setup"><li class="open"><span class="s-mark" aria-hidden="true"></span>');
     expect(todo).toContain('Weekly plan generated<span class="s-need slug">course-materials-f2026</span><span class="sr">: To do</span>');
@@ -413,8 +413,8 @@ describe('S2 course and S17 template', () => {
     expect(setupComplete(done)).toBe(true);
     const out = html(<CourseScreen {...cp} loaded={{ kind: 'ready', status: { ...STATUS, course: done }, sha: 's', stale: [] }} />);
     expect(out).not.toContain('<details class="fold setup-fold" open>');
-    expect(out).toContain('<summary><h3>Initial setup</h3><span class="cnt">Complete</span></summary>');
-    expect(out).toContain('<summary><h3>To do</h3><span class="cnt">Nothing to do</span></summary>');
+    expect(out).toContain('<summary><span class="fold-title">Initial setup</span><span class="cnt">Complete</span></summary>');
+    expect(out).toContain('<summary><span class="fold-title">To do</span><span class="cnt">Nothing to do</span></summary>');
   });
   it('shows every course fact in Course details, the institution’s in grey', () => {
     const t = text(<CourseScreen {...cp} />);
@@ -490,6 +490,25 @@ describe('S2 course and S17 template', () => {
     expect(half.indexOf('id="sec-templates"')).toBeGreaterThan(half.indexOf('id="sec-materials"'));
     expect(half.slice(half.indexOf('id="sec-materials"'), half.indexOf('id="sec-templates"')).match(/<section/g)).toHaveLength(1);
   });
+  it('keeps the placement fixed while statuses load, and splits once every one has arrived', () => {
+    const columns = (out: string) => {
+      const cols = out.slice(out.indexOf('class="grid-2 cols"'));
+      const second = cols.indexOf('<div class="stack">', 1 + cols.indexOf('<div class="stack">'));
+      const ids = (h: string) => ['<h2>Setup', 'id="course-problems"', '<h2>Semesters</h2>', '<h2>Course details</h2>', '<h2>Recent activity</h2>', 'id="sec-materials"'].filter((x) => h.includes(x));
+      return [ids(cols.slice(0, second)), ids(cols.slice(second))];
+    };
+    const settling = ['<h2>Setup', '<h2>Semesters</h2>', 'id="sec-materials"'];
+    // The course's own status and a semester's still loading: the fixed layout, whatever arrived.
+    const loading = { ...cp, loaded: { kind: 'loading' } as Loaded };
+    expect(columns(html(<CourseScreen {...loading} />))[0]).toEqual(settling);
+    expect(columns(html(<CourseScreen {...cp} cohortStates={{ [COHORT_ORG]: { kind: 'loading' } }} />))[0]).toEqual(settling);
+    // A semester not yet asked for counts as loading too.
+    expect(columns(html(<CourseScreen {...cp} cohortStates={{}} />))[0]).toEqual(settling);
+    expect(SETTLING_COLUMNS[0]).toEqual(['setup', 'semesters', 'handouts']);
+    // Once all have arrived the split is the estimate's, and the same however late each came.
+    const settled = columns(html(<CourseScreen {...cp} />));
+    expect(columns(html(<CourseScreen {...cp} cohortStates={{ ...cp.cohortStates }} />))).toEqual(settled);
+  });
   it('splits the panels so the two columns come out about even, materials and templates as one block', () => {
     const b = (key: string, h: number) => ({ key, h });
     // Heights whose sums are all distinct: the one even split is 18 against 18.
@@ -504,6 +523,9 @@ describe('S2 course and S17 template', () => {
     ]);
     const hs = overviewHeights({ course: base, problems: 2, semesters: 2, description: '', activity: 1 });
     expect(hs.map((x) => x.key)).toEqual(['setup', 'problems', 'semesters', 'details', 'activity', 'handouts']);
+    // Past four, more problems weigh nothing: a day's new fault does not reshuffle the page.
+    const weigh = (n: number) => overviewHeights({ course: base, problems: n, semesters: 2, description: '', activity: 1 })[1].h;
+    expect(weigh(9)).toBe(weigh(4));
     // More to-dos make Setup & To do taller.
     expect(overviewHeights({ course: { ...base, todo: [...base.todo!, ...base.todo!] }, problems: 2, semesters: 2, description: '', activity: 1 })[0].h).toBeGreaterThan(hs[0].h);
   });

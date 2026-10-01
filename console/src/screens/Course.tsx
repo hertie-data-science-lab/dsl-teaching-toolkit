@@ -404,6 +404,17 @@ export function splitColumns([setup, problems, ...rest]: Block[]): [string[], st
   return best;
 }
 
+/** How many problems count towards the Problems panel's estimated height. */
+const PROBLEMS_WEIGHED = 4;
+
+/** Until every status has loaded, the overview keeps this layout, so panels do not move as each arrives. */
+export const SETTLING_COLUMNS: [string[], string[]] = [['setup', 'semesters', 'handouts'], ['problems', 'details', 'activity']];
+
+/** Whether the course's and every semester's status has finished loading (present, absent or failed). */
+export function statusesSettled(p: Pick<CourseProps, 'course' | 'loaded' | 'cohortStates'>): boolean {
+  return p.loaded.kind !== 'loading' && p.course.cohorts.every((c) => p.cohortStates[c.org] && p.cohortStates[c.org].kind !== 'loading');
+}
+
 /** Each overview panel's height, estimated from what it lists: a heading and one or two lines a row. */
 export function overviewHeights(o: { course: CourseStatus | null; problems: number; semesters: number; description: string; activity: number }): Block[] {
   const HEAD = 3; // the heading and the panel's padding
@@ -413,7 +424,8 @@ export function overviewHeights(o: { course: CourseStatus | null; problems: numb
   const materials = (c?.materials ?? []).reduce((n, m) => n + 1 + materialsWhys(m).length, 0);
   return [
     { key: 'setup', h: HEAD + (c ? 2 + steps + 2 * todo : 1) },
-    { key: 'problems', h: HEAD + Math.max(1, 5 * o.problems) },
+    // Capped: a day's new problem must not reshuffle the page.
+    { key: 'problems', h: HEAD + 5 * Math.min(Math.max(1, o.problems), PROBLEMS_WEIGHED) },
     { key: 'semesters', h: HEAD + Math.max(1, 3 * o.semesters) },
     { key: 'details', h: HEAD + 9 + Math.ceil(o.description.length / 50) + 5 },
     { key: 'activity', h: HEAD + Math.max(1, 2 * o.activity) },
@@ -448,11 +460,11 @@ export function CourseScreen(p: CourseProps) {
         {v.course ? (
           <>
             <details class="fold setup-fold" open={!setupComplete(v.course)}>
-              <summary><h3>Initial setup</h3><span class="cnt">{setupComplete(v.course) ? 'Complete' : `${SETUP_STEPS.filter((x) => v.course!.stages[x.id] === 'done').length} of ${SETUP_STEPS.length} done`}</span></summary>
+              <summary><span class="fold-title">Initial setup</span><span class="cnt">{setupComplete(v.course) ? 'Complete' : `${SETUP_STEPS.filter((x) => v.course!.stages[x.id] === 'done').length} of ${SETUP_STEPS.length} done`}</span></summary>
               <SetupList course={v.course} />
             </details>
             <details class="fold setup-fold" open={!!v.course.todo?.length}>
-              <summary><h3>To do</h3><span class="cnt">{v.course.todo?.length ? v.course.todo.length : 'Nothing to do'}</span></summary>
+              <summary><span class="fold-title">To do</span><span class="cnt">{v.course.todo?.length ? `${v.course.todo.length} open` : 'Nothing to do'}</span></summary>
               <TodoList course={v.course} />
             </details>
           </>
@@ -549,7 +561,7 @@ export function CourseScreen(p: CourseProps) {
       </>
     ),
   };
-  const [left, right] = splitColumns(overviewHeights({ course: v.course, problems: problems.length, semesters: course.cohorts.length, description, activity: recentActivity(ops).length }));
+  const [left, right] = statusesSettled(p) ? splitColumns(overviewHeights({ course: v.course, problems: problems.length, semesters: course.cohorts.length, description, activity: recentActivity(ops).length })) : SETTLING_COLUMNS;
   return (
     <>
       <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: course.name }]} />

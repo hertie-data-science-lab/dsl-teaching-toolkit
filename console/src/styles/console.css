@@ -969,5 +969,5 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 
 /* WP-U2: the overview's Setup & To do, two folds of one checklist (decision 0031 rule 2). */
 .setup-fold { margin-top: 10px; }
-.setup-fold > summary h3 { font-size: 14px; }
+.setup-fold > summary .fold-title { font-size: 14px; }
 .setup-fold > .setup, .setup-fold > .footnote { padding-top: 4px; }
