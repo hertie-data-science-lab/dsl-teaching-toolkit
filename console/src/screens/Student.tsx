@@ -13,7 +13,7 @@ import { DEFAULT_TIMEZONE } from '../model/policy';
 import { useEffect } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { GitHubClient } from '../github/client';
-import { semesterName, type Semester } from '../model/discovery';
+import type { Semester } from '../model/discovery';
 import { addDays, ago, dayKey, fmtDay, fmtTime, fmtWhen, sortKey } from '../model/format';
 import { gradebookUrl, isMarked, knownAuditor, patchLines, patchNotes, readAllReceipts, readMine, repoUrl, type Gradebook, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
 import { lastVisit, markVisit } from '../model/prefs';
@@ -62,11 +62,11 @@ export function studentData(client: GitHubClient): StudentData {
   return s;
 }
 
-export function StudentViewBanner({ semester }: { semester: Semester }) {
+export function StudentViewBanner() {
   return (
     <div class="ro-banner" role="status">
       <b>Student view.</b>
-      <span>What a student of {semesterName(semester)} sees, shown with your own account: no student’s repos or marks.</span>
+      <span>What a student of this semester sees, shown with your own account: no student’s repos or marks.</span>
     </div>
   );
 }
@@ -100,7 +100,7 @@ export function StudentScreen({ semester, screen, studentView, entry, now = Date
   const label = STUDENT_SCREENS.find(([k]) => k === screen)?.[1] ?? 'This week';
   return (
     <>
-      {studentView ? <StudentViewBanner semester={semester} /> : null}
+      {studentView ? <StudentViewBanner /> : null}
       <div class="page-head"><div><h2 class="h1">{label}{STUDENT_HINTS[screen] ? <Hint>{STUDENT_HINTS[screen]}</Hint> : null}</h2></div></div>
       {semester.archived ? <ArchivedSemester semester={semester} studentView={studentView} /> : <SemesterBody semester={semester} screen={screen} studentView={studentView} entry={entry} now={now} />}
     </>
@@ -196,7 +196,7 @@ export function ArchivedSemester({ semester, studentView = false }: { semester: 
   );
   const head = (
     <section class="panel section">
-      <p>{semesterName(semester)} is archived: every repository in it is read-only, and you keep read access to what was yours.</p>
+      <p>This semester is archived: every repository in it is read-only, and you keep read access to what was yours.</p>
       <p><a class="btn outline" href={ghUrl(org)} target="_blank" rel="noopener">Semester on GitHub <Ext /></a></p>
     </section>
   );

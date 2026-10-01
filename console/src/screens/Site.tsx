@@ -179,7 +179,7 @@ function Operations(p: ReadyProps) {
   return (
     <>
       <div class="page-head">
-        <div><h2 class="h1">All operations <Hint doc="reference/actions-reference.md">Each line says what happened and how many. Open Details for the reasons behind a count and the run on GitHub.</Hint></h2><p class="lede">Everything automation and you have done in {p.cohort.termLabel}, newest first. Outcomes stay here after the panel closes.</p></div>
+        <div><h2 class="h1">All operations <Hint doc="reference/actions-reference.md">Each line says what happened and how many. Open Details for the reasons behind a count and the run on GitHub.</Hint></h2><p class="lede">Everything automation and you have done in this semester, newest first. Outcomes stay here after the panel closes.</p></div>
       </div>
       <section class="panel"><OpsList list={ops} now={p.now} full runRepo={`${p.course.org}/.github`} outcomes={outcomes} /></section>
     </>
