@@ -330,7 +330,7 @@ def test_the_archive_date_is_there_whatever_show_on_site_says():
 def test_the_semester_dates_and_the_moment_it_was_written():
     doc = _render()
     assert (doc["semester_start"], doc["semester_end"]) == ("2026-09-07", "2026-12-18")
-    assert doc["generated_at"] == NOW.isoformat()
+    assert doc["generated_at"] == NOW.isoformat(timespec="seconds")
 
 
 def test_an_unchanged_render_keeps_the_old_moment_so_it_makes_no_commit():

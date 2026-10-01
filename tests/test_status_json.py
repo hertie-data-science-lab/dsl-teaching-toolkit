@@ -932,6 +932,18 @@ def test_an_unchanged_student_file_keeps_its_moment(monkeypatch):
     assert puts[1][3] == published.encode()
 
 
+def test_a_failed_read_of_the_published_student_file_still_writes_it(monkeypatch):
+    student = {"schema": "dsl.student-status/2", "generated_at": "2026-09-23T09:15:00"}
+    puts = _stub_write(monkeypatch, _render(), (True, True), student)
+
+    def refused(*a, **k):
+        raise RuntimeError("could not read: 502")
+
+    monkeypatch.setattr(status, "get_file_content", refused)
+    assert status.write(COURSE, SEMESTER) == 0
+    assert puts[1][3] == student_status.dumps(student)
+
+
 def test_a_student_file_that_did_not_land_is_an_error(monkeypatch):
     student = {"schema": "dsl.student-status/1"}
     puts = _stub_write(monkeypatch, _render(), (True, False, False), student)

@@ -704,7 +704,7 @@ def render(
         "semester_start": _iso(sched.semester_start),
         "semester_end": _iso(sched.semester_end),
         # When the facts below last changed: `settle` keeps the old moment otherwise.
-        "generated_at": now.isoformat(),
+        "generated_at": now.isoformat(timespec="seconds"),
         "timezone": sched.timezone,
         # Always, whatever `show_on_site` says: a student loses write access either way.
         "archive_datetime": _iso(sched.archive.when if sched.archive else None),

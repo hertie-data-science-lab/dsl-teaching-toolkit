@@ -534,11 +534,15 @@ def write(course_org: str, semester_org: str | None = None) -> int:
 
 def _write_student(org: str, doc: dict) -> bool:
     """`student-status.json` into the semester's `.github`, tried twice like status.json.
-    Its `generated_at` moves only when something else in it did (`student_status.settle`)."""
+    Its `generated_at` moves only when something else in it did (`student_status.settle`).
+    A read of the published file that fails is no reason to stop: the render is written as
+    it is, its moment perhaps newer than it had to be."""
     repo, path = student_status.REPO, student_status.PATH
-    content = student_status.dumps(
-        student_status.settle(doc, get_file_content(org, repo, path))
-    )
+    try:
+        old = get_file_content(org, repo, path)
+    except RuntimeError:
+        old = None
+    content = student_status.dumps(student_status.settle(doc, old))
     message = "ci: refresh student-status.json"
     if put_file(org, repo, path, content, message) or put_file(
         org, repo, path, content, message
