@@ -92,8 +92,15 @@ may hold both across organisations:
 - **student** of a semester org: an active member with no push on its `.github`;
 - anything else is not shown (a course the person can read but not change still shows read only).
 
-Home shows **Your courses** (the instructor's course and semester cards) and **Your semesters**
-(one card per semester the person is a student of, archived ones greyed). For a student-only
+An instructor always lands on **All courses** (decision 0030): every course the lab runs, read
+from the toolkit's public `orgs.yml`, in three sections, **DSL courses**, **This semester**
+(running semesters) and **Past semesters** (ended ones, newest first, ten at a time with Show
+more). A semester whose end cannot be read ends on a date its key implies (a fall semester on
+1 February, spring 1 August, summer 1 October, winter 1 April). The person's own rows are in colour and ordered by what needs them; the others are greyed,
+not links, and say "Not one of your courses". Each section head has its own **My courses**
+checkbox, on by default and kept in this browser per account and section; while it is on, the head
+says how many rows it hides ("+2 others"). Then **Your semesters** (one card per semester the
+person is a student of, archived ones greyed; such a semester is never a greyed row above). For a student-only
 account it is its own page, laid out as the instructor's (decision 0029): **This semester** (the
 live ones, each card with its week and "Next: ...") and **Past semesters**, which a **Current
 only** checkbox in the page head hides (kept in this browser, per account). A student-only

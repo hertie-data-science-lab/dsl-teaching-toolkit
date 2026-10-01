@@ -20,7 +20,7 @@ import { OpsSession } from './ops/session';
 import { ArchiveScreen } from './screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
 import { takeInstallReturn } from './wizards/drafts';
-import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, landing, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, wizardOf } from './router';
+import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseScreen, TemplateScreen, courseView, semesterChip, templateTitle } from './screens/Course';
@@ -198,7 +198,8 @@ export function App({ state: s }: { state: AppState }) {
     );
   }
 
-  const screen = route.screen || landing(courses);
+  // A URL naming no page lands an instructor on All courses (decision 0030 rule 1).
+  const screen = route.screen || 'home';
   const r = { ...route, screen };
   const ctx = resolveContext(courses, sel, r);
   const wiz = wizardOf(screen);

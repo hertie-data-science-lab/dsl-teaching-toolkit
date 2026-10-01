@@ -2,7 +2,8 @@
 // `orgs.yml` names, each read off its public `.github` (`dsl-course.yml` for the name and
 // code, `semesters.yml` for its semesters). A course in the person's estate is theirs and is
 // not read again. Everything here is public: a semester's dates come from its `.github`
-// (archived or not) and, while it runs, its public student status (the archive date as its end).
+// (archived or not) and, while it runs, its public student status (the archive date as its end;
+// without one, an approximate end from the semester key).
 
 import { parse } from 'yaml';
 import type { GitHubClient } from '../github/client';
@@ -154,5 +155,43 @@ export async function loadCatalogue(client: GitHubClient, estate: Course[] = [],
   return list;
 }
 
-/** Whether a semester runs at `now`: not archived, and its end (when known) not past. */
-export const runningNow = (s: CatalogueSemester, now: number) => s.archived === false && (!s.end || !(Date.parse(s.end) <= now));
+/** A semester key (`f2026`) as its season and year; null for an org name without one. */
+function seasonOf(org: string): { season: string; year: number } | null {
+  const m = /^([fswu])(\d{4})$/.exec(termOf(org).term);
+  return m ? { season: m[1], year: Number(m[2]) } : null;
+}
+
+/**
+ * When a semester ends: its archive date when read, else an approximate one from its key
+ * (fall to 1 February, spring to 1 August, summer to 1 October, winter to 1 April), so a
+ * semester whose status gives no date does not run for ever.
+ */
+function endOf(s: CatalogueSemester): string | undefined {
+  if (s.end) return s.end;
+  const k = seasonOf(s.org);
+  if (!k) return undefined;
+  const { season, year } = k;
+  return { f: `${year + 1}-02-01`, s: `${year}-08-01`, u: `${year}-10-01`, w: `${year + 1}-04-01` }[season];
+}
+
+/** Whether a semester runs at `now`: not archived, and its end (read or approximate) not past; with no end at all, only when known to be open. */
+export function runningNow(s: CatalogueSemester, now: number): boolean {
+  if (s.archived) return false;
+  const end = endOf(s);
+  return end ? !(Date.parse(end) <= now) : s.archived === false;
+}
+
+/** Whether a semester has ended by `now`: archived, or its end (read or approximate) past. */
+export function endedNow(s: CatalogueSemester, now: number): boolean {
+  if (s.archived) return true;
+  const end = endOf(s);
+  return !!end && Date.parse(end) <= now;
+}
+
+const SEASON_ORDER: Record<string, number> = { s: 1, u: 2, f: 3, w: 4 };
+
+/** A semester org's place in time from its key: larger is newer; 0 for a name without one. */
+export function termRank(org: string): number {
+  const k = seasonOf(org);
+  return k ? k.year * 10 + SEASON_ORDER[k.season] : 0;
+}

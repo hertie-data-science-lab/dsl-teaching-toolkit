@@ -1,5 +1,6 @@
-// S1 Home (All courses: the institution's catalogue, the person's own courses in colour and
-// ordered by what needs them, decision 0021 rule 5; Your semesters: the semesters the person
+// S1 Home (All courses: the institution's catalogue in three sections, DSL courses, This
+// semester and Past semesters, the person's own rows in colour and ordered by what needs them,
+// each section with its own My courses checkbox, decisions 0021 rule 5 and 0030; Your semesters: the semesters the person
 // is a student of, This semester then Past semesters as the instructor's page has them,
 // decision 0029 rule 3), S0 Sign in, and the read-only view.
 
@@ -9,9 +10,9 @@ import { FINE_GRAINED_SETTINGS_URL, NEW_FINE_GRAINED_URL, NEW_TOKEN_URL } from '
 import type { GhUser } from '../github/client';
 import { useEnv } from '../env';
 import { cohortName, invitationUrl, semesterName, type Course, type CohortRef, type Invitation, type Semester, type TokenKind } from '../model/discovery';
-import { loadCatalogue, runningNow, type CatalogueCourse } from '../model/catalogue';
+import { endedNow, loadCatalogue, runningNow, termRank, type CatalogueCourse } from '../model/catalogue';
 import { fmtWhen } from '../model/format';
-import { currentOnly, myCoursesOnly, saveCurrentOnly, saveMyCoursesOnly } from '../model/prefs';
+import { currentOnly, myCoursesOnly, saveCurrentOnly, saveMyCoursesOnly, type CatalogueSection } from '../model/prefs';
 import type { Loaded } from '../model/status';
 import type { SemesterFacts } from '../model/student';
 import { nextLine, semesterLine } from '../model/week';
@@ -81,18 +82,40 @@ function CardRow({ c }: { c: Card }) {
 
 const NOT_MINE = 'Not one of your courses';
 
-/** A catalogue row the person has no role in: greyed, and not a link. `quiet` keeps its sub-line for screen readers only. */
-function OffRow({ name, quiet = false }: { name: string; quiet?: boolean }) {
+/** A catalogue row the person has no role in: greyed, and not a link. */
+function OffRow({ name }: { name: string }) {
   return (
     <li>
       <div class="cohort-card ro off" aria-disabled="true">
-        <span class="cc-name">{name}<span class={quiet ? 'sr' : undefined}>{NOT_MINE}</span></span>
+        <span class="cc-name">{name}<span>{NOT_MINE}</span></span>
         <span class="cc-week" />
         <span />
         <span class="cc-next" />
       </div>
     </li>
   );
+}
+
+/** Past semesters shown at once, and added by each Show more. */
+const PAGE = 10;
+
+/** A section's head: its title, how many rows My courses hides, and the checkbox (only when the section has rows that are not the person's). */
+function SectionHead({ id, title, others = 0, only = true, onFlip }: { id: string; title: string; others?: number; only?: boolean; onFlip?: () => void }) {
+  return (
+    <div class="section-head">
+      <h2 id={id}>{title}{only && others ? <span class="meta"> (+{others} {others === 1 ? 'other' : 'others'})</span> : null}</h2>
+      {others ? <label class="check my-only"><input type="checkbox" checked={only} onChange={onFlip} /><span>My courses</span></label> : null}
+    </div>
+  );
+}
+
+/** One row of This semester or Past semesters: the person's card, or a greyed catalogue semester. */
+interface SemRow {
+  key: string;
+  course: string;
+  rank: number;
+  mine: boolean;
+  el: preact.JSX.Element;
 }
 
 type CatalogueState = { list: CatalogueCourse[]; state: 'off' | 'loading' | 'ready' | 'failed' };
@@ -216,12 +239,12 @@ function SemesterCards({ semesters, now, sections, current = false }: { semester
   return (
     <>
       <section class="section" aria-labelledby="h-live">
-        <h2 id="h-live">This semester</h2>
+        <SectionHead id="h-live" title="This semester" />
         {live.length ? <ul class="cohort-list">{live.map(card)}</ul> : <p class="footnote">None of your semesters is running.</p>}
       </section>
       {past.length ? (
         <section class="section" aria-labelledby="h-past">
-          <h2 id="h-past">Past semesters</h2>
+          <SectionHead id="h-past" title="Past semesters" />
           <ul class="cohort-list">{past.map(card)}</ul>
         </section>
       ) : null}
@@ -250,7 +273,8 @@ function NothingFound({ kind }: { kind?: TokenKind }) {
 }
 
 export function HomeScreen({ courses, semesters = [], invited = [], kind, cohortStates, user, now }: HomeProps) {
-  const [only, setOnly] = useState(() => myCoursesOnly(user.login));
+  const [only, setOnly] = useState<Record<CatalogueSection, boolean>>(() => ({ courses: myCoursesOnly(user.login, 'courses'), now: myCoursesOnly(user.login, 'now'), past: myCoursesOnly(user.login, 'past') }));
+  const [pastShown, setPastShown] = useState(PAGE);
   const [current, setCurrent] = useState(() => currentOnly(user.login));
   const catalogue = useCatalogue(courses);
   // An invitation whose role cannot be told is most likely a student's.
@@ -281,55 +305,61 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
   // The person's courses by what needs them (their running semesters' problems), then the rest by name.
   const need = (c: Course) => cards.filter((k) => !k.past && c.cohorts.some((h) => h.org === k.key)).reduce((n, k) => n + Math.max(k.urgency, 0), 0);
   const mine = [...courses].sort((a, b) => need(b) - need(a) || a.name.localeCompare(b.name));
-  const foreign = catalogue.list.filter((c) => !c.mine);
-  const others = only ? [] : foreign.sort((a, b) => a.name.localeCompare(b.name));
-  const othersNow = others
-    .flatMap((c) => c.semesters.filter((s) => runningNow(s, now)).map((s) => `${c.name}, ${s.termLabel}`))
-    .sort((a, b) => a.localeCompare(b));
-  const flipOnly = () => {
-    saveMyCoursesOnly(user.login, !only);
-    setOnly(!only);
+  const foreign = catalogue.list.filter((c) => !c.mine).sort((a, b) => a.name.localeCompare(b.name));
+  // A semester the person studies in shows only under Your semesters, never greyed.
+  const studying = new Set(semesters.map((s) => s.org.toLowerCase()));
+  const offSemesters = (pick: (s: CatalogueCourse['semesters'][number]) => boolean): SemRow[] =>
+    foreign.flatMap((c) => c.semesters.filter((s) => !studying.has(s.org.toLowerCase()) && pick(s)).map((s) => ({ key: s.org, course: c.name, rank: termRank(s.org), mine: false, el: <OffRow name={`${c.name}, ${s.termLabel}`} /> })));
+  // By course, newest first within each.
+  const othersNow = offSemesters((s) => runningNow(s, now)).sort((a, b) => a.course.localeCompare(b.course) || b.rank - a.rank || a.key.localeCompare(b.key));
+  // Newest first; within one semester the person's own first.
+  const pastRows = [...past.map((c): SemRow => ({ key: c.key, course: '', rank: termRank(c.key), mine: true, el: <CardRow c={c} /> })), ...offSemesters((s) => endedNow(s, now))]
+    .sort((a, b) => b.rank - a.rank || Number(b.mine) - Number(a.mine) || a.key.localeCompare(b.key));
+  const pastOthers = pastRows.filter((r) => !r.mine).length;
+  const pastShownRows = (only.past ? pastRows.filter((r) => r.mine) : pastRows);
+  const flip = (section: CatalogueSection) => () => {
+    saveMyCoursesOnly(user.login, section, !only[section]);
+    setOnly({ ...only, [section]: !only[section] });
+    if (section === 'past') setPastShown(PAGE);
   };
   return (
     <>
       <Crumbs items={[{ t: 'All courses' }]} />
-      <div class="page-head">
-        <div><h1>All courses <Hint doc="01-new-course-org.md">A course org is a standing staging area for the materials and assignment templates you are working on, for every semester. Each semester runs in its own org: students join it, and materials are released, assignments handed out and marks returned there.</Hint></h1><p class="lede">Every course the lab runs; yours in colour, ordered by what needs your attention</p></div>
-        <div class="actions">
-          {foreign.length ? <label class="check my-only"><input type="checkbox" checked={only} onChange={flipOnly} /><span>My courses</span></label> : null}
-          <a class="btn" href="#new-course-1">New course</a>
-        </div>
+      <div class="page-head all-courses-head">
+        <div><h1>All courses <Hint doc="01-new-course-org.md">A course org is a standing staging area for the materials and assignment templates you are working on, for every semester. Each semester runs in its own org: students join it, and materials are released, assignments handed out and marks returned there.</Hint></h1><p class="lede">Every course the lab runs, ordered by what needs your attention.</p></div>
+        <div class="actions"><a class="btn" href="#new-course-1">New course</a></div>
       </div>
       <Invitations invited={invited} kind={kind} />
       {!courses.length ? (
         <NothingFound kind={kind} />
       ) : (
-        <div class="stack">
+        <div class="stack all-courses">
           <section class="section" aria-labelledby="h-courses">
-            <h2 id="h-courses">Courses</h2>
+            <SectionHead id="h-courses" title="DSL courses" others={foreign.length} only={only.courses} onFlip={flip('courses')} />
             <ul class="cohort-list">
               {mine.map((c) => (
                 <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{courseSub(c, user)}</span></span><span class="cc-week" /><span /><span class="cc-next" /></a></li>
               ))}
-              {others.map((c) => <OffRow name={c.name} />)}
+              {only.courses ? null : foreign.map((c) => <OffRow name={c.name} />)}
             </ul>
-            {catalogue.state === 'loading' && !only ? <p class="footnote">Reading the catalogue…</p> : catalogue.state === 'failed' ? <p class="footnote">The catalogue could not be read.</p> : null}
+            {catalogue.state === 'loading' && !only.courses ? <p class="footnote">Reading the catalogue…</p> : catalogue.state === 'failed' ? <p class="footnote">The catalogue could not be read.</p> : null}
           </section>
           <section class="section" aria-labelledby="h-live">
-            <h2 id="h-live">This semester</h2>
-            {live.length || othersNow.length ? (
+            <SectionHead id="h-live" title="This semester" others={othersNow.length} only={only.now} onFlip={flip('now')} />
+            {live.length || (othersNow.length && !only.now) ? (
               <ul class="cohort-list">
                 {live.map((c) => <CardRow c={c} />)}
-                {othersNow.map((name) => <OffRow name={name} quiet />)}
+                {only.now ? null : othersNow.map((r) => r.el)}
               </ul>
             ) : (
-              <p class="footnote">No semester is running.</p>
+              <p class="footnote">{othersNow.length ? 'None of your semesters is running.' : 'No semester is running.'}</p>
             )}
           </section>
-          {past.length ? (
+          {pastRows.length ? (
             <section class="section" aria-labelledby="h-past">
-              <h2 id="h-past">Past semesters</h2>
-              <ul class="cohort-list">{past.map((c) => <CardRow c={c} />)}</ul>
+              <SectionHead id="h-past" title="Past semesters" others={pastOthers} only={only.past} onFlip={flip('past')} />
+              {pastShownRows.length ? <ul class="cohort-list">{pastShownRows.slice(0, pastShown).map((r) => r.el)}</ul> : <p class="footnote">None of your semesters has ended.</p>}
+              {pastShownRows.length > pastShown ? <div class="actions"><button class="btn outline small" type="button" onClick={() => setPastShown(pastShown + PAGE)}>Show more</button></div> : null}
             </section>
           ) : null}
           {courseOnly.length ? (

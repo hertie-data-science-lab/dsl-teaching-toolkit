@@ -1,5 +1,5 @@
 // Per-viewer settings kept in this browser (localStorage): whether Your semesters shows the
-// current ones only, when the student last opened each semester (for "new since your last visit"),
+// current ones only, which All courses sections show the person's own rows only, when the student last opened each semester (for "new since your last visit"),
 // and a person's Profile (root folder, per-course folders, editor, the Open button's last
 // choice), one for both roles (decision 0027). Storage can be missing or refuse (a private
 // window, blocked site data); the console then shows every semester, calls nothing new, and
@@ -126,22 +126,26 @@ export function rememberOpen(login: string, choice: OpenChoice, store: PrefStore
   return next;
 }
 
-// --------------------------------------------------------------------------- My courses (WP-S2)
+// --------------------------------------------------------------------------- My courses (decision 0030 rule 3)
 
-const myCoursesKey = (login: string) => `dsl-console-my-courses:${login}`;
+/** The All courses sections that carry their own My courses checkbox. */
+export type CatalogueSection = 'courses' | 'now' | 'past';
 
-/** Whether `login` chose to see only their own courses on All courses; off by default. */
-export function myCoursesOnly(login: string, store: PrefStore | null = localStore()): boolean {
+/** Per section; the key without a section is the one page-wide choice it replaced, read as every section's until a section is saved. */
+const myCoursesKey = (login: string, section?: CatalogueSection) => `dsl-console-my-courses:${login}${section ? `:${section}` : ''}`;
+
+/** Whether `login` chose to see only their own rows in `section` of All courses; on by default. */
+export function myCoursesOnly(login: string, section: CatalogueSection, store: PrefStore | null = localStore()): boolean {
   try {
-    return store?.getItem(myCoursesKey(login)) === '1';
+    return (store?.getItem(myCoursesKey(login, section)) ?? store?.getItem(myCoursesKey(login)) ?? '1') !== '0';
   } catch {
-    return false;
+    return true;
   }
 }
 
-export function saveMyCoursesOnly(login: string, on: boolean, store: PrefStore | null = localStore()): void {
+export function saveMyCoursesOnly(login: string, section: CatalogueSection, on: boolean, store: PrefStore | null = localStore()): void {
   try {
-    store?.setItem(myCoursesKey(login), on ? '1' : '0');
+    store?.setItem(myCoursesKey(login, section), on ? '1' : '0');
   } catch {
     /* storage unavailable: the choice lasts until reload */
   }
