@@ -42,7 +42,9 @@ Not every template is derived (decision 0028). `grading_config.yml`'s `starter:`
 `derived` or `handwritten`; a hand-written starter is the instructor's own `main`, and
 Derive refuses it (`STARTER_HANDWRITTEN`) rather than overwrite it. A template that
 predates the key reads as `derived` when any source on `solution` carries a marker
-(`starter_mode`). Docs: docs/assignment-starter.md.
+(`starter_mode`). Every real run also writes `.system/starter.json` on `main`
+(`STARTER_RECORD`), which is how the status tells a hand edit on `main` and a solution
+changed since from a starter that is current. Docs: docs/assignment-starter.md.
 
 Usage:
     python3 -m dsl_course.derive --course-org hertie-dsl-demo-course-e1234 \\
@@ -67,7 +69,7 @@ from .course import (
     STARTER_HANDWRITTEN,
     STARTER_MODES,
 )
-from .gh_contents import get_file_content, put_files, repo_tree
+from .gh_contents import blob_sha, get_file_content, put_files, repo_path_shas
 from .grades import GRADING_FILE
 from .log import (
     CLIParser,
@@ -126,14 +128,22 @@ TEX_PLACEHOLDER = "% YOUR ANSWER HERE"
 # student version" is a surprise, and `Release materials` is how a file gets published.
 DERIVABLE = (".ipynb", ".rmd", ".qmd", ".py", ".r", ".tex")
 
-# What Derive writes on `main`, and how `status_json` tells Derive's commits from a hand
-# edit (decision 0028: `main` of a derived template is Derive's alone). Frozen: a reworded
-# message would turn every derived template's last commit into a "hand edit".
 COMMIT_MESSAGE = "chore: derive the student starter from the solution branch"
-# The first commit `scaffold` writes on a new template's `main`: its stubs, the toolkit's
-# own, so a derived template not derived yet is not "edited by hand" either.
-SEED_COMMIT = "init: assignment starter"
-DERIVE_COMMITS = (COMMIT_MESSAGE, SEED_COMMIT)
+# SYSTEM-OWNED, written on `main` beside the starter by every real Derive (decision 0028):
+# `solution_tree`, the sha of the `solution/` folder on the solution branch it derived
+# from ("" after a run that refused a file), and `files`, `{main path: blob sha written}`.
+# `status_json` compares it with the two trees it already reads: a recorded file whose
+# blob differs is a hand edit on `main`, a different `solution_tree` asks for a new Derive.
+STARTER_RECORD = ".system/starter.json"
+
+
+def starter_record(solution_tree: str, files: Mapping[str, bytes]) -> bytes:
+    """The record's bytes. Sorted and stable, so an unchanged starter is no commit."""
+    record = {
+        "solution_tree": solution_tree,
+        "files": {path: blob_sha(files[path]) for path in sorted(files)},
+    }
+    return (json.dumps(record, indent=2) + "\n").encode()
 
 
 class DeriveError(ValueError):
@@ -513,12 +523,6 @@ def is_marked(path: str, text: str) -> bool:
         return True
 
 
-def unmarked(sources: Mapping[str, str]) -> list[str]:
-    """The derivable sources with something in them and no marker, sorted: each would
-    derive the model answer itself as the starter."""
-    return [p for p, t in sorted(sources.items()) if t.strip() and not is_marked(p, t)]
-
-
 def starter_mode(declared: str | None, sources: Mapping[str, str]) -> str:
     """Decision 0028: the key when the file has it (rule 1); else rule 6 - `derived` when
     any derivable source on `solution` carries a marker, `handwritten` otherwise."""
@@ -612,12 +616,12 @@ def derive_student_version(
     if declared == STARTER_HANDWRITTEN:
         return _handwritten(course_org, template)
     try:
-        tree = repo_tree(course_org, template, SOLUTION_BRANCH, "blob")
+        tree = repo_path_shas(course_org, template, SOLUTION_BRANCH)
     except RuntimeError as exc:
         log_err(f"could not read {template}'s `{SOLUTION_BRANCH}` branch: {exc}")
         text = f"The {SOLUTION_BRANCH} branch of {template} could not be read."
         return Summary(text, reasons=[_refused("BRANCH_UNREADABLE", text)], code=1)
-    sources = derivable_sources(tree)
+    sources = derivable_sources(list(tree))
     if not sources:
         log_err(
             f"{course_org}/{template} has no {'/'.join(DERIVABLE)} file under "
@@ -702,7 +706,11 @@ def derive_student_version(
         # org's public `.github` Actions tab, and the content is the model answer.
         log_ok(f"preview: would write {summary_line} onto main")
         return summary(f"Would derive {derived} onto main{refused}.")
-    if files and not put_files(course_org, template, files, COMMIT_MESSAGE):
+    # A run that refused a file records no solution tree, so the status asks to derive again.
+    record = starter_record("" if failures else tree.get(SOLUTION_DIR, ""), files)
+    if files and not put_files(
+        course_org, template, {**files, STARTER_RECORD: record}, COMMIT_MESSAGE
+    ):
         log_err(
             f"the derived starter was NOT written to {course_org}/{template} - main still "
             f"holds whatever it held before; re-run once the cause is fixed"

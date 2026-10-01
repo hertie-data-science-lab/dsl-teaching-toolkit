@@ -15,7 +15,6 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from dsl_course import (
-    derive,
     grades,
     releaseignore,
     roster,
@@ -1850,9 +1849,9 @@ def test_the_todo_list_is_every_unmet_check_and_every_unwritten_brief():
 # ------------------------------------------------- the starter: derived or by hand (0028)
 
 
-def test_a_derived_template_is_ready_only_once_every_source_marks_an_answer():
+def test_a_template_with_a_starter_to_do_is_not_ready_and_lists_it():
     t = status_json.TemplateFacts(
-        "assignment-1", "# Trees", unmarked=("solution/a.py",)
+        "assignment-1", "# Trees", starter_todo="Derive has not been run yet."
     )
     doc = status_json.render_course_file(_course(templates=[t]), NOW)
     assert doc["course"]["templates"][0]["state"] == "todo"
@@ -1861,29 +1860,12 @@ def test_a_derived_template_is_ready_only_once_every_source_marks_an_answer():
         "id": "template:assignment-1:starter",
         "kind": "template",
         "repo": "assignment-1",
-        "text": "solution/a.py marks no answer yet, so Derive would copy the answer.",
+        "text": "Derive has not been run yet.",
         "screen": "template",
         "entry": "assignment-1",
     }
     assert doc["problems"] == []
     assert validate(doc, schemas.status_schema()) == []
-
-
-def test_a_hand_written_template_needs_a_brief_and_a_non_empty_main_and_no_marker():
-    written = status_json.TemplateFacts(
-        "assignment-3", "# Project", starter="handwritten", unmarked=("solution/a.py",)
-    )
-    empty = status_json.TemplateFacts(
-        "assignment-4", "# Essay", starter="handwritten", main_files=False
-    )
-    doc = status_json.render_course_file(_course(templates=[written, empty]), NOW)
-    states = {t["repo"]: (t["state"], t["starter"]) for t in doc["course"]["templates"]}
-    assert states == {
-        "assignment-3": ("ready", "handwritten"),
-        "assignment-4": ("todo", "handwritten"),
-    }
-    texts = [t["text"] for t in doc["course"]["todo"] if t["kind"] == "template"]
-    assert texts == ["main has no starter files yet."]
 
 
 def test_a_hand_edit_on_a_derived_main_is_a_problem_naming_the_fix():
@@ -1907,55 +1889,65 @@ def test_a_hand_edit_on_a_derived_main_is_a_problem_naming_the_fix():
     assert "template:assignment-1:MAIN_EDITED" in [p["id"] for p in sem["problems"]]
 
 
-FENCED = "def f():\n    ### BEGIN SOLUTION\n    return 1\n    ### END SOLUTION\n"
+def _record(tree="t1", files=None):
+    return json.dumps({"solution_tree": tree, "files": files or {"starter.py": "b1"}})
 
 
-def _starter_world(monkeypatch, files, main, subjects, config):
+SOLUTION = {"solution": "t1", "solution/starter.py": "s1", "grading_config.yml": "g"}
+MAIN = {"README.md": "r", "starter.py": "b1", ".system/starter.json": "j"}
+
+
+def test_a_derived_starter_is_checked_off_the_two_trees_and_derive_s_record():
+    current = _record()
+    check = lambda solution=SOLUTION, main=MAIN, record=current: (
+        status_json.starter_check("derived", solution, main, record)
+    )
+    assert check() == (None, None)
+    assert check(record=None) == ("Derive has not been run yet.", None)
+    assert check(record="not json") == ("Derive has not been run yet.", None)
+    assert check(solution={"grading_config.yml": "g"}) == (
+        "There is nothing under solution/ to derive a starter from.",
+        None,
+    )
+    assert check(main={**MAIN, "starter.py": "edited"}) == (None, "starter.py")
+    assert check(main={"README.md": "r"}) == (None, "starter.py")  # deleted by hand
+    assert check(solution={**SOLUTION, "solution": "t2"}) == (
+        "The solution changed since the last Derive; derive again.",
+        None,
+    )
+    # A run that refused a file records no tree, so it asks to derive again.
+    assert check(record=_record(tree=""))[0].startswith("The solution changed")
+
+
+def test_a_hand_written_starter_needs_main_to_hold_more_than_the_brief():
+    check = lambda main: status_json.starter_check("handwritten", {}, main, None)
+    assert check({"README.md": "r", "skeleton.py": "x"}) == (None, None)
+    for main in ({}, {"README.md": "r"}, {"README.md": "r", ".github": "t"}):
+        assert check(main) == ("main has no starter files yet.", None)
+
+
+def test_the_gather_reads_two_trees_and_the_record_never_a_source(monkeypatch):
+    reads = []
     monkeypatch.setattr(
         status_json,
         "repo_path_shas",
-        lambda org, repo, branch: dict.fromkeys(
-            files if branch == "solution" else main, "s"
-        ),
+        lambda org, repo, branch: SOLUTION if branch == "solution" else MAIN,
     )
     monkeypatch.setattr(
-        status_json, "get_file_content", lambda org, repo, path, ref="": files.get(path)
+        status_json,
+        "get_file_content",
+        lambda org, repo, path, ref="": reads.append(path) or _record(),
     )
-    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
-    monkeypatch.setattr(
-        status_json, "_last_subject", lambda org, repo, path: subjects.get(path)
-    )
-    t = status_json.TemplateFacts("assignment-1", "# Trees")
-    status_json._starter_facts(COURSE, t, config)
-    return t
-
-
-def test_the_starter_mode_is_the_key_else_read_from_the_markers(monkeypatch):
-    marked = {"solution/starter.py": FENCED}
-    plain = {"solution/starter.py": "def f():\n    return 1\n"}
-    assert _starter_world(monkeypatch, marked, [], {}, None).starter == "derived"
-    assert _starter_world(monkeypatch, plain, [], {}, None).starter == "handwritten"
-    said = _starter_world(monkeypatch, plain, ["README.md"], {}, "starter: derived\n")
-    assert said.starter == "derived" and said.unmarked == ("solution/starter.py",)
-    hand = _starter_world(
-        monkeypatch, marked, ["README.md"], {}, "starter: handwritten\n"
-    )
-    assert hand.starter == "handwritten" and hand.main_files and hand.unmarked == ()
-
-
-def test_main_is_edited_when_a_starter_file_s_last_commit_is_not_derive_s(monkeypatch):
-    marked = {"solution/starter.py": FENCED}
-    for subject, edited in (
-        (derive.COMMIT_MESSAGE, None),
-        (derive.SEED_COMMIT, None),
-        (None, None),  # could not be read: a hint, never a problem
-        ("fix typo", "starter.py"),
+    for config, mode, n in (
+        (None, "derived", 1),  # no key, a derivable source: derived
+        ("starter: handwritten\n", "handwritten", 0),
     ):
-        t = _starter_world(
-            monkeypatch,
-            marked,
-            ["starter.py", "README.md"],
-            {"starter.py": subject},
-            None,
-        )
-        assert t.main_edited == edited
+        reads.clear()
+        t = status_json.TemplateFacts("assignment-1", "# Trees")
+        status_json._starter_facts(COURSE, t, config)
+        assert t.starter == mode and (t.starter_todo, t.main_edited) == (None, None)
+        assert reads == [".system/starter.json"] * n
+    monkeypatch.setattr(status_json, "repo_path_shas", lambda org, repo, branch: {})
+    t = status_json.TemplateFacts("assignment-1", "# Trees")
+    status_json._starter_facts(COURSE, t, None)
+    assert t.starter == "handwritten"

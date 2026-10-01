@@ -65,6 +65,7 @@ from .course import (
     MATERIALS_REPO_PREFIX,
     SELF_SELECT,
     SOLUTION_BRANCH,
+    SOLUTION_DIR,
     STARTER_DERIVED,
     STARTER_HANDWRITTEN,
     SYLLABUS_SESSIONS_FILE,
@@ -75,12 +76,9 @@ from .course import (
     semester_of,
 )
 from .derive import (
-    DERIVE_COMMITS,
+    STARTER_RECORD,
     declared_starter,
     derivable_sources,
-    starter_mode,
-    student_path,
-    unmarked,
 )
 from .discovery import (
     SEMESTERS_PATH,
@@ -180,14 +178,12 @@ class TemplateFacts:
     faults: list[ConfigFault] = field(default_factory=list)
     # False for an `assignment-*` GitHub template without the `dsl-assignment` topic yet.
     topic: bool = True
-    # Decision 0028: how `main` is written (the key, else read from the markers).
+    # Decision 0028: how `main` is written (the key, else read off the solution tree).
     starter: str = STARTER_DERIVED
-    # Derived: the sources on `solution` that mark no answer yet.
-    unmarked: tuple[str, ...] = ()
-    # Derived: the first starter file on `main` whose last commit is not Derive's.
+    # What the starter still needs (`starter_check`), None when it is in place.
+    starter_todo: str | None = None
+    # Derived: the first recorded starter file whose blob on `main` is not Derive's.
     main_edited: str | None = None
-    # Hand-written: `main` holds something.
-    main_files: bool = True
 
 
 @dataclass
@@ -943,6 +939,8 @@ def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
 
 
 MAIN_EDITED = "MAIN_EDITED"
+# The branch a template hands out: the starter students receive (decision 0028).
+TEMPLATE_MAIN = "main"
 
 
 def main_edited_problem(t: TemplateFacts, org: str) -> dict:
@@ -954,7 +952,7 @@ def main_edited_problem(t: TemplateFacts, org: str) -> dict:
         "stage": "C5",
         "text": "main is derived; edit the solution branch and derive again.",
         "stops": (
-            f"{t.main_edited} was changed on main by hand; the next Derive "
+            f"{t.main_edited} on main is not what Derive wrote; the next Derive "
             f"overwrites it."
         ),
         "fix": {
@@ -975,23 +973,51 @@ def template_problems(t: TemplateFacts, org: str) -> list[dict]:
     return [main_edited_problem(t, org)] if t.main_edited else []
 
 
-def _starter_todo(t: TemplateFacts) -> str | None:
-    """What the starter still needs (decision 0028), or None."""
-    if t.starter == STARTER_HANDWRITTEN:
-        return None if t.main_files else "main has no starter files yet."
-    if t.unmarked:
-        return f"{t.unmarked[0]} marks no answer yet, so Derive would copy the answer."
-    return None
+def _record(text: str | None) -> dict | None:
+    """Derive's `.system/starter.json`, or None when it is absent or not its shape."""
+    try:
+        record = json.loads(text) if text else None
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(record, dict) or not isinstance(record.get("files"), dict):
+        return None
+    return record
+
+
+def starter_check(
+    starter: str,
+    solution: Mapping[str, str],
+    main: Mapping[str, str],
+    record_text: str | None,
+) -> tuple[str | None, str | None]:
+    """`(to-do, hand-edited path)` for one template's starter (decision 0028), off the two
+    trees (`{path: sha}`) and Derive's record. Hand-written: `main` holds something other
+    than the brief. Derived: a source to derive from, a record, every recorded blob still
+    on `main` (else that path is a hand edit), and the solution unchanged since."""
+    if starter == STARTER_HANDWRITTEN:
+        filled = any(p != README_FILE and not p.startswith(".") for p in main)
+        return (None if filled else "main has no starter files yet."), None
+    if not derivable_sources(list(solution)):
+        return f"There is nothing under {SOLUTION_DIR}/ to derive a starter from.", None
+    record = _record(record_text)
+    if record is None:
+        return "Derive has not been run yet.", None
+    edited = next(
+        (p for p, sha in sorted(record["files"].items()) if main.get(p) != sha), None
+    )
+    if record.get("solution_tree") != solution.get(SOLUTION_DIR):
+        return "The solution changed since the last Derive; derive again.", edited
+    return None, edited
 
 
 def template_state(t: TemplateFacts) -> str:
     """C5, per template: `problem` until the migration gives it the topic, while its
     grading_config.yml will not grade as written, or while a derived `main` carries a
     hand edit; `ready` once its README is written and its starter is in place (derived:
-    every source marks an answer; hand-written: `main` holds something), `todo` before."""
+    `starter_check` finds nothing to do), `todo` before."""
     if t.faults or template_problems(t, ""):
         return PROBLEM
-    return "ready" if _written(t.readme) and not _starter_todo(t) else TODO
+    return "ready" if _written(t.readme) and not t.starter_todo else TODO
 
 
 def app_installed() -> bool | None:
@@ -1123,7 +1149,7 @@ def course_todo(facts: CourseFacts) -> list[dict]:
             "entry": t.repo,
         }
         for t in facts.templates
-        if t.topic and (text := _starter_todo(t))
+        if t.topic and (text := t.starter_todo)
     ]
     return sorted(out, key=lambda e: (e["kind"] != "materials", e["repo"]))
 
@@ -1829,43 +1855,22 @@ def gather_course(course_org: str) -> CourseFacts:
 
 
 def _starter_facts(org: str, t: TemplateFacts, config: str | None) -> None:
-    """Decision 0028's facts for one template: the starter mode and what readiness asks
-    of it. Derived: the sources that mark nothing, and the first starter file on `main`
-    whose last commit is not Derive's (or the scaffold's seed)."""
+    """Decision 0028's facts for one template, from the solution and `main` trees and,
+    for a derived one, Derive's record: three reads, never a source file's content. With
+    no `starter:` key a template reads as derived when `solution/` holds a derivable
+    source (Derive itself reads the markers; the migration writes the key)."""
     solution = repo_path_shas(org, t.repo, SOLUTION_BRANCH)
-    sources = {}
-    for path in derivable_sources(list(solution)):
-        text = get_file_content(org, t.repo, path, ref=SOLUTION_BRANCH)
-        if text is not None:
-            sources[path] = text
-    t.starter = starter_mode(declared_starter(config), sources)
-    main = repo_path_shas(org, t.repo, default_branch(org, t.repo, fallback="main"))
-    if t.starter == STARTER_HANDWRITTEN:
-        t.main_files = any(not p.startswith(".") for p in main)
-        return
-    t.unmarked = tuple(unmarked(sources))
-    t.main_edited = next(
-        (
-            student_path(path)
-            for path in sorted(sources)
-            if student_path(path) in main
-            and _last_subject(org, t.repo, student_path(path))
-            not in (None, *DERIVE_COMMITS)
-        ),
-        None,
+    has_source = bool(derivable_sources(list(solution)))
+    t.starter = declared_starter(config) or (
+        STARTER_DERIVED if has_source else STARTER_HANDWRITTEN
     )
-
-
-def _last_subject(org: str, repo: str, path: str) -> str | None:
-    """The first line of the last commit that touched `path` on the default branch; None
-    when it could not be read - a hint, never a reason to raise."""
-    code, out = gh(
-        "api",
-        f"repos/{org}/{repo}/commits?per_page=1&path={path}",
-        "--jq",
-        '.[0].commit.message // "" | split("\\n")[0]',
+    main = repo_path_shas(org, t.repo, TEMPLATE_MAIN)
+    record = (
+        get_file_content(org, t.repo, STARTER_RECORD, ref=TEMPLATE_MAIN)
+        if t.starter == STARTER_DERIVED and has_source
+        else None
     )
-    return out.strip() if code == 0 and out.strip() else None
+    t.starter_todo, t.main_edited = starter_check(t.starter, solution, main, record)
 
 
 def _outcomes(semester_org: str, paths: dict[str, str]) -> list[dict]:

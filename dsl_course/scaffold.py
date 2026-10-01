@@ -54,7 +54,6 @@ from .course import (
 from .derive import (
     BEGIN_SOLUTION,
     END_SOLUTION,
-    SEED_COMMIT,
     SOLUTION_CHUNK_OPT,
     TEX_BEGIN_SOLUTION,
     TEX_END_SOLUTION,
@@ -1286,7 +1285,7 @@ def scaffold_assignment(
         org,
         repo,
         {path: text.encode() for path, text in seeds.items()},
-        SEED_COMMIT,
+        "init: assignment starter",
         create_only=True,
     )
 

@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from dsl_course import derive
+from dsl_course import derive, gh_contents
 
 # A solution notebook in the shape nbformat writes: a markdown question, a fenced code
 # answer, an untouched helper cell, and a `solution`-tagged prose answer with outputs on
@@ -276,7 +276,9 @@ class _Repo:
 
     def install(self, monkeypatch):
         monkeypatch.setattr(
-            derive, "repo_tree", lambda o, r, b, k: tuple(sorted(self.files))
+            derive,
+            "repo_path_shas",
+            lambda o, r, b: {"solution": "tree1", **dict.fromkeys(self.files, "b")},
         )
         monkeypatch.setattr(
             derive,
@@ -310,7 +312,7 @@ def test_the_run_writes_main_and_never_reads_or_writes_anything_but_solution(
     )
     assert derive.derive_student_version("Course", "assignment-1-f2026", False) == 0
     assert set(refs) == {derive.SOLUTION_BRANCH}
-    assert list(repo.written) == ["starter.py"]
+    assert list(repo.written) == ["starter.py", derive.STARTER_RECORD]
     assert derive.PY_PLACEHOLDER in repo.written["starter.py"].decode()
 
 
@@ -342,7 +344,10 @@ def test_one_broken_file_reds_the_run_even_though_the_others_landed(monkeypatch)
         }
     ).install(monkeypatch)
     assert derive.derive_student_version("Course", "assignment-1-f2026", False) == 1
-    assert list(repo.written) == ["starter.py"]
+    assert list(repo.written) == ["starter.py", derive.STARTER_RECORD]
+    # A run that refused a file records no solution tree: the status asks to derive again.
+    record = json.loads(repo.written[derive.STARTER_RECORD])
+    assert record["solution_tree"] == ""
 
 
 def test_a_template_with_no_derivable_source_says_so(monkeypatch, capsys):
@@ -623,7 +628,6 @@ def test_the_starter_key_is_read_and_a_template_without_it_reads_by_its_markers(
     assert derive.starter_mode(None, {}) == "handwritten"
     assert derive.starter_mode("derived", plain) == "derived"
     assert derive.starter_mode("handwritten", marked) == "handwritten"
-    assert derive.unmarked({**marked, "solution/__init__.py": ""}) == ["solution/b.py"]
     assert (derive.default_starter(True), derive.default_starter(False)) == (
         "derived",
         "handwritten",
@@ -653,3 +657,17 @@ def test_a_template_without_the_key_that_marks_nothing_is_hand_written(monkeypat
     out = derive.derive_student_version("Course", "assignment-3", False)
     assert [r["code"] for r in out.reasons] == ["STARTER_HANDWRITTEN"]
     assert repo.written == {}
+
+
+def test_every_real_derive_records_the_solution_tree_and_each_blob_it_wrote(
+    monkeypatch,
+):
+    repo = _Repo({"solution/starter.py": FENCED_PY}).install(monkeypatch)
+    assert derive.derive_student_version("Course", "assignment-1", True) == 0
+    assert repo.written == {}  # a preview writes no record either
+    assert derive.derive_student_version("Course", "assignment-1", False) == 0
+    record = json.loads(repo.written[derive.STARTER_RECORD])
+    assert record == {
+        "solution_tree": "tree1",
+        "files": {"starter.py": gh_contents.blob_sha(repo.written["starter.py"])},
+    }

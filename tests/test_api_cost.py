@@ -41,7 +41,7 @@ from dsl_course import (
     status,
     sync_membership,
 )
-from dsl_course.discovery import ASSIGNMENT_TEMPLATE_TOPIC
+from dsl_course.discovery import ASSIGNMENT_TEMPLATE_TOPIC, TEMPLATE_TOPIC
 
 FIXTURES = Path(__file__).parent / "fixtures" / "layouts"
 COURSE = "Course-e1234"
@@ -112,6 +112,7 @@ class FakeGitHub:
         students: tuple[str, ...] = STUDENTS,
         pushed: tuple[str, ...] = (),
         gone: tuple[str, ...] = (),
+        templates: tuple[str, ...] = (),
     ) -> None:
         # `pushed`: students who pushed since the sheets last looked. `gone`: handles off
         # the roster whose submission repos are still in the org.
@@ -154,6 +155,20 @@ class FakeGitHub:
                 for org, name in ((COURSE, f"{slug}-f2026"), (SEMESTER, slug))
             },
         }
+        # `templates`: course assignment templates (topic `dsl-assignment`), each derived
+        # once: a marked solution, its starter on main and Derive's record.
+        self.templates = templates
+        for name in templates:
+            self.trees[(COURSE, name)] = [
+                "README.md",
+                "starter.py",
+                "solution/starter.py",
+            ]
+            self.files[(COURSE, name, "README.md")] = "# Trees\n"
+            self.files[(COURSE, name, "grading_config.yml")] = "starter: derived\n"
+            self.files[(COURSE, name, ".system/starter.json")] = json.dumps(
+                {"solution_tree": "", "files": {}}
+            )
         self.repos: dict[str, list[str]] = {
             COURSE: [".github", *{repo for _, repo in self.trees}],
             SEMESTER: [
@@ -253,7 +268,7 @@ class FakeGitHub:
                     "visibility": "private",
                     "url": f"https://github.com/{parts[1]}/{name}",
                     # A semester template the handout has frozen: flagged and topiced.
-                    "isTemplate": ready,
+                    "isTemplate": ready or name in self.templates,
                     "archived": False,
                     # A repo nobody has pushed to since the handout is quiet.
                     "pushed_at": (
@@ -264,6 +279,8 @@ class FakeGitHub:
                     "topics": (
                         [repos.topic_name(name), ASSIGNMENT_TEMPLATE_TOPIC]
                         if ready
+                        else [TEMPLATE_TOPIC]
+                        if name in self.templates
                         else _submission_topics(name, self.students)
                     ),
                 }
@@ -732,6 +749,23 @@ def test_a_student_who_left_costs_one_invitation_read_per_repo(github, monkeypat
     stayed = _cost_in_a_term(monkeypatch, sync)
     left = _cost_in_a_term(monkeypatch, sync, gone=("octo-gone",))
     assert 0 < left - stayed <= 1.25 * len(ASSIGNMENTS)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [("status", *_C, *_S, "--no-preview"), ("status", *_C, "--no-preview")],
+    ids=["semester", "course"],
+)
+def test_a_course_template_costs_its_two_files_and_three_starter_reads(
+    github, monkeypatch, argv
+):
+    # Decision 0028: beside its brief and grading_config.yml, a derived template's
+    # starter check reads the solution tree, the main tree and Derive's record - never a
+    # source file, never a commit.
+    none = _cost_in_a_term(monkeypatch, argv)
+    two = _cost_in_a_term(monkeypatch, argv, templates=("assignment-a", "assignment-b"))
+    # Measured 2026-10-01: +10 for two templates, on the semester's and the course's write.
+    assert 0 < two - none <= 2 * (2 + 3)
 
 
 # --------------------------------------------------------------- the read-once memo
