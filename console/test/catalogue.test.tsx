@@ -10,8 +10,9 @@ import { act } from 'preact/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient } from '../src/github/client';
-import { loadCatalogue, parseOrgs, pool, runningNow } from '../src/model/catalogue';
-import type { Course } from '../src/model/discovery';
+import { endedNow, loadCatalogue, parseOrgs, pool, runningNow, termRank } from '../src/model/catalogue';
+import type { Loaded } from '../src/model/status';
+import type { Course, Semester } from '../src/model/discovery';
 import { myCoursesOnly, saveMyCoursesOnly, type PrefStore } from '../src/model/prefs';
 import { HomeScreen } from '../src/screens/Home';
 import { FakeGitHub, fileBody, json } from './fake';
@@ -186,6 +187,25 @@ describe('loading the catalogue', () => {
     expect(runningNow({ org: 'a', termLabel: 'Fall 2025', archived: true }, NOW)).toBe(false);
     expect(runningNow({ org: 'a', termLabel: 'Fall 2025' }, NOW)).toBe(false);
   });
+
+  it('gives a semester with no end an approximate one from its key, so it does not run for ever', () => {
+    // Fall to 1 February, spring to 1 August, summer to 1 October, winter to 1 April.
+    expect(runningNow({ org: 'x-f2024', termLabel: 'Fall 2024', archived: false }, NOW)).toBe(false);
+    expect(endedNow({ org: 'x-f2024', termLabel: 'Fall 2024', archived: false }, NOW)).toBe(true);
+    expect(runningNow({ org: 'x-f2026', termLabel: 'Fall 2026', archived: false }, NOW)).toBe(true);
+    expect(endedNow({ org: 'x-s2026', termLabel: 'Spring 2026', archived: false }, NOW)).toBe(true);
+    expect(endedNow({ org: 'x-u2026', termLabel: 'Summer 2026', archived: false }, Date.parse('2026-09-30T12:00:00Z'))).toBe(false);
+    expect(runningNow({ org: 'x-w2026', termLabel: 'Winter 2026', archived: false }, Date.parse('2027-03-31T12:00:00Z'))).toBe(true);
+    // Unknown whether archived (its .github unreadable): the same approximate end.
+    expect(runningNow({ org: 'x-w2026', termLabel: 'Winter 2026' }, NOW)).toBe(true);
+    expect(endedNow({ org: 'x-u2026', termLabel: 'Summer 2026' }, NOW)).toBe(true);
+    // A read end wins over the approximate one.
+    expect(runningNow({ org: 'x-f2024', termLabel: 'Fall 2024', archived: false, end: '2027-01-01' }, NOW)).toBe(true);
+  });
+
+  it('ranks semesters by their key: spring, summer, fall, winter within a year', () => {
+    expect(['x-f2026', 'x-s2026', 'x-w2025', 'x-u2026', 'nokey'].sort((a, b) => termRank(b) - termRank(a))).toEqual(['x-f2026', 'x-u2026', 'x-s2026', 'x-w2025', 'nokey']);
+  });
 });
 
 describe('the My courses pref', () => {
@@ -229,11 +249,11 @@ afterEach(() => {
 
 const flush = () => act(async () => { for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0)); });
 
-function mount(f: FakeGitHub) {
+function mount(f: FakeGitHub, { courses = [course], semesters = [], cohortStates = {} }: { courses?: Course[]; semesters?: Semester[]; cohortStates?: Record<string, Loaded> } = {}) {
   const env = { client: client(f), user } as unknown as Env;
   host = document.createElement('div');
   document.body.appendChild(host);
-  act(() => render(<EnvCtx.Provider value={env}><HomeScreen courses={[course]} semesters={[]} cohortStates={{}} now={NOW} user={user} /></EnvCtx.Provider>, host!));
+  act(() => render(<EnvCtx.Provider value={env}><HomeScreen courses={courses} semesters={semesters} cohortStates={cohortStates} now={NOW} user={user} /></EnvCtx.Provider>, host!));
   return host;
 }
 const greyed = (h: HTMLElement) => [...h.querySelectorAll('.cohort-card.off')];
@@ -259,8 +279,8 @@ describe('All courses', () => {
     expect(greyed(h)).toEqual([]);
     for (const id of ['h-courses', 'h-live', 'h-past']) expect(boxOf(h, id).checked).toBe(true);
     expect(head(h, 'h-courses')).toContain('DSL courses (+2 others)');
-    expect(head(h, 'h-live')).toContain('This semester (+3 others)');
-    expect(head(h, 'h-past')).toContain('Past semesters (+1 other)');
+    expect(head(h, 'h-live')).toContain('This semester (+2 others)');
+    expect(head(h, 'h-past')).toContain('Past semesters (+4 others)');
     expect(section(h, 'h-live').textContent).toContain('None of your semesters is running.');
     expect(h.querySelector('a.cohort-card')?.getAttribute('href')).toBe(`?course=${course.org}#course`);
   });
@@ -283,11 +303,11 @@ describe('All courses', () => {
     expect(greyed(section(h, 'h-live') as HTMLElement)).toEqual([]);
     await act(async () => boxOf(h, 'h-live').click());
     const now = section(h, 'h-live');
-    expect(names(now)).toEqual(['Natural Language Processing, Fall 2024', 'Natural Language Processing, Fall 2026', 'Natural Language Processing, Spring 2026']);
-    expect(now.textContent).not.toContain('Fall 2025');
-    expect(now.textContent).not.toContain('Summer 2026');
+    // By course, newest first; Winter 2026's .github is unreadable, so its key gives its end.
+    expect(names(now)).toEqual(['Natural Language Processing, Winter 2026', 'Natural Language Processing, Fall 2026']);
     await act(async () => boxOf(h, 'h-past').click());
-    expect(names(section(h, 'h-past'))).toEqual(['Natural Language Processing, Fall 2025']);
+    // Fall 2024 and Spring 2026 have no end date: theirs comes from the key, so they are past.
+    expect(names(section(h, 'h-past'))).toEqual(['Natural Language Processing, Summer 2026', 'Natural Language Processing, Spring 2026', 'Natural Language Processing, Fall 2025', 'Natural Language Processing, Fall 2024']);
   });
 
   it('remembers each section’s choice for this login', async () => {
@@ -304,7 +324,7 @@ describe('All courses', () => {
     expect(greyed(section(again, 'h-courses') as HTMLElement)).toEqual([]);
   });
 
-  it('lists past semesters newest first, ten at a time', async () => {
+  it('lists past semesters newest first, ten at a time, from the first ten again when My courses flips', async () => {
     const OLD = 'hertie-old-e1000';
     const terms = Array.from({ length: 12 }, (_, i) => `hertie-old-${i % 2 ? 'f' : 's'}${2014 + Math.floor(i / 2)}`);
     const f = new FakeGitHub()
@@ -325,6 +345,49 @@ describe('All courses', () => {
     expect(names(past)).toHaveLength(12);
     expect(names(past).at(-1)).toBe('Old Course, Spring 2014');
     expect(past.querySelector('button')).toBeNull();
+    await act(async () => boxOf(h, 'h-past').click());
+    await act(async () => boxOf(h, 'h-past').click());
+    expect(names(section(h, 'h-past'))).toHaveLength(10);
+  });
+
+  it('puts the person’s own past semester ahead of another course’s from the same semester', async () => {
+    const mineOld = { org: 'hertie-dsl-demo-f2025', term: 'f2025', termLabel: 'Fall 2025' };
+    const done = { kind: 'ready', status: { semester: { live: false, archive_date: null, timezone: 'Europe/Berlin' }, problems: [], this_week: [] } } as unknown as Loaded;
+    saveMyCoursesOnly(user.login, 'past', false);
+    const h = mount(catalogueFake(), { courses: [{ ...course, cohorts: [mineOld] }], cohortStates: { [mineOld.org]: done } });
+    await flush();
+    const rows = [...section(h, 'h-past').querySelectorAll('.cohort-card')];
+    const own = rows.findIndex((r) => r.getAttribute('href') === `?cohort=${mineOld.org}#dashboard`);
+    const theirs = rows.findIndex((r) => r.textContent?.startsWith('Natural Language Processing, Fall 2025'));
+    expect(own).toBeGreaterThan(-1);
+    expect(theirs).toBe(own + 1);
+  });
+
+  it('puts another course’s semester that is not archived but whose end is past under Past semesters', async () => {
+    const OTHER = 'hertie-geo-e2000';
+    const f = new FakeGitHub()
+      .on('GET', ORGS_URL, fileBody('orgs.yml', `course_orgs:\n  - ${OTHER}\n`))
+      .on('GET', `/repos/${OTHER}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Geography\n'))
+      .on('GET', `/repos/${OTHER}/.github/contents/semesters.yml`, fileBody('semesters.yml', 'semesters:\n- hertie-geo-f2026\n'))
+      .on('GET', '/repos/hertie-geo-f2026/.github', { name: '.github', archived: false })
+      .on('GET', '/repos/hertie-geo-f2026/.github/contents/.system/student-status.json', fileBody('student-status.json', JSON.stringify({ archive_datetime: '2026-09-01T00:00:00Z' })));
+    saveMyCoursesOnly(user.login, 'past', false);
+    saveMyCoursesOnly(user.login, 'now', false);
+    const h = mount(f);
+    await flush();
+    expect(names(section(h, 'h-past'))).toEqual(['Geography, Fall 2026']);
+    expect(section(h, 'h-live').textContent).not.toContain('Geography');
+  });
+
+  it('never greys a semester the person studies in: it shows under Your semesters only', async () => {
+    const studied: Semester = { org: 'hertie-nlp-f2026', term: 'f2026', termLabel: 'Fall 2026', courseOrg: NLP, courseName: 'Natural Language Processing', archived: false, role: 'student' };
+    saveMyCoursesOnly(user.login, 'now', false);
+    const h = mount(catalogueFake(), { semesters: [studied] });
+    await flush();
+    expect(names(section(h, 'h-live'))).toEqual(['Natural Language Processing, Winter 2026']);
+    await act(async () => boxOf(h, 'h-live').click());
+    expect(head(h, 'h-live')).toContain('This semester (+1 other)');
+    expect(section(h, 'h-semesters').querySelector(`a[href="?semester=${studied.org}#week"]`)).not.toBeNull();
   });
 
   it('shows no My courses switch while every course is yours, and reads nothing for a person with no course', async () => {

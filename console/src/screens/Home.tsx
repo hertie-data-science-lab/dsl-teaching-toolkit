@@ -100,7 +100,7 @@ function OffRow({ name }: { name: string }) {
 const PAGE = 10;
 
 /** A section's head: its title, how many rows My courses hides, and the checkbox (only when the section has rows that are not the person's). */
-function SectionHead({ id, title, others, only, onFlip }: { id: string; title: string; others: number; only: boolean; onFlip: () => void }) {
+function SectionHead({ id, title, others = 0, only = true, onFlip }: { id: string; title: string; others?: number; only?: boolean; onFlip?: () => void }) {
   return (
     <div class="section-head">
       <h2 id={id}>{title}{only && others ? <span class="meta"> (+{others} {others === 1 ? 'other' : 'others'})</span> : null}</h2>
@@ -112,6 +112,7 @@ function SectionHead({ id, title, others, only, onFlip }: { id: string; title: s
 /** One row of This semester or Past semesters: the person's card, or a greyed catalogue semester. */
 interface SemRow {
   key: string;
+  course: string;
   rank: number;
   mine: boolean;
   el: preact.JSX.Element;
@@ -238,12 +239,12 @@ function SemesterCards({ semesters, now, sections, current = false }: { semester
   return (
     <>
       <section class="section" aria-labelledby="h-live">
-        <h2 id="h-live">This semester</h2>
+        <SectionHead id="h-live" title="This semester" />
         {live.length ? <ul class="cohort-list">{live.map(card)}</ul> : <p class="footnote">None of your semesters is running.</p>}
       </section>
       {past.length ? (
         <section class="section" aria-labelledby="h-past">
-          <h2 id="h-past">Past semesters</h2>
+          <SectionHead id="h-past" title="Past semesters" />
           <ul class="cohort-list">{past.map(card)}</ul>
         </section>
       ) : null}
@@ -305,17 +306,21 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
   const need = (c: Course) => cards.filter((k) => !k.past && c.cohorts.some((h) => h.org === k.key)).reduce((n, k) => n + Math.max(k.urgency, 0), 0);
   const mine = [...courses].sort((a, b) => need(b) - need(a) || a.name.localeCompare(b.name));
   const foreign = catalogue.list.filter((c) => !c.mine).sort((a, b) => a.name.localeCompare(b.name));
+  // A semester the person studies in shows only under Your semesters, never greyed.
+  const studying = new Set(semesters.map((s) => s.org.toLowerCase()));
   const offSemesters = (pick: (s: CatalogueCourse['semesters'][number]) => boolean): SemRow[] =>
-    foreign.flatMap((c) => c.semesters.filter(pick).map((s) => ({ key: s.org, rank: termRank(s.org), mine: false, el: <OffRow name={`${c.name}, ${s.termLabel}`} /> })));
-  const othersNow = offSemesters((s) => runningNow(s, now)).sort((a, b) => a.key.localeCompare(b.key));
+    foreign.flatMap((c) => c.semesters.filter((s) => !studying.has(s.org.toLowerCase()) && pick(s)).map((s) => ({ key: s.org, course: c.name, rank: termRank(s.org), mine: false, el: <OffRow name={`${c.name}, ${s.termLabel}`} /> })));
+  // By course, newest first within each.
+  const othersNow = offSemesters((s) => runningNow(s, now)).sort((a, b) => a.course.localeCompare(b.course) || b.rank - a.rank || a.key.localeCompare(b.key));
   // Newest first; within one semester the person's own first.
-  const pastRows = [...past.map((c): SemRow => ({ key: c.key, rank: termRank(c.key), mine: true, el: <CardRow c={c} /> })), ...offSemesters((s) => endedNow(s, now))]
+  const pastRows = [...past.map((c): SemRow => ({ key: c.key, course: '', rank: termRank(c.key), mine: true, el: <CardRow c={c} /> })), ...offSemesters((s) => endedNow(s, now))]
     .sort((a, b) => b.rank - a.rank || Number(b.mine) - Number(a.mine) || a.key.localeCompare(b.key));
   const pastOthers = pastRows.filter((r) => !r.mine).length;
   const pastShownRows = (only.past ? pastRows.filter((r) => r.mine) : pastRows);
   const flip = (section: CatalogueSection) => () => {
     saveMyCoursesOnly(user.login, section, !only[section]);
     setOnly({ ...only, [section]: !only[section] });
+    if (section === 'past') setPastShown(PAGE);
   };
   return (
     <>

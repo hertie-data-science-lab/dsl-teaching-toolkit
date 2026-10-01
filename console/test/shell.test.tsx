@@ -10,7 +10,7 @@ import { AppAuth } from '../src/auth/app';
 import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import { GitHubClient } from '../src/github/client';
-import type { Course } from '../src/model/discovery';
+import type { Course, Semester } from '../src/model/discovery';
 import { movedHash, parseHash, parseSearch, resolveContext } from '../src/router';
 import { SignInScreen } from '../src/screens/Home';
 import { Sidenav, Topbar } from '../src/ui/shell';
@@ -38,11 +38,11 @@ describe('router', () => {
 });
 
 describe('two levels', () => {
-  const app = (hash: string) => {
+  const app = (hash: string, semesters: Semester[] = []) => {
     const gh = new FakeGitHub();
     const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: new GitHubClient({ token: () => 't', fetch: gh.fetch }) });
     s.user.value = user;
-    s.estate.value = { courses: [course], semesters: [], roles: new Map(), kind: 'classic' };
+    s.estate.value = { courses: [course], semesters, roles: new Map([[course.org, 'instructor'], ...semesters.map((x) => [x.org, 'student'] as [string, 'student'])]), kind: 'classic' };
     s.hash.value = hash;
     return render(<App state={s} />);
   };
@@ -57,6 +57,14 @@ describe('two levels', () => {
   it('lands an instructor on All courses, even with one writable course (decision 0030 rule 1)', () => {
     const out = app('');
     expect(out).toContain('<h1>All courses');
+    expect(out).not.toContain('sem-banner');
+  });
+  it('lands a person with a course and one live student semester on All courses, with Your semesters below', () => {
+    const nlp: Semester = { org: 'hertie-nlp-f2026', term: 'f2026', termLabel: 'Fall 2026', courseOrg: 'hertie-nlp-e1282', courseName: 'Natural Language Processing', archived: false, role: 'student' };
+    const out = app('', [nlp]);
+    expect(out).toContain('<h1>All courses');
+    expect(out).toContain('Your semesters');
+    expect(out).toContain(`?semester=${nlp.org}#week`);
     expect(out).not.toContain('sem-banner');
   });
   it('keeps the side nav on Home', () => {
