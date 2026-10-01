@@ -516,14 +516,28 @@ describe('S2 course and S17 template', () => {
     expect(out).toContain('<td>50</td>');
     expect(out).toContain('Advanced <span class="cnt changed">(1 changed)</span>');
     expect(out).toContain('/edit/solution/grading_config.yml');
+    // No `starter:` and no tests: written by hand, so there is nothing to derive.
+    expect(out).toMatch(/value="handwritten" checked/);
+    expect(out).toContain('Starter written by hand on main; nothing is derived.');
+    expect(out).not.toContain('Derive student version');
+  });
+  const derivedFiles = () => new StaticFiles({ [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: `${GRADING}starter: derived\n` }, {}, TREE);
+  it('offers Derive only for a derived starter, and the engine’s reading stands in for a missing key', () => {
+    const out = html(<TemplateScreen {...cp} files={derivedFiles()} entry="assignment-3-f2026" />);
+    expect(out).toMatch(/value="derived" checked/);
     expect(out).toContain('Derive student version');
+    expect(out).not.toContain('Starter written by hand on main');
+    const st = { ...STATUS, course: { ...STATUS.course!, templates: [{ repo: 'assignment-3-f2026', slug: 'assignment-3-f2026', state: 'ready', starter: 'derived' as const }] } };
+    const read = html(<TemplateScreen {...cp} loaded={{ ...ready, status: st } as Loaded} entry="assignment-3-f2026" />);
+    expect(read).toMatch(/value="derived" checked/);
   });
   it('explains marking, points per question and the student version with a ?', () => {
-    const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
+    const out = html(<TemplateScreen {...cp} files={derivedFiles()} entry="assignment-3-f2026" />);
     expect(out).toMatch(/<h3>How it is marked <span class="hint-wrap"><button[^>]*aria-label="About marking"/);
     expect(out).toMatch(/Points per question <span class="hint-wrap"><button[^>]*aria-label="About points per question"/);
     expect(out).toMatch(/<h3>Student version <span class="hint-wrap"><button[^>]*aria-label="About the student version"/);
-    expect(out).toContain('Derive builds the main branch, the copy students get, from the solution branch, removing the marked answers.');
+    expect(out).toContain('Write the solution once and mark the answers; Derive builds the starter students get by blanking them. Run it after every change to the solution.');
+    expect(out).toContain('assignment-starter.md');
     // One place for the student-version sentence: the ?, not a paragraph under it too.
     expect(out).not.toContain('Builds the student starter on main');
   });

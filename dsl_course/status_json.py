@@ -65,12 +65,20 @@ from .course import (
     MATERIALS_REPO_PREFIX,
     SELF_SELECT,
     SOLUTION_BRANCH,
+    SOLUTION_DIR,
+    STARTER_DERIVED,
+    STARTER_HANDWRITTEN,
     SYLLABUS_SESSIONS_FILE,
     active_today,
     is_repo_root,
     pages_repo,
     semester_label,
     semester_of,
+)
+from .derive import (
+    STARTER_RECORD,
+    declared_starter,
+    derivable_sources,
 )
 from .discovery import (
     SEMESTERS_PATH,
@@ -170,6 +178,12 @@ class TemplateFacts:
     faults: list[ConfigFault] = field(default_factory=list)
     # False for an `assignment-*` GitHub template without the `dsl-assignment` topic yet.
     topic: bool = True
+    # Decision 0028: how `main` is written (the key, else read off the solution tree).
+    starter: str = STARTER_DERIVED
+    # What the starter still needs (`starter_check`), None when it is in place.
+    starter_todo: str | None = None
+    # Derived: the first recorded starter file whose blob on `main` is not Derive's.
+    main_edited: str | None = None
 
 
 @dataclass
@@ -924,13 +938,86 @@ def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
     return out
 
 
+MAIN_EDITED = "MAIN_EDITED"
+# The branch a template hands out: the starter students receive (decision 0028).
+TEMPLATE_MAIN = "main"
+
+
+def main_edited_problem(t: TemplateFacts, org: str) -> dict:
+    """Decision 0028 rule 2: a derived template's `main` carries a commit Derive did not
+    make, which the next Derive overwrites."""
+    return {
+        "id": f"template:{_slugify(t.repo)}:{MAIN_EDITED}",
+        "scope": "course",
+        "stage": "C5",
+        "text": "main is derived; edit the solution branch and derive again.",
+        "stops": (
+            f"{t.main_edited} on main is not what Derive wrote; the next Derive "
+            f"overwrites it."
+        ),
+        "fix": {
+            "repo": f"{org}/{t.repo}",
+            "path": "",
+            "line": None,
+            "screen": "template",
+            "entry": t.repo,
+        },
+    }
+
+
+def template_problems(t: TemplateFacts, org: str) -> list[dict]:
+    """A template's own problems beside its grading_config.yml faults: NOT_MIGRATED
+    without the topic, MAIN_EDITED on a derived one."""
+    if not t.topic:
+        return [template_problem(t, org)]
+    return [main_edited_problem(t, org)] if t.main_edited else []
+
+
+def _record(text: str | None) -> dict | None:
+    """Derive's `.system/starter.json`, or None when it is absent or not its shape."""
+    try:
+        record = json.loads(text) if text else None
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(record, dict) or not isinstance(record.get("files"), dict):
+        return None
+    return record
+
+
+def starter_check(
+    starter: str,
+    solution: Mapping[str, str],
+    main: Mapping[str, str],
+    record_text: str | None,
+) -> tuple[str | None, str | None]:
+    """`(to-do, hand-edited path)` for one template's starter (decision 0028), off the two
+    trees (`{path: sha}`) and Derive's record. Hand-written: `main` holds something other
+    than the brief. Derived: a source to derive from, a record, every recorded blob still
+    on `main` (else that path is a hand edit), and the solution unchanged since."""
+    if starter == STARTER_HANDWRITTEN:
+        filled = any(p != README_FILE and not p.startswith(".") for p in main)
+        return (None if filled else "main has no starter files yet."), None
+    if not derivable_sources(list(solution)):
+        return f"There is nothing under {SOLUTION_DIR}/ to derive a starter from.", None
+    record = _record(record_text)
+    if record is None:
+        return "Derive has not been run yet.", None
+    edited = next(
+        (p for p, sha in sorted(record["files"].items()) if main.get(p) != sha), None
+    )
+    if record.get("solution_tree") != solution.get(SOLUTION_DIR):
+        return "The solution changed since the last Derive; derive again.", edited
+    return None, edited
+
+
 def template_state(t: TemplateFacts) -> str:
-    """C5, per template: `problem` until the migration gives it the topic, or while its
-    grading_config.yml will not grade as written; `ready` once its README is written,
-    `todo` before that."""
-    if t.faults or not t.topic:
+    """C5, per template: `problem` until the migration gives it the topic, while its
+    grading_config.yml will not grade as written, or while a derived `main` carries a
+    hand edit; `ready` once its README is written and its starter is in place (derived:
+    `starter_check` finds nothing to do), `todo` before."""
+    if t.faults or template_problems(t, ""):
         return PROBLEM
-    return "ready" if _written(t.readme) else TODO
+    return "ready" if _written(t.readme) and not t.starter_todo else TODO
 
 
 def app_installed() -> bool | None:
@@ -978,7 +1065,8 @@ def render_course(
     problems += [
         materials_problem(m, facts.org) for m in facts.materials if not m.topic
     ]
-    problems += [template_problem(t, facts.org) for t in facts.templates if not t.topic]
+    for t in facts.templates:
+        problems += template_problems(t, facts.org)
     for t in facts.templates:
         problems += [problem_from_fault(f, facts.org, now) for f in t.faults]
     meta = facts.meta
@@ -1007,6 +1095,7 @@ def render_course(
                 "repo": t.repo,
                 "slug": t.repo,
                 "state": template_state(t),
+                "starter": t.starter,
             }
             for t in facts.templates
         ],
@@ -1049,6 +1138,18 @@ def course_todo(facts: CourseFacts) -> list[dict]:
         }
         for t in facts.templates
         if t.topic and not _written(t.readme)
+    ]
+    out += [
+        {
+            "id": f"template:{_slugify(t.repo)}:starter",
+            "kind": "template",
+            "repo": t.repo,
+            "text": text,
+            "screen": "template",
+            "entry": t.repo,
+        }
+        for t in facts.templates
+        if t.topic and (text := t.starter_todo)
     ]
     return sorted(out, key=lambda e: (e["kind"] != "materials", e["repo"]))
 
@@ -1578,9 +1679,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     problems += [
         materials_problem(m, course.org) for m in course.materials if not m.topic
     ]
-    problems += [
-        template_problem(t, course.org) for t in course.templates if not t.topic
-    ]
+    problems += [p for t in course.templates for p in template_problems(t, course.org)]
     problems = _unique_ids(problems)
     course_block, _ = render_course(
         course, now, [p for p in problems if p["scope"] == "course"]
@@ -1742,6 +1841,8 @@ def gather_course(course_org: str) -> CourseFacts:
                 t.faults, _ = grades.grading_spec_faults(
                     name, name, course_org, text, None
                 )
+            if t.topic:
+                _starter_facts(course_org, t, text)
             facts.templates.append(t)
     facts.public_site = pages_repo(course_org) in listing
     try:
@@ -1751,6 +1852,25 @@ def gather_course(course_org: str) -> CourseFacts:
         facts.website_unusable = True
     facts.website_on = bool(oc and oc.enabled)
     return facts
+
+
+def _starter_facts(org: str, t: TemplateFacts, config: str | None) -> None:
+    """Decision 0028's facts for one template, from the solution and `main` trees and,
+    for a derived one, Derive's record: three reads, never a source file's content. With
+    no `starter:` key a template reads as derived when `solution/` holds a derivable
+    source (Derive itself reads the markers; the migration writes the key)."""
+    solution = repo_path_shas(org, t.repo, SOLUTION_BRANCH)
+    has_source = bool(derivable_sources(list(solution)))
+    t.starter = declared_starter(config) or (
+        STARTER_DERIVED if has_source else STARTER_HANDWRITTEN
+    )
+    main = repo_path_shas(org, t.repo, TEMPLATE_MAIN)
+    record = (
+        get_file_content(org, t.repo, STARTER_RECORD, ref=TEMPLATE_MAIN)
+        if t.starter == STARTER_DERIVED and has_source
+        else None
+    )
+    t.starter_todo, t.main_edited = starter_check(t.starter, solution, main, record)
 
 
 def _outcomes(semester_org: str, paths: dict[str, str]) -> list[dict]:

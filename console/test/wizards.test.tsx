@@ -12,7 +12,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { validateArgs } from '../src/ops/adapter';
 import { FormatPicker } from '../src/forms/FormatPicker';
-import { NewAssignmentScreen, withStart, copySentences, extrasOf, initialValues, linesFor, naDone, ordinalUnconfirmed, sourceOf, S1, S2, S3, S4, withExtras } from '../src/screens/NewAssignment';
+import { NewAssignmentScreen, withAutograde, withStart, copySentences, extrasOf, initialValues, linesFor, naDone, ordinalUnconfirmed, sourceOf, S1, S2, S3, S4, S5, withExtras } from '../src/screens/NewAssignment';
 import { NewCohortScreen, cardsDone, nkDone } from '../src/screens/NewCohort';
 import { NewCourseScreen, ncDone, ncOrg } from '../src/screens/NewCourse';
 import { NewMaterialsScreen } from '../src/screens/NewMaterials';
@@ -103,18 +103,18 @@ describe('which step a wizard opens at', () => {
   it('keeps a New assignment step done only while its answers are the ones verified', () => {
     const v = { ...initialValues(null), name: 'Trees' };
     const d = { v, verified: { 1: signature(v, S1), 2: signature(v, S2) } };
-    expect(naDone(d, v, false)).toEqual([true, true, false, false, false]);
-    expect(naDone(d, { ...v, type: 'group' }, false)).toEqual([true, false, false, false, false]);
-    expect(naDone(d, { ...v, name: 'Forests' }, false)).toEqual([false, false, false, false, false]);
-    expect(naDone(d, { ...v, start: 'repo', source_repo: 'a/b' }, false)).toEqual([false, false, false, false, false]);
+    expect(naDone(d, v, false)).toEqual([true, true, false, false, false, false]);
+    expect(naDone(d, { ...v, type: 'group' }, false)).toEqual([true, false, false, false, false, false]);
+    expect(naDone(d, { ...v, name: 'Forests' }, false)).toEqual([false, false, false, false, false, false]);
+    expect(naDone(d, { ...v, start: 'repo', source_repo: 'a/b' }, false)).toEqual([false, false, false, false, false, false]);
   });
 
   it('asks every question when importing too (settings are not read from the source), and none once the template exists', () => {
     const v = { ...initialValues(null), name: 'Trees', start: 'template', source_template: 'assignment-2-f2026' };
-    expect(naDone({ v, verified: { 1: signature(v, S1) } }, v, false)).toEqual([true, false, false, false, false]);
-    const all = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4) };
-    expect(naDone({ v, verified: all }, v, false)).toEqual([true, true, true, true, false]);
-    expect(openAt(naDone({ v, verified: {} }, v, true))).toBe(5);
+    expect(naDone({ v, verified: { 1: signature(v, S1) } }, v, false)).toEqual([true, false, false, false, false, false]);
+    const all = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4), 5: signature(v, S5) };
+    expect(naDone({ v, verified: all }, v, false)).toEqual([true, true, true, true, true, false]);
+    expect(openAt(naDone({ v, verified: {} }, v, true))).toBe(6);
   });
 
   it('trusts live checks over what the draft remembers', () => {
@@ -192,10 +192,13 @@ describe('what the wizards send', () => {
   it('builds assignment.create args the registry accepts: the name and the template keys, never a number, a semester or copy_from', () => {
     const v = { ...initialValues(null), name: ' Trees ', start: 'template', source_template: 'assignment-2-f2026' };
     const solo = assignmentArgs(v);
-    expect(solo).toEqual({ name: 'Trees', type: 'individual', submit_via: 'assignment_repo', formats: 'ipynb', autograde: false });
+    expect(solo).toEqual({ name: 'Trees', type: 'individual', submit_via: 'assignment_repo', formats: 'ipynb', autograde: false, starter: 'handwritten' });
     expect(validateArgs('assignment.create', JSON.parse(JSON.stringify(solo)))).toEqual([]);
     const team = assignmentArgs({ ...v, type: 'group', team_formation: 'assigned', submit_via: 'shared_dropbox_repo', visibility: 'public', autograde: 'true', formats: ['py', 'rmd'] });
-    expect(team).toMatchObject({ type: 'group', autograde: false, formats: 'py,rmd' });
+    // Tests cannot run in a drop box, so the starter defaults to hand-written (decision 0028 rule 1).
+    expect(team).toMatchObject({ type: 'group', autograde: false, formats: 'py,rmd', starter: 'handwritten' });
+    expect(assignmentArgs({ ...v, autograde: 'true', formats: ['py'] }).starter).toBe('derived');
+    expect(assignmentArgs({ ...v, autograde: 'true', formats: ['py'], starter: 'handwritten' }).starter).toBe('handwritten');
     // How a semester runs it is its assignments.yml: never sent (decision 0009).
     expect(team).not.toHaveProperty('team_formation');
     expect(team).not.toHaveProperty('visibility');
@@ -372,8 +375,8 @@ describe('the wizard screens', () => {
 
   it('New assignment asks the name and what it starts from first: no number, no semester', () => {
     const out = render(<NewAssignmentScreen {...cp()} step={5} />);
-    expect(out).toContain('Question 1 of 4');
-    expect(out).toContain('Four questions, then a check');
+    expect(out).toContain('Question 1 of 5');
+    expect(out).toContain('Five questions, then a check');
     expect(out).toContain("The assignment's title.");
     expect(out).toContain('Start from');
     expect(out).toContain('A template of this course');
@@ -407,12 +410,40 @@ describe('the wizard screens', () => {
     vi.stubGlobal('localStorage', { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => kept.set(k, v), removeItem: (k: string) => kept.delete(k) });
     try {
       const v = { ...initialValues(null), name: 'Regression' };
-      saveDraft(`new-assignment:${COURSE_ORG}`, { v, verified: { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3) } });
-      const out = render(<NewAssignmentScreen {...cp()} step={4} />);
-      expect(out).toContain('Question 4 of 4');
+      saveDraft(`new-assignment:${COURSE_ORG}`, { v, verified: { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4) } });
+      const out = render(<NewAssignmentScreen {...cp()} step={5} />);
+      expect(out).toContain('Question 5 of 5');
       expect(out).toContain('Skip it if the assignment is not written yet. You can fill it in later');
       expect(out).toContain('The marks page then shows no total.');
       expect(out).toContain('>Skip</button>');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps the starter choice only until the tests answer changes, so the default follows it', () => {
+    const v = { ...initialValues(null), autograde: 'false', starter: 'derived' };
+    expect(withAutograde(v, { ...v, grader_pdf: true }).starter).toBe('derived');
+    expect(withAutograde(v, { ...v, autograde: 'true' }).starter).toBeUndefined();
+  });
+
+  it('New assignment asks how students get the starter, defaulting from the tests answer', () => {
+    const kept = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => kept.set(k, v), removeItem: (k: string) => kept.delete(k) });
+    try {
+      const at4 = (v: Record<string, unknown>) => {
+        saveDraft(`new-assignment:${COURSE_ORG}`, { v, verified: { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3) } });
+        return render(<NewAssignmentScreen {...cp()} step={4} />);
+      };
+      const tests = at4({ ...initialValues(null), name: 'Regression', autograde: 'true' });
+      expect(tests).toContain('Question 4 of 5');
+      expect(tests).toContain('How do students get the starter?');
+      expect(tests).toContain('Derived from your solution (recommended when tests mark it)');
+      expect(tests).toContain('Write only the solution branch and mark each answer with ### BEGIN SOLUTION / ### END SOLUTION');
+      expect(tests).toContain('You write main yourself: a skeleton, a brief, a different shape from the solution.');
+      expect(tests).toMatch(/value="derived" checked/);
+      expect(at4({ ...initialValues(null), name: 'Regression' })).toMatch(/value="handwritten" checked/);
+      expect(at4({ ...initialValues(null), name: 'Regression', autograde: 'true', starter: 'handwritten' })).toMatch(/value="handwritten" checked/);
     } finally {
       vi.unstubAllGlobals();
     }

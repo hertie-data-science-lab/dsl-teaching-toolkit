@@ -49,6 +49,7 @@ breaks a live link that faculty click:
 |---|---|
 | `docs/01-new-course-org.md` | `config_digest.COURSE` |
 | `docs/03-add-assignment-to-course.md` | `config_digest.GRADING_CONFIG` |
+| `docs/assignment-starter.md` | the console's Template settings and New assignment `?` (`Course.tsx` `STARTER_DOC`) |
 | `docs/05-manage-teaching-team.md` | `templates/semester-config/instructors.yml`, `config_digest.PEOPLE` |
 | `docs/06-enrol-students-to-cohort.md` | `config_digest.ROSTER` |
 | `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/semester-config/schedule.yml`, `templates/semester-config/validate-schedule.yml` |
@@ -118,6 +119,20 @@ Things whose *literal spelling* is depended on from outside Python:
   spelling is still recognised. The hidden
   `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what makes the quarter-hourly
   refresh post once rather than four times an hour.
+- **A template's starter (decision 0028).** `grading_config.yml` `starter: derived |
+  handwritten` (`course.STARTER_MODES`). Derive reads a missing key from the markers
+  (`derive.starter_mode`); the status, which reads no source file, reads it as `derived`
+  when `solution/` holds a derivable file; the migration's *template starter* step writes
+  it. Derive refuses a hand-written one with the reason code `STARTER_HANDWRITTEN`,
+  appended to its codes. Every real Derive writes `derive.STARTER_RECORD`
+  (`.system/starter.json` on `main`: `solution_tree`, the sha of the `solution/` folder it
+  derived from, `""` after a run that refused a file; `files`, `{main path: blob sha}`).
+  `status_json.starter_check` compares it with the solution and `main` trees the gather
+  already reads, plus that one file: a recorded blob that differs on `main` is the problem
+  `template:<_slugify(repo)>:MAIN_EDITED`; no record is the to-do "Derive has not been run
+  yet"; another `solution_tree` is "The solution changed since the last Derive". Its two
+  keys are read by the status: add a key, never rename one. Faculty page:
+  `docs/assignment-starter.md`.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-semester`, `submission`, `gradebook`,
   `assignment-template`, `dsl-materials` (a course materials repo; `materials.MATERIALS_TOPIC`),
   `dsl-assignment` (a course assignment template; `discovery.TEMPLATE_TOPIC`).
@@ -343,7 +358,10 @@ never propagated:
 Seeded files carry their owner on the first line, and the write site enforces it:
 
 - **SYSTEM-OWNED** - written unconditionally on every bootstrap and refresh, so fixes reach
-  running courses. Workflows, generated docs, everything under `.system/`.
+  running courses. Workflows, generated docs, everything under `.system/`. One is written by
+  an op rather than a refresh: `.system/starter.json` on a derived template's `main`, by
+  every real Derive (JSON, so it carries no stamp; it reaches students with the rest of
+  `main`, and says only which blobs Derive wrote).
 - **INSTRUCTOR-OWNED** - `gh_contents.seed_if_absent` only. Rewriting one destroys live state (roster
   rows, enrol codes, the semester's schedule). The code comments call this "USER-owned"; the shipped
   stamp says INSTRUCTOR-OWNED. Same thing.
@@ -987,7 +1005,8 @@ still keyed `cohorts:`), `.system/` in `.github`, `dsl-course.yml` keys, templat
 (`grading_config.yml` `format:` -> `formats:` on each template's `solution` branch,
 and the run settings out, recorded first in `.github/.system/migration-run-keys.json` for
 the semesters, re-read with `parse_grading_spec` - course-owned, so here rather than per
-semester),
+semester), template starter (`starter:` written into each live template's
+`grading_config.yml` from its answer markers, decision 0028),
 materials files, public website (every materials repo's `publish.yml` deleted; `.github/opencourse.yml`
 seeded, create-only, from the site repo's `_publish-config.yml` when there is one - on, with its
 settings - else off), re-render (Refresh

@@ -80,6 +80,8 @@ Numbered in reading order - **course-level** (01-03) before **semester-level** (
 | 10 | [Grade and return assignments](10-grade-and-return-assignments.md) | semester | per assignment, after the deadline |
 | 11 | [Configure the semester website](11-configure-cohort-site.md) | course + semester | whenever the site should say something different - and to know what not to hand-edit |
 
+How an assignment's starter is written, derived from the solution or by hand: [assignment-starter.md](assignment-starter.md).
+
 For a one-page summary of **every workflow**, see [`actions-reference.md`](reference/actions-reference.md);
 for who may run them, [`access-reference.md`](reference/access-reference.md). If you maintain the
 toolkit itself rather than a course, start at [`maintainers.md`](reference/maintainers.md); to

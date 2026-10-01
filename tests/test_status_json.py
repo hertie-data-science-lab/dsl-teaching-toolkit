@@ -532,7 +532,12 @@ def test_an_assignment_template_by_its_old_name_only_is_not_migrated():
     old = status_json.TemplateFacts("assignment-1-f2025", "# Trees", topic=False)
     doc = _render(_course(templates=[old]))
     assert doc["course"]["templates"] == [
-        {"repo": "assignment-1-f2025", "slug": "assignment-1-f2025", "state": "problem"}
+        {
+            "repo": "assignment-1-f2025",
+            "slug": "assignment-1-f2025",
+            "state": "problem",
+            "starter": "derived",
+        }
     ]
     (problem,) = [p for p in doc["problems"] if p["id"].startswith("template:")]
     assert problem["id"] == "template:assignment-1-f2025:NOT_MIGRATED"
@@ -1839,3 +1844,110 @@ def test_the_todo_list_is_every_unmet_check_and_every_unwritten_brief():
     # To-dos never enter the problem list.
     assert doc["problems"] == []
     assert validate(doc, schemas.status_schema()) == []
+
+
+# ------------------------------------------------- the starter: derived or by hand (0028)
+
+
+def test_a_template_with_a_starter_to_do_is_not_ready_and_lists_it():
+    t = status_json.TemplateFacts(
+        "assignment-1", "# Trees", starter_todo="Derive has not been run yet."
+    )
+    doc = status_json.render_course_file(_course(templates=[t]), NOW)
+    assert doc["course"]["templates"][0]["state"] == "todo"
+    assert doc["course"]["templates"][0]["starter"] == "derived"
+    assert doc["course"]["todo"][-1] == {
+        "id": "template:assignment-1:starter",
+        "kind": "template",
+        "repo": "assignment-1",
+        "text": "Derive has not been run yet.",
+        "screen": "template",
+        "entry": "assignment-1",
+    }
+    assert doc["problems"] == []
+    assert validate(doc, schemas.status_schema()) == []
+
+
+def test_a_hand_edit_on_a_derived_main_is_a_problem_naming_the_fix():
+    t = status_json.TemplateFacts("assignment-1", "# Trees", main_edited="starter.py")
+    course = _course(templates=[t])
+    doc = status_json.render_course_file(course, NOW)
+    assert doc["course"]["templates"][0]["state"] == "problem"
+    problem = next(p for p in doc["problems"] if p["id"].endswith("MAIN_EDITED"))
+    assert problem["id"] == "template:assignment-1:MAIN_EDITED"
+    assert (
+        problem["text"] == "main is derived; edit the solution branch and derive again."
+    )
+    assert (problem["fix"]["screen"], problem["fix"]["entry"]) == (
+        "template",
+        "assignment-1",
+    )
+    assert "starter.py" in problem["stops"]
+    assert validate(doc, schemas.status_schema()) == []
+    # A semester that cites it shows the same problem.
+    sem = status_json.render_semester(course, _semester(), NOW)
+    assert "template:assignment-1:MAIN_EDITED" in [p["id"] for p in sem["problems"]]
+
+
+def _record(tree="t1", files=None):
+    return json.dumps({"solution_tree": tree, "files": files or {"starter.py": "b1"}})
+
+
+SOLUTION = {"solution": "t1", "solution/starter.py": "s1", "grading_config.yml": "g"}
+MAIN = {"README.md": "r", "starter.py": "b1", ".system/starter.json": "j"}
+
+
+def test_a_derived_starter_is_checked_off_the_two_trees_and_derive_s_record():
+    current = _record()
+    check = lambda solution=SOLUTION, main=MAIN, record=current: (
+        status_json.starter_check("derived", solution, main, record)
+    )
+    assert check() == (None, None)
+    assert check(record=None) == ("Derive has not been run yet.", None)
+    assert check(record="not json") == ("Derive has not been run yet.", None)
+    assert check(solution={"grading_config.yml": "g"}) == (
+        "There is nothing under solution/ to derive a starter from.",
+        None,
+    )
+    assert check(main={**MAIN, "starter.py": "edited"}) == (None, "starter.py")
+    assert check(main={"README.md": "r"}) == (None, "starter.py")  # deleted by hand
+    assert check(solution={**SOLUTION, "solution": "t2"}) == (
+        "The solution changed since the last Derive; derive again.",
+        None,
+    )
+    # A run that refused a file records no tree, so it asks to derive again.
+    assert check(record=_record(tree=""))[0].startswith("The solution changed")
+
+
+def test_a_hand_written_starter_needs_main_to_hold_more_than_the_brief():
+    check = lambda main: status_json.starter_check("handwritten", {}, main, None)
+    assert check({"README.md": "r", "skeleton.py": "x"}) == (None, None)
+    for main in ({}, {"README.md": "r"}, {"README.md": "r", ".github": "t"}):
+        assert check(main) == ("main has no starter files yet.", None)
+
+
+def test_the_gather_reads_two_trees_and_the_record_never_a_source(monkeypatch):
+    reads = []
+    monkeypatch.setattr(
+        status_json,
+        "repo_path_shas",
+        lambda org, repo, branch: SOLUTION if branch == "solution" else MAIN,
+    )
+    monkeypatch.setattr(
+        status_json,
+        "get_file_content",
+        lambda org, repo, path, ref="": reads.append(path) or _record(),
+    )
+    for config, mode, n in (
+        (None, "derived", 1),  # no key, a derivable source: derived
+        ("starter: handwritten\n", "handwritten", 0),
+    ):
+        reads.clear()
+        t = status_json.TemplateFacts("assignment-1", "# Trees")
+        status_json._starter_facts(COURSE, t, config)
+        assert t.starter == mode and (t.starter_todo, t.main_edited) == (None, None)
+        assert reads == [".system/starter.json"] * n
+    monkeypatch.setattr(status_json, "repo_path_shas", lambda org, repo, branch: {})
+    t = status_json.TemplateFacts("assignment-1", "# Trees")
+    status_json._starter_facts(COURSE, t, None)
+    assert t.starter == "handwritten"

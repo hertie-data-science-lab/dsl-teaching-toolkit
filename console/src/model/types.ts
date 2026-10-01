@@ -36,7 +36,8 @@ export interface CourseStatus {
   /** C1-C3 done and no course problem: a new semester can start (decision 0019). */
   ready: boolean;
   materials: MaterialsState[];
-  templates: { repo: string; slug: string; state: string }[];
+  /** `starter`: how main is written (decision 0028), the key or the engine's reading of the markers. */
+  templates: { repo: string; slug: string; state: string; starter?: 'derived' | 'handwritten' }[];
   semesters: string[];
   /** Work started and not finished (decision 0022): never a problem. */
   todo?: Todo[];

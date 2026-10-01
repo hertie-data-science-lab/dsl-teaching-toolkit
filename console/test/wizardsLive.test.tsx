@@ -10,7 +10,7 @@ import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
-import { NewAssignmentScreen, S1, S2, S3, S4 } from '../src/screens/NewAssignment';
+import { NewAssignmentScreen, S1, S2, S3, S4, S5 } from '../src/screens/NewAssignment';
 import { signature } from '../src/wizards/model';
 import { NewCohortScreen } from '../src/screens/NewCohort';
 import { NewCourseScreen } from '../src/screens/NewCourse';
@@ -166,10 +166,10 @@ describe('New assignment: import', () => {
 
     // The template now exists (the operation ran); every step verified: the check step copies.
     exists = true;
-    const verified = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4) };
+    const verified = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4), 5: signature(v, S5) };
     localStorage.setItem(`dsl-console:wizard:new-assignment:${COURSE}`, JSON.stringify({ v, verified, extrasSaved: T }));
     render(null, root);
-    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={5} /></EnvCtx.Provider>, root!));
+    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={6} /></EnvCtx.Provider>, root!));
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(root.textContent).toContain('Copied 2 files to main.');
@@ -177,6 +177,17 @@ describe('New assignment: import', () => {
     expect(gh.seen.find((x) => x.method === 'POST' && x.url.endsWith('/git/trees'))!.body).toMatchObject({ base_tree: 'tr1', tree: [{ path: 'README.md' }, { path: 'data/x.csv' }] });
     expect(root.textContent).toContain('Created. Nothing reaches students until you add it to a schedule.');
     expect(root.textContent).toContain('Add to the Fall 2026 schedule');
+    // Written by hand: nothing to derive. Derived: Derive is offered straight away.
+    expect(root.textContent).not.toContain('Derive the student version now');
+    const key = `dsl-console:wizard:new-assignment:${COURSE}`;
+    const saved = JSON.parse(localStorage.getItem(key)!);
+    const dv = { ...v, starter: 'derived' };
+    localStorage.setItem(key, JSON.stringify({ ...saved, v: dv, verified: { ...saved.verified, 4: signature(dv, S4) } }));
+    render(null, root);
+    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={6} /></EnvCtx.Provider>, root!));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(root.textContent).toContain('Created.');
+    expect([...root.querySelectorAll('button')].some((b) => b.textContent === 'Derive the student version now')).toBe(true);
   });
 
   it('never says Created while the source cannot be read: the check fails with its sentence and a way to read it again', async () => {
@@ -192,12 +203,12 @@ describe('New assignment: import', () => {
     const client = new GitHubClient({ token: () => 't', fetch: gh.fetch });
     const env = { client, user: { login: 'a-example', id: 1, name: null, email: null, avatar_url: '' }, files: new StaticFiles(), kind: 'classic', ops: { runs: { value: [] } } } as unknown as Env;
     const v = { name: 'Regression', start: 'repo', source_repo: 'prof/old-course', type: 'individual', submit_via: 'assignment_repo', formats: ['ipynb'], autograde: 'false', completion_check: 'auto', grader_pdf: false };
-    const verified = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4) };
+    const verified = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4), 5: signature(v, S5) };
     localStorage.setItem(`dsl-console:wizard:new-assignment:${COURSE}`, JSON.stringify({ v, verified, extrasSaved: T }));
     const props = { course, loaded: { kind: 'absent' } as const, cohortStates: {}, files: new StaticFiles(), now };
     root = document.createElement('div');
     document.body.appendChild(root);
-    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={5} /></EnvCtx.Provider>, root!));
+    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={6} /></EnvCtx.Provider>, root!));
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(root.textContent).toContain('prof/old-course can be read (could not tell)');
     expect(root.textContent).not.toContain('Created');
@@ -233,12 +244,12 @@ describe('New assignment: import', () => {
     const client = new GitHubClient({ token: () => 't', fetch: gh.fetch });
     const env = { client, user: { login: 'a-example', id: 1, name: null, email: null, avatar_url: '' }, files: new StaticFiles(), kind: 'classic', ops: { runs: { value: [] } } } as unknown as Env;
     const v = { name: 'Regression', start: 'repo', source_repo: 'prof/old-course', type: 'individual', submit_via: 'assignment_repo', formats: ['ipynb'], autograde: 'false', completion_check: 'auto', grader_pdf: false };
-    const verified = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4) };
+    const verified = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4), 5: signature(v, S5) };
     localStorage.setItem(`dsl-console:wizard:new-assignment:${COURSE}`, JSON.stringify({ v, verified, extrasSaved: T }));
     const props = { course, loaded: { kind: 'absent' } as const, cohortStates: {}, files: new StaticFiles(), now };
     root = document.createElement('div');
     document.body.appendChild(root);
-    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={5} /></EnvCtx.Provider>, root!));
+    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={6} /></EnvCtx.Provider>, root!));
     for (let i = 0; i < 3; i++) await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     const trees = () => gh.seen.filter((x) => x.method === 'POST' && x.url.endsWith('/git/trees')).map((x) => (x.body as { base_tree: string }).base_tree);
     expect(trees()).toEqual(['tr1', 'tr2']);

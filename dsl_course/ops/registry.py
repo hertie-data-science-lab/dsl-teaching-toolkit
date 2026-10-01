@@ -30,6 +30,7 @@ from ..course import (
     SOLUTION_NOW,
     SOLUTION_WARNING,
     STARTER_FORMATS,
+    STARTER_MODES,
     SUBMIT_VIA,
 )
 
@@ -348,6 +349,8 @@ def _new_assignment(request: Request) -> list[str]:
         "--autograde",
         "true" if _a(request, "autograde") else "false",
     ]
+    if _a(request, "starter"):
+        argv += ["--starter", _a(request, "starter")]
     return argv
 
 
@@ -702,6 +705,8 @@ _OPS = (
                 "type": _enum(ASSIGNMENT_TYPES),
                 "submit_via": _enum(SUBMIT_VIA),
                 "autograde": _boolean("Seed tests and run them at the late cutoff"),
+                # Decision 0028; left out, derived when autograde is on.
+                "starter": _enum(STARTER_MODES, "How main's starter is written"),
                 # Ignored, until the console stops sending them.
                 "number": _string(r"^[0-9]{1,3}$", "Ignored"),
                 "semester": _string(SEMESTER_PATTERN, "Ignored"),

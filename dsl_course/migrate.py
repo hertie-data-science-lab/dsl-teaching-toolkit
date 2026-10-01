@@ -30,8 +30,10 @@ migration under a hold neither pauses nor unpauses.
 
 Semester org, in order: preflight, pause, rename repos, layout, keys, proposed releases,
 topic, re-render, status, unpause. Course org: preflight, pause, registry, .system/,
-dsl-course.yml keys, template keys, seeded text, materials topic, materials files,
-public website, re-render, status, unpause.
+dsl-course.yml keys, template keys, seeded text, template starter (decision 0028:
+`starter:` written into each live template's grading_config.yml, read from its answer
+markers), materials topic, materials files, public website, assignment topic, re-render,
+status, unpause.
 """
 
 from __future__ import annotations
@@ -77,6 +79,7 @@ from .course import (
     SYLLABUS_SESSIONS_FILE,
     pages_repo,
 )
+from .derive import derivable_sources, starter_mode
 from .discovery import (
     OLD_SEMESTERS_PATH,
     SEMESTERS_PATH,
@@ -117,7 +120,7 @@ from .repos import (
     repo_missing,
     set_repo_topics,
 )
-from .scaffold import materials_system_files
+from .scaffold import materials_system_files, starter_line
 from .schedule_plan import (
     Aliases,
     entry_kind,
@@ -198,6 +201,7 @@ TEXT_COMMIT = "migrate: seeded text"
 PROFILE_README = "profile/README.md"
 JOIN_README = "README.md"
 KEYS_COMMIT = "migrate: keys"
+STARTER_COMMIT = "migrate: starter"
 
 
 def fold(live: set[str], table: dict[str, str]) -> dict[str, str]:
@@ -2928,6 +2932,46 @@ class Course:
             log_err(f"{repo}@{SOLUTION_BRANCH}/{GRADING_FILE} is still NOT_MIGRATED")
         return not self.templates_left() and not bad
 
+    # starter (decision 0028) --------------------------------------------------
+    def starters_left(self) -> dict[str, tuple[str, str]]:
+        """`{template: (its mode, its grading_config.yml with the key)}` for each live
+        template whose file parses and has no `starter:` yet. The mode is rule 6's
+        reading (`derive.starter_mode`), written down so it never has to be guessed again."""
+        out = {}
+        for repo in self.templates():
+            text = self.grading_text(repo)
+            try:
+                data = yaml.safe_load(text) if text else None
+            except yaml.YAMLError:
+                continue
+            if not isinstance(data, dict) or "starter" in data:
+                continue
+            mode = starter_mode(None, self.solution_sources(repo))
+            out[repo] = (mode, f"{text.rstrip()}\n{starter_line(mode)}\n")
+        return out
+
+    def solution_sources(self, repo: str) -> dict[str, str]:
+        """`{path: text}` for the derivable sources on `repo`'s solution branch."""
+        paths = _files(self.org, repo, SOLUTION_BRANCH)
+        texts = {
+            p: get_file_content(self.org, repo, p, ref=SOLUTION_BRANCH)
+            for p in derivable_sources(list(paths))
+        }
+        return {p: t for p, t in texts.items() if t is not None}
+
+    def write_starters(self) -> bool:
+        return all(
+            move_files(
+                self.org,
+                repo,
+                {},
+                STARTER_COMMIT,
+                files={GRADING_FILE: text.encode()},
+                branch=SOLUTION_BRANCH,
+            )
+            for repo, (_, text) in self.starters_left().items()
+        )
+
     # seeded text -----------------------------------------------------------
     def texts(self) -> dict[tuple[str, str, str], tuple[str, str]]:
         """`{(repo, branch, path): (text now, text after this step)}` for `dsl-course.yml`
@@ -3205,6 +3249,21 @@ class Course:
                 rollback=(
                     f"git revert the '{TEXT_COMMIT}' commit in {dotgithub} and on each "
                     f"template's {SOLUTION_BRANCH} branch"
+                ),
+            ),
+            Step(
+                "template starter",
+                done=lambda: not self.starters_left(),
+                plan=lambda: [
+                    f"{r}@{SOLUTION_BRANCH}/{GRADING_FILE}: starter: {mode} "
+                    f"(read from its answer markers)"
+                    for r, (mode, _) in self.starters_left().items()
+                ],
+                do=self.write_starters,
+                verify=lambda: not self.starters_left(),
+                rollback=(
+                    f"git revert the '{STARTER_COMMIT}' commit on each template's "
+                    f"{SOLUTION_BRANCH} branch"
                 ),
             ),
             Step(

@@ -34,6 +34,7 @@ from .course import (
     LABELS,
     SOLUTION_BEFORE_CUTOFF,
     SOLUTION_WARNING,
+    STARTER_MODES,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
@@ -246,8 +247,15 @@ def status_schema() -> dict:
         },
         ("repo", "path"),
     )
-    repo_state = _obj(
-        {"repo": _str(), "slug": _str(), "state": _str()}, ("repo", "state")
+    # A template's C5 state, plus how its starter is written (decision 0028).
+    template_state = _obj(
+        {
+            "repo": _str(),
+            "slug": _str(),
+            "state": _str(),
+            "starter": _enum(STARTER_MODES),
+        },
+        ("repo", "state"),
     )
     # A materials repo's checklist (decision 0022 rule 5); `why` is null once done.
     # `detail` (on `kind_folder`, 0024 rule 8): the top folders per content kind.
@@ -296,7 +304,7 @@ def status_schema() -> dict:
             "stage_why": stage_why,
             "ready": {"type": "boolean"},
             "materials": {"type": "array", "items": materials_state},
-            "templates": {"type": "array", "items": repo_state},
+            "templates": {"type": "array", "items": template_state},
             "semesters": {"type": "array", "items": _str()},
             "todo": {"type": "array", "items": todo},
         },
@@ -576,6 +584,8 @@ _SPEC_TYPES = {
     "autograde": {"type": "boolean"},
     "completion_check": {"type": "boolean"},
     "grader_pdf": {"type": "boolean"},
+    # Decision 0028. No default here: a template without it reads by its markers.
+    "starter": _enum(STARTER_MODES),
 }
 
 
