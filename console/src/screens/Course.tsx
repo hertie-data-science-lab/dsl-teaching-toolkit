@@ -208,21 +208,32 @@ export function CourseHeaderActions({ course, ready }: { course: CourseProps['co
   );
 }
 
+/** The newer of two ISO times; either may be missing. */
+const newer = (a: string | null | undefined, b: string | null | undefined) => (!a ? b : !b ? a : Date.parse(a) >= Date.parse(b) ? a : b);
+
 /**
  * Under the overview's head, quiet: how old the course's status is, Refresh, and the course on
- * GitHub. The age is when the status file last changed.
+ * GitHub. The age is the newer of the status file's last change and this session's last
+ * Refresh that finished, so a Refresh that changed nothing still reads "just now". A read-only
+ * viewer gets the GitHub link alone.
  */
 export function CourseSubActions({ course, loaded, files, now, computed }: Pick<CourseProps, 'course' | 'loaded' | 'files' | 'now'> & { computed: boolean }) {
+  const env = useEnv();
   const scope = newestScope({ course });
-  const changed = loaded.kind === 'ready' ? files.lastChange(course.org, COURSE_REPO, STATUS_PATH) : null;
-  const age = !computed ? 'Not computed yet' : loaded.kind === 'ready' && changed ? `Updated ${ago(changed, now)}` : null;
+  const refreshed = (env?.ops.runs.value ?? []).find((r) => r.op === 'semester.check' && r.course === course.org && r.conclusion !== 'failed')?.finished;
+  const changed = newer(loaded.kind === 'ready' ? files.lastChange(course.org, COURSE_REPO, STATUS_PATH) : null, refreshed);
+  const age = !computed ? 'Not computed yet' : changed ? `Updated ${ago(changed, now)}` : null;
   return (
     <div class="actions sub-actions">
-      {age ? <span class="footnote">{age}</span> : null}
-      {age ? <span aria-hidden="true">·</span> : null}
-      {scope ? <OpButtons def={{ ...checkNow(scope), where: course.name }} verbCls="textlink" /> : <Soon label="Refresh" cls="textlink" title="Refresh runs on a semester; this course has none yet." />}
-      <Hint label="About Refresh">{REFRESH_HINT}</Hint>
-      <span class="sep" aria-hidden="true">|</span>
+      {course.write ? (
+        <>
+          {age ? <span class="footnote">{age}</span> : null}
+          {age ? <span aria-hidden="true">·</span> : null}
+          {scope ? <OpButtons def={{ ...checkNow(scope), where: course.name }} verbCls="textlink" /> : <Soon label="Refresh" cls="textlink" title="Refresh runs on a semester; this course has none yet." />}
+          <Hint label="About Refresh">{REFRESH_HINT}</Hint>
+          <span class="sep" aria-hidden="true">|</span>
+        </>
+      ) : null}
       <a class="textlink" href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
     </div>
   );
@@ -256,7 +267,7 @@ export function CourseScreen(p: CourseProps) {
         </div>
         <CourseHeaderActions course={course} ready={ready} />
       </div>
-      {course.write ? <CourseSubActions course={course} loaded={p.loaded} files={p.files} now={p.now} computed={v.computed} /> : null}
+      <CourseSubActions course={course} loaded={p.loaded} files={p.files} now={p.now} computed={v.computed} />
       <p class="page-note">Materials and assignment templates are prepared here, for every semester. Students get only what a semester releases or hands out, from that semester’s page.</p>
       <Verdict course={v.course} />
       {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}

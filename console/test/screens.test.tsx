@@ -8,6 +8,8 @@ import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
+import { signal } from '@preact/signals';
+import { EnvCtx, type Env } from '../src/env';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
@@ -441,6 +443,15 @@ describe('S2 course and S17 template', () => {
     dated.lastChange = () => new Date(NOW - 3 * 3600000).toISOString();
     const fine: Loaded = { kind: 'ready', status: STATUS, sha: 's', stale: [] };
     expect(text(<CourseScreen {...cp} loaded={fine} files={dated} />)).toContain('Updated 3 h ago · Refresh');
+    // A Refresh this session that changed nothing still reads just now.
+    const runs = signal([{ run_id: 1, op: 'semester.check', conclusion: 'ok', summary: '', finished: new Date(NOW).toISOString(), course: COURSE_ORG }]);
+    const env = { ops: { runs } } as unknown as Env;
+    expect(text(<EnvCtx.Provider value={env}><CourseScreen {...cp} loaded={fine} files={dated} /></EnvCtx.Provider>)).toContain('Updated just now · Refresh');
+    // Read only: the GitHub link stays; no age, no Refresh.
+    const ro = html(<CourseScreen {...cp} course={{ ...course, write: false }} />);
+    const roSub = ro.slice(ro.indexOf('class="actions sub-actions"'), ro.indexOf('class="page-note"'));
+    expect(roSub).toContain('Course on GitHub');
+    expect(roSub).not.toContain('Refresh');
   });
   it('lays the overview out as two columns of stacked panels', () => {
     const out = html(<CourseScreen {...cp} />);

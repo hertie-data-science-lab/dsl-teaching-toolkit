@@ -20,7 +20,7 @@ export { cohortName };
 export const CHECK_NOW_SOON = 'Sign in to refresh.';
 
 /** The `?` beside every Refresh. */
-export const REFRESH_HINT = 'Reads the course and its semesters from GitHub again and brings this page up to date. Happens by itself every night.';
+export const REFRESH_HINT = 'Reads the course and its semesters from GitHub again and re-runs every check. Automation does the same every night.';
 
 export const tzOf = (s: Status) => s.semester?.timezone ?? DEFAULT_TIMEZONE;
 export const yearOf = (now: number, tz: string) => zoned(new Date(now).toISOString(), tz).y;
@@ -137,7 +137,7 @@ export function NotComputed({ title, crumbs, p }: { title: string; crumbs: { t: 
       <section class="panel section stub">
         <h2>Status not computed yet</h2>
         <p>This semester has not been checked since it moved to the console's engine, so there is no status to show: no problems list, no semester strip, no counts.</p>
-        <p>Refresh computes it. Automation also computes it at the next nightly refresh.</p>
+        <p>Refresh computes it. Automation also computes it every night.</p>
       </section>
     </>
   );

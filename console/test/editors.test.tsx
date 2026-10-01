@@ -378,6 +378,9 @@ describe('editing screens', () => {
     const out = html(<DetailsScreen {...cp} />);
     expect(out).toContain(`<div class="actions"><a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/dsl-course.yml" target="_blank" rel="noopener">Edit on GitHub`);
     expect(out).not.toContain('New semester');
+    // On .github's own default branch; GitHub's new-file page while dsl-course.yml does not exist.
+    const trunk = new StaticFiles({}, {}, {}, { [COURSE_ORG]: [{ name: '.github', default_branch: 'trunk' }] });
+    expect(html(<DetailsScreen {...cp} files={trunk} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/trunk?filename=dsl-course.yml"`);
     expect(out).toContain('value="Machine Learning"');
     expect(out).toContain('value="a@staff.example.org"');
     expect(out).toContain('Defaults for this course’s assignments');

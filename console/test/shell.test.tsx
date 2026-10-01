@@ -3,7 +3,9 @@
 
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
-import { App, createState } from '../src/app';
+import { App, createState, subPages } from '../src/app';
+import { StaticFiles } from '../src/model/files';
+import type { Loaded } from '../src/model/status';
 import { AppAuth } from '../src/auth/app';
 import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
@@ -117,5 +119,38 @@ describe('sign-in page', () => {
     expect(out.indexOf('>Sign in with GitHub</button>')).toBeLessThan(out.indexOf(LINE));
     expect(out).toMatch(/<p class="footnote">The console can see/);
     expect(out).toMatch(/<details class="fold">.*<div class="fold-body"><form[\s\S]*id="pat"[\s\S]*<\/form><\/div><\/details>/s);
+  });
+});
+
+describe('the course nav’s sub-pages', () => {
+  const status = { kind: 'ready', sha: 's', stale: [], status: { schema: 'dsl.status/1', inputs: {}, course: {
+    org: course.org, ready: true, stages: {}, todo: [],
+    materials: [{ repo: 'course-materials-f2026', state: 'ready' }],
+    templates: [{ repo: 'assignment-3-f2026', slug: 'assignment-3-f2026', state: 'ready' }, { repo: 'assignment-4', slug: 'assignment-4', state: 'todo' }],
+  } } } as unknown as Loaded;
+  const files = new StaticFiles(
+    { [`${course.org}/assignment-3-f2026/grading_config.yml`]: 'title: Group project\n' },
+    {},
+    {},
+    { [course.org]: [{ name: '.github' }, { name: 'course-materials-f2026' }, { name: 'lecture-code', html_url: 'https://github.com/x/lecture-code' }, { name: 'assignment-4', topics: ['dsl-assignment'] }] },
+  );
+  const all = { materials: true, templates: true, titles: true };
+  it('lists materials first, then the other repos as links to GitHub', () => {
+    const s = subPages(course, status, {}, files, all)!;
+    expect(s.materials).toEqual([
+      { repo: 'course-materials-f2026', label: 'course-materials-f2026', href: '#materials-course-materials-f2026' },
+      { repo: 'lecture-code', label: 'lecture-code', href: 'https://github.com/x/lecture-code', ext: true },
+    ]);
+    // Collapsed, Materials reads no repo list.
+    expect(subPages(course, status, {}, files, { ...all, materials: false })!.materials.map((x) => x.repo)).toEqual(['course-materials-f2026']);
+  });
+  it('labels a template by its title, else its repo name, and by the repo name alone when titles are off', () => {
+    expect(subPages(course, status, {}, files, all)!.templates.map((t) => t.label)).toEqual(['Group project', 'assignment-4']);
+    expect(subPages(course, status, {}, files, { ...all, titles: false })!.templates.map((t) => t.label)).toEqual(['assignment-3-f2026', 'assignment-4']);
+    expect(subPages(course, status, {}, files, { ...all, templates: false })!.templates[0].href).toBe('#template-assignment-3-f2026');
+  });
+  it('gives nothing for a read-only course or before any status is read', () => {
+    expect(subPages({ ...course, write: false }, status, {}, files, all)).toBeUndefined();
+    expect(subPages(course, { kind: 'loading' }, {}, files, all)).toBeUndefined();
   });
 });

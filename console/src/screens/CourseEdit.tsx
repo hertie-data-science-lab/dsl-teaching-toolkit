@@ -216,6 +216,13 @@ export function LinkKindsField({ id, value, onInput }: { id: string; value: stri
   );
 }
 
+/** A course file's Edit on GitHub link, on .github's default branch (main until the repo list is read); GitHub's new-file page when it does not exist yet. */
+export function courseFileUrl(files: CourseProps['files'], org: string, path: string, exists: boolean): string {
+  const gh = files.repos(org);
+  const branch = (gh.kind === 'ready' ? gh.repos.find((r) => r.name === COURSE_REPO)?.default_branch : undefined) ?? 'main';
+  return exists ? editUrl(org, COURSE_REPO, path, branch) : newFileUrl(org, COURSE_REPO, path, branch);
+}
+
 export function DetailsScreen(p: CourseProps) {
   const { course } = p;
   const env = useEnv();
@@ -249,7 +256,7 @@ export function DetailsScreen(p: CourseProps) {
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Course details' }]} />
       <div class="page-head">
         <div><h1>Course details <Hint doc="01-new-course-org.md">Every semester of the course starts from these settings. Each semester and each assignment can set its own defaults.</Hint></h1><p class="lede">What every semester’s student site shows about the course, and the course’s defaults.</p></div>
-        <div class="actions"><a class="btn quiet" href={editUrl(course.org, COURSE_REPO, 'dsl-course.yml')} target="_blank" rel="noopener">Edit on GitHub <Ext /></a></div>
+        <div class="actions"><a class="btn quiet" href={courseFileUrl(p.files, course.org, 'dsl-course.yml', file.kind !== 'absent')} target="_blank" rel="noopener">Edit on GitHub <Ext /></a></div>
       </div>
       {file.kind === 'loading' ? <Loading what="Reading dsl-course.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no dsl-course.yml in {course.org}/.github.</CheckLine> : null}
@@ -407,8 +414,6 @@ export function WebsiteScreen(p: CourseProps) {
   const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir).map((x) => x.path) : [];
   const gh = p.files.repos(course.org);
   const siteExists = gh.kind === 'ready' && gh.repos.some((r) => r.name.toLowerCase() === `${course.org}.github.io`.toLowerCase());
-  // The default branch of .github, for Edit on GitHub; main until the repo list is read.
-  const branch = (gh.kind === 'ready' ? gh.repos.find((r) => r.name === COURSE_REPO)?.default_branch : undefined) ?? 'main';
   const doSave = async () => {
     if (y?.errors.length) return;
     if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
@@ -428,7 +433,7 @@ export function WebsiteScreen(p: CourseProps) {
         </div>
         <div class="actions">
           <OpButtons def={publishWebsite(courseScope(p), published)} />
-          <a class="btn quiet" href={file.kind === 'absent' ? newFileUrl(course.org, COURSE_REPO, OPENCOURSE_FILE, branch) : editUrl(course.org, COURSE_REPO, OPENCOURSE_FILE, branch)} target="_blank" rel="noopener">Edit on GitHub <Ext /></a>
+          <a class="btn quiet" href={courseFileUrl(p.files, course.org, OPENCOURSE_FILE, file.kind !== 'absent')} target="_blank" rel="noopener">Edit on GitHub <Ext /></a>
         </div>
       </div>
       {file.kind === 'loading' ? <Loading what={`Reading ${OPENCOURSE_FILE}`} /> : null}

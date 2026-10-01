@@ -10,7 +10,7 @@ import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import { GitHubClient } from '../src/github/client';
 import type { Course, Semester } from '../src/model/discovery';
-import { Sidenav } from '../src/ui/shell';
+import { Sidenav, type SubWanted } from '../src/ui/shell';
 import { FakeGitHub } from './fake';
 
 const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
@@ -75,10 +75,12 @@ describe('the course nav’s sub-pages', () => {
     ],
     templates: [{ repo: 'assignment-3-f2026', label: 'Group project', href: '#template-assignment-3-f2026' }],
   };
+  let asked: SubWanted[] = [];
   const show = (current: string, entry?: string) => {
     root = document.createElement('div');
     document.body.append(root);
-    act(() => render(<Sidenav courses={[course]} course={course} cohortStates={{}} current={current} problems={0} sub={sub} entry={entry} />, root!));
+    asked = [];
+    act(() => render(<Sidenav courses={[course]} course={course} cohortStates={{}} current={current} problems={0} sub={(w) => (asked.push(w), sub)} entry={entry} />, root!));
     return root;
   };
   const group = (h: HTMLElement, label: string) => [...h.querySelectorAll('.nav-group')].find((g) => g.querySelector('.nav-row a')?.textContent === label)!;
@@ -88,7 +90,10 @@ describe('the course nav’s sub-pages', () => {
     const chev = mat.querySelector<HTMLButtonElement>('button.nav-chev')!;
     expect(chev.getAttribute('aria-expanded')).toBe('false');
     expect(mat.querySelector<HTMLElement>('ul.nav-sub')!.hidden).toBe(true);
+    // Collapsed groups ask for nothing beyond the status.
+    expect(asked.at(-1)).toEqual({ materials: false, templates: false });
     act(() => chev.click());
+    expect(asked.at(-1)).toEqual({ materials: true, templates: false });
     expect(chev.getAttribute('aria-expanded')).toBe('true');
     expect(mat.querySelector<HTMLElement>('ul.nav-sub')!.hidden).toBe(false);
     const links = [...mat.querySelectorAll('ul.nav-sub a')];

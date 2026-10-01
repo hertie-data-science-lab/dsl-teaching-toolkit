@@ -217,29 +217,31 @@ export interface CourseSubPages {
   templates: SubPage[];
 }
 
+/** Which nav groups are shown: only those read anything beyond the course status. */
+export type SubWanted = { materials: boolean; templates: boolean };
+
 /**
  * A course nav item with its sub-pages: the link goes to the index; the chevron button opens a
  * nested list. Collapsed unless the open page is one of them, or until the chevron is pressed.
  */
-function NavGroup({ href, t, here, pages, entry }: { href: string; t: string; here: boolean; pages: SubPage[]; entry?: string }) {
-  const inside = here && !!entry && pages.some((x) => !x.ext && x.repo === entry);
-  const [open, setOpen] = useState<boolean | null>(null);
-  const shown = open ?? inside;
+function NavGroup({ href, t, here, inside, shown, onToggle, pages, entry }: {
+  href: string; t: string; here: boolean; inside: boolean; shown: boolean; onToggle: () => void; pages: SubPage[]; entry?: string;
+}) {
   const id = `nav-${href.slice(1)}`;
   return (
     <li class="nav-group">
       <span class="nav-row">
         <a href={href} aria-current={here && !inside ? 'page' : undefined}>{t}</a>
-        {pages.length ? <button class="nav-chev" type="button" aria-expanded={shown} aria-controls={id} aria-label={`${shown ? 'Hide' : 'Show'} the ${t.toLowerCase()} pages`} onClick={() => setOpen(!shown)}><span class="arrow" aria-hidden="true" /></button> : null}
+        {pages.length ? <button class="nav-chev" type="button" aria-expanded={shown} aria-controls={id} aria-label={`${shown ? 'Hide' : 'Show'} the ${t.toLowerCase()} pages`} onClick={onToggle}><span class="arrow" aria-hidden="true" /></button> : null}
       </span>
       {pages.length ? (
         <ul class="nav-sub" id={id} hidden={!shown}>
-          {pages.map((x) => (
+          {shown ? pages.map((x) => (
             <li>
               {x.ext ? <a href={x.href} target="_blank" rel="noopener">{x.label} <Ext /></a>
                 : <a href={x.href} aria-current={inside && x.repo === entry ? 'page' : undefined}>{x.label}</a>}
             </li>
-          ))}
+          )) : null}
         </ul>
       ) : null}
     </li>
@@ -254,13 +256,22 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
   cohortStates: Record<string, Loaded>;
   current: string;
   problems: number;
-  /** The course's materials and templates, for the nav's sub-pages; none until its status is read. */
-  sub?: CourseSubPages;
+  /** The course's materials and templates for the nav's sub-pages, read for the groups shown; none until its status is read. */
+  sub?: (wanted: SubWanted) => CourseSubPages | undefined;
   /** The open page's entry (a repo on `#materials-<repo>` or `#template-<repo>`). */
   entry?: string;
 }) {
   const item = (href: string, t: string, key: string, extra?: preact.ComponentChildren) => (
     <li><a href={href} aria-current={key === current ? 'page' : undefined}>{t}{extra}</a></li>
+  );
+  // A group opens on a page inside it, or when its chevron is pressed (kept here only).
+  const [open, setOpen] = useState<Partial<Record<keyof SubWanted, boolean>>>({});
+  const inside = (k: keyof SubWanted) => current === k && !!entry;
+  const shown = (k: keyof SubWanted) => open[k] ?? inside(k);
+  const pages = sub?.({ materials: shown('materials'), templates: shown('templates') });
+  const group = (k: keyof SubWanted, href: string, t: string) => (
+    <NavGroup href={href} t={t} here={current === k} inside={inside(k) && !!pages?.[k].some((x) => !x.ext && x.repo === entry)} shown={shown(k)}
+      onToggle={() => setOpen({ ...open, [k]: !shown(k) })} pages={pages?.[k] ?? []} entry={entry} />
   );
   return (
     <nav>
@@ -287,8 +298,8 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
           <ul>
             {!cohort ? item('#course', 'Overview', 'course') : null}
             {item('#details', 'Course details', 'details')}
-            <NavGroup href="#materials" t="Materials" here={current === 'materials'} pages={sub?.materials ?? []} entry={entry} />
-            <NavGroup href="#templates" t="Assignment templates" here={current === 'templates'} pages={sub?.templates ?? []} entry={entry} />
+            {group('materials', '#materials', 'Materials')}
+            {group('templates', '#templates', 'Assignment templates')}
             {item('#website', 'Public website', 'website')}
           </ul>
           <CohortsNav course={course} cohortStates={cohortStates} />

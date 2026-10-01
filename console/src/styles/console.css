@@ -903,6 +903,7 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .sub-actions .footnote { margin: 0; }
 .sub-actions .sep { color: var(--rule-strong); }
 .grid-2.cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 1060px) { .grid-2.cols { grid-template-columns: minmax(0, 1fr); } }
 .sidenav .nav-row { display: flex; align-items: center; }
 .sidenav .nav-row > a { flex: 1; }
 .sidenav .nav-chev { width: 30px; min-height: 34px; display: grid; place-items: center; background: none; border: 0; border-radius: 6px; cursor: pointer; padding: 0; }

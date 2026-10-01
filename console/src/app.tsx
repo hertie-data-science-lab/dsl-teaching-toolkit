@@ -43,7 +43,7 @@ import type { CohortProps, CourseProps } from './screens/types';
 import { Loading, ghUrl } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
 import { forgetRendered } from './ui/rendered';
-import { Footer, Sidenav, StudentNav, Topbar, type CourseSubPages } from './ui/shell';
+import { Footer, Sidenav, StudentNav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
 import type { Files } from './model/files';
 import type { Course } from './model/discovery';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from './model/names';
@@ -207,7 +207,8 @@ export function App({ state: s }: { state: AppState }) {
   const cohortLoaded = ctx.cohort && ctx.course?.write && !blocked ? s.statuses.cohort(ctx.cohort.org).value : undefined;
   const problems = cohortLoaded?.kind === 'ready' ? (cohortLoaded.status.problems ?? []).length : 0;
   const navKey = COHORT_SCREENS[screen] ?? COURSE_SCREENS[screen] ?? (wiz ? WIZARD_NAV[wiz.name] : undefined) ?? screen;
-  const sub = ctx.course?.write && !blocked && !APP_SCREENS.includes(screen) ? subPages(ctx.course, s.statuses.course(ctx.course.org).value, cohortStates, s.files) : undefined;
+  const navCourse = !blocked && !APP_SCREENS.includes(screen) ? ctx.course : undefined;
+  const sub = navCourse ? (wanted: SubWanted) => subPages(navCourse, s.statuses.course(navCourse.org).value, cohortStates, s.files, { ...wanted, titles: !ctx.cohort }) : undefined;
 
   let body;
   if (unmigrated) {
@@ -286,22 +287,25 @@ export function App({ state: s }: { state: AppState }) {
 
 /**
  * The course nav's sub-pages, from the course status (or a semester's copy of it): every
- * materials repo, then the other releasable repos (on GitHub), and every template by its
- * title (its repo name until the title is read).
+ * materials repo, then the other releasable repos (on GitHub), and every template. Only a
+ * shown group reads more than the status: the other repos for Materials, and each template's
+ * title when `titles` (else, and until it is read, the repo name). Nothing for a read-only course.
  */
-function subPages(course: Course, loaded: Loaded, cohortStates: Record<string, Loaded>, files: Files): CourseSubPages | undefined {
+export function subPages(course: Course, loaded: Loaded, cohortStates: Record<string, Loaded>, files: Files, want: SubWanted & { titles: boolean }): CourseSubPages | undefined {
+  if (!course.write) return undefined;
   const c = courseView({ loaded, cohortStates }).course;
   if (!c) return undefined;
-  const repos = files.repos(course.org);
   const materials = c.materials ?? [], templates = c.templates ?? [];
+  const repos = want.materials ? files.repos(course.org) : null;
   const known = [...materials.map((m) => m.repo), ...templates.map((t) => t.repo)];
-  const others = repos.kind === 'ready' ? otherRepos(course.org, repos.repos, known) : [];
+  const others = repos?.kind === 'ready' ? otherRepos(course.org, repos.repos, known) : [];
+  const title = (repo: string) => (want.templates && want.titles ? templateTitle(files, course.org, repo) : '') || repo;
   return {
     materials: [
       ...materials.map((m) => ({ repo: m.repo, label: m.repo, href: `#materials-${m.repo}` })),
       ...others.map((r) => ({ repo: r.name, label: r.name, href: r.html_url || ghUrl(course.org, r.name), ext: true })),
     ],
-    templates: templates.map((t) => ({ repo: t.repo, label: templateTitle(files, course.org, t.repo) || t.repo, href: `#template-${t.repo}` })),
+    templates: templates.map((t) => ({ repo: t.repo, label: title(t.repo), href: `#template-${t.repo}` })),
   };
 }
 
