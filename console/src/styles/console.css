@@ -936,3 +936,19 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .ops .o-who { grid-column: 2; margin: 0; font-size: 13.5px; color: var(--muted); }
 .ops .o-head a { color: inherit; text-decoration: none; }
 .ops .o-head a:hover b { text-decoration: underline; }
+
+/* T6: handout materials (decision 0026 rule 5): withheld tree beside its patterns, file-tree look, line flash */
+.grid-2.withhold { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+@media (max-width: 900px) { .grid-2.withhold { grid-template-columns: minmax(0, 1fr); } }
+.file-tree li > details > ul { margin-left: 6px; padding-left: 12px; border-left: 1px solid var(--rule-strong); }
+.file-tree .ft-icon { flex: none; color: var(--muted); }
+.file-tree .ft-closed, .file-tree .ft-opened { display: inline-flex; }
+.file-tree details[open] > summary .ft-closed, .file-tree details:not([open]) > summary .ft-opened { display: none; }
+.file-tree .ft-out > .ft-name, .file-tree .ft-out > details > summary > .ft-name { color: var(--muted); text-decoration: line-through; }
+.pattern-box { position: relative; background: var(--surface); border-radius: 6px; }
+.pattern-box textarea.code, .pattern-box .pattern-mirror { font-family: var(--font-code); font-size: 13px; line-height: 1.5; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pattern-box textarea.code { position: relative; background: transparent; min-height: 240px; }
+.pattern-box .pattern-mirror { position: absolute; inset: 0; margin: 0; border: 1px solid transparent; color: transparent; overflow: hidden; pointer-events: none; }
+.pattern-box .pm-line { display: block; border-radius: 3px; }
+.pattern-box .pm-line.flash { animation: pm-flash 1.2s ease-out forwards; }
+@keyframes pm-flash { from { background: var(--amber-soft); box-shadow: 0 0 0 2px var(--amber); } to { background: transparent; box-shadow: none; } }

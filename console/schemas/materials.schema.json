@@ -10,6 +10,7 @@
           "readings",
           "exam",
           "drop-in",
+          "assets",
           "other"
         ],
         "type": "string"

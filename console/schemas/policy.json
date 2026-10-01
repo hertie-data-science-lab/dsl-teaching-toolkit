@@ -80,6 +80,13 @@
       "system": false
     },
     {
+      "background": "#eceff1",
+      "colour": "#4a5560",
+      "key": "assets",
+      "label": "Supporting files",
+      "system": false
+    },
+    {
       "background": "#fbf2d5",
       "colour": "#7d6230",
       "key": "other",

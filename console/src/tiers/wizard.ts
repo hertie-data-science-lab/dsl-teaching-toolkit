@@ -97,10 +97,10 @@ export function newMaterials(terms: string[], repos: string[]): Tiers {
   return {
     term: {
       tier: 'default', label: 'Semester', widget: 'select', defaultLabel: 'default: the newest semester',
-      reason: 'Materials are usually per semester. Seeds the repo name and the syllabus header.', options: terms.map((t) => opt(t, termLabel(t))),
+      reason: 'Handout materials are usually per semester. Seeds the repo name and the syllabus header.', options: terms.map((t) => opt(t, termLabel(t))),
     },
     copy_from: {
-      tier: 'advanced', label: 'Copy an existing materials repo', widget: 'select', default: '', defaultLabel: 'default: fresh starter',
+      tier: 'advanced', label: 'Copy an existing handout materials repo', widget: 'select', default: '', defaultLabel: 'default: fresh starter',
       reason: 'Starts from an existing repo: every branch and its history.', options: [opt('', 'No, a fresh starter'), ...repos.map((r) => opt(r, r))],
     },
   };

@@ -166,7 +166,7 @@ function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDr
                 <div class="field">
                   <label for={`e-d${i}-repo`}>From repo</label>
                   <select id={`e-d${i}-repo`} onChange={(e) => setDeploy(i, { repo: (e.target as HTMLSelectElement).value })}>
-                    <optgroup label="Materials repos">{from.materials.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup>
+                    <optgroup label="Handout materials repos">{from.materials.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup>
                     {from.others.length ? <optgroup label="Other repos">{from.others.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup> : null}
                     {dp.repo && !from.materials.includes(dp.repo) && !from.others.includes(dp.repo) ? <option value={dp.repo} selected>{dp.repo}</option> : null}
                     {!dp.repo ? <option value="" selected>Choose a repo</option> : null}

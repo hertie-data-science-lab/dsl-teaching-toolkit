@@ -184,14 +184,14 @@ def test_preview_and_write_both_hand_the_block_to_the_outcome(monkeypatch, wired
     assert preview == 0 and written == {}
     assert preview.block.startswith("## Course sessions and readings")
     assert preview.counts == {"sessions": 2}
-    assert preview.text == "Built the session list: 2 sessions; nothing was written."
+    assert preview.text == "Built the weekly plan: 2 sessions; nothing was written."
     _argv(monkeypatch, "--no-preview")
     wrote = syllabus.main()
     assert wrote == 0 and wrote.block == preview.block
     assert wrote.block in written[syllabus.SYLLABUS_SESSIONS_FILE]
     assert (
         wrote.text
-        == "Wrote the session list (2 sessions) to cm/.system/SYLLABUS.sessions.md."
+        == "Wrote the weekly plan (2 sessions) to cm/.system/SYLLABUS.sessions.md."
     )
 
 

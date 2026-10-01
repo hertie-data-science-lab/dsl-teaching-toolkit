@@ -1,5 +1,11 @@
 {
   "aliases": {
+    "assets": "assets",
+    "data": "assets",
+    "fig": "assets",
+    "figures": "assets",
+    "images": "assets",
+    "img": "assets",
     "lab": "lab",
     "labs": "lab",
     "lecture": "lecture",
@@ -7,6 +13,8 @@
     "literature": "readings",
     "reading": "readings",
     "readings": "readings",
+    "src": "assets",
+    "static": "assets",
     "tutorials": "lab"
   },
   "cases": [

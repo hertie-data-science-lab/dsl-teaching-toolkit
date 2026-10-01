@@ -199,9 +199,9 @@ export function derive(s: Scope, slug: string, repo: string, title: string): OpD
 
 export function generateSyllabus(s: Scope, repo: string): OpDef {
   return {
-    ...base(s, 'assignment.generate_syllabus', repo), name: 'Generate the session list', title: repo, where: `From ${s.where}’s schedule`,
-    intro: 'Writes SYLLABUS.sessions.md: one line per session from the semester’s schedule.',
-    verb: 'Write the session list', running: 'Writing the session list', cancel: 'Stop', args: { course_source_repo: repo },
+    ...base(s, 'assignment.generate_syllabus', repo), name: 'Generate the weekly plan', title: repo, where: `From ${s.where}’s schedule`,
+    intro: 'Writes .system/SYLLABUS.sessions.md: every session with its date and readings, from the semester’s schedule.',
+    verb: 'Write the weekly plan', running: 'Writing the weekly plan', cancel: 'Stop', args: { course_source_repo: repo },
   };
 }
 
@@ -226,8 +226,8 @@ export function createAssignment(s: Scope, repo: string, title: string, args: Re
 
 export function createMaterials(s: Scope, repo: string, args: Record<string, unknown>): OpDef {
   return {
-    ...base(s, 'materials.create', repo), name: 'New materials', title: repo, where: s.where,
+    ...base(s, 'materials.create', repo), name: 'New handout materials', title: repo, where: s.where,
     intro: `Creates ${repo}, private to instructors until releases copy it to a semester.`,
-    verb: 'Create materials repo', running: `Creating ${repo}`, cancel: 'Stop', args,
+    verb: 'Create handout materials repo', running: `Creating ${repo}`, cancel: 'Stop', args,
   };
 }

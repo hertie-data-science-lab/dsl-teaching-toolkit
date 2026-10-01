@@ -52,22 +52,6 @@
                 "folders": [
                   "labs"
                 ]
-              },
-              {
-                "kind": "readings",
-                "folders": []
-              },
-              {
-                "kind": "exam",
-                "folders": []
-              },
-              {
-                "kind": "drop-in",
-                "folders": []
-              },
-              {
-                "kind": "other",
-                "folders": []
               }
             ]
           },
@@ -87,9 +71,9 @@
           },
           {
             "id": "sessions",
-            "label": "Session list generated",
+            "label": "Weekly plan generated",
             "done": false,
-            "why": "The session list has not been generated yet.",
+            "why": "The weekly plan has not been generated yet.",
             "blocks": false
           }
         ]
@@ -110,7 +94,7 @@
         "id": "materials:course-materials-f2026:sessions",
         "kind": "materials",
         "repo": "course-materials-f2026",
-        "text": "The session list has not been generated yet.",
+        "text": "The weekly plan has not been generated yet.",
         "screen": "materials",
         "entry": "course-materials-f2026"
       }

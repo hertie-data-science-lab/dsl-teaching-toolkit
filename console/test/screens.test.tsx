@@ -221,7 +221,7 @@ describe('S6 schedule and S11 release', () => {
   it('lists the materials repos and the Other repos to release from', () => {
     const listed = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE }, {}, TREE, { [COURSE_ORG]: [{ name: '.github' }, { name: 'course-materials-f2026' }, { name: 'lecture-code-f2026' }, { name: 'assignment-3-f2026' }] });
     const out = html(<ScheduleScreen {...props({ entry: 's5', files: listed })} />);
-    expect(out).toMatch(/<optgroup label="Materials repos"><option value="course-materials-f2026" selected>/);
+    expect(out).toMatch(/<optgroup label="Handout materials repos"><option value="course-materials-f2026" selected>/);
     expect(out).toContain('<optgroup label="Other repos"><option value="lecture-code-f2026">lecture-code-f2026</option></optgroup>');
   });
   it('renders a release with its source, destination and problem', () => {
@@ -255,13 +255,13 @@ describe('S6 schedule and S11 release', () => {
 describe('operation outcome', () => {
   it('shows the generated text directly, and what the op touched in the details fold', () => {
     const def = generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026');
-    const outcome = { schema: 'dsl.outcome/1' as const, op: def.op, run_id: 7, actor: 'a', preview: true, conclusion: 'previewed' as const, summary: 'Preview: the session list.', reasons: [{ code: 'NO_SOLUTION_REGION', text: 'solution.py\nhas no region' }], details: ['main/solution.py', 'main/README.md'], block: '## Course sessions and readings\n- Session 1: Intro' };
+    const outcome = { schema: 'dsl.outcome/1' as const, op: def.op, run_id: 7, actor: 'a', preview: true, conclusion: 'previewed' as const, summary: 'Preview: the weekly plan.', reasons: [{ code: 'NO_SOLUTION_REGION', text: 'solution.py\nhas no region' }], details: ['main/solution.py', 'main/README.md'], block: '## Course sessions and readings\n- Session 1: Intro' };
     const out = html(<OutcomeView result={{ outcome, people: [], leaked: [] }} def={def} />);
     expect(out).toContain('<summary>Details</summary>');
     expect(out).toContain('<ul class="outcome-list"><li>main/solution.py</li><li>main/README.md</li></ul>');
     expect(out).toContain('<pre class="outcome-details">## Course sessions and readings\n- Session 1: Intro</pre>');
     expect(out).toContain('>Copy</button>');
-    // The session list is what a preview is for (finding 31): above the fold, not in it.
+    // The weekly plan is what a preview is for (finding 31): above the fold, not in it.
     expect(out.indexOf('outcome-details')).toBeLessThan(out.indexOf('<summary>Details</summary>'));
     expect(out).toContain('<td class="pre">solution.py\nhas no region');
   });
@@ -390,7 +390,7 @@ describe('S2 course and S17 template', () => {
     const out = html(<CourseScreen {...cp} />);
     expect(out).toContain('Setup &amp; To do');
     expect(out).toContain('<h3 class="todo-head">To do</h3>');
-    expect(out).toContain('<span class="slug">course-materials-f2026</span> The session list has not been generated yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a>');
+    expect(out).toContain('<span class="slug">course-materials-f2026</span> The weekly plan has not been generated yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a>');
     const none: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [] } }, sha: 's', stale: [] };
     expect(text(<CourseScreen {...cp} loaded={none} />)).toContain('Nothing to do.');
     const tpl: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.' }] } }, sha: 's', stale: [] };

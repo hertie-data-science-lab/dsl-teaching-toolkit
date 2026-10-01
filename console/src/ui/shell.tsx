@@ -303,7 +303,7 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
           <ul>
             {!cohort ? item('#course', 'Overview', 'course') : null}
             {item('#details', 'Course details', 'details')}
-            {group('materials', '#materials', 'Materials')}
+            {group('materials', '#materials', 'Handout materials')}
             {group('templates', '#templates', 'Assignment templates')}
             {item('#website', 'Public website', 'website')}
           </ul>

@@ -68,3 +68,11 @@ def test_folder_keys_and_aliases_match_whatever_the_case():
     assert materials.infer_kind("Quiz", {"quiz": "exam"}) == "exam"
     assert materials.alias_kind("LABS") == "lab"
     assert materials.alias_kind("code") is None
+
+
+def test_supporting_files_folders_are_assets_by_name():
+    # Decision 0026 rule 3: released, never shown; an unknown name stays a lecture.
+    for name in ("data", "img", "images", "src", "assets", "figures", "fig", "Static"):
+        assert materials.alias_kind(name) == materials.ASSETS_KIND, name
+    assert materials.ASSETS_KIND in materials.policy.content_kinds()
+    assert materials.infer_kind("code") == "lecture"

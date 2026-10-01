@@ -107,13 +107,15 @@ describe('index screens', () => {
     expect(t).toContain('Fall 2026');
     expect(t).not.toContain('public website');
     expect(t).toContain('Last change');
-    expect(t).toContain('New materials');
+    expect(t).toContain('Handout materials repos');
+    expect(t).toContain('New handout materials');
     expect(t).toContain('lecture-code-f2026');
-    expect(t).toContain('Not a materials repo, so nothing to set up here. Can be released to a semester from the schedule.');
+    expect(t).toContain('Not handout materials, so nothing to set up here. Can be released to a semester from the schedule.');
     // Other repos get the Open button, not a GitHub link.
     const other = render(<MaterialsIndexScreen {...cp()} />).split('<li>').find((li) => li.includes('lecture-code-f2026'))!;
     expect(other).toContain('aria-label="More ways to open lecture-code-f2026"');
     expect(other).not.toContain('<a class="btn small quiet"');
+    expect(other).toContain('>Treat as handout materials</button>');
     expect(t).not.toContain('assignment-9-draft');
     expect(t).not.toContain('old-thing');
     expect(render(<MaterialsIndexScreen {...cp()} />)).toContain(`href="#materials-${MAT}"`);
@@ -168,8 +170,8 @@ describe('materials settings file tree', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
     expect(out).toContain('<h2>Checklist</h2><span class="chip ok">Ready</span>');
     expect((out.match(/<li class="done">/g) ?? []).length).toBe(4);
-    expect(out).toContain('Session list generated<span class="sr">: To do</span>');
-    expect(out).toContain('<span class="s-why">The session list has not been generated yet.</span>');
+    expect(out).toContain('Weekly plan generated<span class="sr">: To do</span>');
+    expect(out).toContain('<span class="s-why">The weekly plan has not been generated yet.</span>');
     expect((out.match(/<span class="s-need">required<\/span>/g) ?? []).length).toBe(3);
   });
   it('saves a withhold list that withholds nothing with the reviewed mark, Save enabled', () => {
@@ -321,10 +323,10 @@ describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () 
     expect(out.match(/aria-label="About this check"/g)).toHaveLength(checks.length);
     expect(out).toContain('A repo with nothing of a content kind has nothing to release.');
     expect(out).toContain('Saving the list once, even empty, marks it reviewed.');
-    // Collapsed: no `open`. Each kind with its folders, or none.
+    // Collapsed: no `open`. Only the kinds a folder has (decision 0026 rule 3).
     expect(out).toContain('<details class="fold s-kinds"><summary>Kinds found</summary>');
     expect(out).toContain('<li><b>Lecture</b>: lectures/</li>');
-    expect(out).toContain('<li><b>Readings</b>: none</li>');
+    expect(out).not.toContain('<b>Readings</b>');
     // Kinds first, then the syllabus, then the two lines that do not block.
     const t = text(<MaterialsChecklist checks={checks} />);
     expect(t.indexOf('Every top folder has a kind')).toBeLessThan(t.indexOf('At least one folder of a content kind'));

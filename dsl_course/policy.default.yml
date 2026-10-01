@@ -65,6 +65,13 @@ kinds:
     colour: "#8f4a1c"
     background: "#fbe3d6"
     system: false
+  # Supporting files (data, images, code): released with everything else, never a row or a
+  # tab on the student site or the public website (decision 0026 rule 3).
+  - key: assets
+    label: Supporting files
+    colour: "#4a5560"
+    background: "#eceff1"
+    system: false
   - key: other
     label: Event
     colour: "#7d6230"

@@ -2226,3 +2226,24 @@ def test_a_declared_title_that_repeats_the_rows_name_is_not_said_twice(
     )
     (row,) = _rows(_plan(monkeypatch, tmp_path, sched)).values()
     assert row["title"] == "Lab 1" and "subtitle" not in row
+
+
+def test_supporting_files_get_no_row_and_no_tab(monkeypatch, tmp_path):
+    # Decision 0026 rule 3: a data/ folder is released (planned or by hand), never shown.
+    trees = {
+        "materials": (
+            "lectures/01_intro/slides.pdf",
+            "data/01_intro/rows.csv",
+            "img/02_trees/tree.png",
+        )
+    }
+    sched = Schedule(
+        releases=[
+            Release("lecture-1", _at(9, 1), [_copy("lectures/01_intro")]),
+            Release("data-1", _at(9, 1), [_copy("data/01_intro")]),
+        ]
+    )
+    plan = _plan(monkeypatch, tmp_path, sched, trees=trees)
+    assert [r["kind"] for r in _rows(plan).values()] == ["lecture"]
+    nav = plan.files["_data/nav.yml"]
+    assert "/lectures/" in nav and "Supporting files" not in nav

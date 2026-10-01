@@ -36,7 +36,8 @@ DEFAULT_SYLLABUS = "SYLLABUS.md"
 DEFAULT_KIND = "lecture"
 
 # The folder names every course gets for free. A folder of one of these names that no
-# schedule entry releases still gets its rows (`site`'s off-plan rows).
+# schedule entry releases still gets its rows (`site`'s off-plan rows), except a
+# supporting-files one (`ASSETS_KIND`), which is released and never shown.
 BUILTIN_ALIASES = {
     "lecture": "lecture",
     "lectures": "lecture",
@@ -46,7 +47,17 @@ BUILTIN_ALIASES = {
     "reading": "readings",
     "readings": "readings",
     "literature": "readings",
+    "assets": "assets",
+    "data": "assets",
+    "fig": "assets",
+    "figures": "assets",
+    "images": "assets",
+    "img": "assets",
+    "src": "assets",
+    "static": "assets",
 }
+# The kind whose folders are released but get no row or tab on either site.
+ASSETS_KIND = "assets"
 
 SCHEMA = {
     "type": "object",

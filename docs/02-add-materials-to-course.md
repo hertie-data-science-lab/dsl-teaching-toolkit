@@ -3,7 +3,8 @@
 Create the year's materials repo and fill it with lectures + readings. **Release materials**
 later copies files and folders from here into a semester. One repo per year: `course-materials-{f/s}YYYY`
 by default. What makes a repo a materials repo is its `dsl-materials` topic, which the scaffold sets;
-add the topic to a repo you made by hand to have it listed as one.
+add the topic to a repo you made by hand to have it listed as one (the console's **Handout
+materials** page does it: **Treat as handout materials** on the repo's row).
 
 ## Prerequisites
 
@@ -52,7 +53,9 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
    schedule entry, not a folder. The skeleton's `01_` prefixes are a starter, never needed.
    An entry that declares no `kind` takes it from the top folder its copy lands in: `labs/`,
    `lab/`, `tutorials/` are labs, `readings/`, `reading/`, `literature/` readings, anything
-   else a lecture. `materials.yml` (below) covers the rest.
+   else a lecture. `data/`, `img/`, `images/`, `src/`, `assets/`, `figures/`, `fig/` and
+   `static/` are supporting files: released like everything else, but never a row or a tab
+   on the semester site or the public website. `materials.yml` (below) covers the rest.
 
    *NB: this repo stays private - students never see it. Only the sessions you **actively release** reach the semester org, so you can privately stage the whole course here.*
 
