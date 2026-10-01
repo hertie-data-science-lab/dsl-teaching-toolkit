@@ -229,12 +229,17 @@ describe('the My courses pref', () => {
     expect(myCoursesOnly('octo', 'past', refusing)).toBe(true);
     expect(myCoursesOnly('octo', 'past', null)).toBe(true);
   });
-  it('ignores the old page-wide choice and deletes it when first read', () => {
+  it('ignores every key of earlier builds, page-wide and per section, and deletes them when first read', () => {
+    // Round 4: the maintainer's browser held per-section keys stored off by an earlier build.
     const { m, store } = memory();
     store.removeItem = (k: string) => void m.delete(k);
     m.set('dsl-console-my-courses:octo', '0');
+    for (const s of ['courses', 'now', 'past']) m.set(`dsl-console-my-courses:octo:${s}`, '0');
     for (const s of ['courses', 'now', 'past'] as const) expect(myCoursesOnly('octo', s, store)).toBe(true);
-    expect(m.has('dsl-console-my-courses:octo')).toBe(false);
+    expect([...m.keys()].filter((k) => k.startsWith('dsl-console-my-courses'))).toEqual([]);
+    // A choice made now is kept.
+    saveMyCoursesOnly('octo', 'now', false, store);
+    expect(myCoursesOnly('octo', 'now', store)).toBe(false);
   });
 });
 
@@ -300,7 +305,7 @@ describe('All courses', () => {
       expect(g.tagName).toBe('DIV');
       expect(g.closest('a')).toBeNull();
       expect(g.getAttribute('aria-disabled')).toBe('true');
-      expect(g.querySelector('.cc-name span')!.textContent).toBe('Not one of your courses');
+      expect(g.querySelector('.cc-sub')!.textContent).toBe('Not one of your courses');
     }
     // The other sections keep their own choice.
     expect(greyed(section(h, 'h-live') as HTMLElement)).toEqual([]);
@@ -456,26 +461,53 @@ describe('All courses', () => {
   describe('the role on a course card', () => {
     const sem = { org: 'hertie-dsl-demo-f2026', term: 'f2026', termLabel: 'Fall 2026' };
     const yml = (role: string) => new StaticFiles({ [`${sem.org}/${CONFIG_REPO}/${INSTRUCTORS_FILE}`]: `instructors:\n  - github_handle: Octo\n    name: Octo Cat\n    role: ${role}\n` });
-    const sub = (h: HTMLElement) => section(h, 'h-courses').querySelector('.cc-name span')!.textContent;
+    const sub = (h: HTMLElement) => section(h, 'h-courses').querySelector('.cc-sub')!.textContent;
     it('is course admin from dsl-course.yml', async () => {
       const h = mount(catalogueFake(), { courses: [{ ...course, admins: ['octo'], cohorts: [sem] }], files: yml('teaching_assistant') });
       await flush();
-      expect(sub(h)).toBe('E1234; you are a course admin');
+      expect(sub(h)).toBe('you are a course admin');
     });
     it('is the role in the newest running semester’s instructors.yml otherwise', async () => {
       const h = mount(catalogueFake(), { courses: [{ ...course, cohorts: [sem] }], files: yml('instructor') });
       await flush();
-      expect(sub(h)).toBe('E1234; you are an instructor');
+      expect(sub(h)).toBe('you are an instructor');
       render(null, h);
       const ta = mount(catalogueFake(), { courses: [{ ...course, cohorts: [sem] }], files: yml('teaching_assistant') });
       await flush();
-      expect(sub(ta)).toBe('E1234; you are a teaching assistant');
+      expect(sub(ta)).toBe('you are a teaching assistant');
     });
     it('says the person teaches on it when no running semester names their role', async () => {
       const h = mount(catalogueFake(), { courses: [{ ...course, cohorts: [sem] }], files: new StaticFiles() });
       await flush();
-      expect(sub(h)).toBe('E1234; you teach on this course');
+      expect(sub(h)).toBe('you teach on this course');
     });
+  });
+
+  it('puts the course code on its own line under each card’s title, and no longer in the role line', async () => {
+    const sem = { org: 'hertie-dsl-demo-f2026', term: 'f2026', termLabel: 'Fall 2026' };
+    saveMyCoursesOnly(user.login, 'courses', false);
+    const h = mount(catalogueFake(), { courses: [{ ...course, admins: ['octo'], cohorts: [sem] }] });
+    await flush();
+    const own = section(h, 'h-courses').querySelector('a.cohort-card .cc-name')!;
+    expect([...own.children].map((c) => [c.className, c.textContent])).toEqual([['cc-code', 'E1234'], ['cc-sub', 'you are a course admin']]);
+    const card = section(h, 'h-live').querySelector(`a[href="?cohort=${sem.org}#dashboard"] .cc-code`)!;
+    expect(card.textContent).toBe('E1234');
+    const nlp = greyed(section(h, 'h-courses') as HTMLElement).find((g) => g.textContent?.startsWith('Natural Language Processing'))!;
+    expect(nlp.querySelector('.cc-code')!.textContent).toBe('E1282');
+    // A course with no code has no code line.
+    expect(greyed(section(h, 'h-courses') as HTMLElement).find((g) => g.textContent?.startsWith(BROKEN))!.querySelector('.cc-code')).toBeNull();
+  });
+
+  it('shows a semester the person studies in once, under Your semesters, even when its course is one of theirs read only', async () => {
+    // An instructor elsewhere who studies in a read-only course's semester.
+    const sem = { org: 'hertie-nlp-f2026', term: 'f2026', termLabel: 'Fall 2026' };
+    const ro: Course = { ...course, org: NLP, name: 'Natural Language Processing', code: 'E1282', write: false, cohorts: [sem] };
+    const studied: Semester = { ...sem, courseOrg: NLP, courseName: 'Natural Language Processing', archived: false, role: 'student' };
+    const h = mount(catalogueFake(), { courses: [course, ro], semesters: [studied] });
+    await flush();
+    const rows = [...h.querySelectorAll(`a[href*="${sem.org}"]`)];
+    expect(rows.map((a) => a.getAttribute('href'))).toEqual([`?semester=${sem.org}#week`]);
+    expect(rows[0].closest('section')!.getAttribute('aria-labelledby')).toBe('h-semesters');
   });
 
   it('says it is reading the catalogue only while DSL courses shows the others', async () => {

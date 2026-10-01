@@ -1,5 +1,6 @@
 // Per-viewer settings kept in this browser (localStorage): whether Your semesters shows the
-// current ones only, which All courses sections show the person's own rows only, when the student last opened each semester (for "new since your last visit"),
+// current ones only, which All courses sections show the person's own rows only (on unless
+// switched off), when the student last opened each semester (for "new since your last visit"),
 // and a person's Profile (root folder, per-course folders, editor, the Open button's last
 // choice), one for both roles (decision 0027). Storage can be missing or refuse (a private
 // window, blocked site data); the console then shows every semester, calls nothing new, and
@@ -131,15 +132,20 @@ export function rememberOpen(login: string, choice: OpenChoice, store: PrefStore
 /** The All courses sections that carry their own My courses checkbox. */
 export type CatalogueSection = 'courses' | 'now' | 'past';
 
-/** Per login per section. */
-const myCoursesKey = (login: string, section: CatalogueSection) => `dsl-console-my-courses:${login}:${section}`;
-/** The one page-wide choice the sections replaced: deleted when first read, never followed. */
-const oldMyCoursesKey = (login: string) => `dsl-console-my-courses:${login}`;
+/**
+ * Per login per section; a section with no key is on. A new name: the `dsl-console-my-courses:`
+ * keys of earlier builds hold states the person may never have chosen (one build showed every
+ * section off from the page-wide key and stored each section's key from there), so they are
+ * not followed (round 4).
+ */
+const myCoursesKey = (login: string, section: CatalogueSection) => `dsl-console-mine:${login}:${section}`;
+/** The keys of earlier builds, page-wide and per section: deleted when first read, never followed. */
+const oldMyCoursesKeys = (login: string) => [`dsl-console-my-courses:${login}`, ...(['courses', 'now', 'past'] as const).map((s) => `dsl-console-my-courses:${login}:${s}`)];
 
-/** Whether `login` chose to see only their own rows in `section` of All courses; on unless that section was saved off. */
+/** Whether `login` chose to see only their own rows in `section` of All courses; on unless that section was switched off. */
 export function myCoursesOnly(login: string, section: CatalogueSection, store: PrefStore | null = localStore()): boolean {
   try {
-    store?.removeItem?.(oldMyCoursesKey(login));
+    for (const k of oldMyCoursesKeys(login)) store?.removeItem?.(k);
     return store?.getItem(myCoursesKey(login, section)) !== '0';
   } catch {
     return true;
