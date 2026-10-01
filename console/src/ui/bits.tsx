@@ -28,11 +28,12 @@ export function runUrl(repo: string, runId: number): string {
   return `https://github.com/${repo}/actions/runs/${runId}`;
 }
 
+/** The breadcrumbs: each a link to its home, plain for the open page; "›" between. */
 export function Crumbs({ items }: { items: { t: string; href?: string }[] }) {
   return (
     <div class="crumbs">
       {items.map((c, i) => [
-        i ? <span aria-hidden="true">/</span> : null,
+        i ? <span aria-hidden="true">›</span> : null,
         c.href ? <a href={c.href}>{c.t}</a> : <span>{c.t}</span>,
       ])}
     </div>

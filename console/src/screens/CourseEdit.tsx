@@ -20,7 +20,7 @@ import { ABOUT, COURSE_FACTS, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
-import { CheckLine, Crumbs, EditFile, Lives, Loading, editUrl, newFileUrl } from '../ui/bits';
+import { CheckLine, EditFile, Lives, Loading, editUrl, newFileUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { PatternTree } from '../ui/PatternTree';
@@ -246,9 +246,8 @@ export function DetailsScreen(p: CourseProps) {
   };
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Course details' }]} />
       <div class="page-head">
-        <div><h1>Course details <Hint doc="01-new-course-org.md">Every semester of the course starts from these settings. Each semester and each assignment can set its own defaults.</Hint></h1><p class="lede">What every semester’s student site shows about the course, and the course’s defaults.</p></div>
+        <div><h2 class="h1">Course details <Hint doc="01-new-course-org.md">Every semester of the course starts from these settings. Each semester and each assignment can set its own defaults.</Hint></h2><p class="lede">What every semester’s student site shows about the course, and the course’s defaults.</p></div>
         <div class="actions"><a class="btn quiet" href={courseFileUrl(p.files, course.org, 'dsl-course.yml', file.kind !== 'absent')} target="_blank" rel="noopener">Edit on GitHub <Ext /></a></div>
       </div>
       {file.kind === 'loading' ? <Loading what="Reading dsl-course.yml" /> : null}
@@ -457,10 +456,9 @@ export function WebsiteScreen(p: CourseProps) {
   const onForm = (nv: Values) => set({ enabled: nv.enabled === true, source_repo: String(nv.source_repo ?? ''), readings_mode: String(nv.readings_mode ?? 'reading-list'), include_lectures: nv.include_lectures !== false });
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Public website' }]} />
       <div class="page-head">
         <div>
-          <h1>Public website <Hint doc="reference/actions-reference.md">An open version of one handout materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h1>
+          <h2 class="h1">Public website <Hint doc="reference/actions-reference.md">An open version of one handout materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h2>
           <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : siteExists && !before.enabled ? 'Off' : 'Not published'}</span>{published ? 'Updates daily.' : siteExists && !before.enabled ? WEBSITE_OFF_LIVE : 'Optional: an open version of your materials for anyone.'}</p>
         </div>
         <div class="actions">
@@ -630,9 +628,8 @@ export function MaterialsScreen(p: CourseProps) {
   };
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Handout materials', href: '#materials' }, { t: repo }]} />
       <div class="page-head">
-        <div><h1>{repo} <Hint doc="02-add-materials-to-course.md">Handout materials stay here, private to instructors, until a scheduled release copies them to a semester. Files withheld here never reach students.</Hint></h1><p class="lede">Handout materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
+        <div><h2 class="h1">{repo} <Hint doc="02-add-materials-to-course.md">Handout materials stay here, private to instructors, until a scheduled release copies them to a semester. Files withheld here never reach students.</Hint></h2><p class="lede">Handout materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
         <div class="actions"><OpenButton org={course.org} repo={repo} quiet /></div>
       </div>
       <div class="stack">

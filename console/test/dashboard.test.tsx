@@ -186,8 +186,12 @@ describe('the Dashboard', () => {
 
   it('expands into the full timeline by week, read-only, and collapses back', () => {
     const h = mount();
-    const expand = h.querySelector<HTMLButtonElement>('.wk-expand')!;
+    // The chevron sits before the heading (decision 0031 rule 11).
+    const expand = h.querySelector<HTMLButtonElement>('.section-head .lead > button.chev')!;
+    expect(expand.nextElementSibling!.tagName).toBe('H2');
+    expect(expand.getAttribute('aria-label')).toBe('Show every week as a list');
     expect(expand.getAttribute('aria-expanded')).toBe('false');
+    expect(h.querySelector('.wk-expand')).toBeNull();
     click(expand);
     expect(h.querySelector('.term-strip')).toBeNull();
     const tl = h.querySelector('.wk-timeline')!;
@@ -195,9 +199,10 @@ describe('the Dashboard', () => {
     expect(tl.querySelector('a[href="#schedule-s5"]')).not.toBeNull();
     expect(tl.querySelectorAll('.wk-empty').length).toBeGreaterThan(5);
     expect(tl.querySelector('input, select, textarea')).toBeNull();
-    click(h.querySelector<HTMLButtonElement>('.wk-expand')!);
+    expect(expand.getAttribute('aria-label')).toBe('Show the week strip');
+    click(expand);
     expect(h.querySelector('.term-strip')).not.toBeNull();
-    expect(h.querySelector('.wk-expand')!.getAttribute('aria-label')).toBe('Show every week');
+    expect(expand.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('shows what is overdue under This week, and filters other weeks strictly', () => {

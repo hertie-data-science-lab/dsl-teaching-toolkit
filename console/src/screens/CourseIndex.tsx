@@ -10,7 +10,7 @@ import { ago, fmtDay, templateName } from '../model/format';
 import { MATERIALS_TOPIC } from '../model/materialsRules';
 import { DEFAULT_FORMATS } from '../model/policy';
 import { formatWord, formatsList } from '../tiers/grading';
-import { CheckLine, Crumbs, Loading } from '../ui/bits';
+import { CheckLine, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
@@ -91,9 +91,8 @@ export function MaterialsIndexScreen(p: CourseProps) {
   const others = repos.kind === 'ready' ? otherRepos(course.org, repos.repos, known) : [];
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Handout materials' }]} />
       <div class="page-head">
-        <div><h1>Handout materials <Hint doc="02-add-materials-to-course.md">Handout materials live here privately until a scheduled release copies them to a semester. Files can be withheld from students.</Hint></h1><p class="lede">The course’s handout materials repos. A scheduled or manual release copies their folders to a semester. This page checks that the set-up files are in place, not their content; change content by pushing to the repo’s main branch.</p></div>
+        <div><h2 class="h1">Handout materials <Hint doc="02-add-materials-to-course.md">Handout materials live here privately until a scheduled release copies them to a semester. Files can be withheld from students.</Hint></h2><p class="lede">The course’s handout materials repos. A scheduled or manual release copies their folders to a semester. This page checks that the set-up files are in place, not their content; change content by pushing to the repo’s main branch.</p></div>
         <div class="actions"><a class="btn quiet" href={topicUrl(course.org, MATERIALS_TOPIC)} target="_blank" rel="noopener">See on GitHub <Ext /></a></div>
       </div>
       <div class="stack">
@@ -150,9 +149,8 @@ export function TemplatesIndexScreen(p: CourseProps) {
   const templates = v.course?.templates ?? [];
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates' }]} />
       <div class="page-head">
-        <div><h1>Assignment templates <Hint label="About templates and semesters">{VERSIONS_HINT}</Hint></h1><p class="lede">The course’s assignment templates. A scheduled or manual hand out gives students a copy in a semester. This page checks how each assignment is worked and marked, not its content; change content by pushing to the repo.</p></div>
+        <div><h2 class="h1">Assignment templates <Hint label="About templates and semesters">{VERSIONS_HINT}</Hint></h2><p class="lede">The course’s assignment templates. A scheduled or manual hand out gives students a copy in a semester. This page checks how each assignment is worked and marked, not its content; change content by pushing to the repo.</p></div>
         <div class="actions"><a class="btn quiet" href={topicUrl(course.org, TEMPLATE_TOPIC)} target="_blank" rel="noopener">See on GitHub <Ext /></a></div>
       </div>
       <section class="panel section">

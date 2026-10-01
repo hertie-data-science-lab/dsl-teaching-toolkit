@@ -91,9 +91,10 @@ describe('the semester dates and when the file was written', () => {
 
 describe('the student banner and screens', () => {
   it('the banner shows the week and the dates once the facts are read', async () => {
-    const el = await mount(<StudentBanner semester={semester} studentView={false} now={NOW} />, withFile());
-    expect(el.querySelector('.sb-line')!.textContent).toContain('Week 3 of 15');
-    expect(el.querySelector('h1')!.textContent).toBe('Fall 2026');
+    const el = await mount(<StudentBanner root="Your semesters" screen="week" semester={semester} studentView={false} now={NOW} />, withFile());
+    expect(el.querySelector('.cb-sem')!.textContent).toContain('Week 3 of 15');
+    expect(el.querySelector('.cb-sem .sem-title')!.textContent).toBe('Fall 2026');
+    expect(el.querySelector('h1')!.textContent).toBe(semester.courseName);
     expect(el.textContent).not.toContain('Back to instructor view');
   });
 

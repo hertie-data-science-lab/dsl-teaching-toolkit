@@ -23,7 +23,7 @@ import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import { STARTERS, STARTER_COPY, formatWord, formatsList, questionFileError, questionsValue, toConfig, type QuestionRow } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { assignmentMarking, assignmentName, assignmentStart, assignmentWork } from '../tiers/wizard';
-import { CheckLine, Crumbs, Loading } from '../ui/bits';
+import { CheckLine, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveLine } from '../ui/edit';
 import { Ext } from '../ui/icons';
@@ -458,8 +458,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const back = step > 1 ? <a class="btn quiet" href={`#new-assignment-${step - 1}`}>Back</a> : <a class="btn quiet" href="#templates">Cancel</a>;
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates', href: '#templates' }, { t: 'New assignment' }]} />
-      <div class="page-head"><div><h1>New assignment <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. Everything here can be changed later in the template’s settings.</Hint></h1></div></div>
+      <div class="page-head"><div><h2 class="h1">New assignment <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. Everything here can be changed later in the template’s settings.</Hint></h2></div></div>
       <div class="wizard">
         <Rail steps={STEPS} cur={step} done={done} heading="Five questions, then a check" base="new-assignment-" />
         <StepCard ctx={`For ${course.name}`} of={step < 6 ? `Question ${step} of 5` : 'The check'} title={heading} back={back} foot={foot}>{body}</StepCard>

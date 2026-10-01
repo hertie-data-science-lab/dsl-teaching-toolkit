@@ -12,7 +12,6 @@ import { parseSchedule } from '../model/schedule';
 import { bootstrapCohort } from '../ops/defs';
 import type { Values } from '../tiers/types';
 import { cohortOrg as cohortOrgTiers } from '../tiers/wizard';
-import { Crumbs } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { useDraft } from '../wizards/drafts';
 import { cohortOrgName, cohortTerms, openAt, TERM_RE, termLabel } from '../wizards/model';
@@ -175,8 +174,7 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
   const backBtn = step > 1 ? <a class="btn quiet" href={`${q}#new-semester-${step - 1}`}>Back</a> : <a class="btn quiet" href={`${q}#course`}>Cancel</a>;
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: `${q}#course` }, { t: 'New semester' }]} />
-      <div class="page-head"><div><h1>New semester: {label} <Hint doc="04-new-cohort-org.md">One org per semester: students join it, never the course. It gets its own student site, join form and schedule.</Hint></h1></div></div>
+      <div class="page-head"><div><h2 class="h1">New semester: {label} <Hint doc="04-new-cohort-org.md">One org per semester: students join it, never the course. It gets its own student site, join form and schedule.</Hint></h2></div></div>
       <div class="wizard">
         <Rail steps={STEPS} cur={step} done={done} heading="Two steps, then three editors" base="new-semester-" query={q} />
         <StepCard ctx={`For ${course.name}`} of={`Step ${step} of 3`} title={title} back={backBtn} foot={foot}>{body}</StepCard>

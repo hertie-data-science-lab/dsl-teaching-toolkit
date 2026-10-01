@@ -224,13 +224,13 @@ describe('4. the auditor', () => {
     await readMine(client(fake), ORG, LOGIN, []);
     expect(knownAuditor(ORG.toUpperCase())).toBe(true);
     const sem: Semester = { org: ORG, term: 'f2026', termLabel: 'Fall 2026', courseOrg: 'c', courseName: 'Deep Learning', archived: false, role: 'student' };
-    const nav = render(<StudentNav courses={[]} cohortStates={{}} semesters={[sem]} semester={sem} current="week" />);
+    const nav = render(<StudentNav root="Your semesters" semesters={[sem]} semester={sem} current="week" />);
     expect(nav).not.toContain('#marks');
     expect(nav).not.toContain('#join');
     expect(nav).toContain('#materials');
     await readMine(client(new FakeGitHub().on('GET', new RegExp(`^/orgs/${ORG}/repos`), [])), ORG, LOGIN, []);
     expect(knownAuditor(ORG)).toBe(false);
-    expect(render(<StudentNav courses={[]} cohortStates={{}} semesters={[sem]} semester={sem} current="week" />)).toContain('#marks');
+    expect(render(<StudentNav root="Your semesters" semesters={[sem]} semester={sem} current="week" />)).toContain('#marks');
   });
 
   it('promises no repo, team or marks: "As an auditor you ..."', async () => {

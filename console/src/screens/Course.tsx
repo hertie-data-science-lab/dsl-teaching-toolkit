@@ -21,7 +21,7 @@ import { nextEvent, nextEventWords, recentActivity, rollUpProblems, whoWord, typ
 import type { CohortRef } from '../model/discovery';
 import { outcomePath } from '../ops/adapter';
 import { validator } from '../model/validate';
-import { CheckLine, Crumbs, Lives, Loading, OpMark, ProblemCards, Probs, Soon, ghUrl, runUrl } from '../ui/bits';
+import { CheckLine, Lives, Loading, OpMark, ProblemCards, Probs, Soon, ghUrl, runUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Check, Ext, Fail } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
@@ -256,7 +256,12 @@ export function StateChip({ state, todo }: { state: string; todo: string }) {
   return state === 'problem' ? <span class="chip bad">Has a problem</span> : state === 'ready' ? <span class="chip ok">Ready</span> : <span class="chip">{todo}</span>;
 }
 
-/** The overview's head: New semester, the one primary action, always the black button. */
+/** The `?` on the course overview's h1, in the course banner. */
+export function CourseHint() {
+  return <Hint doc="02-add-materials-to-course.md">Materials are staged here privately until a release copies them in whole or in part to a semester. Selected materials can also be published on the course’s optional public website.</Hint>;
+}
+
+/** The overview's head, on the right of the course banner: New semester, the one primary action, always the black button. */
 export function CourseHeaderActions({ course }: { course: CourseProps['course'] }) {
   return (
     <div class="actions">
@@ -564,13 +569,6 @@ export function CourseScreen(p: CourseProps) {
   const [left, right] = statusesSettled(p) ? splitColumns(overviewHeights({ course: v.course, problems: problems.length, semesters: course.cohorts.length, description, activity: recentActivity(ops).length })) : SETTLING_COLUMNS;
   return (
     <>
-      <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: course.name }]} />
-      <div class="page-head">
-        <div>
-          <h1>{course.name} <Hint doc="02-add-materials-to-course.md">Materials are staged here privately until a release copies them in whole or in part to a semester. Selected materials can also be published on the course’s optional public website.</Hint></h1>
-        </div>
-        <CourseHeaderActions course={course} />
-      </div>
       <CourseSubActions course={course} loaded={p.loaded} files={p.files} now={p.now} computed={v.computed} />
       <p class="page-note">Materials and assignment templates are prepared here, for every semester. Students get only what a semester releases or hands out, from that semester’s page.</p>
       <Verdict course={v.course} />
@@ -679,9 +677,8 @@ export function TemplateScreen(p: CourseProps) {
   };
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates', href: '#templates' }, { t: heading }]} />
       <div class="page-head">
-        <div><h1>{heading} <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. These settings apply to every semester, and after hand out they reach students only through Update every copy.</Hint></h1><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
+        <div><h2 class="h1">{heading} <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. These settings apply to every semester, and after hand out they reach students only through Update every copy.</Hint></h2><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
         <div class="actions"><span class={`chip ${problems.length ? 'bad' : 'ok'}`}>{problems.length ? 'Has a problem' : 'Ready'}</span><OpenButton org={course.org} repo={repo} /></div>
       </div>
       {problems.length ? <div style="margin-bottom:18px"><ProblemCards list={problems} /></div> : null}
