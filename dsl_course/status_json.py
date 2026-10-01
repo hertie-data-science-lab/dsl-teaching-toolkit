@@ -47,6 +47,7 @@ import yaml
 
 from . import (
     grades,
+    policy,
     records,
     roster,
     schedule,
@@ -708,16 +709,32 @@ def _unmapped_why(folders: list[str]) -> str:
     return f"The folders {names} have no kind yet; set them under Folder kinds."
 
 
+def _kinds_found(m: MaterialsFacts) -> list[dict]:
+    """Every content kind the policy knows, with the released top folders that name it."""
+    named = {f: alias_kind(f, m.kinds) for f in _released_folders(m)}
+    return [
+        {"kind": kind, "folders": [f for f, k in named.items() if k == kind]}
+        for kind in policy.content_kinds()
+    ]
+
+
 def materials_checks(m: MaterialsFacts) -> list[dict]:
-    """Decision 0022 rule 5: a materials repo's checklist, in order. `blocks` marks the
-    checks `ready` needs; `why` names what is missing, None once the check is done."""
+    """Decision 0022 rule 5, in the order of 0024 rule 8: a materials repo's checklist.
+    `blocks` marks the checks `ready` needs; `why` names what is missing, None once the
+    check is done; `kind_folder` carries `detail`, the folders found per content kind."""
     unmapped = _unmapped(m)
     released = _released_folders(m)
     rows = (
-        ("syllabus", "Syllabus written", True, _syllabus_written(m), _syllabus_why(m)),
+        (
+            "all_mapped",
+            "Every top folder has a kind",
+            True,
+            not unmapped,
+            _unmapped_why(unmapped) if unmapped else None,
+        ),
         (
             "kind_folder",
-            "At least one folder of a known kind (lectures, labs, readings…)",
+            "At least one folder of a content kind",
             True,
             len(unmapped) < len(released),
             (
@@ -729,13 +746,7 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
                 )
             ),
         ),
-        (
-            "all_mapped",
-            "Every top folder has a kind",
-            True,
-            not unmapped,
-            _unmapped_why(unmapped) if unmapped else None,
-        ),
+        ("syllabus", "Syllabus written", True, _syllabus_written(m), _syllabus_why(m)),
         (
             "withheld",
             "Withheld patterns reviewed",
@@ -758,6 +769,7 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
             "done": done,
             "why": None if done else why,
             "blocks": blocks,
+            **({"detail": _kinds_found(m)} if cid == "kind_folder" else {}),
         }
         for cid, label, blocks, done, why in rows
     ]
