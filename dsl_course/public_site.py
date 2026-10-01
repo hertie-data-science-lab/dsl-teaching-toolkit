@@ -5,7 +5,7 @@ repos it publishes are private, so linking into them would 404 for the public; i
 this HOSTS the chosen repo's files in the site repo (Jekyll serves any path not starting
 with `_`) and links to site-relative URLs. Session materials only - no assignments, no
 events, no semester repos. What it publishes is the course's `opencourse.yml`
-(`opencourse`): the Publish public website operation and the daily update both read it,
+(`opencourse`): the Publish website operation and the daily update both read it,
 and `enabled: false` stops both.
 
 Driven through `python3 -m dsl_course.site public-sync`, which delegates here.

@@ -151,7 +151,7 @@ Things whose *literal spelling* is depended on from outside Python:
 - **`opencourse.OPENCOURSE_FILE`** (`opencourse.yml`, in the course `.github`) is the
   public website's one declaration (decision 0016): `enabled`, `source_repo`,
   `readings_mode`, `include_lectures`, `withhold` (`.releaseignore` syntax,
-  `releaseignore.deny_lines`). The Publish public website operation and the daily cron read
+  `releaseignore.deny_lines`). The Publish website operation and the daily cron read
   it and nothing else; `enabled: false` stops both. Seeded CREATE-ONLY and INSTRUCTOR-OWNED
   by Bootstrap Course Org (off), schema in `console/schemas/opencourse.schema.json`. A
   materials repo's `publish.yml` and the site repo's `_publish-config.yml` are retired: the
@@ -919,7 +919,7 @@ every real course is held:
 4. `--release <course>` - preview first: no "NOT migrated inside the hold" - then
    `--no-preview` (semesters first, then one catch-up for every semester). Refused while an
    org is not migrated; `--abandon` releases anyway, naming them.
-5. Check now per semester, one preview of the next automatic run, the catch-up runs green.
+5. Refresh per semester, one preview of the next automatic run, the catch-up runs green.
 
 One course at a time instead: pin its `central_ref` to the new ref rather than Promote.
 Under a hold a migration never pauses and never unpauses: its bracket steps only mark the
