@@ -12,11 +12,11 @@ import type { Outcome } from '../model/types';
 import { outcomePath } from '../ops/adapter';
 import { updateSite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { CheckLine, Crumbs, Lives, Loading, OpsList } from '../ui/bits';
+import { CheckLine, Lives, Loading, OpsList } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { Ext } from '../ui/icons';
-import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
+import { WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
 
@@ -93,9 +93,8 @@ function Site(p: ReadyProps) {
   };
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, 'Site')} />
       <div class="page-head">
-        <div><h1>Student site <Hint doc="11-configure-cohort-site.md">The home text and announcements are yours. The schedule, lectures, assignments and instructors pages are rewritten on every update.</Hint></h1><p class="lede">Students’ single page for the semester. Almost everything on it comes from the schedule, instructors and materials.</p></div>
+        <div><h2 class="h1">Student site <Hint doc="11-configure-cohort-site.md">The home text and announcements are yours. The schedule, lectures, assignments and instructors pages are rewritten on every update.</Hint></h2><p class="lede">Students’ single page for the semester. Almost everything on it comes from the schedule, instructors and materials.</p></div>
         <div class="actions">
           <OpButtons def={updateSite(cohortScope(p))} verbCls="btn outline" />
           <a class="btn quiet" href={url} target="_blank" rel="noopener">Open the student site <Ext /></a>
@@ -161,7 +160,7 @@ function Site(p: ReadyProps) {
 }
 
 export function SiteScreen(p: CohortProps) {
-  return <WithStatus props={p} title="Student site" crumbs={cohortCrumbs(p, 'Site')}>{(r) => <Site {...r} />}</WithStatus>;
+  return <WithStatus props={p} title="Student site">{(r) => <Site {...r} />}</WithStatus>;
 }
 
 function Operations(p: ReadyProps) {
@@ -179,9 +178,8 @@ function Operations(p: ReadyProps) {
   }
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, 'All operations')} />
       <div class="page-head">
-        <div><h1>All operations <Hint doc="reference/actions-reference.md">Each line says what happened and how many. Open Details for the reasons behind a count and the run on GitHub.</Hint></h1><p class="lede">Everything automation and you have done in {p.cohort.termLabel}, newest first. Outcomes stay here after the panel closes.</p></div>
+        <div><h2 class="h1">All operations <Hint doc="reference/actions-reference.md">Each line says what happened and how many. Open Details for the reasons behind a count and the run on GitHub.</Hint></h2><p class="lede">Everything automation and you have done in {p.cohort.termLabel}, newest first. Outcomes stay here after the panel closes.</p></div>
       </div>
       <section class="panel"><OpsList list={ops} now={p.now} full runRepo={`${p.course.org}/.github`} outcomes={outcomes} /></section>
     </>
@@ -189,5 +187,5 @@ function Operations(p: ReadyProps) {
 }
 
 export function OperationsScreen(p: CohortProps) {
-  return <WithStatus props={p} title="All operations" crumbs={cohortCrumbs(p, 'All operations')}>{(r) => <Operations {...r} />}</WithStatus>;
+  return <WithStatus props={p} title="All operations">{(r) => <Operations {...r} />}</WithStatus>;
 }

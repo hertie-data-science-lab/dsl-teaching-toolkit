@@ -3,10 +3,9 @@
 import { fmtDay } from '../model/format';
 import { archive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { Crumbs } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Check } from '../ui/icons';
-import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, yearOf } from './common';
+import { WithStatus, cohortScope, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 
 function Archive(p: ReadyProps) {
@@ -19,9 +18,8 @@ function Archive(p: ReadyProps) {
   const t = p.cohort.termLabel;
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, 'Archive')} />
       <div class="page-head">
-        <div><h1>Archive {t} <Hint doc="10-grade-and-return-assignments.md">Archiving makes every repo read-only. Students keep access and nothing is deleted.</Hint></h1><p class="lede">{archived ? 'Archived: every repo is read-only.' : `Scheduled for ${when ?? 'never'}.`}</p></div>
+        <div><h2 class="h1">Archive {t} <Hint doc="10-grade-and-return-assignments.md">Archiving makes every repo read-only. Students keep access and nothing is deleted.</Hint></h2><p class="lede">{archived ? 'Archived: every repo is read-only.' : `Scheduled for ${when ?? 'never'}.`}</p></div>
         <div class="actions">{archived ? null : <OpButtons def={archive(cohortScope(p), when, passed)} />}</div>
       </div>
       <div class="grid-2">
@@ -45,5 +43,5 @@ function Archive(p: ReadyProps) {
 }
 
 export function ArchiveScreen(p: CohortProps) {
-  return <WithStatus props={p} title={`Archive ${p.cohort.termLabel}`} crumbs={cohortCrumbs(p, 'Archive')}>{(r) => <Archive {...r} />}</WithStatus>;
+  return <WithStatus props={p} title={`Archive ${p.cohort.termLabel}`}>{(r) => <Archive {...r} />}</WithStatus>;
 }

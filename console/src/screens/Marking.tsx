@@ -17,12 +17,12 @@ import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { studentHref, tabHref } from '../router';
-import { CheckLine, Crumbs, Lives, Loading } from '../ui/bits';
+import { CheckLine, Lives, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { Check, Lock } from '../ui/icons';
 import type { TabProps } from './Assignments';
-import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
+import { WithStatus, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO, LEDGER_PATH } from '../model/names';
 
@@ -73,7 +73,7 @@ export function MarksTab(p: TabProps) {
   const scope = cohortScope(p);
   const head = (
     <div class="page-head">
-      <div><h1>{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. {group ? 'A team’s marks and feedback reach every member once you return marks.' : 'Nothing reaches a student until you return marks.'}</Hint></h1><p class="lede">{a.marks.filled} of {a.marks.total} marked. {rate !== null ? `Totals and late penalties (${round(rate * 100)}% of the total per late day) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p></div>
+      <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. {group ? 'A team’s marks and feedback reach every member once you return marks.' : 'Nothing reaches a student until you return marks.'}</Hint></h2><p class="lede">{a.marks.filled} of {a.marks.total} marked. {rate !== null ? `Totals and late penalties (${round(rate * 100)}% of the total per late day) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p></div>
       <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name)} /></div>
     </div>
   );
@@ -294,7 +294,7 @@ export function TeamsTab(p: TabProps) {
     <>
       <div class="page-head">
         <div>
-          <h1>{assignmentTitle(a)} <Hint doc="09-release-assignment-to-cohort.md">Students form their own teams on the Join screen until the window closes; you can assign the rest here. Students without a team get no repo at hand out.</Hint></h1>
+          <h2 class="h1">{assignmentTitle(a)} <Hint doc="09-release-assignment-to-cohort.md">Students form their own teams on the Join screen until the window closes; you can assign the rest here. Students without a team get no repo at hand out.</Hint></h2>
           <p class="lede">{joined.length - free.length} of {joined.length} joined students in {cur.teams.length} teams; {free.length} without a team.{notJoined ? ` ${notJoined} students have not joined yet and cannot be placed.` : ''}</p>
         </div>
         <div class="actions"><a class="btn outline" href={studentHref(p.cohort.org, 'join')}>Join screen, as students see it</a></div>
@@ -411,10 +411,9 @@ function MarksOverview(p: ReadyProps) {
   const toMark = list.reduce((n, a) => n + (sheets.has(`${sheetName(p, a.slug)}.yml`) ? a.marks.total - a.marks.filled : 0), 0);
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, 'Marks')} />
       <div class="page-head">
         <div>
-          <h1>Marks <Hint doc="10-grade-and-return-assignments.md">This page only reads. Open an assignment to enter and return its marks.</Hint></h1>
+          <h2 class="h1">Marks <Hint doc="10-grade-and-return-assignments.md">This page only reads. Open an assignment to enter and return its marks.</Hint></h2>
           <p class="lede">{sheets.size ? `${returned} of ${list.length} assignment${list.length === 1 ? '' : 's'} returned; ${toMark} mark${toMark === 1 ? '' : 's'} still to enter.` : 'Where marking stands this semester, one row per assignment.'}</p>
         </div>
       </div>
@@ -441,5 +440,5 @@ function MarksOverview(p: ReadyProps) {
 }
 
 export function MarksOverviewScreen(p: CohortProps) {
-  return <WithStatus props={p} title="Marks" crumbs={cohortCrumbs(p, 'Marks')}>{(r) => <MarksOverview {...r} />}</WithStatus>;
+  return <WithStatus props={p} title="Marks">{(r) => <MarksOverview {...r} />}</WithStatus>;
 }

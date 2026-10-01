@@ -10,7 +10,7 @@ import type { Operation, Status } from '../model/types';
 import { checkNow, keepFuture, previewNext, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { mergeOperations, type OpDef } from '../ops/session';
-import { CheckLine, Crumbs, Loading, Soon } from '../ui/bits';
+import { CheckLine, Loading, Soon } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import type { CohortProps, ReadyProps } from './types';
@@ -123,13 +123,12 @@ export function StaleNote({ stale }: { stale: string[] }) {
 }
 
 /** The page every semester screen shows before an org has been refreshed on the new engine. */
-export function NotComputed({ title, crumbs, p }: { title: string; crumbs: { t: string; href?: string }[]; p?: Pick<CohortProps, 'course' | 'cohort'> }) {
+export function NotComputed({ title, p }: { title: string; p?: Pick<CohortProps, 'course' | 'cohort'> }) {
   return (
     <>
-      <Crumbs items={crumbs} />
       <div class="page-head">
         <div>
-          <h1>{title}</h1>
+          <h2 class="h1">{title}</h2>
           <p class="lede">Status not computed yet.</p>
         </div>
         <div class="actions"><CheckNow p={p} /></div>
@@ -150,22 +149,19 @@ export function NotComputed({ title, crumbs, p }: { title: string; crumbs: { t: 
 export function WithStatus({
   props,
   title,
-  crumbs,
   children,
 }: {
   props: CohortProps;
   title: string;
-  crumbs: { t: string; href?: string }[];
   children: (p: ReadyProps) => VNode | ComponentChildren;
 }) {
   const l = props.loaded;
   if (l.kind === 'loading') return <Loading what="Reading the semester's status" />;
-  if (l.kind === 'absent') return <NotComputed title={title} crumbs={crumbs} p={props} />;
+  if (l.kind === 'absent') return <NotComputed title={title} p={props} />;
   if (l.kind === 'invalid' || l.kind === 'error')
     return (
       <>
-        <Crumbs items={crumbs} />
-        <div class="page-head"><div><h1>{title}</h1></div><div class="actions"><CheckNow p={props} /></div></div>
+        <div class="page-head"><div><h2 class="h1">{title}</h2></div><div class="actions"><CheckNow p={props} /></div></div>
         <section class="panel section">
           <CheckLine cls="bad">
             {l.kind === 'invalid' ? `The semester's status file does not match the expected shape: ${l.errors.slice(0, 3).join('; ')}.` : `Could not read the semester's status: ${l.message}`}
@@ -179,12 +175,4 @@ export function WithStatus({
       {children({ ...props, status: l.status })}
     </>
   );
-}
-
-export function cohortCrumbs(p: Pick<CohortProps, 'course' | 'cohort'>, page?: string, mid?: { t: string; href: string }[]) {
-  return [
-    { t: cohortName(p), href: page ? '#dashboard' : undefined },
-    ...(mid ?? []),
-    ...(page ? [{ t: page }] : []),
-  ];
 }

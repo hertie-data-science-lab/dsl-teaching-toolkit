@@ -147,14 +147,6 @@ export function AdminRows({ admins, onChange, id }: { admins: Admin[]; onChange:
   );
 }
 
-/** The public website's on/off, from opencourse.yml's `enabled`: no file is off (`opencourse.parse`), one not loaded is not known. */
-export function websiteWord(files: CourseProps['files'], org: string): string {
-  const site = files.file(org, COURSE_REPO, OPENCOURSE_FILE);
-  if (site.kind === 'absent') return 'Off.';
-  const y = site.kind === 'ready' ? new YamlText(site.text) : null;
-  return y && !y.errors.length ? (websiteOf(obj(y.toJS())).enabled ? 'On.' : 'Off.') : 'Not known yet.';
-}
-
 /** The live public website. */
 export const websiteUrl = (org: string) => `https://${org}.github.io`;
 

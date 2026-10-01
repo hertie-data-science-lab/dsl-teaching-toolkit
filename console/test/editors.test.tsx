@@ -343,7 +343,7 @@ describe('editing screens', () => {
   });
   it('teams shows the window, the team size from assignments.yml and who has no team', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams' })} />);
-    expect(out).toContain('<h1>Assignment 3: Group project <span class="hint">');
+    expect(out).toContain('<h2 class="h1">Assignment 3: Group project <span class="hint">');
     expect(out).toContain('2 of 3 joined students in 1 teams; 1 without a team.');
     expect(out).toContain('team-alpha<span>2 of 3</span>');
     expect(out).toContain('Carla Cohen');
@@ -351,7 +351,7 @@ describe('editing screens', () => {
   });
   it('marks computes the total with the penalty and adjustment', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks' })} />);
-    expect(out).toContain('<h1>Assignment 2: Regression <span class="hint">');
+    expect(out).toContain('<h2 class="h1">Assignment 2: Regression <span class="hint">');
     expect(out).toContain('Total / 40');
     expect(out).toContain('−20%');
     expect(out).toContain('<td class="calc">28.2</td>');

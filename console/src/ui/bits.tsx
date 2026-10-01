@@ -2,6 +2,7 @@
 
 import type { ComponentChildren } from 'preact';
 import { COHORT_STAGES, COURSE_STAGES, PROBLEM_AREA, STAGE_WORD, md, opLabel, ago } from '../model/format';
+import type { TaggedProblem } from '../model/status';
 import type { Operation, Outcome, Problem, StageState } from '../model/types';
 import { Alert, Check, Eye, Ext, Fail, Skip } from './icons';
 
@@ -109,7 +110,12 @@ export function fixHref(p: Problem): string | null {
   return `#${f.screen}${f.entry ? `-${f.entry}` : ''}`;
 }
 
-export function ProblemCards({ list, cohort }: { list: Problem[]; cohort?: boolean }) {
+/**
+ * The problem cards. `cohort` marks the course's faults "(course)" on a semester's page. A
+ * card carrying `semester` (the course overview's roll-up) is tagged with it, the tag linking
+ * to that semester's Dashboard, and its Fix opens that semester's screen.
+ */
+export function ProblemCards({ list, cohort }: { list: TaggedProblem[]; cohort?: boolean }) {
   if (!list.length)
     return (
       <div class="no-problems"><Check /><span>No problems. Everything automatic will happen on time.</span></div>
@@ -117,14 +123,16 @@ export function ProblemCards({ list, cohort }: { list: Problem[]; cohort?: boole
   return (
     <ul class="problems">
       {list.map((p) => {
-        const href = fixHref(p);
+        const fix = fixHref(p);
+        const href = fix && p.semester ? `?cohort=${p.semester.org}${fix}` : fix;
         const [org, repo] = (p.fix?.repo ?? '').split('/');
         return (
-          <li class="problem" key={p.id}>
+          <li class="problem" key={p.semester ? `${p.semester.org}:${p.id}` : p.id}>
             <div class="p-where">
+              {p.semester ? <a class="chip p-tag" href={`?cohort=${p.semester.org}#dashboard`}>{p.semester.label}</a> : null}
               <b>{PROBLEM_AREA[p.stage] ?? p.stage}</b>
               <span>{whereOf(p)}</span>
-              {cohort && p.scope === 'course' ? <span>(course)</span> : null}
+              {(cohort || p.semester) && p.scope === 'course' ? <span>(course)</span> : null}
             </div>
             <p class="p-say">{p.text}</p>
             <p class="p-effect">{p.stops}</p>
@@ -184,6 +192,12 @@ export function Rail({
 
 const TONE: Record<string, string> = { done: 'ok', failed: 'fail', previewed: 'dry', skipped: 'skip', nothing_to_do: 'skip' };
 
+/** An operation's mark: done, failed, previewed, or skipped (nothing to do). */
+export function OpMark({ conclusion }: { conclusion: string }) {
+  const tone = TONE[conclusion] ?? 'skip';
+  return <span class={`mark ${tone}`}>{tone === 'ok' ? <Check /> : tone === 'fail' ? <Fail /> : tone === 'dry' ? <Eye /> : <Skip />}</span>;
+}
+
 export function OpsList({
   list,
   now,
@@ -201,12 +215,11 @@ export function OpsList({
   return (
     <ul class="ops">
       {list.map((o) => {
-        const tone = TONE[o.conclusion] ?? 'skip';
         const oc = outcomes[o.op];
         const detail = oc && oc.run_id === o.run_id ? oc : undefined;
         return (
           <li key={o.run_id}>
-            <span class={`mark ${tone}`}>{tone === 'ok' ? <Check /> : tone === 'fail' ? <Fail /> : tone === 'dry' ? <Eye /> : <Skip />}</span>
+            <OpMark conclusion={o.conclusion} />
             <div class="o-head">
               <span><b>{opLabel(o.op)}</b>{o.conclusion === 'failed' ? <span class="failed">FAILED</span> : null}</span>
               <span>{ago(o.finished, now)}</span>

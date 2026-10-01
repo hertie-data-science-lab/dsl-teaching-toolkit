@@ -9,9 +9,9 @@ import type { Assignment, Problem, Status } from '../model/types';
 import { checkAccess, releaseEarly, type ReleaseRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { Release } from '../model/types';
-import { Crumbs, Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
+import { Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
 import { Hint } from '../ui/Hint';
-import { CheckNow, MoreMenu, WithStatus, cohortName, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
+import { CheckNow, MoreMenu, WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
 
@@ -62,20 +62,15 @@ export function AsgRows({ status, now }: { status: Status; now: number }) {
 }
 
 /**
- * "Fall 2026, 14 Sep to 18 Dec. Week 3 of 15. Exams 8 and 15 Dec. Archive 12 Jan 2027."
- * Each sentence only when its facts are known; before week 1, "Starts 14 Sep." when the
- * range is not already shown. Years are said when they are not the start's (`thisYear`
- * without a start).
+ * The Dashboard's line under its title: what the semester banner does not say (its name, dates
+ * and week are there). The start while the semester has no end date yet, the exams, the archive.
  */
 export function headerLine(status: Status, sched: Schedule | null, rows: Row[], tz: string, thisYear: number): string {
   const sem = status.semester;
   const start = sem?.start ?? sched?.start ?? null, end = sem?.end ?? sched?.end ?? null;
   const year = start ? Number(start.slice(0, 4)) : thisYear;
   const out: string[] = [];
-  const dates = start && end ? `${fmtDate(start, tz, year)} to ${fmtDate(end, tz, year)}` : '';
-  if (sem?.label || dates) out.push(`${[sem?.label, dates].filter(Boolean).join(', ')}.`);
-  if (sem?.week === 0) { if (start && !dates) out.push(`Starts ${fmtDate(start, tz, year)}.`); }
-  else if (sem?.week && sem.weeks) out.push(`Week ${sem.week} of ${sem.weeks}.`);
+  if (sem?.week === 0 && start && !end) out.push(`Starts ${fmtDate(start, tz, year)}.`);
   const exams = rows.filter((r) => r.type === 'exam' && r.when).map((r) => r.when!);
   if (exams.length) out.push(`${exams.length > 1 ? 'Exams' : 'Exam'} ${fmtDays(exams, tz, year)}.`);
   if (sem?.archive_date) out.push(`Archive ${fmtDate(sem.archive_date, tz, year)}.`);
@@ -337,10 +332,9 @@ function Overview(p: ReadyProps) {
   const shown = problemGroups(problems, selected, isThisWeek, term, tz);
   return (
     <>
-      <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: cohortName(p) }]} />
       <div class="page-head">
         <div>
-          <h1>Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h1>
+          <h2 class="h1">Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h2>
           <p class="lede">
             <span>{headerLine(status, sched, rows, tz, year)}</span>
             {amber ? <span class="amber">Setup done, but {amber} {amber > 1 ? 'stages have a problem' : 'stage has a problem'}.</span> : <span>Setup complete.</span>}
@@ -433,7 +427,7 @@ function Overview(p: ReadyProps) {
 
 export function CohortScreen(p: CohortProps) {
   return (
-    <WithStatus props={p} title="Dashboard" crumbs={[{ t: 'All courses', href: '#home' }, { t: cohortName(p) }]}>
+    <WithStatus props={p} title="Dashboard">
       {(r) => <Overview {...r} />}
     </WithStatus>
   );
