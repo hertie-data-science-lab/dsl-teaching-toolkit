@@ -123,7 +123,7 @@ repos nothing else is looking for. To change the shape, edit `grading_config.yml
 
 Live example: [`example-course/cohort-org/teams.csv`](../example-course/cohort-org/teams.csv).
 
-Teams are formed in one of two ways - both end up in `classroom-config/teams.csv` (`assignment, team, github_handle`), and **Sync membership** turns each into a GitHub team on push. A team need not exist before the hand-out: the release provisions one shared repo per team that exists, and a scheduled hand-out re-fires every tick, so a team formed on day three gets its repo then.
+Teams are formed in one of two ways - both end up in `classroom-config/teams.csv` (`assignment, team, github_handle`), and **Sync membership** turns each into a secret GitHub team on push (visible only to its members and org owners; the assignment's site page is the list). A team need not exist before the hand-out: the release provisions one shared repo per team that exists, and a scheduled hand-out re-fires every tick, so a team formed on day three gets its repo then.
 
 Which of the two an assignment uses is its own declaration - `team_formation` in the `grading_config.yml` on the template's `solution` branch:
 
