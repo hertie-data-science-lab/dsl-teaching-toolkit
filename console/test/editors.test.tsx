@@ -15,7 +15,7 @@ import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
 import { POLICY, penaltyRate } from '../src/model/policy';
 import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { assignmentKey, blankDraft, draftErrors, freshId, nextNumber, readDraft, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { assignmentKey, blankDraft, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
@@ -115,6 +115,11 @@ describe('the schedule entry sheet model', () => {
     expect(withNumber({ ...d, number: 7 }, doc).number).toBe(7);
     expect(withNumber({ ...d, number: '' }, doc).number).toBe('');
     expect(withNumber({ ...d, id: 'assignment-1' }, doc).number).toBeUndefined();
+    // Supporting files are no row: a new one gets no number, and none is asked of it.
+    const data = { ...blankDraft('lecture', { repo: 'cm' }), number: 3 } as ReleaseDraft;
+    expect(withNumber(data, { releases: {} }, undefined, 'assets').number).toBeUndefined();
+    expect(needsNumber(data, 'assets')).toBe(false);
+    expect(needsNumber(data, 'lecture')).toBe(true);
     const ok = { ...d, dueDate: '2026-10-01', handoutDate: '2026-09-01' };
     expect(draftErrors({ ...ok, number: 2 }, { doc })).toEqual({});
     expect(draftErrors({ ...ok, number: 1 }, { doc }).number).toBe('assignment-1 is already in this schedule.');

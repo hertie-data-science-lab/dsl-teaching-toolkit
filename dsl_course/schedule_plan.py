@@ -189,8 +189,9 @@ def give_a_number(key: str) -> str:
 def needs_number(release: schedule.Release, kind: str) -> bool:
     """Whether a `releases:` entry must carry a number: every row the site shows, except
     readings - a readings number means "join that lecture" (decision 0013 rule 3), so a
-    stand-alone readings row is rightly unnumbered."""
-    return release.show_on_site and kind != "readings"
+    stand-alone readings row is rightly unnumbered - and supporting files, which are no
+    row at all (decision 0026 rule 3)."""
+    return release.show_on_site and kind not in ("readings", ASSETS_KIND)
 
 
 def kind_unknown(release: schedule.Release, aliases: Aliases = _no_aliases) -> bool:
