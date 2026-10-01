@@ -297,6 +297,28 @@
                     "blocks": {
                       "type": "boolean"
                     },
+                    "detail": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "folders": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "kind": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "folders"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
                     "done": {
                       "type": "boolean"
                     },

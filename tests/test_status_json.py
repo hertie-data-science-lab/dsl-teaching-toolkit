@@ -16,6 +16,7 @@ import pytest
 
 from dsl_course import (
     grades,
+    policy,
     releaseignore,
     roster,
     scaffold,
@@ -610,9 +611,10 @@ def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
     del present["E1282_syllabus.pdf"]
     facts = status_json._materials_facts(COURSE, "nlp-materials")
     assert status_json.materials_state(facts) == "todo"
-    assert status_json.materials_checks(facts)[0]["why"] == (
-        "There is no E1282_syllabus.pdf yet."
-    )
+    (syllabus,) = [
+        c for c in status_json.materials_checks(facts) if c["id"] == "syllabus"
+    ]
+    assert syllabus["why"] == "There is no E1282_syllabus.pdf yet."
 
 
 def test_an_archived_semester_is_not_live_and_k7_is_done():
@@ -1653,7 +1655,7 @@ def _unmet(m: status_json.MaterialsFacts) -> list[str]:
         ({"folders": ()}, ["kind_folder"], "todo"),
         # A folder on the default fallback blocks, though another has a kind.
         ({"folders": ("lectures", "img")}, ["all_mapped"], "todo"),
-        ({"folders": ("img",)}, ["kind_folder", "all_mapped"], "todo"),
+        ({"folders": ("img",)}, ["all_mapped", "kind_folder"], "todo"),
         # A declared kind maps the folder, matched case-insensitively.
         ({"folders": ("Tutorien",), "kinds": {"tutorien": "lab"}}, [], "ready"),
         # The two non-blocking lines never stop ready.
@@ -1669,17 +1671,39 @@ def test_the_materials_checklist_and_its_state(over, unmet, state):
 
 
 def test_the_checklist_order_and_what_blocks():
+    # Decision 0024 rule 8: folder kinds first, then the syllabus, then the two
+    # non-blocking lines.
     checks = status_json.materials_checks(_materials("m", None))
     assert [(c["id"], c["blocks"]) for c in checks] == [
-        ("syllabus", True),
-        ("kind_folder", True),
         ("all_mapped", True),
+        ("kind_folder", True),
+        ("syllabus", True),
         ("withheld", False),
         ("sessions", False),
     ]
     # A done check carries no why; an unmet one names what is missing.
-    assert [c["why"] is None for c in checks] == [False, True, True, False, False]
-    assert checks[0]["why"] == "There is no SYLLABUS.md yet."
+    assert [c["why"] is None for c in checks] == [True, True, False, False, False]
+    assert checks[2]["why"] == "There is no SYLLABUS.md yet."
+    assert checks[1]["label"] == "At least one folder of a content kind"
+
+
+def test_kind_folder_lists_every_content_kind_with_its_folders():
+    m = _materials(
+        "m",
+        folders=("Lectures", "tutorials", "Tutorien", "img", "solution"),
+        kinds={"tutorien": "lab"},
+    )
+    checks = status_json.materials_checks(m)
+    # Only `kind_folder` carries the detail.
+    assert [c["id"] for c in checks if "detail" in c] == ["kind_folder"]
+    (kind,) = [c for c in checks if c["id"] == "kind_folder"]
+    found = {d["kind"]: d["folders"] for d in kind["detail"]}
+    # Every content kind of the policy, in its order; an unmapped or never-released
+    # folder is under none.
+    assert list(found) == list(policy.content_kinds())
+    assert found["lecture"] == ["Lectures"]
+    assert found["lab"] == ["tutorials", "Tutorien"]
+    assert found["readings"] == []
 
 
 def test_the_seeded_releaseignore_is_not_reviewed_and_a_pattern_or_the_mark_is():

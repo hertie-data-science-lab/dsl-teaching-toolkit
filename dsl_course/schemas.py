@@ -250,6 +250,11 @@ def status_schema() -> dict:
         {"repo": _str(), "slug": _str(), "state": _str()}, ("repo", "state")
     )
     # A materials repo's checklist (decision 0022 rule 5); `why` is null once done.
+    # `detail` (on `kind_folder`, 0024 rule 8): the top folders per content kind.
+    kind_found = _obj(
+        {"kind": _str(), "folders": {"type": "array", "items": _str()}},
+        ("kind", "folders"),
+    )
     check = _obj(
         {
             "id": _str(),
@@ -257,6 +262,7 @@ def status_schema() -> dict:
             "done": {"type": "boolean"},
             "why": nullable,
             "blocks": {"type": "boolean"},
+            "detail": {"type": "array", "items": kind_found},
         },
         ("id", "label", "done", "blocks"),
     )
