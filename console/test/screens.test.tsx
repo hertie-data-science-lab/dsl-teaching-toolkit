@@ -420,7 +420,7 @@ describe('S2 course and S17 template', () => {
     const out = html(<CourseScreen {...cp} loaded={pub} />);
     expect(out).toContain(`href="https://${COURSE_ORG}.github.io"`);
     const t = text(<CourseScreen {...cp} loaded={pub} />);
-    expect(t).toContain('Optional: an open version of your materials for anyone on the internet, updated daily.');
+    expect(t).toContain('Optional: an open course version of your materials accessible to anyone on the internet, updated daily.');
     expect(t).toContain('Edit website details');
     expect(t).not.toContain('Public website settings');
     expect(out).toContain('<button class="btn small outline" type="button">Republish website</button>');
@@ -429,7 +429,8 @@ describe('S2 course and S17 template', () => {
   it('keeps only New semester in the head; the status line, Refresh and the course on GitHub sit under it', () => {
     const out = html(<CourseScreen {...cp} />);
     const head = out.slice(out.indexOf('class="page-head"'), out.indexOf('class="actions sub-actions"'));
-    expect(head).toContain('>New semester</a>');
+    // Always the black primary button, ready or not.
+    expect(head).toContain(`<a class="btn" href="?course=${COURSE_ORG}#new-semester-1">New semester</a>`);
     expect(head).not.toContain('Publish');
     expect(head).not.toContain('Refresh');
     expect(head).not.toContain('on GitHub');

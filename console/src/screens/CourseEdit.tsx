@@ -523,12 +523,14 @@ export function folderKinds(folders: string[], kinds: Record<string, string>): {
   });
 }
 
-const FROM_WORD = { declared: 'set here', name: 'from its name', default: 'the default' };
+const FROM_WORD = { declared: 'set here', name: 'from its name' };
+/** A folder whose kind only the fallback gives: the check counts it as unmapped, so it is said so. */
+const NO_KIND = 'No kind yet';
 
-/** The override's "not set here" option: the kind the folder gets without `materials.yml`, and why. */
+/** The override's "not set here" option: the kind the folder gets by its name, or that it has none yet. */
 export function resetLabel(folder: string): string {
   const { kind, named } = inferKind(folder);
-  return `${KIND_LABEL[kind] ?? kind} (${named ? FROM_WORD.name : FROM_WORD.default})`;
+  return named ? `${KIND_LABEL[kind] ?? kind} (${FROM_WORD.name})` : NO_KIND;
 }
 
 /** `materials.yml` with the syllabus and kinds written: blank syllabus and no kinds remove the keys. */
@@ -641,7 +643,7 @@ export function MaterialsScreen(p: CourseProps) {
           </section>
         ) : null}
         <section class="panel section">
-          <h2>Syllabus <Hint label="About the syllabus">The syllabus is one file at the repo’s top level that the student site pins. Pick which file it is here; the default is SYLLABUS.md.</Hint></h2>
+          <h2>Syllabus <Hint label="About the syllabus">The syllabus is one file at the repo’s top level that the student site pins. Pick which file it is here; the default is SYLLABUS.md. The list shows this repo’s top-level Markdown files; pick the one that is your syllabus.</Hint></h2>
           <div class="field">
             <label for="m-syl">Syllabus file <span class="default">default: {DEFAULT_SYLLABUS}</span></label>
             <select id="m-syl" onChange={(e) => setSyl((e.target as HTMLSelectElement).value)}>
@@ -667,10 +669,10 @@ export function MaterialsScreen(p: CourseProps) {
                 {kinds.map((k) => (
                   <tr>
                     <td><code>{k.folder}/</code></td>
-                    <td><span class="chip">{KIND_LABEL[k.kind] ?? k.kind}</span> <span class="footnote">{FROM_WORD[k.from]}</span></td>
+                    <td>{k.from === 'default' ? <span class="chip">{NO_KIND}</span> : <><span class="chip">{KIND_LABEL[k.kind] ?? k.kind}</span> <span class="footnote">{FROM_WORD[k.from]}</span></>}</td>
                     <td><select aria-label={`Kind of ${k.folder}`} onChange={(e) => setKind(k.folder, (e.target as HTMLSelectElement).value)}>
-                      <option value="" selected={k.from !== 'declared' || k.kind === inferKind(k.folder).kind}>{resetLabel(k.folder)}</option>
-                      {CONTENT_KINDS.filter((x) => x !== inferKind(k.folder).kind).map((x) => <option value={x} selected={k.from === 'declared' && k.kind === x}>{KIND_LABEL[x] ?? x}</option>)}
+                      <option value="" selected={k.from !== 'declared' || (inferKind(k.folder).named && k.kind === inferKind(k.folder).kind)}>{resetLabel(k.folder)}</option>
+                      {CONTENT_KINDS.filter((x) => !inferKind(k.folder).named || x !== inferKind(k.folder).kind).map((x) => <option value={x} selected={k.from === 'declared' && k.kind === x}>{KIND_LABEL[x] ?? x}</option>)}
                     </select></td>
                   </tr>
                 ))}
@@ -684,7 +686,7 @@ export function MaterialsScreen(p: CourseProps) {
           <h2>Withheld from students <Hint label="About withheld files">Everything in this repo is released to students as it stands, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
           {tree.kind === 'absent' ? <p class="footnote">Could not read the repo’s files.</p> : (
             <WithholdEditor id="ign-pat" label="Withheld patterns" files={files} text={ign ?? ignText} onText={setIgn} loading={tree.kind === 'loading'} partial={partial}
-              kinds={Object.fromEntries(kinds.map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} withheldWord="withheld" releasedWord="released to students" />
+              kinds={Object.fromEntries(kinds.filter((k) => k.from !== 'default').map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} withheldWord="withheld" releasedWord="released to students" />
           )}
           <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
           <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ignFile.kind === 'loading' || (ignFile.kind === 'ready' && ignOut === ignText)} file={ignRef} />

@@ -279,7 +279,9 @@ describe('materials settings: syllabus file and folder kinds', () => {
     const t = text(<MaterialsScreen {...cp({ entry: MAT, files: withYml })} />);
     expect(t).toContain('quiz/ Exam set here');
     expect(t).toContain('Tutorials/ Lab from its name');
-    expect(t).toContain('datasets/ Lecture the default');
+    // A folder only the fallback gives a kind is unmapped, and says so.
+    expect(t).toContain('datasets/ No kind yet');
+    expect(t).not.toContain('Lecture the default');
     expect(out).toContain('<table class="grid kinds">');
     expect(out).toContain('<th>Kind, and why</th>');
     expect(out).toContain('value="E1282.pdf"');
@@ -292,10 +294,11 @@ describe('materials settings: syllabus file and folder kinds', () => {
     expect(sel('Tutorials').startsWith('<option value selected>Lab (from its name)</option>')).toBe(true);
     expect(sel('Tutorials')).not.toContain('value="lab"');
     expect(sel('quiz')).toContain('<option value="exam" selected>');
-    expect(sel('quiz')).not.toContain('value="lecture"');
+    // quiz has no kind by its name: every kind is offered, lecture too.
+    expect(sel('quiz')).toContain('value="lecture"');
   });
-  it('names the kind a folder falls back to, and why', () => {
-    expect(resetLabel('quiz')).toBe('Lecture (the default)');
+  it('names the kind a folder gets by its name, or that it has none yet', () => {
+    expect(resetLabel('quiz')).toBe('No kind yet');
     expect(resetLabel('Tutorials')).toBe('Lab (from its name)');
   });
   it('writes materials.yml with only what is declared', () => {

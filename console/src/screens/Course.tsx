@@ -210,11 +210,11 @@ export function StateChip({ state, todo }: { state: string; todo: string }) {
   return state === 'problem' ? <span class="chip bad">Has a problem</span> : state === 'ready' ? <span class="chip ok">Ready</span> : <span class="chip">{todo}</span>;
 }
 
-/** The overview's head: New semester, the one primary action. */
-export function CourseHeaderActions({ course, ready }: { course: CourseProps['course']; ready: boolean }) {
+/** The overview's head: New semester, the one primary action, always the black button. */
+export function CourseHeaderActions({ course }: { course: CourseProps['course'] }) {
   return (
     <div class="actions">
-      <a class={ready ? 'btn' : 'btn quiet'} href={`?course=${course.org}#new-semester-1`}>New semester</a>
+      <a class="btn" href={`?course=${course.org}#new-semester-1`}>New semester</a>
     </div>
   );
 }
@@ -345,7 +345,6 @@ export function CourseScreen(p: CourseProps) {
   const lastPublish = recentActivity(ops.map((l) => l.filter((o) => o.op === 'course.publish_website' && o.conclusion !== 'previewed')), 1)[0];
   const cur = env?.ops.current.value;
   const publishing = cur?.phase === 'running' && cur.def.op === 'course.publish_website' && cur.def.courseOrg === course.org;
-  const ready = v.course ? v.course.ready : false;
   const layers = courseLayers(p);
   const lateDays = resolve('late_window_days', layers), latePen = resolve('late_penalty_per_day', layers);
   const team = resolve('max_team_size', layers);
@@ -360,7 +359,7 @@ export function CourseScreen(p: CourseProps) {
         <div>
           <h1>{course.name} <Hint doc="02-add-materials-to-course.md">Materials are staged here privately until a release copies them in whole or in part to a semester. Selected materials can also be published on the course’s optional public website.</Hint></h1>
         </div>
-        <CourseHeaderActions course={course} ready={ready} />
+        <CourseHeaderActions course={course} />
       </div>
       <CourseSubActions course={course} loaded={p.loaded} files={p.files} now={p.now} computed={v.computed} />
       <p class="page-note">Materials and assignment templates are prepared here, for every semester. Students get only what a semester releases or hands out, from that semester’s page.</p>
@@ -436,7 +435,7 @@ export function CourseScreen(p: CourseProps) {
             </dl>
             <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
             <div class="website-block">
-              <h3>Public website <Hint label="About the public website">Optional: an open version of your materials for anyone on the internet, updated daily.</Hint></h3>
+              <h3>Public website <Hint label="About the public website">Optional: an open course version of your materials accessible to anyone on the internet, updated daily.</Hint></h3>
               <SiteLive org={course.org} published={pub} last={lastPublish} running={publishing} now={p.now} />
               <div class="actions">
                 {course.write ? <OpButtons def={publishWebsite(courseScope({ course }), pub)} small verbCls="btn small outline" /> : null}
