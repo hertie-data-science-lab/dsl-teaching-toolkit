@@ -207,6 +207,60 @@ describe('Stop', () => {
     await expect(adapter.cancel({ op: 'site.update', runId: 77, htmlUrl: '', preview: false, courseOrg: COURSE })).resolves.toBeUndefined();
   });
 
+  it('a Stop GitHub answers with 409, the run having ended, still says it came too late', async () => {
+    let polls = 0;
+    const done = { schema: 'dsl.outcome/1', op: 'site.update', run_id: 77, actor: 'a', preview: false, conclusion: 'done', summary: 'Updated the site.', started: 's', finished: 'f' };
+    const gh = new FakeGitHub()
+      .on('POST', `/repos/${COURSE}/.github/actions/workflows/console.yml/dispatches`, { workflow_run_id: 77, html_url: 'h' })
+      .on('GET', `/repos/${COURSE}/.github/actions/runs/77`, () => json({ id: 77, status: ++polls > 2 ? 'completed' : 'in_progress', conclusion: polls > 2 ? 'success' : null, html_url: 'h' }))
+      .on('GET', `/repos/${COURSE}/.github/actions/runs/77/jobs`, { jobs: [{ id: 901, name: 'console', status: 'completed', conclusion: 'success', steps: [] }] })
+      .on('GET', `/repos/${COURSE}/.github/check-runs/901/annotations`, [{ path: '.github', start_line: 1, annotation_level: 'notice', title: 'dsl-outcome', message: JSON.stringify(done) }])
+      .on('POST', `/repos/${COURSE}/.github/actions/runs/77/cancel`, () => json({ message: 'Cannot cancel a workflow run that is completed.' }, 409))
+      .on('GET', /contents/, () => json({ message: 'Not Found' }, 404));
+    const ops = session(new DispatchAdapter(new GitHubClient({ token: () => 't', fetch: gh.fetch }), () => 'a'));
+    ops.open(defs.updateSite(scope));
+    const p = ops.start('run');
+    for (let i = 0; i < 20 && !ops.current.value?.handle; i++) await tick();
+    await ops.cancel();
+    expect(ops.current.value?.error).toBeNull();
+    await p;
+    expect(ops.current.value).toMatchObject({ phase: 'done', stopped: true, stopping: false, error: null });
+    expect(ops.current.value?.result?.outcome?.summary).toBe('Updated the site.');
+    await mount(envOf(ops), <OpPanel />);
+    expect(root!.textContent).toContain('Stopped, but too late: it had already finished.');
+  });
+
+  it('a Stop pressed before GitHub names the run is sent once it does, and the run ends Stopped', async () => {
+    const a = new Scripted(true);
+    const ops = session(a);
+    ops.open(defs.handout(scope, asg));
+    ops.setChecked(true);
+    const p = ops.start('preview');
+    await tick();
+    expect(ops.current.value?.handle).toBeNull();
+    await ops.cancel();
+    expect(ops.current.value).toMatchObject({ stopping: true, stopRequested: true });
+    expect(a.cancels).toEqual([]);
+    a.name();
+    await p;
+    expect(a.cancels).toEqual([77]);
+    expect(ops.current.value).toMatchObject({ phase: 'ready', stopped: true, stopping: false });
+  });
+
+  it('clears a refused cancel’s error once the run ends', async () => {
+    const a = new Scripted();
+    a.cancelError = new Error('Resource not accessible by integration');
+    const ops = session(a);
+    ops.open(defs.checkNow(scope));
+    const p = ops.start('run');
+    await tick();
+    await ops.cancel();
+    expect(ops.current.value?.error).toContain('Could not stop it');
+    a.finish();
+    await p;
+    expect(ops.current.value).toMatchObject({ phase: 'done', error: null, stopped: false });
+  });
+
   it('stops every op the console runs: each popup’s Stop cancels its own run', async () => {
     for (const def of ALL) {
       const a = new Scripted();
@@ -249,6 +303,13 @@ describe('See on GitHub', () => {
     }
     expect(targetOf(defs.releaseEarly(scope, rel), {})).toBe(`https://github.com/${COHORT}/materials/tree/main/lectures/05`);
     expect(targetOf(defs.releaseAdhoc(scope, []), { semester_dest_repo: 'extras', semester_dest_path: '/week4/' })).toBe(`https://github.com/${COHORT}/extras/tree/main/week4`);
+    // A blank destination is the source path; a list of paths opens the repo.
+    expect(targetOf(defs.releaseAdhoc(scope, []), { course_source_path: 'readings/week04' })).toBe(`https://github.com/${COHORT}/materials/tree/main/readings/week04`);
+    expect(targetOf(defs.releaseAdhoc(scope, []), { course_source_path: 'labs/a, labs/b' })).toBe(`https://github.com/${COHORT}/materials`);
+    // Student copies are found by the semester-side name, not the schedule key.
+    const named = { ...asg, name: 'regression-f2026' };
+    expect(targetOf(defs.handout(scope, named), {})).toBe(`https://github.com/orgs/${COHORT}/repositories?q=regression-f2026`);
+    expect(targetOf(defs.updateCopies(scope, named, []), {})).toBe(`https://github.com/orgs/${COHORT}/repositories?q=regression-f2026`);
   });
 });
 
@@ -278,15 +339,35 @@ describe('the drawer', () => {
     drawer.getBoundingClientRect = () => ({ width: 440, height: 300, top: 64, left: 0, right: 440, bottom: 364, x: 0, y: 64, toJSON: () => ({}) });
     const grip = root!.querySelector('.drawer-grip')!;
     await act(() => void grip.dispatchEvent(new PointerEvent('pointerdown', { clientX: 500, clientY: 360, bubbles: true })));
-    await act(() => void window.dispatchEvent(new PointerEvent('pointermove', { clientX: 400, clientY: 460 })));
-    await act(() => void window.dispatchEvent(new PointerEvent('pointerup', {})));
+    await act(() => void grip.dispatchEvent(new PointerEvent('pointermove', { clientX: 400, clientY: 460 })));
+    await act(() => void grip.dispatchEvent(new PointerEvent('pointerup', {})));
     expect(drawer.classList.contains('sized')).toBe(true);
     expect(drawer.style.width).toBe('540px');
     expect(drawer.style.height).toBe('400px');
     await act(() => void grip.dispatchEvent(new PointerEvent('pointerdown', { clientX: 400, clientY: 460, bubbles: true })));
-    await act(() => void window.dispatchEvent(new PointerEvent('pointermove', { clientX: 2000, clientY: -500 })));
+    await act(() => void grip.dispatchEvent(new PointerEvent('pointermove', { clientX: 2000, clientY: -500 })));
     expect(drawer.style.width).toBe('320px');
     expect(drawer.style.height).toBe('240px');
+    // A cancelled pointer ends the drag: later moves change nothing.
+    await act(() => void grip.dispatchEvent(new PointerEvent('pointercancel', {})));
+    await act(() => void grip.dispatchEvent(new PointerEvent('pointermove', { clientX: 0, clientY: 900 })));
+    expect(drawer.style.width).toBe('320px');
+  });
+
+  it('is a focusable separator the arrow keys resize', async () => {
+    const ops = session(new Scripted());
+    await mount(envOf(ops), <OpPanel />);
+    await act(() => ops.open(defs.updateSite(scope)));
+    const drawer = root!.querySelector('aside.drawer') as HTMLElement;
+    drawer.getBoundingClientRect = () => ({ width: 440, height: 300, top: 64, left: 0, right: 440, bottom: 364, x: 0, y: 64, toJSON: () => ({}) });
+    const grip = root!.querySelector('.drawer-grip') as HTMLElement;
+    expect(grip.getAttribute('role')).toBe('separator');
+    expect(grip.getAttribute('tabindex')).toBe('0');
+    expect(grip.getAttribute('aria-label')).toContain('arrow keys');
+    await act(() => void grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
+    expect(drawer.style.width).toBe('464px');
+    await act(() => void grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    expect(drawer.style.height).toBe('324px');
   });
 });
 

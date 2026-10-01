@@ -57,7 +57,9 @@ export interface Current {
   min: boolean;
   /** Stop was pressed and GitHub has not ended the run yet. */
   stopping: boolean;
-  /** The last run ended because it was stopped (GitHub says `cancelled`). */
+  /** Stop was pressed for this run and GitHub took the cancel (a 409 included: it had already ended). */
+  stopRequested: boolean;
+  /** The last run was stopped: GitHub says `cancelled`, or Stop was pressed and the run ended anyway. */
   stopped: boolean;
 }
 
@@ -154,7 +156,7 @@ export class OpsSession {
     }
     this.current.value = {
       def, mode: modeOf(def.op), values: { ...def.args }, checked: false, phase: 'ready', running: null,
-      handle: null, progress: null, dry: null, result: null, error: null, min: false, stopping: false, stopped: false,
+      handle: null, progress: null, dry: null, result: null, error: null, min: false, stopping: false, stopRequested: false, stopped: false,
     };
     if (def.info) return;
     const cur = this.current.value;
@@ -192,7 +194,7 @@ export class OpsSession {
   async cancel(): Promise<void> {
     const c = this.current.value;
     if (!c || c.phase !== 'running' || c.stopping) return;
-    this.patch({ stopping: true, error: null });
+    this.patch({ stopping: true, stopRequested: true, error: null });
     if (c.handle) await this.sendCancel(c.handle);
   }
 
@@ -200,7 +202,7 @@ export class OpsSession {
     try {
       await this.adapter.cancel(handle);
     } catch (e) {
-      if (this.current.value?.handle === handle) this.patch({ stopping: false, error: `Could not stop it: ${e instanceof Error ? e.message : String(e)}` });
+      if (this.current.value?.handle === handle) this.patch({ stopping: false, stopRequested: false, error: `Could not stop it: ${e instanceof Error ? e.message : String(e)}` });
     }
   }
 
@@ -212,7 +214,7 @@ export class OpsSession {
     const def = c.def;
     const preview = kind === 'preview';
     const args = requestArgs(def, c.values, c.checked);
-    this.patch({ phase: 'running', running: kind, error: null, progress: null, handle: null, stopping: false, stopped: false, ...(preview ? { dry: null } : { result: null }) });
+    this.patch({ phase: 'running', running: kind, error: null, progress: null, handle: null, stopping: false, stopRequested: false, stopped: false, ...(preview ? { dry: null } : { result: null }) });
     let handle: Handle;
     try {
       handle = await this.adapter.submit({ op: def.op, courseOrg: def.courseOrg, cohortOrg: def.cohortOrg, args, preview });
@@ -245,7 +247,7 @@ export class OpsSession {
       if (i + 1 < tries) await this.sleep(this.pollMs);
     }
     const o = result.outcome;
-    const stopped = progress?.conclusion === 'cancelled';
+    const stopped = progress?.conclusion === 'cancelled' || !!this.current.value?.stopRequested;
     const finished = o?.finished || new Date(this.now()).toISOString();
     this.runs.value = [
       {
@@ -258,7 +260,8 @@ export class OpsSession {
     if (preview && ok) this.previewed.value = { ...this.previewed.value, [this.gateKey(def)]: argsKey(args) };
     if (preview && ok && o.block) this.blocks.value = { ...this.blocks.value, [this.gateKey(def)]: o.block };
     if (this.current.value?.handle === handle) {
-      const ended = { running: null, stopping: false, stopped };
+      // A refused cancel's error is about a run that has now ended either way.
+      const ended = { running: null, stopping: false, stopped, error: null };
       this.patch(preview ? { ...ended, phase: 'ready', dry: result } : { ...ended, phase: 'done', result });
     }
     if (!preview) this.opts.onFinished?.(def);
