@@ -17,6 +17,8 @@ match the starter; with tests off, `handwritten`. Change it either way, at any t
 
 A template made before the key existed reads as `derived` when any file under `solution/`
 on its `solution` branch carries a marker, else `handwritten`. The migration writes the key.
+Until it does, the course page reads such a template as derived whenever `solution/` holds
+a notebook or script.
 
 ## Derived from your solution
 
@@ -45,18 +47,25 @@ default and lists the files and counts, never their content.
 Derive refuses, rather than publish the answer:
 
 - a file with nothing marked (a blank file such as an empty `__init__.py` is copied as it is);
-- a marker that opens and never closes;
-- and it clears the stored outputs of every code cell it changed.
+- a marker that opens and never closes.
+
+It also clears the stored outputs of every code cell it changed: a solution notebook's
+outputs are the answers in print.
 
 Only `.ipynb`, `.Rmd`, `.qmd`, `.py`, `.R` and `.tex` are derived. Anything else under
 `solution/` stays there.
 
-**Do not edit `main` by hand.** The next Derive overwrites it. The course shows the problem
-*main is derived; edit the solution branch and derive again* when a starter file on `main`
-was last changed by anything but Derive (or the first commit New assignment made).
+Each run also writes `.system/starter.json` on `main`: the version of `solution/` it
+derived from, and a fingerprint of each file it wrote. Leave it alone; it is how the course
+page knows the starter is current.
 
-**Ready** when the brief (`README.md` on `main`) is written and every file under
-`solution/` marks an answer.
+**Do not edit `main` by hand.** The next Derive overwrites it. The course shows the problem
+*main is derived; edit the solution branch and derive again* when a file Derive wrote no
+longer matches on `main`.
+
+**Ready** when the brief (`README.md` on `main`) is written and Derive has run since the
+last change to `solution/`. Until then the course lists a to-do: *Derive has not been run
+yet*, or *The solution changed since the last Derive; derive again*.
 
 ## Written by hand
 
@@ -65,4 +74,4 @@ You write `main` yourself: a skeleton, a brief, a different shape from the solut
 cutoff. Derive is hidden and refuses to run (*This template's starter is written by hand,
 so nothing is derived.*). No marker is needed anywhere.
 
-**Ready** when the brief is written and `main` holds something.
+**Ready** when the brief is written and `main` holds something besides it.

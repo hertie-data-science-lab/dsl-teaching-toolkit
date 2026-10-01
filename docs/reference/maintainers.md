@@ -49,6 +49,7 @@ breaks a live link that faculty click:
 |---|---|
 | `docs/01-new-course-org.md` | `config_digest.COURSE` |
 | `docs/03-add-assignment-to-course.md` | `config_digest.GRADING_CONFIG` |
+| `docs/assignment-starter.md` | the console's Template settings and New assignment `?` (`Course.tsx` `STARTER_DOC`) |
 | `docs/05-manage-teaching-team.md` | `templates/semester-config/instructors.yml`, `config_digest.PEOPLE` |
 | `docs/06-enrol-students-to-cohort.md` | `config_digest.ROSTER` |
 | `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/semester-config/schedule.yml`, `templates/semester-config/validate-schedule.yml` |
@@ -119,14 +120,19 @@ Things whose *literal spelling* is depended on from outside Python:
   `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what makes the quarter-hourly
   refresh post once rather than four times an hour.
 - **A template's starter (decision 0028).** `grading_config.yml` `starter: derived |
-  handwritten` (`course.STARTER_MODES`; no key reads as `derived` when a source under
-  `solution/` carries a marker, `derive.starter_mode`; the migration's *template starter*
-  step writes it). Derive refuses a hand-written one with the reason code
-  `STARTER_HANDWRITTEN`, appended to its codes. `derive.DERIVE_COMMITS` (Derive's
-  `COMMIT_MESSAGE` and scaffold's `SEED_COMMIT`) is how `status_json` tells Derive's commits
-  on `main` from a hand edit (`template:<repo>:MAIN_EDITED`, checked per starter file by its
-  last commit): a reworded message is appended to the chain, never edited, or every derived
-  template reads as edited. Faculty page: `docs/assignment-starter.md`.
+  handwritten` (`course.STARTER_MODES`). Derive reads a missing key from the markers
+  (`derive.starter_mode`); the status, which reads no source file, reads it as `derived`
+  when `solution/` holds a derivable file; the migration's *template starter* step writes
+  it. Derive refuses a hand-written one with the reason code `STARTER_HANDWRITTEN`,
+  appended to its codes. Every real Derive writes `derive.STARTER_RECORD`
+  (`.system/starter.json` on `main`: `solution_tree`, the sha of the `solution/` folder it
+  derived from, `""` after a run that refused a file; `files`, `{main path: blob sha}`).
+  `status_json.starter_check` compares it with the solution and `main` trees the gather
+  already reads, plus that one file: a recorded blob that differs on `main` is the problem
+  `template:<_slugify(repo)>:MAIN_EDITED`; no record is the to-do "Derive has not been run
+  yet"; another `solution_tree` is "The solution changed since the last Derive". Its two
+  keys are read by the status: add a key, never rename one. Faculty page:
+  `docs/assignment-starter.md`.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-semester`, `submission`, `gradebook`,
   `assignment-template`, `dsl-materials` (a course materials repo; `materials.MATERIALS_TOPIC`),
   `dsl-assignment` (a course assignment template; `discovery.TEMPLATE_TOPIC`).
@@ -352,7 +358,10 @@ never propagated:
 Seeded files carry their owner on the first line, and the write site enforces it:
 
 - **SYSTEM-OWNED** - written unconditionally on every bootstrap and refresh, so fixes reach
-  running courses. Workflows, generated docs, everything under `.system/`.
+  running courses. Workflows, generated docs, everything under `.system/`. One is written by
+  an op rather than a refresh: `.system/starter.json` on a derived template's `main`, by
+  every real Derive (JSON, so it carries no stamp; it reaches students with the rest of
+  `main`, and says only which blobs Derive wrote).
 - **INSTRUCTOR-OWNED** - `gh_contents.seed_if_absent` only. Rewriting one destroys live state (roster
   rows, enrol codes, the semester's schedule). The code comments call this "USER-owned"; the shipped
   stamp says INSTRUCTOR-OWNED. Same thing.
