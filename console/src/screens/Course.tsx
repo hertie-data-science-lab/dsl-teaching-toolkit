@@ -478,7 +478,7 @@ export const STARTER_DOC = 'assignment-starter.md';
 
 /** The `?` on "Marked from" (decision 0031 rule 7), after `questions: Q: {file:}` in the engine (`setting_readers.question_files`). */
 export const MARKED_FROM_HINT =
-  'The file in the student’s repo this question is marked from, when it is not the runnable one: a LaTeX write-up, say. Type its path from the top of the repo, like report.tex; the mark sheet names it beside the question. Leave it blank and the question is marked from the runnable file.';
+  'The file in the student’s repo this question is marked from, when it is not the runnable one: a LaTeX write-up, say. Type its path from the top of the repo, like report.tex (for a shared drop box, from the student’s or team’s folder); the mark sheet names it beside the question. Leave it blank and the question is marked from the runnable file.';
 
 export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: QuestionRow[]) => void; files: string[] }) {
   const total = rows.reduce((n, r) => n + (Number(r.points) || 0), 0);
