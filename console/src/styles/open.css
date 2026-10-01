@@ -34,4 +34,4 @@
 .course-folders li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 6px 0; }
 .course-folders li code { overflow-wrap: anywhere; }
 .course-folders li input { flex: 1 1 260px; min-width: 0; }
-.course-folders li .hint-wrap { flex-basis: 100%; margin: 0; }
+.course-folders li p.hint { flex-basis: 100%; margin: 0; }

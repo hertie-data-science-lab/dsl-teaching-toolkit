@@ -75,10 +75,11 @@ export function MaterialsTree({ org, trees }: { org: string; trees: (readonly [s
           );
         const top = buildTree(files);
         const support = top.filter(isSupport);
+        const main = top.filter((n) => !isSupport(n));
         return (
           <section class="panel section" aria-label={repo}>
             <h2>{repo}</h2>
-            {files.length ? <ul class="file-tree">{top.filter((n) => !isSupport(n)).map((n) => node(n, 0))}</ul> : <p class="footnote">Nothing released yet.</p>}
+            {main.length ? <ul class="file-tree">{main.map((n) => node(n, 0))}</ul> : files.length ? null : <p class="footnote">Nothing released yet.</p>}
             {support.length ? (
               <details class="fold supporting">
                 <summary>Supporting files</summary>

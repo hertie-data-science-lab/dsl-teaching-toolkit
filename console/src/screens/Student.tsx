@@ -14,7 +14,7 @@ import { useEffect } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { GitHubClient } from '../github/client';
 import { semesterName, type Semester } from '../model/discovery';
-import { ago, dayKey, daysBetween, fmtDay, fmtTime, fmtWhen, sortKey } from '../model/format';
+import { addDays, ago, dayKey, fmtDay, fmtTime, fmtWhen, sortKey } from '../model/format';
 import { gradebookUrl, isMarked, knownAuditor, patchLines, patchNotes, readAllReceipts, readMine, repoUrl, type Gradebook, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
 import { lastVisit, markVisit } from '../model/prefs';
 import { weekOf } from '../model/schedule';
@@ -311,14 +311,37 @@ function mondayOf(iso: string, tz: string): string {
   return new Date(Date.UTC(y, m - 1, d - dow)).toISOString().slice(0, 10);
 }
 
-/** A week's heading: its semester week when the dates are known (as the Dashboard counts), else its place in the list (an older source). */
-function weekTitle(monday: string, n: number, facts: SemesterFacts, tz: string): string {
+interface WeekGroup {
+  title: string;
+  /** The first day of the week, for its heading; none for what falls outside the semester. */
+  from?: string;
+  rows: ScheduleRow[];
+}
+
+/**
+ * The rows by week. With the semester's dates, by semester week as the Dashboard counts them
+ * (week 1 from `start`), one group for what falls before the semester and one for after;
+ * without them (an older source), by calendar week, numbered by place.
+ */
+function weekGroups(rows: ScheduleRow[], facts: SemesterFacts, tz: string): WeekGroup[] {
   const term = termOfFacts(facts);
-  if (!term) return `Week ${n + 1}`;
-  // A semester that starts mid-week: its first calendar week is week 1.
-  const day = monday < term.start && daysBetween(monday, term.start) < 7 ? term.start : monday;
-  const w = weekOf(day, term, tz);
-  return w === 'before' ? 'Before the semester' : w === 'after' ? 'After the semester' : `Week ${w}`;
+  const groups: WeekGroup[] = [];
+  const byKey = new Map<string, WeekGroup>();
+  for (const r of rows) {
+    const w = term ? weekOf(r.when, term, tz) : mondayOf(r.when, tz);
+    const key = String(w);
+    let g = byKey.get(key);
+    if (!g) {
+      g = !term ? { title: `Week ${groups.length + 1}`, from: key, rows: [] }
+        : w === 'before' ? { title: 'Before the semester', rows: [] }
+        : w === 'after' ? { title: 'After the semester', rows: [] }
+        : { title: `Week ${w}`, from: addDays(term.start, ((w as number) - 1) * 7), rows: [] };
+      byKey.set(key, g);
+      groups.push(g);
+    }
+    g.rows.push(r);
+  }
+  return groups;
 }
 
 export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; mine: Mine | null; now: number; org: string }) {
@@ -327,22 +350,15 @@ export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; 
   if (!rows.length) return <p class="footnote">The schedule has no entries yet.</p>;
   const year = new Date(now).getFullYear();
   const byAssignment = new Map(facts.assignments.map((a) => [a.slug, a]));
-  const weeks: [string, ScheduleRow[]][] = [];
-  for (const r of rows) {
-    const w = mondayOf(r.when, tz);
-    const last = weeks[weeks.length - 1];
-    if (last && last[0] === w) last[1].push(r);
-    else weeks.push([w, [r]]);
-  }
   const nowKey = sortKey(new Date(now).toISOString(), tz);
   let todayDone = false;
   return (
     <div class="stack">
-      {weeks.map(([monday, list], n) => (
-        <section aria-label={weekTitle(monday, n, facts, tz)}>
-          <h2 class="week-h">{weekTitle(monday, n, facts, tz)} <span>from {fmtDay(monday, tz, year)}</span></h2>
+      {weekGroups(rows, facts, tz).map((g) => (
+        <section aria-label={g.title}>
+          <h2 class="week-h">{g.title}{g.from ? <> <span>from {fmtDay(g.from, tz, year)}</span></> : null}</h2>
           <ul class="timeline">
-            {list.flatMap((r) => {
+            {g.rows.flatMap((r) => {
               const out = [];
               if (!todayDone && sortKey(r.when, tz) >= nowKey) {
                 todayDone = true;

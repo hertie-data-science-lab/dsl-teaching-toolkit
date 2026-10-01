@@ -23,7 +23,7 @@ import { nextLine, semesterLine } from '../src/model/week';
 import { STUDENT_HINTS, ScheduleView, StudentBanner, StudentScreen } from '../src/screens/Student';
 import { AskedList } from '../src/screens/StudentJoin';
 import { MaterialsTree } from '../src/screens/StudentMaterials';
-import { RECHECK_MS, SetupView } from '../src/screens/StudentSetup';
+import { RECHECK_FOR_MS, RECHECK_MS, SetupView } from '../src/screens/StudentSetup';
 import { FakeGitHub, fileBody } from './fake';
 import FILE from './fixtures/student-status.json?raw';
 
@@ -78,9 +78,13 @@ describe('the semester dates and when the file was written', () => {
     expect(semesterLine({ ...f, start: undefined }, NOW)).toEqual({});
   });
 
-  it('give each semester card its next dated row', () => {
+  it('give each semester card its next dated row, worded as the instructor’s cards', () => {
     const f = factsFromStatus(DOC);
-    expect(nextLine(f, NOW)).toMatch(/^Next: .+, \w{3} \d+ \w{3}$/);
+    const row = (kind: string, title: string, when: string) => ({ ...f.rows[0], id: when, kind, title, when });
+    const lecture = row('lecture', 'Lecture 2', '2026-09-30T10:00:00+02:00');
+    const handOut = row('assignment', 'Assignment 2', '2026-10-06T10:00:00+02:00');
+    expect(nextLine({ ...f, rows: [handOut, lecture] }, NOW)).toBe('Next: Lecture 2, Wed 30 Sep');
+    expect(nextLine({ ...f, rows: [handOut] }, NOW)).toBe('Next: Assignment 2 hand out, Tue 6 Oct');
     expect(nextLine({ ...f, rows: [] }, NOW)).toBe('Nothing scheduled');
   });
 });
@@ -113,10 +117,16 @@ describe('the student banner and screens', () => {
 
   it('the Schedule numbers weeks from the semester start, and only by position for an older file', () => {
     const f = factsFromStatus(DOC);
-    const weeks = (facts: SemesterFacts) => [...html(<ScheduleView facts={facts} mine={null} now={NOW} org={ORG} />).matchAll(/<h2 class="week-h">([^<]+?) <span>/g)].map((m) => m[1]);
+    const heads = (facts: SemesterFacts) => [...html(<ScheduleView facts={facts} mine={null} now={NOW} org={ORG} />).matchAll(/<h2 class="week-h">(.*?)<\/h2>/g)].map((m) => m[1].replace(/<[^>]+>/g, '').trim());
+    const weeks = (facts: SemesterFacts) => heads(facts).map((h) => h.replace(/ from .*/, ''));
     // Weeks 5 and 6 have no row: the numbers skip them, as the Dashboard counts.
     expect(weeks(f)).toEqual(['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 7', 'Week 8', 'Week 15']);
     expect(weeks({ ...f, start: undefined, end: undefined })).toEqual(['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5', 'Week 6', 'Week 7']);
+    // A Wednesday start: weeks run Wednesday to Tuesday, as the Dashboard counts them, with one
+    // group for what falls before the semester and one for after.
+    const row = (when: string) => ({ ...f.rows[1], id: when, when, kind: 'lecture', title: when });
+    const wed = { ...f, start: '2026-09-09', end: '2026-12-18', rows: ['2026-09-01T10:00:00+02:00', '2026-09-08T10:00:00+02:00', '2026-09-09T10:00:00+02:00', '2026-09-14T10:00:00+02:00', '2026-09-16T10:00:00+02:00', '2027-01-05T10:00:00+01:00'].map(row) };
+    expect(heads(wed)).toEqual(['Before the semester', 'Week 1 from Wed 9 Sep', 'Week 2 from Wed 16 Sep', 'After the semester']);
   });
 });
 
@@ -138,6 +148,13 @@ describe('the student shell', () => {
 });
 
 describe('Materials', () => {
+  it('shows no empty list above Supporting files when a repo holds nothing else', () => {
+    const tree: TreeEntry[] = ['data/x.csv'].map((path) => ({ path, mode: '100644', type: 'blob', sha: path, size: 1 }));
+    const out = html(<MaterialsTree org={ORG} trees={[['materials', tree]]} />);
+    expect(out.slice(0, out.indexOf('Supporting files'))).not.toContain('file-tree');
+    expect(out).not.toContain('Nothing released yet');
+  });
+
   it('puts supporting folders last, folded, under Supporting files', () => {
     const tree: TreeEntry[] = ['data/x.csv', 'lectures/01/slides.pdf', 'img/a.png', 'SYLLABUS.md'].map((path) => ({ path, mode: '100644', type: 'blob', sha: path, size: 1 }));
     const out = html(<MaterialsTree org={ORG} trees={[['materials', tree]]} />);
@@ -162,26 +179,75 @@ describe('live checks', () => {
   const forked = { name: 'materials', fork: true, parent: { full_name: `${ORG}/materials` }, html_url: `https://github.com/${LOGIN}/materials` };
   const checks = (f: FakeGitHub) => f.seen.filter((x) => x.url.includes(`/repos/${LOGIN}/materials`)).length;
 
-  it('the fork check runs again on focus and every 10 s while the repo is not forked, and stops once it is', async () => {
-    const every = vi.spyOn(window, 'setInterval');
+  const notFound = () => new Response('{"message":"Not Found"}', { status: 404 });
+  const ok = (body: object) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+  // Only the intervals and the clock are fake: the reads still settle on real timers.
+  const fakeIntervals = () => vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+  const tickBy = async (ms: number) => {
+    await act(() => void vi.advanceTimersByTime(ms));
+    await settle();
+  };
+  afterEach(() => vi.useRealTimers());
+
+  it('runs the fork check again every 10 s and on focus while the repo is not forked, and stops once it is', async () => {
+    fakeIntervals();
     let fork = false;
-    const f = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, () => (fork ? new Response(JSON.stringify(forked), { status: 200, headers: { 'content-type': 'application/json' } }) : new Response('{"message":"Not Found"}', { status: 404 })));
+    const f = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, () => (fork ? ok(forked) : notFound()));
     const el = await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, f);
     expect(el.textContent).toContain('Fork materials');
     expect(el.textContent).toContain('Check again');
-    expect(every).toHaveBeenCalledWith(expect.any(Function), RECHECK_MS);
-    expect(RECHECK_MS).toBe(10000);
-    const before = checks(f);
+    const first = checks(f);
+    await tickBy(RECHECK_MS);
+    expect(checks(f)).toBe(first + 1);
     fork = true;
     await act(() => void window.dispatchEvent(new Event('focus')));
     await settle();
-    expect(checks(f)).toBe(before + 1);
+    expect(checks(f)).toBe(first + 2);
     expect(el.querySelector('.check-line.ok')!.textContent).toContain(`You have forked it: ${LOGIN}/materials`);
     expect(el.querySelector('.check-line.ok svg')).not.toBeNull();
     // All forked: nothing runs again by itself.
+    await tickBy(RECHECK_MS * 3);
     await act(() => void window.dispatchEvent(new Event('focus')));
     await settle();
-    expect(checks(f)).toBe(before + 1);
+    expect(checks(f)).toBe(first + 2);
+  });
+
+  it('stops re-checking after 5 minutes and on leaving the page; Check again starts it again', async () => {
+    fakeIntervals();
+    const f = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, notFound);
+    const el = await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, f);
+    const first = checks(f);
+    for (let t = 0; t < RECHECK_FOR_MS / RECHECK_MS + 3; t++) await tickBy(RECHECK_MS);
+    const capped = checks(f);
+    expect(capped - first).toBe(RECHECK_FOR_MS / RECHECK_MS - 1);
+    await tickBy(RECHECK_MS * 3);
+    expect(checks(f)).toBe(capped);
+    await act(() => void [...el.querySelectorAll('button')].find((b) => b.textContent === 'Check again')!.click());
+    await settle();
+    await tickBy(RECHECK_MS);
+    expect(checks(f)).toBe(capped + 2);
+    // Leaving the page clears the interval, and a focus reads nothing.
+    const cleared = vi.spyOn(window, 'clearInterval');
+    render(null, root!);
+    expect(cleared).toHaveBeenCalled();
+    window.dispatchEvent(new Event('focus'));
+    await tickBy(RECHECK_MS * 2);
+    expect(checks(f)).toBe(capped + 2);
+  });
+
+  it('does not re-check a repo of the name that is not the fork, or after a read that failed', async () => {
+    fakeIntervals();
+    const other = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, () => ok({ ...forked, fork: false, parent: undefined }));
+    await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, other);
+    expect(root!.querySelector('.check-line.warn')!.textContent).toContain('that is not a fork');
+    await tickBy(RECHECK_MS * 2);
+    expect(checks(other)).toBe(1);
+    render(null, root!);
+    const failing = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, () => new Response('{"message":"Server Error"}', { status: 500 }));
+    await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, failing);
+    const after = checks(failing);
+    await tickBy(RECHECK_MS * 2);
+    expect(checks(failing)).toBe(after);
   });
 
   it('a Join request still waiting for the automation shows the spinner', () => {
@@ -194,6 +260,7 @@ describe('live checks', () => {
 describe('the ? wrapper', () => {
   it('is .hint-wrap in every stylesheet, so a p.hint note takes none of its layout', () => {
     const left = [css('console.css'), css('open.css')].flatMap((t) => t.match(/[^\n{}]*\.hint(?![-\w])[^{]*\{/g) ?? []).map((x) => x.trim());
-    expect(left).toEqual(['.field .hint {']);
+    // Both are form notes (`p.hint`), not the ? wrapper.
+    expect(left.sort()).toEqual(['.course-folders li p.hint {', '.field .hint {']);
   });
 });

@@ -10,6 +10,7 @@ import { DEFAULT_TIMEZONE } from './policy';
 import { daysBetween, fmtDay } from './format';
 import { isMarked, type Mine } from './mine';
 import { weekOf, type Term } from './schedule';
+import { nextEventWords } from './status';
 import { instant, startOfDay, type SemesterFacts } from './student';
 
 export type WeekKind = 'due' | 'hand_out' | 'release' | 'exam' | 'event' | 'marks' | 'teams' | 'news' | 'patch';
@@ -131,12 +132,12 @@ export function semesterLine(facts: Pick<SemesterFacts, 'start' | 'end' | 'timez
   };
 }
 
-const NEXT_WORD: Record<string, string> = { assignment: 'hand out', due: 'due', exam: 'exam', lecture: 'lecture', lab: 'lab' };
+/** The event word a row's title lacks: a hand-out and a due row are titled by their assignment alone. */
+const NEXT_WORD: Record<string, string> = { assignment: 'hand out', due: 'due' };
 
-/** A semester card's "Next: Assignment 2 hand out, Mon 6 Oct" (as the instructor's cards say it): the next dated row, or "Nothing scheduled". */
+/** A semester card's "Next: Assignment 2 hand out, Mon 6 Oct", worded as the instructor's cards (`nextEventWords`): the next dated row, or "Nothing scheduled". */
 export function nextLine(facts: Pick<SemesterFacts, 'rows' | 'timezone'>, now: number): string {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const next = facts.rows.map((r) => ({ r, at: instant(r.when, tz) })).filter((x) => x.at > now).sort((a, b) => a.at - b.at)[0]?.r;
-  if (!next) return 'Nothing scheduled';
-  return `Next: ${[next.title, NEXT_WORD[next.kind]].filter(Boolean).join(' ')}, ${fmtDay(next.when, tz, new Date(now).getFullYear())}`;
+  return nextEventWords(next ? { title: next.title, word: NEXT_WORD[next.kind] ?? '', when: next.when } : null, tz, new Date(now).getFullYear());
 }
