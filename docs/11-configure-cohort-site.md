@@ -7,7 +7,7 @@ the console; nothing about a student is on the site.
 
 The console reads `.system/student-status.json` in the semester org's `.github`, which the
 engine rewrites with every status refresh. It is public too, so it carries only what the site
-could show: the schedule, the assignments' dates, rules and (once handed out) briefs, teams as
+could show: the semester's dates, the schedule, the assignments' dates, rules and (once handed out) briefs, teams as
 name and headcount, the instructor cards, the home text, announcements and the materials paths.
 
 You never edit what the site shows - you edit the file it reads, and it re-syncs itself.

@@ -327,6 +327,25 @@ def test_the_archive_date_is_there_whatever_show_on_site_says():
     assert "semester-archived" not in {r["id"] for r in doc["rows"]}
 
 
+def test_the_semester_dates_and_the_moment_it_was_written():
+    doc = _render()
+    assert (doc["semester_start"], doc["semester_end"]) == ("2026-09-07", "2026-12-18")
+    assert doc["generated_at"] == NOW.isoformat()
+
+
+def test_an_unchanged_render_keeps_the_old_moment_so_it_makes_no_commit():
+    old = _render()
+    later = _render(NOW + timedelta(minutes=15))
+    settled = student_status.settle(later, student_status.dumps(old).decode())
+    assert student_status.dumps(settled) == student_status.dumps(old)
+    # Something else changed: the new moment stands.
+    changed = {**later, "home_markdown": "Moved to B2."}
+    assert student_status.settle(changed, student_status.dumps(old).decode()) == changed
+    # Nothing to compare with: the render as it is.
+    for text in (None, "", "not json", '{"schema": "dsl.student-status/1"}'):
+        assert student_status.settle(later, text) == later
+
+
 # ---------------------------------------------------------------- rows
 
 

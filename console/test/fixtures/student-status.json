@@ -1,8 +1,11 @@
 {
-  "schema": "dsl.student-status/1",
+  "schema": "dsl.student-status/2",
   "semester": "hertie-dsl-demo-f2026",
   "course_name": "Deep Learning",
   "term_label": "Fall 2026",
+  "semester_start": "2026-09-07",
+  "semester_end": "2026-12-18",
+  "generated_at": "2026-09-23T09:00:00+00:00",
   "timezone": "Europe/Berlin",
   "archive_datetime": "2027-01-31",
   "home_markdown": "# Deep Learning\n\nWelcome.",
