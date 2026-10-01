@@ -488,7 +488,7 @@ def _how_to_fence(path: str) -> str:
     else:
         lines = f"{BEGIN_SOLUTION} and {END_SOLUTION}"
     extra = {
-        ".ipynb": f", or tag each answer cell {SOLUTION_TAG}",
+        ".ipynb": f", or give each answer cell the {SOLUTION_TAG} tag",
         ".rmd": f", or add {SOLUTION_CHUNK_OPT} to each answer chunk",
         ".qmd": f", or add {SOLUTION_CHUNK_OPT} to each answer chunk",
     }.get(suffix, "")
@@ -561,8 +561,8 @@ def derive_student_version(
             log_err(f"  ! {exc}")
             reasons.append(_refused("SOLUTION_REGION_BROKEN", f"{exc}."))
             continue
-        # A blank file (a package's empty `__init__.py`) has no answer to hide, and no
-        # fence can be put in it, so refusing it left a template that could never derive.
+        # A blank file (a package's empty `__init__.py`) has no answer to hide, so
+        # refusing it left a template that could never derive.
         if not stripped.replaced and text.strip():
             log_err(
                 f"  ! {path} has no {_missing_fences(path, '`')} - NOT written, because "

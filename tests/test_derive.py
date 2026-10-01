@@ -575,7 +575,10 @@ def test_an_unfenced_python_file_names_only_the_fence_python_can_carry(monkeypat
     )
     _Repo({"solution/a.ipynb": json.dumps({"cells": []})}).install(monkeypatch)
     text = derive.derive_student_version("Course", "t", True).reasons[0]["text"]
-    assert "no solution cell tag" in text and "tag each answer cell solution" in text
+    assert (
+        "no solution cell tag" in text
+        and "give each answer cell the solution tag" in text
+    )
     assert "chunk" not in text
 
 
