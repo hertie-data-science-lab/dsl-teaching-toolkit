@@ -15,6 +15,7 @@ import { CONTENT_KINDS, inferKind } from '../src/model/materialsRules';
 import { StatusStore } from '../src/model/status';
 import type { Adapter, Handle } from '../src/ops/adapter';
 import { generateSyllabus } from '../src/ops/defs';
+import { targetOf } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
 import { MaterialsScreen, changedLine, syllabusChoices } from '../src/screens/CourseEdit';
 import { OtherRepoRow } from '../src/screens/CourseIndex';
@@ -136,7 +137,7 @@ describe('the weekly plan', () => {
   it('writes into the chosen syllabus and ends with a link to it on GitHub', () => {
     const def = generateSyllabus(scope, MAT, 'docs/E1282 syllabus.md');
     expect(def.args).toEqual({ course_source_repo: MAT, syllabus: 'docs/E1282 syllabus.md' });
-    expect(def.after).toEqual([{ label: 'See on GitHub', href: `https://github.com/${ORG}/${MAT}/blob/HEAD/docs/E1282%20syllabus.md` }]);
+    expect(targetOf(def, def.args)).toBe(`https://github.com/${ORG}/${MAT}/blob/HEAD/docs/E1282%20syllabus.md`);
     expect(def.intro).toContain('docs/E1282 syllabus.md');
     expect(def.intro).not.toContain('.system');
   });

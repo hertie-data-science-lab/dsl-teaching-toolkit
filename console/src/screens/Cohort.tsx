@@ -183,7 +183,7 @@ function Timeline({ rows, term, tz, year }: { rows: Row[]; term: Term; tz: strin
 
 /** A release as an operation names it; null while there is nothing to release (no deploy block, so no source). */
 export function releaseRef(r: Release, tz: string, year: number): ReleaseRef | null {
-  return r.source ? { id: r.id, ident: releaseIdent(r), title: r.title, when: fmtWhen(r.when, tz, year), source: r.source } : null;
+  return r.source ? { id: r.id, ident: releaseIdent(r), title: r.title, when: fmtWhen(r.when, tz, year), source: r.source, dest: r.dest } : null;
 }
 
 /** The line a release with no deploy block shows instead of its actions. */
@@ -407,7 +407,7 @@ function Overview(p: ReadyProps) {
             {s ? (
               <p class="footnote">
                 {s.codes_sent - s.joined} students have a code but have not joined.
-                {s.rows > s.codes_sent ? ` ${s.rows - s.codes_sent} ${s.rows - s.codes_sent > 1 ? 'have' : 'has'} no code (see Problems).` : ''}
+                {s.rows > s.codes_sent ? ` ${s.rows - s.codes_sent} ${s.rows - s.codes_sent > 1 ? 'have' : 'has'} no code.` : ''}
               </p>
             ) : null}
           </section>

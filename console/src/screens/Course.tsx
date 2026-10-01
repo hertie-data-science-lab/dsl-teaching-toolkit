@@ -1,6 +1,6 @@
 // S2 Course overview (a status board, decision 0025) and S17 Template settings (read).
 
-import type { ComponentChildren } from 'preact';
+import { Fragment, type ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 import { useEnv } from '../env';
@@ -96,6 +96,21 @@ export function stepLink(id: string, c: CourseStatus): { href: string; label: st
   }
 }
 
+/** What each setup step is, for its `?`. */
+const STEP_HINT: Record<string, string> = {
+  C1: 'The console and the nightly check can read the course’s GitHub org.',
+  C2: 'The course’s .github repo holds its details file and the workflows behind every button.',
+  C3: 'A name, code, description and at least one course admin, in Course details.',
+  C4: 'A repo of lectures, labs and readings that semesters release from. Done once any one is ready.',
+  C5: 'A repo that semesters hand assignments out from. Done once any one is ready.',
+  C6: 'Optional: an open version of your materials for anyone on the internet.',
+};
+
+/** Initial setup is complete once every step is done but the optional website (decision 0031 rule 2). */
+export function setupComplete(c: CourseStatus): boolean {
+  return SETUP_STEPS.every((s) => s.id === 'C6' || c.stages[s.id] === 'done');
+}
+
 /** Setup: a calm checklist. A tick when done; else a grey line, why, and where to do it. */
 export function SetupList({ course }: { course: CourseStatus }) {
   return (
@@ -107,7 +122,7 @@ export function SetupList({ course }: { course: CourseStatus }) {
         return (
           <li class={done ? 'done' : 'open'}>
             <span class="s-mark" aria-hidden="true">{done ? <Check /> : null}</span>
-            <span class="s-name">{s.name}{s.need ? <span class="s-need">{s.need}</span> : null}<span class="sr">: {STAGE_WORD[state]}</span></span>
+            <span class="s-name">{s.name}{s.need ? <span class="s-need">{s.need}</span> : null}<span class="sr">: {STAGE_WORD[state]}</span> <Hint label="About this step">{STEP_HINT[s.id]}</Hint></span>
             {link ? (
               <span class="s-why">
                 {course.stage_why?.[s.id] ?? 'Not done yet.'}{' '}
@@ -132,14 +147,39 @@ export function todoHref(t: Todo): string {
   return `#${t.kind === 'materials' ? 'materials' : 'template'}-${t.repo}`;
 }
 
-/** The open to-dos, one line each with where it is done. */
-export function TodoList({ todo }: { todo: Todo[] }) {
+/** A template to-do's line and `?`, by the last part of its id (`template:<repo>:brief`). */
+const TEMPLATE_TODO: Record<string, { label: string; hint: string }> = {
+  brief: { label: 'Brief written', hint: 'The README.md students get as their instructions. Still the template text until you write it.' },
+  starter: { label: 'Student version derived', hint: 'Derive builds the starter students get by blanking the marked answers. Run it after every change to the solution.' },
+};
+
+/** A to-do's line and `?`: a materials one reads as the same check on its settings checklist. */
+export function todoLine(t: Todo, c: CourseStatus): { label: string; hint?: string } {
+  const id = t.id.split(':').pop() ?? '';
+  if (t.kind === 'template') return TEMPLATE_TODO[id] ?? { label: t.text };
+  const check = c.materials?.find((m) => m.repo === t.repo)?.checks?.find((k) => k.id === id);
+  return { label: check?.label ?? t.text, hint: CHECK_HINT[id] };
+}
+
+/** The open to-dos as a checklist styled like Initial setup: a grey line, why, and where to do it. */
+export function TodoList({ course }: { course: CourseStatus }) {
+  const todo = course.todo ?? [];
   if (!todo.length) return <p class="footnote">Nothing to do.</p>;
   return (
-    <ul class="todo">
-      {todo.map((t) => (
-        <li><span class="slug">{t.repo}</span> {t.text} <a class="textlink" href={todoHref(t)} aria-label={`Open ${t.repo} settings`}>Open settings</a></li>
-      ))}
+    <ul class="setup">
+      {todo.map((t) => {
+        const line = todoLine(t, course);
+        return (
+          <li class="open" key={t.id}>
+            <span class="s-mark" aria-hidden="true" />
+            <span class="s-name">{line.label}<span class="s-need slug">{t.repo}</span><span class="sr">: To do</span>{line.hint ? <> <Hint label="About this to-do">{line.hint}</Hint></> : null}</span>
+            <span class="s-why">
+              {line.label === t.text ? null : <>{t.text}{' '}</>}
+              <a class="textlink" href={todoHref(t)} aria-label={`Open ${t.repo} settings`}>Open settings</a>
+            </span>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -339,6 +379,59 @@ export function courseLayers(p: Pick<CourseProps, 'course' | 'files'>): Layers {
 /** Where a course-level default comes from, in plain words. */
 const whose = (s: string) => (s === 'course' ? 'this course' : 'institution');
 
+/** A panel of the overview and its estimated height, in lines of text. */
+export interface Block {
+  key: string;
+  h: number;
+}
+
+/**
+ * The overview's two columns (decision 0031 rule 4): Setup & To do heads the left, Problems the
+ * right, and every other block goes where the two columns come out closest in height, keeping
+ * the given order within each. Deterministic, so the page does not reflow between renders; on
+ * a tie the earlier block stays left.
+ */
+export function splitColumns([setup, problems, ...rest]: Block[]): [string[], string[]] {
+  let best: [string[], string[]] = [[setup.key], [problems.key]];
+  let gap = Infinity;
+  for (let mask = 0; mask < 1 << rest.length; mask++) {
+    const cols: [Block[], Block[]] = [[setup], [problems]];
+    rest.forEach((b, i) => cols[(mask >> i) & 1].push(b));
+    const [l, r] = cols.map((c) => c.reduce((n, b) => n + b.h, 0));
+    if (Math.abs(l - r) < gap) [gap, best] = [Math.abs(l - r), [cols[0].map((b) => b.key), cols[1].map((b) => b.key)]];
+  }
+  return best;
+}
+
+/** How many problems count towards the Problems panel's estimated height. */
+const PROBLEMS_WEIGHED = 4;
+
+/** Until every status has loaded, the overview keeps this layout, so panels do not move as each arrives. */
+export const SETTLING_COLUMNS: [string[], string[]] = [['setup', 'semesters', 'handouts'], ['problems', 'details', 'activity']];
+
+/** Whether the course's and every semester's status has finished loading (present, absent or failed). */
+export function statusesSettled(p: Pick<CourseProps, 'course' | 'loaded' | 'cohortStates'>): boolean {
+  return p.loaded.kind !== 'loading' && p.course.cohorts.every((c) => p.cohortStates[c.org] && p.cohortStates[c.org].kind !== 'loading');
+}
+
+/** Each overview panel's height, estimated from what it lists: a heading and one or two lines a row. */
+export function overviewHeights(o: { course: CourseStatus | null; problems: number; semesters: number; description: string; activity: number }): Block[] {
+  const HEAD = 3; // the heading and the panel's padding
+  const c = o.course;
+  const steps = c && !setupComplete(c) ? SETUP_STEPS.reduce((n, s) => n + (c.stages[s.id] === 'done' ? 1 : 2), 0) : 0;
+  const todo = c?.todo?.length ?? 0;
+  const materials = (c?.materials ?? []).reduce((n, m) => n + 1 + materialsWhys(m).length, 0);
+  return [
+    { key: 'setup', h: HEAD + (c ? 2 + steps + 2 * todo : 1) },
+    // Capped: a day's new problem must not reshuffle the page.
+    { key: 'problems', h: HEAD + 5 * Math.min(Math.max(1, o.problems), PROBLEMS_WEIGHED) },
+    { key: 'semesters', h: HEAD + Math.max(1, 3 * o.semesters) },
+    { key: 'details', h: HEAD + 9 + Math.ceil(o.description.length / 50) + 5 },
+    { key: 'activity', h: HEAD + Math.max(1, 2 * o.activity) },
+    { key: 'handouts', h: 2 * HEAD + Math.max(1, materials) + Math.max(1, 2 * (c?.templates?.length ?? 0)) },
+  ];
+}
+
 export function CourseScreen(p: CourseProps) {
   const { course } = p;
   const env = useEnv();
@@ -357,6 +450,117 @@ export function CourseScreen(p: CourseProps) {
   const about = detailsOf(course.meta ?? {}).about;
   const description = typeof about.course_description === 'string' ? about.course_description.trim() : '';
   const fallback = (value: unknown, institution: string) => (value ? String(value) : <span class="footnote">{institution}, from the institution</span>);
+  // Every panel but the two anchors goes in whichever column keeps the two about even; the
+  // materials and templates panels travel as one block, so they stay together (0031 rule 4).
+  const panels: Record<string, ComponentChildren> = {
+    setup: (
+      <section class="panel section">
+        <h2>Setup &amp; To do <Hint label="Setup, to-dos and problems">Setup steps are the one-time things a course needs. To-dos are work started but not finished. Problems, on the right, are things that broke.</Hint></h2>
+        {v.course ? (
+          <>
+            <details class="fold setup-fold" open={!setupComplete(v.course)}>
+              <summary><span class="fold-title">Initial setup</span><span class="cnt">{setupComplete(v.course) ? 'Complete' : `${SETUP_STEPS.filter((x) => v.course!.stages[x.id] === 'done').length} of ${SETUP_STEPS.length} done`}</span></summary>
+              <SetupList course={v.course} />
+            </details>
+            <details class="fold setup-fold" open={!!v.course.todo?.length}>
+              <summary><span class="fold-title">To do</span><span class="cnt">{v.course.todo?.length ? `${v.course.todo.length} open` : 'Nothing to do'}</span></summary>
+              <TodoList course={v.course} />
+            </details>
+          </>
+        ) : <p class="footnote">Status not computed yet.</p>}
+      </section>
+    ),
+    problems: (
+      <section class="panel section" id="course-problems">
+        <div class="problems-head"><h2>Problems <Hint label="About course problems">Things that broke and need fixing: the course’s first, then each live semester’s, tagged with the semester. Unfinished work is a to-do on the left, not a problem.</Hint></h2>{problems.length ? <span class="count-badge" aria-label={`${problems.length} problems`}>{problems.length}</span> : null}</div>
+        {!v.computed && !live.length ? <p class="footnote">Status not computed yet.</p> : problems.length ? <ProblemCards list={problems} /> : <div class="no-problems"><Check /><span>No problems.</span></div>}
+      </section>
+    ),
+    semesters: (
+      <section class="panel section">
+        <h2>Semesters</h2>
+        {course.cohorts.length ? (
+          <ul class="rows">
+            {course.cohorts.map((c) => {
+              const l = p.cohortStates[c.org];
+              const n = problemsOf(p, c.org);
+              const st = l && l.kind === 'ready' ? l.status : undefined;
+              const sem = st?.semester;
+              return (
+                <li>
+                  <span class="r-title">{c.termLabel} {semesterChip(sem)}</span>
+                  <span class="r-sub">{sem ? `Week ${sem.week} of ${sem.weeks}` : l?.kind === 'absent' ? 'Status not computed yet' : c.termLabel}</span>
+                  {st && sem?.live !== false ? <span class="r-sub next-event">{nextEventWords(nextEvent(st, p.now), tzOf(st), yearOf(p.now, tzOf(st)))}</span> : null}
+                  <span class="r-side">{n !== null ? <Probs n={n} /> : null}<a class="btn small quiet" href={`?cohort=${c.org}#dashboard`}>Open</a></span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : <p class="footnote">No semesters yet.</p>}
+      </section>
+    ),
+    details: (
+      <section class="panel section">
+        <div class="section-head"><h2>Course details</h2><a class="btn small quiet" href="#details">Edit course details</a></div>
+        <dl class="kv">
+          <dt>Name <Hint small label="About the name">The course’s name, as the console and the student site show it. In dsl-course.yml.</Hint></dt><dd>{course.name}</dd>
+          <dt>Code <Hint small label="About the code">The course’s code in the catalogue, as students know it. In dsl-course.yml.</Hint></dt><dd>{course.code || 'not set'}</dd>
+          <dt>Description <Hint small label="About the description">One paragraph about the course, shown on the public website. In dsl-course.yml.</Hint></dt><dd>{description || <span class="footnote">Not set</span>}</dd>
+          <dt>Contact <Hint small label="About the contact">Who students and the lab write to about the course. In dsl-course.yml; the institution’s contact when unset.</Hint></dt><dd>{fallback(about.contact, POLICY.contact)}</dd>
+          <dt>Licence <Hint small label="About the licence">The licence the public website shows for your materials. In dsl-course.yml; the institution’s default when unset.</Hint></dt><dd>{fallback(about.licence, POLICY.licences[0].name)}</dd>
+          <dt>Admins <Hint small label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, every semester. A semester’s instructors and TAs are set on that semester’s Instructors page. In dsl-course.yml.</Hint></dt><dd>{course.admins.join(', ') || 'none'}</dd>
+          <dt>Late work <Hint small label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>
+          <dt>Max team size <Hint small label="About max team size">This course’s default. Each assignment can set its own.</Hint></dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
+        </dl>
+        <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={p.files.file(course.org, COURSE_REPO, 'dsl-course.yml').kind !== 'absent'} />
+        <div class="website-block">
+          <h3>Public website <Hint label="About the public website">Optional: an open course version of your materials accessible to anyone on the internet, updated daily.</Hint></h3>
+          <SiteLive org={course.org} published={pub} last={lastPublish} running={publishing} now={p.now} />
+          <div class="actions">
+            {course.write ? <OpButtons def={publishWebsite(courseScope({ course }), pub)} small verbCls="btn small outline" /> : null}
+            <a class="btn small quiet" href="#website">Edit website details</a>
+          </div>
+        </div>
+      </section>
+    ),
+    activity: <RecentActivity p={p} lists={ops} newest={live[0]?.ref.org} />,
+    handouts: (
+      <>
+        <section class="panel section" id="sec-materials">
+          <div class="section-head"><h2>Handout materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New handout materials</a></div>
+          {v.course?.materials?.length ? (
+            <ul class="rows">
+              {v.course.materials.map((m) => (
+                <li>
+                  <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" /></span>
+                  <Whys m={m} />
+                  <span class="r-side"><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
+                </li>
+              ))}
+            </ul>
+          ) : <p class="footnote">{v.computed ? 'No materials repos yet.' : 'Materials appear once the course has been checked.'}</p>}
+        </section>
+        <section class="panel section" id="sec-templates">
+          <div class="section-head"><h2>Assignment templates</h2><a class="btn small outline" href={`?course=${course.org}#new-assignment-1`}>New assignment</a></div>
+          {v.course?.templates?.length ? (
+            <ul class="rows">
+              {v.course.templates.map((t) => {
+                const bad = t.state === 'problem';
+                return (
+                  <li>
+                    <span class="r-title">{templateName(templateTitle(p.files, course.org, t.repo))} <StateChip state={t.state} todo="Not written yet" /></span>
+                    <span class={`r-sub${bad ? ' flag' : ''}`}>{bad ? v.problems.find((x) => x.fix?.entry === t.repo)?.stops ?? 'Has a problem.' : t.state === 'ready' ? 'Brief written. Settings check out.' : 'The brief (README.md) is not written yet.'} <span class="slug">{t.repo}</span></span>
+                    <span class="r-side"><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.repo}`}>{bad ? 'Fix' : 'Settings'}</a></span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : <p class="footnote">{v.computed ? 'No assignment templates yet.' : 'Assignment templates appear once the course has been checked.'}</p>}
+        </section>
+      </>
+    ),
+  };
+  const [left, right] = statusesSettled(p) ? splitColumns(overviewHeights({ course: v.course, problems: problems.length, semesters: course.cohorts.length, description, activity: recentActivity(ops).length })) : SETTLING_COLUMNS;
   return (
     <>
       <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: course.name }]} />
@@ -371,99 +575,8 @@ export function CourseScreen(p: CourseProps) {
       <Verdict course={v.course} />
       {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
       <div class="grid-2 cols">
-        <div class="stack">
-          <section class="panel section">
-            <h2>Setup &amp; To do <Hint label="Setup, to-dos and problems">Setup steps are the one-time things a course needs. To-dos are work started but not finished. Problems, on the right, are things that broke.</Hint></h2>
-            {v.course ? (
-              <>
-                <SetupList course={v.course} />
-                <h3 class="todo-head">To do</h3>
-                <TodoList todo={v.course.todo ?? []} />
-              </>
-            ) : <p class="footnote">Status not computed yet.</p>}
-          </section>
-          <section class="panel section">
-            <h2>Semesters</h2>
-            {course.cohorts.length ? (
-              <ul class="rows">
-                {course.cohorts.map((c) => {
-                  const l = p.cohortStates[c.org];
-                  const n = problemsOf(p, c.org);
-                  const st = l && l.kind === 'ready' ? l.status : undefined;
-                  const sem = st?.semester;
-                  return (
-                    <li>
-                      <span class="r-title">{c.termLabel} {semesterChip(sem)}</span>
-                      <span class="r-sub">{sem ? `Week ${sem.week} of ${sem.weeks}` : l?.kind === 'absent' ? 'Status not computed yet' : c.termLabel}</span>
-                      {st && sem?.live !== false ? <span class="r-sub next-event">{nextEventWords(nextEvent(st, p.now), tzOf(st), yearOf(p.now, tzOf(st)))}</span> : null}
-                      <span class="r-side">{n !== null ? <Probs n={n} /> : null}<a class="btn small quiet" href={`?cohort=${c.org}#dashboard`}>Open</a></span>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : <p class="footnote">No semesters yet.</p>}
-          </section>
-          <section class="panel section" id="sec-templates">
-            <div class="section-head"><h2>Assignment templates</h2><a class="btn small outline" href={`?course=${course.org}#new-assignment-1`}>New assignment</a></div>
-            {v.course?.templates?.length ? (
-              <ul class="rows">
-                {v.course.templates.map((t) => {
-                  const bad = t.state === 'problem';
-                  return (
-                    <li>
-                      <span class="r-title">{templateName(templateTitle(p.files, course.org, t.repo))} <StateChip state={t.state} todo="Not written yet" /></span>
-                      <span class={`r-sub${bad ? ' flag' : ''}`}>{bad ? v.problems.find((x) => x.fix?.entry === t.repo)?.stops ?? 'Has a problem.' : t.state === 'ready' ? 'Brief written. Settings check out.' : 'The brief (README.md) is not written yet.'} <span class="slug">{t.repo}</span></span>
-                      <span class="r-side"><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.repo}`}>{bad ? 'Fix' : 'Settings'}</a></span>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : <p class="footnote">{v.computed ? 'No assignment templates yet.' : 'Assignment templates appear once the course has been checked.'}</p>}
-          </section>
-        </div>
-        <div class="stack">
-          <section class="panel section" id="course-problems">
-            <div class="problems-head"><h2>Problems <Hint label="About course problems">Things that broke and need fixing: the course’s first, then each live semester’s, tagged with the semester. Unfinished work is a to-do on the left, not a problem.</Hint></h2>{problems.length ? <span class="count-badge" aria-label={`${problems.length} problems`}>{problems.length}</span> : null}</div>
-            {!v.computed && !live.length ? <p class="footnote">Status not computed yet.</p> : problems.length ? <ProblemCards list={problems} /> : <div class="no-problems"><Check /><span>No problems.</span></div>}
-          </section>
-          <section class="panel section">
-            <div class="section-head"><h2>Course details</h2><a class="btn small quiet" href="#details">Edit course details</a></div>
-            <dl class="kv">
-              <dt>Name <Hint small label="About the name">The course’s name, as the console and the student site show it. In dsl-course.yml.</Hint></dt><dd>{course.name}</dd>
-              <dt>Code <Hint small label="About the code">The course’s code in the catalogue, as students know it. In dsl-course.yml.</Hint></dt><dd>{course.code || 'not set'}</dd>
-              <dt>Description <Hint small label="About the description">One paragraph about the course, shown on the public website. In dsl-course.yml.</Hint></dt><dd>{description || <span class="footnote">Not set</span>}</dd>
-              <dt>Contact <Hint small label="About the contact">Who students and the lab write to about the course. In dsl-course.yml; the institution’s contact when unset.</Hint></dt><dd>{fallback(about.contact, POLICY.contact)}</dd>
-              <dt>Licence <Hint small label="About the licence">The licence the public website shows for your materials. In dsl-course.yml; the institution’s default when unset.</Hint></dt><dd>{fallback(about.licence, POLICY.licences[0].name)}</dd>
-              <dt>Admins <Hint small label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, every semester. A semester’s instructors and TAs are set on that semester’s Instructors page. In dsl-course.yml.</Hint></dt><dd>{course.admins.join(', ') || 'none'}</dd>
-              <dt>Late work <Hint small label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>
-              <dt>Max team size <Hint small label="About max team size">This course’s default. Each assignment can set its own.</Hint></dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
-            </dl>
-            <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={p.files.file(course.org, COURSE_REPO, 'dsl-course.yml').kind !== 'absent'} />
-            <div class="website-block">
-              <h3>Public website <Hint label="About the public website">Optional: an open course version of your materials accessible to anyone on the internet, updated daily.</Hint></h3>
-              <SiteLive org={course.org} published={pub} last={lastPublish} running={publishing} now={p.now} />
-              <div class="actions">
-                {course.write ? <OpButtons def={publishWebsite(courseScope({ course }), pub)} small verbCls="btn small outline" /> : null}
-                <a class="btn small quiet" href="#website">Edit website details</a>
-              </div>
-            </div>
-          </section>
-          <RecentActivity p={p} lists={ops} newest={live[0]?.ref.org} />
-          <section class="panel section" id="sec-materials">
-            <div class="section-head"><h2>Handout materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New handout materials</a></div>
-            {v.course?.materials?.length ? (
-              <ul class="rows">
-                {v.course.materials.map((m) => (
-                  <li>
-                    <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" /></span>
-                    <Whys m={m} />
-                    <span class="r-side"><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
-                  </li>
-                ))}
-              </ul>
-            ) : <p class="footnote">{v.computed ? 'No materials repos yet.' : 'Materials appear once the course has been checked.'}</p>}
-          </section>
-        </div>
+        <div class="stack">{left.map((k) => <Fragment key={k}>{panels[k]}</Fragment>)}</div>
+        <div class="stack">{right.map((k) => <Fragment key={k}>{panels[k]}</Fragment>)}</div>
       </div>
     </>
   );
@@ -475,6 +588,10 @@ const gradingValid = validator(gradingSchema);
 /** The page that explains derived and hand-written starters (decision 0028 rule 5). */
 export const STARTER_DOC = 'assignment-starter.md';
 
+/** The `?` on "Marked from" (decision 0031 rule 7), after `questions: Q: {file:}` in the engine (`setting_readers.question_files`). */
+export const MARKED_FROM_HINT =
+  'The file in the student’s repo this question is marked from, when it is not the runnable one: a LaTeX write-up, say. Type its path from the top of the repo, like report.tex (for a shared drop box, from the student’s or team’s folder); the mark sheet names it beside the question. Leave it blank and the question is marked from the runnable file.';
+
 export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: QuestionRow[]) => void; files: string[] }) {
   const total = rows.reduce((n, r) => n + (Number(r.points) || 0), 0);
   const edit = (i: number, patch: Partial<QuestionRow>) => set(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -483,7 +600,7 @@ export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: 
       <span class="label">Points per question <Hint label="About points per question">Optional. With questions set, the mark sheet has one column per question with its maximum, totals add up for you, and students see their score per question. Leave it empty for one flat score.</Hint></span>
       {rows.length ? (
         <table class="qtable">
-          <thead><tr><th>Question</th><th>Points</th><th>Marked from <span class="default">optional</span></th><th /></tr></thead>
+          <thead><tr><th>Question</th><th>Points</th><th>Marked from <span class="default">optional</span> <Hint small label="About marked from">{MARKED_FROM_HINT}</Hint></th><th /></tr></thead>
           <tbody>
             {rows.map((r, i) => (
               <tr>
@@ -502,7 +619,6 @@ export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: 
       ) : <div class="readonly">Not set: the mark sheet takes one flat score.</div>}
       <datalist id="q-files">{files.map((f) => <option value={f} />)}</datalist>
       <div><button class="btn small quiet" type="button" onClick={() => set([...rows, { name: `Q${rows.length + 1}`, points: '', file: '' }])}>Add a question</button></div>
-      <p class="why">A question marked from another file (a LaTeX write-up, say) names it; the mark sheet shows it beside the maximum.</p>
     </div>
   );
 }

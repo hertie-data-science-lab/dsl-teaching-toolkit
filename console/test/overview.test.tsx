@@ -24,6 +24,8 @@ const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const old = { org: OLD_ORG, term: 'f2025', termLabel: 'Fall 2025' };
 const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort, old], meta: null };
 const ready = (status: Status): Loaded => ({ kind: 'ready', status, sha: 's', stale: [] });
+/** One overview panel's markup, from `from` to its section's end. */
+const panelOf = (out: string, from: string) => out.slice(out.indexOf(from), out.indexOf('</section>', out.indexOf(from)));
 const text = (v: preact.VNode) => render(v).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 
 const prob = (id: string, scope: 'course' | 'semester', stage = 'K4'): Problem => ({ id, scope, stage, text: `${id} broke.`, stops: 'Something stops.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', screen: 'schedule', entry: 's5' } });
@@ -46,7 +48,7 @@ describe('Problems roll-up', () => {
   it('counts every problem in the panel head and leaves archived semesters out', () => {
     const archived = ready({ ...STATUS, semester: { ...STATUS.semester!, live: false }, problems: [prob('gone', 'semester')] });
     const out = render(<CourseScreen course={course} loaded={{ kind: 'absent' }} cohortStates={{ [COHORT_ORG]: ready(STATUS), [OLD_ORG]: archived }} files={new StaticFiles()} now={NOW} />);
-    const panel = out.slice(out.indexOf('id="course-problems"'), out.indexOf('<h2>Course details'));
+    const panel = panelOf(out, 'id="course-problems"');
     expect(panel).toContain('<span class="count-badge" aria-label="2 problems">2</span>');
     expect(panel).toContain('>Fall 2026</a>');
     expect(panel).not.toContain('gone broke.');
@@ -104,7 +106,7 @@ describe('the public website indicator', () => {
   });
   it('sits inside Course details, with Publish and Edit website details', () => {
     const out = render(<CourseScreen course={course} loaded={{ kind: 'absent' }} cohortStates={{ [COHORT_ORG]: ready(STATUS) }} files={new StaticFiles()} now={NOW} />);
-    const details = out.slice(out.indexOf('<h2>Course details'), out.indexOf('<h2>Recent activity'));
+    const details = panelOf(out, '<h2>Course details');
     expect(details).toContain('<h3>Public website');
     expect(details).toContain('Not published');
     expect(details).toContain('>Publish website</button>');
@@ -132,7 +134,7 @@ describe('Recent activity', () => {
     const env = { ops: { runs, current: signal(null) }, user: { login: 'octo' } } as unknown as Env;
     const at = { ...STATUS, operations: [{ ...STATUS.operations![0], finished: '2026-09-23T05:00:00Z' }] };
     const out = render(<EnvCtx.Provider value={env}><CourseScreen course={course} loaded={{ kind: 'absent' }} cohortStates={{ [COHORT_ORG]: ready(at) }} files={files} now={NOW} /></EnvCtx.Provider>);
-    const panel = out.slice(out.indexOf('<h2>Recent activity'), out.indexOf('<h2>Handout materials'));
+    const panel = panelOf(out, '<h2>Recent activity');
     expect(panel).toContain(`<a class="textlink" href="?cohort=${COHORT_ORG}#operations">All operations</a>`);
     const t = panel.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
     expect(t).toContain('Update site just now course · you');
@@ -155,7 +157,7 @@ describe('Recent activity', () => {
   });
   it('says Nothing has run yet, with no All operations link without a live semester', () => {
     const out = render(<CourseScreen course={{ ...course, cohorts: [] }} loaded={{ kind: 'absent' }} cohortStates={{}} files={new StaticFiles()} now={NOW} />);
-    const panel = out.slice(out.indexOf('<h2>Recent activity'), out.indexOf('<h2>Handout materials'));
+    const panel = panelOf(out, '<h2>Recent activity');
     expect(panel).toContain('Nothing has run yet.');
     expect(panel).not.toContain('All operations');
   });

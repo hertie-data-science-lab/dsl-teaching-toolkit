@@ -404,7 +404,10 @@ public `.github` (counts only, never a handle or an email). `seed.refresh` rewri
 semester's and the course's; the single-semester run of each of the four semester-config dispatch
 targets (scheduler, Sync membership, Send enrolment codes, Sync site) rewrites that semester's;
 every Console run rewrites its semester's and the course's (`status.write_after_op`). It records
-the git shas of its inputs, never a timestamp, so an unchanged render makes no commit.
+the git shas of its inputs, never a timestamp, so an unchanged render makes no commit. Its
+problems are the teaching team's to fix: students still without a team at an OPEN formation
+window are left out (`status_json.faculty_window_faults`; the schedule digest still lists them),
+and a shut window's are kept.
 
 `.system/student-status.json` (`dsl.student-status/2`, `student_status`) is written by the same
 `status.write`, for a live semester, into the SEMESTER org's public `.github`: what the student

@@ -12,7 +12,7 @@ import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient } from '../src/github/client';
 import { endedNow, loadCatalogue, parseOrgs, pool, runningNow, termRank } from '../src/model/catalogue';
 import type { Loaded } from '../src/model/status';
-import type { Course, Semester } from '../src/model/discovery';
+import { discoverEstate, studentSemesters, type Course, type Semester } from '../src/model/discovery';
 import { myCoursesOnly, saveMyCoursesOnly, type PrefStore } from '../src/model/prefs';
 import { HomeScreen } from '../src/screens/Home';
 import { StaticFiles } from '../src/model/files';
@@ -28,8 +28,7 @@ const ORGS = `# comment\ncourse_orgs:\n  - ${MINE}\n  - ${NLP}\n  - ${BROKEN}\n`
 const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
 const course: Course = { org: 'Hertie-DSL-Demo-Course-E1234', name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [], meta: null };
 
-function catalogueFake(orgs: string | null = ORGS) {
-  const f = new FakeGitHub();
+function catalogueFake(orgs: string | null = ORGS, f = new FakeGitHub()) {
   if (orgs !== null) f.on('GET', ORGS_URL, fileBody('orgs.yml', orgs));
   return f
     .on('GET', `/repos/${NLP}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Natural Language Processing\ncourse_code: E1282\n'))
@@ -229,12 +228,17 @@ describe('the My courses pref', () => {
     expect(myCoursesOnly('octo', 'past', refusing)).toBe(true);
     expect(myCoursesOnly('octo', 'past', null)).toBe(true);
   });
-  it('ignores the old page-wide choice and deletes it when first read', () => {
+  it('ignores every key of earlier builds, page-wide and per section, and deletes them when first read', () => {
+    // Round 4: the maintainer's browser held per-section keys stored off by an earlier build.
     const { m, store } = memory();
     store.removeItem = (k: string) => void m.delete(k);
     m.set('dsl-console-my-courses:octo', '0');
+    for (const s of ['courses', 'now', 'past']) m.set(`dsl-console-my-courses:octo:${s}`, '0');
     for (const s of ['courses', 'now', 'past'] as const) expect(myCoursesOnly('octo', s, store)).toBe(true);
-    expect(m.has('dsl-console-my-courses:octo')).toBe(false);
+    expect([...m.keys()].filter((k) => k.startsWith('dsl-console-my-courses'))).toEqual([]);
+    // A choice made now is kept.
+    saveMyCoursesOnly('octo', 'now', false, store);
+    expect(myCoursesOnly('octo', 'now', store)).toBe(false);
   });
 });
 
@@ -300,7 +304,7 @@ describe('All courses', () => {
       expect(g.tagName).toBe('DIV');
       expect(g.closest('a')).toBeNull();
       expect(g.getAttribute('aria-disabled')).toBe('true');
-      expect(g.querySelector('.cc-name span')!.textContent).toBe('Not one of your courses');
+      expect(g.querySelector('.cc-sub')!.textContent).toBe('Not one of your courses');
     }
     // The other sections keep their own choice.
     expect(greyed(section(h, 'h-live') as HTMLElement)).toEqual([]);
@@ -456,26 +460,70 @@ describe('All courses', () => {
   describe('the role on a course card', () => {
     const sem = { org: 'hertie-dsl-demo-f2026', term: 'f2026', termLabel: 'Fall 2026' };
     const yml = (role: string) => new StaticFiles({ [`${sem.org}/${CONFIG_REPO}/${INSTRUCTORS_FILE}`]: `instructors:\n  - github_handle: Octo\n    name: Octo Cat\n    role: ${role}\n` });
-    const sub = (h: HTMLElement) => section(h, 'h-courses').querySelector('.cc-name span')!.textContent;
+    const sub = (h: HTMLElement) => section(h, 'h-courses').querySelector('.cc-sub')!.textContent;
     it('is course admin from dsl-course.yml', async () => {
       const h = mount(catalogueFake(), { courses: [{ ...course, admins: ['octo'], cohorts: [sem] }], files: yml('teaching_assistant') });
       await flush();
-      expect(sub(h)).toBe('E1234; you are a course admin');
+      expect(sub(h)).toBe('you are a course admin');
     });
     it('is the role in the newest running semester’s instructors.yml otherwise', async () => {
       const h = mount(catalogueFake(), { courses: [{ ...course, cohorts: [sem] }], files: yml('instructor') });
       await flush();
-      expect(sub(h)).toBe('E1234; you are an instructor');
+      expect(sub(h)).toBe('you are an instructor');
       render(null, h);
       const ta = mount(catalogueFake(), { courses: [{ ...course, cohorts: [sem] }], files: yml('teaching_assistant') });
       await flush();
-      expect(sub(ta)).toBe('E1234; you are a teaching assistant');
+      expect(sub(ta)).toBe('you are a teaching assistant');
     });
     it('says the person teaches on it when no running semester names their role', async () => {
       const h = mount(catalogueFake(), { courses: [{ ...course, cohorts: [sem] }], files: new StaticFiles() });
       await flush();
-      expect(sub(h)).toBe('E1234; you teach on this course');
+      expect(sub(h)).toBe('you teach on this course');
     });
+  });
+
+  it('puts the course code on its own line under each card’s title, and no longer in the role line', async () => {
+    const sem = { org: 'hertie-dsl-demo-f2026', term: 'f2026', termLabel: 'Fall 2026' };
+    saveMyCoursesOnly(user.login, 'courses', false);
+    const h = mount(catalogueFake(), { courses: [{ ...course, admins: ['octo'], cohorts: [sem] }] });
+    await flush();
+    const own = section(h, 'h-courses').querySelector('a.cohort-card .cc-name')!;
+    expect([...own.children].map((c) => [c.className, c.textContent])).toEqual([['cc-code', 'E1234'], ['cc-sub', 'you are a course admin']]);
+    const card = section(h, 'h-live').querySelector(`a[href="?cohort=${sem.org}#dashboard"] .cc-code`)!;
+    expect(card.textContent).toBe('E1234');
+    const nlp = greyed(section(h, 'h-courses') as HTMLElement).find((g) => g.textContent?.startsWith('Natural Language Processing'))!;
+    expect(nlp.querySelector('.cc-code')!.textContent).toBe('E1282');
+    // A course with no code has no code line.
+    expect(greyed(section(h, 'h-courses') as HTMLElement).find((g) => g.textContent?.startsWith(BROKEN))!.querySelector('.cc-code')).toBeNull();
+  });
+
+  it('an instructor who studies in another course’s semester sees it once, and that course greyed as theirs to study (end to end from discovery)', async () => {
+    // Instructor of MINE; a member of NLP's course org without push, and a student of its Fall 2026.
+    const SEM = 'hertie-nlp-f2026';
+    const f = new FakeGitHub()
+      .on('GET', '/user/orgs?per_page=100&page=1', [])
+      .on('GET', '/user/memberships/orgs?state=active&per_page=100&page=1', [MINE, NLP, SEM].map((login) => ({ state: 'active', role: 'member', organization: { login } })))
+      .on('GET', `/repos/${MINE}/.github`, { name: '.github', topics: ['dsl-course-hub'], permissions: { push: true } })
+      .on('GET', `/repos/${MINE}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Machine Learning\ncourse_code: E1234\n'))
+      .on('GET', `/repos/${NLP}/.github`, { name: '.github', topics: ['dsl-course-hub'], permissions: { push: false, pull: true } })
+      .on('GET', `/repos/${SEM}/.github`, { name: '.github', topics: ['dsl-semester'], archived: false, permissions: { push: false, pull: true } });
+    catalogueFake(ORGS, f);
+    const e = await discoverEstate(client(f), { kind: 'classic', login: user.login });
+    expect(e.courses.map((c) => c.org)).toEqual([MINE]);
+    const semesters = studentSemesters(e);
+    expect(semesters.map((s) => [s.org, s.courseOrg])).toEqual([[SEM, NLP]]);
+    saveMyCoursesOnly(user.login, 'courses', false);
+    saveMyCoursesOnly(user.login, 'now', false);
+    const h = mount(f, { courses: e.courses, semesters });
+    await flush();
+    // The semester: once, under Your semesters, never a greyed row of This semester.
+    expect([...h.querySelectorAll(`a[href*="${SEM}"]`)].map((a) => a.closest('section')!.getAttribute('aria-labelledby'))).toEqual(['h-semesters']);
+    expect(names(section(h, 'h-live'))).not.toContain('Natural Language Processing, Fall 2026');
+    // Its course, greyed in DSL courses, says what the person is there.
+    const nlp = greyed(section(h, 'h-courses') as HTMLElement).find((g) => g.textContent?.startsWith('Natural Language Processing'))!;
+    expect(nlp.querySelector('.cc-sub')!.textContent).toBe('You are a student');
+    const broken = greyed(section(h, 'h-courses') as HTMLElement).find((g) => g.textContent?.startsWith(BROKEN))!;
+    expect(broken.querySelector('.cc-sub')!.textContent).toBe('Not one of your courses');
   });
 
   it('says it is reading the catalogue only while DSL courses shows the others', async () => {

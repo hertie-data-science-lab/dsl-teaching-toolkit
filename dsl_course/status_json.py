@@ -1618,6 +1618,20 @@ def _no_email_problem(
     ]
 
 
+def faculty_window_faults(
+    sched: schedule.Schedule, windows: list[team_formation.Window] | None
+) -> list[ConfigFault]:
+    """The team-formation faults that are the teaching team's (decision 0031 rule 3).
+
+    While a window is open, students still without a team are theirs to fix: joining a team
+    is a student's step, like joining the course, so it is not a Problem on the overview.
+    The mail `team_formation.notify_windows` sends is what reaches them, and the schedule
+    digest still lists the fault. Once the window has SHUT, nobody but an instructor can
+    place the students left over, so that fault stays."""
+    shut = [w for w in windows or [] if w.shut]
+    return team_formation.window_faults(sched, shut) or []
+
+
 def semester_checks(
     facts: SemesterFacts, course: CourseFacts, instructors: int
 ) -> dict[str, str | None]:
@@ -1993,7 +2007,8 @@ def _returned_at(semester_org: str) -> dict[str, datetime]:
 
 def gather_semester(course_org: str, semester_org: str, now: datetime) -> SemesterFacts:
     """Read one semester, through the same loaders its digest issues are built by, so a
-    problem here is the fault that issue lists. A read that fails raises."""
+    problem here is the fault that issue lists, except an open team-formation window's
+    (`faculty_window_faults`). A read that fails raises."""
     facts = SemesterFacts(org=semester_org)
     facts.listing = {r["name"]: r for r in list_org_repos(semester_org)}
     branch = default_branch(semester_org, schedule.CONFIG_REPO, fallback="main")
@@ -2007,12 +2022,13 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
     # The schedule.yml digest's own sources (`scheduler._preflight_sources`): the sources
     # the plan cites, the entries the parser dropped (assignments.yml's with them), the
     # team-formation windows somebody is still waiting on (None = the roster could not be
-    # read), and the marks due but not all written.
+    # read), and the marks due but not all written. Of the windows, only the shut ones
+    # (`faculty_window_faults`): an open one is the students' to act on.
     windows = team_formation.open_windows(course_org, semester_org, sched, now)
     facts.schedule_faults = [
         *schedule.source_faults(sched, course_org),
         *sched.faults,
-        *(team_formation.window_faults(sched, windows) or []),
+        *faculty_window_faults(sched, windows),
         *grades.marks_due(course_org, semester_org, sched, now)[0],
     ]
     facts.people = sync_faculty.read_semester_people(semester_org, facts.people_faults)

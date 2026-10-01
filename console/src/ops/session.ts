@@ -36,8 +36,8 @@ export interface OpDef {
   previewProposed?: boolean;
   /** An information panel with no operation behind it (Export). */
   info?: ComponentChildren;
-  /** Links shown once the verb has run. */
-  after?: { label: string; href: string }[];
+  /** Where on GitHub the verb's change shows (a repo, branch or file): "See on GitHub" once it has run. A function reads the run's args. */
+  target?: string | ((args: Record<string, unknown>) => string);
 }
 
 export type Phase = 'ready' | 'running' | 'done';
@@ -55,6 +55,12 @@ export interface Current {
   result: Result | null; // the verb's result
   error: string | null;
   min: boolean;
+  /** Stop was pressed and GitHub has not ended the run yet. */
+  stopping: boolean;
+  /** Stop was pressed for this run and GitHub took the cancel (a 409 included: it had already ended). */
+  stopRequested: boolean;
+  /** The last run was stopped: GitHub says `cancelled`, or Stop was pressed and the run ended anyway. */
+  stopped: boolean;
 }
 
 export interface SessionOptions {
@@ -150,7 +156,7 @@ export class OpsSession {
     }
     this.current.value = {
       def, mode: modeOf(def.op), values: { ...def.args }, checked: false, phase: 'ready', running: null,
-      handle: null, progress: null, dry: null, result: null, error: null, min: false,
+      handle: null, progress: null, dry: null, result: null, error: null, min: false, stopping: false, stopRequested: false, stopped: false,
     };
     if (def.info) return;
     const cur = this.current.value;
@@ -181,13 +187,22 @@ export class OpsSession {
     else this.current.value = null;
   }
 
+  /**
+   * Press Stop: cancel the workflow run. Pressed before GitHub has named the run, the cancel
+   * goes as soon as it does. The panel says "Stopping" until the run ends, then "Stopped".
+   */
   async cancel(): Promise<void> {
     const c = this.current.value;
-    if (!c?.handle || c.phase !== 'running') return;
+    if (!c || c.phase !== 'running' || c.stopping) return;
+    this.patch({ stopping: true, stopRequested: true, error: null });
+    if (c.handle) await this.sendCancel(c.handle);
+  }
+
+  private async sendCancel(handle: Handle): Promise<void> {
     try {
-      await this.adapter.cancel(c.handle);
+      await this.adapter.cancel(handle);
     } catch (e) {
-      this.patch({ error: `Could not stop it: ${e instanceof Error ? e.message : String(e)}` });
+      if (this.current.value?.handle === handle) this.patch({ stopping: false, stopRequested: false, error: `Could not stop it: ${e instanceof Error ? e.message : String(e)}` });
     }
   }
 
@@ -199,15 +214,16 @@ export class OpsSession {
     const def = c.def;
     const preview = kind === 'preview';
     const args = requestArgs(def, c.values, c.checked);
-    this.patch({ phase: 'running', running: kind, error: null, progress: null, handle: null, ...(preview ? { dry: null } : { result: null }) });
+    this.patch({ phase: 'running', running: kind, error: null, progress: null, handle: null, stopping: false, stopRequested: false, stopped: false, ...(preview ? { dry: null } : { result: null }) });
     let handle: Handle;
     try {
       handle = await this.adapter.submit({ op: def.op, courseOrg: def.courseOrg, cohortOrg: def.cohortOrg, args, preview });
     } catch (e) {
-      this.patch({ phase: 'ready', running: null, error: e instanceof Error ? e.message : String(e) });
+      this.patch({ phase: 'ready', running: null, stopping: false, error: e instanceof Error ? e.message : String(e) });
       return;
     }
     this.patch({ handle });
+    if (this.current.value?.stopping) void this.sendCancel(handle);
     let progress: Progress | null = null;
     for (;;) {
       try {
@@ -231,11 +247,12 @@ export class OpsSession {
       if (i + 1 < tries) await this.sleep(this.pollMs);
     }
     const o = result.outcome;
+    const stopped = progress?.conclusion === 'cancelled' || !!this.current.value?.stopRequested;
     const finished = o?.finished || new Date(this.now()).toISOString();
     this.runs.value = [
       {
-        run_id: handle.runId, op: def.op, conclusion: o?.conclusion ?? 'failed', finished, course: def.courseOrg, cohort: def.cohortOrg,
-        summary: o?.summary ?? (progress?.conclusion === 'cancelled' ? 'Stopped before it finished.' : 'The run ended without reporting what it did. Open the run on GitHub.'),
+        run_id: handle.runId, op: def.op, conclusion: o?.conclusion ?? (stopped ? 'skipped' : 'failed'), finished, course: def.courseOrg, cohort: def.cohortOrg,
+        summary: o?.summary ?? (stopped ? 'Stopped before it finished.' : 'The run ended without reporting what it did. Open the run on GitHub.'),
       },
       ...this.runs.value,
     ];
@@ -243,7 +260,9 @@ export class OpsSession {
     if (preview && ok) this.previewed.value = { ...this.previewed.value, [this.gateKey(def)]: argsKey(args) };
     if (preview && ok && o.block) this.blocks.value = { ...this.blocks.value, [this.gateKey(def)]: o.block };
     if (this.current.value?.handle === handle) {
-      this.patch(preview ? { phase: 'ready', running: null, dry: result } : { phase: 'done', running: null, result });
+      // A refused cancel's error is about a run that has now ended either way.
+      const ended = { running: null, stopping: false, stopped, error: null };
+      this.patch(preview ? { ...ended, phase: 'ready', dry: result } : { ...ended, phase: 'done', result });
     }
     if (!preview) this.opts.onFinished?.(def);
   }
