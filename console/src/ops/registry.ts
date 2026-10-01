@@ -42,8 +42,9 @@ export const PREVIEW_ONLY = new Set(['semester.preview_automation']);
 
 /**
  * Ops the engine can preview whose preview the console does not offer (decision 0031 rule
- * 6): it shows nothing anyone acts on. Derive and the releases report a count the page
- * already shows; Keep for future semesters proposes changes you accept on GitHub anyway;
+ * 6): it shows nothing anyone acts on. Derive and the releases report a count (a release's
+ * path checks refuse the real run just the same, before it copies anything); Keep for
+ * future semesters proposes changes you accept on GitHub anyway;
  * the team-window email and instructor access report a count; Collect now's preview only
  * starts another workflow the panel does not follow.
  */
@@ -52,6 +53,7 @@ export const PREVIEW_NOT_OFFERED = new Set([
   'release.now',
   'release.early',
   'release.rerun',
+  'release.adhoc',
   'release.propagate_back',
   'teams.open_window',
   'access.check',

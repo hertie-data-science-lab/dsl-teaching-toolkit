@@ -265,7 +265,6 @@ describe('Preview buttons', () => {
     // Publishing has no engine preview at all: it asks for a tick instead.
     for (const op of GATED) expect(modeOf(op), op).toBe(opSpec(op).preview ? 'gated' : 'direct');
     for (const op of PREVIEW_NOT_OFFERED) expect(modeOf(op), op).toBe('direct');
-    expect(modeOf('release.adhoc')).toBe('preview');
     expect(modeOf('semester.preview_automation')).toBe('previewOnly');
   });
 });
