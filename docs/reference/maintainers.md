@@ -409,6 +409,14 @@ problems are the teaching team's to fix: students still without a team at an OPE
 window are left out (`status_json.faculty_window_faults`; the schedule digest still lists them),
 and a shut window's are kept.
 
+Decision 0032: the course block carries `stage_optional` and `stage_set_aside` (per stage id), and
+each `todo[]` entry `optional` and `set_aside`. Optional is the engine's rule alone (C4-C6; a
+to-do that blocks nothing, i.e. a materials check with `blocks: false`), so the console holds no
+copy. `set_aside` comes from `dsl-course.yml`'s `set_aside:` list (`status_json.set_aside_ids`),
+read at the edge: any other shape or an unknown id sets nothing aside and is never a fault; a
+required or done item's id is ignored. Setting aside changes no stage, no `ready`, no problem.
+Forward-only: no migration, an absent key means nothing is set aside.
+
 `.system/student-status.json` (`dsl.student-status/2`, `student_status`) is written by the same
 `status.write`, for a live semester, into the SEMESTER org's public `.github`: what the student
 console reads instead of the site. It is public, so its shape is an allow-list, closed at every

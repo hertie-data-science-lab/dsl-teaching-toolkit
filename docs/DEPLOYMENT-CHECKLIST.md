@@ -57,6 +57,7 @@ course_description: One or two sentences, on one line - the sites' blurb
 site_link_extensions: [pdf, html]  # optional - semester sites only; see below
 contact: course@example.org     # optional - the public website's contact; unset = the lab's
 licence: CC BY 4.0              # optional - one of policy.yml's licences; unset = its first
+set_aside: [C6]                 # optional - optional setup steps / to-dos set aside; see below
 people:
   course_admins:
     - github_handle: "janedoe"   # admin on the course org + every semester
@@ -85,6 +86,12 @@ set in its own `schedule.yml` (default: the institution's, Europe/Berlin and 60 
 
 `course_name` / `course_code` / `course_description` are the fields that reach every
 semester website - a push here re-syncs them all: [11](11-configure-cohort-site.md).
+
+`set_aside` lists the optional items of the course overview's Setup & To do that nobody needs
+(the console writes it from the circle before each line; Bring back removes the id): setup steps
+`C4`-`C6` and the to-dos that block nothing (weekly plan in the syllabus, withheld patterns
+reviewed). A required step or to-do, an unknown id, or an item done anyway is ignored. Unset,
+nothing is set aside.
 
 `site_link_extensions` narrows what each row **links** on the **semester** sites,
 never what it ships. Unset (the default), a row lists the files at the root of each folder it

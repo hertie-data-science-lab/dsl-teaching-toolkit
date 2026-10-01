@@ -375,6 +375,18 @@
           },
           "type": "array"
         },
+        "stage_optional": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "type": "object"
+        },
+        "stage_set_aside": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "type": "object"
+        },
         "stage_why": {
           "additionalProperties": {
             "type": "string"
@@ -439,11 +451,17 @@
                 ],
                 "type": "string"
               },
+              "optional": {
+                "type": "boolean"
+              },
               "repo": {
                 "type": "string"
               },
               "screen": {
                 "type": "string"
+              },
+              "set_aside": {
+                "type": "boolean"
               },
               "text": {
                 "type": "string"

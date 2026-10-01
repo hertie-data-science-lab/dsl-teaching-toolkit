@@ -230,6 +230,7 @@ def status_schema() -> dict:
     stages = {"type": "object", "additionalProperties": _enum(STAGE_STATES)}
     # Why each stage that is not done is not: one sentence per stage id. Optional.
     stage_why = {"type": "object", "additionalProperties": _str()}
+    flags = {"type": "object", "additionalProperties": {"type": "boolean"}}
     nullable = {"type": ["string", "null"]}
     unknown = {"type": ["boolean", "null"]}  # `app_installed` until decision 0002
     # A status problem's pointer: the line, screen and entry are what the fault knows,
@@ -282,7 +283,8 @@ def status_schema() -> dict:
         },
         ("repo", "state"),
     )
-    # Work started and not finished (decision 0022 rule 3): never a problem.
+    # Work started and not finished (decision 0022 rule 3): never a problem. `optional`:
+    # it blocks nothing, so it may be set aside; `set_aside`: it is (decision 0032).
     todo = _obj(
         {
             "id": _str(),
@@ -291,6 +293,8 @@ def status_schema() -> dict:
             "text": _str(),
             "screen": _str(),
             "entry": _str(),
+            "optional": {"type": "boolean"},
+            "set_aside": {"type": "boolean"},
         },
         ("id", "kind", "repo", "text"),
     )
@@ -302,6 +306,9 @@ def status_schema() -> dict:
             "app_installed": unknown,
             "stages": stages,
             "stage_why": stage_why,
+            # Decision 0032, per stage id: may it be set aside, and is it.
+            "stage_optional": flags,
+            "stage_set_aside": flags,
             "ready": {"type": "boolean"},
             "materials": {"type": "array", "items": materials_state},
             "templates": {"type": "array", "items": template_state},
@@ -634,6 +641,8 @@ def dsl_course_schema() -> dict:
         },
     )
     top |= {
+        # Optional setup steps and to-dos set aside (decision 0032): ids, unknown ones ignored.
+        "set_aside": {"type": "array", "items": _str()},
         "people": people,
         ASSIGNMENT_DEFAULTS_KEY: defaults,
     }
