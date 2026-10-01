@@ -236,6 +236,8 @@ describe('the Open button', () => {
     expect(rows[0].querySelector('.hint-pop')!.textContent).toBe(`VS Code asks where to put it; choose your course folder. Or run: git clone ${GH}.git "/Users/a/repos/${ORG}/assignment-2-f2026"`);
     // The command no longer sits under the menu row.
     expect(items().find((i) => i.textContent === 'Copy the clone command')!.querySelector('code')).toBeNull();
+    // Each ? describes the item beside it.
+    for (const r of rows) expect(r.querySelector('[role="menuitem"]')!.getAttribute('aria-describedby')).toBe(r.querySelector('.hint-pop')!.id);
     // Not an item: out of the tab order and skipped by the arrows.
     expect(clone.tabIndex).toBe(-1);
     expect(items().some((i) => i.classList.contains('hint-btn'))).toBe(false);
@@ -247,6 +249,39 @@ describe('the Open button', () => {
     // Hover still opens it.
     await act(() => void rows[0].querySelector('.hint')!.dispatchEvent(new MouseEvent('mouseenter')));
     expect(rows[0].querySelector<HTMLElement>('.hint-pop')!.hidden).toBe(false);
+  });
+
+  it('without a folder, the Clone ? names no course folder', async () => {
+    await mount(<OpenButton {...REF} />);
+    const rows = [...root!.querySelectorAll<HTMLElement>('.open-menu .pm-row')];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].querySelector('.hint-pop')!.textContent).toBe(`VS Code asks where to put it. Or run: git clone ${GH}.git`);
+  });
+
+  it('shows the clone command under its entry when copying fails, and keeps the button label', async () => {
+    const clip = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } });
+    try {
+      rememberOpen(LOGIN, 'clone');
+      await mount(<OpenButton {...REF} />);
+      const main = q<HTMLButtonElement>('.split-main');
+      expect(main.textContent).toBe('Copy the clone command');
+      expect(root!.querySelector('.open-menu > .pm-cmd')).toBeNull();
+      await act(async () => {
+        main.click();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(q('[role="menu"]').hidden).toBe(false);
+      expect(main.textContent).toBe('Copy the clone command');
+      expect(q('.sr[role="status"]').textContent).toBe('Could not copy: select it below');
+      const cmd = q('.open-menu > .pm-cmd');
+      expect(cmd.textContent).toBe(`git clone ${GH}.git`);
+      expect(cmd.getAttribute('role')).not.toBe('menuitem');
+      expect(cmd.previousElementSibling!.textContent).toBe('Copy the clone command');
+    } finally {
+      if (clip) Object.defineProperty(navigator, 'clipboard', clip);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
   });
 });
 

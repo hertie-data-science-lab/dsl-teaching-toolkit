@@ -77,6 +77,8 @@ export interface OpenItem {
   copy?: string;
   /** Where it sits in the menu. */
   group: 'online' | 'local';
+  /** Which `?` the menu gives it: VS Code's clone or its open (decision 0024 rule 7). */
+  hint?: 'clone' | 'open';
 }
 
 /** Profile, about `org`'s course, so its folder check knows the course the person came from. */
@@ -100,9 +102,9 @@ export function openItems(r: RepoRef, setup: Setup | null, cloned?: boolean): Op
     { choice: 'githubdev', label: 'Open on github.dev', href: `https://github.dev/${r.org}/${r.repo}${inRepo(r)}`, group: 'online' },
   ];
   // Clone before Open: the order the person goes through them (decision 0024 rule 7).
-  if (!local) items.push({ choice: 'vscode', label: 'Clone in VS Code', href: vsClone, group: 'local' });
-  if (local && canClone) items.push({ choice: 'vsclone', label: 'Clone in VS Code', href: vsClone, group: 'local' });
-  if (canOpen) items.push({ choice: 'vscode', label: 'Open in VS Code', href: vscodeFolder(inside), group: 'local' });
+  if (!local) items.push({ choice: 'vscode', label: 'Clone in VS Code', href: vsClone, group: 'local', hint: 'clone' });
+  if (local && canClone) items.push({ choice: 'vsclone', label: 'Clone in VS Code', href: vsClone, group: 'local', hint: 'clone' });
+  if (canOpen) items.push({ choice: 'vscode', label: 'Open in VS Code', href: vscodeFolder(inside), group: 'local', hint: 'open' });
   items.push({ choice: 'desktop', label: 'Open in GitHub Desktop', href: `x-github-client://openRepo/${url}${r.branch ? `?branch=${encodeURIComponent(r.branch)}` : ''}`, group: 'local' });
   const scheme = setup?.editor === 'other' ? (setup.scheme ?? '').trim() : '';
   // Another editor opens a folder or nothing: with no folder set up, the menu's last line

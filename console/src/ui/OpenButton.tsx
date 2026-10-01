@@ -79,6 +79,8 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
   const [open, setOpen] = useState(false);
   const [focusAt, setFocusAt] = useState<'first' | 'last' | null>(null);
   const [note, setNote] = useFlash();
+  // The copy failed: the command shows under its entry, to select by hand.
+  const [copyFailed, setCopyFailed] = useState(false);
   const id = useId();
   const wrap = useRef<HTMLDivElement>(null);
   const caret = useRef<HTMLButtonElement>(null);
@@ -91,9 +93,15 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [open]);
-  // A `?` in the menu is not one of its items (decision 0024): out of the tab order.
+  // A `?` in the menu is not one of its items (decision 0024): out of the tab order, its text
+  // the description of the item beside it.
   useEffect(() => {
-    wrap.current?.querySelectorAll<HTMLElement>('.open-menu .hint-btn').forEach((b) => (b.tabIndex = -1));
+    wrap.current?.querySelectorAll<HTMLElement>('.open-menu .pm-row').forEach((row) => {
+      const btn = row.querySelector<HTMLElement>('.hint-btn');
+      const pop = row.querySelector<HTMLElement>('.hint-pop');
+      if (btn) btn.tabIndex = -1;
+      if (pop) row.querySelector('[role="menuitem"]')?.setAttribute('aria-describedby', pop.id);
+    });
   });
   useEffect(() => {
     if (!open || !focusAt) return;
@@ -116,9 +124,11 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
     remember(item);
     // From the menu, focus goes back to the arrow rather than to the page.
     if (open) shut();
+    setCopyFailed(false);
     if (item.copy) {
       void copyText(item.copy).then((ok) => {
-        setNote(ok ? 'Copied' : 'Could not copy: the ? beside Clone in VS Code shows it');
+        setNote(ok ? 'Copied' : 'Could not copy: select it below');
+        setCopyFailed(!ok);
         if (!ok) setOpen(true);
       });
     }
@@ -161,9 +171,10 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
       <button type="button" onClick={() => choose(item)} {...extra}>{children}</button>
     );
   const command = items.find((i) => i.copy)?.copy;
-  const hints: Record<string, preact.ComponentChildren> = {
-    'Open in VS Code': <Hint label="About opening in VS Code">Opens the repo’s folder on your computer. Clone it first if it is not there yet.</Hint>,
-    'Clone in VS Code': <Hint label="About cloning in VS Code">VS Code asks where to put it; choose your course folder.{command ? <> Or run: <code class="pm-cmd">{command}</code></> : null}</Hint>,
+  const folder = !!setup?.folder.trim();
+  const hints = {
+    open: <Hint label="About opening in VS Code">Opens the repo’s folder on your computer. Clone it first if it is not there yet.</Hint>,
+    clone: <Hint label="About cloning in VS Code">VS Code asks where to put it{folder ? '; choose your course folder' : ''}.{command ? <> Or run: <code class="pm-cmd">{command}</code></> : null}</Hint>,
   };
   const entry = (item: OpenItem) => {
     const row = link(item, { role: 'menuitem', tabIndex: -1 }, (
@@ -172,15 +183,16 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
         {item.href && isWeb(item.href) ? <Ext /> : null}
       </>
     ));
-    const hint = hints[item.label];
-    return hint ? <div class="pm-row" role="none">{row}{hint}</div> : row;
+    if (item.hint) return <div class="pm-row" role="none">{row}{hints[item.hint]}</div>;
+    // Not an item: the command to select by hand when copying it failed.
+    if (item.copy && copyFailed) return <>{row}<code class="pm-cmd" role="none">{item.copy}</code></>;
+    return row;
   };
   const online = items.filter((i) => i.group === 'online');
   const local = items.filter((i) => i.group === 'local');
-  const folder = !!setup?.folder.trim();
   return (
     <div class={`split${small ? ' small' : ''}`} ref={wrap}>
-      {link(main, { class: `${cls} split-main`, ...(small ? { title: main.label, 'aria-label': main.label } : {}) }, <>{note && main.copy ? note : small ? 'Open' : main.label}{main.href && isWeb(main.href) ? <Ext /> : null}</>)}
+      {link(main, { class: `${cls} split-main`, ...(small ? { title: main.label, 'aria-label': main.label } : {}) }, <>{note === 'Copied' && main.copy ? note : small ? 'Open' : main.label}{main.href && isWeb(main.href) ? <Ext /> : null}</>)}
       <button ref={caret} type="button" class={`${cls} split-caret`} aria-haspopup="menu" aria-expanded={open} aria-controls={id} aria-label={`More ways to open ${ref.repo}`}
         onClick={() => (open ? setOpen(false) : show('first'))} onKeyDown={onCaretKey} onKeyUp={onCaretKeyUp}>
         <span class="caret" aria-hidden="true" />
