@@ -10,6 +10,7 @@
 // a student's own, or an instructor's Student view. `?join=<org>` opens the Join course form
 // of a semester the person is not a member of yet.
 
+import { semesterOver } from './model/catalogue';
 import { ORG_NAME_RE } from './model/policy';
 import { isInstructor, roleOf, type Course, type CohortRef, type Estate, type Mode, type Semester } from './model/discovery';
 
@@ -172,10 +173,12 @@ export function resolveContext(courses: Course[], sel: Selection, route: Route):
  * Where a URL that names no page lands (decision 0030 rule 1): an instructor always on All
  * courses (Home); a person who teaches nothing (decision 0029 rule 3):
  * the org of their one live semester, whose This week opens; null (Your semesters) otherwise.
+ * Live is neither archived nor ended, the end judged by the semester key: facts are not read
+ * yet when the page is routed (decision 0031).
  */
-export function studentLanding(estate: Estate): string | null {
+export function studentLanding(estate: Estate, now: number = Date.now()): string | null {
   if (estate.courses.length || isInstructor(estate)) return null;
-  const live = estate.semesters.filter((s) => s.role === 'student' && !s.archived);
+  const live = estate.semesters.filter((s) => s.role === 'student' && !semesterOver(s, now));
   return live.length === 1 ? live[0].org : null;
 }
 

@@ -203,10 +203,37 @@ describe('roles', () => {
   });
 
   it('a read-only course carries no role; its semester, joined as a student, is a student’s', async () => {
-    const gh = orgs(new FakeGitHub()).on('GET', MEMBERSHIPS, member([COURSE, SEM]));
+    const gh = orgs(new FakeGitHub()).on('GET', MEMBERSHIPS, member([COURSE, OTHER_SEM]));
     const e = await discover(gh);
     expect(e.courses.map((c) => c.write)).toEqual([false]);
-    expect(Object.fromEntries(e.roles)).toEqual({ [SEM]: 'student' });
+    expect(Object.fromEntries(e.roles)).toEqual({ [OTHER_SEM]: 'student' });
+  });
+
+  it('leaves out a read-only course the person only studies in: its semesters show once, as theirs (decision 0031)', async () => {
+    // The demo's test student: a member of the course org, and a student of two of its semesters.
+    const gh = orgs(new FakeGitHub()).on('GET', MEMBERSHIPS, member([COURSE, SEM, OLD]));
+    const e = await discover(gh);
+    expect(e.courses).toEqual([]);
+    expect(e.semesters.map((s) => [s.org, s.role, s.courseName, s.courseCode])).toEqual([
+      [SEM, 'student', 'Machine Learning', 'E1234'],
+      [OLD, 'student', 'Machine Learning', 'E1234'],
+    ]);
+  });
+
+  it('keeps a read-only course in which the person also teaches a semester', async () => {
+    const gh = orgs(new FakeGitHub(), [SEM]).on('GET', MEMBERSHIPS, member([COURSE, SEM, OLD]));
+    const e = await discover(gh);
+    expect(e.courses.map((c) => [c.org, c.write])).toEqual([[COURSE, false]]);
+    expect(e.semesters.map((s) => [s.org, s.role])).toEqual([[SEM, 'instructor'], [OLD, 'student']]);
+  });
+
+  it('takes a student’s semester’s course from the registry that lists it when its pointer is private', async () => {
+    const gh = new FakeGitHub()
+      .on('GET', `/repos/${SEM}/semester-config/contents/.system/dsl-course.yml`, () => json({ message: 'Not Found' }, 404));
+    orgs(gh).on('GET', MEMBERSHIPS, member([COURSE, SEM]));
+    const e = await discover(gh);
+    expect(e.courses).toEqual([]);
+    expect(e.semesters.map((s) => [s.org, s.courseOrg, s.courseName, s.courseCode])).toEqual([[SEM, COURSE, 'Machine Learning', 'E1234']]);
   });
 
   it('names each semester after its course, reading the course’s public .github when the person is not in it, and marks archived ones', async () => {
