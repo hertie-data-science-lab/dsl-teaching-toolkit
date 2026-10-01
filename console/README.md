@@ -116,7 +116,7 @@ Each screen reads with the student's own account:
 | Assignments | dates (TBC), late cutoff, late rule, points, how to hand in, solution shown, the shape note, the brief (a fold, rendered by GitHub), the course's late-work sentences | `<slug>-<handle>`, a team repo they can push to, the drop box; their team (from the repo, else from `GET /user/teams` by the `<slug>-` prefix, so a drop-box or external group finds it too) and its members; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos): its body, the newest receipt, a patch note as "pull before you continue", every comment in a fold; the CONTRIBUTIONS.md ask on a team repo; for a student-choice repo after the cutoff, the Settings link to make it public |
 | Marks | assignment titles | `grades-<handle>/grades.yml`: final grade, score (per question when given), penalty, feedback overall and per question, team and team feedback, a term total if present |
 | Materials | the materials repos; each session's readings | the repo's recursive tree; each file read when opened |
-| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`); clone commands, VS Code and github.dev links; their assignment repos to clone. The local folders are kept in this browser only |
+| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decision 0027) |
 | Join | assignments forming teams, and each one's teams so far (name, headcount, cap; never who) with a Pick that fills in the team | their own Join course / Join team issues in `join` and the automation's last reply; after "You joined", the invitation's accept link |
 | Instructors | the cards, with an email only where the instructor chose to show it | none (a picture hosted on the semester site is read through the API and shown as `data:`) |
 
@@ -132,9 +132,10 @@ read the list again when the tab regains focus. If the role cannot be read, the 
 promise no repo, team or marks; an auditor's nav omits Marks and Join.
 
 The visit time behind "new since your last visit" is stored only after that semester's
-receipts were read. Signing out forgets every visit time and remembered folder of that
-login in this browser, the rendered markdown, the team list and the semester facts. It keeps
-Profile: the folder, the editor, and the folder picked for the folder check (in IndexedDB).
+receipts were read. Signing out forgets every visit time of that login in this browser, the
+rendered markdown, the team list and the semester facts. It keeps Profile, one for both
+roles: the root folder, each course's own folder where one is set, the editor, and the folder
+picked for the folder check (in IndexedDB).
 
 The shared facts come through one interface, `StudentData` (`src/model/student.ts`), read by
 `StatusFileSource` from the engine's public `<semester>/.github/.system/student-status.json`

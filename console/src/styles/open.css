@@ -18,7 +18,7 @@
 .open-menu > .pm-cmd { padding: 0 10px 6px; color: var(--muted); }
 .open-menu svg { width: 12px; height: 12px; color: var(--muted); flex: none; }
 
-/* ================= Your setup (screens/Setup.tsx) ================= */
+/* ================= Profile (screens/Setup.tsx) ================= */
 .setup-form { display: grid; gap: 22px; max-width: 640px; }
 .setup-form .saved { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
 .setup-form .scheme { margin-top: 6px; }
@@ -29,3 +29,9 @@
 .setup-view .setup-edit svg { width: 14px; height: 14px; }
 /* A row's buttons sit at the left on a phone: the menu opens rightwards from there. */
 @media (max-width: 560px) { .rows .split .open-menu { left: 0; right: auto; } }
+/* Your courses: each course's folder on one line, wrapping on a phone; an edited row's input takes the width. */
+.course-folders h2 { margin: 0 0 6px; }
+.course-folders li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 6px 0; }
+.course-folders li code { overflow-wrap: anywhere; }
+.course-folders li input { flex: 1 1 260px; min-width: 0; }
+.course-folders li .hint { flex-basis: 100%; margin: 0; }

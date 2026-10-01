@@ -7,8 +7,8 @@ import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
-import { askFolderOnce, clonedIn, folderHandle, forgetFolder, isCloned, setHandleStore, type HandleStore } from '../src/model/localFolder';
-import { lastSegment } from '../src/model/open';
+import { askFolderOnce, clonedIn, courseSteps, folderHandle, forgetFolder, isCloned, setHandleStore, type HandleStore } from '../src/model/localFolder';
+import { lastSegment, type Setup } from '../src/model/open';
 import { saveYourSetup } from '../src/model/prefs';
 import { SetupScreen } from '../src/screens/Setup';
 import { OpenButton } from '../src/ui/OpenButton';
@@ -57,6 +57,18 @@ describe('whether a repo is cloned', () => {
 
   it('takes a folder named for the org as the course folder itself', async () => {
     expect(await clonedIn(fakeDir(ORG.toUpperCase(), { materials: {} }), ORG, 'materials')).toBe(true);
+  });
+
+  it('looks in a course’s own folder when it sits inside the picked one, and cannot tell when it does not', async () => {
+    const setup = (own: string): Setup => ({ folder: '/Users/a/repositories', editor: 'vscode', overrides: { [ORG]: own } });
+    expect(courseSteps('repositories', setup('/Users/a/repositories/teaching/ml'), ORG)).toEqual(['teaching', 'ml']);
+    expect(courseSteps('ml', setup('/Users/a/repositories/teaching/ml'), ORG)).toEqual([]);
+    expect(courseSteps('repositories', setup('/elsewhere/ml'), ORG)).toBeNull();
+    expect(courseSteps('repositories', null, ORG)).toEqual([ORG]);
+    const h = fakeDir('repositories', { teaching: { ml: { materials: {} } } });
+    expect(await clonedIn(h, ORG, 'materials', setup('/Users/a/repositories/teaching/ml'))).toBe(true);
+    expect(await clonedIn(h, ORG, 'assignment-1-template', setup('/Users/a/repositories/teaching/ml'))).toBe(false);
+    expect(await clonedIn(h, ORG, 'materials', setup('/elsewhere/ml'))).toBeUndefined();
   });
 
   it('cannot tell without read permission, or on another error', async () => {
@@ -136,8 +148,10 @@ describe('the Open button with a folder check', () => {
     expect(local(a)).not.toContain('Clone in VS Code');
     expect(local(b)).toContain('Clone in VS Code');
     expect(local(b)).not.toContain('Open in VS Code');
-    expect(a.querySelector('.split-main')!.textContent).toBe('Open in VS Code');
-    expect(b.querySelector('.split-main')!.textContent).toBe('Clone in VS Code');
+    expect(a.querySelector('.split-main')!.textContent).toBe('Open');
+    expect(a.querySelector('.split-main')!.getAttribute('href')).toBe(`vscode://file/Users/a/repositories/${ORG}/materials`);
+    expect(b.querySelector('.split-main')!.textContent).toBe('Clone');
+    expect(b.querySelector('.split-main')!.getAttribute('href')).toMatch(/^vscode:\/\/vscode\.git\/clone/);
   });
 
   it('keeps both entries until permission is granted from the arrow', async () => {
@@ -206,10 +220,16 @@ describe('Profile', () => {
     expect(root!.querySelector('.folder-check')).toBe(check);
   });
 
+  it('gives no Chrome or Edge footnote where the folder check works', async () => {
+    setHandleStore(memHandles());
+    await mount(<SetupScreen org={ORG} />);
+    expect(root!.textContent).not.toContain('In Chrome or Edge');
+  });
+
   it('keeps the folder check in view mode, and offers no clone block', async () => {
     setHandleStore(memHandles());
     saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'vscode' });
-    await mount(<SetupScreen org={ORG} repos={['materials', 'assignment-1-template']} />);
+    await mount(<SetupScreen org={ORG} />);
     expect(root!.querySelector('.setup-view')).not.toBeNull();
     expect(root!.textContent).toContain('Let the console see which repos are cloned');
     expect(root!.textContent).not.toContain('Clone every repo');
