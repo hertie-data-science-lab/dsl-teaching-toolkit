@@ -107,7 +107,7 @@ export function StudentScreen({ semester, screen, studentView, entry, now = Date
   return (
     <>
       {studentView ? <StudentViewBanner /> : null}
-      <div class="page-head"><div><h2 class="h1">{label}{STUDENT_HINTS[screen] ? <Hint>{STUDENT_HINTS[screen]}</Hint> : null}</h2></div></div>
+      <div class="page-head"><div><h2 class="h1">{label}{STUDENT_HINTS[screen] ? <> <Hint>{STUDENT_HINTS[screen]}</Hint></> : null}</h2></div></div>
       {semester.archived ? <ArchivedSemester semester={semester} studentView={studentView} /> : <SemesterBody semester={semester} screen={screen} studentView={studentView} entry={entry} now={now} />}
     </>
   );

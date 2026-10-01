@@ -114,7 +114,7 @@ describe('side nav', () => {
     expect(out).not.toContain('nav-anchor');
   });
   it('orders the external links Public site, Course (Student view and the semester on GitHub are in the banner)', () => {
-    const t = text(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{}} current="dashboard" />);
+    const t = text(<Sidenav courses={[course]} course={course} cohort={cohort} site={cohort} cohortStates={{}} current="dashboard" />);
     const at = ['Public site', 'Course on GitHub'].map((l) => t.indexOf(l));
     expect(at.every((i) => i >= 0)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);

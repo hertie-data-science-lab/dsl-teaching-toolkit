@@ -181,18 +181,20 @@ export function TreeNode({ node, open, onToggle, onPick, current }: { node: NavN
 /**
  * Nodes one at a time (an accordion), the first `shown` always visible and the rest under
  * "Older semesters (n)", which unfolds in place. `open` is the node expanded by default; a
- * chevron or name pressed overrides it until the default changes (another semester opened).
- * The fold starts open when the expanded node is inside it. State is the component's, never the URL's.
+ * chevron or name pressed overrides it until the default or `scope` changes (another semester
+ * or page opened, another anchor), so the open page is always shown after a move. The fold
+ * starts open when the expanded node is inside it. State is the component's, never the URL's.
  */
-export function NodeList({ nodes, open = null, shown = nodes.length }: { nodes: NavNode[]; open?: string | null; shown?: number }) {
-  const [pick, setPick] = useState<{ base: string | null; id: string | null } | null>(null);
-  const cur = pick && pick.base === open ? pick.id : open;
-  const [fold, setFold] = useState<{ base: string | null; v: boolean } | null>(null);
+export function NodeList({ nodes, open = null, shown = nodes.length, scope = '' }: { nodes: NavNode[]; open?: string | null; shown?: number; scope?: string }) {
+  const base = `${open ?? ''}|${scope}`;
+  const [pick, setPick] = useState<{ base: string; id: string | null } | null>(null);
+  const cur = pick && pick.base === base ? pick.id : open;
+  const [fold, setFold] = useState<{ base: string; v: boolean } | null>(null);
   const head = nodes.slice(0, shown), rest = nodes.slice(shown);
   const inRest = rest.some((n) => n.id === cur);
-  const unfolded = fold && fold.base === open ? fold.v : inRest;
+  const unfolded = fold && fold.base === base ? fold.v : inRest;
   const node = (n: NavNode) => (
-    <TreeNode node={n} open={cur === n.id} onToggle={() => setPick({ base: open, id: cur === n.id ? null : n.id })} onPick={() => setPick({ base: open, id: n.id })} />
+    <TreeNode node={n} open={cur === n.id} onToggle={() => setPick({ base, id: cur === n.id ? null : n.id })} onPick={() => setPick({ base, id: n.id })} />
   );
   const foldId = `nav-older-${nodes[0]?.id ?? ''}`;
   return (
@@ -201,8 +203,8 @@ export function NodeList({ nodes, open = null, shown = nodes.length }: { nodes: 
       {rest.length ? (
         <li>
           <div class="row">
-            <Chev open={unfolded} controls={foldId} what="the older semesters" onToggle={() => setFold({ base: open, v: !unfolded })} />
-            <span class="nav-fold" onClick={() => setFold({ base: open, v: !unfolded })}>Older semesters ({rest.length})</span>
+            <Chev open={unfolded} controls={foldId} what="the older semesters" onToggle={() => setFold({ base, v: !unfolded })} />
+            <span class="nav-fold" onClick={() => setFold({ base, v: !unfolded })}>Older semesters ({rest.length})</span>
           </div>
           <ul class="tree" id={foldId} hidden={!unfolded}>{rest.map(node)}</ul>
         </li>
@@ -287,12 +289,14 @@ export type SubWanted = { materials: boolean; templates: boolean };
  * nodes: being set up first, every live one, then past ones newest first to three rows and the
  * rest under Older semesters. The open semester is expanded to its pages, else on a course page
  * the newest live one. The person's student semesters are not here: they are on All courses.
- * `cohort` is the semester whose page is open, none on a course page.
+ * `cohort` is the semester whose page is open, none on a course page; `site` the semester whose
+ * public site the external links name (the URL's, on any page of the course, read only too).
  */
-export function Sidenav({ courses, course, cohort, cohortStates, current, sub, entry, now = Date.now() }: {
+export function Sidenav({ courses, course, cohort, site, cohortStates, current, sub, entry, now = Date.now() }: {
   courses: Course[];
   course?: Course;
   cohort?: CohortRef;
+  site?: CohortRef;
   cohortStates: Record<string, Loaded>;
   current: string;
   /** The course's materials and templates for the nav's sub-pages, read for the groups shown; none until its status is read. */
@@ -362,14 +366,14 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, sub, e
           {nodes.length ? (
             <>
               <div class="nav-h">Semesters</div>
-              <NodeList nodes={nodes} open={expanded} shown={settingUp.length + shown} />
+              <NodeList nodes={nodes} open={expanded} shown={settingUp.length + shown} scope={current} />
             </>
           ) : null}
         </>
       ) : <p class="footnote" style="padding:8px 10px">Read only: other pages need write access.</p>}
       <hr />
       <ul>
-        {cohort ? <li><a href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Public site <Ext /></a></li> : null}
+        {site ? <li><a href={`https://${site.org}.github.io`} target="_blank" rel="noopener">Public site <Ext /></a></li> : null}
         <li><a href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a></li>
       </ul>
     </NavTree>
@@ -430,12 +434,12 @@ export function StudentNav({ root, semesters, semester, current, studentView = f
   const past = newestFirst(others.filter((o) => !o.live)).map((o) => termNode(o.list, false));
   return (
     <NavTree root={root} anchor={<NavAnchor>{semLabel(semester.termLabel, hereLive, hereLive ? undefined : termMark(here))}</NavAnchor>}>
-      <NodeList nodes={courseNodes} open={`c-${semester.org}`} />
-      {liveOthers.length ? <NodeList nodes={liveOthers} /> : null}
+      <NodeList nodes={courseNodes} open={`c-${semester.org}`} scope={current} />
+      {liveOthers.length ? <NodeList nodes={liveOthers} scope={semester.term} /> : null}
       {past.length ? (
         <>
           <div class="nav-h">Past semesters</div>
-          <NodeList nodes={past} shown={3} />
+          <NodeList nodes={past} shown={3} scope={semester.term} />
         </>
       ) : null}
     </NavTree>

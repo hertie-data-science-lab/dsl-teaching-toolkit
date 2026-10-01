@@ -629,7 +629,7 @@ describe('read only and the shell', () => {
     expect(t).toContain('No roster, no marks, no buttons.');
   });
   it('puts the course tree, nav with the problem count and the on-GitHub links in the side nav, none in the bar', () => {
-    const nav = html(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" />);
+    const nav = html(<Sidenav courses={[course]} course={course} cohort={cohort} site={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" />);
     expect(nav).toContain(`<a class="nav-anchor" href="?course=${COURSE_ORG}#course">Machine Learning</a>`);
     expect(nav).toContain('Fall 2026');
     expect(nav).toContain('class="n-count"');

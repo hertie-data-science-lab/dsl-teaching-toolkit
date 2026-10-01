@@ -246,6 +246,11 @@ export function App({ state: s }: { state: AppState }) {
     body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course.write) {
     body = <ReadonlyScreen course={ctx.course} cohort={ctx.cohort} />;
+    // Read only: the same banner, the semester's line without the Student view (no role to preview).
+    banner = (
+      <CourseBanner crumbs={ctx.cohort ? [home, { t: ctx.course.name, href: `?course=${ctx.course.org}#course` }, { t: ctx.cohort.termLabel }] : [home, { t: ctx.course.name }]}
+        name={ctx.course.name} semester={ctx.cohort ? { org: ctx.cohort.org, termLabel: ctx.cohort.termLabel } : undefined} />
+    );
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
     const cp: CourseProps = { migrated: Array.isArray(courseLeft) && !courseLeft.length, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
     body = wiz?.name === 'new-semester' ? <NewCohortScreen {...cp} step={wiz.step} />
@@ -300,7 +305,7 @@ export function App({ state: s }: { state: AppState }) {
       <div class="shell" style={appLevel ? 'grid-template-columns:minmax(0,1fr)' : undefined}>
         {appLevel ? null : (
           <aside class="sidenav" id="sidenav-wrap" aria-label="Console navigation">
-            <Sidenav courses={courses} course={ctx.course} cohort={semesterPage ? ctx.cohort : undefined} cohortStates={cohortStates} current={navKey} sub={sub} entry={route.entry} now={s.now.value} />
+            <Sidenav courses={courses} course={ctx.course} cohort={semesterPage ? ctx.cohort : undefined} site={ctx.cohort} cohortStates={cohortStates} current={navKey} sub={sub} entry={route.entry} now={s.now.value} />
           </aside>
         )}
         <main id="view" tabindex={-1}>

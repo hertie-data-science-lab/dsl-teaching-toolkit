@@ -200,15 +200,15 @@ describe('the student tree', () => {
 describe('one person, two roles', () => {
   const taught: Course = { ...course(['f2026']), org: COURSE_ORG };
   const studied = sem('f2026', 'Natural Language Processing');
-  async function mount(url: string) {
+  async function mount(url: string, courses: Course[] = [taught]) {
     history.replaceState(null, '', url);
-    const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: new GitHubClient({ token: () => 't', fetch: new FakeGitHub().fetch }) });
+    const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: new GitHubClient({ token: () => 't', fetch: new FakeGitHub().on('GET', /\/git\/trees\/HEAD/, { sha: 'r', truncated: false, tree: [] }).fetch }) });
     s.user.value = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
-    s.estate.value = { courses: [taught], semesters: [studied], roles: new Map([[studied.org, 'student' as const], [taught.cohorts[0].org, 'instructor' as const], [COURSE_ORG, 'instructor' as const]]), kind: 'classic' };
+    s.estate.value = { courses, semesters: [studied], roles: new Map([[studied.org, 'student' as const], [taught.cohorts[0].org, 'instructor' as const], [COURSE_ORG, 'instructor' as const]]), kind: 'classic' };
     root = document.createElement('div');
     document.body.append(root);
     await act(async () => render(<App state={s} />, root!));
-    await act(async () => {});
+    for (let i = 0; i < 5; i++) await act(async () => {});
     return root;
   }
   it('keeps the taught semesters out of the student tree', async () => {
@@ -224,5 +224,46 @@ describe('one person, two roles', () => {
     expect(nav.querySelector('.nav-anchor')!.textContent).toBe('Machine Learning');
     expect(nav.innerHTML).not.toContain(studied.org);
     expect(el.querySelector('.switcher')).toBeNull();
+  });
+  it('lights the course anchor in the New semester wizard', async () => {
+    const el = await mount(`/?course=${COURSE_ORG}#new-semester-1`);
+    expect(el.querySelector('.sidenav .nav-anchor')!.getAttribute('aria-current')).toBe('page');
+    expect(el.querySelector('.sidenav a.leaf[aria-current]')).toBeNull();
+  });
+  it('heads a read-only course’s pages with the course banner, keeping the Public site link', async () => {
+    const ro: Course = { ...taught, write: false };
+    const k = ro.cohorts[0];
+    const el = await mount(`/?cohort=${k.org}#dashboard`, [ro]);
+    const banner = el.querySelector('#view .course-banner')!;
+    expect(banner.querySelector('h1')!.textContent).toBe('Machine Learning');
+    expect(banner.querySelector('.sem-title')!.textContent).toBe('Fall 2026');
+    expect(banner.textContent).not.toContain('Student view');
+    expect(el.querySelectorAll('h1')).toHaveLength(1);
+    const crumbs = [...el.querySelectorAll('#view .crumbs > a, #view .crumbs > span:not([aria-hidden])')].map((c) => [c.textContent, c.getAttribute('href')]);
+    expect(crumbs).toEqual([['All courses', '?#home'], ['Machine Learning', `?course=${COURSE_ORG}#course`], ['Fall 2026', null]]);
+    expect(el.querySelector('#view .ro-banner')).not.toBeNull();
+    expect(el.querySelector(`.sidenav a[href="https://${k.org}.github.io"]`)).not.toBeNull();
+  });
+});
+
+describe('the expansion follows the open page', () => {
+  it('an instructor’s override lasts until another page opens, which shows the open page again', () => {
+    const c = course(['s2026', 'f2026']);
+    const open = c.cohorts.find((k) => k.term === 'f2026')!;
+    const h = show(<Sidenav courses={[c]} course={c} cohort={open} cohortStates={{}} current="dashboard" now={NOW} />);
+    act(() => chevOf(h, 'Spring 2026').click());
+    expect(nodes(h).filter((n) => n.open).map((n) => n.name)).toEqual(['Spring 2026 ended']);
+    act(() => render(<Sidenav courses={[c]} course={c} cohort={open} cohortStates={{}} current="schedule" now={NOW} />, root!));
+    expect(nodes(h).filter((n) => n.open).map((n) => n.name)).toEqual(['Fall 2026']);
+    expect(h.querySelector('a[aria-current="page"]')!.textContent).toBe('Schedule');
+  });
+  it('a student’s Past semesters fold back when the anchor changes', () => {
+    const dl = sem('f2026', 'Deep Learning'), stats = sem('s2026', 'Statistics I', { archived: true }), intro = sem('f2025', 'Intro', { archived: true });
+    const all = [dl, stats, intro];
+    const h = show(<StudentNav root="Your semesters" semesters={all} semester={dl} current="week" now={NOW} />);
+    act(() => chevOf(h, 'Fall 2025').click());
+    expect(chevOf(h, 'Fall 2025').getAttribute('aria-expanded')).toBe('true');
+    act(() => render(<StudentNav root="Your semesters" semesters={all} semester={stats} current="week" now={NOW} />, root!));
+    expect(chevOf(h, 'Fall 2025').getAttribute('aria-expanded')).toBe('false');
   });
 });
