@@ -8,6 +8,7 @@ import type { TreeEntry } from '../github/client';
 import { termOf } from '../model/discovery';
 import { kebab } from '../model/format';
 import { DEFAULT_FORMATS, HANDLE_RE, SUBMIT_VIA_DEFAULT } from '../model/policy';
+import { defaultStarter, type Starter } from '../tiers/grading';
 import type { Values } from '../tiers/types';
 
 /** The lab's bot: an owner of every course and semester org until the console app replaces it. */
@@ -175,6 +176,12 @@ export function toggleFormat(formats: string[], f: string): string[] {
   return [...formats.filter((x) => x !== 'none'), f];
 }
 
+/** The starter the wizard creates with: the choice made, else decision 0028 rule 1 from the tests answer. */
+export function starterChoice(v: Values): Starter {
+  if (v.starter === 'derived' || v.starter === 'handwritten') return v.starter;
+  return defaultStarter(!autogradeBlock(v) && v.autograde === 'true');
+}
+
 /** The `assignment.create` args (schemas/ops.json): the name and the template's own keys. No
  * number and no semester (decision 0014); an import is the console's, after creation. */
 export function assignmentArgs(v: Values): Record<string, unknown> {
@@ -186,6 +193,7 @@ export function assignmentArgs(v: Values): Record<string, unknown> {
     submit_via: submit,
     formats: ((v.formats as string[] | undefined) ?? DEFAULT_FORMATS).join(','),
     autograde: !autogradeBlock(v) && v.autograde === 'true',
+    starter: starterChoice(v),
   };
 }
 

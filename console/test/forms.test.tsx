@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import gradingSchema from '../schemas/grading_config.schema.json';
 import { SchemaForm, effective, fieldErrors, layout } from '../src/forms/Form';
 import { opSpec } from '../src/ops/registry';
-import { fromConfig, settingsTiers, toConfig } from '../src/tiers/grading';
+import { STARTER_COPY, fromConfig, settingsTiers, starterOf, toConfig } from '../src/tiers/grading';
 import { RETURN_MARKS, releaseAdhoc } from '../src/tiers/ops';
 import { matches } from '../src/edit/glob';
 import { diffRoster, readTable, writeTable } from '../src/edit/csv';
@@ -13,7 +13,7 @@ describe('the tiered form', () => {
 
   it('puts Ask and Default in the body, Conditional under its trigger, Advanced behind the reveal', () => {
     const solo = layout(tiers, fromConfig({ type: 'individual' }));
-    expect(solo.main.map((i) => i.key)).toEqual(['title', 'type', 'submit_via', 'autograde']);
+    expect(solo.main.map((i) => i.key)).toEqual(['title', 'type', 'submit_via', 'autograde', 'starter']);
     expect(solo.advanced.map((i) => i.key)).toEqual(['completion_check', 'grader_pdf']);
     const team = layout(tiers, fromConfig({ type: 'group', submit_via: 'external', autograde: true }));
     expect(team.main.find((i) => i.key === 'type')!.under).toEqual([]);
@@ -23,7 +23,22 @@ describe('the tiered form', () => {
   it('holds what the task is, never how a semester runs it', () => {
     for (const k of ['team_formation', 'max_team_size', 'submit_url', 'visibility', 'late_window_days', 'late_penalty_per_day']) expect(tiers).not.toHaveProperty(k);
     const cfg = { type: 'group', team_formation: 'assigned', max_team_size: 3, visibility: 'public', late_window_days: 3 };
-    expect(Object.keys(toConfig(fromConfig(cfg))).filter((k) => toConfig(fromConfig(cfg))[k] !== undefined).sort()).toEqual(['submit_via', 'type']);
+    expect(Object.keys(toConfig(fromConfig(cfg))).filter((k) => toConfig(fromConfig(cfg))[k] !== undefined).sort()).toEqual(['starter', 'submit_via', 'type']);
+  });
+
+  it('reads the starter from the file, else the engine, else the tests answer (decision 0028)', () => {
+    expect(starterOf({ starter: 'handwritten', autograde: true }, 'derived')).toBe('handwritten');
+    expect(starterOf({}, 'derived')).toBe('derived');
+    expect(starterOf({ autograde: true })).toBe('derived');
+    expect(starterOf({ autograde: false })).toBe('handwritten');
+    expect(starterOf({ starter: 'copied' }, 'nonsense')).toBe('handwritten');
+    expect(toConfig(fromConfig({}, 'derived')).starter).toBe('derived');
+    // The radio's long text sits in a ? beside each short label.
+    const out = render(<SchemaForm id="t" schema={null} tiers={{ starter: tiers.starter }} values={fromConfig({ autograde: true })} onChange={() => {}} />);
+    expect(out).toContain('Derived from your solution');
+    expect(out).toContain('Written by hand');
+    expect(out).toContain(STARTER_COPY.derived.hint);
+    expect(out).toContain('aria-label="About Written by hand"');
   });
 
   it('counts only non-default Advanced fields', () => {
@@ -45,7 +60,7 @@ describe('the tiered form', () => {
   });
 
   it('round-trips grading_config.yml with several formats, the runnable one first, and the schema accepts the result', async () => {
-    const cfg = { title: 'Group project', type: 'group', submit_via: 'assignment_repo', formats: ['ipynb', 'latex'], autograde: true, completion_check: false };
+    const cfg = { title: 'Group project', type: 'group', submit_via: 'assignment_repo', formats: ['ipynb', 'latex'], autograde: true, completion_check: false, starter: 'derived' };
     const back = Object.fromEntries(Object.entries(toConfig(effective(tiers, fromConfig(cfg)))).filter(([, x]) => x !== undefined));
     expect(back).toEqual(cfg);
     expect(fromConfig({ formats: 'py, latex' }).formats).toEqual(['py', 'latex']);

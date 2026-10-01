@@ -1,5 +1,6 @@
-// New assignment (`#new-assignment-1..5`): four questions, then a check (design/inputs.md
-// "New assignment", decision 0014 rules 6 and 7). What the `assignment.create` operation
+// New assignment (`#new-assignment-1..6`): five questions, then a check (design/inputs.md
+// "New assignment", decision 0014 rules 6 and 7). Question 4 asks how students get the
+// starter (decision 0028), after the tests answer its default follows. What the `assignment.create` operation
 // accepts goes in its request; the marking values it does not accept are written into the new
 // template's grading_config.yml straight after, as its Settings form would. An import is the
 // console's: once the template exists and checks out, the ticked files are copied onto it by
@@ -18,7 +19,7 @@ import { createAssignment } from '../ops/defs';
 import { FormatPicker } from '../forms/FormatPicker';
 import { labelOf } from '../model/labels';
 import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
-import { formatWord, formatsList, questionFileError, questionsValue, toConfig, type QuestionRow } from '../tiers/grading';
+import { STARTERS, STARTER_COPY, formatWord, formatsList, questionFileError, questionsValue, toConfig, type QuestionRow } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { assignmentMarking, assignmentName, assignmentStart, assignmentWork } from '../tiers/wizard';
 import { CheckLine, Crumbs, Loading } from '../ui/bits';
@@ -30,11 +31,11 @@ import { PatternTree } from '../ui/PatternTree';
 import { useDraft } from '../wizards/drafts';
 import {
   APP_SLUG, IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, ORDINAL_WARNING, assignmentArgs, formatError, installUrl, liveSemesters, openAt, ordinalInName,
-  parseSource, signature, sourceFixed, templateRepo, tickedEntries, type SourceRepo,
+  parseSource, signature, sourceFixed, starterChoice, templateRepo, tickedEntries, type SourceRepo,
 } from '../wizards/model';
 import { allOk, checkFree, checkTemplate, readSource, useLive, type Check, type SourceBranch, type SourceRead } from '../wizards/verify';
 import { Checks, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
-import { Questions, courseView } from './Course';
+import { Questions, STARTER_DOC, courseView } from './Course';
 import { courseScope } from './CourseEdit';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
@@ -43,6 +44,7 @@ const STEPS = [
   { t: 'What is it', s: 'Name, what it starts from' },
   { t: 'How students work', s: 'Teams, where they submit' },
   { t: 'How it is marked', s: 'Format, tests' },
+  { t: 'How students get the starter', s: 'Derived or by hand' },
   { t: 'Points per question', s: 'Optional' },
   { t: 'Check', s: 'Verified against the course', check: true },
 ];
@@ -50,7 +52,8 @@ const STEPS = [
 export const S1 = ['name', 'keep_number', 'start', 'source_template', 'source_repo'];
 export const S2 = ['type', 'submit_via'];
 export const S3 = ['formats', 'autograde', 'tests', 'completion_check', 'grader_pdf'];
-export const S4 = ['questions'];
+export const S4 = ['starter'];
+export const S5 = ['questions'];
 /** grading_config.yml keys the create request cannot carry. */
 export const EXTRA_KEYS = ['tests', 'completion_check', 'grader_pdf', 'questions'];
 
@@ -107,13 +110,22 @@ export const ordinalUnconfirmed = (v: Values) => ordinalInName(v.name) && v.keep
 
 /** Steps done: each stays done only while its answers match what was verified. */
 export function naDone(d: NaDraft, v: Values, created: boolean): boolean[] {
-  if (created) return [true, true, true, true, false];
+  if (created) return [true, true, true, true, true, false];
   const one = d.verified['1'] === signature(v, S1);
   const two = one && d.verified['2'] === signature(v, S2);
   const three = two && d.verified['3'] === signature(v, S3);
   const four = three && d.verified['4'] === signature(v, S4);
-  return [one, two, three, four, false];
+  const five = four && d.verified['5'] === signature(v, S5);
+  return [one, two, three, four, five, false];
 }
+
+/** Question 4's radio: the two ways a starter is written, each described in full (decision 0028 rule 4). */
+const STARTER_TIERS: Tiers = {
+  starter: {
+    tier: 'ask', label: 'How students get the starter', widget: 'radio',
+    options: STARTERS.map((k) => ({ value: k, label: k === 'derived' ? `${STARTER_COPY[k].label} (recommended when tests mark it)` : STARTER_COPY[k].label, sub: STARTER_COPY[k].hint })),
+  },
+};
 
 /** The values the wizard writes into grading_config.yml after creation, key by key. */
 export function extrasOf(v: Values): Record<string, unknown> {
@@ -274,7 +286,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   }, [copyNow]);
 
   let heading = '', body, foot;
-  const createdNote = created && step < 5 ? <p class="note">{repo} is created. Change its settings on the <a href={`#template-${repo}`}>assignment template's settings</a>.</p> : null;
+  const createdNote = created && step < 6 ? <p class="note">{repo} is created. Change its settings on the <a href={`#template-${repo}`}>assignment template's settings</a>.</p> : null;
   if (step === 1) {
     heading = 'What is the assignment?';
     const warn = ordinalInName(v.name);
@@ -327,13 +339,29 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
       }}>Continue</button>
     );
   } else if (step === 4) {
+    heading = 'How do students get the starter?';
+    const sv = { ...v, starter: starterChoice(v) };
+    body = (
+      <>
+        {createdNote}
+        <p class="note">Students receive the main branch at hand out. <Hint label="About the starter" doc={STARTER_DOC}>The default follows the tests answer: with tests on, derived, so the tests always match the starter. You can change it later in the template’s settings.</Hint></p>
+        <SchemaForm id="na4" schema={null} tiers={STARTER_TIERS} values={sv} onChange={setV} />
+      </>
+    );
+    foot = (
+      <button class="btn" type="button" onClick={() => {
+        set({ v: sv, verified: { ...d.verified, '4': signature(sv, S4) } });
+        go(5);
+      }}>Continue</button>
+    );
+  } else if (step === 5) {
     heading = 'Points per question';
     const rows = (v.questions as QuestionRow[] | undefined) ?? [];
     const bad = rows.map((r) => questionFileError(r.file)).find(Boolean);
     const files = toCopy.find((c) => c.branch === 'main')?.entries.map((e) => e.path) ?? [];
     const next = (nv: Values) => {
-      set({ v: nv, verified: { ...d.verified, '4': signature(nv, S4) } });
-      go(5);
+      set({ v: nv, verified: { ...d.verified, '5': signature(nv, S5) } });
+      go(6);
     };
     body = (
       <>
@@ -371,7 +399,8 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
           <dt>Students</dt><dd>{w.type === 'group' ? 'In teams' : 'Alone'}</dd><dd><a href="#new-assignment-2">Change</a></dd>
           <dt>Submit</dt><dd>{submit}</dd><dd><a href="#new-assignment-2">Change</a></dd>
           <dt>Marking</dt><dd>{`${fmts}; tests ${w.autograde === 'true' ? `on (${String(w.tests ?? 'tests')})` : 'off'}`}</dd><dd><a href="#new-assignment-3">Change</a></dd>
-          <dt>Points</dt><dd>{rows.length ? `${rows.length} question${rows.length === 1 ? '' : 's'}, total ${total}` : 'Not set yet'}</dd><dd><a href="#new-assignment-4">Change</a></dd>
+          <dt>Starter</dt><dd>{STARTER_COPY[starterChoice(v)].label}</dd><dd><a href="#new-assignment-4">Change</a></dd>
+          <dt>Points</dt><dd>{rows.length ? `${rows.length} question${rows.length === 1 ? '' : 's'}, total ${total}` : 'Not set yet'}</dd><dd><a href="#new-assignment-5">Change</a></dd>
         </dl>
         <Checks list={tplNow?.checks ?? null} busy={tpl.busy} pending={[`Assignment template ${repo} created`]} />
         {src && !read ? <CheckLine cls="busy">Reading {srcKey}</CheckLine> : null}
@@ -420,8 +449,8 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates', href: '#templates' }, { t: 'New assignment' }]} />
       <div class="page-head"><div><h1>New assignment <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. Everything here can be changed later in the template’s settings.</Hint></h1></div></div>
       <div class="wizard">
-        <Rail steps={STEPS} cur={step} done={done} heading="Four questions, then a check" base="new-assignment-" />
-        <StepCard ctx={`For ${course.name}`} of={step < 5 ? `Question ${step} of 4` : 'The check'} title={heading} back={back} foot={foot}>{body}</StepCard>
+        <Rail steps={STEPS} cur={step} done={done} heading="Five questions, then a check" base="new-assignment-" />
+        <StepCard ctx={`For ${course.name}`} of={step < 6 ? `Question ${step} of 5` : 'The check'} title={heading} back={back} foot={foot}>{body}</StepCard>
       </div>
     </>
   );

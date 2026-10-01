@@ -468,6 +468,8 @@ export function CourseScreen(p: CourseProps) {
 // --------------------------------------------------------------------------- S17
 
 const gradingValid = validator(gradingSchema);
+/** The page that explains derived and hand-written starters (decision 0028 rule 5). */
+export const STARTER_DOC = 'assignment-starter.md';
 
 export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: QuestionRow[]) => void; files: string[] }) {
   const total = rows.reduce((n, r) => n + (Number(r.points) || 0), 0);
@@ -522,7 +524,7 @@ export function TemplateScreen(p: CourseProps) {
   }
   const tiers = settingsTiers();
   // A template that lists no formats runs on the course's, else the institution's: shown ticked, written only when changed.
-  const read = fromConfig(cfg);
+  const read = fromConfig(cfg, v.course?.templates?.find((t) => t.repo === repo)?.starter);
   const fallbackFormats = formatsList(courseBlock(p.files, course.org, course.meta).formats);
   const base: Values = { ...read, formats: (read.formats as string[]).length ? read.formats : fallbackFormats.length ? fallbackFormats : [...DEFAULT_FORMATS] };
   const cur = values ?? base;
@@ -583,15 +585,22 @@ export function TemplateScreen(p: CourseProps) {
             <div class="form-section">
               <h3>How it is marked <Hint label="About marking">Marking builds a mark sheet per student or team from these settings: the formats to read, whether tests run, and the questions below. You fill the sheet in Marks; totals and late penalties are worked out.</Hint></h3>
               <FormatPicker id="g-fmt" v={cur} set={change} fallback={fallbackFormats.length ? { formats: fallbackFormats, source: 'course' } : undefined} />
-              <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['autograde', 'tests'])} values={cur} onChange={change} />
+              <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['autograde', 'tests', 'starter'])} values={cur} onChange={change} />
               <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} files={files} />
               <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf'])} values={cur} onChange={change} />
               <p class="lives"><a href={ghUrl(course.org, repo, 'grading_config.yml', 'solution')} target="_blank" rel="noopener">Lives in {`${course.org}/${repo}/grading_config.yml`}</a> on the solution branch.</p>
             </div>
-            <div class="form-section">
-              <h3>Student version <Hint label="About the student version">Derive builds the main branch, the copy students get, from the solution branch, removing the marked answers. Run it after every change to the solution.</Hint></h3>
-              <div class="actions"><OpButtons def={derive(scope, repo, repo, heading)} small /></div>
-            </div>
+            {cur.starter === 'derived' ? (
+              <div class="form-section">
+                <h3>Student version <Hint label="About the student version" doc={STARTER_DOC}>Write the solution once and mark the answers; Derive builds the starter students get by blanking them. Run it after every change to the solution.</Hint></h3>
+                <div class="actions"><OpButtons def={derive(scope, repo, repo, heading)} small /></div>
+              </div>
+            ) : (
+              <div class="form-section">
+                <h3>Student version</h3>
+                <p class="footnote">Starter written by hand on main; nothing is derived.</p>
+              </div>
+            )}
             <div class="form-section">
               <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: course.org, repo, path: 'grading_config.yml', branch: 'solution' }} />
             </div>
