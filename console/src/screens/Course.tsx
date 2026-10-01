@@ -157,13 +157,13 @@ export function Whys({ m }: { m: MaterialsState }) {
   return whys.length ? <ul class="r-sub unmet">{whys.map((w) => <li>{w}</li>)}</ul> : null;
 }
 
-/** What each materials check is, for its `?` (decision 0024 rule 8). */
+/** What each materials check is, for its `?`, in the checklist's order. */
 const CHECK_HINT: Record<string, string> = {
   all_mapped: 'The student site and the public website show materials by kind (lectures, labs, readings…), so every top folder a release can copy needs one. Folder names like lectures/ set it; anything else you set under Folder kinds.',
   kind_folder: 'A repo with nothing of a content kind has nothing to release.',
   syllabus: 'The file the student site pins as the syllabus. Still the template text until you write it.',
-  withheld: 'The whole repo is released as it stands unless a line here withholds it. Saving the list once, even empty, marks it reviewed.',
   sessions: 'A block of sessions and readings built from the semester schedule, for pasting into your syllabus. Optional.',
+  withheld: 'The whole repo is released as it stands unless a line here withholds it. Saving the list once, even empty, marks it reviewed.',
 };
 
 /** A materials repo's whole checklist, ticks included: the settings screen's head. */
@@ -179,7 +179,13 @@ export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
             <details class="fold s-kinds">
               <summary>Kinds found</summary>
               <ul class="fold-body">
-                {c.detail.map((d) => <li><b>{KIND_LABEL[d.kind] ?? d.kind}</b>: {d.folders.length ? d.folders.map((f) => `${f}/`).join(', ') : 'none'}</li>)}
+                {/* Every content kind: a tick and its folders when present, nothing when not. */}
+                {c.detail.map((d) => (
+                  <li class={d.folders.length ? 'found' : undefined}>
+                    <span class="k-mark" aria-hidden="true">{d.folders.length ? <Check /> : null}</span>
+                    <b>{KIND_LABEL[d.kind] ?? d.kind}</b>{d.folders.length ? `: ${d.folders.map((f) => `${f}/`).join(', ')}` : <span class="sr">: none</span>}
+                  </li>
+                ))}
               </ul>
             </details>
           ) : null}

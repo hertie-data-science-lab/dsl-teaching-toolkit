@@ -967,3 +967,5 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .all-courses-head .actions { gap: 8px 16px; }
 .all-courses-head .my-only { min-height: 0; align-items: center; }
 .all-courses-head .my-only input { margin-top: 0; }
+.setup .s-kinds .k-mark { display: inline-grid; place-items: center; width: 14px; margin-right: 4px; color: var(--ok); vertical-align: -1px; }
+.setup .s-kinds .k-mark svg { width: 10px; height: 10px; }
