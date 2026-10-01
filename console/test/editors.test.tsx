@@ -440,6 +440,11 @@ describe('editing screens', () => {
     expect(onlyCopy).toContain('>Copy</button>');
     expect(onlyCopy).not.toContain('>Write</button>');
     expect(onlyCopy).toContain('E1282.pdf is not Markdown, so the plan cannot be written into it: copy it and paste it in.');
+    // A Markdown syllabus that is not there yet: nothing to write into either.
+    const absent = new StaticFiles({ ...FILES, [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'syllabus: E1282.md\n' }, {}, TREES);
+    const noFile = html(<MaterialsScreen {...cp} files={absent} entry="course-materials-f2026" />);
+    expect(noFile).not.toContain('>Write</button>');
+    expect(noFile).toContain('There is no E1282.md yet: write the syllabus first, or copy the plan.');
     // No public-website setting here: that list is the Public website tab's.
     expect(out).not.toContain('kept off');
     expect(out).not.toContain('opencourse.yml');

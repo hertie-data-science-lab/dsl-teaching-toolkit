@@ -599,6 +599,12 @@ export function MaterialsScreen(p: CourseProps) {
   const savedSyl = baseSyl.trim() || DEFAULT_SYLLABUS;
   const syllabus = syl ?? savedSyl;
   const sylFile = p.files.file(course.org, repo, syllabus);
+  // Why Write is not offered (Copy still is): a file the plan cannot go into.
+  const noWrite = !isMarkdown(syllabus)
+    ? `${syllabus} is not Markdown, so the plan cannot be written into it: copy it and paste it in.`
+    : sylFile.kind === 'absent' && !files.includes(syllabus)
+      ? `There is no ${syllabus} yet: write the syllabus first, or copy the plan.`
+      : null;
   const ignText = ignFile.kind === 'ready' ? ignFile.text : '';
   const [ign, setIgn] = useState<string | null>(null);
   const [ignSave, runIgn] = useSave(env);
@@ -659,7 +665,7 @@ export function MaterialsScreen(p: CourseProps) {
           <h3>Weekly plan for the syllabus <Hint label="About the weekly plan">Built from the semester schedule: every session with its date and readings. Copy shows it to paste anywhere; Write puts it into your syllabus file.</Hint></h3>
           {scope ? (
             <div class="actions">
-              {isMarkdown(syllabus) ? (
+              {noWrite === null ? (
                 <>
                   <OpButtons def={generateSyllabus(scope, repo, syllabus)} small previewLabel="Copy" label="Write" />
                   <Hint label="About Write">Write puts the plan into {syllabus} between the lines &lt;!-- dsl:weekly-plan --&gt; and &lt;!-- /dsl:weekly-plan --&gt;, adding them under “## Weekly plan” at the end the first time. Move the marked block anywhere in the file and Write updates it there; nothing else changes.</Hint>
@@ -667,7 +673,7 @@ export function MaterialsScreen(p: CourseProps) {
               ) : (
                 <>
                   <button class="btn small" type="button" onClick={() => env?.ops.open(generateSyllabus(scope, repo, syllabus), 'preview')}>Copy</button>
-                  <span class="footnote">{syllabus} is not Markdown, so the plan cannot be written into it: copy it and paste it in.</span>
+                  <span class="footnote">{noWrite}</span>
                 </>
               )}
             </div>

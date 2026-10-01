@@ -17,7 +17,7 @@ export const ASSETS_KIND = rules.assets_kind;
 /** The kind of a release entry that names none and copies nothing yet (`schedule_plan.entry_kind`). */
 export const EMPTY_ENTRY_KIND = rules.empty_entry_kind;
 /** The kinds a folder may be set to (decision 0031 rule 10), in row order: the rest are schedule kinds. */
-export const FOLDER_KINDS = ['lecture', 'lab', 'readings', ASSETS_KIND];
+export const FOLDER_KINDS: string[] = rules.folder_kinds;
 const ALIASES: Record<string, string> = rules.aliases;
 /** The line a `.releaseignore` carries when somebody looked and chose to withhold nothing. */
 export const REVIEWED_MARK: string = rules.reviewed_mark;

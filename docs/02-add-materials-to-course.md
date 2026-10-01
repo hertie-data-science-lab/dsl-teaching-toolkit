@@ -75,7 +75,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
    ```yaml
    syllabus: E1282_syllabus.pdf   # the syllabus the home page pins (default SYLLABUS.md)
    kinds:                         # a top folder -> the kind of the rows it feeds
-     quiz: exam
+     slides: lecture
      seminars: lab
    ```
 

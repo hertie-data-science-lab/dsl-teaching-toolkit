@@ -459,6 +459,12 @@
   ],
   "empty_entry_kind": "lecture",
   "file": "materials.yml",
+  "folder_kinds": [
+    "lecture",
+    "lab",
+    "readings",
+    "assets"
+  ],
   "never_material": [
     ".DS_Store",
     ".gitkeep",
