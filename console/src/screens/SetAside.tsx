@@ -12,7 +12,7 @@ import type { CourseStatus, Todo } from '../model/types';
 import { validator } from '../model/validate';
 import { CheckLine } from '../ui/bits';
 import { Ext } from '../ui/icons';
-import { Modal } from '../ui/Modal';
+import { MODAL_TEXT_ID, Modal } from '../ui/Modal';
 
 const validCourse = validator(courseSchema);
 export const SET_ASIDE_KEY = 'set_aside';
@@ -53,7 +53,7 @@ export function setAsideText(text: string, id: string, on: boolean): { text: str
 /** What the circle before a line asks about: an optional item, a required setup step, or a required to-do. */
 export type Ask =
   | { kind: 'optional'; id: string; label: string }
-  | { kind: 'step'; id: string; label: string; why: string; page: { href: string; label: string; ext?: boolean } }
+  | { kind: 'step'; id: string; label: string; text: string; page: { href: string; label: string; ext?: boolean } }
   | { kind: 'todo'; id: string; label: string; todo: Todo; href: string };
 
 /** A sentence as the tail of "Still missing: ...": first letter lower-case, no full stop. */
@@ -63,11 +63,11 @@ export function missingClause(why: string): string {
 }
 
 /** The circle's question, in decision 0032 rule 4's words. */
-export function SetAsideDialog({ ask, busy, error, onSetAside, onClose }: { ask: Ask; busy: boolean; error?: string; onSetAside: () => void; onClose: () => void }) {
+export function SetAsideDialog({ ask, busy, error, onSetAside, onClose, fallback }: { ask: Ask; busy: boolean; error?: string; onSetAside: () => void; onClose: () => void; fallback?: () => HTMLElement | null | undefined }) {
   if (ask.kind === 'optional') {
     return (
-      <Modal small title={`Set aside “${ask.label}”?`} onClose={onClose}>
-        <p>It’s optional: the course is ready without it. It moves to Set aside at the end of this list, for everyone on the course. You can bring it back at any time.</p>
+      <Modal small title={`Set aside “${ask.label}”?`} onClose={onClose} fallback={fallback}>
+        <p id={MODAL_TEXT_ID}>It’s optional: the course is ready without it. It moves to Set aside at the end of this list, for everyone on the course. You can bring it back at any time.</p>
         {error ? <CheckLine cls="bad">{error}</CheckLine> : null}
         <div class="actions">
           <button class="btn" type="button" disabled={busy} onClick={onSetAside}>{busy ? 'Setting aside…' : 'Set aside'}</button>
@@ -80,8 +80,8 @@ export function SetAsideDialog({ ask, busy, error, onSetAside, onClose }: { ask:
   if (ask.kind === 'step') {
     const { page } = ask;
     return (
-      <Modal small title={title} onClose={onClose}>
-        <p>A new semester needs this step first. Still missing: {missingClause(ask.why)}.</p>
+      <Modal small title={title} onClose={onClose} fallback={fallback}>
+        <p id={MODAL_TEXT_ID}>{ask.text}</p>
         <div class="actions">
           <a class="btn" href={page.href} onClick={onClose} {...(page.ext ? { target: '_blank', rel: 'noopener' } : {})}>{page.label}{page.ext ? <Ext /> : null}</a>
           <button class="btn quiet" type="button" onClick={onClose}>Close</button>
@@ -91,8 +91,8 @@ export function SetAsideDialog({ ask, busy, error, onSetAside, onClose }: { ask:
   }
   const materials = ask.todo.kind === 'materials';
   return (
-    <Modal small title={title} onClose={onClose}>
-      <p>{ask.todo.repo} can’t be {materials ? 'released' : 'handed out'} without it. If you no longer need this {materials ? 'materials repo' : 'assignment template'}, archive its repo on GitHub and it leaves this list.</p>
+    <Modal small title={title} onClose={onClose} fallback={fallback}>
+      <p id={MODAL_TEXT_ID}>{ask.todo.repo} can’t be {materials ? 'released' : 'handed out'} without it. If you no longer need this {materials ? 'materials repo' : 'assignment template'}, archive its repo on GitHub and it leaves this list.</p>
       <div class="actions">
         <a class="btn" href={ask.href} onClick={onClose}>Open settings</a>
         <button class="btn quiet" type="button" onClick={onClose}>Close</button>

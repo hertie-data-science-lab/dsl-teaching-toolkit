@@ -1,7 +1,7 @@
 // S2 Course overview (a status board, decision 0025) and S17 Template settings (read).
 
 import { Fragment, type ComponentChildren } from 'preact';
-import { useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 import { useEnv } from '../env';
 import { invalidText, saveText, useSave } from '../edit/save';
@@ -29,7 +29,7 @@ import { formatError } from '../wizards/model';
 import { courseScope, detailsOf, newestScope, websiteUrl } from './CourseEdit';
 import type { CourseProps } from './types';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from '../model/names';
-import { AsideFold, COURSE_FILE, Circle, SetAsideDialog, asideList, setAsideText, stepAside, todoAside, type Ask } from './SetAside';
+import { AsideFold, COURSE_FILE, Circle, SetAsideDialog, asideList, missingClause, setAsideText, stepAside, todoAside, type Ask } from './SetAside';
 import { REFRESH_HINT, tzOf, yearOf } from './common';
 
 /** The course block and course-scoped problems: from the course's own status, else a semester's. */
@@ -119,11 +119,19 @@ function stepPage(id: string, c: CourseStatus): { href: string; label: string; e
   return { ...own, label: STEP_PAGE[id] ?? own.label };
 }
 
-/** What the circle before a setup step asks: may it be set aside, or why not. */
+const stepName = (id: string) => SETUP_STEPS.find((s) => s.id === id)?.name ?? id;
+
+/** What the circle before a setup step asks: may it be set aside, or why not. A required step that waits for
+ * another names that one and opens its page; one with a problem sends to the problem (decision 0032 rule 4). */
 export function stepAsk(id: string, c: CourseStatus): Ask {
-  const label = SETUP_STEPS.find((s) => s.id === id)?.name ?? id;
+  const label = stepName(id);
   if (c.stage_optional?.[id]) return { kind: 'optional', id, label };
-  return { kind: 'step', id, label, why: c.stage_why?.[id] ?? 'Not done yet.', page: stepPage(id, c) };
+  const first = 'A new semester needs this step first.';
+  const state = c.stages[id];
+  const pre = WAITS_FOR[id];
+  if (state === 'problem') return { kind: 'step', id, label, text: `${first} A problem stops it: fix that first.`, page: { href: '#course-problems', label: 'See the problem' } };
+  if (state === 'blocked' && pre) return { kind: 'step', id, label, text: `${first} It waits for ${stepName(pre)}.`, page: stepPage(pre, c) };
+  return { kind: 'step', id, label, text: `${first} Still missing: ${missingClause(c.stage_why?.[id] ?? 'Not done yet.')}.`, page: stepPage(id, c) };
 }
 
 /** What the circle before a to-do asks. */
@@ -449,11 +457,13 @@ export function statusesSettled(p: Pick<CourseProps, 'course' | 'loaded' | 'coho
 }
 
 /** Each overview panel's height, estimated from what it lists: a heading and one or two lines a row. */
-export function overviewHeights(o: { course: CourseStatus | null; problems: number; semesters: number; description: string; activity: number }): Block[] {
+export function overviewHeights(o: { course: CourseStatus | null; problems: number; semesters: number; description: string; activity: number; list?: string[] | null }): Block[] {
   const HEAD = 3; // the heading and the panel's padding
   const c = o.course;
-  const steps = c && !setupComplete(c) ? SETUP_STEPS.reduce((n, s) => n + (stepAside(c, s.id, null) ? 0 : c.stages[s.id] === 'done' ? 1 : 2), 0) : 0;
-  const todo = c ? openTodos(c).length : 0;
+  // The set-aside list the panel renders from (`asideList`), so the columns match what it shows.
+  const list = o.list ?? null;
+  const steps = c && !setupComplete(c, list) ? SETUP_STEPS.reduce((n, s) => n + (stepAside(c, s.id, list) ? 0 : c.stages[s.id] === 'done' ? 1 : 2), 0) : 0;
+  const todo = c ? openTodos(c, list).length : 0;
   const materials = (c?.materials ?? []).reduce((n, m) => n + 1 + materialsWhys(m).length, 0);
   return [
     { key: 'setup', h: HEAD + (c ? 2 + steps + 2 * todo : 1) },
@@ -473,6 +483,9 @@ export function SetupPanel({ p, c }: { p: CourseProps; c: CourseStatus | null })
   const env = useEnv();
   const { course } = p;
   const [ask, setAsk] = useState<Ask | null>(null);
+  // Which fold the open dialog's line is in (0 Initial setup, 1 To do): where focus goes if that line moved.
+  const [from, setFrom] = useState(0);
+  const panel = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const file = p.files.file(course.org, COURSE_REPO, COURSE_FILE);
@@ -507,22 +520,25 @@ export function SetupPanel({ p, c }: { p: CourseProps; c: CourseStatus | null })
   const todoRows = c ? (c.todo ?? []).filter((t) => todoAside(t, list)).map((t) => ({ id: t.id, label: todoLine(t, c).label, repo: t.repo })) : [];
   const back = write ? (id: string) => void change(id, false) : undefined;
   return (
-    <section class="panel section">
-      <h2>Setup &amp; To do <Hint label="Setup, to-dos and problems">Setup steps are the one-time things a course needs. To-dos are work started but not finished. Problems, on the right, are things that broke.{write ? ' Optional items can be set aside: click the circle before them.' : ''}</Hint></h2>
+    <section class="panel section" ref={panel}>
+      <h2>Setup &amp; To do <Hint label="Setup, to-dos and problems">Setup steps are the one-time things a course needs; to-dos are work started but not finished. Problems, on the right, are things that broke.{write ? ' Optional items can be set aside: click the circle before them.' : ''}</Hint></h2>
       {c ? (
         <>
           <details class="fold setup-fold" open={!setupComplete(c, list)}>
             <summary><span class="fold-title">Initial setup</span><span class="cnt">{setupComplete(c, list) ? 'Complete' : `${steps.filter((x) => c.stages[x.id] === 'done').length} of ${steps.length} done`}</span></summary>
-            <SetupList course={c} list={list} onCircle={write ? (id) => setAsk(stepAsk(id, c)) : undefined} />
+            <SetupList course={c} list={list} onCircle={write ? (id) => (setFrom(0), setAsk(stepAsk(id, c))) : undefined} />
             <AsideFold rows={stepRows} busy={busy} onBack={back} />
           </details>
           <details class="fold setup-fold" open={!!open.length}>
             <summary><span class="fold-title">To do</span><span class="cnt">{open.length ? `${open.length} open` : 'Nothing to do'}</span></summary>
-            <TodoList course={c} list={list} onCircle={write ? (t) => setAsk(todoAsk(t, c)) : undefined} />
+            <TodoList course={c} list={list} onCircle={write ? (t) => (setFrom(1), setAsk(todoAsk(t, c))) : undefined} />
             <AsideFold rows={todoRows} busy={busy} onBack={back} />
           </details>
           {error && !ask ? <CheckLine cls="bad">{error}</CheckLine> : null}
-          {ask ? <SetAsideDialog ask={ask} busy={busy} error={error} onSetAside={() => void change(ask.id, true)} onClose={close} /> : null}
+          {ask ? <SetAsideDialog ask={ask} busy={busy} error={error} onSetAside={() => void change(ask.id, true)} onClose={close} fallback={() => {
+            const fold = panel.current?.querySelectorAll<HTMLElement>('.setup-fold')[from];
+            return fold?.querySelector<HTMLElement>('.aside-fold > summary') ?? fold?.querySelector<HTMLElement>(':scope > summary');
+          }} /> : null}
         </>
       ) : <p class="footnote">Status not computed yet.</p>}
     </section>
@@ -641,7 +657,7 @@ export function CourseScreen(p: CourseProps) {
       </>
     ),
   };
-  const [left, right] = statusesSettled(p) ? splitColumns(overviewHeights({ course: v.course, problems: problems.length, semesters: course.cohorts.length, description, activity: recentActivity(ops).length })) : SETTLING_COLUMNS;
+  const [left, right] = statusesSettled(p) ? splitColumns(overviewHeights({ course: v.course, problems: problems.length, semesters: course.cohorts.length, description, activity: recentActivity(ops).length, list: asideList(p.files.file(course.org, COURSE_REPO, COURSE_FILE)) })) : SETTLING_COLUMNS;
   return (
     <>
       <CourseSubActions course={course} loaded={p.loaded} files={p.files} now={p.now} computed={v.computed} />

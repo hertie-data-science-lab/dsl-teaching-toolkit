@@ -347,7 +347,7 @@ describe('S2 course and S17 template', () => {
     // C1-C3 are done; the template's problem is what holds the course back.
     expect(t).toContain('Not ready: a problem below needs fixing.');
     expect(t).not.toMatch(/\b0 (setup steps|problems)/);
-    expect(t).toContain('Setup steps are the one-time things a course needs. To-dos are work started but not finished.');
+    expect(t).toContain('Setup steps are the one-time things a course needs; to-dos are work started but not finished. Problems, on the right, are things that broke. Optional items can be set aside: click the circle before them.');
     expect(t).toContain('Unfinished work is a to-do on the left, not a problem.');
     expect(t).toContain('Students get only what a semester releases or hands out');
     expect(t).toContain('Marking of Assignment 3 cannot start.');

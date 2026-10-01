@@ -12,9 +12,10 @@ import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { CourseStatus, Status } from '../src/model/types';
+import { CONFLICT } from '../src/edit/save';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
-import { SetupPanel } from '../src/screens/Course';
+import { SetupPanel, overviewHeights } from '../src/screens/Course';
 import { setAsideText } from '../src/screens/SetAside';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, json, type Seen } from './fake';
@@ -103,6 +104,43 @@ describe('the circle before an optional item', () => {
     expect(dialog()).toBeNull();
     expect(folds()).toEqual([]);
   });
+
+  it('keeps the dialog open on a stale file and writes nothing', async () => {
+    const f = files();
+    const stale = new FakeGitHub().on('PUT', /\/contents\//, () => json({ message: 'dsl-course.yml does not match static' }, 409));
+    await mount(BASE, f, stale);
+    await act(() => circle('Public website').click());
+    await act(() => button('Set aside').click());
+    await settle(() => !!dialog()?.querySelector('.bad'));
+    expect(dialog()!.textContent).toContain(CONFLICT);
+    expect(f.file(ORG, '.github', 'dsl-course.yml')).toMatchObject({ kind: 'ready', text: META });
+    expect(folds()).toEqual([]);
+    expect(button('Set aside')).toBeDefined();
+  });
+
+  it('is described by its text, names one Close, and gives focus back on close', async () => {
+    await mount(BASE, files());
+    circle('Public website').focus();
+    await act(() => circle('Public website').click());
+    const d = dialog()!;
+    expect(d.getAttribute('aria-describedby')).toBe('modal-text');
+    expect(d.querySelector('#modal-text')!.textContent).toMatch(/^It’s optional/);
+    expect(d.querySelector('.x')!.getAttribute('aria-hidden')).toBe('true');
+    expect([...d.querySelectorAll('button:not([aria-hidden])')].filter((b) => (b.getAttribute('aria-label') ?? b.textContent) === 'Close')).toHaveLength(0);
+    await act(() => button('Cancel').click());
+    await settle(() => document.activeElement === circle('Public website'));
+    expect(document.activeElement).toBe(circle('Public website'));
+  });
+
+  it('sends focus to the Set aside fold when the line it came from moved', async () => {
+    await mount(BASE, files());
+    circle('Public website').focus();
+    await act(() => circle('Public website').click());
+    await act(() => button('Set aside').click());
+    await settle(() => !dialog());
+    await settle(() => document.activeElement?.tagName === 'SUMMARY');
+    expect(document.activeElement!.textContent).toBe('Set aside (1)');
+  });
 });
 
 describe('the circle before a required item', () => {
@@ -116,6 +154,22 @@ describe('the circle before a required item', () => {
     await act(() => button('Close').click());
     expect(dialog()).toBeNull();
     expect(puts(gh)).toHaveLength(0);
+  });
+
+  it('names the step a blocked one waits for and opens that step’s page', async () => {
+    const c = { ...BASE, stages: { ...BASE.stages, C2: 'todo' as const, C3: 'blocked' as const }, stage_why: { C3: 'Waiting for the course to be set up.' } };
+    await mount(c, files());
+    await act(() => circle('Course details filled in').click());
+    expect(dialog()!.querySelector('#modal-text')!.textContent).toBe('A new semester needs this step first. It waits for Course set up on GitHub.');
+    expect(button('Open .github').getAttribute('href')).toBe(`https://github.com/${ORG}/.github`);
+  });
+
+  it('sends a step with a problem to the problem', async () => {
+    const c = { ...BASE, stages: { ...BASE.stages, C3: 'problem' as const }, stage_why: { C3: '1 problem needs fixing.' } };
+    await mount(c, files());
+    await act(() => circle('Course details filled in').click());
+    expect(dialog()!.querySelector('#modal-text')!.textContent).toBe('A new semester needs this step first. A problem stops it: fix that first.');
+    expect(button('See the problem').getAttribute('href')).toBe('#course-problems');
   });
 
   it('says a required to-do stops the repo, materials released and templates handed out', async () => {
@@ -147,6 +201,12 @@ describe('the Set aside fold', () => {
     await settle(() => folds().length === 1);
     expect(body(puts(gh)[0])).toBe(`${META}set_aside:\n  - ${SESSIONS}\n`);
     expect(circle('Public website')).not.toBeNull();
+  });
+
+  it('weighs the overview from the same list the panel shows', () => {
+    const o = { course: BASE, problems: 0, semesters: 0, description: '', activity: 0 };
+    const plain = overviewHeights({ ...o, list: [] })[0].h;
+    expect(overviewHeights({ ...o, list: ['C6', SESSIONS] })[0].h).toBe(plain - 2 - 2);
   });
 
   it('drops the key when the last id is brought back', () => {
