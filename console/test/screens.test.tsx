@@ -347,7 +347,7 @@ describe('S2 course and S17 template', () => {
     // C1-C3 are done; the template's problem is what holds the course back.
     expect(t).toContain('Not ready: a problem below needs fixing.');
     expect(t).not.toMatch(/\b0 (setup steps|problems)/);
-    expect(t).toContain('Setup steps are the one-time things a course needs. To-dos are work started but not finished.');
+    expect(t).toContain('Setup steps are the one-time things a course needs; to-dos are work started but not finished. Problems, on the right, are things that broke. Optional items can be set aside: click the circle before them.');
     expect(t).toContain('Unfinished work is a to-do on the left, not a problem.');
     expect(t).toContain('Students get only what a semester releases or hands out');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
@@ -393,7 +393,8 @@ describe('S2 course and S17 template', () => {
     expect(out).toContain('<summary><span class="fold-title">To do</span><span class="cnt">1 open</span></summary>');
     const todo = out.slice(out.indexOf('>To do</span>'), out.indexOf('</details>', out.indexOf('>To do</span>')));
     // The same markup as the setup list: an open line, its check's label and ?, why and the link.
-    expect(todo).toContain('<ul class="setup"><li class="open"><span class="s-mark" aria-hidden="true"></span>');
+    // With write access the circle is a button that asks whether the line can be set aside (decision 0032).
+    expect(todo).toContain('<ul class="setup"><li class="open"><button class="s-mark s-circle" type="button" title="Set aside…" aria-label="Set aside Weekly plan in the syllabus…" aria-haspopup="dialog"></button>');
     expect(todo).toContain('Weekly plan in the syllabus<span class="s-need slug">course-materials-f2026</span><span class="sr">: To do</span>');
     expect(todo).toContain('Every session with its date and readings, built from the semester schedule');
     expect(todo).toContain('<span class="s-why">The weekly plan is not in SYLLABUS.md yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a></span>');
@@ -408,10 +409,14 @@ describe('S2 course and S17 template', () => {
     // The fixture's C5 has a problem: setup is open, and so is To do with its one item.
     expect(setupComplete(base)).toBe(false);
     expect((html(<CourseScreen {...cp} />).match(/<details class="fold setup-fold" open>/g) ?? []).length).toBe(2);
-    // Every step done but the optional website: complete, folded, and To do with nothing folds too.
+    // Every step done but the website, still open: not complete (decision 0032 rule 5).
     const done = { ...base, stages: { ...base.stages, C5: 'done' }, todo: [] } as typeof base;
-    expect(setupComplete(done)).toBe(true);
-    const out = html(<CourseScreen {...cp} loaded={{ kind: 'ready', status: { ...STATUS, course: done }, sha: 's', stale: [] }} />);
+    expect(setupComplete(done)).toBe(false);
+    // Set aside, it no longer counts: complete, folded, and To do with nothing folds too.
+    const aside = { ...done, stage_set_aside: { ...done.stage_set_aside, C6: true } } as typeof base;
+    expect(setupComplete(aside)).toBe(true);
+    const f = new StaticFiles({ [`${COURSE_ORG}/.github/dsl-course.yml`]: 'course_name: Machine Learning\nset_aside: [C6]\n' });
+    const out = html(<CourseScreen {...cp} files={f} loaded={{ kind: 'ready', status: { ...STATUS, course: aside }, sha: 's', stale: [] }} />);
     expect(out).not.toContain('<details class="fold setup-fold" open>');
     expect(out).toContain('<summary><span class="fold-title">Initial setup</span><span class="cnt">Complete</span></summary>');
     expect(out).toContain('<summary><span class="fold-title">To do</span><span class="cnt">Nothing to do</span></summary>');

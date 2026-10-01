@@ -4,13 +4,13 @@
 // Every run setting shows its effective value and where it comes from; a save writes only
 // the keys the instructor set.
 
-import type { ComponentChildren } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import scheduleSchema from '../../schemas/schedule.schema.json';
 import { useEnv } from '../env';
 import { invalidText, saveSteps, useSave, type SaveState, type Step } from '../edit/save';
 import { YamlText, compact, deepEqual, obj, type Path } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
+import { Modal } from '../ui/Modal';
 import {
   REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
   validAssignments, valueWord, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
@@ -86,41 +86,6 @@ export function SemesterDefaults({ p }: { p: ReadyProps }) {
       </p>
       {open ? <Modal title="Defaults for this semester’s assignments" onClose={close}><DefaultsForm p={p} f={f} draft={draft} setDraft={setDraft} /></Modal> : null}
     </>
-  );
-}
-
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-/** A modal dialog: Escape and a click on the scrim close it; focus moves in and Tab stays inside. */
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
-  const box = useRef<HTMLDivElement>(null);
-  const downOnScrim = useRef(false);
-  useEffect(() => {
-    box.current?.focus();
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') return onClose();
-      if (e.key !== 'Tab' || !box.current) return;
-      const all = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
-      if (!all.length) return;
-      const first = all[0], last = all[all.length - 1], at = document.activeElement;
-      if (e.shiftKey && (at === first || at === box.current)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && (at === last || !box.current.contains(at))) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', key);
-    return () => document.removeEventListener('keydown', key);
-  }, []);
-  return (
-    <div class="modal-scrim" onMouseDown={(e) => (downOnScrim.current = e.target === e.currentTarget)} onClick={(e) => downOnScrim.current && e.target === e.currentTarget && onClose()}>
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex={-1} ref={box}>
-        <div class="entry-head"><h2 id="modal-title">{title}</h2><button class="x" type="button" aria-label="Close" onClick={onClose}>&times;</button></div>
-        <div class="entry-body">{children}</div>
-      </div>
-    </div>
   );
 }
 

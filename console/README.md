@@ -129,7 +129,8 @@ console is in instructor mode for anyone who teaches somewhere, and in student m
 The **side nav** is one tree in both consoles (decision 0031 rule 11), with the chevron before
 what it expands. An instructor's is anchored on the open course: "All courses" above it, the
 course name (a link to its overview), the course's pages (Overview first, where the name
-goes, as a semester's Dashboard is where its name goes), then its semesters as nodes: being set up
+goes, as a semester's Dashboard is where its name goes; a read-only course shows only Overview),
+then its semesters as nodes: being set up
 first, every live one (a green dot), then past ones ("ended" or "archived") newest first to
 three rows, the rest under "Older semesters (n)". The open semester is expanded to its nine
 pages, else on a course page the newest live one; one at a time. Other courses are reached
@@ -149,8 +150,12 @@ how old that file's facts are ("Updated 3 h ago"). The footer names the course a
 semester. On a phone the preview's top-bar link reads "Preview".
 
 The **course overview** is a status board in two columns. Setup & To do heads the left: two
-folds, Initial setup (folded once every step but the optional website is done) and To do (open
-while it has items), the same checklist with a `?` on each line. Problems heads the right (the
+folds, Initial setup (folded once every step not set aside is done) and To do (open while it
+has items), the same checklist with a `?` on each line. For a viewer with write access the circle
+before an open line is a button (decision 0032): an optional item (the engine's `stage_optional`
+or a to-do's `optional`) can be set aside, which writes its id into `dsl-course.yml`'s
+`set_aside:` through the Course details save path and moves it to a "Set aside (n)" fold at the
+end of its section, with Bring back; a required one says why it cannot be and where it is done. Problems heads the right (the
 course's, then each live semester's, tagged). The other panels, Semesters (each with its next
 automatic event), Course details (with the public website's indicator and Publish button),
 Recent activity (the last five operations across the course and its live semesters; who ran

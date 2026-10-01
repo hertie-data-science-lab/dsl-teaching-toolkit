@@ -1102,6 +1102,28 @@ def course_admin_count(meta: dict) -> int:
 
 # The course stages a new semester needs done (decision 0019); C4-C6 are listed, optional.
 REQUIRED_COURSE_STAGES = COURSE_STAGES[:3]
+# `dsl-course.yml`'s list of optional setup steps and to-dos the course has set aside
+# (decision 0032).
+SET_ASIDE_KEY = "set_aside"
+
+
+def set_aside_ids(meta: dict) -> frozenset[str]:
+    """The ids `dsl-course.yml` sets aside: its `set_aside:` list, the strings in it. Any
+    other shape, or an absent key, sets nothing aside; an unknown id is never a fault, it
+    simply matches nothing (decision 0032 rule 2)."""
+    raw = meta.get(SET_ASIDE_KEY)
+    if not isinstance(raw, list):
+        return frozenset()
+    return frozenset(x.strip() for x in raw if isinstance(x, str) and x.strip())
+
+
+def stage_set_aside(stages: dict[str, str], aside: frozenset[str]) -> dict[str, bool]:
+    """Decision 0032: an optional stage that is not done and that the course lists. A
+    required stage's id, or a done stage's, is ignored."""
+    return {
+        s: s not in REQUIRED_COURSE_STAGES and state != DONE and s in aside
+        for s, state in stages.items()
+    }
 
 
 def course_ready(stages: dict[str, str], problems: list[dict]) -> bool:
@@ -1126,7 +1148,9 @@ def render_course(
     - C5 any template `ready`;
     - C6 `opencourse.yml` turns the public website on and its repo exists.
     `ready` (decision 0019) is C1-C3 done and no course-scope problem standing: a new
-    semester can start. Materials, templates and the website are listed but optional."""
+    semester can start. Materials, templates and the website are listed but optional:
+    `dsl-course.yml`'s `set_aside:` may list them (decision 0032), and `stage_set_aside`
+    marks those still not done."""
     problems = [problem_from_fault(f, facts.org, now) for f in facts.faults]
     problems += [
         materials_problem(m, facts.org) for m in facts.materials if not m.topic
@@ -1137,6 +1161,7 @@ def render_course(
     for t in facts.templates:
         problems += [problem_from_fault(f, facts.org, now) for f in t.faults]
     meta = facts.meta
+    aside = set_aside_ids(meta)
     todo = course_checks(facts)
     done = {stage: todo[stage] is None for stage in COURSE_STAGES}
     standing = [*problems, *rolled_up]
@@ -1148,6 +1173,9 @@ def render_course(
         "app_installed": app_installed(),
         "stages": stages,
         "stage_why": stage_why(stages, todo, standing),
+        # Decision 0032: which stages may be set aside, and which are.
+        "stage_optional": {s: s not in REQUIRED_COURSE_STAGES for s in stages},
+        "stage_set_aside": stage_set_aside(stages, aside),
         "ready": course_ready(stages, standing),
         "materials": [
             {
@@ -1167,17 +1195,20 @@ def render_course(
             for t in facts.templates
         ],
         "semesters": list(facts.registry),
-        "todo": course_todo(facts),
+        "todo": course_todo(facts, aside),
     }
     return block, problems
 
 
-def course_todo(facts: CourseFacts) -> list[dict]:
+def course_todo(facts: CourseFacts, aside: frozenset[str] = frozenset()) -> list[dict]:
     """Decision 0022 rule 3: work started and not finished, one entry per missing item -
     every unmet check of a materials repo (the non-blocking ones of a ready repo too) and
-    every template whose brief is the placeholder. Materials first, then by repo, then
-    check order. Never a
-    problem: a repo without its topic is the migration's problem, not a to-do."""
+    every template whose brief is the placeholder or whose starter is not in place.
+    Materials first, then by repo, then check order. Never a problem: a repo without its
+    topic is the migration's problem, not a to-do.
+    Decision 0032: `optional` is a to-do that blocks nothing (a materials check that does
+    not block `ready`); `set_aside` is an optional one whose id is in `aside`. A required
+    to-do's id in `aside` is ignored."""
     out = []
     for m in facts.materials:
         if not m.topic:
@@ -1190,6 +1221,7 @@ def course_todo(facts: CourseFacts) -> list[dict]:
                 "text": c["why"],
                 "screen": "materials",
                 "entry": m.repo,
+                "optional": not c["blocks"],
             }
             for c in materials_checks(m)
             if not c["done"]
@@ -1202,6 +1234,7 @@ def course_todo(facts: CourseFacts) -> list[dict]:
             "text": f"The brief ({README_FILE}) is not written yet.",
             "screen": "template",
             "entry": t.repo,
+            "optional": False,
         }
         for t in facts.templates
         if t.topic and not _written(t.readme)
@@ -1214,10 +1247,13 @@ def course_todo(facts: CourseFacts) -> list[dict]:
             "text": text,
             "screen": "template",
             "entry": t.repo,
+            "optional": False,
         }
         for t in facts.templates
         if t.topic and (text := t.starter_todo)
     ]
+    for e in out:
+        e["set_aside"] = e["optional"] and e["id"] in aside
     return sorted(out, key=lambda e: (e["kind"] != "materials", e["repo"]))
 
 

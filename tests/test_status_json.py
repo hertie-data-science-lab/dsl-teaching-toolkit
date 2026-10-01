@@ -2010,12 +2010,114 @@ def test_the_todo_list_is_every_unmet_check_and_every_unwritten_brief():
         "text": "The brief (README.md) is not written yet.",
         "screen": "template",
         "entry": "assignment-2",
+        "optional": False,
+        "set_aside": False,
     }
     assert todo[1]["text"] == "There is no SYLLABUS.md yet."
     assert (todo[1]["screen"], todo[1]["entry"]) == ("materials", "course-materials-b")
     # To-dos never enter the problem list.
     assert doc["problems"] == []
     assert validate(doc, schemas.status_schema()) == []
+
+
+# ------------------------------------------------- set aside optional items (0032)
+
+
+def _aside(course: status_json.CourseFacts, ids) -> status_json.CourseFacts:
+    course.meta = {**course.meta, "set_aside": ids}
+    return course
+
+
+def test_optional_setup_steps_and_to_dos_are_marked_and_required_ones_are_not():
+    course = _course(
+        materials=[_materials("course-materials-b", None)],
+        templates=[status_json.TemplateFacts("assignment-2", None)],
+        public_site=False,
+        website_on=False,
+    )
+    block = _course_block(course)
+    assert block["stage_optional"] == {
+        "C1": False,
+        "C2": False,
+        "C3": False,
+        "C4": True,
+        "C5": True,
+        "C6": True,
+    }
+    # The non-blocking materials checks are optional; the syllabus and a brief are not.
+    optional = {t["id"]: t["optional"] for t in block["todo"]}
+    assert optional == {
+        "materials:course-materials-b:syllabus": False,
+        "materials:course-materials-b:sessions": True,
+        "materials:course-materials-b:withheld": True,
+        "template:assignment-2:brief": False,
+    }
+    # Absent key: nothing is set aside (forward-only, no migration).
+    assert not any(block["stage_set_aside"].values())
+    assert not any(t["set_aside"] for t in block["todo"])
+
+
+def test_set_aside_marks_only_optional_items_that_are_not_done():
+    course = _aside(
+        _course(
+            materials=[_materials("course-materials-b", None)],
+            templates=[status_json.TemplateFacts("assignment-2", None)],
+            public_site=False,
+            website_on=False,
+        ),
+        [
+            "C6",
+            "C3",  # required: ignored
+            "materials:course-materials-b:withheld",
+            "materials:course-materials-b:syllabus",  # required: ignored
+            "template:assignment-2:brief",  # required: ignored
+        ],
+    )
+    doc = status_json.render_course_file(course, NOW)
+    block = doc["course"]
+    assert [s for s, on in block["stage_set_aside"].items() if on] == ["C6"]
+    assert [t["id"] for t in block["todo"] if t["set_aside"]] == [
+        "materials:course-materials-b:withheld"
+    ]
+    # Setting aside changes no stage, no verdict, no problem.
+    plain = status_json.render_course_file(_aside(course, []), NOW)
+    assert block["stages"] == plain["course"]["stages"]
+    assert block["ready"] == plain["course"]["ready"]
+    assert doc["problems"] == plain["problems"]
+    assert validate(doc, schemas.status_schema()) == []
+
+
+def test_a_set_aside_item_done_anyway_shows_done_and_its_id_is_ignored():
+    # The website is on and published, the withheld patterns reviewed: both done.
+    course = _aside(
+        _course(
+            materials=[_materials("course-materials-a", releaseignore="drafts/\n")]
+        ),
+        ["C6", "materials:course-materials-a:withheld"],
+    )
+    block = _course_block(course)
+    assert block["stages"]["C6"] == "done"
+    assert block["stage_set_aside"]["C6"] is False
+    assert "materials:course-materials-a:withheld" not in {
+        t["id"] for t in block["todo"]
+    }
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        ["no-such-item", "materials:gone:withheld", 7, None, ""],
+        "C6",  # not a list
+        {"C6": True},
+        None,
+    ],
+)
+def test_unknown_ids_and_other_shapes_set_nothing_aside_and_raise_no_fault(raw):
+    course = _aside(_course(public_site=False, website_on=False), raw)
+    doc = status_json.render_course_file(course, NOW)
+    assert not any(doc["course"]["stage_set_aside"].values())
+    assert doc["problems"] == []
+    assert status_json.set_aside_ids({"set_aside": ["  C6 ", 3]}) == {"C6"}
 
 
 # ------------------------------------------------- the starter: derived or by hand (0028)
@@ -2035,6 +2137,8 @@ def test_a_template_with_a_starter_to_do_is_not_ready_and_lists_it():
         "text": "Derive has not been run yet.",
         "screen": "template",
         "entry": "assignment-1",
+        "optional": False,
+        "set_aside": False,
     }
     assert doc["problems"] == []
     assert validate(doc, schemas.status_schema()) == []

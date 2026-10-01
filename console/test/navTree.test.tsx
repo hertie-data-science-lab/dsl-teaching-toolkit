@@ -70,6 +70,18 @@ describe('the instructor tree', () => {
     expect(nodes(h)).toEqual([{ name: 'Fall 2026', open: true, folded: false, live: true }]);
   });
 
+  it('shows a read-only course its Overview, current on the overview, and hides the edit pages', () => {
+    const ro = { ...course(['f2026']), write: false };
+    const h = show(<Sidenav courses={[ro]} course={ro} cohortStates={{}} current="course" now={NOW} />);
+    const cur = h.querySelectorAll('[aria-current]');
+    expect(cur).toHaveLength(1);
+    expect(cur[0].textContent).toBe('Overview');
+    expect(cur[0].getAttribute('href')).toBe(`?course=${COURSE_ORG}#course`);
+    const t = h.textContent!;
+    for (const page of ['Course details', 'Handout materials', 'Assignment templates', 'Public website']) expect(t).not.toContain(page);
+    expect(t).toContain('Read only: other pages need write access.');
+  });
+
   it('with three semesters, shows them all newest first, marks the past ones ended, and expands the newest live one', () => {
     const c = course(['f2025', 'f2026', 's2026']);
     const h = show(<Sidenav courses={[c]} course={c} cohortStates={{}} current="details" now={NOW} />);
