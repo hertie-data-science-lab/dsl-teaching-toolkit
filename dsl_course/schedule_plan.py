@@ -19,8 +19,8 @@ from .gh_contents import line_of
 from .log import Summary, log_err
 from .materials import (
     ASSETS_KIND,
-    DEFAULT_KIND,
     DEFAULT_SYLLABUS,
+    EMPTY_ENTRY_KIND,
     Declared,
     alias_kind,
     infer_kind,
@@ -56,7 +56,8 @@ def entry_kind(
     release: schedule.Release, aliases: Aliases = _no_aliases
 ) -> tuple[str, bool]:
     """`(kind, inferred)` for a `releases:` entry: the kind it declares, else the kind the
-    section of its first copy implies, else `lecture` (an entry that copies nothing yet)."""
+    section of its first copy implies (supporting files when no alias names it), else
+    `lecture` (an entry that copies nothing yet)."""
     if release.kind:
         return release.kind, False
     if release.deploy:
@@ -64,7 +65,7 @@ def entry_kind(
         return infer_kind(
             deploy_section(first), aliases(first.course_source_repo)
         ), True
-    return DEFAULT_KIND, True
+    return EMPTY_ENTRY_KIND, True
 
 
 @dataclass

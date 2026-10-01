@@ -512,6 +512,11 @@
             "description": "Repo holding the syllabus",
             "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
             "type": "string"
+          },
+          "syllabus": {
+            "description": "The syllabus file to write into",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
           }
         },
         "required": [
@@ -521,7 +526,7 @@
       },
       "counts_doc": "",
       "doc": "docs/07-schedule-releases.md",
-      "help": "Write the syllabus's weekly plan from the semester's schedule.",
+      "help": "Write the weekly plan into the syllabus, from the semester's schedule.",
       "name": "assignment.generate_syllabus",
       "preview": true,
       "required_team": "instructors",

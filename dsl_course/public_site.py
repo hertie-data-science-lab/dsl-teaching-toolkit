@@ -32,7 +32,7 @@ from .faults import Unusable
 from .fs import copy_tree, union_deny
 from .ghcli import clone
 from .log import Summary, log, log_err, log_step
-from .materials import ASSETS_KIND, MATERIALS_FILE, Declared, alias_kind
+from .materials import ASSETS_KIND, MATERIALS_FILE, Declared, infer_kind
 from .materials import parse as parse_materials
 from .opencourse import OPENCOURSE_FILE, OpenCourse
 from .opencourse import read as read_opencourse
@@ -68,10 +68,10 @@ from .site_repo import (
 PUBLIC_MATERIALS_DIR = "public-materials"
 
 # The open site is still built from one repo's folders (its own design, `openware`, is
-# not written yet): `readings` is the section `opencourse.yml`'s `readings_mode` governs, and `labs` is the
-# one section that makes a lab row. The semester site reads kinds from the schedule.
+# not written yet): `readings` is the section `opencourse.yml`'s `readings_mode` governs,
+# and a lab-kind section makes a lab row (`row_kind`). The semester site reads kinds from
+# the schedule.
 READINGS_SECTION = "readings"
-LAB_SECTION = "labs"
 
 
 def _declared(src: Path) -> Declared:
@@ -86,14 +86,15 @@ def _declared(src: Path) -> Declared:
 
 
 def shown_sections(sections: list[str], kinds: dict[str, str]) -> list[str]:
-    """The sections that get rows: a supporting-files one (`data/`, `img/`, ...) never
-    does (decision 0026 rule 3)."""
-    return [s for s in sections if alias_kind(s, kinds) != ASSETS_KIND]
+    """The sections that get rows: a supporting-files one (`data/`, `img/`, and any
+    folder no alias names) never does (decisions 0026 rule 3, 0031 rule 10)."""
+    return [s for s in sections if infer_kind(s, kinds) != ASSETS_KIND]
 
 
-def row_kind(section: str) -> str:
-    """The open site's row for a section: 'lab' for `labs`, else 'lecture'."""
-    return "lab" if section == LAB_SECTION else "lecture"
+def row_kind(section: str, kinds: dict[str, str]) -> str:
+    """The open site's row for a section: 'lab' for a lab-kind one (`labs/`,
+    `tutorials/`, or so declared), else 'lecture' (the session row)."""
+    return "lab" if infer_kind(section, kinds) == "lab" else "lecture"
 
 
 def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
@@ -285,11 +286,13 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             # use), not a hardcoded lectures/readings pair - a course whose content lives
             # in `labs/` publishes labs. `readings` is the one section with special
             # semantics (`readings_mode`, below); `include_lectures` gates all the others.
-            # Supporting-files sections are never rows here either.
+            # Supporting-files sections (any folder no alias names) are never rows here
+            # either.
+            kinds = dict(_declared(src).kinds)
             file_sections = (
                 shown_sections(
                     [sec for sec in discover_sections(src) if sec != READINGS_SECTION],
-                    dict(_declared(src).kinds),
+                    kinds,
                 )
                 if include_lectures
                 else []
@@ -318,7 +321,9 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                     links = _public_links(dest, f"{url_base}/{section}")
                     if links:
                         rows = (
-                            lab_links if row_kind(section) == "lab" else section_links
+                            lab_links
+                            if row_kind(section, kinds) == "lab"
+                            else section_links
                         )
                         rows.append((section, links))
 

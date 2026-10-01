@@ -741,6 +741,8 @@ def materials_json() -> dict:
         "file": materials.MATERIALS_FILE,
         "default_syllabus": materials.DEFAULT_SYLLABUS,
         "default_kind": materials.DEFAULT_KIND,
+        "assets_kind": materials.ASSETS_KIND,
+        "empty_entry_kind": materials.EMPTY_ENTRY_KIND,
         "aliases": materials.BUILTIN_ALIASES,
         "reviewed_mark": releaseignore.REVIEWED_MARK,
         "denylist": list(PUBLICATION_DENYLIST),

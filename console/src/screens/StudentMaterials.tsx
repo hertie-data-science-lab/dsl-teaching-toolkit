@@ -11,6 +11,7 @@ import type { TreeEntry } from '../github/client';
 import { buildTree, type TreeNode } from '../edit/badges';
 import { openDeck } from '../model/deckTab';
 import { fmtDay } from '../model/format';
+import { ASSETS_KIND, aliasKind } from '../model/materialsRules';
 import { showFile, type Shown } from '../model/materials';
 import { sortedRows, type SemesterFacts } from '../model/student';
 import { studentHref } from '../router';
@@ -54,11 +55,13 @@ export function MaterialsView({ org, repos, entry }: { org: string; repos: strin
   return <MaterialsTree org={org} trees={trees.value} />;
 }
 
-/** Top folder names that hold supporting files (the `assets` kind of decision 0026; the status file carries no kinds). */
-export const SUPPORT_DIRS = ['data', 'img', 'images', 'src', 'assets', 'figures', 'fig', 'static'];
-
-/** A top-level tree node is supporting files: a folder with one of those names. */
-export const isSupport = (n: TreeNode) => !!n.children && SUPPORT_DIRS.includes(n.name.toLowerCase());
+/**
+ * A top-level tree node is supporting files (decision 0026): a folder the engine's built-in
+ * names make so (data/, img/, ...). Only those: a folder no name covers is supporting files
+ * by default (decision 0031), but the status file carries no repo's own kinds, so one the
+ * instructor set to a lecture or lab would be folded away by mistake.
+ */
+export const isSupport = (n: TreeNode) => !!n.children && aliasKind(n.name) === ASSETS_KIND;
 
 export function MaterialsTree({ org, trees }: { org: string; trees: (readonly [string, TreeEntry[] | null])[] }) {
   const shown = trees.filter(([, t]) => t !== null);

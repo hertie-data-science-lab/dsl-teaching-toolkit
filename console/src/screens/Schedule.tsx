@@ -33,7 +33,7 @@ import { parse } from 'yaml';
 import { RunRows, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
-import { CONTENT_KINDS, DEFAULT_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
+import { CONTENT_KINDS, EMPTY_ENTRY_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
 import { otherRepos } from './CourseIndex';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
@@ -121,7 +121,7 @@ function FolderCheck({ p, dp, i, onSuggest }: { p: ReadyProps; dp: DeployDraft; 
 /** The kind an entry that names none takes (`schedule_plan.entry_kind`): from where its first copy lands. */
 export function inferredKind(p: ReadyProps, d: ReleaseDraft): string {
   const first = d.deploys[0];
-  if (!first) return DEFAULT_KIND;
+  if (!first) return EMPTY_ENTRY_KIND;
   const mat = first.repo ? p.files.file(p.course.org, first.repo, MATERIALS_FILE) : null;
   const aliases = (mat?.kind === 'ready' ? readDeclared(mat.text) : null)?.kinds ?? {};
   return inferKind(landingSection(first, DEFAULT_DEST_REPO), aliases).kind;

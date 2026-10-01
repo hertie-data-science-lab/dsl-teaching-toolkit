@@ -1,16 +1,16 @@
-"""dsl-course syllabus -- build the "Course sessions and readings" section of a syllabus.
+"""dsl-course syllabus -- build a syllabus's weekly plan and write it into the syllabus.
 
 A Hertie syllabus lists, session by session, a title, its learning objectives and its
 readings. The semester's `semester-config/schedule.yml` already holds the first two
 (`title:` / `details:` of each lecture entry) and its readings entries name the third, so
-that section can be written for the course team instead of by them.
+that plan can be written for the course team instead of by them.
 
-DELIBERATELY paste-ready output, not an edit of their document. The syllabus is a faculty
-document - often the one submitted to the school, and for one live course a Word file
-exported to PDF - so a tool that rewrote a region of it would sooner or later overwrite work
-the day before a deadline, and could not help the PDF authors at all. This prints the block
-and writes it to `.system/SYLLABUS.sessions.md` (never released to students);
-the course team pastes what they want.
+The syllabus is a faculty document, so a write touches ONLY the block between
+`<!-- dsl:weekly-plan -->` and `<!-- /dsl:weekly-plan -->` in the chosen Markdown file
+(decision 0031 rule 9). Where the markers are absent they are appended, under a
+`## Weekly plan` heading, at the end; the course team may move the marked block anywhere in
+the file and the next write updates it in place. A syllabus that is not Markdown (a PDF)
+is never written: the preview hands the block over to paste.
 
 Readings are read from the COURSE org's source repos, not from what has been released: a
 syllabus is written before the term starts, when nothing has shipped yet. Sessions, their
@@ -19,12 +19,13 @@ numbers and the readings under each are the website's own rows
 lecture with its number; any other readings entry closes the list under
 "Further readings".
 
-`--course-source-repo` names the materials repo the block is written into
-(`.system/SYLLABUS.sessions.md`); it no longer limits where readings are read from.
+`--course-source-repo` names the materials repo holding the syllabus; `--syllabus` the file
+in it (default: the one its `materials.yml` declares, else SYLLABUS.md). Neither limits
+where readings are read from.
 
 Usage:
     python3 -m dsl_course.syllabus --course-org COURSE --semester-org SEMESTER \\
-        --course-source-repo course-materials-f2026 [--no-preview]
+        --course-source-repo course-materials-f2026 [--syllabus SYLLABUS.md] [--no-preview]
 """
 
 from __future__ import annotations
@@ -32,8 +33,7 @@ from __future__ import annotations
 import sys
 
 from . import schedule
-from .course import SYLLABUS_SESSIONS_FILE
-from .gh_contents import get_file_content, put_file, repo_tree
+from .gh_contents import get_file_content, get_file_with_sha, put_file, repo_tree
 from .log import (
     CLIParser,
     Summary,
@@ -44,6 +44,7 @@ from .log import (
     log_step,
     plural,
 )
+from .materials import PLAN_END, PLAN_START
 from .materials import read as read_materials
 from .readings import demote_headings, readings_block
 from .repos import default_branch
@@ -52,6 +53,25 @@ from .schedule_plan import PlannedRow, planned_rows, site_rows
 # How far a reading list's own headings are pushed down here: the syllabus puts a session at
 # `###`, so its `# Session N readings` has to land below that.
 _READINGS_SHIFT = 3
+
+PLAN_HEADING = "## Weekly plan"
+
+
+def place(text: str, body: str) -> str:
+    """`text` (the syllabus) with `body` between the plan markers: the block replaced
+    where both markers stand in order, else the markers and block appended at the end
+    under `## Weekly plan`. Nothing outside the markers changes."""
+    block = f"{PLAN_START}\n{body.strip()}\n{PLAN_END}"
+    start = text.find(PLAN_START)
+    end = text.find(PLAN_END, start + len(PLAN_START)) if start >= 0 else -1
+    if start >= 0 and end >= 0:
+        return text[:start] + block + text[end + len(PLAN_END) :]
+    head = text.rstrip("\n")
+    return (
+        f"{head}\n\n{PLAN_HEADING}\n\n{block}\n"
+        if head
+        else f"{PLAN_HEADING}\n\n{block}\n"
+    )
 
 
 def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
@@ -83,7 +103,8 @@ def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
 
 
 def build(course_org: str, semester_org: str) -> tuple[str, int]:
-    """The syllabus's sessions section as markdown, plus how many sessions it holds.
+    """The weekly plan as markdown (a `###` per session, the block's own heading left to
+    the syllabus), plus how many sessions it holds.
 
     Sessions are the shown lecture rows of `schedule_plan.site_rows`, numbered as the
     website numbers them, so the two cannot disagree about what session 3 is called."""
@@ -105,7 +126,7 @@ def build(course_org: str, semester_org: str) -> tuple[str, int]:
                 out += [demote_headings(text, _READINGS_SHIFT), ""]
         return out
 
-    out = ["## Course sessions and readings", ""]
+    out = []
     for sr in lectures:
         row = sr.row
         out += [
@@ -129,14 +150,15 @@ def main() -> int:
     ap.add_argument("--course-org", required=True)
     ap.add_argument("--semester-org", required=True)
     ap.add_argument("--course-source-repo", required=True)
-    add_preview_flag(
-        ap, "Print the block; commit nothing to the source repo (default)."
+    ap.add_argument(
+        "--syllabus",
+        default="",
+        help="The Markdown file to write into (default: the declared syllabus).",
     )
+    add_preview_flag(ap, "Print the block; write nothing (default).")
     a = ap.parse_args()
 
-    log_step(
-        f"Building the syllabus sessions block from {a.semester_org}'s schedule.yml"
-    )
+    log_step(f"Building the weekly plan from {a.semester_org}'s schedule.yml")
     body, sessions = build(a.course_org, a.semester_org)
     if not sessions:
         log_err(
@@ -157,30 +179,43 @@ def main() -> int:
             counts,
             block=body,
         )
-    header = (
-        "<!-- Generated by `python3 -m dsl_course.syllabus` from this semester's\n"
-        "     semester-config/schedule.yml and its readings entries. Paste what\n"
-        "     you want into SYLLABUS.md; edits here are overwritten. Never released to\n"
-        "     students. -->\n\n"
+    path = (
+        a.syllabus.strip().strip("/")
+        or read_materials(a.course_org, a.course_source_repo).syllabus
     )
-    target = f"{a.course_source_repo}/{SYLLABUS_SESSIONS_FILE}"
+    target = f"{a.course_source_repo}/{path}"
+
+    def refuse(code: str, text: str) -> Summary:
+        log_err(text)
+        return Summary(text, counts, [{"code": code, "text": text}], code=1, block=body)
+
+    if not path.lower().endswith((".md", ".markdown")):
+        return refuse(
+            "NOT_MARKDOWN",
+            f"{target} is not a Markdown file, so the plan cannot be written into it. "
+            "Copy it and paste it in.",
+        )
+    current = get_file_with_sha(a.course_org, a.course_source_repo, path)
+    if current is None:
+        return refuse(
+            "NO_SYLLABUS", f"There is no {target} yet. Write the syllabus first."
+        )
+    text, sha = current
     if not put_file(
         a.course_org,
         a.course_source_repo,
-        SYLLABUS_SESSIONS_FILE,
-        (header + body).encode(),
-        "docs: regenerate the syllabus sessions block",
+        path,
+        place(text, body).encode(),
+        f"docs: write the weekly plan into {path}",
+        expected_sha=sha,
     ):
-        text = f"The weekly plan could not be written to {target}."
-        return Summary(
-            text,
-            counts,
-            [{"code": "WRITE_FAILED", "text": text}],
-            code=1,
-            block=body,
+        return refuse(
+            "WRITE_FAILED", f"The weekly plan could not be written to {target}."
         )
     log_ok(f"{sessions} session(s) -> {target}")
-    return Summary(f"Wrote the weekly plan ({listed}) to {target}.", counts, block=body)
+    return Summary(
+        f"Wrote the weekly plan ({listed}) into {target}.", counts, block=body
+    )
 
 
 if __name__ == "__main__":

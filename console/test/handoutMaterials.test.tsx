@@ -16,7 +16,7 @@ import { StatusStore } from '../src/model/status';
 import type { Adapter, Handle } from '../src/ops/adapter';
 import { generateSyllabus } from '../src/ops/defs';
 import { OpsSession } from '../src/ops/session';
-import { CopyPlan, MaterialsScreen, changedLine, syllabusChoices } from '../src/screens/CourseEdit';
+import { MaterialsScreen, changedLine, syllabusChoices } from '../src/screens/CourseEdit';
 import { OtherRepoRow } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { PatternTree } from '../src/ui/PatternTree';
@@ -105,7 +105,9 @@ describe('the Supporting files kind', () => {
     expect(KIND_LABEL.assets).toBe('Supporting files');
     expect(CONTENT_KINDS).toContain('assets');
     for (const f of ['data', 'img', 'images', 'src', 'assets', 'figures', 'fig', 'static']) expect(inferKind(f)).toEqual({ kind: 'assets', named: true });
-    expect(inferKind('code')).toEqual({ kind: 'lecture', named: false });
+    // Decision 0031 rule 10: any other name is supporting files by default, not a lecture.
+    expect(inferKind('code')).toEqual({ kind: 'assets', named: false });
+    expect(inferKind('Lectures')).toEqual({ kind: 'lecture', named: true });
   });
 });
 
@@ -128,27 +130,25 @@ describe('the syllabus panel', () => {
   });
 });
 
-describe('the weekly plan’s Copy', () => {
+describe('the weekly plan', () => {
+  const scope = { courseOrg: ORG, cohortOrg: 'hertie-dsl-demo-f2026', where: 'Fall 2026' };
+
+  it('writes into the chosen syllabus and ends with a link to it on GitHub', () => {
+    const def = generateSyllabus(scope, MAT, 'docs/E1282 syllabus.md');
+    expect(def.args).toEqual({ course_source_repo: MAT, syllabus: 'docs/E1282 syllabus.md' });
+    expect(def.after).toEqual([{ label: 'See on GitHub', href: `https://github.com/${ORG}/${MAT}/blob/HEAD/docs/E1282%20syllabus.md` }]);
+    expect(def.intro).toContain('docs/E1282 syllabus.md');
+    expect(def.intro).not.toContain('.system');
+  });
+
   it('holds the text of the last good preview, per op and scope', async () => {
-    const ops = new OpsSession(new DispatchStub('## Course sessions and readings\n- Session 1'), { pollMs: 0, sleep: async () => {} });
-    const def = generateSyllabus({ courseOrg: ORG, cohortOrg: 'hertie-dsl-demo-f2026', where: 'Fall 2026' }, MAT);
+    const ops = new OpsSession(new DispatchStub('### Session 1'), { pollMs: 0, sleep: async () => {} });
+    const def = generateSyllabus(scope, MAT, 'SYLLABUS.md');
     expect(ops.lastBlock(def)).toBeNull();
     ops.open(def);
     await ops.start('preview');
-    expect(ops.lastBlock(def)).toBe('## Course sessions and readings\n- Session 1');
-    expect(ops.lastBlock(generateSyllabus({ courseOrg: ORG, cohortOrg: 'hertie-dsl-demo-f2026', where: 'Fall 2026' }, 'other-repo'))).toBeNull();
-  });
-
-  it('says what to do when the browser refuses the clipboard', async () => {
-    const ops = new OpsSession(new DispatchStub('## Sessions'), { pollMs: 0, sleep: async () => {} });
-    const def = generateSyllabus({ courseOrg: ORG, cohortOrg: 'hertie-dsl-demo-f2026', where: 'Fall 2026' }, MAT);
-    ops.open(def);
-    await ops.start('preview');
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } });
-    await mount(envOf(new FakeGitHub(), ops), <CopyPlan def={def} />);
-    await act(() => button('Copy')!.click());
-    await settle(() => !!root!.querySelector('.check-line.bad'));
-    expect(root!.querySelector('.check-line.bad')!.textContent).toContain('Could not copy. Select the preview text instead.');
+    expect(ops.lastBlock(def)).toBe('### Session 1');
+    expect(ops.lastBlock(generateSyllabus(scope, 'other-repo', 'SYLLABUS.md'))).toBeNull();
   });
 });
 

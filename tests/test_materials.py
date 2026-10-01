@@ -71,8 +71,23 @@ def test_folder_keys_and_aliases_match_whatever_the_case():
 
 
 def test_supporting_files_folders_are_assets_by_name():
-    # Decision 0026 rule 3: released, never shown; an unknown name stays a lecture.
+    # Decision 0026 rule 3: released, never shown. Decision 0031 rule 10: an unknown name
+    # is supporting files too, not a lecture.
     for name in ("data", "img", "images", "src", "assets", "figures", "fig", "Static"):
         assert materials.alias_kind(name) == materials.ASSETS_KIND, name
     assert materials.ASSETS_KIND in materials.policy.content_kinds()
-    assert materials.infer_kind("code") == "lecture"
+    assert materials.DEFAULT_KIND == materials.ASSETS_KIND
+    assert materials.alias_kind("code") is None
+    assert materials.infer_kind("code") == materials.ASSETS_KIND
+    assert materials.infer_kind("Code", {"code": "lecture"}) == "lecture"
+    for name, kind in {
+        "lecture": "lecture",
+        "Lectures": "lecture",
+        "lab": "lab",
+        "labs": "lab",
+        "tutorials": "lab",
+        "reading": "readings",
+        "readings": "readings",
+        "literature": "readings",
+    }.items():
+        assert materials.infer_kind(name) == kind, name

@@ -159,10 +159,9 @@ export function Whys({ m }: { m: MaterialsState }) {
 
 /** What each materials check is, for its `?`, in the checklist's order. */
 const CHECK_HINT: Record<string, string> = {
-  all_mapped: 'The student site and the public website show materials by kind (lectures, labs, readings…), so every top folder a release can copy needs one. Folder names like lectures/ set it; anything else you set under Folder kinds.',
   kind_folder: 'A repo with nothing of a content kind has nothing to release.',
   syllabus: 'The file the student site pins as the syllabus. Still the template text until you write it.',
-  sessions: 'A block of sessions and readings built from the semester schedule, for pasting into your syllabus. Optional.',
+  sessions: 'Every session with its date and readings, built from the semester schedule. Write puts it into your syllabus. Optional.',
   withheld: 'The whole repo is released as it stands unless a line here withholds it. Saving the list once, even empty, marks it reviewed.',
 };
 

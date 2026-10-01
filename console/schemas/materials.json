@@ -17,6 +17,7 @@
     "static": "assets",
     "tutorials": "lab"
   },
+  "assets_kind": "assets",
   "cases": [
     {
       "name": "nothing declared",
@@ -444,7 +445,7 @@
       ]
     }
   ],
-  "default_kind": "lecture",
+  "default_kind": "assets",
   "default_syllabus": "SYLLABUS.md",
   "denylist": [
     "solution",
@@ -456,6 +457,7 @@
     ".env.*",
     ".git"
   ],
+  "empty_entry_kind": "lecture",
   "file": "materials.yml",
   "never_material": [
     ".DS_Store",

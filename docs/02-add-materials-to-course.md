@@ -52,10 +52,11 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
    The layout is yours: any file or folder is releasable, and a row on the semester site is a
    schedule entry, not a folder. The skeleton's `01_` prefixes are a starter, never needed.
    An entry that declares no `kind` takes it from the top folder its copy lands in: `labs/`,
-   `lab/`, `tutorials/` are labs, `readings/`, `reading/`, `literature/` readings, anything
-   else a lecture. `data/`, `img/`, `images/`, `src/`, `assets/`, `figures/`, `fig/` and
-   `static/` are supporting files: released like everything else, but never a row or a tab
-   on the semester site or the public website. `materials.yml` (below) covers the rest.
+   `lab/`, `tutorials/` are labs, `readings/`, `reading/`, `literature/` readings,
+   `lectures/`, `lecture/` lectures. Any other folder (`data/`, `img/`, `code/`, ...) is
+   supporting files: released like everything else, but never a row or a tab on the
+   semester site or the public website. Name your folders differently? Set their kinds in
+   `materials.yml` (below) or under Folder kinds in the console.
 
    *NB: this repo stays private - students never see it. Only the sessions you **actively release** reach the semester org, so you can privately stage the whole course here.*
 
@@ -80,6 +81,11 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    *`kinds:` keys name the top folder the copy LANDS in (its semester-side path), in any
    case. A file that does not parse stops the site sync and says so.*
+
+   *NB: the console's **Weekly plan** writes every session with its date and readings into
+   your Markdown syllabus, between `<!-- dsl:weekly-plan -->` and `<!-- /dsl:weekly-plan -->`
+   (added under `## Weekly plan` at the end the first time). Move the marked block anywhere;
+   the next Write updates it there. A PDF syllabus: use Copy and paste it in.*
 
 3. **Run Refresh actions** in the course org's `.github` Actions tab - only after creating a
    *new repo*, not after pushing content into one.

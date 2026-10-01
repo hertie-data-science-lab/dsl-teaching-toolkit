@@ -1786,17 +1786,19 @@ def render_generate_syllabus(
     """Build the syllabus's session-by-session section from a semester's schedule.yml.
 
     A workflow rather than a CLI habit, because the people who write syllabi are the people
-    who use the Actions tab. It writes a companion file for them to paste from and never
-    touches SYLLABUS.md itself - see dsl_course/syllabus.py for why."""
+    who use the Actions tab. It writes only the marked weekly-plan block of the declared
+    syllabus - see dsl_course/syllabus.py."""
     return f"""name: Generate syllabus
 
-# Writes the "Course sessions and readings" section of a syllabus - one block per session,
-# with its title, its learning objectives and its reading list - from the semester's
-# semester-config/schedule.yml and this repo's readings/ folders.
+# Writes the weekly plan of a syllabus - one block per session, with its title, its
+# learning objectives and its reading list - from the semester's
+# semester-config/schedule.yml and its readings entries.
 #
-# It lands in .system/SYLLABUS.sessions.md, and is NEVER released to students.
-# Paste what you want into SYLLABUS.md; a re-run overwrites the companion file, never your
-# syllabus. Dropdowns are refreshed by the 'Refresh actions' workflow.
+# It goes into your syllabus file (SYLLABUS.md, or the one materials.yml declares),
+# between <!-- dsl:weekly-plan --> and <!-- /dsl:weekly-plan -->; without those lines it
+# adds them under "## Weekly plan" at the end. Move the marked block anywhere in the file
+# and a re-run updates it there; nothing else in the file changes.
+# Dropdowns are refreshed by the 'Refresh actions' workflow.
 
 on:
   workflow_dispatch:
@@ -1804,7 +1806,7 @@ on:
 {_choice_input("course_source_repo", "Repo holding your syllabus and readings", source_repos, _newest_materials(source_repos, materials))}
 {_choice_input("semester_org", "Semester whose schedule.yml supplies the sessions", semester_orgs)}
       preview:
-        description: "Preview - print the block, commit nothing to .system/SYLLABUS.sessions.md"
+        description: "Preview - print the block, write nothing to your syllabus"
         type: boolean
         default: true
 

@@ -429,10 +429,17 @@ describe('editing screens', () => {
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
     expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">withheld<\/span><span class="footnote">withheld by <code>solutions\/<\/code><\/span>/);
     expect(out).toContain('Weekly plan for the syllabus');
-    expect(out).toContain('>Preview</button>');
+    // Copy opens the plan to copy; Write puts it into the syllabus (decision 0031 rule 9).
+    expect(out).toContain('>Copy</button>');
     expect(out).toContain('>Write</button>');
-    // Copy waits for a preview in this session.
-    expect(out).toContain('disabled title="Preview first">Copy</button>');
+    expect(out).not.toContain('>Preview</button>');
+    expect(out).toContain('aria-label="About Write"');
+    // A syllabus that is not Markdown cannot be written into: Copy alone, and why.
+    const pdf = new StaticFiles({ ...FILES, [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'syllabus: E1282.pdf\n' }, {}, TREES);
+    const onlyCopy = html(<MaterialsScreen {...cp} files={pdf} entry="course-materials-f2026" />);
+    expect(onlyCopy).toContain('>Copy</button>');
+    expect(onlyCopy).not.toContain('>Write</button>');
+    expect(onlyCopy).toContain('E1282.pdf is not Markdown, so the plan cannot be written into it: copy it and paste it in.');
     // No public-website setting here: that list is the Public website tab's.
     expect(out).not.toContain('kept off');
     expect(out).not.toContain('opencourse.yml');

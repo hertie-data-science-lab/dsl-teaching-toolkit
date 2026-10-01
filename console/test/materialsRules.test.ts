@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import rules from '../schemas/materials.json';
 import { badgeFiles } from '../src/edit/badges';
 import { compileAll, withheldBy } from '../src/edit/glob';
-import { aliasKind, inferKind, landingSection, readDeclared } from '../src/model/materialsRules';
+import { EMPTY_ENTRY_KIND, aliasKind, inferKind, landingSection, readDeclared } from '../src/model/materialsRules';
 
 describe('the withhold rule', () => {
   const withheldPaths = (files: string[], lines: string[]) => files.filter((f) => withheldBy(compileAll(lines), f) !== null);
@@ -29,7 +29,9 @@ describe('kinds', () => {
     expect(aliasKind('quiz')).toBeNull();
     expect(aliasKind('quiz', { quiz: 'exam' })).toBe('exam');
     expect(aliasKind('quiz', { quiz: 'nonsense' })).toBe('other');
-    expect(inferKind('datasets')).toEqual({ kind: 'lecture', named: false });
+    // Decision 0031 rule 10: a folder no name covers is supporting files.
+    expect(inferKind('datasets')).toEqual({ kind: 'assets', named: false });
+    expect(EMPTY_ENTRY_KIND).toBe('lecture');
   });
 
   it('takes the section from where the copy lands', () => {

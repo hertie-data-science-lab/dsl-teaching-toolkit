@@ -68,12 +68,12 @@ from .course import (
     SOLUTION_DIR,
     STARTER_DERIVED,
     STARTER_HANDWRITTEN,
-    SYLLABUS_SESSIONS_FILE,
     active_today,
     is_repo_root,
     pages_repo,
     semester_label,
     semester_of,
+    session_number,
 )
 from .derive import (
     STARTER_RECORD,
@@ -105,9 +105,12 @@ from .ghcli import gh
 from .materials import (
     ASSETS_KIND,
     DEFAULT_SYLLABUS,
+    MATERIALS_FILE,
     MATERIALS_TOPIC,
+    PLAN_START,
     Declared,
     alias_kind,
+    infer_kind,
     is_materials_repo,
     publishable,
 )
@@ -120,6 +123,7 @@ from .repos import default_branch
 from .schedule_plan import (
     Unnumbered,
     deploy_dest,
+    deploy_section,
     duplicate_numbers,
     duplicate_text,
     entry_kind,
@@ -202,8 +206,10 @@ class MaterialsFacts:
     kinds: Mapping[str, str] = field(default_factory=dict)
     # The top-level `.releaseignore`'s text; None when there is none.
     releaseignore: str | None = None
-    # `.system/SYLLABUS.sessions.md` is there.
-    sessions: bool = False
+    # The released top folders no kind names (no `kinds:` entry, no alias) that hold
+    # numbered subfolders: each got rows under the old `lecture` default and is now
+    # supporting files (`kindless_problems`).
+    numbered: tuple[str, ...] = ()
 
 
 @dataclass
@@ -695,12 +701,6 @@ def _released_folders(m: MaterialsFacts) -> list[str]:
     return [f for f in m.folders if publishable(f)]
 
 
-def _unmapped(m: MaterialsFacts) -> list[str]:
-    """The released top folders that name no kind (by the repo's alias or a built-in one):
-    the ones a release would put on the default fallback."""
-    return [f for f in _released_folders(m) if alias_kind(f, m.kinds) is None]
-
-
 def _reviewed(text: str | None) -> bool:
     """A `.releaseignore` somebody has been through: one pattern (a line that is not blank
     or a comment), or the mark the console writes when nothing is withheld. The seeded one
@@ -717,11 +717,17 @@ def _syllabus_why(m: MaterialsFacts) -> str:
     return f"{m.syllabus_path} is still the placeholder."
 
 
-def _unmapped_why(folders: list[str]) -> str:
-    names = ", ".join(f"{f}/" for f in folders)
-    if len(folders) == 1:
-        return f"The folder {names} has no kind yet; set it under Folder kinds."
-    return f"The folders {names} have no kind yet; set them under Folder kinds."
+def _plan_written(m: MaterialsFacts) -> bool:
+    """The Markdown syllabus carries the weekly plan's marked block."""
+    return PLAN_START in (m.syllabus or "")
+
+
+def _plan_why(m: MaterialsFacts) -> str:
+    if m.syllabus == "":
+        return (
+            f"{m.syllabus_path} is not Markdown: copy the weekly plan and paste it in."
+        )
+    return f"The weekly plan is not in {m.syllabus_path} yet."
 
 
 def _kinds_found(m: MaterialsFacts) -> list[dict]:
@@ -737,55 +743,43 @@ def _kinds_found(m: MaterialsFacts) -> list[dict]:
 
 
 def _shown_folders(m: MaterialsFacts) -> list[str]:
-    """The released top folders of a kind the sites show: a supporting-files folder is
-    released but gets no page, so on its own it does not make a repo releasable."""
-    return [
-        f
-        for f in _released_folders(m)
-        if alias_kind(f, m.kinds) not in (None, ASSETS_KIND)
-    ]
+    """The released top folders of a kind the sites show: a supporting-files folder (any
+    folder no kind names) is released but gets no page, so on its own it does not make a
+    repo releasable."""
+    return [f for f in _released_folders(m) if infer_kind(f, m.kinds) != ASSETS_KIND]
 
 
-def _kind_folder_why(released: list[str], unmapped: list[str]) -> str:
+def _kind_folder_why(released: list[str]) -> str:
     if not released:
         return (
             "There is no lectures/, labs/ or readings/ folder yet; add one or set a "
             "folder's kind under Folder kinds."
         )
-    if len(unmapped) < len(released):
-        return "Only supporting files so far; set a folder's kind under Folder kinds."
-    return "No top folder has a kind yet; set one under Folder kinds."
+    return "Only supporting files so far; set a folder's kind under Folder kinds."
 
 
 def materials_checks(m: MaterialsFacts) -> list[dict]:
     """Decision 0022 rule 5: a materials repo's checklist, folder kinds first, then the
-    syllabus, the weekly plan it carries, and the withheld patterns.
+    syllabus, the weekly plan it carries, and the withheld patterns. Every folder has a
+    kind since decision 0031 (supporting files by default), so there is no check that
+    each is mapped: `kindless_problems` names the folders the new default hid.
     `blocks` marks the checks `ready` needs; `why` names what is missing, None once the
     check is done; `kind_folder` carries `detail`, the folders found per content kind."""
-    unmapped = _unmapped(m)
-    released = _released_folders(m)
     rows = (
-        (
-            "all_mapped",
-            "Every top folder has a kind",
-            True,
-            not unmapped,
-            _unmapped_why(unmapped) if unmapped else None,
-        ),
         (
             "kind_folder",
             "At least one folder of a content kind",
             True,
             bool(_shown_folders(m)),
-            _kind_folder_why(released, unmapped),
+            _kind_folder_why(_released_folders(m)),
         ),
         ("syllabus", "Syllabus written", True, _syllabus_written(m), _syllabus_why(m)),
         (
             "sessions",
-            "Weekly plan generated",
+            "Weekly plan in the syllabus",
             False,
-            m.sessions,
-            "The weekly plan has not been generated yet.",
+            _plan_written(m),
+            _plan_why(m),
         ),
         (
             "withheld",
@@ -837,6 +831,72 @@ def materials_problem(m: MaterialsFacts, org: str) -> dict:
             "url": f"https://github.com/{org}/{m.repo}",
         },
     }
+
+
+# Decision 0031 rule 10: a folder no kind names is supporting files, where it used to be a
+# lecture. Content that got rows under the old default would vanish from the sites without a
+# word, so each such folder is a problem until a kind is set.
+KINDLESS_STOPS = "Its files are still released, but get no page of their own."
+
+
+def kindless_problems(m: MaterialsFacts, org: str) -> list[dict]:
+    """`kinds:<repo>:<folder>` for each top folder of a materials repo that no kind names
+    and that holds numbered subfolders (`MaterialsFacts.numbered`): sessions the public
+    website and an unkinded schedule entry showed as lectures before."""
+    return [
+        {
+            "id": f"kinds:{_slugify(m.repo)}:{_slugify(folder)}",
+            "scope": "course",
+            "stage": "C4",
+            "text": (
+                f"{folder}/ in {m.repo} has numbered folders but no kind; set its kind "
+                "under Folder kinds."
+            ),
+            "stops": KINDLESS_STOPS,
+            "fix": {
+                "repo": f"{org}/{m.repo}",
+                "path": MATERIALS_FILE,
+                "line": None,
+                "screen": "materials",
+                "entry": m.repo,
+            },
+        }
+        for folder in m.numbered
+        if alias_kind(folder, m.kinds) is None
+    ]
+
+
+def kindless_entry_problems(facts: SemesterFacts) -> list[dict]:
+    """`kinds:<key>` for each shown `releases:` entry that declares no kind and lands in a
+    folder no kind names: it was a lecture row before decision 0031 and is now supporting
+    files, no row at all."""
+    out = []
+    for r in facts.sched.releases:
+        if r.kind or not r.deploy or not r.show_on_site:
+            continue
+        first = r.deploy[0]
+        section = deploy_section(first)
+        if alias_kind(section, facts.aliases.get(first.course_source_repo, {})):
+            continue
+        where = (
+            f"{section}/"
+            if "/" in deploy_dest(first)
+            else f"the top of {first.semester_dest_repo}"
+        )
+        out.append(
+            {
+                "id": f"kinds:{_slugify(r.label)}",
+                "scope": "semester",
+                "stage": "K4",
+                "text": (
+                    f"{r.label} lands in {where}, which has no kind; set its kind under "
+                    "Folder kinds, or give the entry a kind."
+                ),
+                "stops": "It gets no row on the student site.",
+                "fix": _schedule_fix(facts.org, r.label, line_of(r.lines, "kind")),
+            }
+        )
+    return out
 
 
 def template_problem(t: TemplateFacts, org: str) -> dict:
@@ -1067,6 +1127,7 @@ def render_course(
     problems += [
         materials_problem(m, facts.org) for m in facts.materials if not m.topic
     ]
+    problems += [p for m in facts.materials for p in kindless_problems(m, facts.org)]
     for t in facts.templates:
         problems += template_problems(t, facts.org)
     for t in facts.templates:
@@ -1678,9 +1739,11 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     ]
     problems += _no_email_problem(facts.org, facts.people)
     problems += number_problems(facts, now)
+    problems += kindless_entry_problems(facts)
     problems += [
         materials_problem(m, course.org) for m in course.materials if not m.topic
     ]
+    problems += [p for m in course.materials for p in kindless_problems(m, course.org)]
     problems += [p for t in course.templates for p in template_problems(t, course.org)]
     problems = _unique_ids(problems)
     course_block, _ = render_course(
@@ -1772,9 +1835,10 @@ def _declaration(org: str, repo: str) -> Declared:
 
 def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
     """A materials repo's C4 facts: its declared syllabus (markdown read, anything else
-    only looked for), its top folders and declared kinds, its `.releaseignore` and whether
-    the weekly plan was generated. The top is listed, never the whole tree: a repo too
-    large for one recursive listing must not fail the course's status."""
+    only looked for), its top folders and declared kinds, its `.releaseignore`, and the
+    unkinded top folders holding numbered folders. The top is listed (and each unkinded
+    folder's own top), never the whole tree: a repo too large for one recursive listing
+    must not fail the course's status."""
     declared = _declaration(course_org, repo)
     path = declared.syllabus
     top = top_level(course_org, repo)
@@ -1787,6 +1851,18 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
     folders = sorted(
         name for name, kind in top.items() if kind == "dir" and not name.startswith(".")
     )
+    # Only a folder no kind names is listed (one read each, usually none): the rest
+    # cannot have lost their rows.
+    numbered = tuple(
+        f
+        for f in folders
+        if publishable(f)
+        and alias_kind(f, declared.kinds) is None
+        and any(
+            kind == "dir" and session_number(name) is not None
+            for name, kind in top_level(course_org, repo, f).items()
+        )
+    )
     return MaterialsFacts(
         repo,
         syllabus,
@@ -1798,7 +1874,7 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
             if RELEASEIGNORE in top
             else None
         ),
-        sessions=file_exists(course_org, repo, SYLLABUS_SESSIONS_FILE),
+        numbered=numbered,
     )
 
 

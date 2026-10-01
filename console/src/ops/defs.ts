@@ -197,11 +197,14 @@ export function derive(s: Scope, slug: string, repo: string, title: string): OpD
   };
 }
 
-export function generateSyllabus(s: Scope, repo: string): OpDef {
+/** The weekly plan (decision 0031 rule 9): Copy previews it, Write puts it between the markers in `syllabus`, then links the file. */
+export function generateSyllabus(s: Scope, repo: string, syllabus: string): OpDef {
+  const file = `https://github.com/${s.courseOrg}/${repo}/blob/HEAD/${syllabus.split('/').map(encodeURIComponent).join('/')}`;
   return {
-    ...base(s, 'assignment.generate_syllabus', repo), name: 'Generate the weekly plan', title: repo, where: `From ${s.where}’s schedule`,
-    intro: 'Writes .system/SYLLABUS.sessions.md: every session with its date and readings, from the semester’s schedule.',
-    verb: 'Write the weekly plan', running: 'Writing the weekly plan', cancel: 'Stop', args: { course_source_repo: repo },
+    ...base(s, 'assignment.generate_syllabus', repo), name: 'Weekly plan', title: syllabus, where: `From ${s.where}’s schedule`,
+    intro: `Every session with its date and readings, from the semester’s schedule. Write puts it into ${syllabus} between the weekly-plan markers; nothing else in the file changes.`,
+    verb: 'Write the weekly plan', running: 'Writing the weekly plan', cancel: 'Stop', args: { course_source_repo: repo, syllabus },
+    after: [{ label: 'See on GitHub', href: file }],
   };
 }
 
