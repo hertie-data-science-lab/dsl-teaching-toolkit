@@ -118,6 +118,15 @@ Things whose *literal spelling* is depended on from outside Python:
   spelling is still recognised. The hidden
   `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what makes the quarter-hourly
   refresh post once rather than four times an hour.
+- **A template's starter (decision 0028).** `grading_config.yml` `starter: derived |
+  handwritten` (`course.STARTER_MODES`; no key reads as `derived` when a source under
+  `solution/` carries a marker, `derive.starter_mode`; the migration's *template starter*
+  step writes it). Derive refuses a hand-written one with the reason code
+  `STARTER_HANDWRITTEN`, appended to its codes. `derive.DERIVE_COMMITS` (Derive's
+  `COMMIT_MESSAGE` and scaffold's `SEED_COMMIT`) is how `status_json` tells Derive's commits
+  on `main` from a hand edit (`template:<repo>:MAIN_EDITED`, checked per starter file by its
+  last commit): a reworded message is appended to the chain, never edited, or every derived
+  template reads as edited. Faculty page: `docs/assignment-starter.md`.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-semester`, `submission`, `gradebook`,
   `assignment-template`, `dsl-materials` (a course materials repo; `materials.MATERIALS_TOPIC`),
   `dsl-assignment` (a course assignment template; `discovery.TEMPLATE_TOPIC`).
@@ -987,7 +996,8 @@ still keyed `cohorts:`), `.system/` in `.github`, `dsl-course.yml` keys, templat
 (`grading_config.yml` `format:` -> `formats:` on each template's `solution` branch,
 and the run settings out, recorded first in `.github/.system/migration-run-keys.json` for
 the semesters, re-read with `parse_grading_spec` - course-owned, so here rather than per
-semester),
+semester), template starter (`starter:` written into each live template's
+`grading_config.yml` from its answer markers, decision 0028),
 materials files, public website (every materials repo's `publish.yml` deleted; `.github/opencourse.yml`
 seeded, create-only, from the site repo's `_publish-config.yml` when there is one - on, with its
 settings - else off), re-render (Refresh
