@@ -77,13 +77,15 @@ export interface OpenItem {
   copy?: string;
   /** Where it sits in the menu. */
   group: 'online' | 'local';
+  /** Which `?` the menu gives it: VS Code's clone or its open (decision 0024 rule 7). */
+  hint?: 'clone' | 'open';
 }
 
-/** Profile, about `org`'s course, so its clone block lists the repos of the course the person came from. */
+/** Profile, about `org`'s course, so its folder check knows the course the person came from. */
 export const profileHref = (org: string) => `?course=${encodeURIComponent(org)}#profile`;
 
 /**
- * Every way to open `r` with this setup, in menu order. With a folder set up, VS Code both
+ * Every way to open `r` with this setup, in menu order, the clone command last. With a folder set up, VS Code both
  * opens it and clones (decision 0023); `cloned` (from the folder check) keeps only the one
  * that applies: Open when the repo is there, Clone when it is not. Undefined keeps both.
  */
@@ -99,9 +101,10 @@ export function openItems(r: RepoRef, setup: Setup | null, cloned?: boolean): Op
     { choice: 'github', label: 'Open on GitHub', href: `${url}${inRepo(r)}`, group: 'online' },
     { choice: 'githubdev', label: 'Open on github.dev', href: `https://github.dev/${r.org}/${r.repo}${inRepo(r)}`, group: 'online' },
   ];
-  if (!local) items.push({ choice: 'vscode', label: 'Clone in VS Code', href: vsClone, group: 'local' });
-  if (canOpen) items.push({ choice: 'vscode', label: 'Open in VS Code', href: vscodeFolder(inside), group: 'local' });
-  if (local && canClone) items.push({ choice: 'vsclone', label: 'Clone in VS Code', href: vsClone, group: 'local' });
+  // Clone before Open: the order the person goes through them (decision 0024 rule 7).
+  if (!local) items.push({ choice: 'vscode', label: 'Clone in VS Code', href: vsClone, group: 'local', hint: 'clone' });
+  if (local && canClone) items.push({ choice: 'vsclone', label: 'Clone in VS Code', href: vsClone, group: 'local', hint: 'clone' });
+  if (canOpen) items.push({ choice: 'vscode', label: 'Open in VS Code', href: vscodeFolder(inside), group: 'local', hint: 'open' });
   items.push({ choice: 'desktop', label: 'Open in GitHub Desktop', href: `x-github-client://openRepo/${url}${r.branch ? `?branch=${encodeURIComponent(r.branch)}` : ''}`, group: 'local' });
   const scheme = setup?.editor === 'other' ? (setup.scheme ?? '').trim() : '';
   // Another editor opens a folder or nothing: with no folder set up, the menu's last line

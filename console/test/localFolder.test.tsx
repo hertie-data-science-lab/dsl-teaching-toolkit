@@ -189,15 +189,30 @@ describe('Profile', () => {
     expect(root!.textContent).not.toContain('The folder you picked');
   });
 
-  it('lists one git clone per course repo, into the course folder', async () => {
+  it('shows the stored handle in view mode, and keeps it across Edit and Cancel', async () => {
+    setHandleStore(memHandles({ [LOGIN]: fakeDir('repos', {}) }));
+    saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'vscode' });
+    await mount(<SetupScreen org={ORG} />);
+    await settle();
+    const view = root!.querySelector('.setup-view')!;
+    expect(view.textContent).toContain('Checking: repos');
+    expect([...view.querySelectorAll('button')].some((b) => b.textContent === 'Forget')).toBe(true);
+    const check = root!.querySelector('.folder-check');
+    await act(() => root!.querySelector<HTMLButtonElement>('button[aria-label="Edit"]')!.click());
+    // The same element: no remount, no flash of the pick button.
+    expect(root!.querySelector('.folder-check')).toBe(check);
+    expect(root!.textContent).toContain('Checking: repos');
+    await act(() => [...root!.querySelectorAll('button')].find((b) => b.textContent === 'Cancel')!.click());
+    expect(root!.querySelector('.folder-check')).toBe(check);
+  });
+
+  it('keeps the folder check in view mode, and offers no clone block', async () => {
     setHandleStore(memHandles());
     saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'vscode' });
     await mount(<SetupScreen org={ORG} repos={['materials', 'assignment-1-template']} />);
+    expect(root!.querySelector('.setup-view')).not.toBeNull();
     expect(root!.textContent).toContain('Let the console see which repos are cloned');
-    expect(root!.textContent).toContain('Clone every repo of this course');
-    expect(root!.querySelector('.clone-all code')!.textContent).toBe(
-      `git clone https://github.com/${ORG}/materials.git "/Users/a/repos/${ORG}/materials"\n` +
-        `git clone https://github.com/${ORG}/assignment-1-template.git "/Users/a/repos/${ORG}/assignment-1-template"`,
-    );
+    expect(root!.textContent).not.toContain('Clone every repo');
+    expect(root!.querySelector('.clone-all')).toBeNull();
   });
 });

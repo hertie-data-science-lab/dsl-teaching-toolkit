@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Profile mounted through the App on `?#profile`: once the course's status is read, the
-// "Clone every repo" block lists its materials repos and templates.
+// Profile mounted through the App on `?course=<org>#profile`: the saved setup shows as text,
+// and no clone block appears once the course's status is read (decision 0024 rule 6).
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
@@ -43,22 +43,19 @@ async function mount(url: string) {
   root = document.createElement('div');
   document.body.appendChild(root);
   await act(async () => render(<App state={s} />, root!));
-  for (let i = 0; i < 5 && !root.querySelector('.clone-all'); i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  for (let i = 0; i < 5; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
   return root;
 }
 
-it('shows the course repos to clone on ?#profile once the course status is ready', async () => {
+it('shows the saved setup as text and no clone block, with the course status read', async () => {
   saveYourSetup(user.login, { folder: '/Users/o/repos', editor: 'vscode' });
-  const root = await mount('/?#profile');
-  expect(root.querySelector('#view h1')?.textContent).toBe('Profile');
-  const repos = [...example.course.materials.map((m) => m.repo), ...example.course.templates.map((t) => t.repo)];
-  expect(root.querySelector('.clone-all code')?.textContent).toBe(
-    repos.map((r) => `git clone https://github.com/${ORG}/${r}.git "/Users/o/repos/${ORG}/${r}"`).join('\n'),
-  );
-});
-
-it('shows the repos of the course the Open menu came from on ?course=<org>#profile', async () => {
-  saveYourSetup(user.login, { folder: '/Users/o/repos', editor: 'vscode' });
-  const root = await mount(`/?course=${OTHER}#profile`);
-  expect(root.querySelector('.clone-all code')?.textContent).toBe(`git clone https://github.com/${OTHER}/other-materials.git "/Users/o/repos/${OTHER}/other-materials"`);
+  for (const url of ['/?#profile', `/?course=${OTHER}#profile`]) {
+    const root = await mount(url);
+    expect(root.querySelector('#view h1')?.textContent).toBe('Profile');
+    expect(root.querySelector('.setup-view dd code')?.textContent).toBe('/Users/o/repos');
+    expect(root.textContent).not.toContain('Clone every repo');
+    expect(root.querySelector('.clone-all')).toBeNull();
+    render(null, root);
+    root.remove();
+  }
 });
