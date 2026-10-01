@@ -228,8 +228,7 @@ export function App({ state: s }: { state: AppState }) {
   } else if (screen === 'help') {
     body = <HelpScreen />;
   } else if (screen === 'profile') {
-    // TODO(#365): pass courses={[...courses.map(({ org, name }) => ({ org, name })), ...semesters.map((k) => ({ org: k.org, name: k.courseName || k.termLabel }))]} once SetupScreen takes it.
-    body = <SetupScreen org={ctx.course?.org} />;
+    body = <SetupScreen org={ctx.course?.org} courses={[...courses.map((c) => ({ org: c.org, name: c.name })), ...semesters.map((k) => ({ org: k.org, name: k.courseName || k.termLabel }))]} />;
   } else if (screen === 'home') {
     body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {
