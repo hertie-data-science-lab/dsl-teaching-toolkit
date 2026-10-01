@@ -9,7 +9,7 @@
 import { useState } from 'preact/hooks';
 import { buildTree, neverMaterial, standing, toggle, type Standing, type TreeNode } from '../edit/badges';
 import { compileAll, withheldBy, type Rule } from '../edit/glob';
-import { File, Folder } from './icons';
+import { FileHead, FolderHead } from './FileTree';
 
 export interface PatternTreeProps {
   files: string[];
@@ -78,8 +78,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
     return (
       <li class={`ft-file${fixed || out ? ' ft-out' : ''}`}>
         {c.mode === 'select' ? control : null}
-        <File />
-        <span class="ft-name">{n.name}</span>
+        <FileHead name={n.name} />
         <span class={`chip ${fixed || out ? 'amber' : ''}`}>{word}</span>
         <Why s={s} word={c.withheldWord} />
         {c.mode === 'exclude' ? control : null}
@@ -93,8 +92,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
       <details open={depth === 0}>
         <summary>
           {c.mode === 'select' ? control : null}
-          <span class="ft-closed"><Folder /></span><span class="ft-opened"><Folder open /></span>
-          <span class="ft-name">{n.name}/</span>
+          <FolderHead name={n.name} />
           {depth === 0 && c.kinds[n.name] ? <span class="chip">{c.kinds[n.name]}</span> : null}
           {out ? <span class="chip amber">{c.withheldWord}</span> : count ? <span class="chip amber">{count} {c.withheldWord}</span> : null}
           <Why s={s} word={c.withheldWord} />

@@ -78,7 +78,7 @@ export function headerLine(status: Status, sched: Schedule | null, rows: Row[], 
 }
 
 const KIND_ORDER = ['lec', 'lab', 'asg', 'exam', 'evt', 'term'];
-const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', term: 'term date' };
+const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', term: 'semester date' };
 
 const weekStart = (term: Term, w: number) => addDays(term.start, (w - 1) * 7);
 

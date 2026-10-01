@@ -1,7 +1,8 @@
 // Materials for a student: the released `materials` repo as a tree (one recursive tree read),
 // a file opened in the console from the private copy with the student's own token, and the
 // readings of each session. Nothing is published anywhere; see model/materials.ts for how
-// each kind is shown.
+// each kind is shown. Top folders that only support the rest (data, images, code a notebook
+// loads) come last, folded, as "Supporting files" (decision 0029 rule 6).
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import { useEffect, useState } from 'preact/hooks';
@@ -14,6 +15,7 @@ import { showFile, type Shown } from '../model/materials';
 import { sortedRows, type SemesterFacts } from '../model/student';
 import { studentHref } from '../router';
 import { CheckLine, Loading, Md } from '../ui/bits';
+import { FileHead, FolderHead } from '../ui/FileTree';
 import { Ext } from '../ui/icons';
 import { useLoad } from '../ui/load';
 
@@ -52,6 +54,12 @@ export function MaterialsView({ org, repos, entry }: { org: string; repos: strin
   return <MaterialsTree org={org} trees={trees.value} />;
 }
 
+/** Top folder names that hold supporting files (the `assets` kind of decision 0026; the status file carries no kinds). */
+export const SUPPORT_DIRS = ['data', 'img', 'images', 'src', 'assets', 'figures', 'fig', 'static'];
+
+/** A top-level tree node is supporting files: a folder with one of those names. */
+export const isSupport = (n: TreeNode) => !!n.children && SUPPORT_DIRS.includes(n.name.toLowerCase());
+
 export function MaterialsTree({ org, trees }: { org: string; trees: (readonly [string, TreeEntry[] | null])[] }) {
   const shown = trees.filter(([, t]) => t !== null);
   if (!shown.length) return <p class="footnote">Nothing has been released yet, or you cannot read the materials: that needs the semester’s student team, which joining gives you.</p>;
@@ -61,14 +69,22 @@ export function MaterialsTree({ org, trees }: { org: string; trees: (readonly [s
         const files = tree!.filter((t) => t.type === 'blob').map((t) => t.path);
         const node = (n: TreeNode, depth: number): preact.JSX.Element =>
           n.children ? (
-            <li class="ft-dir"><details open={depth === 0 && !n.name.endsWith('_files')}><summary><span class="ft-name">{n.name}/</span></summary><ul>{n.children.map((c) => node(c, depth + 1))}</ul></details></li>
+            <li class="ft-dir"><details open={depth === 0 && !n.name.endsWith('_files')}><summary><FolderHead name={n.name} /></summary><ul>{n.children.map((c) => node(c, depth + 1))}</ul></details></li>
           ) : (
-            <li class="ft-file"><a class="ft-name" href={materialHref(org, repo, n.path)}>{n.name}</a></li>
+            <li class="ft-file"><FileHead name={n.name}><a class="ft-name" href={materialHref(org, repo, n.path)}>{n.name}</a></FileHead></li>
           );
+        const top = buildTree(files);
+        const support = top.filter(isSupport);
         return (
           <section class="panel section" aria-label={repo}>
             <h2>{repo}</h2>
-            {files.length ? <ul class="file-tree">{buildTree(files).map((n) => node(n, 0))}</ul> : <p class="footnote">Nothing released yet.</p>}
+            {files.length ? <ul class="file-tree">{top.filter((n) => !isSupport(n)).map((n) => node(n, 0))}</ul> : <p class="footnote">Nothing released yet.</p>}
+            {support.length ? (
+              <details class="fold supporting">
+                <summary>Supporting files</summary>
+                <ul class="file-tree">{support.map((n) => node(n, 1))}</ul>
+              </details>
+            ) : null}
           </section>
         );
       })}

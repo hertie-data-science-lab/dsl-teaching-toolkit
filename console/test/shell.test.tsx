@@ -73,7 +73,7 @@ describe('top bar', () => {
     expect(out).toContain('DSL Teaching Console<small>Instructor view</small>');
   });
   it('links the person to Profile, with no Your setup pill and no course links', () => {
-    const out = render(<Topbar user={user} title="Instructor view" onSignOut={() => {}} />);
+    const out = render(<Topbar user={user} title="Instructor view" onSignOut={() => {}} guide />);
     const who = /<a[^>]*class="who"[^>]*>/.exec(out)?.[0] ?? '';
     expect(who).toContain('href="?#profile"');
     expect(who).toContain('aria-label="Your profile"');
@@ -83,6 +83,11 @@ describe('top bar', () => {
     expect(out).not.toContain('Your setup');
     expect(out).not.toContain('hdr-links');
     expect(out).toContain('>Guide</a>');
+    expect(out).toContain('>Sign out</button>');
+  });
+  it('shows Guide only to a person with an instructor role (decision 0029 rule 5)', () => {
+    const out = render(<Topbar user={user} title="Student view" onSignOut={() => {}} />);
+    expect(out).not.toContain('Guide');
     expect(out).toContain('>Sign out</button>');
   });
 });

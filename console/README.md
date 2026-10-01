@@ -93,9 +93,12 @@ may hold both across organisations:
 - anything else is not shown (a course the person can read but not change still shows read only).
 
 Home shows **Your courses** (the instructor's course and semester cards) and **Your semesters**
-(one card per semester the person is a student of, archived ones greyed), with a **Show these
-semesters** choice kept in this browser (`localStorage`, per account). A student-only account
-lands on Your semesters, with This week across the semesters it shows.
+(one card per semester the person is a student of, archived ones greyed). For a student-only
+account it is its own page, laid out as the instructor's (decision 0029): **This semester** (the
+live ones, each card with its week and "Next: ...") and **Past semesters**, which a **Current
+only** checkbox in the page head hides (kept in this browser, per account). A student-only
+account with exactly one live semester lands on its This week instead. The top bar's Guide
+explains the instructor console, so only a person with an instructor role sees it.
 
 The mode picks the shell. `?semester=<org>` opens that semester's student screens (This
 week, Schedule, Assignments, Marks, Materials, Join, Instructors). For a
@@ -108,7 +111,9 @@ console is in instructor mode for anyone who teaches somewhere, and in student m
 Every semester page, in either console, opens with the **semester banner** (decision 0025):
 the course name, the semester as the page's one h1, its state, week and dates, and the
 semester on GitHub. It replaces the breadcrumbs there; the page's own title is an h2 styled
-as a heading. Course pages have no banner and keep their breadcrumbs. On a phone the preview's
+as a heading, with its `?`. A student's banner takes the week and the dates from
+`student-status.json`, and This week says how old that file's facts are ("Updated 3 h ago").
+The footer names the course and the semester. Course pages have no banner and keep their breadcrumbs. On a phone the preview's
 top-bar link reads "Preview".
 
 The **course overview** is a status board in two columns: Setup & To do, Semesters (each with
@@ -125,12 +130,12 @@ Each screen reads with the student's own account:
 
 | Screen | Shared facts (`StudentData`) | The student's own (GitHub, directly) |
 |---|---|---|
-| This week (per semester, and on Home across the semesters shown, each line in its semester's timezone) | rows due, handed out, released or on in the next 7 days; releases and announcements of the last 7; open team formation; the About block: course name, syllabus pinned, the home text, announcements | gradebook's last change (marks returned); whether they have a team; a patch note on their Submission receipts newer than their last visit |
-| Schedule | rows by week, coloured by kind; TBC dates; row details; file chips that open each file; readings (files, reading list, "to come") | their state on hand-out and due rows; rows for their repos marked |
+| This week (in the semester's timezone; "Updated <age>" from the file's `generated_at`) | rows due, handed out, released or on in the next 7 days; releases and announcements of the last 7; open team formation; the About block: course name, syllabus pinned, the home text, announcements | gradebook's last change (marks returned); whether they have a team; a patch note on their Submission receipts newer than their last visit |
+| Schedule | rows by semester week (from `semester_start`, as the Dashboard counts), coloured by kind; TBC dates; row details; file chips that open each file; readings (files, reading list, "to come") | their state on hand-out and due rows; rows for their repos marked |
 | Assignments | dates (TBC), late cutoff, late rule, points, how to hand in, solution shown, the shape note, the brief (a fold, rendered by GitHub), the course's late-work sentences | `<slug>-<handle>`, a team repo they can push to, the drop box; their team (from the repo, else from `GET /user/teams` by the `<slug>-` prefix, so a drop-box or external group finds it too) and its members; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos): its body, the newest receipt, a patch note as "pull before you continue", every comment in a fold; the CONTRIBUTIONS.md ask on a team repo; for a student-choice repo after the cutoff, the Settings link to make it public |
 | Marks | assignment titles | `grades-<handle>/grades.yml`: final grade, score (per question when given), penalty, feedback overall and per question, team and team feedback, a term total if present |
-| Materials | the materials repos; each session's readings | the repo's recursive tree; each file read when opened |
-| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decision 0027) |
+| Materials | the materials repos; each session's readings | the repo's recursive tree (supporting folders such as `data/` and `img/` last, folded, under "Supporting files"); each file read when opened |
+| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s until each is forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decision 0027) |
 | Join | assignments forming teams, and each one's teams so far (name, headcount, cap; never who) with a Pick that fills in the team | their own Join course / Join team issues in `join` and the automation's last reply; after "You joined", the invitation's accept link |
 | Instructors | the cards, with an email only where the instructor chose to show it | none (a picture hosted on the semester site is read through the API and shown as `data:`) |
 
@@ -154,8 +159,10 @@ picked for the folder check (in IndexedDB).
 The shared facts come through one interface, `StudentData` (`src/model/student.ts`), read by
 `StatusFileSource` from the engine's public `<semester>/.github/.system/student-status.json`
 (`dsl_course/student_status.py`, rewritten with every status refresh; its allow-list schema is
-`schemas/student-status.schema.json`). It carries the cutoff, the timezone and the policy's
-kinds, so the console derives none of them. A semester whose engine has not written the file
+`schemas/student-status.schema.json`). It carries the cutoff, the timezone, the policy's
+kinds and the semester's dates, so the console derives none of them, and `generated_at`, when
+its facts last changed. A file of the first schema (`dsl.student-status/1`) is still read, its
+dates and age unknown. A semester whose engine has not written the file
 yet is read from its site repo instead (`SiteSource`: the generated collections, `index.md`,
 `_data/*.yml`), which also serves site-hosted instructor pictures. In a Student view nothing
 of the student's own is read.

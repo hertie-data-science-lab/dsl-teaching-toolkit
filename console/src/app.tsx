@@ -7,7 +7,7 @@ import { EnvCtx, type Env } from './env';
 import { useEffect } from 'preact/hooks';
 import { createAuth, type ConsoleAuth } from './auth/console';
 import { GitHubClient, type GhUser } from './github/client';
-import { discoverEstate, studentSemesters, type Estate, type Mode } from './model/discovery';
+import { discoverEstate, isInstructor, studentSemesters, type Estate, type Mode } from './model/discovery';
 import { LiveFiles } from './model/files';
 import { forgetMyTeams } from './model/mine';
 import { forgetStudentPrefs } from './model/prefs';
@@ -20,7 +20,7 @@ import { OpsSession } from './ops/session';
 import { ArchiveScreen } from './screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
 import { takeInstallReturn } from './wizards/drafts';
-import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, landing, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, wizardOf } from './router';
+import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, landing, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseScreen, TemplateScreen, courseView, semesterChip, templateTitle } from './screens/Course';
@@ -37,7 +37,7 @@ import { NewCohortScreen } from './screens/NewCohort';
 import { NewCourseScreen } from './screens/NewCourse';
 import { NewMaterialsScreen } from './screens/NewMaterials';
 import { MigrationUnknownScreen, NotMigratedScreen } from './screens/NotMigrated';
-import { StudentScreen, forgetStudentData, studentScreen } from './screens/Student';
+import { StudentBanner, StudentScreen, forgetStudentData, studentScreen } from './screens/Student';
 import { JoinCourseScreen } from './screens/StudentJoin';
 import type { CohortProps, CourseProps } from './screens/types';
 import { Loading, ghUrl } from './ui/bits';
@@ -146,15 +146,22 @@ export function App({ state: s }: { state: AppState }) {
 
   const courses = estate.courses;
   const semesters = studentSemesters(estate);
-  const sel = parseSearch(s.search.value);
+  const asks = parseSearch(s.search.value);
+  // A URL naming no page or org lands a person who teaches nothing in their one live semester.
+  const one = !route.screen && !asks.semester && !asks.cohort && !asks.course && !asks.join ? studentLanding(estate) : null;
+  const sel = one ? { ...asks, semester: one } : asks;
   const title = s.mode.value === 'student' ? 'Student view' : 'Instructor view';
+  // Guide explains the instructor console: only a person with an instructor role sees it.
+  const guide = courses.length > 0 || isInstructor(estate);
+  // The landing page's name: All courses for anyone with a course, else Your semesters.
+  const root = courses.length ? 'All courses' : 'Your semesters';
 
   if (sel.join) {
     return (
       <EnvCtx.Provider value={s.env(user)}>
-        <Topbar user={user} title="Student view" onSignOut={s.signOut} />
-        <div class="shell" style="grid-template-columns:minmax(0,1fr)"><main id="view" tabindex={-1}><ScreenBoundary key={s.search.value}><JoinCourseScreen org={sel.join} /></ScreenBoundary></main></div>
-        <Footer />
+        <Topbar user={user} title="Student view" onSignOut={s.signOut} guide={guide} />
+        <div class="shell" style="grid-template-columns:minmax(0,1fr)"><main id="view" tabindex={-1}><ScreenBoundary key={s.search.value}><JoinCourseScreen org={sel.join} root={root} /></ScreenBoundary></main></div>
+        <Footer sub={root} />
       </EnvCtx.Provider>
     );
   }
@@ -164,9 +171,9 @@ export function App({ state: s }: { state: AppState }) {
   if (stu?.pending) {
     return (
       <>
-        <Topbar user={user} title={title} onSignOut={s.signOut} />
+        <Topbar user={user} title={title} onSignOut={s.signOut} guide={guide} />
         <div class="shell" style="grid-template-columns:minmax(0,1fr)"><main><Loading what="Opening the semester" /></main></div>
-        <Footer />
+        <Footer sub={root} />
       </>
     );
   }
@@ -175,18 +182,18 @@ export function App({ state: s }: { state: AppState }) {
     const back = `?cohort=${stu.semester.org}#dashboard`;
     return (
       <EnvCtx.Provider value={s.env(user)}>
-        <Topbar user={user} title={stu.studentView ? 'Student view (preview)' : title} titleHref={stu.studentView ? back : undefined} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} />
+        <Topbar user={user} title={stu.studentView ? 'Student view (preview)' : title} titleHref={stu.studentView ? back : undefined} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} guide={guide} />
         <div class="shell">
           <aside class="sidenav" id="sidenav-wrap" aria-label="Semester navigation">
             <StudentNav courses={courses} cohortStates={{}} semesters={semesters} semester={stu.semester} current={key} />
           </aside>
           <main id="view" tabindex={-1}>
             {estate.invited?.length ? <Invitations invited={estate.invited} kind={estate.kind} /> : null}
-            <SemesterBanner courseName={stu.semester.courseName} termLabel={stu.semester.termLabel} org={stu.semester.org} chip={semesterChip({ live: !stu.semester.archived })} view={stu.studentView ? 'back' : undefined} />
+            <StudentBanner semester={stu.semester} studentView={stu.studentView} chip={semesterChip({ live: !stu.semester.archived })} now={s.now.value} />
             <ScreenBoundary key={s.search.value + s.hash.value}><StudentScreen semester={stu.semester} screen={key} studentView={stu.studentView} entry={route.entry} now={s.now.value} /></ScreenBoundary>
           </main>
         </div>
-        <Footer />
+        <Footer title={stu.semester.courseName || undefined} sub={stu.semester.termLabel} />
       </EnvCtx.Provider>
     );
   }
@@ -275,7 +282,7 @@ export function App({ state: s }: { state: AppState }) {
   const appLevel = FULL_WIDTH.includes(screen);
   return (
     <EnvCtx.Provider value={s.env(user)}>
-      <Topbar user={user} title={title} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={appLevel ? undefined : s.toggleNav} />
+      <Topbar user={user} title={title} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={appLevel ? undefined : s.toggleNav} guide={guide} />
       <div class="shell" style={appLevel ? 'grid-template-columns:minmax(0,1fr)' : undefined}>
         {appLevel ? null : (
           <aside class="sidenav" id="sidenav-wrap" aria-label="Console navigation">
@@ -288,7 +295,7 @@ export function App({ state: s }: { state: AppState }) {
           <ScreenBoundary key={s.search.value + s.hash.value}>{body}</ScreenBoundary>
         </main>
       </div>
-      {appLevel ? <Footer /> : <Footer course={ctx.course} cohort={ctx.cohort} />}
+      {appLevel || !ctx.course ? <Footer sub={root} /> : <Footer title={ctx.course.name} sub={ctx.cohort ? ctx.cohort.termLabel : 'Course'} />}
       <OpPanel />
     </EnvCtx.Provider>
   );

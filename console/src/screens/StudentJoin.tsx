@@ -16,7 +16,8 @@ import { readable, type Mine } from '../model/mine';
 import { JOIN_MARKERS, JOIN_REPO } from '../model/names';
 import type { SemesterFacts } from '../model/student';
 import { ORG_NAME_RE } from '../model/policy';
-import { Crumbs, Md } from '../ui/bits';
+import { CheckLine, Crumbs, Md } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 
 export const WELCOME = JOIN_REPO;
@@ -120,7 +121,7 @@ export function AskedList({ asked, org, invitePending = false }: { asked: Asked[
         const s = issueState(issue);
         return (
           <li>
-            <div class={`check-line ${s.tone}`}><span><b>{issue.title}</b>, {fmtWhen(issue.created_at)}: {s.word}. <a href={issue.html_url} target="_blank" rel="noopener">Open <Ext /></a>{org && invitePending && issue.labels.some((l) => l.name === 'onboarded') ? <> <a href={invitationUrl(org)} target="_blank" rel="noopener">Accept the invitation <Ext /></a></> : null}</span></div>
+            <CheckLine cls={s.tone}><b>{issue.title}</b>, {fmtWhen(issue.created_at)}: {s.word}. <a href={issue.html_url} target="_blank" rel="noopener">Open <Ext /></a>{org && invitePending && issue.labels.some((l) => l.name === 'onboarded') ? <> <a href={invitationUrl(org)} target="_blank" rel="noopener">Accept the invitation <Ext /></a></> : null}</CheckLine>
             {reply ? <Md class="reply" src={readable(reply.body)} /> : null}
           </li>
         );
@@ -255,13 +256,13 @@ export function JoinCourseForm({ org, onSent }: { org: string; onSent?: () => vo
   );
 }
 
-/** `?join=<org>`: joining a semester you are not a member of yet (its join repo is public). */
-export function JoinCourseScreen({ org }: { org: string }) {
+/** `?join=<org>`: joining a semester you are not a member of yet (its join repo is public). `root` names the landing page the crumb goes back to. */
+export function JoinCourseScreen({ org, root = 'Your semesters' }: { org: string; root?: string }) {
   const [sent, setSent] = useState(0);
   return (
     <>
-      <Crumbs items={[{ t: 'Your semesters', href: '#home' }, { t: `Join ${org}` }]} />
-      <div class="page-head"><div><h1>Join a semester</h1><p class="lede">{org}</p></div></div>
+      <Crumbs items={[{ t: root, href: '?#home' }, { t: `Join ${org}` }]} />
+      <div class="page-head"><div><h1>Join a semester <Hint>Send the enrolment code from your email. The automation then invites you to the semester on GitHub.</Hint></h1><p class="lede">{org}</p></div></div>
       <div class="stack">
         <section class="panel section"><JoinCourseForm org={org} onSent={() => setSent(sent + 1)} /></section>
         <JoinRequests org={org} sent={sent} />

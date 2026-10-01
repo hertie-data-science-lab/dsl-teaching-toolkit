@@ -45,9 +45,13 @@ function useTheme(): [boolean, () => void] {
  * button only where there is a side nav to open. Its links start `?`: app-level pages are about
  * no course or semester, so they clear the query. With `titleHref` (an instructor previewing a
  * semester's Student view, decision 0025) the view is a link of its own, back to that semester.
+ * Guide only for a person with an instructor role (`guide`): it explains the instructor console
+ * (decision 0029 rule 5).
  */
-export function Topbar({ user, onSignOut, navOpen = false, onMenu, title, titleHref }: {
+export function Topbar({ user, onSignOut, navOpen = false, onMenu, title, titleHref, guide = false }: {
   user: GhUser | null;
+  /** Show the Guide link. */
+  guide?: boolean;
   /** The view after sign-in: Instructor view, Student view, or Student view (preview). */
   title?: string;
   /** Where the view links to; plain text without it. */
@@ -70,7 +74,7 @@ export function Topbar({ user, onSignOut, navOpen = false, onMenu, title, titleH
               <span class="who-name">{user.name || user.login}</span>
             </a>
           ) : null}
-          {user ? <a class="pill-ghost" href="?#help" aria-label="Guide: how the console is organised">Guide</a> : null}
+          {user && guide ? <a class="pill-ghost" href="?#help" aria-label="Guide: how the console is organised">Guide</a> : null}
           <button class="pill-ghost" type="button" aria-label="Switch colour theme" onClick={toggle}>{dark ? 'Light' : 'Dark'}</button>
           {user && onSignOut ? <button class="pill-ghost" type="button" onClick={onSignOut}>Sign out</button> : null}
         </div>
@@ -79,11 +83,12 @@ export function Topbar({ user, onSignOut, navOpen = false, onMenu, title, titleH
   );
 }
 
-export function Footer({ course, cohort }: { course?: Course; cohort?: CohortRef }) {
+/** The footer, naming what the page is about: a course and its semester, or the console (`sub` then names the landing page). */
+export function Footer({ title = 'DSL Teaching Console', sub = 'All courses' }: { title?: string; sub?: string }) {
   return (
     <footer class="site-footer">
       <div class="f-inner">
-        <div><h2>{course ? course.name : 'DSL Teaching Console'}</h2><p>{cohort ? cohort.termLabel : course ? 'Course' : 'All courses'}</p></div>
+        <div><h2>{title}</h2><p>{sub}</p></div>
         <div>
           <ul>
             <li><a href="https://github.com/hertie-data-science-lab" target="_blank" rel="noopener"><Gh />Hertie School Data Science Lab</a></li>

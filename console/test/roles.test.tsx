@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import type { Course, Estate, Role, Semester } from '../src/model/discovery';
-import { hiddenSemesters, saveHiddenSemesters, type PrefStore } from '../src/model/prefs';
-import { modeOf, parseSearch, studentContext } from '../src/router';
+import { currentOnly, saveCurrentOnly, type PrefStore } from '../src/model/prefs';
+import { modeOf, parseSearch, studentContext, studentLanding } from '../src/router';
 import { HomeScreen } from '../src/screens/Home';
 import { StudentScreen, studentScreen } from '../src/screens/Student';
 import { SemesterBanner, Sidenav, StudentNav, Topbar } from '../src/ui/shell';
@@ -30,7 +30,13 @@ afterEach(() => vi.unstubAllGlobals());
 describe('Home groups', () => {
   it('a student-only account lands on Your semesters, archived ones greyed, with no instructor actions', () => {
     const out = render(<HomeScreen courses={[]} semesters={[NLP, NLP_OLD]} cohortStates={{}} now={0} user={user} />);
-    expect(out).toContain('<h1>Your semesters');
+    expect(out).toContain('<h1>Your semesters <span class="hint-wrap">');
+    // This semester first, then Past semesters, as the instructor's page has them (decision 0029 rule 3).
+    expect(out.indexOf('This semester')).toBeLessThan(out.indexOf('hertie-nlp-f2026#week'));
+    expect(out.indexOf('hertie-nlp-f2026#week')).toBeLessThan(out.indexOf('Past semesters'));
+    expect(out.indexOf('Past semesters')).toBeLessThan(out.indexOf('hertie-nlp-f2025#week'));
+    expect(out).not.toContain('Open the semester');
+    expect(out).not.toContain('Show these semesters');
     expect(out).not.toContain('New course');
     expect(out).not.toContain('Your courses');
     expect(out).toContain('Natural Language Processing, Fall 2026');
@@ -41,7 +47,7 @@ describe('Home groups', () => {
 
   it('a person with both roles sees All courses, then Your semesters', () => {
     const out = render(<HomeScreen courses={[course]} semesters={[NLP]} cohortStates={{}} now={0} user={user} />);
-    expect(out).toContain('<h1>All courses <span class="hint">');
+    expect(out).toContain('<h1>All courses <span class="hint-wrap">');
     expect(out.indexOf('Machine Learning, Fall 2026')).toBeLessThan(out.indexOf('Your semesters'));
     expect(out.indexOf('Your semesters')).toBeLessThan(out.indexOf('Natural Language Processing, Fall 2026'));
   });
@@ -53,27 +59,34 @@ describe('Home groups', () => {
     expect(text(<HomeScreen courses={[]} semesters={[]} kind="classic" cohortStates={{}} now={0} user={user} />)).toContain('No courses found');
   });
 
-  it('Show these semesters hides what the viewer chose, per viewer, and still lists it to bring back', () => {
+  it('Current only hides the past semesters, per viewer, and is offered only when there are some', () => {
     const map = new Map<string, string>();
     vi.stubGlobal('localStorage', { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => void map.set(k, v) });
-    saveHiddenSemesters('octo', new Set([NLP_OLD.org]));
+    expect(render(<HomeScreen courses={[]} semesters={[NLP]} cohortStates={{}} now={0} user={user} />)).not.toContain('Current only');
+    saveCurrentOnly('octo', true);
     const out = render(<HomeScreen courses={[]} semesters={[NLP, NLP_OLD]} cohortStates={{}} now={0} user={user} />);
+    expect(out).toMatch(/<label class="check my-only"><input type="checkbox" checked[^>]*\/?><span>Current only<\/span>/);
     expect(out).not.toContain('href="?semester=hertie-nlp-f2025#week"');
+    expect(out).not.toContain('Past semesters');
     expect(out).toContain('href="?semester=hertie-nlp-f2026#week"');
-    expect(out).toContain('Show these semesters');
-    expect(text(<HomeScreen courses={[]} semesters={[NLP, NLP_OLD]} cohortStates={{}} now={0} user={user} />)).toContain('Natural Language Processing, Fall 2025');
     const other = render(<HomeScreen courses={[]} semesters={[NLP, NLP_OLD]} cohortStates={{}} now={0} user={{ ...user, login: 'someone-else' }} />);
     expect(other).toContain('href="?semester=hertie-nlp-f2025#week"');
   });
 
   it('the toggle survives storage that is missing or refuses', () => {
     const refusing: PrefStore = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
-    expect(hiddenSemesters('octo', refusing)).toEqual(new Set());
-    expect(() => saveHiddenSemesters('octo', new Set(['x']), refusing)).not.toThrow();
-    expect(hiddenSemesters('octo', { getItem: () => '{not json', setItem: () => {} })).toEqual(new Set());
-    expect(hiddenSemesters('octo', null)).toEqual(new Set());
+    expect(currentOnly('octo', refusing)).toBe(false);
+    expect(() => saveCurrentOnly('octo', true, refusing)).not.toThrow();
+    expect(currentOnly('octo', null)).toBe(false);
     vi.stubGlobal('localStorage', undefined);
     expect(render(<HomeScreen courses={[]} semesters={[NLP]} cohortStates={{}} now={0} user={user} />)).toContain('?semester=hertie-nlp-f2026#week');
+  });
+
+  it('a student with exactly one live semester and no instructor role lands on it', () => {
+    expect(studentLanding(estate([], [NLP, NLP_OLD], [[NLP.org, 'student'], [NLP_OLD.org, 'student']]))).toBe(NLP.org);
+    expect(studentLanding(estate([], [NLP, sem('hertie-maths-f2026')], [[NLP.org, 'student']]))).toBeNull();
+    expect(studentLanding(estate([], [NLP_OLD], [[NLP_OLD.org, 'student']]))).toBeNull();
+    expect(studentLanding(estate([course], [NLP], [[COURSE_ORG, 'instructor'], [NLP.org, 'student']]))).toBeNull();
   });
 });
 
