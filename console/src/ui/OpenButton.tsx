@@ -199,7 +199,7 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
   return (
     <div class={`split${small ? ' small' : ''}`} ref={wrap}>
       {/* The small button keeps one short word; its title and name carry the whole label. */}
-      {link(main, { class: `${cls} split-main`, ...(small ? { title: label, 'aria-label': label } : {}) }, <>{note === 'Copied' && main.copy ? note : small ? (cloned === false ? 'Clone' : 'Open') : label}{main.href && isWeb(main.href) ? <Ext /> : null}</>)}
+      {link(main, { class: `${cls} split-main`, ...(small ? { title: label, 'aria-label': label } : {}) }, <>{note === 'Copied' && main.copy ? note : small ? (main.copy ? 'Copy' : cloned === false ? 'Clone' : 'Open') : label}{main.href && isWeb(main.href) ? <Ext /> : null}</>)}
       <button ref={caret} type="button" class={`${cls} split-caret`} aria-haspopup="menu" aria-expanded={open} aria-controls={id} aria-label={`More ways to open ${ref.repo}`}
         onClick={() => (open ? setOpen(false) : show('first'))} onKeyDown={onCaretKey} onKeyUp={onCaretKeyUp}>
         <span class="caret" aria-hidden="true" />
@@ -211,7 +211,7 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
         <div class="pm-h" role="presentation">On your computer</div>
         {local.map(entry)}
         <hr />
-        <a href={profileHref(home)} role="menuitem" tabIndex={-1} onClick={() => setOpen(false)}>
+        <a href={profileHref(home, !!ref.home)} role="menuitem" tabIndex={-1} onClick={() => setOpen(false)}>
           <span>{folder ? 'Change your profile' : 'Set up a local folder'}</span>
         </a>
       </div>

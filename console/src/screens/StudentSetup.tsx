@@ -32,7 +32,7 @@ export function SetupView({ org, facts, mine, studentView }: { org: string; fact
   const [tick, setTick] = useState(0);
   const repos = facts.materialsRepos;
   const forks = useLoad(env && !studentView ? () => Promise.all(repos.map((r) => forkOf(env.client, login, org, r))) : null, [org, repos.join(','), tick]);
-  if (studentView) return <p class="footnote">A student checks here that they have forked each materials repo, then opens or clones their fork and their assignment repos, with the folder and editor from their Profile.</p>;
+  if (studentView) return <p class="footnote">A student checks here that they have forked each materials repo. Each fork and assignment repo then gets an Open button, using the folder and editor from their Profile.</p>;
   const own = mine ? Object.values(mine.units).filter((u) => u.repo) : [];
   return (
     <div class="stack">
@@ -71,7 +71,7 @@ export function SetupView({ org, facts, mine, studentView }: { org: string; fact
             {own.map((u) => (
               <li>
                 <span><b>{u.repo}</b>{u.shared ? <span class="footnote"> (shared: your work goes in your {u.team ? 'team’s' : 'own'} folder)</span> : null}</span>
-                <OpenButton org={org} repo={u.repo!} small />
+                <OpenButton org={org} repo={u.repo!} home={org} small />
               </li>
             ))}
           </ul>

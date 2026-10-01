@@ -28,7 +28,10 @@ export interface RepoRef {
   repo: string;
   branch?: string;
   path?: string;
-  /** The course whose folder the clone goes in, when not `org`: a student's fork sits with its semester's repos. */
+  /**
+   * The semester whose folder the clone goes in, set on the student screens: a student's fork
+   * sits with its semester's repos. Unset, the folder is `org`'s course folder.
+   */
   home?: string;
 }
 
@@ -103,8 +106,11 @@ export interface OpenItem {
   hint?: 'clone' | 'open';
 }
 
-/** Profile, about `org`'s course, so its folder check knows the course the person came from. */
-export const profileHref = (org: string) => `?course=${encodeURIComponent(org)}#profile`;
+/**
+ * Profile, about the org the person came from, so its folder check knows it: `?course=` for
+ * a course, `?cohort=` for a semester (the student screens), which the App maps to its course.
+ */
+export const profileHref = (org: string, semester = false) => `?${semester ? 'cohort' : 'course'}=${encodeURIComponent(org)}#profile`;
 
 /**
  * Every way to open `r` with this setup, in menu order, the clone command last. With a folder set up, VS Code both
@@ -142,7 +148,8 @@ const CLONES: OpenChoice[] = ['vsclone', 'desktop', 'clone'];
 const OPENS: OpenChoice[] = ['vscode', 'desktop', 'editor'];
 
 /**
- * The button's own action (decision 0027 rule 2). Where the folder check tells the repo is
+ * The button's own action (decision 0027 rule 2). A remembered web choice (GitHub,
+ * github.dev) stays the action in every state. Where the folder check tells the repo is
  * not there: a clone, the remembered one if it clones, else the same tool's (a VS Code open
  * becomes a VS Code clone), else the editor's (GitHub Desktop clones on its own; anything
  * else clones in VS Code). Where it is there: an open, likewise. Where it cannot tell: the
@@ -152,6 +159,7 @@ export function defaultItem(items: OpenItem[], setup: Setup | null, cloned?: boo
   const find = (c: OpenChoice | undefined) => items.find((i) => i.choice === c);
   const opener = setup ? EDITOR_CHOICE[setup.editor] : 'vscode';
   const last = setup?.lastOpen;
+  if (last === 'github' || last === 'githubdev') return find(last) ?? items[0];
   const vs = last === 'vscode' || last === 'vsclone';
   if (cloned === false) return find(last && CLONES.includes(last) ? last : vs ? 'vsclone' : opener === 'desktop' ? 'desktop' : 'vsclone') ?? find('vscode') ?? items[0];
   if (cloned === true) return find(last && OPENS.includes(last) ? last : vs ? 'vscode' : opener) ?? find('vscode') ?? items[0];

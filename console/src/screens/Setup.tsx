@@ -21,7 +21,7 @@ const draftOf = (s: Setup | null): Draft => ({ folder: s?.folder ?? '', editor: 
 const same = (a: Draft, b: Draft) => a.folder.trim() === b.folder.trim() && a.editor === b.editor && (a.editor !== 'other' || a.scheme.trim() === b.scheme.trim());
 
 /** The picked repos folder: pick it, see its name, forget it. Chrome and Edge only. */
-function FolderCheck({ login, typed, org }: { login: string; typed: string; org?: string }) {
+function FolderCheck({ login, typed, org, courses, saved }: { login: string; typed: string; org?: string; courses: ProfileCourse[]; saved: Setup | null }) {
   const [name, setName] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
@@ -40,8 +40,10 @@ function FolderCheck({ login, typed, org }: { login: string; typed: string; org?
   };
   const end = lastSegment(typed).toLowerCase();
   const picked = name?.toLowerCase();
-  // Picking the course's own folder under the typed one is a setup `courseFolder` supports.
-  const differs = !!end && !!picked && end !== picked && picked !== org?.toLowerCase();
+  // Picking a course's own folder (under the typed one, or the one Profile names for it) is a
+  // setup the folder check supports.
+  const courseEnds = [...courses.map((c) => c.org), ...(org ? [org] : [])].map((o) => lastSegment(courseFolder(saved, o)).toLowerCase());
+  const differs = !!end && !!picked && end !== picked && !courseEnds.includes(picked);
   return (
     <div class="field folder-check">
       {name ? (
@@ -66,7 +68,8 @@ export interface ProfileCourse {
 }
 
 /** One course's folder, and "Use a different folder" to give it one of its own. */
-function CourseRow({ course, setup, onSave }: { course: ProfileCourse; setup: Setup | null; onSave: (org: string, folder: string) => void }) {
+// While the root folder is being edited the row only shows: its own folder is saved against the saved root.
+function CourseRow({ course, setup, editable, onSave }: { course: ProfileCourse; setup: Setup | null; editable: boolean; onSave: (org: string, folder: string) => void }) {
   const folder = courseFolder(setup, course.org);
   const [draft, setDraft] = useState<string | null>(null);
   const id = `ys-course-${course.org}`;
@@ -75,7 +78,7 @@ function CourseRow({ course, setup, onSave }: { course: ProfileCourse; setup: Se
       <li>
         <b>{course.name}</b>
         {folder ? <code>{folder}</code> : <span class="footnote">Set the folder above.</span>}
-        <button class="textlink" type="button" onClick={() => setDraft(folder)}>Use a different folder</button>
+        {editable ? <button class="textlink" type="button" onClick={() => setDraft(folder)}>Use a different folder</button> : null}
       </li>
     );
   }
@@ -93,13 +96,13 @@ function CourseRow({ course, setup, onSave }: { course: ProfileCourse; setup: Se
 }
 
 /** "Your courses": each course's folder, resolved from `root` (the saved folder, or the one being typed). */
-function CourseFolders({ courses, setup, root, onSave }: { courses: ProfileCourse[]; setup: Setup | null; root: string; onSave: (org: string, folder: string) => void }) {
+function CourseFolders({ courses, setup, root, editable, onSave }: { courses: ProfileCourse[]; setup: Setup | null; root: string; editable: boolean; onSave: (org: string, folder: string) => void }) {
   if (!courses.length) return null;
   const shown: Setup = { ...(setup ?? { editor: 'vscode' }), folder: root };
   return (
     <div class="field course-folders">
       <h2 class="label">Your courses</h2>
-      <ul class="plain-list">{courses.map((c) => <CourseRow key={c.org} course={c} setup={shown} onSave={onSave} />)}</ul>
+      <ul class="plain-list">{courses.map((c) => <CourseRow key={c.org} course={c} setup={shown} editable={editable} onSave={onSave} />)}</ul>
     </div>
   );
 }
@@ -158,14 +161,14 @@ export function SetupScreen({ org, courses = [] }: { org?: string; courses?: Pro
   const status = done === 'stored' ? <span class="valid-msg" role="status">Saved.</span> : done === 'kept' ? <span class="footnote" role="status">This browser does not keep it: it lasts until you reload.</span> : null;
   const shown = editing ? draft.folder : saved?.folder ?? '';
   const view = !editing && !!saved;
-  const check = shown.trim() && canCheckFolders() ? <FolderCheck login={login} typed={shown} org={org} /> : null;
+  const check = shown.trim() && canCheckFolders() ? <FolderCheck login={login} typed={shown} org={org} courses={courses} saved={saved} /> : null;
   // A course's own folder is stored at once, beside whatever else is saved.
   const saveCourse = (course: string, folder: string) => {
     const next = withOverride(saved ?? { folder: '', editor: 'vscode' }, course, folder);
     setDone(saveYourSetup(login, next) ? 'stored' : 'kept');
     setSaved(next);
   };
-  const folders = <CourseFolders courses={courses} setup={saved} root={shown} onSave={saveCourse} />;
+  const folders = <CourseFolders courses={courses} setup={saved} root={shown} editable={!editing} onSave={saveCourse} />;
   return (
     <>
       <div class="page-head">

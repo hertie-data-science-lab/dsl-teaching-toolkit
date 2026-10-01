@@ -203,6 +203,29 @@ describe('Profile', () => {
     expect(root!.textContent).not.toContain('The folder you picked');
   });
 
+  it('does not flag a course’s own folder picked, nor a semester’s folder for a student with no course', async () => {
+    setHandleStore(memHandles({ [LOGIN]: fakeDir('ml', { materials: {} }) }));
+    saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'vscode', overrides: { [ORG]: '/Users/a/teaching/ml' } });
+    await mount(<SetupScreen org={ORG} courses={[{ org: ORG, name: 'Machine Learning' }]} />);
+    await settle();
+    expect(root!.textContent).toContain('Checking: ml');
+    expect(root!.textContent).not.toContain('The folder you picked');
+    render(null, root!);
+    const SEM = 'hertie-nlp-f2026';
+    setHandleStore(memHandles({ [LOGIN]: fakeDir(SEM, {}) }));
+    saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'vscode' });
+    await mount(<SetupScreen courses={[{ org: SEM, name: 'Natural Language Processing' }]} />);
+    await settle();
+    expect(root!.textContent).toContain(`Checking: ${SEM}`);
+    expect(root!.textContent).not.toContain('The folder you picked');
+    // Another name still is flagged.
+    render(null, root!);
+    setHandleStore(memHandles({ [LOGIN]: fakeDir('elsewhere', {}) }));
+    await mount(<SetupScreen courses={[{ org: SEM, name: 'Natural Language Processing' }]} />);
+    await settle();
+    expect(root!.textContent).toContain('The folder you picked is elsewhere');
+  });
+
   it('shows the stored handle in view mode, and keeps it across Edit and Cancel', async () => {
     setHandleStore(memHandles({ [LOGIN]: fakeDir('repos', {}) }));
     saveYourSetup(LOGIN, { folder: '/Users/a/repos', editor: 'vscode' });

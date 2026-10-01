@@ -176,16 +176,16 @@ describe('3. the whole receipts thread', () => {
     resetVisits();
   });
 
-  it('forgets every visit time of the signed-out person, and no one else’s', () => {
+  it('forgets every visit time and the old student folders of the signed-out person, and no one else’s', () => {
     const data = new Map<string, string>([
-      [`dsl-console-visit:${LOGIN}:${ORG}`, '1'], [`dsl-console-visit:${LOGIN}:other-f2026`, '2'],
-      ['dsl-console-visit:someone:x', '3'], ['console-theme', 'dark'],
+      [`dsl-console-visit:${LOGIN}:${ORG}`, '1'], [`dsl-console-visit:${LOGIN}:other-f2026`, '2'], [`dsl-console-paths:${LOGIN}`, '{}'],
+      ['dsl-console-visit:someone:x', '3'], ['dsl-console-paths:someone', '{}'], ['console-theme', 'dark'],
     ]);
     const store: PrefStore = { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v), removeItem: (k) => void data.delete(k), get length() { return data.size; }, key: (i) => [...data.keys()][i] ?? null };
     resetVisits();
     lastVisit(LOGIN, ORG, store);
     forgetStudentPrefs(LOGIN, store);
-    expect([...data.keys()].sort()).toEqual(['console-theme', 'dsl-console-visit:someone:x']);
+    expect([...data.keys()].sort()).toEqual(['console-theme', 'dsl-console-paths:someone', 'dsl-console-visit:someone:x']);
     data.set(`dsl-console-visit:${LOGIN}:${ORG}`, '5');
     expect(lastVisit(LOGIN, ORG, store)).toBe(5); // the in-memory answers went too
     expect(() => forgetStudentPrefs(LOGIN, refusing)).not.toThrow();

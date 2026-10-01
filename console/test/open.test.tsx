@@ -34,8 +34,9 @@ describe('Your setup in this browser', () => {
     expect(rememberOpen(LOGIN, 'githubdev', store)).toEqual({ folder: '/Users/a/repos', editor: 'other', scheme: 'zed://file/{path}', lastOpen: 'githubdev' });
     expect(rememberOpen('b-example', 'clone', store)).toEqual({ folder: '', editor: 'vscode', lastOpen: 'clone' });
     store.setItem(`dsl-console-visit:${LOGIN}:${ORG}`, '1');
+    store.setItem(`dsl-console-paths:${LOGIN}`, '{}');
     forgetStudentPrefs(LOGIN, store);
-    // Visit times go; Profile stays (decision 0021 rule 3).
+    // Visit times and the old student folders go; Profile stays (decision 0021 rule 3).
     expect([...store.data.keys()].sort()).toEqual([`dsl-console-setup:${LOGIN}`, 'dsl-console-setup:b-example']);
     expect(yourSetup(LOGIN, store)?.folder).toBe('/Users/a/repos');
   });
@@ -169,10 +170,9 @@ describe('where each choice opens', () => {
     expect(at(vs, false)).toEqual(['vsclone', 'Clone']);
     expect(at(vs, true)).toEqual(['vscode', 'Open']);
     expect(at(vs)).toEqual(['vscode', 'Open or clone']);
-    // The state wins over a web choice; the remembered choice still picks the way.
-    expect(at({ ...vs, lastOpen: 'githubdev' }, false)).toEqual(['vsclone', 'Clone']);
-    expect(at({ ...vs, lastOpen: 'githubdev' }, true)).toEqual(['vscode', 'Open']);
-    expect(at({ ...vs, lastOpen: 'githubdev' })).toEqual(['githubdev', 'Open on github.dev']);
+    // A remembered web choice stays, with its own label, whatever the state.
+    for (const c of [false, true, undefined]) expect(at({ ...vs, lastOpen: 'githubdev' }, c)).toEqual(['githubdev', 'Open on github.dev']);
+    expect(at({ ...vs, lastOpen: 'github' }, false)).toEqual(['github', 'Open on GitHub']);
     expect(at({ folder: '/r', editor: 'desktop' }, false)).toEqual(['desktop', 'Clone']);
     expect(at({ ...vs, lastOpen: 'clone' }, false)).toEqual(['clone', 'Copy the clone command']);
     expect(at({ folder: '/r', editor: 'other', scheme: 'zed://file/{path}' }, true)).toEqual(['editor', 'Open']);
@@ -299,6 +299,17 @@ describe('the Open button', () => {
     expect(rows[0].querySelector('.hint-pop')!.textContent).toBe(`VS Code asks where to put it. Or run: git clone ${GH}.git`);
   });
 
+  it('says Copy on the small button for the clone command, and links a student’s Profile by semester', async () => {
+    rememberOpen(LOGIN, 'clone');
+    await mount(<><OpenButton org={ORG} repo="materials" small /><OpenButton org={LOGIN} repo="materials" home="hertie-nlp-f2026" small /></>);
+    const [a, b] = [...root!.querySelectorAll<HTMLElement>('.split')];
+    expect(a.querySelector('.split-main')!.textContent).toBe('Copy');
+    expect(a.querySelector('.split-main')!.getAttribute('aria-label')).toBe('Copy the clone command');
+    const last = (el: Element) => [...el.querySelectorAll('[role="menuitem"]')].at(-1)!.getAttribute('href');
+    expect(last(a)).toBe(`?course=${ORG}#profile`);
+    expect(last(b)).toBe('?cohort=hertie-nlp-f2026#profile');
+  });
+
   it('shows the clone command under its entry when copying fails, and keeps the button label', async () => {
     const clip = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } });
@@ -395,8 +406,10 @@ describe('Profile', () => {
     await act(() => button('Save').click());
     expect(yourSetup(LOGIN)?.overrides).toEqual({ [ORG]: '/Users/a/teaching/ml' });
     expect(rows()[0].querySelector('code')!.textContent).toBe('/Users/a/teaching/ml');
-    // Editing the root keeps the course's own folder; the other course follows the root.
+    // Editing the root keeps the course's own folder; the other course follows the root. A
+    // row cannot take its own folder meanwhile: it would be saved against the draft root.
     await act(() => button('Edit').click());
+    expect(button('Use a different folder')).toBeUndefined();
     expect(rows().map((r) => r.querySelector('code')!.textContent)).toEqual(['/Users/a/teaching/ml', '/Users/a/repos/hertie-nlp-f2026']);
     await type(q<HTMLInputElement>('#ys-folder'), '/Users/a/code');
     expect(rows()[1].querySelector('code')!.textContent).toBe('/Users/a/code/hertie-nlp-f2026');
