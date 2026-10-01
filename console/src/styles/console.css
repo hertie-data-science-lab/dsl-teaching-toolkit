@@ -981,3 +981,15 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .drawer.sized .drawer-body { flex: 1 1 auto; }
 .drawer .outcome-details { margin: 0; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.45; white-space: pre-wrap; overflow: auto; }
 @media (max-width: 520px) { .drawer-grip { display: none; } .drawer.sized { width: 100% !important; height: auto !important; max-width: none; max-height: calc(100vh - 80px); } }
+
+/* WP-U6: set aside optional Setup & To do items (decision 0032). The circle is a button; the
+   fold at the end of each section lists what is set aside. */
+.setup .s-circle { padding: 0; background: none; cursor: pointer; font: inherit; }
+.setup li.open .s-circle:hover, .setup .s-circle:focus-visible { border-color: var(--ink-2); background: var(--surface-2); }
+.setup .s-circle:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 2px; }
+.aside-fold { margin-top: 4px; padding-top: 6px; }
+.aside-fold > summary { min-height: 0; font-family: var(--font-body); font-weight: 400; font-size: 13px; color: var(--muted); }
+.aside-fold > .fold-body { list-style: none; margin: 0; padding: 4px 0 0 28px; display: grid; gap: 2px; font-size: 13.5px; color: var(--ink-2); }
+.aside-fold .textlink { min-height: 0; padding: 0 2px; }
+.modal.small { width: min(460px, 100%); }
+.modal.small .entry-body p { margin: 0; }

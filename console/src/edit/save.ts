@@ -79,6 +79,8 @@ export interface SaveOptions {
   message: string;
   /** Where the status that lists this file's problems lives: the semester's or the course's. */
   statusRepo?: [string, string];
+  /** Called once the commit lands, before the checks are followed: the file is saved. */
+  onCommit?: () => void;
 }
 
 /** Write `text` over `sha` (null for a new file), then report the checks. */
@@ -100,6 +102,7 @@ export async function saveText(env: Env, t: Target, text: string | null, sha: st
     else report({ kind: 'bad', text: `Not saved: ${e instanceof Error ? e.message : String(e)}` });
     return false;
   }
+  opts.onCommit?.();
   report({ kind: 'busy', text: 'Checking…' });
   const sr = opts.statusRepo;
   const before = sr ? statusProblems(env, sr, t).length : 0;

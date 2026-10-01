@@ -4,7 +4,7 @@ import { Fragment, type ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 import { useEnv } from '../env';
-import { invalidText, useSave } from '../edit/save';
+import { invalidText, saveText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { KIND_LABEL, STAGE_WORD, ago, opLabel, templateName } from '../model/format';
@@ -29,6 +29,7 @@ import { formatError } from '../wizards/model';
 import { courseScope, detailsOf, newestScope, websiteUrl } from './CourseEdit';
 import type { CourseProps } from './types';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from '../model/names';
+import { AsideFold, COURSE_FILE, Circle, SetAsideDialog, asideList, setAsideText, stepAside, todoAside, type Ask } from './SetAside';
 import { REFRESH_HINT, tzOf, yearOf } from './common';
 
 /** The course block and course-scoped problems: from the course's own status, else a semester's. */
@@ -106,22 +107,45 @@ const STEP_HINT: Record<string, string> = {
   C6: 'Optional: an open version of your materials for anyone on the internet.',
 };
 
-/** Initial setup is complete once every step is done but the optional website (decision 0031 rule 2). */
-export function setupComplete(c: CourseStatus): boolean {
-  return SETUP_STEPS.every((s) => s.id === 'C6' || c.stages[s.id] === 'done');
+/** Initial setup is complete once every step not set aside is done (decision 0032 rule 5). */
+export function setupComplete(c: CourseStatus, list: string[] | null = null): boolean {
+  return SETUP_STEPS.every((s) => c.stages[s.id] === 'done' || stepAside(c, s.id, list));
 }
 
-/** Setup: a calm checklist. A tick when done; else a grey line, why, and where to do it. */
-export function SetupList({ course }: { course: CourseStatus }) {
+/** Where a required step is done, for its can't-be-set-aside dialog: the step's own page, whatever its state. */
+const STEP_PAGE: Record<string, string> = { C1: 'Open on GitHub', C2: 'Open .github', C3: 'Open course details' };
+function stepPage(id: string, c: CourseStatus): { href: string; label: string; ext?: boolean } {
+  const own = stepLink(id, { ...c, stages: { ...c.stages, [id]: 'todo' } });
+  return { ...own, label: STEP_PAGE[id] ?? own.label };
+}
+
+/** What the circle before a setup step asks: may it be set aside, or why not. */
+export function stepAsk(id: string, c: CourseStatus): Ask {
+  const label = SETUP_STEPS.find((s) => s.id === id)?.name ?? id;
+  if (c.stage_optional?.[id]) return { kind: 'optional', id, label };
+  return { kind: 'step', id, label, why: c.stage_why?.[id] ?? 'Not done yet.', page: stepPage(id, c) };
+}
+
+/** What the circle before a to-do asks. */
+export function todoAsk(t: Todo, c: CourseStatus): Ask {
+  const label = todoLine(t, c).label;
+  return t.optional ? { kind: 'optional', id: t.id, label } : { kind: 'todo', id: t.id, label, todo: t, href: todoHref(t) };
+}
+
+/** Setup: a calm checklist. A tick when done; else a grey line, why, and where to do it. Steps set aside are left out
+ * (the panel lists them in its fold); `onCircle`, for a viewer with write access, makes an open line's circle a button. */
+export function SetupList({ course, list = null, onCircle }: { course: CourseStatus; list?: string[] | null; onCircle?: (id: string) => void }) {
   return (
     <ul class="setup">
-      {SETUP_STEPS.map((s) => {
+      {SETUP_STEPS.filter((s) => !stepAside(course, s.id, list)).map((s) => {
         const state = course.stages[s.id] ?? 'todo';
         const done = state === 'done';
         const link = done ? null : stepLink(s.id, course);
+        // Only a status that says which steps are optional offers the circle.
+        const circle = !done && onCircle && course.stage_optional && s.id in course.stage_optional;
         return (
           <li class={done ? 'done' : 'open'}>
-            <span class="s-mark" aria-hidden="true">{done ? <Check /> : null}</span>
+            {circle ? <Circle label={s.name} onClick={() => onCircle(s.id)} /> : <span class="s-mark" aria-hidden="true">{done ? <Check /> : null}</span>}
             <span class="s-name">{s.name}{s.need ? <span class="s-need">{s.need}</span> : null}<span class="sr">: {STAGE_WORD[state]}</span> <Hint label="About this step">{STEP_HINT[s.id]}</Hint></span>
             {link ? (
               <span class="s-why">
@@ -161,9 +185,14 @@ export function todoLine(t: Todo, c: CourseStatus): { label: string; hint?: stri
   return { label: check?.label ?? t.text, hint: CHECK_HINT[id] };
 }
 
+/** The to-dos not set aside. */
+export function openTodos(c: CourseStatus, list: string[] | null = null): Todo[] {
+  return (c.todo ?? []).filter((t) => !todoAside(t, list));
+}
+
 /** The open to-dos as a checklist styled like Initial setup: a grey line, why, and where to do it. */
-export function TodoList({ course }: { course: CourseStatus }) {
-  const todo = course.todo ?? [];
+export function TodoList({ course, list = null, onCircle }: { course: CourseStatus; list?: string[] | null; onCircle?: (t: Todo) => void }) {
+  const todo = openTodos(course, list);
   if (!todo.length) return <p class="footnote">Nothing to do.</p>;
   return (
     <ul class="setup">
@@ -171,7 +200,7 @@ export function TodoList({ course }: { course: CourseStatus }) {
         const line = todoLine(t, course);
         return (
           <li class="open" key={t.id}>
-            <span class="s-mark" aria-hidden="true" />
+            {onCircle && typeof t.optional === 'boolean' ? <Circle label={line.label} onClick={() => onCircle(t)} /> : <span class="s-mark" aria-hidden="true" />}
             <span class="s-name">{line.label}<span class="s-need slug">{t.repo}</span><span class="sr">: To do</span>{line.hint ? <> <Hint label="About this to-do">{line.hint}</Hint></> : null}</span>
             <span class="s-why">
               {line.label === t.text ? null : <>{t.text}{' '}</>}
@@ -423,8 +452,8 @@ export function statusesSettled(p: Pick<CourseProps, 'course' | 'loaded' | 'coho
 export function overviewHeights(o: { course: CourseStatus | null; problems: number; semesters: number; description: string; activity: number }): Block[] {
   const HEAD = 3; // the heading and the panel's padding
   const c = o.course;
-  const steps = c && !setupComplete(c) ? SETUP_STEPS.reduce((n, s) => n + (c.stages[s.id] === 'done' ? 1 : 2), 0) : 0;
-  const todo = c?.todo?.length ?? 0;
+  const steps = c && !setupComplete(c) ? SETUP_STEPS.reduce((n, s) => n + (stepAside(c, s.id, null) ? 0 : c.stages[s.id] === 'done' ? 1 : 2), 0) : 0;
+  const todo = c ? openTodos(c).length : 0;
   const materials = (c?.materials ?? []).reduce((n, m) => n + 1 + materialsWhys(m).length, 0);
   return [
     { key: 'setup', h: HEAD + (c ? 2 + steps + 2 * todo : 1) },
@@ -435,6 +464,69 @@ export function overviewHeights(o: { course: CourseStatus | null; problems: numb
     { key: 'activity', h: HEAD + Math.max(1, 2 * o.activity) },
     { key: 'handouts', h: 2 * HEAD + Math.max(1, materials) + Math.max(1, 2 * (c?.templates?.length ?? 0)) },
   ];
+}
+
+/** The Setup & To do panel: Initial setup and To do, each with its Set aside fold (decision 0032). The circle before an
+ * open line asks whether it can be set aside; the answer is saved into dsl-course.yml through the same save path as
+ * Course details, and Bring back removes the id at once. A read-only viewer gets neither. */
+export function SetupPanel({ p, c }: { p: CourseProps; c: CourseStatus | null }) {
+  const env = useEnv();
+  const { course } = p;
+  const [ask, setAsk] = useState<Ask | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const file = p.files.file(course.org, COURSE_REPO, COURSE_FILE);
+  const list = asideList(file);
+  const change = async (id: string, on: boolean) => {
+    setError('');
+    const refuse = (text: string) => setError(text);
+    if (!env) return refuse('Sign in to save.');
+    if (p.migrated === false) return refuse('Not saved: the console has not yet confirmed this course uses the current names.');
+    if (file.kind !== 'ready') return refuse(`Not saved: ${COURSE_FILE} is not read yet.`);
+    const out = setAsideText(file.text, id, on);
+    if ('error' in out) return refuse(out.error);
+    setBusy(true);
+    const ok = await saveText(env, { owner: course.org, repo: COURSE_REPO, path: COURSE_FILE }, out.text, file.sha, {
+      message: `course: ${on ? 'set aside' : 'bring back'} ${id}, from the DSL Teaching Console`,
+      statusRepo: [course.org, COURSE_REPO],
+      onCommit: () => {
+        setBusy(false);
+        setAsk(null);
+      },
+    }, (st) => setError(st.kind === 'bad' ? st.text : ''));
+    if (!ok) setBusy(false);
+  };
+  const write = course.write;
+  const close = () => {
+    setAsk(null);
+    setError('');
+  };
+  const steps = c ? SETUP_STEPS.filter((x) => !stepAside(c, x.id, list)) : [];
+  const stepRows = c ? SETUP_STEPS.filter((x) => stepAside(c, x.id, list)).map((x) => ({ id: x.id, label: x.name })) : [];
+  const open = c ? openTodos(c, list) : [];
+  const todoRows = c ? (c.todo ?? []).filter((t) => todoAside(t, list)).map((t) => ({ id: t.id, label: todoLine(t, c).label, repo: t.repo })) : [];
+  const back = write ? (id: string) => void change(id, false) : undefined;
+  return (
+    <section class="panel section">
+      <h2>Setup &amp; To do <Hint label="Setup, to-dos and problems">Setup steps are the one-time things a course needs. To-dos are work started but not finished. Problems, on the right, are things that broke.{write ? ' Optional items can be set aside: click the circle before them.' : ''}</Hint></h2>
+      {c ? (
+        <>
+          <details class="fold setup-fold" open={!setupComplete(c, list)}>
+            <summary><span class="fold-title">Initial setup</span><span class="cnt">{setupComplete(c, list) ? 'Complete' : `${steps.filter((x) => c.stages[x.id] === 'done').length} of ${steps.length} done`}</span></summary>
+            <SetupList course={c} list={list} onCircle={write ? (id) => setAsk(stepAsk(id, c)) : undefined} />
+            <AsideFold rows={stepRows} busy={busy} onBack={back} />
+          </details>
+          <details class="fold setup-fold" open={!!open.length}>
+            <summary><span class="fold-title">To do</span><span class="cnt">{open.length ? `${open.length} open` : 'Nothing to do'}</span></summary>
+            <TodoList course={c} list={list} onCircle={write ? (t) => setAsk(todoAsk(t, c)) : undefined} />
+            <AsideFold rows={todoRows} busy={busy} onBack={back} />
+          </details>
+          {error && !ask ? <CheckLine cls="bad">{error}</CheckLine> : null}
+          {ask ? <SetAsideDialog ask={ask} busy={busy} error={error} onSetAside={() => void change(ask.id, true)} onClose={close} /> : null}
+        </>
+      ) : <p class="footnote">Status not computed yet.</p>}
+    </section>
+  );
 }
 
 export function CourseScreen(p: CourseProps) {
@@ -458,23 +550,7 @@ export function CourseScreen(p: CourseProps) {
   // Every panel but the two anchors goes in whichever column keeps the two about even; the
   // materials and templates panels travel as one block, so they stay together (0031 rule 4).
   const panels: Record<string, ComponentChildren> = {
-    setup: (
-      <section class="panel section">
-        <h2>Setup &amp; To do <Hint label="Setup, to-dos and problems">Setup steps are the one-time things a course needs. To-dos are work started but not finished. Problems, on the right, are things that broke.</Hint></h2>
-        {v.course ? (
-          <>
-            <details class="fold setup-fold" open={!setupComplete(v.course)}>
-              <summary><span class="fold-title">Initial setup</span><span class="cnt">{setupComplete(v.course) ? 'Complete' : `${SETUP_STEPS.filter((x) => v.course!.stages[x.id] === 'done').length} of ${SETUP_STEPS.length} done`}</span></summary>
-              <SetupList course={v.course} />
-            </details>
-            <details class="fold setup-fold" open={!!v.course.todo?.length}>
-              <summary><span class="fold-title">To do</span><span class="cnt">{v.course.todo?.length ? `${v.course.todo.length} open` : 'Nothing to do'}</span></summary>
-              <TodoList course={v.course} />
-            </details>
-          </>
-        ) : <p class="footnote">Status not computed yet.</p>}
-      </section>
-    ),
+    setup: <SetupPanel p={p} c={v.course} />,
     problems: (
       <section class="panel section" id="course-problems">
         <div class="problems-head"><h2>Problems <Hint label="About course problems">Things that broke and need fixing: the course’s first, then each live semester’s, tagged with the semester. Unfinished work is a to-do on the left, not a problem.</Hint></h2>{problems.length ? <span class="count-badge" aria-label={`${problems.length} problems`}>{problems.length}</span> : null}</div>

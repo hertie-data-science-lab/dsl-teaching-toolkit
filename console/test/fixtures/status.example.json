@@ -21,6 +21,22 @@
       "C5": "problem",
       "C6": "todo"
     },
+    "stage_optional": {
+      "C1": false,
+      "C2": false,
+      "C3": false,
+      "C4": true,
+      "C5": true,
+      "C6": true
+    },
+    "stage_set_aside": {
+      "C1": false,
+      "C2": false,
+      "C3": false,
+      "C4": false,
+      "C5": false,
+      "C6": false
+    },
     "ready": false,
     "materials": [
       {
@@ -105,7 +121,9 @@
         "repo": "course-materials-f2026",
         "text": "The weekly plan is not in SYLLABUS.md yet.",
         "screen": "materials",
-        "entry": "course-materials-f2026"
+        "entry": "course-materials-f2026",
+        "optional": true,
+        "set_aside": false
       }
     ]
   },

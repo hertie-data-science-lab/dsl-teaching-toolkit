@@ -33,6 +33,9 @@ export interface CourseStatus {
   stages: Record<string, StageState>;
   /** One sentence per stage that is not done, saying why. */
   stage_why?: Record<string, string>;
+  /** Decision 0032, per stage: may it be set aside (C4-C6), and is it. Absent on an older status. */
+  stage_optional?: Record<string, boolean>;
+  stage_set_aside?: Record<string, boolean>;
   /** C1-C3 done and no course problem: a new semester can start (decision 0019). */
   ready: boolean;
   materials: MaterialsState[];
@@ -68,6 +71,9 @@ export interface Todo {
   text: string;
   screen?: string;
   entry?: string;
+  /** Decision 0032: it blocks nothing, so it may be set aside; and it is. Absent on an older status. */
+  optional?: boolean;
+  set_aside?: boolean;
 }
 
 export interface SemesterStatus {
