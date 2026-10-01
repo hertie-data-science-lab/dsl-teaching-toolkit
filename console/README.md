@@ -280,7 +280,13 @@ a first visit, mostly free 304s after).
   `return_run_details`, polls the run, and reads the public `dsl-outcome` annotation and the
   private outcome file. Hand out, return marks, archive, update every copy and send new codes
   unlock only after a preview in the same session; publishing the public website, which has no
-  engine preview, asks for a confirmation instead.
+  engine preview, asks for a confirmation instead. Other previews are offered only where they
+  show something you act on (`PREVIEW_NOT_OFFERED` in `src/ops/registry.ts` lists the ones
+  that are not). The run popup lists each job step once (GitHub's "Post ..." steps are left
+  out), resizes by its bottom-left grip, and its Stop cancels the workflow run
+  (`POST .../actions/runs/{id}/cancel`), saying "Stopping…" until GitHub ends it and then
+  "Stopped". Once a run ends, "See on GitHub" opens the op's `target` (`src/ops/defs.ts`):
+  the repo, branch or folder it changed.
 - Wizards: New course, New semester, New assignment, New handout materials. Each step checks live state
   before it lets you continue (the org exists, `hertie-dsl-bot` is an owner, the set-up left
   its repos, the template has both branches and a settings file that parses), and unfinished
