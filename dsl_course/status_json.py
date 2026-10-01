@@ -118,7 +118,7 @@ from .materials import read as read_materials
 from .opencourse import read as read_opencourse
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
-from .releaseignore import RELEASEIGNORE, REVIEWED_MARK
+from .releaseignore import RELEASEIGNORE, REVIEWED_MARK, listed
 from .repos import default_branch
 from .schedule_plan import (
     Unnumbered,
@@ -1855,12 +1855,19 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
     folders = sorted(
         name for name, kind in top.items() if kind == "dir" and not name.startswith(".")
     )
-    # Only a folder no kind names is listed (one read each, usually none): the rest
-    # cannot have lost their rows.
+    releaseignore = (
+        get_file_content(course_org, repo, RELEASEIGNORE)
+        if RELEASEIGNORE in top
+        else None
+    )
+    withheld = listed((releaseignore or "").splitlines())
+    # Only a folder no kind names, and that a release copies, is listed (one read each,
+    # usually none): the rest cannot have lost their rows.
     numbered = tuple(
         f
         for f in folders
         if publishable(f)
+        and not withheld.excludes(f, lambda _rel: True)
         and alias_kind(f, declared.kinds) is None
         and any(
             kind == "dir" and session_number(name) is not None
@@ -1873,11 +1880,7 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
         path,
         folders=tuple(folders),
         kinds=declared.kinds,
-        releaseignore=(
-            get_file_content(course_org, repo, RELEASEIGNORE)
-            if RELEASEIGNORE in top
-            else None
-        ),
+        releaseignore=releaseignore,
         numbered=numbered,
     )
 

@@ -1828,6 +1828,25 @@ def test_only_unkinded_folders_with_numbered_subfolders_are_read_and_flagged(
     assert sorted(listed) == ["", "code", "quiz"]
 
 
+def test_a_folder_withheld_from_release_is_never_a_kinds_problem(monkeypatch):
+    # quiz/ never reaches students, so it cannot have lost rows.
+    tops = {
+        "": {"quiz": "dir", "drafts": "dir", ".releaseignore": "file"},
+        "quiz": {"01_first": "dir"},
+        "drafts": {"01_x": "dir"},
+    }
+    monkeypatch.setattr(status_json, "top_level", lambda o, r, folder="": tops[folder])
+    monkeypatch.setattr(status_json, "_declaration", lambda org, repo: Declared())
+    monkeypatch.setattr(
+        status_json,
+        "get_file_content",
+        lambda org, repo, path: "quiz/\n" if path == ".releaseignore" else None,
+    )
+    m = status_json._materials_facts(COURSE, "cm")
+    assert m.numbered == ("drafts",)
+    assert m.releaseignore == "quiz/\n"
+
+
 def test_a_shown_entry_landing_in_a_kindless_folder_is_a_problem():
     sched = _sched(
         "timezone: Europe/Berlin\n"
