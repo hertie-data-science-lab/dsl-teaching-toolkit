@@ -131,13 +131,16 @@ export function rememberOpen(login: string, choice: OpenChoice, store: PrefStore
 /** The All courses sections that carry their own My courses checkbox. */
 export type CatalogueSection = 'courses' | 'now' | 'past';
 
-/** Per section; the key without a section is the one page-wide choice it replaced, read as every section's until a section is saved. */
-const myCoursesKey = (login: string, section?: CatalogueSection) => `dsl-console-my-courses:${login}${section ? `:${section}` : ''}`;
+/** Per login per section. */
+const myCoursesKey = (login: string, section: CatalogueSection) => `dsl-console-my-courses:${login}:${section}`;
+/** The one page-wide choice the sections replaced: deleted when first read, never followed. */
+const oldMyCoursesKey = (login: string) => `dsl-console-my-courses:${login}`;
 
-/** Whether `login` chose to see only their own rows in `section` of All courses; on by default. */
+/** Whether `login` chose to see only their own rows in `section` of All courses; on unless that section was saved off. */
 export function myCoursesOnly(login: string, section: CatalogueSection, store: PrefStore | null = localStore()): boolean {
   try {
-    return (store?.getItem(myCoursesKey(login, section)) ?? store?.getItem(myCoursesKey(login)) ?? '1') !== '0';
+    store?.removeItem?.(oldMyCoursesKey(login));
+    return store?.getItem(myCoursesKey(login, section)) !== '0';
   } catch {
     return true;
   }
