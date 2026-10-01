@@ -1924,7 +1924,8 @@ def _returned_at(semester_org: str) -> dict[str, datetime]:
 
 def gather_semester(course_org: str, semester_org: str, now: datetime) -> SemesterFacts:
     """Read one semester, through the same loaders its digest issues are built by, so a
-    problem here is the fault that issue lists. A read that fails raises."""
+    problem here is the fault that issue lists, except an open team-formation window's
+    (`faculty_window_faults`). A read that fails raises."""
     facts = SemesterFacts(org=semester_org)
     facts.listing = {r["name"]: r for r in list_org_repos(semester_org)}
     branch = default_branch(semester_org, schedule.CONFIG_REPO, fallback="main")
