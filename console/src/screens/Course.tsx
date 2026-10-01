@@ -476,6 +476,10 @@ const gradingValid = validator(gradingSchema);
 /** The page that explains derived and hand-written starters (decision 0028 rule 5). */
 export const STARTER_DOC = 'assignment-starter.md';
 
+/** The `?` on "Marked from" (decision 0031 rule 7), after `questions: Q: {file:}` in the engine (`setting_readers.question_files`). */
+export const MARKED_FROM_HINT =
+  'The file in the student’s repo this question is marked from, when it is not the runnable one: a LaTeX write-up, say. Type its path from the top of the repo, like report.tex; the mark sheet names it beside the question. Leave it blank and the question is marked from the runnable file.';
+
 export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: QuestionRow[]) => void; files: string[] }) {
   const total = rows.reduce((n, r) => n + (Number(r.points) || 0), 0);
   const edit = (i: number, patch: Partial<QuestionRow>) => set(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -484,7 +488,7 @@ export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: 
       <span class="label">Points per question <Hint label="About points per question">Optional. With questions set, the mark sheet has one column per question with its maximum, totals add up for you, and students see their score per question. Leave it empty for one flat score.</Hint></span>
       {rows.length ? (
         <table class="qtable">
-          <thead><tr><th>Question</th><th>Points</th><th>Marked from <span class="default">optional</span></th><th /></tr></thead>
+          <thead><tr><th>Question</th><th>Points</th><th>Marked from <span class="default">optional</span> <Hint small label="About marked from">{MARKED_FROM_HINT}</Hint></th><th /></tr></thead>
           <tbody>
             {rows.map((r, i) => (
               <tr>
@@ -503,7 +507,6 @@ export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: 
       ) : <div class="readonly">Not set: the mark sheet takes one flat score.</div>}
       <datalist id="q-files">{files.map((f) => <option value={f} />)}</datalist>
       <div><button class="btn small quiet" type="button" onClick={() => set([...rows, { name: `Q${rows.length + 1}`, points: '', file: '' }])}>Add a question</button></div>
-      <p class="why">A question marked from another file (a LaTeX write-up, say) names it; the mark sheet shows it beside the maximum.</p>
     </div>
   );
 }
