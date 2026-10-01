@@ -1,8 +1,11 @@
 // S1 Home (All courses: the institution's catalogue in three sections, DSL courses, This
 // semester and Past semesters, the person's own rows in colour and ordered by what needs them,
-// each section with its own My courses checkbox (the first in the page head), decisions 0021 rule 5 and 0030; Your semesters: the semesters the person
-// is a student of, This semester then Past semesters as the instructor's page has them,
-// decision 0029 rule 3), S0 Sign in, and the read-only view.
+// each section with its own My courses checkbox (the first in the page head), decisions 0021
+// rule 5 and 0030; Your semesters: the semesters the person is a student of, This semester then
+// Past semesters as the instructor's page has them, decision 0029 rule 3). A semester the
+// person studies in shows once, under Your semesters, never also as a row of another section;
+// each card carries its course code on a quiet line under its title (decision 0031 rule 1).
+// S0 Sign in, and the read-only view.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ConsoleAuth } from '../auth/console';
@@ -10,7 +13,7 @@ import { FINE_GRAINED_SETTINGS_URL, NEW_FINE_GRAINED_URL, NEW_TOKEN_URL } from '
 import type { GhUser } from '../github/client';
 import { useEnv } from '../env';
 import { cohortName, invitationUrl, semesterName, type Course, type CohortRef, type Invitation, type Semester, type TokenKind } from '../model/discovery';
-import { endedNow, loadCatalogue, runningNow, termRank, type CatalogueCourse } from '../model/catalogue';
+import { endedNow, loadCatalogue, runningNow, semesterOver, termRank, type CatalogueCourse } from '../model/catalogue';
 import type { Files } from '../model/files';
 import { fmtWhen } from '../model/format';
 import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
@@ -31,6 +34,8 @@ import type { HomeProps } from './types';
 interface Card {
   key: string;
   name: string;
+  /** The course code, on its own quiet line under the name; '' for none. */
+  code: string;
   sub: string;
   week: string;
   status: preact.ComponentChildren;
@@ -67,12 +72,17 @@ function roleSub(course: Course, user: GhUser, live: CohortRef | undefined, file
   return ROLE_SUB[me?.role ?? ''] ?? 'you teach on this course';
 }
 
-/** "E1234; you are a course admin". */
-const courseSub = (course: Course, role: string) => `${course.code ? `${course.code}; ` : ''}${course.write ? role : 'read only'}`;
+/** "you are a course admin"; the code has its own line (decision 0031 rule 1). */
+const courseSub = (course: Course, role: string) => (course.write ? role : 'read only');
+
+/** A card's name: the title, the course code under it (small and quiet), then the sub line. */
+const CardName = ({ name, code, sub }: { name: string; code?: string; sub: string }) => (
+  <span class="cc-name">{name}{code ? <span class="cc-code">{code}</span> : null}{sub ? <span class="cc-sub">{sub}</span> : null}</span>
+);
 
 function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, sub: string, now: number): Card {
   const name = cohortName({ course, cohort: c });
-  const base = { key: c.org, name, href: `?cohort=${c.org}#dashboard`, sub, past: isPast(c, l, now) };
+  const base = { key: c.org, name, code: course.code, href: `?cohort=${c.org}#dashboard`, sub, past: isPast(c, l, now) };
   if (!course.write)
     return { ...base, week: '', status: <span class="chip">read only</span>, next: [['', 'Problems and dates need write access']], ro: true, urgency: -1 };
   if (!l || l.kind === 'loading') return { ...base, week: '…', status: <span class="chip">Reading</span>, next: [], ro: false, urgency: 0 };
@@ -103,7 +113,7 @@ function CardRow({ c }: { c: Card }) {
   return (
     <li>
       <a class={`cohort-card${c.ro ? ' ro' : ''}${c.past ? ' past' : ''}`} href={c.href}>
-        <span class="cc-name">{c.name}<span>{c.sub}</span></span>
+        <CardName name={c.name} code={c.code} sub={c.sub} />
         <span class="cc-week">{c.week}</span>
         {c.status}
         <span class="cc-next">{c.next.map(([b, t]) => <span>{b ? <b>{b}</b> : null}{b ? ' ' : ''}{t}</span>)}</span>
@@ -113,13 +123,14 @@ function CardRow({ c }: { c: Card }) {
 }
 
 const NOT_MINE = 'Not one of your courses';
+const STUDENT = 'You are a student';
 
-/** A catalogue row the person has no role in: greyed, and not a link. */
-function OffRow({ name }: { name: string }) {
+/** A catalogue row the person teaches nothing in: greyed, and not a link; `studies` when they are a student of one of its semesters. */
+function OffRow({ name, code, studies = false }: { name: string; code: string; studies?: boolean }) {
   return (
     <li>
       <div class="cohort-card ro off" aria-disabled="true">
-        <span class="cc-name">{name}<span>{NOT_MINE}</span></span>
+        <CardName name={name} code={code} sub={studies ? STUDENT : NOT_MINE} />
         <span class="cc-week" />
         <span />
         <span class="cc-next" />
@@ -181,19 +192,24 @@ function useCatalogue(courses: Course[]): CatalogueState {
   return st;
 }
 
+/** Whether a semester the person studies in is over, by its facts' last day once read (`semesterOver`). */
+export const studentPast = (s: Semester, facts: SemesterFacts | null | undefined, now: number) => semesterOver(s, now, facts?.end);
+
 /** A semester the person studies in, as the instructor's cards show theirs: its week and what comes next, once its facts are read. */
 function semesterCard(s: Semester, facts: SemesterFacts | null | undefined, now: number): Card {
-  const live = !s.archived && facts;
+  const past = studentPast(s, facts, now);
+  const live = !past && facts;
   return {
     key: s.org,
-    name: semesterName(s),
-    sub: s.archived ? 'Archived; your work stays yours to read' : 'You are a student',
+    name: semesterName({ ...s, courseName: s.courseName || facts?.courseName || '' }),
+    code: s.courseCode ?? '',
+    sub: s.archived ? 'Archived; your work stays yours to read' : STUDENT,
     week: live ? semesterLine(facts, now).week ?? '' : '',
-    status: <span class="chip">{s.archived ? 'Archived' : 'Current'}</span>,
+    status: <span class="chip">{s.archived ? 'Archived' : past ? 'Ended' : 'Current'}</span>,
     next: live ? [['', nextLine(facts, now)]] : [],
     href: studentHref(s.org),
     ro: false,
-    past: s.archived,
+    past,
     urgency: 0,
   };
 }
@@ -267,12 +283,11 @@ function useSemesterFacts(semesters: Semester[]): Record<string, SemesterFacts |
   return load.kind === 'ready' ? load.value : {};
 }
 
-/** Your semesters as cards: the live ones first, then (unless `currentOnly`) the archived ones; under their own headings when `sections`. */
-function SemesterCards({ semesters, now, sections, current = false }: { semesters: Semester[]; now: number; sections: boolean; current?: boolean }) {
-  const facts = useSemesterFacts(semesters);
+/** Your semesters as cards: the current ones first, then (unless `currentOnly`) the past ones; under their own headings when `sections`. */
+function SemesterCards({ semesters, facts, now, sections, current = false }: { semesters: Semester[]; facts: Record<string, SemesterFacts | null>; now: number; sections: boolean; current?: boolean }) {
   const card = (s: Semester) => <CardRow c={semesterCard(s, facts[s.org], now)} />;
-  const live = semesters.filter((s) => !s.archived);
-  const past = current ? [] : semesters.filter((s) => s.archived);
+  const live = semesters.filter((s) => !studentPast(s, facts[s.org], now));
+  const past = current ? [] : semesters.filter((s) => studentPast(s, facts[s.org], now));
   if (!sections) return <ul class="cohort-list">{[...live, ...past].map(card)}</ul>;
   return (
     <>
@@ -316,6 +331,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
   const [current, setCurrent] = useState(() => currentOnly(user.login));
   const env = useEnv();
   const catalogue = useCatalogue(courses);
+  const facts = useSemesterFacts(semesters);
   // An invitation whose role cannot be told is most likely a student's.
   if (!courses.length && (semesters.length || (invited.length && invited.every((i) => i.role === null)))) {
     const flipCurrent = () => {
@@ -326,12 +342,12 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
       <>
         <Crumbs items={[{ t: 'Your semesters' }]} />
         <div class="page-head">
-          <div><h1>Your semesters <Hint>Every semester you are a student of. Archived ones stay as history.</Hint></h1></div>
-          {semesters.some((x) => x.archived) ? <div class="actions"><label class="check my-only"><input type="checkbox" checked={current} onChange={flipCurrent} /><span>Current only</span></label></div> : null}
+          <div><h1>Your semesters <Hint>Every semester you are a student of. Past ones stay as history.</Hint></h1></div>
+          {semesters.some((x) => studentPast(x, facts[x.org], now)) ? <div class="actions"><label class="check my-only"><input type="checkbox" checked={current} onChange={flipCurrent} /><span>Current only</span></label></div> : null}
         </div>
         <div class="stack">
           <Invitations invited={invited} kind={kind} />
-          {semesters.length ? <SemesterCards semesters={semesters} now={now} sections current={current} /> : null}
+          {semesters.length ? <SemesterCards semesters={semesters} facts={facts} now={now} sections current={current} /> : null}
           <JoinStart />
         </div>
       </>
@@ -343,7 +359,10 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
     const live = course.cohorts.filter((c) => !isPast(c, cohortStates[c.org], now)).sort((a, b) => termRank(b.org) - termRank(a.org))[0];
     return [course.org, courseSub(course, roleSub(course, user, live, files))];
   }));
-  const cards = courses.flatMap((course) => course.cohorts.map((c) => cardOf(course, c, cohortStates[c.org], subs.get(course.org)!, now)));
+  // A semester the person studies in shows only under Your semesters: never also as a row here (decision 0031 rule 1).
+  const studying = new Set(semesters.map((s) => s.org.toLowerCase()));
+  const studiedCourses = new Set(semesters.map((s) => s.courseOrg.toLowerCase()).filter(Boolean));
+  const cards = courses.flatMap((course) => course.cohorts.filter((c) => !studying.has(c.org.toLowerCase())).map((c) => cardOf(course, c, cohortStates[c.org], subs.get(course.org)!, now)));
   const live = cards.filter((c) => !c.past).sort((a, b) => b.urgency - a.urgency);
   const past = cards.filter((c) => c.past);
   const courseOnly = courses.filter((c) => !c.cohorts.length);
@@ -351,10 +370,8 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
   const need = (c: Course) => cards.filter((k) => !k.past && c.cohorts.some((h) => h.org === k.key)).reduce((n, k) => n + Math.max(k.urgency, 0), 0);
   const mine = [...courses].sort((a, b) => need(b) - need(a) || a.name.localeCompare(b.name));
   const foreign = catalogue.list.filter((c) => !c.mine).sort((a, b) => a.name.localeCompare(b.name));
-  // A semester the person studies in shows only under Your semesters, never greyed.
-  const studying = new Set(semesters.map((s) => s.org.toLowerCase()));
   const offSemesters = (pick: (s: CatalogueCourse['semesters'][number]) => boolean): SemRow[] =>
-    foreign.flatMap((c) => c.semesters.filter((s) => !studying.has(s.org.toLowerCase()) && pick(s)).map((s) => ({ key: s.org, course: c.name, rank: termRank(s.org), mine: false, el: <OffRow name={`${c.name}, ${s.termLabel}`} /> })));
+    foreign.flatMap((c) => c.semesters.filter((s) => !studying.has(s.org.toLowerCase()) && pick(s)).map((s) => ({ key: s.org, course: c.name, rank: termRank(s.org), mine: false, el: <OffRow name={`${c.name}, ${s.termLabel}`} code={c.code} /> })));
   // By course, newest first within each.
   const othersNow = offSemesters((s) => runningNow(s, now)).sort((a, b) => a.course.localeCompare(b.course) || b.rank - a.rank || a.key.localeCompare(b.key));
   // Newest first; within one semester the person's own first.
@@ -384,9 +401,9 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
             <SectionHead id="h-courses" title="DSL courses" others={foreign.length} only={only.courses} inHead />
             <ul class="cohort-list">
               {mine.map((c) => (
-                <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{subs.get(c.org)}</span></span><span class="cc-week" /><span /><span class="cc-next" /></a></li>
+                <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><CardName name={c.name} code={c.code} sub={subs.get(c.org)!} /><span class="cc-week" /><span /><span class="cc-next" /></a></li>
               ))}
-              {only.courses ? null : foreign.map((c) => <OffRow name={c.name} />)}
+              {only.courses ? null : foreign.map((c) => <OffRow name={c.name} code={c.code} studies={studiedCourses.has(c.org.toLowerCase())} />)}
             </ul>
             {catalogue.state === 'loading' && !only.courses ? <p class="footnote">Reading the catalogue…</p> : catalogue.state === 'failed' ? <p class="footnote">The catalogue could not be read.</p> : null}
           </section>
@@ -412,7 +429,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
               <h2>Courses with no semester yet</h2>
               <ul class="cohort-list">
                 {courseOnly.map((c) => (
-                  <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{c.code}</span></span><span class="cc-week" /><span /><span class="cc-next" /></a></li>
+                  <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><CardName name={c.name} code={c.code} sub={subs.get(c.org)!} /><span class="cc-week" /><span /><span class="cc-next" /></a></li>
                 ))}
               </ul>
             </section>
@@ -420,7 +437,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
           {semesters.length ? (
             <section class="section" aria-labelledby="h-semesters">
               <h2 id="h-semesters">Your semesters</h2>
-              <SemesterCards semesters={semesters} now={now} sections={false} />
+              <SemesterCards semesters={semesters} facts={facts} now={now} sections={false} />
             </section>
           ) : null}
         </div>

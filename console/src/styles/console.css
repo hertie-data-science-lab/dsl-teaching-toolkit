@@ -969,3 +969,6 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .all-courses-head .my-only input { margin-top: 0; }
 .setup .s-kinds .k-mark { display: inline-grid; place-items: center; width: 14px; margin-right: 4px; color: var(--ok); vertical-align: -1px; }
 .setup .s-kinds .k-mark svg { width: 10px; height: 10px; }
+
+/* U1: the course code on its own quiet line under a card's title (decision 0031 rule 1) */
+.cohort-card .cc-name .cc-code { font-size: 12px; letter-spacing: 0.02em; margin-top: 2px; }
