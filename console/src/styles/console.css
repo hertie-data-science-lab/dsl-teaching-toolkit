@@ -866,7 +866,6 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 
 /* WP-S4 */
 .folder-check .saved { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
-.clone-all-h { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
 
 /* WP-S3 */
 .verdict { display: flex; gap: 8px; align-items: center; margin: -6px 0 18px; font-weight: 600; color: var(--ink-2); }
