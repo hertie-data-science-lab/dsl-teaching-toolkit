@@ -62,7 +62,7 @@ export function AsgRows({ status, now }: { status: Status; now: number }) {
 }
 
 /**
- * The Dashboard's line under its title: what the semester banner does not say (its name, dates
+ * The Dashboard's line under its title: what the course banner does not say (its name, dates
  * and week are there). The start while the semester has no end date yet, the exams, the archive.
  */
 export function headerLine(status: Status, sched: Schedule | null, rows: Row[], tz: string, thisYear: number): string {
@@ -355,16 +355,21 @@ function Overview(p: ReadyProps) {
         ) : null}
         <section class="panel section">
           <div class="section-head">
-            <h2>Semester <Hint label="About the weeks">Pick one or more weeks to show only what falls in them. A red number counts that week's problems.</Hint></h2>
+            {/* The chevron before the heading (decision 0031 rule 11), as in the side nav. */}
+            <span class="lead">
+              <button type="button" class="chev" aria-expanded={expanded} aria-controls="dash-weeks" aria-label={expanded ? 'Show the week strip' : 'Show every week as a list'} onClick={() => setExpanded(!expanded)}><span class="arrow" aria-hidden="true" /></button>
+              <h2>Semester <Hint label="About the weeks">Pick one or more weeks to show only what falls in them. A red number counts that week's problems.</Hint></h2>
+            </span>
             <span class="wk-filters" role="group" aria-label="Show weeks">
               <button type="button" class="toggle" aria-pressed={isThisWeek} onClick={() => setSelected(thisWeek)}>This week</button>
               <button type="button" class="toggle" aria-pressed={!selected.length} onClick={() => setSelected([])}>All weeks</button>
-              <button type="button" class="btn small quiet wk-expand" aria-expanded={expanded} aria-label="Show every week" onClick={() => setExpanded(!expanded)}>{expanded ? '<' : '>'}</button>
             </span>
           </div>
-          {expanded
-            ? <Timeline rows={rows} term={term} tz={tz} year={year} />
-            : <TermStrip rows={rows} term={term} tz={tz} today={today} counts={problemCounts(problems, term, tz)} selected={selected} onToggle={toggle} />}
+          <div id="dash-weeks">
+            {expanded
+              ? <Timeline rows={rows} term={term} tz={tz} year={year} />
+              : <TermStrip rows={rows} term={term} tz={tz} today={today} counts={problemCounts(problems, term, tz)} selected={selected} onToggle={toggle} />}
+          </div>
         </section>
         <section class="section">
           <div class="problems-head"><h2>Problems</h2><span class="footnote">What will not happen until you fix it.</span></div>

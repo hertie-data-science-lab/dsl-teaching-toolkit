@@ -114,25 +114,38 @@ the instructor's (decision 0029): **This semester** (the live ones, each card wi
 "Next: ...") and **Past semesters** (archived, or past their last day; with no dates read yet,
 by the date their key implies), which a **Current only** checkbox in the page head hides (kept
 in this browser, per account). A student-only account with exactly one live semester (neither
-archived nor ended, judged by its key) lands on its This week instead; the student nav and the
-semester banner call an ended semester ended by the same rule. The top bar's Guide explains the
+archived nor ended, judged by its key) lands on its This week instead; the side nav and the
+banner call an ended semester ended by the same rule. The top bar's Guide explains the
 instructor console, so only a person with an instructor role sees it.
 
 The mode picks the shell. `?semester=<org>` opens that semester's student screens (This
 week, Schedule, Assignments, Marks, Materials, Join, Instructors). For a
 semester the person teaches, that is the **Student view** (the Student view pill in the
-semester banner): the same screens with the instructor's own identity and a note, never a
+course banner): the same screens with the instructor's own identity and a note, never a
 student's repos or marks (rule 7). Its top bar reads "Student view (preview)", a link back to
 the semester's Dashboard, as is "Back to instructor view" in its banner. Anywhere else the
 console is in instructor mode for anyone who teaches somewhere, and in student mode otherwise.
 
-Every semester page, in either console, opens with the **semester banner** (decision 0025):
-the course name, the semester as the page's one h1, its state, week and dates, and the
-semester on GitHub. It replaces the breadcrumbs there; the page's own title is an h2 styled
-as a heading, with its `?`. A student's banner takes the week and the dates from
-`student-status.json`, and This week says how old that file's facts are ("Updated 3 h ago").
-The footer names the course and the semester. Course pages have no banner and keep their breadcrumbs. On a phone the preview's
-top-bar link reads "Preview".
+The **side nav** is one tree in both consoles (decision 0031 rule 11), with the chevron before
+what it expands. An instructor's is anchored on the open course: "All courses" above it, the
+course name (its overview), the course's pages, then its semesters as nodes: being set up
+first, every live one (a green dot), then past ones ("ended" or "archived") newest first to
+three rows, the rest under "Older semesters (n)". The open semester is expanded to its nine
+pages, else on a course page the newest live one; one at a time. Other courses are reached
+through All courses, and so are the person's own student semesters. A student's tree is
+inverted, since a student takes each course once: the open semester's term is the anchor, its
+courses the nodes (the open one expanded), another live term under them, and Past semesters
+below, each expanding to its courses as links. A Student view's tree is that one semester's.
+
+Every course and semester page, in either console, opens with the **course banner**: crumbs
+that follow the tree ("All courses › Course › Semester"; a student's "Your semesters ›
+Semester › Course", led by All courses for a person who also teaches), the course name as the page's one h1, and on a semester page the
+semester's line under it (its name, state, week and dates) with the Student view pill (or
+"Back to instructor view") and the semester on GitHub on the right. The overview's banner is
+its head, with New semester; the page's own title is an h2 under the banner, with its `?`. A
+student's banner takes the week and the dates from `student-status.json`, and This week says
+how old that file's facts are ("Updated 3 h ago"). The footer names the course and the
+semester. On a phone the preview's top-bar link reads "Preview".
 
 The **course overview** is a status board in two columns. Setup & To do heads the left: two
 folds, Initial setup (folded once every step but the optional website is done) and To do (open

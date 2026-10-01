@@ -1,6 +1,6 @@
 // The student shell's screens (decision 0011 rule 2): This week (with the course's About
 // block), Schedule, Assignments, Marks, Materials, Set up, Join and Instructors of one
-// semester, each title with its `?` (decision 0029 rule 5), and the semester banner's week
+// semester, each title with its `?` (decision 0029 rule 5), and the course banner's week
 // line and dates (rule 2). The semester's shared facts come
 // through `StudentData` (the engine's public `student-status.json`, else the site); the
 // student's own repos, team, role, receipts and marks come from GitHub with their own token
@@ -25,7 +25,7 @@ import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { useLoad } from '../ui/load';
 import { Ext } from '../ui/icons';
-import { SemesterBanner } from '../ui/shell';
+import { CourseBanner } from '../ui/shell';
 import { GhMd, LazyFold } from '../ui/rendered';
 import { JoinScreen } from './StudentJoin';
 import { MaterialsView, ReadingsView, materialHref } from './StudentMaterials';
@@ -84,16 +84,22 @@ export const STUDENT_HINTS: Record<string, string> = {
 };
 
 /**
- * The semester banner in the student console (decision 0025 rule 6): the same as the
- * instructor's, its week line and dates from the shared facts (decision 0029 rule 2), which the
- * screen below reads anyway (`studentData` keeps one read per semester). Until they are read,
- * and for a source without the dates, the line is the chip alone.
+ * The course banner in the student console (decision 0031 rule 11): the instructor's banner,
+ * the course name as the h1 and the semester's line under it, its week and dates from the shared
+ * facts (decision 0029 rule 2), which the screen below reads anyway (`studentData` keeps one read
+ * per semester). Until they are read, and for a source without the dates, the line is the name
+ * and the chip. The crumbs follow the student's tree: the landing page (`root`), the semester
+ * (no page of its own, so plain) and the course, plain on This week.
  */
-export function StudentBanner({ semester, studentView, chip, now = Date.now() }: { semester: Semester; studentView: boolean; chip?: preact.ComponentChildren; now?: number }) {
+export function StudentBanner({ root, screen, semester, studentView, chip, now = Date.now() }: { root: string; screen: string; semester: Semester; studentView: boolean; chip?: preact.ComponentChildren; now?: number }) {
   const env = useEnv();
   const facts = useLoad(env && !semester.archived ? () => studentData(env.client).facts(semester.org) : null, [semester.org]);
   const line = facts.kind === 'ready' && facts.value ? semesterLine(facts.value, now) : {};
-  return <SemesterBanner courseName={semester.courseName} termLabel={semester.termLabel} org={semester.org} chip={chip} view={studentView ? 'back' : undefined} {...line} />;
+  const name = semester.courseName || semester.org;
+  return (
+    <CourseBanner crumbs={[{ t: root, href: '?#home' }, { t: semester.termLabel }, { t: name, href: screen === 'week' ? undefined : studentHref(semester.org) }]} name={name}
+      semester={{ org: semester.org, termLabel: semester.termLabel, chip, view: studentView ? 'back' : undefined, ...line }} />
+  );
 }
 
 export function StudentScreen({ semester, screen, studentView, entry, now = Date.now() }: StudentProps) {
@@ -101,7 +107,7 @@ export function StudentScreen({ semester, screen, studentView, entry, now = Date
   return (
     <>
       {studentView ? <StudentViewBanner /> : null}
-      <div class="page-head"><div><h2 class="h1">{label}{STUDENT_HINTS[screen] ? <Hint>{STUDENT_HINTS[screen]}</Hint> : null}</h2></div></div>
+      <div class="page-head"><div><h2 class="h1">{label}{STUDENT_HINTS[screen] ? <> <Hint>{STUDENT_HINTS[screen]}</Hint></> : null}</h2></div></div>
       {semester.archived ? <ArchivedSemester semester={semester} studentView={studentView} /> : <SemesterBody semester={semester} screen={screen} studentView={studentView} entry={entry} now={now} />}
     </>
   );

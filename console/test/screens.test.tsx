@@ -14,7 +14,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { CohortScreen } from '../src/screens/Cohort';
-import { CourseScreen, SETTLING_COLUMNS, SetupList, TemplateScreen, overviewHeights, readyWords, semesterChip, setupComplete, splitColumns, stepLink } from '../src/screens/Course';
+import { CourseHeaderActions, CourseScreen, SETTLING_COLUMNS, SetupList, TemplateScreen, overviewHeights, readyWords, semesterChip, setupComplete, splitColumns, stepLink } from '../src/screens/Course';
 import { HomeScreen, ReadonlyScreen, SignInScreen } from '../src/screens/Home';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
@@ -448,7 +448,10 @@ describe('S2 course and S17 template', () => {
   });
   it('keeps only New semester in the head; the status line, Refresh and the course on GitHub sit under it', () => {
     const out = html(<CourseScreen {...cp} />);
-    const head = out.slice(out.indexOf('class="page-head"'), out.indexOf('class="actions sub-actions"'));
+    // The head is the course banner's right side (decision 0031 rule 11); the screen starts under it.
+    expect(out).not.toContain('class="page-head"');
+    expect(out).not.toContain('<h1');
+    const head = html(<CourseHeaderActions course={course} />);
     // Always the black primary button, ready or not.
     expect(head).toContain(`<a class="btn" href="?course=${COURSE_ORG}#new-semester-1">New semester</a>`);
     expect(head).not.toContain('Publish');
@@ -456,7 +459,7 @@ describe('S2 course and S17 template', () => {
     expect(head).not.toContain('on GitHub');
     const sub = out.slice(out.indexOf('class="actions sub-actions"'), out.indexOf('class="page-note"'));
     // The course's own status is absent here (a semester's copy fills the page), so no age.
-    expect(text(<CourseScreen {...cp} />)).toContain('New semester Refresh ? Reads the course and its semesters from GitHub again');
+    expect(text(<CourseScreen {...cp} />)).toContain('Refresh ? Reads the course and its semesters from GitHub again');
     expect(sub).toContain('<button class="textlink" type="button">Refresh</button>');
     expect(sub).toContain(`href="https://github.com/${COURSE_ORG}"`);
     const none = text(<CourseScreen {...cp} cohortStates={{}} />);
@@ -571,8 +574,9 @@ describe('S2 course and S17 template', () => {
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
-    expect(out).toContain('<h1>Group project <span class="hint-wrap">');
-    expect(out).toContain('<span>Group project</span></div>');
+    expect(out).toContain('<h2 class="h1">Group project <span class="hint-wrap">');
+    // The crumbs are the course banner's (decision 0031 rule 11), not the screen's.
+    expect(out).not.toContain('class="crumbs"');
     expect(out).toContain('value="Group project"');
     expect(out).toMatch(/value="group" checked/);
     expect(out).toContain('The file says “sometimes”. Choose on or off.');
@@ -624,9 +628,10 @@ describe('read only and the shell', () => {
     expect(t).toContain('Read only.');
     expect(t).toContain('No roster, no marks, no buttons.');
   });
-  it('puts the switcher, nav with the problem count and the on-GitHub links in the side nav, none in the bar', () => {
-    const nav = html(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" problems={2} />);
-    expect(nav).toContain('Machine Learning, Fall 2026');
+  it('puts the course tree, nav with the problem count and the on-GitHub links in the side nav, none in the bar', () => {
+    const nav = html(<Sidenav courses={[course]} course={course} cohort={cohort} site={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" />);
+    expect(nav).toContain(`<a class="nav-anchor" href="?course=${COURSE_ORG}#course">Machine Learning</a>`);
+    expect(nav).toContain('Fall 2026');
     expect(nav).toContain('class="n-count"');
     expect(nav).toContain('aria-current="page"');
     expect(nav).toContain('2 problems');

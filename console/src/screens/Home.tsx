@@ -537,14 +537,10 @@ function Reach({ reach }: { reach: { seen: string[]; unseen: string[] } | null }
 // --------------------------------------------------------------------------- read-only and placeholders
 
 export function ReadonlyScreen({ course, cohort }: { course: Course; cohort?: CohortRef }) {
-  const title = cohort ? cohortName({ course, cohort }) : course.name;
+  // The course banner above heads the page (decision 0031 rule 11).
   return (
     <>
-      <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: title }]} />
-      <div class="page-head">
-        <div><h1>{title}</h1></div>
-        {cohort ? <div class="actions"><a class="btn outline" href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Open the student site <Ext /></a></div> : null}
-      </div>
+      {cohort ? <div class="actions" style="margin-bottom:18px"><a class="btn outline" href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Open the student site <Ext /></a></div> : null}
       <div class="ro-banner">
         <b>Read only.</b>
         <span>You are not an instructor on this course, so this shows only what your GitHub account can see: the course’s public details and its student site. No roster, no marks, no buttons.</span>

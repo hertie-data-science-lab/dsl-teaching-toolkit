@@ -11,7 +11,7 @@ import { modeOf, parseSearch, studentContext, studentLanding } from '../src/rout
 import { HomeScreen, studentPast } from '../src/screens/Home';
 import type { SemesterFacts } from '../src/model/student';
 import { StudentScreen, studentScreen } from '../src/screens/Student';
-import { SemesterBanner, Sidenav, StudentNav, Topbar } from '../src/ui/shell';
+import { CourseBanner, Sidenav, StudentNav, Topbar } from '../src/ui/shell';
 import { FakeGitHub, json } from './fake';
 
 const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
@@ -160,12 +160,13 @@ describe('mode and the student shell', () => {
 
   it('the student nav marks a semester that ended unarchived as ended', () => {
     const old = sem('hertie-nlp-f2024', { term: 'f2024', termLabel: 'Fall 2024' });
-    const nav = render(<StudentNav courses={[]} cohortStates={{}} semesters={[old]} semester={old} current="week" />);
-    expect(nav).toMatch(/class="ro cur"[^>]*>Natural Language Processing, Fall 2024<span class="pm-sub">ended<\/span>/);
+    const nav = render(<StudentNav root="Your semesters" semesters={[old]} semester={old} current="week" />);
+    expect(nav).toContain('<span class="nav-anchor">Fall 2024<span class="n-soon"> ended</span></span>');
+    expect(nav).not.toContain('nav-dot');
   });
 
   it('the student nav lists the eight screens', () => {
-    const nav = render(<StudentNav courses={[]} cohortStates={{}} semesters={[NLP]} semester={NLP} current="marks" />);
+    const nav = render(<StudentNav root="Your semesters" semesters={[NLP]} semester={NLP} current="marks" />);
     const labels = [...nav.matchAll(/<li><a href="\?semester=hertie-nlp-f2026#(\w+)"[^>]*>([^<]+)</g)].map((m) => [m[1], m[2]]);
     expect(labels).toEqual([['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['materials', 'Materials'], ['setup', 'Set up'], ['join', 'Join'], ['instructors', 'Instructors']]);
     expect(nav).toMatch(/#marks" aria-current="page"/);
@@ -180,20 +181,21 @@ describe('mode and the student shell', () => {
   it('Student view shows a banner, the instructor’s own identity only, and a way back', () => {
     const s = studentContext(both, parseSearch(`?semester=${cohort.org}`))!.semester;
     expect(text(<StudentScreen semester={s} screen="week" studentView />)).toContain('Student view. What a student of this semester sees, shown with your own account: no student’s repos or marks.');
-    const banner = render(<SemesterBanner courseName={s.courseName} termLabel={s.termLabel} org={s.org} view="back" />);
+    const banner = render(<CourseBanner crumbs={[]} name={s.courseName} semester={{ org: s.org, termLabel: s.termLabel, view: 'back' }} />);
     expect(banner).toContain(`<a class="textlink" href="?cohort=${cohort.org}#dashboard">Back to instructor view</a>`);
     expect(banner).not.toContain('Student view');
   });
 
   it('the Student view is entered from the semester banner’s pill, not the side nav', () => {
-    const nav = render(<Sidenav courses={[course]} semesters={[NLP]} course={course} cohort={cohort} cohortStates={{}} current="dashboard" problems={0} />);
+    const nav = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{}} current="dashboard" />);
     expect(nav).not.toContain('Student view');
     expect(nav).not.toContain('Semester on GitHub');
-    expect(nav).toContain(`href="?semester=${NLP.org}#week"`);
-    const banner = render(<SemesterBanner courseName="Machine Learning" termLabel="Fall 2026" org={cohort.org} view="student" />);
+    // The person's student semesters are on All courses, not in the course's tree.
+    expect(nav).not.toContain(`?semester=${NLP.org}`);
+    const banner = render(<CourseBanner crumbs={[]} name="Machine Learning" semester={{ org: cohort.org, termLabel: 'Fall 2026', view: 'student' }} />);
     expect(banner).toContain(`<a class="btn small quiet" href="?semester=${cohort.org}#week">Student view</a>`);
-    expect(banner).toContain('<h1>Fall 2026</h1>');
-    expect(banner).toContain('<p class="banner-course">Machine Learning</p>');
+    expect(banner).toContain('<h1>Machine Learning</h1>');
+    expect(banner).toContain('<span class="sem-title">Fall 2026</span>');
     expect(banner).toContain(`href="https://github.com/${cohort.org}"`);
   });
 

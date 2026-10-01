@@ -143,7 +143,7 @@ export function wizardOf(screen: string): { name: string; step?: number } | null
 }
 
 /** The nav key each wizard lights up. */
-export const WIZARD_NAV: Record<string, string> = { 'new-course': 'home', 'new-semester': 'details', 'new-assignment': 'templates', 'new-materials': 'materials' };
+export const WIZARD_NAV: Record<string, string> = { 'new-course': 'home', 'new-semester': 'course', 'new-assignment': 'templates', 'new-materials': 'materials' };
 
 export interface Context {
   course?: Course;

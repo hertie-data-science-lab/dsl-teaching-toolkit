@@ -224,14 +224,14 @@ describe('materials settings file tree', () => {
 
 describe('course nav and overview', () => {
   it('lists each cohort by term with its problems count, archived ones greyed', () => {
-    const nav = render(<Sidenav courses={[course]} course={course} cohortStates={{ [COHORT_ORG]: ready, [OLD_ORG]: archived }} current="course" problems={0} />);
+    const nav = render(<Sidenav courses={[course]} course={course} cohortStates={{ [COHORT_ORG]: ready, [OLD_ORG]: archived }} current="course" />);
     const t = nav.replace(/<[^>]+>/g, ' ');
     expect(t.indexOf('Public website')).toBeLessThan(t.indexOf('Semesters'));
     expect(nav).toContain(`href="?cohort=${COHORT_ORG}#dashboard"`);
     expect(nav).toMatch(/aria-label="2 problems">2</);
-    expect(nav).toContain('class="archived"');
+    expect(nav).toMatch(/class="past"[^>]*><span class="node-name">Fall 2025<span class="n-soon"> archived<\/span>/);
     expect(t).toContain('Assignment templates');
-    const inCohort = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" problems={2} />);
+    const inCohort = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" />);
     expect(inCohort.match(/aria-current="page"/g)).toHaveLength(1);
   });
   it('shows the term, not the org, while a cohort status loads', () => {

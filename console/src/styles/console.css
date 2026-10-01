@@ -29,11 +29,7 @@ code, .mono { font-family: var(--font-code); font-size: 0.86em; }
 
 /* ================= shell and nav ================= */
 .shell { max-width: 1320px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 96px; display: grid; grid-template-columns: 228px minmax(0, 1fr); gap: 32px; }
-.sidenav { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 80px); align-self: start; font-size: 14.5px; }
-.switcher { position: relative; margin-bottom: 14px; }
-.switcher > button { width: 100%; text-align: left; display: flex; justify-content: space-between; align-items: center; gap: 8px; font: inherit; font-family: var(--font-display); font-weight: 700; font-size: 15px; line-height: 1.25; color: var(--ink); background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 10px; padding: 9px 12px; min-height: 44px; cursor: pointer; }
-.switcher > button:hover { border-color: var(--ink-2); }
-.switcher .caret { width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); margin-top: -4px; flex: none; }
+.sidenav { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 80px); align-self: start; font-size: 14.5px; max-height: calc(100vh - 100px); overflow-y: auto; }
 .popmenu { position: absolute; z-index: 25; left: 0; right: 0; top: calc(100% + 4px); background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 10px; box-shadow: var(--shadow); padding: 6px; display: grid; gap: 1px; min-width: 240px; }
 .popmenu a, .popmenu button { display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; width: 100%; font: inherit; font-size: 14px; color: var(--ink); background: none; border: 0; border-radius: 6px; padding: 7px 10px; min-height: 34px; text-decoration: none; cursor: pointer; }
 .popmenu a:hover, .popmenu button:hover { background: var(--sunk); }
@@ -44,17 +40,36 @@ code, .mono { font-family: var(--font-code); font-size: 0.86em; }
 .sidenav a { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 10px; min-height: 34px; border-radius: 6px; color: var(--ink); text-decoration: none; }
 .sidenav a:hover { background: var(--sunk); }
 .sidenav a[aria-current="page"] { background: var(--surface); box-shadow: inset 3px 0 0 var(--ink); font-weight: 600; }
-.sidenav .nav-h { font-size: 12.5px; color: var(--muted); margin: 14px 10px 4px; }
+.sidenav .nav-h { font-size: 12.5px; color: var(--muted); margin: 14px 10px 4px 32px; }
 .sidenav hr { border: 0; border-top: 1px solid var(--rule-strong); margin: 12px 0 0; }
 .sidenav .n-count { font-family: var(--font-display); font-weight: 700; font-size: 11.5px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--bad); color: #fff; display: inline-grid; place-items: center; }
 .sidenav .n-soon { font-size: 11px; color: var(--muted); font-weight: 400; }
-.sidenav a.archived { color: var(--muted); }
 .sidenav .nav-pending { display: flex; align-items: center; gap: 4px; padding: 6px 10px; min-height: 34px; color: var(--muted); }
-.sidenav .home-link { font-size: 13.5px; color: var(--muted); }
+/* The tree (decision 0031 rule 11): the root link, the anchor, and a 22px chevron gutter before every label. */
+.sidenav a.nav-root { font-size: 13.5px; color: var(--muted); min-height: 30px; padding-block: 3px; justify-content: flex-start; }
+.sidenav a.nav-root:hover { color: var(--ink); }
+.sidenav .nav-anchor { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; padding: 7px 10px; border-radius: 8px; font-family: var(--font-display); font-weight: 700; font-size: 16px; line-height: 1.25; color: var(--ink); text-decoration: none; justify-content: flex-start; }
+.sidenav span.nav-anchor { cursor: default; }
+.sidenav .row { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; }
+.sidenav .row > a { min-width: 0; }
+.sidenav .leaf { margin-left: 22px; }
+.sidenav .lvl2 { padding-left: 44px; }
+.sidenav .lvl2 a { font-size: 13.5px; min-height: 30px; padding: 4px 10px; overflow-wrap: anywhere; }
+.sidenav .node-name { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.sidenav .nav-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+.sidenav .past { color: var(--muted); }
+.sidenav .nav-fold { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 6px 10px; color: var(--muted); font-size: 13.5px; cursor: pointer; border-radius: 6px; }
+.sidenav .nav-fold:hover { background: var(--sunk); }
+.chev { width: 22px; min-height: 34px; display: grid; place-items: center; background: none; border: 0; border-radius: 6px; cursor: pointer; padding: 0; color: var(--muted); flex: none; }
+.chev:hover { background: var(--sunk); color: var(--ink); }
+.chev:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.chev .arrow { width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform 0.15s; margin-left: -3px; }
+.chev[aria-expanded="true"] .arrow { transform: rotate(45deg); margin: -3px 0 0 0; }
+.section-head .lead { display: inline-flex; align-items: center; gap: 2px; margin-left: -8px; }
 main { min-width: 0; }
 @media (max-width: 860px) {
   .shell { grid-template-columns: minmax(0, 1fr); gap: 16px; padding-block: 16px 96px; }
-  .sidenav { position: static; display: none; background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px; }
+  .sidenav { position: static; display: none; max-height: none; background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px; }
   body.nav-open .sidenav { display: block; }
 }
 
@@ -175,7 +190,6 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .wk-filters { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .wk-filters .toggle[aria-pressed="false"] { opacity: 1; text-decoration: none; }
 .wk-filters .toggle[aria-pressed="true"] { background: var(--sunk); }
-.wk-expand { min-width: 32px; font-weight: 700; }
 .wk-timeline { display: grid; gap: 12px; padding-top: 12px; }
 .wk-timeline .week-h { font-size: 14px; margin: 0 0 6px; }
 .wk-empty { font-size: 12.5px; color: var(--muted); margin: 0; padding: 2px 0; border-top: 1px solid var(--rule); }
@@ -627,14 +641,6 @@ input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-sof
 /* ================= v3 additions ================= */
 .prop { display: inline-flex; align-items: center; font-family: var(--font-body); font-weight: 600; font-size: 10.5px; line-height: 1.5; letter-spacing: 0.02em; padding: 0 6px; border-radius: 4px; border: 1px dashed var(--rule-strong); color: var(--muted); background: transparent; white-space: nowrap; vertical-align: 0.1em; margin-left: 6px; text-transform: none; }
 
-/* switcher: two levels */
-.popmenu .sub-toggle { justify-content: space-between; }
-.popmenu .sub-toggle .arrow { width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; flex: none; }
-.popmenu .sub-toggle[aria-expanded="true"] .arrow { transform: rotate(45deg); }
-.popmenu .submenu { display: grid; gap: 1px; padding-left: 14px; }
-.popmenu .ro { color: var(--muted); }
-.popmenu .ro .pm-sub { font-style: italic; }
-.popmenu .cur { font-weight: 700; }
 
 /* read-only */
 .ro-banner { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 14px; border-radius: 10px; background: var(--sunk); color: var(--ink-2); font-size: 14px; margin-bottom: 18px; }
@@ -901,23 +907,15 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .sub-actions .sep { color: var(--rule-strong); }
 .grid-2.cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 @media (max-width: 1060px) { .grid-2.cols { grid-template-columns: minmax(0, 1fr); } }
-.sidenav .nav-row { display: flex; align-items: center; }
-.sidenav .nav-row > a { flex: 1; }
-.sidenav .nav-chev { width: 30px; min-height: 34px; display: grid; place-items: center; background: none; border: 0; border-radius: 6px; cursor: pointer; padding: 0; }
-.sidenav .nav-chev:hover { background: var(--sunk); }
-.sidenav .nav-chev:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
-.sidenav .nav-chev .arrow { width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; }
-.sidenav .nav-chev[aria-expanded="true"] .arrow { transform: rotate(45deg); }
-.sidenav .nav-sub { padding-left: 12px; }
-.sidenav .nav-sub a { font-size: 13.5px; min-height: 30px; padding: 4px 10px; overflow-wrap: anywhere; }
 
-/* T5: overview status board, semester banner, Student view entry (decision 0025) */
-.page-head h2.h1 { font-size: 30px; font-weight: 600; }
-.sem-banner { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 24px; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--rule); }
-.sem-banner .banner-course { margin: 0; font-size: 13px; color: var(--muted); }
-.sem-banner h1 { font-size: 20px; }
-.sem-banner .sb-line { margin: 4px 0 0; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 13.5px; color: var(--ink-2); }
-.sem-banner .sb-side { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13.5px; }
+/* The course banner on every course and semester page (decision 0031 rule 11): the course h1, the semester's line, the page title an h2 at 24px. */
+.page-head h2.h1 { font-size: 24px; font-weight: 600; }
+.course-banner { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 24px; padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--rule); }
+.course-banner.plain { border-bottom: 0; padding-bottom: 0; margin-bottom: 6px; }
+.course-banner .cb-sem { margin: 4px 0 0; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 13.5px; color: var(--ink-2); }
+.course-banner .sem-title { font-family: var(--font-display); font-weight: 600; font-size: 18px; color: var(--ink); line-height: 1.2; }
+.course-banner .cb-side { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13.5px; }
+@media (max-width: 640px) { h1 { font-size: 26px; } .page-head h2.h1 { font-size: 22px; } }
 .app-view { font-size: 13px; color: var(--on-brand); opacity: 0.9; }
 @media (max-width: 860px) { .app-view .long { display: none; } }
 @media (min-width: 861px) { .app-view .short { display: none; } }

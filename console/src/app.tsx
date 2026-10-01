@@ -1,6 +1,7 @@
 // The console's root: sign-in, discovery, the route, and which screen renders: the
 // instructor screens, or a semester's student screens (a student's own, or an instructor's
-// Student view). Every semester page, in either console, opens with the semester banner.
+// Student view). Every course and semester page, in either console, opens with the course
+// banner (decision 0031 rule 11): crumbs, the course name as the h1, the semester's line.
 
 import { computed, signal } from '@preact/signals';
 import { EnvCtx, type Env } from './env';
@@ -24,7 +25,7 @@ import { takeInstallReturn } from './wizards/drafts';
 import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
-import { CourseScreen, TemplateScreen, courseView, semesterChip, templateTitle } from './screens/Course';
+import { CourseHeaderActions, CourseHint, CourseScreen, TemplateScreen, courseView, semesterChip, templateTitle } from './screens/Course';
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from './screens/CourseIndex';
 import { HomeScreen, Invitations, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { InstructorsScreen, StudentsScreen } from './screens/People';
@@ -44,7 +45,7 @@ import type { CohortProps, CourseProps } from './screens/types';
 import { Loading, ghUrl } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
 import { forgetRendered } from './ui/rendered';
-import { Footer, SemesterBanner, Sidenav, StudentNav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
+import { CourseBanner, Footer, Sidenav, StudentNav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
 import { fmtDay } from './model/format';
 import { DEFAULT_TIMEZONE } from './model/policy';
 import type { SemesterStatus } from './model/types';
@@ -186,11 +187,11 @@ export function App({ state: s }: { state: AppState }) {
         <Topbar user={user} title={stu.studentView ? 'Student view (preview)' : title} titleHref={stu.studentView ? back : undefined} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} guide={guide} />
         <div class="shell">
           <aside class="sidenav" id="sidenav-wrap" aria-label="Semester navigation">
-            <StudentNav courses={courses} cohortStates={{}} semesters={semesters} semester={stu.semester} current={key} />
+            <StudentNav root={root} semesters={semesters} semester={stu.semester} current={key} studentView={stu.studentView} now={s.now.value} />
           </aside>
           <main id="view" tabindex={-1}>
             {estate.invited?.length ? <Invitations invited={estate.invited} kind={estate.kind} /> : null}
-            <StudentBanner semester={stu.semester} studentView={stu.studentView} chip={semesterChip({ live: !stu.semester.archived, ended: semesterOver(stu.semester, s.now.value) })} now={s.now.value} />
+            <StudentBanner root={root} screen={key} semester={stu.semester} studentView={stu.studentView} chip={semesterChip({ live: !stu.semester.archived, ended: semesterOver(stu.semester, s.now.value) })} now={s.now.value} />
             <ScreenBoundary key={s.search.value + s.hash.value}><StudentScreen semester={stu.semester} screen={key} studentView={stu.studentView} entry={route.entry} now={s.now.value} /></ScreenBoundary>
           </main>
         </div>
@@ -219,13 +220,14 @@ export function App({ state: s }: { state: AppState }) {
   const wanted = blocked ? [] : screen === 'home' ? courses.filter((c) => c.write).flatMap((c) => c.cohorts) : ctx.course?.write ? ctx.course.cohorts : [];
   for (const k of wanted) cohortStates[k.org] = s.statuses.cohort(k.org).value;
   const cohortLoaded = ctx.cohort && ctx.course?.write && !blocked ? s.statuses.cohort(ctx.cohort.org).value : undefined;
-  const problems = cohortLoaded?.kind === 'ready' ? (cohortLoaded.status.problems ?? []).length : 0;
   const navKey = COHORT_SCREENS[screen] ?? COURSE_SCREENS[screen] ?? (wiz ? WIZARD_NAV[wiz.name] : undefined) ?? screen;
   const navCourse = !blocked && !APP_SCREENS.includes(screen) ? ctx.course : undefined;
   const sub = navCourse ? (wanted: SubWanted) => subPages(navCourse, s.statuses.course(navCourse.org).value, cohortStates, s.files, { ...wanted, titles: !ctx.cohort }) : undefined;
 
   let body;
   let banner = null;
+  // The banner's crumbs follow the tree: All courses › Course (› Semester); the open page's is plain.
+  const home = { t: root, href: '?#home' };
   if (unmigrated) {
     body = <NotMigratedScreen what={unmigrated.what} org={unmigrated.org} leftovers={unmigrated.list} />;
   } else if (failed) {
@@ -244,6 +246,11 @@ export function App({ state: s }: { state: AppState }) {
     body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course.write) {
     body = <ReadonlyScreen course={ctx.course} cohort={ctx.cohort} />;
+    // Read only: the same banner, the semester's line without the Student view (no role to preview).
+    banner = (
+      <CourseBanner crumbs={ctx.cohort ? [home, { t: ctx.course.name, href: `?course=${ctx.course.org}#course` }, { t: ctx.cohort.termLabel }] : [home, { t: ctx.course.name }]}
+        name={ctx.course.name} semester={ctx.cohort ? { org: ctx.cohort.org, termLabel: ctx.cohort.termLabel } : undefined} />
+    );
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
     const cp: CourseProps = { migrated: Array.isArray(courseLeft) && !courseLeft.length, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
     body = wiz?.name === 'new-semester' ? <NewCohortScreen {...cp} step={wiz.step} />
@@ -256,6 +263,12 @@ export function App({ state: s }: { state: AppState }) {
       : screen === 'materials' ? <MaterialsIndexScreen {...cp} />
       : screen === 'templates' ? <TemplatesIndexScreen {...cp} />
       : <CourseScreen {...cp} />;
+    // The overview: the banner is its head, with New semester; other course pages have no right side.
+    const overview = !wiz && !['template', 'details', 'website', 'materials', 'templates'].includes(screen);
+    banner = (
+      <CourseBanner crumbs={[home, { t: ctx.course.name, href: overview ? undefined : `?course=${ctx.course.org}#course` }]} name={ctx.course.name}
+        hint={overview ? <CourseHint /> : undefined} side={overview ? <CourseHeaderActions course={ctx.course} /> : undefined} />
+    );
   } else {
     const cp: CohortProps = {
       course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry, tab: route.tab,
@@ -277,7 +290,11 @@ export function App({ state: s }: { state: AppState }) {
     };
     body = (screens[screen] ?? screens.dashboard)();
     const sem = cohortLoaded?.kind === 'ready' ? cohortLoaded.status.semester : undefined;
-    banner = <SemesterBanner courseName={ctx.course.name} termLabel={ctx.cohort.termLabel} org={ctx.cohort.org} view="student" {...bannerLine(sem)} />;
+    const dashboard = `?cohort=${ctx.cohort.org}#dashboard`;
+    banner = (
+      <CourseBanner crumbs={[home, { t: ctx.course.name, href: `?course=${ctx.course.org}#course` }, { t: ctx.cohort.termLabel, href: navKey === 'dashboard' ? undefined : dashboard }]}
+        name={ctx.course.name} semester={{ org: ctx.cohort.org, termLabel: ctx.cohort.termLabel, view: 'student', ...bannerLine(sem) }} />
+    );
   }
 
   // Two levels (decision 0021): Profile and Guide are app-level, full width without the side nav.
@@ -288,7 +305,7 @@ export function App({ state: s }: { state: AppState }) {
       <div class="shell" style={appLevel ? 'grid-template-columns:minmax(0,1fr)' : undefined}>
         {appLevel ? null : (
           <aside class="sidenav" id="sidenav-wrap" aria-label="Console navigation">
-            <Sidenav courses={courses} semesters={semesters} course={ctx.course} cohort={ctx.cohort} cohortStates={cohortStates} current={navKey} problems={problems} sub={sub} entry={route.entry} />
+            <Sidenav courses={courses} course={ctx.course} cohort={semesterPage ? ctx.cohort : undefined} site={ctx.cohort} cohortStates={cohortStates} current={navKey} sub={sub} entry={route.entry} now={s.now.value} />
           </aside>
         )}
         <main id="view" tabindex={-1}>
@@ -303,7 +320,7 @@ export function App({ state: s }: { state: AppState }) {
   );
 }
 
-/** The semester banner's line from the semester's status: state, week and dates, each only when known. */
+/** A semester page's banner line from the semester's status: state, week and dates, each only when known. */
 export function bannerLine(sem: SemesterStatus | undefined): { chip?: preact.ComponentChildren; week?: string; dates?: string } {
   if (!sem) return {};
   const tz = sem.timezone || DEFAULT_TIMEZONE;

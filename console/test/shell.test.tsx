@@ -1,5 +1,5 @@
-// The shell (decision 0021): the app-level top bar, two levels of navigation, the switcher
-// without wizards, `#setup` landing on Profile, and the sign-in page's copy.
+// The shell (decision 0021): the app-level top bar, two levels of navigation, the side nav
+// without wizards (decision 0031 rule 11), `#setup` landing on Profile, and the sign-in page's copy.
 
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
@@ -57,7 +57,7 @@ describe('two levels', () => {
   it('lands an instructor on All courses, even with one writable course (decision 0030 rule 1)', () => {
     const out = app('');
     expect(out).toContain('<h1>All courses');
-    expect(out).not.toContain('sem-banner');
+    expect(out).not.toContain('course-banner');
   });
   it('lands a person with a course and one live student semester on All courses, with Your semesters below', () => {
     const nlp: Semester = { org: 'hertie-nlp-f2026', term: 'f2026', termLabel: 'Fall 2026', courseOrg: 'hertie-nlp-e1282', courseName: 'Natural Language Processing', archived: false, role: 'student' };
@@ -65,7 +65,7 @@ describe('two levels', () => {
     expect(out).toContain('<h1>All courses');
     expect(out).toContain('Your semesters');
     expect(out).toContain(`?semester=${nlp.org}#week`);
-    expect(out).not.toContain('sem-banner');
+    expect(out).not.toContain('course-banner');
   });
   it('keeps the side nav on Home', () => {
     const out = app('#home');
@@ -101,18 +101,20 @@ describe('top bar', () => {
   });
 });
 
-describe('switcher and side nav', () => {
+describe('side nav', () => {
   it('lists no wizards, and All courses clears the query', () => {
-    const out = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{}} current="dashboard" problems={0} />);
+    const out = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{}} current="dashboard" />);
     expect(out).not.toContain('New course');
     expect(out).not.toContain('New semester');
-    expect(out).toMatch(/<a[^>]*href="\?#home"[^>]*>All courses<\/a>/);
+    expect(out).toMatch(/<a class="nav-root" href="\?#home"><span aria-hidden="true">‹ <\/span>All courses<\/a>/);
   });
-  it('reads All courses on Home', () => {
-    expect(render(<Sidenav courses={[course]} cohortStates={{}} current="home" problems={0} />)).toContain('<span>All courses</span>');
+  it('marks All courses current on Home, with no course in the nav', () => {
+    const out = render(<Sidenav courses={[course]} cohortStates={{}} current="home" />);
+    expect(out).toContain('<a class="nav-root" href="?#home" aria-current="page">');
+    expect(out).not.toContain('nav-anchor');
   });
   it('orders the external links Public site, Course (Student view and the semester on GitHub are in the banner)', () => {
-    const t = text(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{}} current="dashboard" problems={0} />);
+    const t = text(<Sidenav courses={[course]} course={course} cohort={cohort} site={cohort} cohortStates={{}} current="dashboard" />);
     const at = ['Public site', 'Course on GitHub'].map((l) => t.indexOf(l));
     expect(at.every((i) => i >= 0)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
