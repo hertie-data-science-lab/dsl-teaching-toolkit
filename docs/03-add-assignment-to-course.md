@@ -147,7 +147,8 @@ what template-generate hands each student. It never writes to `solution`.
 Three things it refuses to do, because each one publishes the answer:
 
 - **a file with nothing fenced in it is not written at all** - the "starter" derived from it
-  would be your model answer, so the run names the file and goes red;
+  would be your model answer, so the run names the file and goes red (a blank file, such as
+  an empty `__init__.py`, is copied as it is);
 - **an unbalanced fence is refused** - a `BEGIN` with no `END` is a typo the run will not
   guess its way past;
 - **a stripped code cell loses its stored outputs** - a solution notebook is a *run*
