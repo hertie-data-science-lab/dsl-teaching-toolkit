@@ -100,7 +100,11 @@ export function releaseAdhoc(s: Scope, repos: string[]): OpDef {
     intro: 'Copies one or more folders to students now. Nothing is added to the schedule.',
     verb: 'Release folders', running: 'Releasing the folders', cancel: 'Stop before copying',
     args: { course_source_repo: repos[0] ?? '' }, options: adhocTiers(repos),
-    target: (a) => destUrl(s.cohortOrg ?? s.courseOrg, String(a.semester_dest_repo || DEFAULT_DEST_REPO), String(a.semester_dest_path || '')),
+    target: (a) => {
+      // A blank destination path means the source path; a comma means several (deploy.parse_path_pairs): the repo then.
+      const path = String(a.semester_dest_path || a.course_source_path || '');
+      return destUrl(s.cohortOrg ?? s.courseOrg, String(a.semester_dest_repo || DEFAULT_DEST_REPO), path.includes(',') ? '' : path);
+    },
   };
 }
 
@@ -111,6 +115,8 @@ export interface AsgRef {
   units: number;
   group: boolean;
   when: string; // for the eyebrow
+  /** The semester-side name its repos are called after (`semester_dest_repo`, else the key: cascade `semesterName`). */
+  name?: string;
 }
 
 export function handout(s: Scope, a: AsgRef): OpDef {
@@ -118,7 +124,7 @@ export function handout(s: Scope, a: AsgRef): OpDef {
     ...base(s, 'assignment.handout_now', a.slug), name: 'Hand out', title: a.title, where: a.when,
     intro: 'Creates each student’s or team’s repo now instead of at the scheduled time.',
     verb: `Hand out to ${a.units} ${a.group ? 'teams' : 'students'}`, running: 'Handing out', cancel: 'Stop after the current repo; repos already made stay',
-    args: { course_source_repo: a.template }, options: HANDOUT, target: reposLike(s.cohortOrg ?? s.courseOrg, a.slug),
+    args: { course_source_repo: a.template }, options: HANDOUT, target: reposLike(s.cohortOrg ?? s.courseOrg, a.name || a.slug),
   };
 }
 
@@ -129,7 +135,7 @@ export function updateCopies(s: Scope, a: AsgRef, files: string[]): OpDef {
     verb: `Update ${a.units} copies`, running: 'Updating every copy', cancel: 'Stop; copies already updated stay updated',
     // The schedule key: which entry, when two hand out from one template.
     args: { course_source_repo: a.template, assignment: a.slug }, options: copiesTiers(files),
-    target: reposLike(s.cohortOrg ?? s.courseOrg, a.slug),
+    target: reposLike(s.cohortOrg ?? s.courseOrg, a.name || a.slug),
   };
 }
 
