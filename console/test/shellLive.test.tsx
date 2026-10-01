@@ -93,7 +93,7 @@ describe('the semester banner (decision 0025)', () => {
     await settle();
     const back = `?cohort=${cohort.org}#dashboard`;
     expect(el.querySelector('.topbar a.app-view')?.getAttribute('href')).toBe(back);
-    expect(el.querySelector('.topbar a.app-view')?.textContent).toBe('Student view (preview)');
+    expect(el.querySelector('.topbar a.app-view .long')?.textContent).toBe('Student view (preview)');
     expect(el.querySelector(`.sem-banner a[href="${back}"]`)?.textContent).toBe('Back to instructor view');
     expect(el.querySelector('.sem-banner')?.textContent).not.toContain('Student view');
     expect(el.querySelectorAll('h1')).toHaveLength(1);

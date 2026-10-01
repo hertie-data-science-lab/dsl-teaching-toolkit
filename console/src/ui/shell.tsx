@@ -62,7 +62,7 @@ export function Topbar({ user, onSignOut, navOpen = false, onMenu, title, titleH
       <div class="topbar-inner">
         {user && onMenu ? <button class="pill-ghost menu-btn" type="button" aria-expanded={navOpen} aria-controls="sidenav-wrap" onClick={onMenu}>Menu</button> : null}
         <a class="app-name" href="?#home">DSL Teaching Console{user && title && !titleHref ? <small>{title}</small> : null}</a>
-        {user && title && titleHref ? <a class="app-view" href={titleHref}>{title}</a> : null}
+        {user && title && titleHref ? <a class="app-view" href={titleHref}><span class="long">{title}</span><span class="short">Preview</span></a> : null}
         <div class="topbar-right">
           {user ? (
             <a class="who" href="?#profile" aria-label="Your profile">

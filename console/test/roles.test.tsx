@@ -144,7 +144,7 @@ describe('mode and the student shell', () => {
   it('the top bar’s view is a link back only in an instructor’s preview', () => {
     const user = { login: 'a', id: 1, name: 'A', email: null, avatar_url: '' };
     const preview = render(<Topbar user={user} title="Student view (preview)" titleHref={`?cohort=${cohort.org}#dashboard`} />);
-    expect(preview).toContain(`<a class="app-view" href="?cohort=${cohort.org}#dashboard">Student view (preview)</a>`);
+    expect(preview).toContain(`<a class="app-view" href="?cohort=${cohort.org}#dashboard"><span class="long">Student view (preview)</span><span class="short">Preview</span></a>`);
     const real = render(<Topbar user={user} title="Student view" />);
     expect(real).toContain('DSL Teaching Console<small>Student view</small></a>');
     expect(real).not.toContain('app-view');

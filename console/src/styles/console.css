@@ -922,7 +922,8 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .sem-banner .sb-line { margin: 4px 0 0; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 13.5px; color: var(--ink-2); }
 .sem-banner .sb-side { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13.5px; }
 .app-view { font-size: 13px; color: var(--on-brand); opacity: 0.9; }
-@media (max-width: 860px) { .app-view { display: none; } }
+@media (max-width: 860px) { .app-view .long { display: none; } }
+@media (min-width: 861px) { .app-view .short { display: none; } }
 .problems-head .count-badge { min-width: 22px; height: 22px; font-size: 12px; }
 .problem .p-where .p-tag { text-decoration: none; }
 .rows .r-sub.next-event { color: var(--ink-2); }
