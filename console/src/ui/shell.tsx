@@ -376,7 +376,13 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
             </>
           ) : null}
         </>
-      ) : <p class="footnote" style="padding:8px 10px">Read only: other pages need write access.</p>}
+      ) : (
+        // Read only (decision 0032): the overview the course name opens, highlighted; the edit pages stay hidden.
+        <>
+          <ul class="tree">{leaf('course', `?course=${course.org}#course`, 'Overview')}</ul>
+          <p class="footnote" style="padding:8px 10px">Read only: other pages need write access.</p>
+        </>
+      )}
       <hr />
       <ul>
         {site ? <li><a href={`https://${site.org}.github.io`} target="_blank" rel="noopener">Public site <Ext /></a></li> : null}
