@@ -538,12 +538,23 @@ export function resetLabel(folder: string): string {
   return `${KIND_LABEL[kind] ?? kind} (${named ? FROM_WORD.name : FROM_WORD.default})`;
 }
 
-/** The kinds the dropdown offers a folder besides its own (decision 0031 rule 10): lecture, lab, readings, supporting files; a kind `materials.yml` already declares stays offered. */
+/**
+ * The kinds the dropdown offers a folder (decision 0031 rule 10): lecture, lab, readings,
+ * supporting files, less the one its name already gives it; a kind `materials.yml` already
+ * declares stays offered. A folder whose kind is only the default is offered Supporting files
+ * explicitly: choosing it writes the kind, which settles the course's problem about it.
+ */
 export function kindChoices(folder: string, declared?: string): string[] {
-  const own = inferKind(folder).kind;
+  const { kind, named } = inferKind(folder);
   const extra = declared && !FOLDER_KINDS.includes(declared) ? [declared] : [];
-  return [...FOLDER_KINDS, ...extra].filter((k) => k !== own);
+  return [...FOLDER_KINDS, ...extra].filter((k) => !named || k !== kind);
 }
+
+/** The "not set here" option is selected: nothing declared, or the kind its name gives anyway. */
+const resetSelected = (k: { folder: string; kind: string; from: string }) => {
+  const own = inferKind(k.folder);
+  return k.from !== 'declared' || (own.named && k.kind === own.kind);
+};
 
 /** A syllabus the weekly plan can be written into. */
 const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
@@ -673,7 +684,7 @@ export function MaterialsScreen(p: CourseProps) {
                     <td><code>{k.folder}/</code></td>
                     <td><span class="chip">{KIND_LABEL[k.kind] ?? k.kind}</span> <span class="footnote">{FROM_WORD[k.from]}</span></td>
                     <td><select aria-label={`Kind of ${k.folder}`} onChange={(e) => setKind(k.folder, (e.target as HTMLSelectElement).value)}>
-                      <option value="" selected={k.from !== 'declared' || k.kind === inferKind(k.folder).kind}>{resetLabel(k.folder)}</option>
+                      <option value="" selected={resetSelected(k)}>{resetLabel(k.folder)}</option>
                       {kindChoices(k.folder, k.from === 'declared' ? k.kind : undefined).map((x) => <option value={x} selected={k.from === 'declared' && k.kind === x}>{KIND_LABEL[x] ?? x}</option>)}
                     </select></td>
                   </tr>

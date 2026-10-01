@@ -306,11 +306,21 @@ describe('materials settings: syllabus file and folder kinds', () => {
   it('offers only Lecture, Lab, Readings and Supporting files, never a schedule kind', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT, files: withYml })} />);
     const values = (folder: string) => [...out.split(`aria-label="Kind of ${folder}">`)[1].split('</select>')[0].matchAll(/value="([^"]+)"/g)].map((m) => m[1]);
-    expect(values('datasets')).toEqual(['lecture', 'lab', 'readings']);
+    // A folder only the default gives a kind is still offered Supporting files: choosing
+    // it writes `datasets: assets`, which settles the course's problem about it.
+    expect(values('datasets')).toEqual(['lecture', 'lab', 'readings', 'assets']);
     expect(values('lectures')).toEqual(['lab', 'readings', 'assets']);
     for (const kind of ['assignment', 'term', 'archive', 'other', 'drop-in']) expect(kindChoices('code')).not.toContain(kind);
     // A kind materials.yml already declares stays offered, so a save does not drop it.
-    expect(kindChoices('quiz', 'exam')).toEqual(['lecture', 'lab', 'readings', 'exam']);
+    expect(kindChoices('quiz', 'exam')).toEqual(['lecture', 'lab', 'readings', 'assets', 'exam']);
+  });
+  it('shows a declared Supporting files as chosen, not as the default', () => {
+    const declared = new StaticFiles({ [`${COURSE_ORG}/${MAT}/materials.yml`]: 'kinds:\n  datasets: assets\n' }, {}, { [`${COURSE_ORG}/${MAT}`]: tree });
+    const out = render(<MaterialsScreen {...cp({ entry: MAT, files: declared })} />);
+    const sel = out.split('aria-label="Kind of datasets">')[1].split('</select>')[0];
+    expect(sel).toContain('<option value="assets" selected>Supporting files</option>');
+    expect(sel).not.toContain('<option value selected>');
+    expect(text(<MaterialsScreen {...cp({ entry: MAT, files: declared })} />)).toContain('datasets/ Supporting files set here');
   });
   it('names the kind a folder gets by its name, or by default', () => {
     expect(resetLabel('quiz')).toBe('Supporting files (by default)');
