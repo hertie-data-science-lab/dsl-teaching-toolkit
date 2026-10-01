@@ -168,14 +168,9 @@ export function resolveContext(courses: Course[], sel: Selection, route: Route):
   return first ? { course: first, cohort: first.cohorts[0] } : {};
 }
 
-/** Where sign-in lands: Dashboard when there is exactly one writable course with a semester, else Home. */
-export function landing(courses: Course[]): string {
-  const writable = courses.filter((c) => c.write && c.cohorts.length);
-  return writable.length === 1 ? 'dashboard' : 'home';
-}
-
 /**
- * Where a URL that names no page lands a person who teaches nothing (decision 0029 rule 3):
+ * Where a URL that names no page lands (decision 0030 rule 1): an instructor always on All
+ * courses (Home); a person who teaches nothing (decision 0029 rule 3):
  * the org of their one live semester, whose This week opens; null (Your semesters) otherwise.
  */
 export function studentLanding(estate: Estate): string | null {

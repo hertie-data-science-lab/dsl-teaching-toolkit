@@ -956,3 +956,9 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 /* WP-T8: student parity (decision 0029) */
 .fold.supporting { margin-top: 12px; }
 .fold.supporting .file-tree { margin-top: 8px; }
+
+/* T10: All courses sections (decision 0030): each section head carries its My courses checkbox, right-aligned under New course */
+.all-courses-head { margin-bottom: 10px; }
+.all-courses .section-head h2 .meta { font-family: var(--font-body); font-weight: 400; font-size: 13px; color: var(--muted); }
+.all-courses .section-head .my-only { margin: 0; min-height: 0; align-items: center; }
+.all-courses .section-head .my-only input { margin-top: 0; }

@@ -11,7 +11,7 @@ import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { landing, movedHash, parseHash, parseSearch, resolveContext } from '../src/router';
+import { movedHash, parseHash, parseSearch, resolveContext } from '../src/router';
 import { SignInScreen } from '../src/screens/Home';
 import { Sidenav, Topbar } from '../src/ui/shell';
 import { FakeGitHub } from './fake';
@@ -35,10 +35,6 @@ describe('router', () => {
     expect(resolveContext([course], parseSearch('?course=hertie-dsl-demo-course-e1234'), home)).toEqual({});
     expect(resolveContext([course], parseSearch('?cohort=hertie-dsl-demo-f2026'), { screen: 'dashboard' })).toEqual({ course, cohort });
   });
-  it('still sends a person with one writable course to Dashboard on sign-in', () => {
-    expect(landing([course])).toBe('dashboard');
-    expect(landing([course, { ...course, org: 'x' }])).toBe('home');
-  });
 });
 
 describe('two levels', () => {
@@ -57,6 +53,11 @@ describe('two levels', () => {
       expect(out).not.toContain('>Menu</button>');
       expect(out).toContain('id="view"');
     }
+  });
+  it('lands an instructor on All courses, even with one writable course (decision 0030 rule 1)', () => {
+    const out = app('');
+    expect(out).toContain('<h1>All courses');
+    expect(out).not.toContain('sem-banner');
   });
   it('keeps the side nav on Home', () => {
     const out = app('#home');

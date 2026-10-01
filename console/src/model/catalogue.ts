@@ -156,3 +156,14 @@ export async function loadCatalogue(client: GitHubClient, estate: Course[] = [],
 
 /** Whether a semester runs at `now`: not archived, and its end (when known) not past. */
 export const runningNow = (s: CatalogueSemester, now: number) => s.archived === false && (!s.end || !(Date.parse(s.end) <= now));
+
+/** Whether a semester has ended by `now`: archived, or its end past. Unknown (unreadable) is neither running nor ended. */
+export const endedNow = (s: CatalogueSemester, now: number) => s.archived === true || (s.archived === false && !!s.end && Date.parse(s.end) <= now);
+
+const SEASON_ORDER: Record<string, number> = { s: 1, u: 2, f: 3, w: 4 };
+
+/** A semester org's place in time from its key (`-f2026`): larger is newer; 0 for a name without one. */
+export function termRank(org: string): number {
+  const m = /-([fswu])(\d{4})$/i.exec(org);
+  return m ? Number(m[2]) * 10 + SEASON_ORDER[m[1].toLowerCase()] : 0;
+}

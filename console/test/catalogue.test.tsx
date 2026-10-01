@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 // All courses shows the institution's catalogue (decision 0021 rule 5): orgs.yml, then each
 // other course's public dsl-course.yml and semesters.yml; one failed org is its name only;
-// courses the person has no role in are greyed and not links; My courses hides them and is
-// remembered per login.
+// courses the person has no role in are greyed and not links (decision 0030): three sections,
+// DSL courses, This semester, Past semesters, each with its own My courses checkbox, on by
+// default and remembered per login per section.
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
@@ -188,18 +189,31 @@ describe('loading the catalogue', () => {
 });
 
 describe('the My courses pref', () => {
-  it('is off by default, round-trips per login, and survives a refusing store', () => {
+  const memory = () => {
     const m = new Map<string, string>();
-    const store: PrefStore = { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v) };
-    expect(myCoursesOnly('octo', store)).toBe(false);
-    saveMyCoursesOnly('octo', true, store);
-    expect(myCoursesOnly('octo', store)).toBe(true);
-    expect(myCoursesOnly('other', store)).toBe(false);
-    saveMyCoursesOnly('octo', false, store);
-    expect(myCoursesOnly('octo', store)).toBe(false);
+    return { m, store: { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) } as PrefStore };
+  };
+  it('is on by default, round-trips per login and per section, and survives a refusing store', () => {
+    const { store } = memory();
+    expect(myCoursesOnly('octo', 'courses', store)).toBe(true);
+    saveMyCoursesOnly('octo', 'courses', false, store);
+    expect(myCoursesOnly('octo', 'courses', store)).toBe(false);
+    expect(myCoursesOnly('octo', 'now', store)).toBe(true);
+    expect(myCoursesOnly('other', 'courses', store)).toBe(true);
+    saveMyCoursesOnly('octo', 'courses', true, store);
+    expect(myCoursesOnly('octo', 'courses', store)).toBe(true);
     const refusing: PrefStore = { getItem: () => { throw new Error('no'); }, setItem: () => { throw new Error('no'); } };
-    expect(() => saveMyCoursesOnly('octo', true, refusing)).not.toThrow();
-    expect(myCoursesOnly('octo', refusing)).toBe(false);
+    expect(() => saveMyCoursesOnly('octo', 'past', false, refusing)).not.toThrow();
+    expect(myCoursesOnly('octo', 'past', refusing)).toBe(true);
+    expect(myCoursesOnly('octo', 'past', null)).toBe(true);
+  });
+  it('reads the old page-wide choice as every section’s until that section is saved', () => {
+    const { m, store } = memory();
+    m.set('dsl-console-my-courses:octo', '0');
+    for (const s of ['courses', 'now', 'past'] as const) expect(myCoursesOnly('octo', s, store)).toBe(false);
+    saveMyCoursesOnly('octo', 'now', true, store);
+    expect(myCoursesOnly('octo', 'now', store)).toBe(true);
+    expect(myCoursesOnly('octo', 'past', store)).toBe(false);
   });
 });
 
@@ -225,48 +239,92 @@ function mount(f: FakeGitHub) {
 const greyed = (h: HTMLElement) => [...h.querySelectorAll('.cohort-card.off')];
 const section = (h: HTMLElement, id: string) => h.querySelector(`[aria-labelledby="${id}"]`)!;
 
+const names = (el: Element) => [...el.querySelectorAll('.cc-name')].map((n) => n.firstChild?.textContent);
+const boxOf = (h: HTMLElement, id: string) => section(h, id).querySelector<HTMLInputElement>('.my-only input')!;
+const head = (h: HTMLElement, id: string) => section(h, id).querySelector('.section-head')!.textContent;
+
 describe('All courses', () => {
-  it('shows the catalogue greyed and not as links, and a running semester of another course', async () => {
+  it('says what the page is', async () => {
     const h = mount(catalogueFake());
-    expect(h.textContent).toContain('Reading the catalogue…');
     await flush();
+    expect(h.querySelector('.page-head .lede')!.textContent).toBe('Every course the lab runs, ordered by what needs your attention.');
+    // The page head holds New course alone: the checkboxes sit in the section heads.
+    expect([...h.querySelectorAll('.page-head .actions > *')].map((e) => e.textContent)).toEqual(['New course']);
+    expect([...h.querySelectorAll('.section-head .my-only')].length).toBe(3);
+  });
+
+  it('shows only the person’s rows by default, and says how many others each section hides', async () => {
+    const h = mount(catalogueFake());
+    await flush();
+    expect(greyed(h)).toEqual([]);
+    for (const id of ['h-courses', 'h-live', 'h-past']) expect(boxOf(h, id).checked).toBe(true);
+    expect(head(h, 'h-courses')).toContain('DSL courses (+2 others)');
+    expect(head(h, 'h-live')).toContain('This semester (+3 others)');
+    expect(head(h, 'h-past')).toContain('Past semesters (+1 other)');
+    expect(section(h, 'h-live').textContent).toContain('None of your semesters is running.');
+    expect(h.querySelector('a.cohort-card')?.getAttribute('href')).toBe(`?course=${course.org}#course`);
+  });
+
+  it('shows the catalogue greyed and not as links once a section’s My courses is off', async () => {
+    const h = mount(catalogueFake());
+    await flush();
+    await act(async () => boxOf(h, 'h-courses').click());
     expect(h.textContent).not.toContain('Reading the catalogue');
     const courses = section(h, 'h-courses');
-    const names = [...courses.querySelectorAll('.cc-name')].map((n) => n.firstChild?.textContent);
-    expect(names).toEqual(['Machine Learning', BROKEN, 'Natural Language Processing']);
-    const mine = courses.querySelector('a.cohort-card')!;
-    expect(mine.getAttribute('href')).toBe(`?course=${course.org}#course`);
+    expect(names(courses)).toEqual(['Machine Learning', BROKEN, 'Natural Language Processing']);
+    expect(head(h, 'h-courses')).not.toContain('others');
     for (const g of greyed(h)) {
       expect(g.tagName).toBe('DIV');
       expect(g.closest('a')).toBeNull();
       expect(g.getAttribute('aria-disabled')).toBe('true');
+      expect(g.querySelector('.cc-name span')!.textContent).toBe('Not one of your courses');
     }
-    expect(courses.textContent).toContain('Not one of your courses');
+    // The other sections keep their own choice.
+    expect(greyed(section(h, 'h-live') as HTMLElement)).toEqual([]);
+    await act(async () => boxOf(h, 'h-live').click());
     const now = section(h, 'h-live');
-    const off = [...now.querySelectorAll('.cohort-card.off')];
-    expect(off.map((o) => o.querySelector('.cc-name')?.firstChild?.textContent)).toEqual(['Natural Language Processing, Fall 2024', 'Natural Language Processing, Fall 2026', 'Natural Language Processing, Spring 2026']);
-    // The greyed semester says whose it is to a screen reader.
-    expect(off[0].querySelector('.sr')?.textContent).toBe('Not one of your courses');
+    expect(names(now)).toEqual(['Natural Language Processing, Fall 2024', 'Natural Language Processing, Fall 2026', 'Natural Language Processing, Spring 2026']);
     expect(now.textContent).not.toContain('Fall 2025');
     expect(now.textContent).not.toContain('Summer 2026');
+    await act(async () => boxOf(h, 'h-past').click());
+    expect(names(section(h, 'h-past'))).toEqual(['Natural Language Processing, Fall 2025']);
   });
 
-  it('hides every greyed row under My courses, and remembers it for this login', async () => {
+  it('remembers each section’s choice for this login', async () => {
     const h = mount(catalogueFake());
     await flush();
-    expect(greyed(h).length).toBe(5);
-    const box = h.querySelector<HTMLInputElement>('.my-only input')!;
-    expect(box.checked).toBe(false);
-    await act(async () => box.click());
-    expect(greyed(h)).toEqual([]);
-    expect(h.textContent).not.toContain('Reading the catalogue');
-    expect(h.querySelector('a.cohort-card')).not.toBeNull();
-    expect(myCoursesOnly(user.login)).toBe(true);
+    await act(async () => boxOf(h, 'h-live').click());
+    expect(myCoursesOnly(user.login, 'now')).toBe(false);
+    expect(myCoursesOnly(user.login, 'courses')).toBe(true);
     render(null, h);
     const again = mount(catalogueFake());
     await flush();
-    expect(again.querySelector<HTMLInputElement>('.my-only input')!.checked).toBe(true);
-    expect(greyed(again)).toEqual([]);
+    expect(boxOf(again, 'h-live').checked).toBe(false);
+    expect(boxOf(again, 'h-courses').checked).toBe(true);
+    expect(greyed(section(again, 'h-courses') as HTMLElement)).toEqual([]);
+  });
+
+  it('lists past semesters newest first, ten at a time', async () => {
+    const OLD = 'hertie-old-e1000';
+    const terms = Array.from({ length: 12 }, (_, i) => `hertie-old-${i % 2 ? 'f' : 's'}${2014 + Math.floor(i / 2)}`);
+    const f = new FakeGitHub()
+      .on('GET', ORGS_URL, fileBody('orgs.yml', `course_orgs:\n  - ${OLD}\n`))
+      .on('GET', `/repos/${OLD}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Old Course\n'))
+      .on('GET', `/repos/${OLD}/.github/contents/semesters.yml`, fileBody('semesters.yml', `semesters:\n${terms.map((t) => `- ${t}\n`).join('')}`));
+    for (const t of terms) f.on('GET', `/repos/${t}/.github`, { name: '.github', archived: true });
+    const h = mount(f);
+    await flush();
+    await act(async () => boxOf(h, 'h-past').click());
+    const past = section(h, 'h-past');
+    const shown = names(past);
+    expect(shown).toHaveLength(10);
+    expect(shown[0]).toBe('Old Course, Fall 2019');
+    expect(shown[1]).toBe('Old Course, Spring 2019');
+    expect(shown[9]).toBe('Old Course, Spring 2015');
+    await act(async () => past.querySelector<HTMLButtonElement>('button')!.click());
+    expect(names(past)).toHaveLength(12);
+    expect(names(past).at(-1)).toBe('Old Course, Spring 2014');
+    expect(past.querySelector('button')).toBeNull();
   });
 
   it('shows no My courses switch while every course is yours, and reads nothing for a person with no course', async () => {
@@ -294,5 +352,13 @@ describe('All courses', () => {
     expect(h.textContent).toContain('The catalogue could not be read.');
     expect(greyed(h)).toEqual([]);
     expect(h.querySelector('a.cohort-card')?.getAttribute('href')).toBe(`?course=${course.org}#course`);
+  });
+
+  it('says it is reading the catalogue only while DSL courses shows the others', async () => {
+    saveMyCoursesOnly(user.login, 'courses', false);
+    const h = mount(catalogueFake());
+    expect(h.textContent).toContain('Reading the catalogue…');
+    await flush();
+    expect(h.textContent).not.toContain('Reading the catalogue');
   });
 });
