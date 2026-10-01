@@ -38,6 +38,12 @@ by accident:
 Nothing here ever writes to `solution`. `main` is the only destination, through the same
 `put_files` every other seeded write uses - so an unchanged starter is no commit at all.
 
+Not every template is derived (decision 0028). `grading_config.yml`'s `starter:` says
+`derived` or `handwritten`; a hand-written starter is the instructor's own `main`, and
+Derive refuses it (`STARTER_HANDWRITTEN`) rather than overwrite it. A template that
+predates the key reads as `derived` when any source on `solution` carries a marker
+(`starter_mode`). Docs: docs/assignment-starter.md.
+
 Usage:
     python3 -m dsl_course.derive --course-org hertie-dsl-demo-course-e1234 \\
         --course-source-repo assignment-linear-regression [--no-preview]
@@ -48,11 +54,21 @@ from __future__ import annotations
 import json
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import NamedTuple
 
-from .course import SOLUTION_BRANCH, SOLUTION_DIR
+import yaml
+
+from .course import (
+    SOLUTION_BRANCH,
+    SOLUTION_DIR,
+    STARTER_DERIVED,
+    STARTER_HANDWRITTEN,
+    STARTER_MODES,
+)
 from .gh_contents import get_file_content, put_files, repo_tree
+from .grades import GRADING_FILE
 from .log import (
     CLIParser,
     Summary,
@@ -63,6 +79,7 @@ from .log import (
     log_step,
     plural,
 )
+from .setting_readers import READERS
 
 # ------------------------------------------------------------------ the fence vocabulary
 
@@ -109,7 +126,14 @@ TEX_PLACEHOLDER = "% YOUR ANSWER HERE"
 # student version" is a surprise, and `Release materials` is how a file gets published.
 DERIVABLE = (".ipynb", ".rmd", ".qmd", ".py", ".r", ".tex")
 
+# What Derive writes on `main`, and how `status_json` tells Derive's commits from a hand
+# edit (decision 0028: `main` of a derived template is Derive's alone). Frozen: a reworded
+# message would turn every derived template's last commit into a "hand edit".
 COMMIT_MESSAGE = "chore: derive the student starter from the solution branch"
+# The first commit `scaffold` writes on a new template's `main`: its stubs, the toolkit's
+# own, so a derived template not derived yet is not "edited by hand" either.
+SEED_COMMIT = "init: assignment starter"
+DERIVE_COMMITS = (COMMIT_MESSAGE, SEED_COMMIT)
 
 
 class DeriveError(ValueError):
@@ -463,6 +487,52 @@ def derivable_sources(tree: tuple[str, ...] | list[str]) -> list[str]:
     )
 
 
+# ------------------------------------------------------- derived or hand-written (0028)
+
+HANDWRITTEN_TEXT = "This template's starter is written by hand, so nothing is derived."
+
+
+def declared_starter(text: str | None) -> str | None:
+    """`grading_config.yml`'s `starter:`, through the engine's reader; None when the file
+    is absent, does not parse, predates the key or says something else."""
+    try:
+        data = yaml.safe_load(text or "")
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict) or "starter" not in data:
+        return None
+    return READERS["starter"](data["starter"], GRADING_FILE, [])
+
+
+def is_marked(path: str, text: str) -> bool:
+    """Whether a source carries any answer marker. A broken fence counts: whoever wrote
+    it meant to mark an answer, and Derive names the fault."""
+    try:
+        return strip_source(path, text).replaced > 0
+    except DeriveError:
+        return True
+
+
+def unmarked(sources: Mapping[str, str]) -> list[str]:
+    """The derivable sources with something in them and no marker, sorted: each would
+    derive the model answer itself as the starter."""
+    return [p for p, t in sorted(sources.items()) if t.strip() and not is_marked(p, t)]
+
+
+def starter_mode(declared: str | None, sources: Mapping[str, str]) -> str:
+    """Decision 0028: the key when the file has it (rule 1); else rule 6 - `derived` when
+    any derivable source on `solution` carries a marker, `handwritten` otherwise."""
+    if declared in STARTER_MODES:
+        return declared
+    marked = any(is_marked(p, t) for p, t in sources.items())
+    return STARTER_DERIVED if marked else STARTER_HANDWRITTEN
+
+
+def default_starter(autograde: bool) -> str:
+    """Decision 0028 rule 1: what a new template starts as - tests on, derived."""
+    return STARTER_DERIVED if autograde else STARTER_HANDWRITTEN
+
+
 # -------------------------------------------------------------------------- the button
 
 
@@ -499,6 +569,20 @@ def _refused(code: str, text: str) -> dict:
     return {"code": code, "text": text}
 
 
+def _handwritten(course_org: str, template: str) -> Summary:
+    """The refusal for a hand-written starter (decision 0028 rule 3): nothing is read
+    further and nothing is written."""
+    log_err(
+        f"{course_org}/{template}: the starter is written by hand on main "
+        f"(`starter: {STARTER_HANDWRITTEN}`, or no answer marked anywhere) - nothing derived"
+    )
+    return Summary(
+        HANDWRITTEN_TEXT,
+        reasons=[_refused("STARTER_HANDWRITTEN", HANDWRITTEN_TEXT)],
+        code=1,
+    )
+
+
 def derive_student_version(
     course_org: str, template: str, dry_run: bool = True
 ) -> Summary:
@@ -517,6 +601,16 @@ def derive_student_version(
         f"Deriving the student version of {course_org}/{template} from "
         f"`{SOLUTION_BRANCH}`{' (preview)' if dry_run else ''}"
     )
+    # A config GitHub would not serve reads as one without the key: the markers decide.
+    try:
+        config = get_file_content(
+            course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH
+        )
+    except RuntimeError:
+        config = None
+    declared = declared_starter(config)
+    if declared == STARTER_HANDWRITTEN:
+        return _handwritten(course_org, template)
     try:
         tree = repo_tree(course_org, template, SOLUTION_BRANCH, "blob")
     except RuntimeError as exc:
@@ -540,6 +634,7 @@ def derive_student_version(
     reasons: list[dict] = []
     details: list[str] = []
     regions = cells = 0
+    texts: dict[str, str] = {}
     for path in sources:
         try:
             text = get_file_content(course_org, template, path, ref=SOLUTION_BRANCH)
@@ -555,6 +650,12 @@ def derive_student_version(
             log_err(f"  ! {path} could not be read - not derived")
             reasons.append(_refused("SOURCE_UNREADABLE", f"{path} could not be read."))
             continue
+        texts[path] = text
+    # A template that predates the key and marks nothing is hand-written (0028 rule 6).
+    # Only on a full read: an unread file may be the one that carries the marker.
+    if not reasons and starter_mode(declared, texts) == STARTER_HANDWRITTEN:
+        return _handwritten(course_org, template)
+    for path, text in texts.items():
         try:
             stripped = strip_source(path, text)
         except DeriveError as exc:

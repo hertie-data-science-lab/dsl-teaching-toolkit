@@ -1264,7 +1264,13 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         assert key not in yaml.safe_load(meta)
     assert "  formats: [ipynb]  # the runnable one" in meta
     grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
-    assert grading == b"formats: [ipynb]\nautograde: true\n"
+    # The template starter step writes rule 6's reading: no source marks an answer.
+    assert (
+        grading
+        == (
+            f"formats: [ipynb]\nautograde: true\n{scaffold.starter_line('handwritten')}\n"
+        ).encode()
+    )
     materials = fake.tree(COURSE, "course-materials-f2026")
     assert set(materials) == {  # publish.yml deleted
         ".system/MAINTAINING.md",
@@ -1302,7 +1308,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     course.clear()
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    assert capsys.readouterr().out.count("already migrated") == 26
+    assert capsys.readouterr().out.count("already migrated") == 28
     assert course == [] and fake.commits == commits and fake.puts == puts
 
 
@@ -1887,7 +1893,7 @@ def test_the_course_records_each_templates_run_settings_before_stripping_them(
     )
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
-    assert grading == b"formats: [ipynb]\n"
+    assert grading.startswith(b"formats: [ipynb]\nstarter: handwritten")
     record = json.loads(fake.tree(COURSE, ".github")[migrate.RUN_KEYS_RECORD])
     assert record == {"assignment-1-f2026": {"max_team_size": 3, "late_window_days": 4}}
 
@@ -2724,3 +2730,25 @@ def test_the_old_pointer_at_publish_yml_names_opencourse_yml():
             "#   # WHICH files the public website shows, and how, is `opencourse.yml` "
             "beside this\n#   # file - not here.\n"
         )
+
+
+def test_the_course_writes_each_templates_starter_from_its_markers_once(
+    fake, course, monkeypatch, capsys
+):
+    # Decision 0028 rule 6: a template that predates the key reads by its markers, and
+    # the migration writes that reading down. Run twice: the second finds it done.
+    solution = fake.tree(COURSE, "assignment-1-f2026", "solution")
+    solution["solution/starter.py"] = b"### BEGIN SOLUTION\nx = 1\n### END SOLUTION\n"
+    assert _main(monkeypatch, COURSE) == 0
+    assert "starter: derived (read from its answer markers)" in capsys.readouterr().out
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
+    assert yaml.safe_load(grading)["starter"] == "derived"
+    assert grading.decode().endswith(f"{scaffold.starter_line('derived')}\n")
+    capsys.readouterr()
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    assert "[skip] template starter: already migrated" in capsys.readouterr().out
+    assert (
+        fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
+        == grading
+    )

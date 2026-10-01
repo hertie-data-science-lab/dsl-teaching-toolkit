@@ -592,6 +592,14 @@
             "pattern": "^[fs][0-9]{4}$",
             "type": "string"
           },
+          "starter": {
+            "description": "How main's starter is written",
+            "enum": [
+              "derived",
+              "handwritten"
+            ],
+            "type": "string"
+          },
           "submit_via": {
             "enum": [
               "assignment_repo",

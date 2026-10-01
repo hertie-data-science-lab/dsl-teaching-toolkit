@@ -1011,6 +1011,9 @@ class GradingSpec(_Shape):
     # the autograde detail. Off unless the assignment asks for it: it clones the whole
     # semester a second time at the cutoff, and most assignments are read in the browser.
     grader_pdf: bool = False
+    # How `main`'s starter is written (decision 0028): `derived` | `handwritten`, or None
+    # when the file predates the key - `derive.starter_mode` then reads the markers.
+    starter: str | None = None
     # The file still carries an old key (decisions 0009, 0012): refused whole, and nothing
     # hands out or grades from it until it is migrated.
     not_migrated: bool = False

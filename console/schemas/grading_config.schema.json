@@ -60,6 +60,13 @@
       },
       "type": "object"
     },
+    "starter": {
+      "enum": [
+        "derived",
+        "handwritten"
+      ],
+      "type": "string"
+    },
     "submit_via": {
       "enum": [
         "assignment_repo",

@@ -65,12 +65,22 @@ from .course import (
     MATERIALS_REPO_PREFIX,
     SELF_SELECT,
     SOLUTION_BRANCH,
+    STARTER_DERIVED,
+    STARTER_HANDWRITTEN,
     SYLLABUS_SESSIONS_FILE,
     active_today,
     is_repo_root,
     pages_repo,
     semester_label,
     semester_of,
+)
+from .derive import (
+    DERIVE_COMMITS,
+    declared_starter,
+    derivable_sources,
+    starter_mode,
+    student_path,
+    unmarked,
 )
 from .discovery import (
     SEMESTERS_PATH,
@@ -170,6 +180,14 @@ class TemplateFacts:
     faults: list[ConfigFault] = field(default_factory=list)
     # False for an `assignment-*` GitHub template without the `dsl-assignment` topic yet.
     topic: bool = True
+    # Decision 0028: how `main` is written (the key, else read from the markers).
+    starter: str = STARTER_DERIVED
+    # Derived: the sources on `solution` that mark no answer yet.
+    unmarked: tuple[str, ...] = ()
+    # Derived: the first starter file on `main` whose last commit is not Derive's.
+    main_edited: str | None = None
+    # Hand-written: `main` holds something.
+    main_files: bool = True
 
 
 @dataclass
@@ -924,13 +942,56 @@ def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
     return out
 
 
+MAIN_EDITED = "MAIN_EDITED"
+
+
+def main_edited_problem(t: TemplateFacts, org: str) -> dict:
+    """Decision 0028 rule 2: a derived template's `main` carries a commit Derive did not
+    make, which the next Derive overwrites."""
+    return {
+        "id": f"template:{_slugify(t.repo)}:{MAIN_EDITED}",
+        "scope": "course",
+        "stage": "C5",
+        "text": "main is derived; edit the solution branch and derive again.",
+        "stops": (
+            f"{t.main_edited} was changed on main by hand; the next Derive "
+            f"overwrites it."
+        ),
+        "fix": {
+            "repo": f"{org}/{t.repo}",
+            "path": "",
+            "line": None,
+            "screen": "template",
+            "entry": t.repo,
+        },
+    }
+
+
+def template_problems(t: TemplateFacts, org: str) -> list[dict]:
+    """A template's own problems beside its grading_config.yml faults: NOT_MIGRATED
+    without the topic, MAIN_EDITED on a derived one."""
+    if not t.topic:
+        return [template_problem(t, org)]
+    return [main_edited_problem(t, org)] if t.main_edited else []
+
+
+def _starter_todo(t: TemplateFacts) -> str | None:
+    """What the starter still needs (decision 0028), or None."""
+    if t.starter == STARTER_HANDWRITTEN:
+        return None if t.main_files else "main has no starter files yet."
+    if t.unmarked:
+        return f"{t.unmarked[0]} marks no answer yet, so Derive would copy the answer."
+    return None
+
+
 def template_state(t: TemplateFacts) -> str:
-    """C5, per template: `problem` until the migration gives it the topic, or while its
-    grading_config.yml will not grade as written; `ready` once its README is written,
-    `todo` before that."""
-    if t.faults or not t.topic:
+    """C5, per template: `problem` until the migration gives it the topic, while its
+    grading_config.yml will not grade as written, or while a derived `main` carries a
+    hand edit; `ready` once its README is written and its starter is in place (derived:
+    every source marks an answer; hand-written: `main` holds something), `todo` before."""
+    if t.faults or template_problems(t, ""):
         return PROBLEM
-    return "ready" if _written(t.readme) else TODO
+    return "ready" if _written(t.readme) and not _starter_todo(t) else TODO
 
 
 def app_installed() -> bool | None:
@@ -978,7 +1039,8 @@ def render_course(
     problems += [
         materials_problem(m, facts.org) for m in facts.materials if not m.topic
     ]
-    problems += [template_problem(t, facts.org) for t in facts.templates if not t.topic]
+    for t in facts.templates:
+        problems += template_problems(t, facts.org)
     for t in facts.templates:
         problems += [problem_from_fault(f, facts.org, now) for f in t.faults]
     meta = facts.meta
@@ -1007,6 +1069,7 @@ def render_course(
                 "repo": t.repo,
                 "slug": t.repo,
                 "state": template_state(t),
+                "starter": t.starter,
             }
             for t in facts.templates
         ],
@@ -1049,6 +1112,18 @@ def course_todo(facts: CourseFacts) -> list[dict]:
         }
         for t in facts.templates
         if t.topic and not _written(t.readme)
+    ]
+    out += [
+        {
+            "id": f"template:{_slugify(t.repo)}:starter",
+            "kind": "template",
+            "repo": t.repo,
+            "text": text,
+            "screen": "template",
+            "entry": t.repo,
+        }
+        for t in facts.templates
+        if t.topic and (text := _starter_todo(t))
     ]
     return sorted(out, key=lambda e: (e["kind"] != "materials", e["repo"]))
 
@@ -1578,9 +1653,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     problems += [
         materials_problem(m, course.org) for m in course.materials if not m.topic
     ]
-    problems += [
-        template_problem(t, course.org) for t in course.templates if not t.topic
-    ]
+    problems += [p for t in course.templates for p in template_problems(t, course.org)]
     problems = _unique_ids(problems)
     course_block, _ = render_course(
         course, now, [p for p in problems if p["scope"] == "course"]
@@ -1742,6 +1815,8 @@ def gather_course(course_org: str) -> CourseFacts:
                 t.faults, _ = grades.grading_spec_faults(
                     name, name, course_org, text, None
                 )
+            if t.topic:
+                _starter_facts(course_org, t, text)
             facts.templates.append(t)
     facts.public_site = pages_repo(course_org) in listing
     try:
@@ -1751,6 +1826,46 @@ def gather_course(course_org: str) -> CourseFacts:
         facts.website_unusable = True
     facts.website_on = bool(oc and oc.enabled)
     return facts
+
+
+def _starter_facts(org: str, t: TemplateFacts, config: str | None) -> None:
+    """Decision 0028's facts for one template: the starter mode and what readiness asks
+    of it. Derived: the sources that mark nothing, and the first starter file on `main`
+    whose last commit is not Derive's (or the scaffold's seed)."""
+    solution = repo_path_shas(org, t.repo, SOLUTION_BRANCH)
+    sources = {}
+    for path in derivable_sources(list(solution)):
+        text = get_file_content(org, t.repo, path, ref=SOLUTION_BRANCH)
+        if text is not None:
+            sources[path] = text
+    t.starter = starter_mode(declared_starter(config), sources)
+    main = repo_path_shas(org, t.repo, default_branch(org, t.repo, fallback="main"))
+    if t.starter == STARTER_HANDWRITTEN:
+        t.main_files = any(not p.startswith(".") for p in main)
+        return
+    t.unmarked = tuple(unmarked(sources))
+    t.main_edited = next(
+        (
+            student_path(path)
+            for path in sorted(sources)
+            if student_path(path) in main
+            and _last_subject(org, t.repo, student_path(path))
+            not in (None, *DERIVE_COMMITS)
+        ),
+        None,
+    )
+
+
+def _last_subject(org: str, repo: str, path: str) -> str | None:
+    """The first line of the last commit that touched `path` on the default branch; None
+    when it could not be read - a hint, never a reason to raise."""
+    code, out = gh(
+        "api",
+        f"repos/{org}/{repo}/commits?per_page=1&path={path}",
+        "--jq",
+        '.[0].commit.message // "" | split("\\n")[0]',
+    )
+    return out.strip() if code == 0 and out.strip() else None
 
 
 def _outcomes(semester_org: str, paths: dict[str, str]) -> list[dict]:

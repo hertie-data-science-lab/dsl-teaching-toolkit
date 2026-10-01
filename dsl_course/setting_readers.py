@@ -20,6 +20,7 @@ from .course import (
     FORMATS,
     NO_STARTER,
     SETTING_PLACEHOLDER,
+    STARTER_MODES,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
@@ -412,6 +413,9 @@ READERS = {
     "completion_check": lambda v, w, d: _boolean(v, "completion_check", w, d),
     "tests": lambda v, w, d: str(v or "tests").strip() or "tests",
     "grader_pdf": lambda v, w, d: _boolean(v, "grader_pdf", w, d),
+    # None for a refused value: the template then reads by its markers, as one written
+    # before the key (`derive.starter_mode`).
+    "starter": lambda v, w, d: _one_of(v, STARTER_MODES, "starter", None, w, d),
 }
 SPEC_KEYS = tuple(READERS)
 

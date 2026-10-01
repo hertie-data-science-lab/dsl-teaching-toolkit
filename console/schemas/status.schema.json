@@ -403,6 +403,13 @@
               "slug": {
                 "type": "string"
               },
+              "starter": {
+                "enum": [
+                  "derived",
+                  "handwritten"
+                ],
+                "type": "string"
+              },
               "state": {
                 "type": "string"
               }

@@ -232,3 +232,31 @@ def test_the_course_template_offers_the_course_layer_and_nothing_retired():
     assert block[settings.ASSIGNMENT_DEFAULTS_KEY] is None
     for key in ("formats", "submit_via", "team_formation", "visibility"):
         assert key in text
+
+
+def test_the_console_s_starter_choice_reaches_the_scaffold():
+    argv = REGISTRY["assignment.create"].argv(
+        parse_request(_create({"name": "Trees", "starter": "handwritten"}))
+    )
+    assert argv[argv.index("--starter") + 1] == "handwritten"
+    left_out = REGISTRY["assignment.create"].argv(parse_request(_create({"name": "T"})))
+    assert "--starter" not in left_out
+    with pytest.raises(RequestError):
+        parse_request(_create({"name": "Trees", "starter": "copied"}))
+
+
+def test_the_scaffolded_grading_config_says_how_the_starter_is_written():
+    def starter(**k):
+        text = scaffold._grading_config(
+            title="T",
+            kind="individual",
+            submit_via="assignment_repo",
+            formats=["py"],
+            **k,
+        )
+        return yaml.safe_load(text)["starter"]
+
+    # Rule 1: tests on, derived; tests off, hand-written; an explicit answer wins.
+    assert starter(autograde=True) == "derived"
+    assert starter(autograde=False) == "handwritten"
+    assert starter(autograde=False, starter="derived") == "derived"
