@@ -444,16 +444,22 @@ _NOTE = "__CRON_NOTE__"
 # each on its own runner, and a shared path would let one semester's mail carry another's log.
 _RUN_LOG = '"$RUNNER_TEMP/run.log"'
 
-# Appended to the main `run:` command of every cron step the mail below reports on, so the
-# step writes the log the mail sends. `tee` and not a redirect, because the log has to stay
-# in the run's own output as well - that is what the failure issue links to.
-#
-# The command is `exec`'d (each call site writes `exec python3 ...`), so Python IS the
-# step's process: a cancel (Stop in the Console, a timeout) signals that process, and a
-# shell waiting on a pipeline would hold the signal until GitHub force-killed the step
-# about 10 s later. `exec` also hands the step Python's own exit status, which keeps a
-# failure red. It is the last line of the block for the same reason.
 _TEE_RUN_LOG = f" > >(tee {_RUN_LOG}) 2>&1"
+
+
+def _logged(cmd: str) -> str:
+    """The main `run:` command of every cron step the mail below reports on, as the whole
+    line: `exec <cmd>`, teed to `_RUN_LOG` so the step writes the log the mail sends.
+    `tee` and not a redirect, because the log has to stay in the run's own output as well
+    - that is what the failure issue links to.
+
+    `exec`, so Python IS the step's process: a cancel (Stop in the Console, a timeout)
+    signals that process, and a shell waiting on a pipeline would hold the signal until
+    GitHub force-killed the step about 10 s later. `exec` also hands the step Python's own
+    exit status, which keeps a failure red, and nothing after it in the block runs. One
+    helper, so a new workflow cannot write the tee and forget the `exec`."""
+    return f"exec {cmd}{_TEE_RUN_LOG}"
+
 
 # The mail that reaches the maintainer, gated on the notice step having actually reported.
 # The step's OWN log, teed to `_RUN_LOG` by the step itself, rather than fetched back from
@@ -1144,7 +1150,7 @@ on:
                 args+=(--all-semesters)
               fi ;;
           esac
-          exec python3 -m dsl_course.sync_membership "${{args[@]}}"{_TEE_RUN_LOG}
+          {_logged('python3 -m dsl_course.sync_membership "${args[@]}"')}
 {_CRON_NOTICE}"""
 
 
@@ -1403,6 +1409,13 @@ on:
 _SEND_CODES_SEMESTER = "${{ " + _PAYLOAD_SEMESTER + " }}"
 
 
+# Two lines, so it is named rather than written inline: `_logged` puts the tee on the end.
+_SEND_CODES_CMD = (
+    'python3 -m dsl_course.enrol_codes --semester-org "$DISPATCH_SEMESTER" \\\n'
+    '            --dispatched-by "$COURSE" --no-preview'
+)
+
+
 def render_send_codes() -> str:
     """Generate a non-PII enrolment code per student and email each their code.
 
@@ -1459,8 +1472,7 @@ on:
           # --dispatched-by names the course org whose registry authorises this semester:
           # the payload comes from a semester's bot token, so the semester it names is
           # untrusted input.
-          exec python3 -m dsl_course.enrol_codes --semester-org "$DISPATCH_SEMESTER" \\
-            --dispatched-by "$COURSE" --no-preview{_TEE_RUN_LOG}
+          {_logged(_SEND_CODES_CMD)}
 {_CRON_NOTICE}"""
 
 
@@ -1618,7 +1630,7 @@ on:
             args=(--course-org "$COURSE" --all-semesters --skip-autograde)
           fi
 {_SCHEDULED_PREVIEW_GATE}
-          exec python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
+          {_logged('python3 -m dsl_course.scheduler "${args[@]}"')}
 {_RELEASE_NOTICE}  autograde:
     # Named, because `autograde-report` below looks its legs up by name through the jobs
     # API - a string this file declares rather than one GitHub composes from the matrix.
@@ -1762,7 +1774,7 @@ on:
 {_MAIL_ENV}
         run: |
           gh auth setup-git
-          exec python -m dsl_course.console --request "$REQUEST"{_TEE_RUN_LOG}
+          {_logged('python -m dsl_course.console --request "$REQUEST"')}
 {_CONSOLE_REPORT}"""
 
 
@@ -1796,7 +1808,7 @@ on:
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
         run: |
-          exec python3 -m dsl_course.seed refresh --course-org "$COURSE"{_TEE_RUN_LOG}
+          {_logged('python3 -m dsl_course.seed refresh --course-org "$COURSE"')}
 {_CRON_NOTICE}"""
 
 
@@ -2117,7 +2129,7 @@ on:
                 args+=(--all-semesters)
               fi ;;
           esac
-          exec python3 -m dsl_course.site sync "${{args[@]}}"{_TEE_RUN_LOG}
+          {_logged('python3 -m dsl_course.site sync "${args[@]}"')}
 {_CRON_NOTICE}"""
 
 
@@ -2162,5 +2174,5 @@ on:
           COURSE_ORG: ${{{{ github.repository_owner }}}}
         run: |
           gh auth setup-git
-          exec python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG" --daily{_TEE_RUN_LOG}
+          {_logged('python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG" --daily')}
 {_CRON_NOTICE}"""
