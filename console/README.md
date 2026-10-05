@@ -61,7 +61,7 @@ The deployed console gets them in `.github/workflows/console-pages.yml`, as an `
 
 The first step of New course and New semester lists the three things only a person can do on
 GitHub, each with a tick that appears by itself (the step re-checks every 10 seconds and when
-the window regains focus, until all pass): create the org, install the console app on it,
+the window regains focus, never while the tab is hidden, until all pass): create the org, install the console app on it,
 and invite `hertie-dsl-bot` as an Owner. The bot accepts the invitation itself, on the
 scheduler's next quarter-hourly run in any course org, once the maintainers have added the org
 to `orgs.yml` (`dsl_course/invitations.py`; maintainers.md, "The course org registry"). New
@@ -188,7 +188,7 @@ Each screen reads with the student's own account:
 | Assignments | dates (TBC), late cutoff, late rule, points, how to hand in, solution shown, the shape note, the brief (a fold, rendered by GitHub), the course's late-work sentences | `<slug>-<handle>`, a team repo they can push to, the drop box; their team (from the repo, else from `GET /user/teams` by the `<slug>-` prefix, so a drop-box or external group finds it too) and its members; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos): its body, the newest receipt, a patch note as "pull before you continue", every comment in a fold; the CONTRIBUTIONS.md ask on a team repo; for a student-choice repo after the cutoff, the Settings link to make it public |
 | Marks | assignment titles | `grades-<handle>/grades.yml`: final grade, score (per question when given), penalty, feedback overall and per question, team and team feedback, a term total if present |
 | Materials | the materials repos; each session's readings | the repo's recursive tree (supporting folders such as `data/` and `img/` last, folded, under "Supporting files"); each file read when opened |
-| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, for up to 5 minutes, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decision 0027) |
+| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, every 30 s after the first minute, for up to 5 minutes of the tab being shown, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decision 0027) |
 | Join | assignments forming teams, and each one's teams so far (name, headcount, cap; never who) with a Pick that fills in the team | their own Join course / Join team issues in `join` and the automation's last reply; after "You joined", the invitation's accept link |
 | Instructors | the cards, with an email only where the instructor chose to show it | none (a picture hosted on the semester site is read through the API and shown as `data:`) |
 
@@ -245,7 +245,8 @@ under a hidden first line (`names.json` `join_markers`). GitHub drops the form's
 issue an account without push creates that way, so the `join` workflows route on that line
 as well as on the label. When the API refuses, the console offers GitHub's own form,
 prefilled (text inputs by field id). The answer is polled from the student's issues every
-15 s for up to 5 minutes while one still waits. `?join=<org>`
+15 s for up to 5 minutes (not while the tab is hidden; comments are re-read only for an issue
+whose comment count moved) while one still waits. `?join=<org>`
 (and Home's "Have an enrolment code?") opens Join course for a semester the person is not a
 member of yet.
 
@@ -308,7 +309,8 @@ a first visit, mostly free 304s after).
   console follows the commit's checks and says what they found.
 - Operations, through the course org's Console workflow (`.github/.github/workflows/console.yml`,
   ref `main`, one `request` input; contracts section 1). `src/ops/adapter.ts` dispatches with
-  `return_run_details`, polls the run, and reads the public `dsl-outcome` annotation and the
+  `return_run_details`, polls the run (`src/github/poll.ts`, the one poll loop: every 3 s, every
+  10 s after 30 s, nothing while the tab is hidden), and reads the public `dsl-outcome` annotation and the
   private outcome file. Hand out, return marks, archive, update every copy and send new codes
   unlock only after a preview in the same session; publishing the public website, which has no
   engine preview, asks for a confirmation instead. Other previews are offered only where they

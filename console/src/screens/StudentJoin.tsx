@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { GhComment, GhIssue } from '../github/client';
+import { poll } from '../github/poll';
 import { invitationUrl } from '../model/discovery';
 import { fmtWhen } from '../model/format';
 import { readable, type Mine } from '../model/mine';
@@ -66,21 +67,27 @@ interface Asked {
   reply: GhComment | null;
 }
 
-/** The person's Join course and Join team issues in the join repo, newest first, each with the automation's last reply. */
-async function readAsked(env: NonNullable<ReturnType<typeof useEnv>>, org: string): Promise<Asked[]> {
+/**
+ * The person's Join course and Join team issues in the join repo, newest first, each with the
+ * automation's last reply. An issue whose comment count has not moved since `before` keeps
+ * the reply read then, so a re-check lists the issues and reads comments only where new.
+ */
+async function readAsked(env: NonNullable<ReturnType<typeof useEnv>>, org: string, before: Asked[] = []): Promise<Asked[]> {
   const mine = (await env.client.listIssues(org, WELCOME, `creator=${encodeURIComponent(env.user.login)}&state=all`))
     .filter((i) => !i.pull_request && isJoinRequest(i))
     .slice(0, 5);
   return Promise.all(mine.map(async (issue) => {
+    const was = before.find((a) => a.issue.number === issue.number && a.issue.comments === issue.comments);
+    if (was) return { issue, reply: was.reply };
     const cs = issue.comments ? await env.client.listIssueComments(org, WELCOME, issue.number).catch(() => []) : [];
     return { issue, reply: cs[cs.length - 1] ?? null };
   }));
 }
 
 const POLL_MS = 15000;
-const POLLS = 20;
+const POLL_FOR_MS = 5 * 60 * 1000;
 
-/** Your requests, read now and every 15 s (up to 5 min) while one still waits for the automation. `sent` changes when the console has just opened one. */
+/** Your requests, read now and every 15 s (up to 5 min, not while the tab is hidden) while one still waits for the automation. `sent` changes when the console has just opened one. */
 export function JoinRequests({ org, sent = 0 }: { org: string; sent?: number }) {
   const env = useEnv();
   const [asked, setAsked] = useState<Asked[] | null>(null);
@@ -88,21 +95,17 @@ export function JoinRequests({ org, sent = 0 }: { org: string; sent?: number }) 
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!env) return;
-    let live = true;
-    let polls = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const read = () =>
-      Promise.all([readAsked(env, org), env.client.getMyMembership(org).catch(() => null)]).then(([a, ms]) => {
-        if (!live) return;
-        setAsked(a);
-        setPending(ms?.state === 'pending');
-        if (a.some((x) => !issueState(x.issue).settled) && ++polls < POLLS) timer = setTimeout(read, POLL_MS);
-      }, () => live && setAsked((x) => x ?? []));
-    void read();
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
+    const stop = new AbortController();
+    let last: Asked[] = [];
+    void poll(async () => {
+      const [a, ms] = await Promise.all([readAsked(env, org, last), env.client.getMyMembership(org).catch(() => null)]);
+      if (stop.signal.aborted) return true;
+      last = a;
+      setAsked(a);
+      setPending(ms?.state === 'pending');
+      return !a.some((x) => !issueState(x.issue).settled);
+    }, { every: POLL_MS, maxMs: POLL_FOR_MS, maxMisses: 1, signal: stop.signal, onMiss: () => setAsked((x) => x ?? []) });
+    return () => stop.abort();
   }, [org, tick, sent, !!env]);
   return (
     <section class="panel section" aria-labelledby="h-asked">

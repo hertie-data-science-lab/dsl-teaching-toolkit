@@ -57,7 +57,7 @@ async function mount(v: preact.VNode, f: FakeGitHub) {
   return root;
 }
 const settle = async () => {
-  for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  for (let i = 0; i < 4; i++) await act(async () => { await (vi.isFakeTimers() ? vi.advanceTimersByTimeAsync(0) : new Promise((r) => setTimeout(r, 0))); });
 };
 
 describe('the semester dates and when the file was written', () => {
@@ -213,10 +213,9 @@ describe('live checks', () => {
 
   const notFound = () => new Response('{"message":"Not Found"}', { status: 404 });
   const ok = (body: object) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
-  // Only the intervals and the clock are fake: the reads still settle on real timers.
-  const fakeIntervals = () => vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+  const fakeIntervals = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   const tickBy = async (ms: number) => {
-    await act(() => void vi.advanceTimersByTime(ms));
+    await act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
     await settle();
   };
   afterEach(() => vi.useRealTimers());
@@ -244,24 +243,23 @@ describe('live checks', () => {
     expect(checks(f)).toBe(first + 2);
   });
 
-  it('stops re-checking after 5 minutes and on leaving the page; Check again starts it again', async () => {
+  it('slows down after a minute, stops re-checking after 5 minutes and on leaving the page; Check again starts it again', async () => {
     fakeIntervals();
     const f = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, notFound);
     const el = await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, f);
     const first = checks(f);
     for (let t = 0; t < RECHECK_FOR_MS / RECHECK_MS + 3; t++) await tickBy(RECHECK_MS);
     const capped = checks(f);
-    expect(capped - first).toBe(RECHECK_FOR_MS / RECHECK_MS - 1);
+    // Every 10 s for the first minute (6), then every 30 s until 5 minutes (at 90 s to 270 s: 7).
+    expect(capped - first).toBe(13);
     await tickBy(RECHECK_MS * 3);
     expect(checks(f)).toBe(capped);
     await act(() => void [...el.querySelectorAll('button')].find((b) => b.textContent === 'Check again')!.click());
     await settle();
     await tickBy(RECHECK_MS);
     expect(checks(f)).toBe(capped + 2);
-    // Leaving the page clears the interval, and a focus reads nothing.
-    const cleared = vi.spyOn(window, 'clearInterval');
+    // Leaving the page stops it: neither a focus nor the clock reads anything.
     render(null, root!);
-    expect(cleared).toHaveBeenCalled();
     window.dispatchEvent(new Event('focus'));
     await tickBy(RECHECK_MS * 2);
     expect(checks(f)).toBe(capped + 2);
