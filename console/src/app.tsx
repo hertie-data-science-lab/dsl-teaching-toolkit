@@ -473,7 +473,7 @@ export function createState({ auth, client }: AppDeps) {
       beats.clear();
       archived.clear();
       left.clear();
-      ops.current.value = null;
+      ops.reset();
       env = null;
       st.user.value = null;
       st.estate.value = null;

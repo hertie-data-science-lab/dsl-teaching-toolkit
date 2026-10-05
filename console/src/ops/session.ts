@@ -1,5 +1,7 @@
 // The operation panel's state: the one operation open at a time, what this session has
-// previewed (the gate), and the runs this session finished (for the Operations list).
+// previewed (the gate), and the runs this session finished (for the Operations list). A
+// run that cannot be read `maxMisses` times in a row is given up on; sign-out (`reset`) ends
+// every watch and forgets the runs and the gate, so the next person starts clean.
 
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
@@ -73,7 +75,12 @@ export interface SessionOptions {
   onFinished?: (def: OpDef) => void;
   /** How many times to re-read a finished run whose outcome is not there yet. */
   outcomeTries?: number;
+  /** How many polls in a row may fail before the panel stops following the run (default 20, a minute at 3 s). */
+  maxMisses?: number;
 }
+
+export const LOST_RUN = 'Could not read the run on GitHub, so the console stopped following it. Open it on GitHub to see how it ended.';
+export const MISSED_POLL = 'Could not read the run just now; trying again.';
 
 /** The args a request for `def` carries: the options as the form resolves them, and the tick. */
 function requestArgs(def: OpDef, values: Record<string, unknown>, checked: boolean): Record<string, unknown> {
@@ -99,6 +106,8 @@ export class OpsSession {
   private readonly pollMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
+  /** Bumped by `reset`: a watch started under an older one stops without recording anything. */
+  private generation = 0;
 
   constructor(
     private readonly adapter: Adapter,
@@ -107,6 +116,16 @@ export class OpsSession {
     this.pollMs = opts.pollMs ?? 3000;
     this.sleep = opts.sleep ?? wait;
     this.now = opts.now ?? Date.now;
+  }
+
+  /** Sign-out: stop following every run and forget this session's runs, previews and panel. */
+  reset(): void {
+    this.generation++;
+    this.current.value = null;
+    this.runs.value = [];
+    this.previewed.value = {};
+    this.blocks.value = {};
+    this.notice.value = null;
   }
 
   private gateKey(def: OpDef): string {
@@ -215,27 +234,41 @@ export class OpsSession {
     if (kind === 'run' && !this.canRun(c)) return;
     const def = c.def;
     const preview = kind === 'preview';
+    const generation = this.generation;
+    const gone = () => this.generation !== generation;
     const args = requestArgs(def, c.values, c.checked);
     this.patch({ phase: 'running', running: kind, error: null, progress: null, handle: null, stopping: false, stopRequested: false, stopped: false, ...(preview ? { dry: null } : { result: null }) });
     let handle: Handle;
     try {
       handle = await this.adapter.submit({ op: def.op, courseOrg: def.courseOrg, cohortOrg: def.cohortOrg, args, preview });
     } catch (e) {
+      if (gone()) return;
       this.patch({ phase: 'ready', running: null, stopping: false, error: e instanceof Error ? e.message : String(e) });
       return;
     }
+    if (gone()) return;
     this.patch({ handle });
     if (this.current.value?.stopping) void this.sendCancel(handle);
+    const mine = () => this.current.value?.handle === handle;
+    const maxMisses = this.opts.maxMisses ?? 20;
     let progress: Progress | null = null;
-    for (;;) {
+    for (let misses = 0; ; ) {
       try {
         progress = await this.adapter.watch(handle);
-        if (this.current.value?.handle === handle) this.patch({ progress });
+        misses = 0;
+        if (gone()) return;
+        if (mine()) this.patch({ progress, ...(this.current.value!.error === MISSED_POLL ? { error: null } : {}) });
       } catch {
-        /* a missed poll is retried */
+        if (gone()) return;
+        if (++misses >= maxMisses) {
+          if (mine()) this.patch({ phase: 'ready', running: null, stopping: false, error: LOST_RUN });
+          return;
+        }
+        if (mine()) this.patch({ error: MISSED_POLL });
       }
       if (progress?.state === 'completed') break;
       await this.sleep(this.pollMs);
+      if (gone()) return;
     }
     let result: Result = { outcome: null, people: [], leaked: [] };
     const tries = this.opts.outcomeTries ?? 3;
@@ -248,6 +281,7 @@ export class OpsSession {
       if (result.outcome) break;
       if (i + 1 < tries) await this.sleep(this.pollMs);
     }
+    if (gone()) return;
     const o = result.outcome;
     const stopped = progress?.conclusion === 'cancelled' || !!this.current.value?.stopRequested;
     const finished = o?.finished || new Date(this.now()).toISOString();
