@@ -682,9 +682,12 @@ Each reports its own failures, because GitHub emails a scheduled-run failure onl
 last committed the file - the bot. **Send enrolment codes** and the **Console** carry the
 same three steps (`_CRON_NOTICE` + `_CRON_MAIL` + `_CRON_CLOSE`) without being crons: a roster
 push fires the first, so it has no actor, and the second's caller reads the outcome, not the
-log, so only a run that breaks after its gate files *Console is failing*. Seven workflows
-report their own failures; only five
-declare a `schedule:`, which is what `CRONS` in `tests/test_renderers.py` means.
+log, so only a run that breaks after its gate files *Console is failing*. A cancelled
+Console run files nothing: Stop is a cancel, and GitHub ends a `timeout-minutes` expiry the
+same way, so a timed-out Console run goes unreported. Seven workflows report their own
+failures; only five declare a `schedule:`, which is what `CRONS` in `tests/test_renderers.py`
+means. Each reported step `exec`s its Python with output teed to `$RUNNER_TEMP/run.log`
+(`_TEE_RUN_LOG`), so a cancel signals Python itself and stops it at once.
 
 No cron may sit on minute 0/15/30/45 and no two daily ones may share a slot - GitHub drops the
 most contended minutes first (on `0 * * * *` the scheduler was delivered 6 ticks a day, not 24),

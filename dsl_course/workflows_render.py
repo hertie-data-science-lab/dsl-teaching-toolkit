@@ -448,10 +448,12 @@ _RUN_LOG = '"$RUNNER_TEMP/run.log"'
 # step writes the log the mail sends. `tee` and not a redirect, because the log has to stay
 # in the run's own output as well - that is what the failure issue links to.
 #
-# `exit "${PIPESTATUS[0]}"` is what keeps the step RED: the exit status of a pipeline is
-# its last command's, which is `tee`, which succeeds - so under the runner's `bash -e` a
-# teed failure would go green. It is the last line of the block for the same reason.
-_TEE_RUN_LOG = f' 2>&1 | tee {_RUN_LOG}\n          exit "${{PIPESTATUS[0]}}"'
+# The command is `exec`'d (each call site writes `exec python3 ...`), so Python IS the
+# step's process: a cancel (Stop in the Console, a timeout) signals that process, and a
+# shell waiting on a pipeline would hold the signal until GitHub force-killed the step
+# about 10 s later. `exec` also hands the step Python's own exit status, which keeps a
+# failure red. It is the last line of the block for the same reason.
+_TEE_RUN_LOG = f" > >(tee {_RUN_LOG}) 2>&1"
 
 # The mail that reaches the maintainer, gated on the notice step having actually reported.
 # The step's OWN log, teed to `_RUN_LOG` by the step itself, rather than fetched back from
@@ -643,14 +645,29 @@ _AUTOGRADE_OUTCOME = """      - name: How this semester's grading leg ended
           RUN_ID: ${{ github.run_id }}
           ATTEMPT: ${{ github.run_attempt }}
           SEMESTER: ${{ matrix.semester }}
+          LEGS: ${{ needs.autograde.result }}
         run: |
+          # The matrix's combined result is `success` only when every leg succeeded, and it
+          # is settled the moment this job starts - unlike the jobs API below, which can
+          # still read a just-finished leg's conclusion as null. So a green matrix never
+          # asks it, and a lagging API cannot file a failure for a leg that passed.
+          if [ "$LEGS" = "success" ]; then
+            echo "graded leg concluded: success"
+            echo "result=success" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # The leg's `name:` is `autograde <semester>`, set explicitly on the job so this
           # lookup matches a string the workflow declares rather than one GitHub composes.
           # `|| true` and a `head`: under `bash -e` a transient search failure would
           # otherwise abort the job that exists to report, and a re-run reads its OWN
-          # attempt.
-          row=$(gh api "repos/$REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs" --paginate \\
-            --jq ".jobs[] | select(.name == \\"autograde $SEMESTER\\") | \\"\\(.conclusion) \\(.id)\\"" | head -n 1) || true
+          # attempt. A null conclusion is the API lagging behind a leg `needs:` says has
+          # finished, so it is asked again for about a minute before it is believed.
+          for pause in 0 5 10 20 30; do
+            sleep "$pause"
+            row=$(gh api "repos/$REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs" --paginate \\
+              --jq ".jobs[] | select(.name == \\"autograde $SEMESTER\\") | \\"\\(.conclusion) \\(.id)\\"" | head -n 1) || true
+            if [ "${row%% *}" != "null" ]; then break; fi
+          done
           if [ -z "$row" ]; then
             # No leg for this semester in this attempt - a semester registered between the two
             # jobs, or a matrix leg GitHub never started. Nothing happened, so nothing is
@@ -1127,7 +1144,7 @@ on:
                 args+=(--all-semesters)
               fi ;;
           esac
-          python3 -m dsl_course.sync_membership "${{args[@]}}"{_TEE_RUN_LOG}
+          exec python3 -m dsl_course.sync_membership "${{args[@]}}"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
 
@@ -1442,7 +1459,7 @@ on:
           # --dispatched-by names the course org whose registry authorises this semester:
           # the payload comes from a semester's bot token, so the semester it names is
           # untrusted input.
-          python3 -m dsl_course.enrol_codes --semester-org "$DISPATCH_SEMESTER" \\
+          exec python3 -m dsl_course.enrol_codes --semester-org "$DISPATCH_SEMESTER" \\
             --dispatched-by "$COURSE" --no-preview{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
@@ -1601,7 +1618,7 @@ on:
             args=(--course-org "$COURSE" --all-semesters --skip-autograde)
           fi
 {_SCHEDULED_PREVIEW_GATE}
-          python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
+          exec python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
 {_RELEASE_NOTICE}  autograde:
     # Named, because `autograde-report` below looks its legs up by name through the jobs
     # API - a string this file declares rather than one GitHub composes from the matrix.
@@ -1680,18 +1697,23 @@ on:
 
 # The Console's failure reporting: the cron trio, fired on the dispatches it is made of.
 # Whoever pressed the button in the Console sees the op's own outcome there; what nobody
-# sees is the RUN breaking - a traceback, a revoked token, a timeout - which only the
+# sees is the RUN breaking - a traceback, a revoked token - which only the
 # maintainer can fix. So a failure files the one "Console is failing" issue and mails the
 # maintainer its log, and the next good run closes it.
 #
 # Only once the gate has passed (`steps.gate`): a refused caller is not a broken run, and
 # must not be able to mail the maintainer by pressing the button.
+#
+# Not on `cancelled()`: Stop in the Console cancels the run, and an instructor's Stop is
+# not a broken run. GitHub ends a `timeout-minutes` expiry the same way (the job
+# concludes `cancelled`, with nothing in the run's contexts to tell the two apart), so a
+# timed-out run goes unreported too: its outcome still shows in the Console.
 _CONSOLE_REPORT = _fill(
     _CRON_NOTICE_TEMPLATE,
-    failed="(failure() || cancelled()) && steps.gate.outcome == 'success'",
+    failed="failure() && steps.gate.outcome == 'success'",
     unattended="",
     note=(
-        "A Console run failed or was cancelled: %s\\n\\n"
+        "A Console run failed: %s\\n\\n"
         "This issue closes itself once a Console run succeeds.\\n"
     ),
 ).replace(_CRON_NOTICE_NAME, "Report a failed Console run as an issue")
@@ -1740,7 +1762,7 @@ on:
 {_MAIL_ENV}
         run: |
           gh auth setup-git
-          python -m dsl_course.console --request "$REQUEST"{_TEE_RUN_LOG}
+          exec python -m dsl_course.console --request "$REQUEST"{_TEE_RUN_LOG}
 {_CONSOLE_REPORT}"""
 
 
@@ -1774,7 +1796,7 @@ on:
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
         run: |
-          python3 -m dsl_course.seed refresh --course-org "$COURSE"{_TEE_RUN_LOG}
+          exec python3 -m dsl_course.seed refresh --course-org "$COURSE"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
 
@@ -2095,7 +2117,7 @@ on:
                 args+=(--all-semesters)
               fi ;;
           esac
-          python3 -m dsl_course.site sync "${{args[@]}}"{_TEE_RUN_LOG}
+          exec python3 -m dsl_course.site sync "${{args[@]}}"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
 
@@ -2140,5 +2162,5 @@ on:
           COURSE_ORG: ${{{{ github.repository_owner }}}}
         run: |
           gh auth setup-git
-          python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG" --daily{_TEE_RUN_LOG}
+          exec python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG" --daily{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""

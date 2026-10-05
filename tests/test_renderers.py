@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 from pathlib import Path
 
@@ -1574,13 +1575,14 @@ def _assert_emails_the_maintainer(step: dict, detached: bool) -> None:
 
 def _assert_the_reported_step_writes_its_log(job: dict, where: str) -> None:
     """The mail above tails a log, so the step it reports on has to write one."""
-    teed = [i for i, s in enumerate(job["steps"]) if "| tee " in s.get("run", "")]
+    teed = [i for i, s in enumerate(job["steps"]) if "(tee " in s.get("run", "")]
     assert len(teed) == 1, where
     step = job["steps"][teed[0]]
-    assert workflows_render._RUN_LOG in step["run"], where
-    # A pipeline's exit status is its LAST command's - `tee`, which succeeds - so without
-    # this the failure the mail exists for would leave the step green and report nothing.
-    assert step["run"].rstrip().endswith('exit "${PIPESTATUS[0]}"'), where
+    assert step["run"].rstrip().endswith(workflows_render._TEE_RUN_LOG), where
+    # `exec`'d, so a cancel signals Python itself and the step exits with Python's status.
+    last = step["run"].rstrip().split("\n")
+    command = next(line for line in reversed(last) if "python" in line)
+    assert command.strip().startswith("exec python"), where
     mail = next(
         i for i, s in enumerate(job["steps"]) if "dsl_course.notify" in s.get("run", "")
     )
@@ -2520,6 +2522,29 @@ def test_the_request_reaches_the_cli_through_env_only():
     assert "${{" not in step["run"]
 
 
+def test_a_stop_reaches_the_logged_command_at_once(tmp_path):
+    # Stop signals the step's own process. Through `exec` that is Python, which stops
+    # at once; a shell waiting on a pipeline held it until GitHub killed the step.
+    script = (
+        'exec python3 -c \'import sys, time; print("started", flush=True); '
+        "time.sleep(30)'" + workflows_render._TEE_RUN_LOG
+    )
+    proc = subprocess.Popen(
+        ["bash", "-e", "-c", script],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    assert proc.stdout.readline() == "started\n"
+    proc.send_signal(signal.SIGINT)
+    out, _ = proc.communicate(timeout=5)
+    assert proc.returncode != 0
+    assert "KeyboardInterrupt" in out
+    # The log the report tails holds what the run printed.
+    assert (tmp_path / "run.log").read_text() == "started\n" + out
+
+
 def test_a_broken_console_run_is_reported_but_a_refused_caller_is_not(tmp_path):
     (job,) = workflow_jobs(ALL_RENDERED["console"]).values()
     steps = job["steps"]
@@ -2531,7 +2556,8 @@ def test_a_broken_console_run_is_reported_but_a_refused_caller_is_not(tmp_path):
     for step in (opener, mail):
         assert "workflow_dispatch" not in step["if"]
         assert "steps.gate.outcome == 'success'" in step["if"]
-        assert "cancelled()" in step["if"]
+        # Stop in the Console cancels the run: not a broken run, so no report.
+        assert "cancelled()" not in step["if"]
     assert "steps.notice.outputs.report == 'true'" in mail["if"]
     assert set(mailer.GRAPH_ENV) <= set(mail["env"])
     assert closer["if"] == "success()"
@@ -2551,3 +2577,79 @@ def test_the_course_page_lists_the_console_as_auto_handled():
     (row,) = [line for line in auto.splitlines() if "console.yml" in line]
     assert "Runs what the Instructor Console asks for" in row
     assert row.rstrip().endswith("| Auto-handled |")
+
+
+# The grading report's `graded` step, as the scheduler renders it.
+_GRADED_STEP = next(
+    s
+    for s in _jobs_of(ALL_RENDERED["scheduler"])["autograde-report"]["steps"]
+    if s.get("id") == "graded"
+)
+
+
+def _graded_outputs(work: Path, legs: str, rows: list[str]) -> tuple[dict, int]:
+    """Run the `graded` step under `bash -e`. The fake `gh` answers each jobs-API call
+    with the next of `rows` (the `<conclusion> <id>` its --jq filter prints) and `sleep`
+    is a no-op, so the retry loop costs nothing. Returns the step's outputs and how many
+    times the API was asked."""
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "rows").write_text("".join(f"{r}\n" for r in rows))
+    (work / "calls").write_text("")
+    (work / "gh").write_text(
+        "#!/bin/sh\n"
+        'echo x >>"$WORK/calls"\n'
+        'n=$(wc -l <"$WORK/calls")\n'
+        'sed -n "${n}p" "$WORK/rows"\n'
+    )
+    (work / "sleep").write_text("#!/bin/sh\n")
+    for fake in ("gh", "sleep"):
+        (work / fake).chmod(0o755)
+    outputs = work / "github_output"
+    subprocess.run(
+        # `bash -e`, which is how GitHub runs a `run:` block.
+        ["bash", "-e", "-c", _GRADED_STEP["run"]],
+        env={
+            "PATH": f"{work}:{os.environ['PATH']}",
+            "WORK": str(work),
+            "GITHUB_OUTPUT": str(outputs),
+            "REPO": "Course-Org/.github",
+            "RUN_ID": "1",
+            "ATTEMPT": "1",
+            "SEMESTER": "semester-a",
+            "LEGS": legs,
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return _step_outputs(outputs), len((work / "calls").read_text().splitlines())
+
+
+def test_a_green_grading_matrix_never_asks_the_jobs_api(tmp_path):
+    # The jobs API read a just-finished leg's conclusion as null, and the report filed a
+    # failure issue and mailed the maintainer for a leg that had passed. A green matrix is
+    # settled in `needs:` before this job starts, so it never asks the API at all.
+    assert _GRADED_STEP["env"]["LEGS"] == "${{ needs.autograde.result }}"
+    assert _graded_outputs(tmp_path, "success", ["null 7"]) == (
+        {"result": "success"},
+        0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("rows", "outputs", "calls"),
+    [
+        # A lagging API is asked again rather than reported as this semester's failure.
+        (["null 7", "null 7", "success 7"], {"result": "success", "job_id": "7"}, 3),
+        (["failure 7"], {"result": "failure", "job_id": "7"}, 1),
+        # A null that never settles is reported, not swallowed: the leg did finish.
+        (["null 7"] * 9, {"result": "null", "job_id": "7"}, 5),
+        # No leg for this semester is still "nothing to report", and is not retried.
+        ([], {"result": "skipped"}, 1),
+    ],
+    ids=["lagging", "red", "stuck", "absent"],
+)
+def test_a_red_grading_matrix_names_its_leg_once_the_api_settles(
+    tmp_path, rows, outputs, calls
+):
+    assert _graded_outputs(tmp_path, "failure", rows) == (outputs, calls)

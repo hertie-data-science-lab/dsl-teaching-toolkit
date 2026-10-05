@@ -11,10 +11,11 @@ say, and is absent for the default layout:
       quiz: other
 
 A release entry that declares no `kind` takes one from the section its first copy lands in:
-the top folder of the DESTINATION path, or the destination repo itself when the copy lands
-at its root. The source repo's `kinds:` first, then the built-in aliases, both matched
-case-insensitively, else supporting files (`assets`, decision 0031 rule 10): a folder not
-named lectures, labs or readings (or a synonym) is released, never shown.
+the top folder of the DESTINATION path; for a copy into the root, the copied name when it
+names a kind (`lectures` copied whole), else the destination repo itself. The source
+repo's `kinds:` first, then the built-in aliases, both matched case-insensitively, else
+supporting files (`assets`, decision 0031 rule 10): a folder not named lectures, labs or
+readings (or a synonym) is released, never shown.
 """
 
 from __future__ import annotations

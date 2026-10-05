@@ -44,12 +44,21 @@ def deploy_dest(deploy: schedule.Deploy) -> str:
     return (deploy.semester_dest_path or deploy.course_source_path).strip("/")
 
 
-def deploy_section(deploy: schedule.Deploy) -> str:
+def deploy_section(
+    deploy: schedule.Deploy, aliases: Mapping[str, str] | None = None
+) -> str:
     """The section a deploy lands in - the top-level directory of its destination path,
     or the destination repo itself when the copy lands at its root (a repo that IS one
-    section, `semester_dest_repo: labs`)."""
+    section, `semester_dest_repo: labs`).
+
+    A destination with no `/` is one name at the repo's root: a whole folder copied
+    (`lectures`) or one item (`SYLLABUS.md`, `01_x` in a `labs` repo). The name is the
+    section when it names a kind (`aliases`, else a built-in one), else the repo is - the
+    order `offplan_folders` reads a tree in."""
     head, sep, _ = deploy_dest(deploy).partition("/")
-    return head if sep else deploy.semester_dest_repo
+    if sep or (head and alias_kind(head, aliases)):
+        return head
+    return deploy.semester_dest_repo
 
 
 def entry_kind(
@@ -62,9 +71,8 @@ def entry_kind(
         return release.kind, False
     if release.deploy:
         first = release.deploy[0]
-        return infer_kind(
-            deploy_section(first), aliases(first.course_source_repo)
-        ), True
+        kinds = aliases(first.course_source_repo)
+        return infer_kind(deploy_section(first, kinds), kinds), True
     return EMPTY_ENTRY_KIND, True
 
 
