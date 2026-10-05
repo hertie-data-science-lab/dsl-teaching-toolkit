@@ -637,6 +637,41 @@ def test_every_cli_previews_unless_told_otherwise(monkeypatch, capsys):
     )
 
 
+@pytest.mark.parametrize(
+    "flag, said",
+    [
+        ("--slug", "`--slug` is the old name of `--assignment`"),
+        ("--deadline", "`--deadline` is no longer read here - the deadline comes from"),
+        (
+            "--group",
+            "`--group` is no longer read here - group or individual comes from",
+        ),
+    ],
+)
+def test_a_retired_collect_flag_is_refused_as_not_migrated(
+    monkeypatch, capsys, flag, said
+):
+    # Gone from collect's command line; refused by name, never parsed as anything.
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "collect",
+            "--course-org",
+            "C",
+            "--course-source-repo",
+            "a1",
+            "--semester-org",
+            "S",
+            flag,
+            "x",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        collect.main()
+    assert f"{NOT_MIGRATED}: {said}" in capsys.readouterr().err
+
+
 def test_every_rendered_run_of_a_previewing_cli_says_which_it_is(monkeypatch):
     # The CLI default is preview, so a rendered command that spelt neither flag would
     # preview for ever on a green run - a cron that released nothing, a roster push that
