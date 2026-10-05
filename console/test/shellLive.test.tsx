@@ -69,7 +69,7 @@ describe('the shell on a real URL', () => {
 describe('the course banner (decision 0031 rule 11)', () => {
   // The course's names check reads its .github tree; an empty one is a migrated course.
   const migrated = () => new FakeGitHub().on('GET', new RegExp(`^/repos/${course.org}/\\.github/git/trees/HEAD`), { sha: 'r', truncated: false, tree: [] });
-  const settle = async () => { for (let i = 0; i < 5; i++) await act(async () => {}); };
+  const settle = async () => { for (let i = 0; i < 10; i++) await act(async () => {}); };
   const crumbs = (el: HTMLElement) => [...el.querySelectorAll('#view .crumbs > a, #view .crumbs > span:not([aria-hidden])')].map((c) => [c.textContent, c.getAttribute('href')]);
   it('opens every instructor semester page with the course as the one h1, the semester line, the Student view pill and the semester on GitHub', async () => {
     const el = await mount(`/?cohort=${cohort.org}#schedule`, migrated());

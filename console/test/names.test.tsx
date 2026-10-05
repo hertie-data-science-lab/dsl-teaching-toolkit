@@ -95,8 +95,10 @@ describe('an org on old names', () => {
       .on('GET', `/repos/${ORG}/semester-config`, { name: 'semester-config' })
       .on('GET', `/repos/${ORG}/join`, { name: 'join' })
       .on('GET', `/repos/${ORG}/.github`, { name: '.github', topics: ['dsl-semester'] })
-      .on('GET', `/repos/${ORG}/semester-config/git/trees/HEAD`, { tree: [{ path: 'schedule.yml', type: 'blob', sha: 'a' }, { path: 'instructors.yml', type: 'blob', sha: 'b' }, { path: '.system', type: 'tree', sha: 'c' }] });
+      .on('GET', `/repos/${ORG}/semester-config/git/trees/HEAD?recursive=1`, { tree: [{ path: 'schedule.yml', type: 'blob', sha: 'a' }, { path: 'instructors.yml', type: 'blob', sha: 'b' }, { path: '.system', type: 'tree', sha: 'c' }] });
     expect(await semesterLeftovers(client(gh), ORG)).toEqual([]);
+    // The retired repo names are not asked for while the new ones are there.
+    expect(gh.seen.filter((x) => /classroom-config|\/welcome/.test(x.url))).toEqual([]);
   });
 
   it('names every retired repo, file, folder and topic a semester still carries', async () => {
@@ -104,7 +106,7 @@ describe('an org on old names', () => {
       .on('GET', `/repos/${ORG}/classroom-config`, { name: 'classroom-config' })
       .on('GET', `/repos/${ORG}/welcome`, { name: 'welcome' })
       .on('GET', `/repos/${ORG}/.github`, { name: '.github', topics: ['dsl-cohort'] })
-      .on('GET', `/repos/${ORG}/classroom-config/git/trees/HEAD`, { tree: [{ path: 'people.yml', type: 'blob', sha: 'a' }, { path: '.dsl', type: 'tree', sha: 'b' }] });
+      .on('GET', `/repos/${ORG}/classroom-config/git/trees/HEAD?recursive=1`, { tree: [{ path: 'people.yml', type: 'blob', sha: 'a' }, { path: '.dsl', type: 'tree', sha: 'b' }] });
     const left = await semesterLeftovers(client(gh), ORG);
     expect(left.map((l) => l.old)).toEqual(['dsl-cohort', 'classroom-config', 'welcome', 'people.yml', '.dsl/']);
     expect(notMigratedText(left[1])).toBe('NOT_MIGRATED: `classroom-config` is the old name of `semester-config` - run the migration');
