@@ -21,6 +21,7 @@ not "there is no issue", and inventing that answer would open a duplicate every 
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from typing import NamedTuple
@@ -246,16 +247,19 @@ def upsert_issue(
     # Whether the "none open" below came straight off GitHub: only a memo's answer, or a
     # caller's (which may be one), is listed again before the create.
     fresh = existing is _UNASKED and _listings is None
-    try:
-        if existing is _UNASKED:
+    if existing is _UNASKED:
+        try:
             existing = find_issue(repo, title)
-        if not existing and not fresh:
-            if _listings is not None:
-                _listings.pop(repo.casefold(), None)
+        except RuntimeError as exc:
+            log_err(str(exc))
+            return Upserted(1)
+    if not existing and not fresh:
+        if _listings is not None:
+            _listings.pop(repo.casefold(), None)
+        # Best effort: the caller has already answered "none open", so a fresh listing
+        # that fails leaves the create it asked for (`site_repo` relies on that).
+        with contextlib.suppress(RuntimeError):
             existing = find_issue(repo, title)
-    except RuntimeError as exc:
-        log_err(str(exc))
-        return Upserted(1)
     held = _held(repo)
     if existing:
         url = issue_url(repo, existing.number)
