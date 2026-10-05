@@ -4,7 +4,9 @@ A static web app (Vite + TypeScript + Preact) that shows an instructor their cou
 semesters as the lifecycle model describes them, and a student their semesters, reading GitHub
 with the person's own token.
 Deployed by `.github/workflows/console-pages.yml` to
-https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/.
+https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/ on every push to `main` that
+touches `console/` (and, until it merges, to `feature/instructor-console`); the build reads
+`orgs.yml` from the branch it was built from.
 
 ## Run it locally
 
