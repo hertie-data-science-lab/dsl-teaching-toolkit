@@ -66,29 +66,30 @@ export interface ReleaseRef {
   dest?: { repo: string; path: string } | null;
 }
 
-// No Options: the engine rebuilds a schedule entry's source and destination from
-// schedule.yml (`console.entry_requests`), so a destination typed here would be dropped.
-function releaseDef(s: Scope, op: string, r: ReleaseRef, copy: Pick<OpDef, 'name' | 'intro' | 'verb' | 'running' | 'cancel' | 'where'>): OpDef {
+// One engine op, `release.entry`, in three wordings: early, again, now. No Options: the
+// engine rebuilds a schedule entry's source and destination from schedule.yml
+// (`console.entry_requests`), so a destination typed here would be dropped.
+function releaseDef(s: Scope, r: ReleaseRef, copy: Pick<OpDef, 'name' | 'intro' | 'verb' | 'running' | 'cancel' | 'where'>): OpDef {
   const target = destUrl(s.cohortOrg ?? s.courseOrg, r.dest?.repo || DEFAULT_DEST_REPO, r.dest?.path ?? '');
-  return { ...base(s, op, r.id), ...copy, title: `${r.ident}: ${r.title}`, args: { entry: r.id }, previewProposed: false, target };
+  return { ...base(s, 'release.entry', r.id), ...copy, title: `${r.ident}: ${r.title}`, args: { entry: r.id }, previewProposed: false, target };
 }
 
 export function releaseEarly(s: Scope, r: ReleaseRef): OpDef {
-  return releaseDef(s, 'release.early', r, {
+  return releaseDef(s, r, {
     name: 'Release early', where: `Scheduled ${r.when}`, intro: `Copies ${r.ident} to students now instead of at its time. The scheduled release then finds nothing left to do.`,
     verb: `Release ${r.ident} early`, running: `Releasing ${r.ident} early`, cancel: 'Stop before copying',
   });
 }
 
 export function releaseAgain(s: Scope, r: ReleaseRef): OpDef {
-  return releaseDef(s, 'release.rerun', r, {
+  return releaseDef(s, r, {
     name: 'Release again', where: `Released ${r.when}`, intro: `Copies the course’s current version of ${r.ident} to students again, for a fixed file.`,
     verb: `Release ${r.ident} again`, running: `Releasing ${r.ident} again`, cancel: 'Stop before copying',
   });
 }
 
 export function releaseNow(s: Scope, r: ReleaseRef): OpDef {
-  return releaseDef(s, 'release.now', r, {
+  return releaseDef(s, r, {
     name: 'Release now', where: `Due ${r.when}`, intro: `${r.ident} is late: copies it to students now.`,
     verb: `Release ${r.ident} now`, running: `Releasing ${r.ident}`, cancel: 'Stop before copying',
   });

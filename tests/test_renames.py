@@ -177,7 +177,7 @@ def test_a_deploy_naming_the_old_dest_keys_ships_nothing():
 def _request(**over) -> str:
     raw = {
         "schema": "dsl.request/1",
-        "op": "release.now",
+        "op": "release.entry",
         "actor": "prof",
         "course_org": "Course",
         "args": {"entry": "s5"},
@@ -197,7 +197,7 @@ def test_a_request_takes_semester_org_and_refuses_cohort_org():
 @pytest.mark.parametrize(
     "op, args",
     [
-        ("release.now", {"entry": "s5", "cohort_dest_repo": "slides"}),
+        ("release.entry", {"entry": "s5", "cohort_dest_repo": "slides"}),
         ("materials.create", {"tag": "f2026"}),
         ("assignment.create", {"number": "1", "semester": "f2026", "format": "py"}),
         (

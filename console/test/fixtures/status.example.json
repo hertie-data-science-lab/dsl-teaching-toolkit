@@ -259,7 +259,7 @@
   "operations": [
     {
       "run_id": 4821,
-      "op": "release.now",
+      "op": "release.entry",
       "conclusion": "done",
       "summary": "Released Session 3: 7 files to materials.",
       "finished": "2026-09-23T09:01:10Z"

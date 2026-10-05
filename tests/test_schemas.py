@@ -104,7 +104,7 @@ def test_every_op_has_a_schema_and_a_doc(name):
 # contracts.md section 2 and 3, as written there.
 CONTRACT_OUTCOME = {
     "schema": "dsl.outcome/1",
-    "op": "release.now",
+    "op": "release.entry",
     "run_id": 4821,
     "actor": "prof",
     "preview": False,
@@ -244,7 +244,7 @@ CONTRACT_STATUS = {
     "operations": [
         {
             "run_id": 4821,
-            "op": "release.now",
+            "op": "release.entry",
             "conclusion": "done",
             "summary": "Released Session 3.",
             "finished": "2026-09-23T09:01:10Z",

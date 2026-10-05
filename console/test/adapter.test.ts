@@ -47,13 +47,13 @@ const scope = { courseOrg: COURSE, cohortOrg: COHORT, where: 'Fall 2026' };
 
 describe('the request', () => {
   it('follows dsl.request/1 and carries no names', () => {
-    const r = buildRequest('a-example', { op: 'release.early', courseOrg: COURSE, cohortOrg: COHORT, args: { entry: 's5', semester_dest_repo: '' }, preview: true });
-    expect(r).toEqual({ schema: 'dsl.request/1', op: 'release.early', actor: 'a-example', course_org: COURSE, semester_org: COHORT, args: { entry: 's5' }, preview: true, client: 'console/0.1' });
+    const r = buildRequest('a-example', { op: 'release.entry', courseOrg: COURSE, cohortOrg: COHORT, args: { entry: 's5', semester_dest_repo: '' }, preview: true });
+    expect(r).toEqual({ schema: 'dsl.request/1', op: 'release.entry', actor: 'a-example', course_org: COURSE, semester_org: COHORT, args: { entry: 's5' }, preview: true, client: 'console/0.1' });
   });
   it('drops the cohort for a course op and refuses bad args, a missing cohort and an impossible preview', () => {
     expect(buildRequest('a', { op: 'assignment.derive_starter', courseOrg: COURSE, cohortOrg: COHORT, args: { course_source_repo: 'assignment-3-f2026' }, preview: true }).semester_org).toBeUndefined();
-    expect(() => buildRequest('a', { op: 'release.early', courseOrg: COURSE, cohortOrg: COHORT, args: {}, preview: false })).toThrow(RequestInvalid);
-    expect(() => buildRequest('a', { op: 'release.early', courseOrg: COURSE, cohortOrg: COHORT, args: { entry: '-rf' }, preview: false })).toThrow(/pattern/);
+    expect(() => buildRequest('a', { op: 'release.entry', courseOrg: COURSE, cohortOrg: COHORT, args: {}, preview: false })).toThrow(RequestInvalid);
+    expect(() => buildRequest('a', { op: 'release.entry', courseOrg: COURSE, cohortOrg: COHORT, args: { entry: '-rf' }, preview: false })).toThrow(/pattern/);
     expect(() => buildRequest('a', { op: 'semester.check', courseOrg: COURSE, args: {}, preview: false })).toThrow(/needs a semester/);
     expect(() => buildRequest('a', { op: 'site.update', courseOrg: COURSE, cohortOrg: COHORT, args: {}, preview: true })).toThrow(/no preview/);
   });
@@ -199,7 +199,7 @@ describe('the gate', () => {
   });
 
   it('merges this session’s runs into the status record, newest first, without duplicates', () => {
-    const a = { run_id: 1, op: 'release.now', conclusion: 'done' as const, summary: 'a', finished: '2026-09-22T10:00:00Z' };
+    const a = { run_id: 1, op: 'release.entry', conclusion: 'done' as const, summary: 'a', finished: '2026-09-22T10:00:00Z' };
     const b = { run_id: 2, op: 'site.update', conclusion: 'done' as const, summary: 'b', finished: '2026-09-23T10:00:00Z' };
     expect(mergeOperations([a], [b, a]).map((o) => o.run_id)).toEqual([2, 1]);
   });

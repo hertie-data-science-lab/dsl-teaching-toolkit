@@ -33,7 +33,7 @@ SEMESTER = "hertie-dsl-demo-f2026"
 # contracts.md section 1, verbatim but for the actor placeholder.
 CONTRACT_REQUEST = {
     "schema": "dsl.request/1",
-    "op": "release.now",
+    "op": "release.entry",
     "actor": "prof",
     "course_org": COURSE,
     "semester_org": SEMESTER,
@@ -45,9 +45,7 @@ CONTRACT_REQUEST = {
 CONTRACT_OPS = {
     "semester.check",
     "semester.preview_automation",
-    "release.now",
-    "release.early",
-    "release.rerun",
+    "release.entry",
     "release.adhoc",
     "release.propagate_back",
     "assignment.handout_now",
@@ -180,7 +178,7 @@ def test_a_real_run_of_a_default_on_dry_run_cli_says_no_dry_run():
 def test_the_contract_example_parses():
     req = parse_request(json.dumps(CONTRACT_REQUEST))
     assert (req.op, req.semester_org, req.args, req.preview) == (
-        "release.now",
+        "release.entry",
         SEMESTER,
         {"entry": "s5"},
         True,

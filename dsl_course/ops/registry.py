@@ -426,18 +426,8 @@ _OPS = (
         counts_doc="Reasons carry one entry per release that is due and would not go out.",
     ),
     _release(
-        "release.now",
-        "Release a scheduled entry now.",
-        _RELEASE_ENTRY_ARGS,
-    ),
-    _release(
-        "release.early",
-        "Release a planned entry before its scheduled time.",
-        _RELEASE_ENTRY_ARGS,
-    ),
-    _release(
-        "release.rerun",
-        "Release an entry again, to carry a fixed file.",
+        "release.entry",
+        "Release a schedule entry now: early, late, or again to carry a fixed file.",
         _RELEASE_ENTRY_ARGS,
     ),
     _release(

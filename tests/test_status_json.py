@@ -188,7 +188,7 @@ CONTRACT_EXAMPLE = {
     "operations": [
         {
             "run_id": 4821,
-            "op": "release.now",
+            "op": "release.entry",
             "conclusion": "done",
             "summary": "Released Session 3: 7 files to materials.",
             "finished": "2026-09-23T09:01:10Z",
@@ -1068,7 +1068,7 @@ def test_write_after_op_refreshes_the_semester_then_the_course(monkeypatch):
     )
     request = {
         "schema": "dsl.request/1",
-        "op": "release.now",
+        "op": "release.entry",
         "course_org": COURSE,
         "semester_org": SEMESTER,
     }
@@ -1112,9 +1112,11 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         (SEMESTER, "semester-config", "grading_sheets/assignment-2.yml"): (
             "submissions:\n  ada:\n    score_individual: 7\n"
         ),
-        (SEMESTER, "semester-config", ".system/outcomes/release.now.json"): json.dumps(
-            CONTRACT_EXAMPLE["operations"][0]
-        ),
+        (
+            SEMESTER,
+            "semester-config",
+            ".system/outcomes/release.entry.json",
+        ): json.dumps(CONTRACT_EXAMPLE["operations"][0]),
         (COURSE, "course-materials-f2026", "SYLLABUS.md"): "# Syllabus",
         (COURSE, "assignment-2-f2026", "README.md"): "# Regression",
         (COURSE, "assignment-2-f2026", "grading_config.yml"): "autograde: sometimes\n",
@@ -1155,7 +1157,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         lambda org, repo, branch: (
             {"dsl-course.yml": "c0ffee"}
             if repo == ".github"
-            else {"schedule.yml": "5c4ed", ".system/outcomes/release.now.json": "0u7"}
+            else {"schedule.yml": "5c4ed", ".system/outcomes/release.entry.json": "0u7"}
         ),
     )
     monkeypatch.setattr(
@@ -1202,7 +1204,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     assert doc["inputs"]["schedule.yml"] == "5c4ed"
     assert doc["inputs"]["course/dsl-course.yml"] == "c0ffee"
     assert doc["staff"] == {"instructors": 1, "tas": 0, "synced": True}
-    assert doc["operations"][0]["op"] == "release.now"
+    assert doc["operations"][0]["op"] == "release.entry"
     a2 = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
     assert a2["marks"] == {"filled": 1, "total": 1}
     # The template's unreadable value, seen from the semester that cites it and from the

@@ -50,9 +50,7 @@ export const PREVIEW_ONLY = new Set(['semester.preview_automation']);
  */
 export const PREVIEW_NOT_OFFERED = new Set([
   'assignment.derive_starter',
-  'release.now',
-  'release.early',
-  'release.rerun',
+  'release.entry',
   'release.adhoc',
   'release.propagate_back',
   'teams.open_window',
