@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PatAuth, RETRY_MS, TOKEN_KEY } from '../src/auth/pat';
+import { PatAuth, TOKEN_KEY } from '../src/auth/pat';
+import { RETRY_MS } from '../src/auth/types';
 import type { KeyStore } from '../src/auth/types';
 import { FakeGitHub, json } from './fake';
 

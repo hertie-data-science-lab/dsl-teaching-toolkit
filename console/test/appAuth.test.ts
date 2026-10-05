@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APP_PENDING_KEY, APP_SESSION_KEY, AppAuth, AUTHORIZE_URL, NOT_CONFIGURED, type AppAuthOptions } from '../src/auth/app';
 import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth, TOKEN_KEY } from '../src/auth/pat';
-import type { KeyStore } from '../src/auth/types';
+import { RETRY_MS, type KeyStore } from '../src/auth/types';
 import { FakeGitHub, json } from './fake';
 
 const RELAY = 'https://relay.example';
@@ -228,6 +228,21 @@ describe('AppAuth', () => {
     const bad = new FakeGitHub().on('GET', '/user', () => json({}, 401));
     expect(await app({ fetch: bad.fetch, store: s }).auth.restore()).toBeNull();
     expect(s.map.has(APP_SESSION_KEY)).toBe(false);
+  });
+  it('keeps a saved session GitHub did not answer for, and tries again as the token path does', async () => {
+    let calls = 0;
+    const base = world();
+    const fetch = (url: string, init?: RequestInit) => (url.endsWith('/user') && ++calls <= 2 ? (calls === 1 ? Promise.reject(new TypeError('offline')) : Promise.resolve(json({}, 502))) : base.gh.fetch(url, init));
+    const s = store();
+    s.setItem(APP_SESSION_KEY, JSON.stringify({ access_token: 'ghu_saved', refresh_token: 'ghr_saved', expires_at: Date.now() + 4 * HOUR }));
+    const waits: number[] = [];
+    const { auth } = app({ fetch, store: s, sleep: async (ms) => void waits.push(ms) });
+    let retries = 0;
+    const console = new ConsoleAuth(new PatAuth({ store: store() }), auth);
+    console.onRetry = () => retries++;
+    expect((await console.restore())?.login).toBe('octo');
+    expect([calls, retries, waits]).toEqual([3, 2, RETRY_MS.slice(0, 2)]);
+    expect(console.token()).toBe('ghu_saved');
   });
 });
 

@@ -24,9 +24,9 @@ Node 22 or newer (`.nvmrc` pins 26).
 Three paths, all behind the `Auth` interface in `src/auth/` (`ConsoleAuth` holds them).
 Whichever is used, the console can read or change exactly what that account can on GitHub,
 and the token stays in `sessionStorage`: it is gone when the tab closes. At reload a saved
-token or App session is dropped only when GitHub (or the relay) refuses it. With no answer
-an App session is kept for the next reload; a pasted token is kept and checked again, the
-screen saying it is retrying. Sign-out also
+token or App session is dropped only when GitHub (or the relay) refuses it (401 or 403). With
+no answer either is kept and checked again (`untilAnswered`, one policy for both), the screen
+saying it is retrying. Sign-out also
 ends any run the console is following and forgets this session's runs and previews.
 
 - **Sign in with GitHub** (`AppAuth`, decisions 0002 and 0011): the default where an

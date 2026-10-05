@@ -1,5 +1,5 @@
-import { API, GitHubError, toBase64, type Fetch, type GhUser } from '../github/client';
-import { SignInError, readJson, remove, safeStorage, writeJson, type Auth, type KeyStore } from './types';
+import { API, GitHubError, toBase64, wait, type Fetch, type GhUser } from '../github/client';
+import { SignInError, readJson, remove, safeStorage, untilAnswered, writeJson, type Auth, type KeyStore } from './types';
 
 export const AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
 export const APP_SESSION_KEY = 'dsl-console-app-session';
@@ -35,6 +35,8 @@ export interface AppAuthOptions {
   navigate?: (url: string) => void;
   /** Called when the session ends by itself (the refresh token was refused). */
   onLost?: () => void;
+  /** Tests: the wait between reload checks GitHub did not answer. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 function b64url(bytes: Uint8Array): string {
@@ -124,33 +126,32 @@ export class AppAuth implements Auth {
   /**
    * Finish a sign-in GitHub just sent back (see takeCallback), or pick up this tab's
    * session. Throws a SignInError only for a callback that failed, so the sign-in screen
-   * can say why; a stale saved session is dropped quietly.
+   * can say why. A saved session GitHub or the relay refuses is dropped quietly; while
+   * neither answers it is kept and tried again (`untilAnswered`, as the token path does).
    */
-  async restore(): Promise<GhUser | null> {
+  async restore(onRetry?: () => void): Promise<GhUser | null> {
     const cb = this.callback;
     this.callback = null;
     if (cb && 'error' in cb) throw new SignInError(cb.error);
     if (cb) return this.start(await this.relay('/exchange', { code: cb.code, code_verifier: cb.verifier, redirect_uri: this.opts.redirectUri }));
     const saved = readJson<Session>(this.store, APP_SESSION_KEY);
     if (!saved) return null;
-    try {
+    const u = await untilAnswered(async () => {
       if (saved.refresh_token && saved.expires_at - Date.now() < REFRESH_EARLY_MS) {
         try {
           return await this.start(await this.relay('/refresh', { refresh_token: saved.refresh_token }));
         } catch (e) {
           // No answer, but the access token still works: use it and keep trying to refresh.
           if (e instanceof SignInError || saved.expires_at <= Date.now()) throw e;
-          const u = await this.start(saved);
+          const user = await this.start(saved);
           this.retryLater();
-          return u;
+          return user;
         }
       }
-      return await this.start(saved);
-    } catch (e) {
-      // Refused (by GitHub or the relay): the session is over. No answer: keep it for a reload.
-      if (e instanceof SignInError || e instanceof GitHubError) this.signOut();
-      return null;
-    }
+      return this.start(saved);
+    }, onRetry, this.opts.sleep ?? wait);
+    if (!u) this.signOut();
+    return u;
   }
 
   private async start(s: Session): Promise<GhUser> {

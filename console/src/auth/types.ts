@@ -1,4 +1,4 @@
-import type { GhUser } from '../github/client';
+import { GitHubError, type GhUser } from '../github/client';
 
 /**
  * How the console gets a token: GitHub App sign-in through the relay (AppAuth, decision
@@ -11,14 +11,40 @@ export interface Auth {
   signOut(): void;
   token(): string | null;
   user(): GhUser | null;
-  /** Re-establish a session remembered earlier in this tab, if any. */
-  restore(): Promise<GhUser | null>;
+  /**
+   * Re-establish a session remembered earlier in this tab, if any (`untilAnswered`: kept and
+   * tried again while GitHub does not answer, `onRetry` told each time).
+   */
+  restore(onRetry?: () => void): Promise<GhUser | null>;
 }
 
 export class SignInError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'SignInError';
+  }
+}
+
+/** The waits between reload checks GitHub did not answer; the last repeats. */
+export const RETRY_MS = [2000, 5000, 10000, 30000];
+
+/** GitHub (or the relay) answered and refused: the saved sign-in is over. Anything else is no answer. */
+const refused = (e: unknown) => e instanceof SignInError || (e instanceof GitHubError && (e.status === 401 || e.status === 403));
+
+/**
+ * The one reload policy for both sign-ins: run `attempt` until it gets an answer. Refused:
+ * null, and the caller forgets the saved session. No answer (offline, a 5xx): `onRetry` told,
+ * a wait from RETRY_MS, and again.
+ */
+export async function untilAnswered(attempt: () => Promise<GhUser>, onRetry: (() => void) | undefined, sleep: (ms: number) => Promise<void>): Promise<GhUser | null> {
+  for (let i = 0; ; i++) {
+    try {
+      return await attempt();
+    } catch (e) {
+      if (refused(e)) return null;
+      onRetry?.();
+      await sleep(RETRY_MS[Math.min(i, RETRY_MS.length - 1)]);
+    }
   }
 }
 
