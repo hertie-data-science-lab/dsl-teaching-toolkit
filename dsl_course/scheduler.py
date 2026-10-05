@@ -577,12 +577,7 @@ def _autograde_passed_deadlines(
         log_step(f"  autograde {slug} via {template} (deadline {deadline})")
         # `slug` here is the schedule KEY (`due_snapshots` yields keys), which is exactly
         # what `collect` needs to tell two entries on one template apart.
-        if (
-            collect(
-                course_org, template, semester_org, deadline, scheduled=True, slug=slug
-            )
-            != 0
-        ):
+        if collect(course_org, template, semester_org, scheduled=True, slug=slug) != 0:
             errors += 1
     return errors
 
