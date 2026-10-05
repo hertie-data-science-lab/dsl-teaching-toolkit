@@ -27,7 +27,7 @@ const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
 
 // The semester sets a 5% late penalty; status states each assignment's effective settings.
-const solo = { ...STATUS.assignments![0], settings: { late_penalty_per_day: { value: '5%', source: 'semester' } } } as Assignment;
+const solo: Assignment = { ...STATUS.assignments![0], settings: { late_penalty_per_day: { value: '5%', source: 'semester' } } };
 const team: Assignment = { ...solo, slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'marking', units: 1, submissions: 1, teams: 1, marks: { filled: 0, total: 1 } };
 const status: Status = { ...STATUS, assignments: [solo, team] };
 const ready: Loaded = { kind: 'ready', status, sha: 's', stale: [] };

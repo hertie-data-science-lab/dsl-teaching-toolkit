@@ -42,8 +42,7 @@ function outOf(m: unknown): string {
 
 /** The late penalty the marks grid applies: the assignment's effective `late_penalty_per_day` as status states it (`status_json.run_settings`). */
 function penaltyOf(a: Assignment): number | null {
-  const settings = (a as Assignment & { settings?: Record<string, { value: unknown } | undefined> }).settings;
-  return penaltyRate(settings?.late_penalty_per_day?.value);
+  return penaltyRate(a.settings?.late_penalty_per_day?.value);
 }
 
 export function MarksTab(p: TabProps) {
