@@ -1476,7 +1476,10 @@ def render_assignments(
         sheet, sspec = facts.sheets.get(name), sheet_specs.get(name)
         filled, on_sheet, submitted = sheet_counts(sheet, sspec)
         total = on_sheet or units
-        returned = (
+        # The automatic return's once-only record is written only when every unit went
+        # back, so it settles the question: a later sheet commit that changes no gradebook
+        # leaves `distributed_at` where it was, and the comparison would say marking.
+        returned = grades.marks_return_record(name) in facts.config_paths or (
             total > 0
             and filled == total
             and marks_returned(

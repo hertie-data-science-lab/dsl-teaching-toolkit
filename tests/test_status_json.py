@@ -805,6 +805,35 @@ def test_marks_are_counted_off_the_sheet_and_returned_once_every_unit_is():
     assert state(back, changed=later + timedelta(hours=1)) == (False, "marking")
 
 
+def test_the_returned_record_keeps_an_assignment_returned_after_a_sheet_commit():
+    sheet = {
+        "submissions": {
+            "ada": {"info": {"submitted": "2026-09-27"}, "score_individual": 8},
+            "bob": {"info": {"submitted": None}, "score_individual": 5},
+        }
+    }
+    later = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+    back = {"ada": later, "bob": later}
+    # A comment committed to the sheet after the return: no gradebook changed, so none
+    # was written again.
+    commented = later + timedelta(hours=1)
+
+    def state(config_paths):
+        semester = _semester(
+            sheets={"assignment-2": sheet},
+            returned_at=back,
+            sheet_changed={"assignment-2": commented},
+        )
+        semester.config_paths = semester.config_paths | config_paths
+        doc = _render(semester=semester, now=later)
+        row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+        return row["returned"], row["state"]
+
+    assert state({}) == (False, "marking")
+    record = grades.marks_return_record("assignment-2")
+    assert state({record: "f00d"}) == (True, "returned")
+
+
 def test_returned_is_read_off_the_gradebook_rows_distribute_writes(monkeypatch):
     text = (
         "target,assignment,channel,content_hash,distributed_at,issue\n"
