@@ -259,7 +259,7 @@ add two calls per private repo (receipts issue, comments). These student reads a
 a minute (`MINE_FRESH_MS`), so moving between screens does not repeat them. A brief or the home text is
 rendered once per page load (one `/markdown` call, a brief only when its fold opens); a
 site-hosted card picture is one call. Set up adds one call per materials repo. A file costs
-one call, a markdown file or notebook two, an HTML page one per bundle file it uses (at most
+one call, a markdown file or notebook two (its rendering is kept by blob sha for the session), an HTML page one per bundle file it uses (at most
 80); file bytes are kept by blob sha (up to 64 MB), so reopening costs nothing. **Home's This
 week costs all of that again for each semester shown**: its site read, the repo list,
 gradebook, role and teams, and the receipts reads (about 50 calls per semester on the demo on

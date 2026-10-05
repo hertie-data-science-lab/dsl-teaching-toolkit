@@ -45,6 +45,7 @@ import type { CohortProps, CourseProps } from './screens/types';
 import { Loading, ghUrl } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
 import { forgetRendered } from './ui/rendered';
+import { forgetShown } from './model/materials';
 import { CourseBanner, Footer, Sidenav, StudentNav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
 import { fmtDay } from './model/format';
 import { DEFAULT_TIMEZONE } from './model/policy';
@@ -473,6 +474,7 @@ export function createState({ auth, client }: AppDeps) {
       forgetRendered();
       forgetMyTeams(client);
       forgetMine(client);
+      forgetShown(client);
       forgetStudentData(client);
       auth.signOut();
       client.clearCache();
