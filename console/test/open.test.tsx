@@ -36,9 +36,8 @@ describe('Your setup in this browser', () => {
     expect(rememberOpen(LOGIN, 'githubdev', store)).toEqual({ folder: '/Users/a/repos', editor: 'other', scheme: 'zed://file/{path}', lastOpen: 'githubdev' });
     expect(rememberOpen('b-example', 'vsclone', store)).toEqual({ folder: '', editor: 'vscode', lastOpen: 'vsclone' });
     store.setItem(`dsl-console-visit:${LOGIN}:${ORG}`, '1');
-    store.setItem(`dsl-console-paths:${LOGIN}`, '{}');
     forgetStudentPrefs(LOGIN, store);
-    // Visit times and the old student folders go; Profile stays (decision 0021 rule 3).
+    // Visit times go; Profile stays (decision 0021 rule 3).
     expect([...store.data.keys()].sort()).toEqual([`dsl-console-setup:${LOGIN}`, 'dsl-console-setup:b-example']);
     expect(yourSetup(LOGIN, store)?.folder).toBe('/Users/a/repos');
   });

@@ -54,7 +54,7 @@ export function markVisit(login: string, org: string, now: number, store: KeySto
 }
 
 /**
- * On sign-out: every visit time of `login` in this browser (and the old student folders), and this load's answers. Profile
+ * On sign-out: every visit time of `login` in this browser, and this load's answers. Profile
  * is kept: a folder and an editor are not secrets (decision 0021).
  */
 export function forgetStudentPrefs(login: string, store: KeyStore | null = localStore()): void {
@@ -64,9 +64,7 @@ export function forgetStudentPrefs(login: string, store: KeyStore | null = local
     const mine = [];
     for (let i = 0; i < store.length; i++) {
       const k = store.key(i);
-      // `dsl-console-paths:` held the student folders Set up had before Profile served both
-      // roles (decision 0027): removed here once, so an old browser does not keep them.
-      if (k && (k.startsWith(`dsl-console-visit:${login}:`) || k === `dsl-console-paths:${login}`)) mine.push(k);
+      if (k?.startsWith(`dsl-console-visit:${login}:`)) mine.push(k);
     }
     for (const k of mine) store.removeItem(k);
   } catch {

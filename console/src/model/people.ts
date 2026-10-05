@@ -39,11 +39,6 @@ export function csvRecords(text: string): CsvRecord[] {
   return out.filter((r) => r.cells.some((f) => f.trim() !== ''));
 }
 
-/** RFC 4180 rows; a leading BOM is dropped, as the engine's strip_bom does. */
-export function parseCsv(text: string): string[][] {
-  return csvRecords(text).map((r) => r.cells);
-}
-
 export interface RosterRow {
   line: number; // the file's line number, header = 1
   email: string;
