@@ -1809,6 +1809,7 @@ def sync_sheet(
     spec = sheet_spec(sched, key, slug, gspec, is_group)
     entry = sched.assignments.get(key)
     due = entry.due_datetime if entry else None
+    cutoff = schedule.grading_cutoff_datetime(sched, key)
 
     targets: list[Target] = []
     if units is None:
@@ -1843,7 +1844,7 @@ def sync_sheet(
         slug,
         old_text,
         now,
-        schedule.grading_cutoff_datetime(sched, key),
+        cutoff,
     )
     try:
         on_disk = grades.parse_sheet(old_text) if old_text else {}
@@ -1911,7 +1912,7 @@ def sync_sheet(
             semester_org,
             listing or {},
             targets,
-            (schedule.grading_cutoff_datetime(sched, key) or now).isoformat(),
+            (cutoff or now).isoformat(),
             previous,
             due,
         )

@@ -1730,24 +1730,6 @@ def provision_all(
     if course_org == semester_org:
         log_err("course-org and semester-org must differ.")
         return 1, False
-    # The assignment's own definition, read ONCE here: it answers the shape (below), and
-    # it composes both the grading sheet's header and the Submission receipts issue's body further
-    # down. Two reads of one memoised file is not expensive, but it is two places for the
-    # answer to be spelt, which is how a handout came to provision a shape the sheet did
-    # not expect.
-    gspec = load_grading_spec(course_org, template)
-    if gspec.not_migrated:
-        log_err(
-            f"{template}/grading_config.yml is NOT_MIGRATED (an old key, or a run "
-            f"setting that moved to assignments.yml) - run the migration; nothing is "
-            f"handed out"
-        )
-        return 1, False
-    # The assignment's own grading_config.yml is the only declaration there is.
-    group = gspec.is_group
-    if group:
-        log("  (declared `type: group` - provisioning per team)")
-
     students = (
         roster.load_path(roster_path) if roster_path else roster.load(semester_org)
     )
@@ -1790,10 +1772,21 @@ def provision_all(
         log_err(target)
         return 1, False
     key, slug = target
-    # The run settings (visibility, the late pair, the team rules) are this semester's
-    # for this entry, now that it is known which entry this is.
+    # The assignment's own definition with this semester's run settings for this entry
+    # (visibility, the late pair, the team rules), read ONCE: it answers the shape, the
+    # grading sheet's header and the Submission receipts issue's body, so there is one
+    # place for the answer to be spelt.
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
-    # The sheet's header and the Submission receipts issue's body, off the definition read above.
+    if gspec.not_migrated:
+        log_err(
+            f"{template}/grading_config.yml is NOT_MIGRATED (an old key, or a run "
+            f"setting that moved to assignments.yml) - run the migration; nothing is "
+            f"handed out"
+        )
+        return 1, False
+    group = gspec.is_group
+    if group:
+        log("  (declared `type: group` - provisioning per team)")
     spec = sheet_spec(sched, key, slug, gspec, group)
 
     # WHAT the assignment is handed out to, in the sheet's own vocabulary and known to
