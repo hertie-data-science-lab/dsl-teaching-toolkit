@@ -1692,8 +1692,13 @@ def provision_all(
     scheduled: bool = False,
     slug: str = "",
     listing: dict[str, dict] | None = None,
+    sync: bool = True,
 ) -> tuple[int, bool]:
     """Freeze the semester template, then provision a repo per unit (student, or team).
+
+    `sync=False` leaves the semester site to the caller, as `deploy_many(sync=False)`
+    does: the scheduler's tick syncs it once after every handout it fired, where a sync
+    per handout cloned, rendered and pushed the site k+1 times.
 
     Returns `(exit code, whether anything changed)` - the shape `deploy.deploy_many`
     already uses. The scheduler re-fires every handed-out release on every hourly tick
@@ -2028,7 +2033,7 @@ def provision_all(
     try:
         # A tick that created or changed nothing has nothing to show the site: skipping the
         # sync here is what stops every handed-out assignment re-rendering the site hourly.
-        if changed:
+        if changed and sync:
             site.sync_site(course_org, semester_org)
     except (RuntimeError, yaml.YAMLError) as exc:
         log_err(

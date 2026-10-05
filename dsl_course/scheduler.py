@@ -431,6 +431,8 @@ def _execute_nondeploy(
             # and adds every repo it creates to - so the next release in this same tick
             # sees them (see `assign.provision_all`).
             listing=listing,
+            # The tick syncs the site once after every release it fired (`run`).
+            sync=False,
         )
         if failed != 0:
             errors += 1

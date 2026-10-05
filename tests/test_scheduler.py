@@ -990,7 +990,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all",
-        lambda course_org, template, semester_org, solution=False, touch_existing=True, scheduled=False, slug="", listing=None: (
+        lambda course_org, template, semester_org, solution=False, touch_existing=True, scheduled=False, slug="", listing=None, sync=True: (
             (
                 calls.append(
                     (
@@ -1001,6 +1001,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
                         touch_existing,
                         scheduled,
                         slug,
+                        sync,
                     )
                 ),
                 (0, True),
@@ -1023,6 +1024,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
         False,
         True,
         "assignment-2",
+        False,  # the tick syncs the site once, after every handout
     )
 
     # The solution release is the SAME call, asked to push the solution too - so a
@@ -1041,6 +1043,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
         False,
         True,
         "assignment-2",
+        False,
     )
 
 
