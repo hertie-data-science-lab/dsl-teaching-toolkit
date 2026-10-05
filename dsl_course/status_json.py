@@ -84,6 +84,7 @@ from .discovery import (
     SEMESTERS_PATH,
     TEMPLATE_TOPIC,
     assignment_rows,
+    handed_out_assignments,
     is_assignment_template,
     is_untopicked_template,
     list_org_repos,
@@ -1359,6 +1360,20 @@ def sheet_counts(
     return filled, len(blocks), submitted
 
 
+def handed_out(
+    name: str,
+    entry: schedule.AssignmentEntry,
+    templates: frozenset[str],
+    now: datetime,
+) -> bool:
+    """Whether the assignment `name` (semester-side) is out: its semester template exists
+    (`handed_out_assignments`, whatever route fired the hand-out) or its
+    `handout_datetime` has passed. One answer for both consoles: the student file's
+    `handed_out` and the instructor's `open`."""
+    pinned = entry.handout_datetime is not None and entry.handout_datetime <= now
+    return name in templates or pinned
+
+
 def assignment_state(
     now: datetime,
     entry: schedule.AssignmentEntry,
@@ -1366,23 +1381,26 @@ def assignment_state(
     spec: grades.GradingSpec,
     units: int,
     returned: bool,
+    out: bool = False,
 ) -> str:
     """`declared | teams_forming | blocked | open | late_window | marking | returned`
     (lifecycle, per assignment), by the assignment's own clock:
 
     returned once marks have gone back for every unit; marking from the cutoff;
-    late_window between the due date and the cutoff; before the due date, open once any
-    copy is handed out. A group assignment past its hand-out moment with no copy yet is
-    teams_forming while students choose their own teams, blocked while the teaching team
-    has to assign them; declared before any of that. Which of the two is the EFFECTIVE
-    `team_formation` (the cascade's, `self_select` unless somebody declared `assigned`)."""
+    late_window between the due date and the cutoff; before the due date, open once the
+    work is out: any unit's copy handed out, or, for a shape with no repo per unit
+    (`external`, `shared_dropbox_repo`), the assignment `handed_out` (`out`). A group
+    assignment past its hand-out moment with no copy yet is teams_forming while students
+    choose their own teams, blocked while the teaching team has to assign them; declared
+    before any of that. Which of the two is the EFFECTIVE `team_formation` (the
+    cascade's, `self_select` unless somebody declared `assigned`)."""
     if returned:
         return "returned"
     if cutoff is not None and now >= cutoff:
         return "marking"
     if now >= entry.due_datetime:
         return "late_window"
-    if units > 0:
+    if units > 0 or (out and not spec.creates_unit_repos):
         return "open"
     if spec.is_group and entry.handout_datetime and now >= entry.handout_datetime:
         return (
@@ -1441,6 +1459,7 @@ def render_assignments(
 ) -> list[dict]:
     """One row per assignment the schedule declares."""
     flagged = _problem_entries(problems)
+    templates = handed_out_assignments(list(facts.listing.values()))
     sheet_specs = {}
     for k, e in facts.sched.assignments.items():
         name = schedule.semester_name(k, e)
@@ -1475,7 +1494,15 @@ def render_assignments(
                 "number": own_number(entry.number, slug),
                 "title": facts.titles.get(slug) or spec.title or slug,
                 "template": entry.course_source_repo,
-                "state": assignment_state(now, entry, cutoff, spec, units, returned),
+                "state": assignment_state(
+                    now,
+                    entry,
+                    cutoff,
+                    spec,
+                    units,
+                    returned,
+                    handed_out(name, entry, templates, now),
+                ),
                 "handout": _iso(entry.handout_datetime),
                 "due": _iso(entry.due_datetime),
                 "grading_cutoff_datetime": _iso(cutoff),

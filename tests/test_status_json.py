@@ -728,6 +728,30 @@ def test_a_group_assignment_with_no_copies_after_hand_out_is_forming_teams():
     assert row["state"] == "blocked"
 
 
+@pytest.mark.parametrize("via", ["external", "shared_dropbox_repo"])
+@pytest.mark.parametrize("kind", ["individual", "group"])
+def test_a_shape_with_no_repo_per_unit_is_open_once_handed_out(via, kind):
+    # Handed out 15 Sep, due 27 Sep: no unit has a repo of its own, so the hand-out
+    # itself is what opens it, as the student file's `handed_out` says.
+    spec = grades.GradingSpec(type=kind, submit_via=via, team_formation="assigned")
+    semester = _semester(specs={"assignment-2": spec})
+    row = next(
+        a
+        for a in _render(semester=semester)["assignments"]
+        if a["slug"] == "assignment-2"
+    )
+    assert row["state"] == "open"
+    entry = semester.sched.assignments["assignment-2"]
+    assert status_json.handed_out("assignment-2", entry, frozenset(), NOW)
+    before = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
+    row = next(
+        a
+        for a in _render(semester=semester, now=before)["assignments"]
+        if a["slug"] == "assignment-2"
+    )
+    assert row["state"] == "declared"
+
+
 def test_a_group_assignment_nobody_declared_a_formation_for_is_forming_teams(
     monkeypatch,
 ):
