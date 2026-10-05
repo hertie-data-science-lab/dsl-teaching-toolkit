@@ -10,10 +10,10 @@ import type { Operation, Status } from '../model/types';
 import { checkNow, keepFuture, previewNext, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { mergeOperations, type OpDef } from '../ops/session';
-import { CheckLine, Loading, Soon } from '../ui/bits';
+import { CheckLine, Loading, Soon, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
-import type { CohortProps, ReadyProps } from './types';
+import type { CohortProps, CourseProps, ReadyProps } from './types';
 
 export { cohortName };
 
@@ -52,6 +52,11 @@ export function useGradingConfig(p: ReadyProps, template: string): Record<string
   return useMemo(() => parseConfig(text), [text]);
 }
 
+/** Who an operation on the course acts for. */
+export function courseScope(p: Pick<CourseProps, 'course'>): Scope {
+  return { courseOrg: p.course.org, where: p.course.name };
+}
+
 /** Who an operation on this semester acts for. */
 export function cohortScope(p: Pick<CohortProps, 'course' | 'cohort'>): Scope {
   return { courseOrg: p.course.org, cohortOrg: p.cohort.org, where: p.cohort.termLabel };
@@ -72,7 +77,7 @@ export function useOperations(fromStatus: Operation[] | undefined, cohortOrg: st
 }
 
 function ExportInfo({ org }: { org: string }) {
-  const f = (path: string) => `https://github.com/${org}/${CONFIG_REPO}/${path.includes('.') ? 'blob' : 'tree'}/main/${path}`;
+  const f = (path: string) => ghUrl(org, CONFIG_REPO, path, 'main', path.includes('.') ? 'blob' : 'tree');
   const row = (t: string, sub: string, path: string) => (
     <li><span class="r-title">{t}</span><span class="r-sub">{sub}</span><span class="r-side"><a class="btn small quiet" href={f(path)} target="_blank" rel="noopener">Open <Ext /></a></span></li>
   );

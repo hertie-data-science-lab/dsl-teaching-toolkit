@@ -19,7 +19,7 @@ import type { Semester } from '../src/model/discovery';
 import type { Mine } from '../src/model/mine';
 import { STUDENT_STATUS_PATH } from '../src/model/names';
 import { StatusFileSource, factsFromStatus, type SemesterFacts } from '../src/model/student';
-import { closesWords, formingAt, nextLine, semesterLine, weekItems } from '../src/model/week';
+import { closesWords, formingAt, nextLine, semesterLine, weekItems, weekPhrase, weekWords } from '../src/model/week';
 import { STUDENT_HINTS, ScheduleView, StudentBanner, StudentScreen } from '../src/screens/Student';
 import { AskedList, TeamForm } from '../src/screens/StudentJoin';
 import { MaterialsTree } from '../src/screens/StudentMaterials';
@@ -92,6 +92,11 @@ describe('the semester dates and when the file was written', () => {
     expect(semesterLine(f, Date.parse('2026-09-01T12:00:00Z'))).toMatchObject({ week: undefined, starts: 'Starts Mon 7 Sep' });
     expect(semesterLine(f, Date.parse('2027-01-10T12:00:00Z')).week).toBe('Week 15 of 15');
     expect(semesterLine({ ...f, start: undefined }, NOW)).toEqual({});
+    // One phrase for both cards: the instructor's from status, the student's from the facts.
+    expect(weekWords({ week: 0, weeks: 15, start: '2026-09-07', timezone: 'Europe/Berlin' })).toBe(semesterLine(f, Date.parse('2026-09-01T12:00:00Z')).starts);
+    expect(weekWords({ week: 3, weeks: 15, start: '2026-09-07', timezone: 'Europe/Berlin' })).toBe(semesterLine(f, NOW).week);
+    expect(weekPhrase(0, 15, null, 'Europe/Berlin')).toBe('Before week 1');
+    expect(weekPhrase(null, null, '2026-09-07', 'Europe/Berlin')).toBe('');
   });
 
   it('give each semester card its next dated row, worded as the instructor’s cards', () => {

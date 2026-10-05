@@ -6,11 +6,13 @@
 // without one, an approximate end from the semester key).
 
 import { parse } from 'yaml';
+import { isObj } from '../edit/yamlText';
 import type { GitHubClient } from '../github/client';
 import { CENTRAL } from './central';
 import { COURSE_META_PATH, parseRegistry, REGISTRY_PATH, termOf, type Course } from './discovery';
-import { str } from './format';
-import { ORG_NAME_RE } from './policy';
+import { addDays, str } from './format';
+import { DEFAULT_TIMEZONE, ORG_NAME_RE } from './policy';
+import { instant } from './student';
 import { COURSE_REPO, STUDENT_STATUS_PATH } from './names';
 
 const ORGS_PATH = 'orgs.yml';
@@ -68,7 +70,7 @@ export interface CatalogueCourse {
 /** `orgs.yml`'s course orgs as spelt, in order (`dsl_course/org_registry.parse_names`); throws on any other shape. */
 export function parseOrgs(text: string): string[] {
   const doc: unknown = parse(text);
-  const orgs = doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as { course_orgs?: unknown }).course_orgs : undefined;
+  const orgs = isObj(doc) ? doc.course_orgs : undefined;
   if (!Array.isArray(orgs) || !orgs.every((o) => typeof o === 'string' && ORG_NAME_RE.test(o))) throw new Error('orgs.yml must be `course_orgs:` and a list of org names');
   return orgs as string[];
 }
@@ -155,56 +157,63 @@ export async function loadCatalogue(client: GitHubClient, estate: Course[] = [],
   return list;
 }
 
-/** A semester key (`f2026`) as its season and year; null for an org name without one. */
-function seasonOf(org: string): { season: string; year: number } | null {
-  const m = /^([fswu])(\d{4})$/.exec(termOf(org).term);
+/** A semester key (`f2026`) as its season and year; null for anything else. */
+export function seasonOf(term: string): { season: string; year: number } | null {
+  const m = /^([fswu])(\d{4})$/.exec(term);
   return m ? { season: m[1], year: Number(m[2]) } : null;
 }
 
 /**
- * When a semester ends: its archive date when read, else an approximate one from its key
- * (fall to 1 February, spring to 1 August, summer to 1 October, winter to 1 April), so a
+ * A semester's end: its archive date when read, else an approximate last day from its key
+ * (fall to 31 January, spring to 31 July, summer to 30 September, winter to 31 March), so a
  * semester whose status gives no date does not run for ever.
  */
 function endOf(s: CatalogueSemester): string | undefined {
   if (s.end) return s.end;
-  const k = seasonOf(s.org);
+  const k = seasonOf(termOf(s.org).term);
   if (!k) return undefined;
   const { season, year } = k;
-  return { f: `${year + 1}-02-01`, s: `${year}-08-01`, u: `${year}-10-01`, w: `${year + 1}-04-01` }[season];
+  return { f: `${year + 1}-01-31`, s: `${year}-07-31`, u: `${year}-09-30`, w: `${year + 1}-03-31` }[season];
+}
+
+/**
+ * Whether a semester whose end is `end` is over at `now`: a day (yyyy-mm-dd, its last day) is
+ * over once the next day starts in `tz`, as the engine's `ended` (`semester_end < today`); a
+ * datetime (an archive date) is over from that instant. The one rule for "is it over".
+ */
+export function over(end: string, now: number, tz = DEFAULT_TIMEZONE): boolean {
+  const day = end.trim();
+  return (/^\d{4}-\d{2}-\d{2}$/.test(day) ? instant(addDays(day, 1), tz) : Date.parse(day)) <= now;
 }
 
 /** Whether a semester runs at `now`: not archived, and its end (read or approximate) not past; with no end at all, only when known to be open. */
 export function runningNow(s: CatalogueSemester, now: number): boolean {
   if (s.archived) return false;
   const end = endOf(s);
-  return end ? !(Date.parse(end) <= now) : s.archived === false;
+  return end ? !over(end, now) : s.archived === false;
 }
 
 /** Whether a semester has ended by `now`: archived, or its end (read or approximate) past. */
-export function endedNow(s: CatalogueSemester, now: number): boolean {
+export function endedNow(s: CatalogueSemester, now: number, tz?: string): boolean {
   if (s.archived) return true;
   const end = endOf(s);
-  return !!end && Date.parse(end) <= now;
+  return !!end && over(end, now, tz);
 }
-
-const DAY = 86_400_000;
 
 /**
  * Whether a semester the person studies in is over (decision 0031): archived; else past `end`
- * (its `semester_end`, the last day, yyyy-mm-dd) when known; else past its key's approximate
- * end. The one rule for Your semesters, the student nav, the banner and the landing.
+ * (its `semester_end`, the last day, in `tz`) when known; else past its key's approximate end.
+ * The one rule for Your semesters, the student nav, the banner and the landing; a loaded
+ * status's `semester.ended` is preferred where there is one.
  */
-export function semesterOver(s: { org: string; termLabel: string; archived: boolean }, now: number, end?: string): boolean {
-  if (s.archived) return true;
-  if (end) return Date.parse(end) + DAY <= now;
-  return endedNow({ org: s.org, termLabel: s.termLabel }, now);
+export function semesterOver(s: { org: string; termLabel: string; archived: boolean }, now: number, end?: string, tz?: string): boolean {
+  return endedNow({ org: s.org, termLabel: s.termLabel, archived: s.archived, ...(end ? { end } : {}) }, now, tz);
 }
 
 const SEASON_ORDER: Record<string, number> = { s: 1, u: 2, f: 3, w: 4 };
 
-/** A semester org's place in time from its key: larger is newer; 0 for a name without one. */
+/** A semester org's (or a bare key's) place in time: larger is newer; 0 for a name without a key. */
 export function termRank(org: string): number {
-  const k = seasonOf(org);
+  const k = seasonOf(termOf(org).term);
   return k ? k.year * 10 + SEASON_ORDER[k.season] : 0;
 }

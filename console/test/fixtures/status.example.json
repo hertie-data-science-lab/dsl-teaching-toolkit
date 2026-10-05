@@ -232,7 +232,13 @@
         "total": 48
       },
       "returned": false,
-      "problem": false
+      "problem": false,
+      "settings": {
+        "late_penalty_per_day": {
+          "value": "10%",
+          "source": "institution"
+        }
+      }
     }
   ],
   "students": {

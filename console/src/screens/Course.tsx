@@ -14,7 +14,7 @@ import { FormatPicker } from '../forms/FormatPicker';
 import { courseBlock, institutionLayer, lateWord, resolve, valueWord, type Layers } from '../model/cascade';
 import { DEFAULT_FORMATS, POLICY } from '../model/policy';
 import { formatsList, fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
-import type { Tiers, Values } from '../tiers/types';
+import { pick, type Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
 import type { CourseStatus, MaterialsCheck, MaterialsState, Operation, Outcome, Problem, SemesterStatus, Status, Todo } from '../model/types';
 import { nextEvent, nextEventWords, recentActivity, rollUpProblems, whoWord, type Activity } from '../model/status';
@@ -26,11 +26,11 @@ import { Hint } from '../ui/Hint';
 import { Check, Ext, Fail } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { formatError } from '../wizards/model';
-import { courseScope, detailsOf, newestScope, websiteUrl } from './CourseEdit';
+import { detailsOf, newestScope, websiteUrl } from './CourseEdit';
 import type { CourseProps } from './types';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from '../model/names';
 import { AsideFold, COURSE_FILE, Circle, SetAsideDialog, asideList, missingClause, setAsideText, stepAside, todoAside, type Ask } from './SetAside';
-import { REFRESH_HINT, tzOf, yearOf } from './common';
+import { REFRESH_HINT, courseScope, tzOf, yearOf } from './common';
 import { weekWords } from '../model/week';
 
 /** The course block and course-scoped problems: from the course's own status, else a semester's. */
@@ -272,13 +272,20 @@ export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
   );
 }
 
+/** Each grading_config.yml text read so far -> its title, so a re-render parses no YAML. */
+const titles = new Map<string, string>();
+
 /** A template's title from its grading_config.yml, as loaded; '' until then. */
 export function templateTitle(files: CourseProps['files'], org: string, repo: string): string {
   const f = files.file(org, repo, 'grading_config.yml', 'solution');
   if (f.kind !== 'ready') return '';
-  const y = new YamlText(f.text);
-  const t = y.errors.length ? undefined : (y.toJS() as Record<string, unknown> | null)?.title;
-  return typeof t === 'string' ? t : '';
+  let title = titles.get(f.text);
+  if (title === undefined) {
+    const y = new YamlText(f.text);
+    const t = y.errors.length ? undefined : (y.toJS() as Record<string, unknown> | null)?.title;
+    titles.set(f.text, (title = typeof t === 'string' ? t : ''));
+  }
+  return title;
 }
 
 /** A semester's state: live, ended but not archived, or archived. */
@@ -818,6 +825,3 @@ export function TemplateScreen(p: CourseProps) {
   );
 }
 
-function pick(t: Tiers, keys: string[]): Tiers {
-  return Object.fromEntries(keys.filter((k) => t[k]).map((k) => [k, t[k]]));
-}

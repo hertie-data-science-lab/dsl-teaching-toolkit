@@ -40,12 +40,10 @@ function outOf(m: unknown): string {
   return pts == null || pts === '' ? '' : ` (out of ${String(pts)})`;
 }
 
-/** The late penalty the marks grid applies: the assignment's effective `late_penalty_per_day`, null while it is read. */
-function penaltyOf(p: ReadyProps, slug: string): { rate: number | null; known: boolean } {
-  const layers = assignmentSettings(p, slug);
-  if (!layers) return { rate: null, known: false };
-  const e = resolve('late_penalty_per_day', layers);
-  return { rate: penaltyRate(e.value), known: true };
+/** The late penalty the marks grid applies: the assignment's effective `late_penalty_per_day` as status states it (`status_json.run_settings`). */
+function penaltyOf(a: Assignment): number | null {
+  const settings = (a as Assignment & { settings?: Record<string, { value: unknown } | undefined> }).settings;
+  return penaltyRate(settings?.late_penalty_per_day?.value);
 }
 
 export function MarksTab(p: TabProps) {
@@ -67,7 +65,7 @@ export function MarksTab(p: TabProps) {
   const cfg = useGradingConfig(p, a.template);
   const questions = cfg.questions && typeof cfg.questions === 'object' ? (cfg.questions as Record<string, unknown>) : null;
   const qs = questions ? Object.entries(questions) : [];
-  const { rate } = penaltyOf(p, a.slug);
+  const rate = penaltyOf(a);
   const max = qs.reduce((n, [, m]) => n + (Number(questionPoints(m)) || 0), 0);
   const group = a.teams !== null && a.teams !== undefined;
   const scope = cohortScope(p);
@@ -387,8 +385,12 @@ function OverviewRow(p: ReadyProps & { a: Assignment; hasSheet: boolean; writes:
   const changed = p.hasSheet ? p.files.lastChange(p.cohort.org, CONFIG_REPO, path) : null;
   const sheet = a.returned && p.hasSheet ? p.files.file(p.cohort.org, CONFIG_REPO, path) : null;
   const text = sheet?.kind === 'ready' ? sheet.text : null;
-  const doc = text !== null ? new YamlText(text) : null;
-  const on = text !== null && doc && !doc.errors.length && p.writes ? returnedOn(readSheet(text, doc.toJS()), p.writes) : null;
+  const writes = p.writes;
+  const on = useMemo(() => {
+    if (text === null || !writes) return null;
+    const doc = new YamlText(text);
+    return doc.errors.length ? null : returnedOn(readSheet(text, doc.toJS()), writes);
+  }, [text, writes]);
   return (
     <tr>
       <td><a class="rowlink" href={tabHref(a.slug, 'marks')}>{assignmentTitle(a)}</a></td>
@@ -406,7 +408,8 @@ function MarksOverview(p: ReadyProps) {
   const dir = p.files.dir(p.cohort.org, CONFIG_REPO, SHEETS);
   const sheets = new Set(dir.kind === 'ready' ? dir.entries.map((e) => e.name) : []);
   const ledger = p.files.file(p.cohort.org, CONFIG_REPO, LEDGER);
-  const writes = ledger.kind === 'ready' ? gradebookWrites(ledger.text) : ledger.kind === 'loading' ? null : new Map<string, string>();
+  const ledgerText = ledger.kind === 'ready' ? ledger.text : null;
+  const writes = useMemo(() => (ledgerText !== null ? gradebookWrites(ledgerText) : ledger.kind === 'loading' ? null : new Map<string, string>()), [ledgerText, ledger.kind]);
   const returned = list.filter((a) => a.returned).length;
   const toMark = list.reduce((n, a) => n + (sheets.has(`${sheetName(p, a.slug)}.yml`) ? a.marks.total - a.marks.filled : 0), 0);
   return (

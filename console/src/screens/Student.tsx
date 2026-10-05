@@ -9,17 +9,18 @@
 // materials and the schedule, and nothing that promises a repo, a team or marks. An archived
 // semester is history: the student's own repos and marks, read-only, and nothing is run.
 
+import { hostOf } from '../model/cascade';
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import { useEffect } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { GitHubClient } from '../github/client';
 import type { Semester } from '../model/discovery';
-import { addDays, ago, dayKey, fmtDay, fmtTime, fmtWhen, sortKey } from '../model/format';
+import { ago, dayKey, fmtDay, fmtTime, fmtWhen, sortKey } from '../model/format';
 import { gradebookUrl, isMarked, knownAuditor, patchLines, patchNotes, readAllReceipts, readMine, repoUrl, type Gradebook, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
 import { lastVisit, markVisit } from '../model/prefs';
-import { weekOf } from '../model/schedule';
+import { weekGroups } from '../model/schedule';
 import { IMG_HOSTS, MY_STATE_WORD, STUDENT_CHOICE, StatusFileSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
-import { semesterLine, termOfFacts, weekItems, type WeekItem } from '../model/week';
+import { ROW_CLASS, ROW_WORD, semesterLine, termOfFacts, weekItems, type WeekLine } from '../model/week';
 import { STUDENT_SCREENS, studentHref } from '../router';
 import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
@@ -247,7 +248,7 @@ export function ArchiveNotice({ when, tz, now }: { when: string; tz: string; now
 
 // --------------------------------------------------------------------------- This week
 
-export function WeekList({ items, tz, org }: { items: WeekItem[]; tz: string; org: string }) {
+export function WeekList({ items, tz, org }: { items: WeekLine[]; tz: string; org: string }) {
   if (!items.length) return <p class="footnote">Nothing is due, handed out or released this week.</p>;
   return (
     <ul class="timeline week-list">
@@ -306,9 +307,6 @@ function FileChips({ org, repos, links }: { org: string; repos: string[]; links:
 
 // --------------------------------------------------------------------------- Schedule
 
-export const ROW_CLASS: Record<string, string> = { lecture: 'lec', lab: 'lab', assignment: 'asg', due: 'asg', exam: 'exam', special_event: 'evt', term_date: 'term' };
-export const ROW_WORD: Record<string, string> = { lecture: 'lecture', lab: 'lab', assignment: 'hand out', due: 'due', exam: 'exam', special_event: 'event', term_date: 'semester date' };
-
 /** Monday of the week `iso` falls in, as yyyy-mm-dd. */
 function mondayOf(iso: string, tz: string): string {
   const day = dayKey(iso, tz);
@@ -317,37 +315,20 @@ function mondayOf(iso: string, tz: string): string {
   return new Date(Date.UTC(y, m - 1, d - dow)).toISOString().slice(0, 10);
 }
 
-interface WeekGroup {
-  title: string;
-  /** The first day of the week, for its heading; none for what falls outside the semester. */
-  from?: string;
-  rows: ScheduleRow[];
-}
-
 /**
- * The rows by week. With the semester's dates, by semester week as the Dashboard counts them
- * (week 1 from `start`), one group for what falls before the semester and one for after;
- * without them (an older source), by calendar week, numbered by place.
+ * The rows by week. With the semester's dates, by semester week as the instructor's Schedule
+ * groups them (`schedule.weekGroups`: week 1 from `start`, a bucket before and after); without
+ * them (an older source), by calendar week, numbered by place.
  */
-function weekGroups(rows: ScheduleRow[], facts: SemesterFacts, tz: string): WeekGroup[] {
+function rowWeeks(rows: ScheduleRow[], facts: SemesterFacts, tz: string): { label: string; from?: string; rows: ScheduleRow[] }[] {
   const term = termOfFacts(facts);
-  const groups: WeekGroup[] = [];
-  const byKey = new Map<string, WeekGroup>();
+  if (term) return weekGroups(rows, (r) => r.when, term, tz, 'all').filter((g) => g.rows.length);
+  const byMonday = new Map<string, ScheduleRow[]>();
   for (const r of rows) {
-    const w = term ? weekOf(r.when, term, tz) : mondayOf(r.when, tz);
-    const key = String(w);
-    let g = byKey.get(key);
-    if (!g) {
-      g = !term ? { title: `Week ${groups.length + 1}`, from: key, rows: [] }
-        : w === 'before' ? { title: 'Before the semester', rows: [] }
-        : w === 'after' ? { title: 'After the semester', rows: [] }
-        : { title: `Week ${w}`, from: addDays(term.start, ((w as number) - 1) * 7), rows: [] };
-      byKey.set(key, g);
-      groups.push(g);
-    }
-    g.rows.push(r);
+    const k = mondayOf(r.when, tz);
+    byMonday.set(k, [...(byMonday.get(k) ?? []), r]);
   }
-  return groups;
+  return [...byMonday].map(([from, list], i) => ({ label: `Week ${i + 1}`, from, rows: list }));
 }
 
 export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; mine: Mine | null; now: number; org: string }) {
@@ -360,9 +341,9 @@ export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; 
   let todayDone = false;
   return (
     <div class="stack">
-      {weekGroups(rows, facts, tz).map((g) => (
-        <section aria-label={g.title}>
-          <h2 class="week-h">{g.title}{g.from ? <> <span>from {fmtDay(g.from, tz, year)}</span></> : null}</h2>
+      {rowWeeks(rows, facts, tz).map((g) => (
+        <section aria-label={g.label}>
+          <h2 class="week-h">{g.label}{g.from ? <> <span>from {fmtDay(g.from, tz, year)}</span></> : null}</h2>
           <ul class="timeline">
             {g.rows.flatMap((r) => {
               const out = [];
@@ -444,7 +425,7 @@ export function AssignmentsView({ org, facts, mine, now, studentView, receipts, 
               {a.lateRule ? <><dt>Late work</dt><dd>{a.lateRule}</dd></> : null}
               {a.maxPoints ? <><dt>Out of</dt><dd>{a.maxPoints} points</dd></> : null}
               {a.solutionShown ? <><dt>Solution shown</dt><dd>{fmtWhen(a.solutionShown, tz, year)}</dd></> : null}
-              {a.submitVia && !auditor ? <><dt>How to hand in</dt><dd>{SUBMIT_WORD[a.submitVia]}{a.submitVia === 'external' && a.submitUrl ? <>: <a href={a.submitUrl} target="_blank" rel="noopener">{hostOf(a.submitUrl)} <Ext /></a></> : null}</dd></> : null}
+              {a.submitVia && !auditor ? <><dt>How to hand in</dt><dd>{SUBMIT_WORD[a.submitVia]}{a.submitVia === 'external' && a.submitUrl ? <>: <a href={a.submitUrl} target="_blank" rel="noopener">{hostOf(a.submitUrl) || a.submitUrl} <Ext /></a></> : null}</dd></> : null}
               {studentView ? <><dt>Yours</dt><dd class="footnote">A student’s repo, team and receipts show here.</dd></>
                 : unknownRole ? <><dt>Yours</dt><dd class="footnote">Could not read your role: your repo, team and receipts are not shown.</dd></>
                 : auditor ? <><dt>Yours</dt><dd class="footnote">As an auditor you hand in no work for this assignment.</dd></>
@@ -488,13 +469,6 @@ export function ThreadView({ receipts, tz, year }: { receipts: Receipts; tz: str
   );
 }
 
-const hostOf = (url: string) => {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-};
 
 function MyUnitRows({ org, a, mine, receipts, loading, tz, year }: { org: string; a: SemesterAssignment; mine: Mine | null; receipts: Receipts | null | undefined; loading: boolean; tz: string; year: number }) {
   if (!mine || a.submitVia === 'external') return null;

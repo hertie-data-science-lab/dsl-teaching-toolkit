@@ -193,7 +193,7 @@ function useCatalogue(courses: Course[]): CatalogueState {
 }
 
 /** Whether a semester the person studies in is over, by its facts' last day once read (`semesterOver`). */
-export const studentPast = (s: Semester, facts: SemesterFacts | null | undefined, now: number) => semesterOver(s, now, facts?.end);
+export const studentPast = (s: Semester, facts: SemesterFacts | null | undefined, now: number) => semesterOver(s, now, facts?.end, facts?.timezone || undefined);
 
 const weekOrStart = (l: { week?: string; starts?: string }) => l.week ?? l.starts ?? '';
 

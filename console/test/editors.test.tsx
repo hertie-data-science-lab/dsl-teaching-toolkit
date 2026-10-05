@@ -509,6 +509,9 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
     expect(nextNumber(doc, 'lecture', kindOf)).toBe(8);
     expect(nextNumber(doc, 'lab', kindOf)).toBe(4);
     expect(nextNumber(doc, 'drop-in', kindOf)).toBe(1);
+    // Readings and supporting files carry no number of their own: nothing is proposed.
+    expect(nextNumber(doc, 'readings', kindOf)).toBeNull();
+    expect(nextNumber(doc, 'assets', kindOf)).toBeNull();
     expect(nextNumber(doc, 'assignment')).toBe(3);
     const lab = blankDraft('lab', { repo: 'm' }) as ReleaseDraft;
     expect(withNumber(lab, doc, kindOf).number).toBe(4);

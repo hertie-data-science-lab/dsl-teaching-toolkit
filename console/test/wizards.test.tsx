@@ -2,6 +2,7 @@
 // pairs, the request args against the registry's schemas, the live checks and the central
 // set-up run against a fake GitHub, and one render per wizard.
 
+import { newestRepo } from '../src/screens/CourseEdit';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it, vi } from 'vitest';
 import { layout } from '../src/forms/Form';
@@ -22,7 +23,7 @@ import { assignmentMarking, assignmentWork, newMaterials } from '../src/tiers/wi
 import { CENTRAL, bootstrapInputs, runBootstrap } from '../src/wizards/central';
 import {
   assignmentArgs, autogradeBlock, cohortOrgName, cohortTerms, contentTerms, courseOrgName, courseSlugOf, formatBlock, formatError, materialsArgs,
-  IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, importFixed, liveSemesters, nextTerm, openAt, ordinalInName, parseSource, signature, sourceFixed, templateRepo, tickedEntries, toggleFormat,
+  IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, importFixed, liveSemesters, nextTerm, openAt, termLabel, ordinalInName, parseSource, signature, sourceFixed, templateRepo, tickedEntries, toggleFormat,
 } from '../src/wizards/model';
 import { allOk, checkOrg, checkTemplate, readSource } from '../src/wizards/verify';
 import { saveDraft } from '../src/wizards/drafts';
@@ -79,6 +80,10 @@ describe('derived names', () => {
   it('offers the terms after the newest cohort', () => {
     expect(nextTerm('f2026')).toBe('s2027');
     expect(nextTerm('s2027')).toBe('f2027');
+    expect(nextTerm('w2026')).toBe('w2026');
+    expect(termLabel('s2027')).toBe('Spring 2027');
+    expect(newestRepo(['course-materials', 'course-materials-f2025', 'course-materials-s2026', 'course-materials-f2026'])).toBe('course-materials-f2026');
+    expect(newestRepo(['course-materials', 'lecture-code'])).toBe('course-materials');
     expect(cohortTerms(['f2026'], NOW)).toEqual(['s2027', 'f2027']);
     expect(cohortTerms([], Date.parse('2026-03-01'))).toEqual(['f2026', 's2027']);
     expect(contentTerms(['f2026'], NOW)).toEqual(['f2026', 's2027']);

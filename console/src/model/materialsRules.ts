@@ -71,8 +71,11 @@ export function inferKind(section: string, aliases: Record<string, string> = {})
   return kind ? { kind, named: true } : { kind: DEFAULT_KIND, named: false };
 }
 
-/** `schedule_plan.deploy_section`: the top folder a copy lands in, or its repo when it lands at the root. */
-export function landingSection(copy: { folder: string; path: string; dest: string }, defaultRepo: string): string {
+/** `schedule_plan.deploy_section`: the top folder a copy lands in. A copy into the repo's root is
+ * one name: that name is the section when it names a kind (the repo's `aliases`, else a built-in
+ * one), else the destination repo is. */
+export function landingSection(copy: { folder: string; path: string; dest: string }, defaultRepo: string, aliases: Record<string, string> = {}): string {
   const dest = (copy.path || copy.folder).replace(/^\/+|\/+$/g, '');
-  return dest.includes('/') ? dest.split('/')[0] : copy.dest || defaultRepo;
+  const head = dest.split('/')[0];
+  return dest.includes('/') || (head && aliasKind(head, aliases)) ? head : copy.dest || defaultRepo;
 }

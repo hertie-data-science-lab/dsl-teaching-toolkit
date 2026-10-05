@@ -10,7 +10,7 @@ import { act } from 'preact/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient } from '../src/github/client';
-import { endedNow, loadCatalogue, parseOrgs, pool, runningNow, termRank } from '../src/model/catalogue';
+import { endedNow, loadCatalogue, over, parseOrgs, pool, runningNow, semesterOver, termRank } from '../src/model/catalogue';
 import type { Loaded } from '../src/model/status';
 import { discoverEstate, studentSemesters, type Course, type Semester } from '../src/model/discovery';
 import { myCoursesOnly, saveMyCoursesOnly, type PrefStore } from '../src/model/prefs';
@@ -189,8 +189,20 @@ describe('loading the catalogue', () => {
     expect(runningNow({ org: 'a', termLabel: 'Fall 2025' }, NOW)).toBe(false);
   });
 
+  it('reads a last day as the engine does: over once the next day starts in the semester’s timezone', () => {
+    expect(over('2026-12-18', Date.parse('2026-12-18T22:30:00Z'), 'Europe/Berlin')).toBe(false);
+    expect(over('2026-12-18', Date.parse('2026-12-18T23:30:00Z'), 'Europe/Berlin')).toBe(true);
+    expect(over('2026-12-18', Date.parse('2026-12-19T04:00:00Z'), 'America/New_York')).toBe(false);
+    // A datetime (an archive date) is over from that instant.
+    expect(over('2027-01-31T00:00:00Z', Date.parse('2027-01-31T00:00:00Z'))).toBe(true);
+    const sem = { org: 'x-f2026', termLabel: 'Fall 2026', archived: false };
+    expect(semesterOver(sem, Date.parse('2026-12-18T22:30:00Z'), '2026-12-18', 'Europe/Berlin')).toBe(false);
+    expect(semesterOver(sem, Date.parse('2026-12-18T23:30:00Z'), '2026-12-18', 'Europe/Berlin')).toBe(true);
+    expect(semesterOver({ ...sem, archived: true }, 0, '2026-12-18')).toBe(true);
+  });
+
   it('gives a semester with no end an approximate one from its key, so it does not run for ever', () => {
-    // Fall to 1 February, spring to 1 August, summer to 1 October, winter to 1 April.
+    // Fall to 31 January, spring to 31 July, summer to 30 September, winter to 31 March, each its last day.
     expect(runningNow({ org: 'x-f2024', termLabel: 'Fall 2024', archived: false }, NOW)).toBe(false);
     expect(endedNow({ org: 'x-f2024', termLabel: 'Fall 2024', archived: false }, NOW)).toBe(true);
     expect(runningNow({ org: 'x-f2026', termLabel: 'Fall 2026', archived: false }, NOW)).toBe(true);

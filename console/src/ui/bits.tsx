@@ -9,18 +9,31 @@ import { Alert, Check, Eye, Ext, Fail, Skip } from './icons';
 export const DOCS = 'https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/';
 export const SOON = 'Coming in this build';
 
-export function ghUrl(org: string, repo?: string, path?: string, branch = 'main'): string {
-  return `https://github.com/${org}${repo ? `/${repo}` : ''}${repo && path ? `/blob/${branch}/${path}` : ''}`;
+/** A repo path as a GitHub URL carries it: each segment encoded, the slashes kept. */
+export const encPath = (path: string): string => path.split('/').map(encodeURIComponent).join('/');
+
+/**
+ * The GitHub page of an org, a repo, or a file (`blob`) or folder (`tree`) in it. The one rule
+ * for the branch: `main` for the repos the toolkit creates; `HEAD` (the default branch, whatever
+ * it is called) for a repo it did not.
+ */
+export function ghUrl(org: string, repo?: string, path?: string, branch = 'main', view: 'blob' | 'tree' = 'blob'): string {
+  return `https://github.com/${org}${repo ? `/${repo}` : ''}${repo && path ? `/${view}/${branch}/${encPath(path)}` : ''}`;
 }
 
 /** GitHub's in-browser editor for one file, optionally at a line. */
 export function editUrl(org: string, repo: string, path: string, branch = 'main', line?: number): string {
-  return `https://github.com/${org}/${repo}/edit/${branch}/${path}${line ? `#L${line}` : ''}`;
+  return `https://github.com/${org}/${repo}/edit/${branch}/${encPath(path)}${line ? `#L${line}` : ''}`;
 }
 
 /** GitHub's new-file page with the name filled in: where an edit link goes while the file does not exist yet. */
 export function newFileUrl(org: string, repo: string, path: string, branch = 'main'): string {
   return `https://github.com/${org}/${repo}/new/${branch}?filename=${encodeURIComponent(path)}`;
+}
+
+/** GitHub's upload page for a repo's branch. */
+export function uploadUrl(org: string, repo: string, branch = 'main'): string {
+  return `https://github.com/${org}/${repo}/upload/${branch}`;
 }
 
 /** One workflow run of `repo` (`owner/name`). */
