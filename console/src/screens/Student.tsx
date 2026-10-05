@@ -20,7 +20,7 @@ import { gradebookUrl, isMarked, knownAuditor, patchLines, patchNotes, readAllRe
 import { lastVisit, markVisit } from '../model/prefs';
 import { weekGroups } from '../model/schedule';
 import { IMG_HOSTS, MY_STATE_WORD, STUDENT_CHOICE, StatusFileSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
-import { semesterLine, termOfFacts, weekItems, type WeekItem } from '../model/week';
+import { ROW_CLASS, ROW_WORD, semesterLine, termOfFacts, weekItems, type WeekItem } from '../model/week';
 import { STUDENT_SCREENS, studentHref } from '../router';
 import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
@@ -306,9 +306,6 @@ function FileChips({ org, repos, links }: { org: string; repos: string[]; links:
 }
 
 // --------------------------------------------------------------------------- Schedule
-
-export const ROW_CLASS: Record<string, string> = { lecture: 'lec', lab: 'lab', assignment: 'asg', due: 'asg', exam: 'exam', special_event: 'evt', term_date: 'term' };
-export const ROW_WORD: Record<string, string> = { lecture: 'lecture', lab: 'lab', assignment: 'hand out', due: 'due', exam: 'exam', special_event: 'event', term_date: 'semester date' };
 
 /** Monday of the week `iso` falls in, as yyyy-mm-dd. */
 function mondayOf(iso: string, tz: string): string {
