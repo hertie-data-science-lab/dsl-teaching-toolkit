@@ -1063,7 +1063,9 @@ def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | Non
     None means the file is genuinely absent (a 404) - nothing else. Any other failure to
     read it (no permission, rate limit, network) raises, because callers treat None as
     "not configured yet" and would otherwise read a transient API failure as an empty
-    roster/schedule/registry and cheerfully do nothing. Same rule as repo_blob_shas."""
+    roster/schedule/registry and cheerfully do nothing. Same rule as repo_blob_shas.
+    A file over 1 MiB, which the Contents API sends no content for, is read by its blob
+    (`_whole`), so a blank answer is a genuinely empty file."""
     url = f"repos/{org}/{repo}/contents/{path}"
     if ref:
         url += f"?ref={ref}"
@@ -1074,7 +1076,13 @@ def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | Non
         if is_missing_resource(out):
             return None
         raise RuntimeError(f"could not read {org}/{repo}/{path}: {out[:200]}")
-    return _decoded(out)
+    if text := _decoded(out):
+        return text
+    # Blank: an empty file, or one over 1 MiB that the Contents API sent no content for.
+    code, sha = _read(org, repo, "api", url, "--jq", ".sha")
+    if code != 0:
+        raise RuntimeError(f"could not read {org}/{repo}/{path}: {sha[:200]}")
+    return _whole(org, repo, path, "", sha.strip())
 
 
 def _peek(org: str, repo: str, *args: str) -> tuple[str, str] | None:
@@ -1092,8 +1100,7 @@ def _peek(org: str, repo: str, *args: str) -> tuple[str, str] | None:
     else:
         sha, _, encoded = out.partition("\n")
     if not encoded.strip():
-        # A file over 1 MB comes back with no content: nothing here says what it holds.
-        return None
+        return None  # empty, or over 1 MiB: the caller's own read settles which
     return _decoded(encoded), sha or blob_sha(base64.b64decode(encoded))
 
 
@@ -1125,7 +1132,29 @@ def get_file_with_sha(
             return None
         raise RuntimeError(f"could not read {org}/{repo}/{path}: {out[:200]}")
     sha, _, encoded = out.partition("\n")
-    return _decoded(encoded), sha
+    return _whole(org, repo, path, _decoded(encoded), sha), sha
+
+
+_EMPTY_BLOB = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"  # blob_sha(b"")
+
+
+def _whole(org: str, repo: str, path: str, text: str, sha: str) -> str:
+    """`text`, or - when it is blank but the file's blob is not the empty one - the
+    file's text read through the blobs API.
+
+    The Contents API inlines nothing over 1 MiB: it answers `content: ""` on a 200, so a
+    plot-heavy notebook read as an EMPTY file, and a caller writing it back wrote nothing
+    over the original. Every reader here goes through this, so only a 404 reads as
+    nothing; a blob that cannot be read raises, and one that is not UTF-8 raises
+    `UnicodeDecodeError`, as any other non-text file does."""
+    if text or sha == _EMPTY_BLOB:
+        return text
+    blob = get_blob(org, repo, sha)
+    if blob is None:
+        raise RuntimeError(
+            f"could not read {org}/{repo}/{path}: its blob {sha} is gone"
+        )
+    return blob.decode("utf-8")
 
 
 def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ...]:
