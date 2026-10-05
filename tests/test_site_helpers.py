@@ -27,6 +27,8 @@ from dsl_course.schedule import Deploy, Release, Schedule
 from dsl_course.site_repo import Link
 from tests.conftest import entry_links, repo_row
 
+_NO_ALIASES = lambda repo: None
+
 
 def test_semester_label():
     assert site._semester_label("Deep-Learning-f2026") == "Fall 2026"
@@ -331,7 +333,7 @@ def _deploy(path, repo="materials", dest=None):
 def _landed(monkeypatch, deploy, readings=False, gh=_tree_gh):
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", gh)
-    return site._landed("Semester-f2026", deploy, frozenset(), readings)
+    return site._landed("Semester-f2026", deploy, frozenset(), readings, _NO_ALIASES)
 
 
 def test_a_landed_folder_links_its_files_and_folds_its_subfolders(monkeypatch):
@@ -406,7 +408,9 @@ _READINGS_TREE = (
 
 def test_a_readings_row_inlines_its_overlay_and_lists_everything_else(monkeypatch):
     monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", _READINGS_TREE))
-    landed = site._landed("C", _deploy("readings/01_week-1"), frozenset(), True)
+    landed = site._landed(
+        "C", _deploy("readings/01_week-1"), frozenset(), True, _NO_ALIASES
+    )
     # Only the overlay is taken out: an uploaded `notes.md` or `refs.bib` is a reading.
     assert sorted(x.name for x in landed.links) == ["ch1.pdf", "notes.md", "refs.bib"]
     assert landed.overlays == ["readings/01_week-1/READINGS.md"]
@@ -415,7 +419,9 @@ def test_a_readings_row_inlines_its_overlay_and_lists_everything_else(monkeypatc
     )
     assert site._reading_list("C", [landed]) == "### Week 1\n\n- Blitzstein."
     # Any other kind keeps the overlay as a file.
-    other = site._landed("C", _deploy("readings/01_week-1"), frozenset(), False)
+    other = site._landed(
+        "C", _deploy("readings/01_week-1"), frozenset(), False, _NO_ALIASES
+    )
     assert "READINGS.md" in [x.name for x in other.links] and not other.overlays
 
 

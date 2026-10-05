@@ -6,8 +6,12 @@ from where its first copy lands. Nothing is read off a folder name beyond that s
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from dsl_course import schedule, schedule_plan
 from dsl_course.schedule import Deploy, Release, Schedule
@@ -153,7 +157,7 @@ def test_a_repo_per_kind_destination_is_its_own_section():
 def test_a_whole_folder_copied_to_the_root_is_that_folder():
     # `lectures` copied whole lands at `materials/lectures`: the folder, not the repo.
     lectures = Deploy("cm", "lectures")
-    assert schedule_plan.deploy_section(lectures) == "lectures"
+    assert schedule_plan.deploy_section(lectures, None) == "lectures"
     assert _kind(lectures) == ("lecture", True)
     (row,) = _rows([Release("lecture-1", _at(1), [lectures])])
     assert [sr.row.key for sr in schedule_plan.site_rows([row])] == ["lecture-1"]
@@ -172,7 +176,7 @@ def test_a_whole_folder_no_kind_names_is_supporting_files():
 
 def test_a_single_file_at_the_root_takes_the_repo_as_its_section():
     syllabus = Deploy("cm", "SYLLABUS.md")
-    assert schedule_plan.deploy_section(syllabus) == "materials"
+    assert schedule_plan.deploy_section(syllabus, None) == "materials"
     assert _kind(syllabus) == ("assets", True)
     assert _kind(Deploy("cm", "SYLLABUS.md", "labs")) == ("lab", True)
 
@@ -406,3 +410,17 @@ def test_a_supporting_files_entry_needs_no_number():
     sched.releases.append(Release("intro", _at(3), [Deploy("cm", "lectures/b")]))
     assert [m.key for m in schedule_plan.unnumbered(sched)] == ["intro"]
     assert schedule_plan.unnumbered_release(sched, "cm", [""]) is not None
+
+
+LANDING_KINDS = Path(__file__).parent / "fixtures" / "landing_kinds.json"
+
+
+@pytest.mark.parametrize(
+    "case", json.loads(LANDING_KINDS.read_text())["cases"], ids=lambda c: str(c)
+)
+def test_the_shared_landing_table(case):
+    # The console runs the same table (`materialsRules.landingSection`).
+    deploy = Deploy("cm", case["dest"], case["repo"], case["dest"])
+    release = Release("x", _at(1), [deploy])
+    landing = schedule_plan.entry_landing(release, lambda repo: case["aliases"])
+    assert (landing.section, landing.kind) == (case["section"], case["kind"])

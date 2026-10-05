@@ -69,6 +69,7 @@ from .repos import (
     default_branch,
 )
 from .schedule_plan import (
+    Aliases,
     PlannedRow,
     declared_syllabus,
     deploy_dest,
@@ -162,10 +163,12 @@ def _landed(
     deploy: schedule.Deploy,
     allow: frozenset[str],
     readings: bool,
+    aliases: Aliases,
 ) -> _Landed | None:
     """What `deploy` has landed, or None while nothing has (`site_repo.landed_links`),
     read off the destination repo's memoised tree (`_repo_tree`), so a released folder
-    whose name carries no ordinal is as linked as one that does."""
+    whose name carries no ordinal is as linked as one that does. Its section is the one
+    the status gives it: through its source repo's `aliases`."""
     repo, path = deploy.semester_dest_repo, deploy_dest(deploy)
     branch, blobs = _repo_tree(semester_org, repo)
     found = landed_links(semester_org, repo, branch, blobs, path, allow, readings)
@@ -173,7 +176,8 @@ def _landed(
         return None
     links, overlays = found
     root_file = bool(path) and path in blobs and "/" not in path
-    return _Landed(repo, deploy_section(deploy), links, overlays, root_file)
+    section = deploy_section(deploy, aliases(deploy.course_source_repo))
+    return _Landed(repo, section, links, overlays, root_file)
 
 
 def _row_landed(
@@ -182,6 +186,7 @@ def _row_landed(
     allow: frozenset[str],
     live_repos: frozenset[str],
     readings: bool,
+    aliases: Aliases,
 ) -> list[_Landed]:
     """Everything these copies have landed, in plan order. A copy into a repo the semester
     does not have yet has landed nothing, and a copy that lands INSIDE another copy of the
@@ -198,7 +203,7 @@ def _row_landed(
     for deploy, (repo, path) in zip(deploys, dests, strict=True):
         if repo not in live_repos or inside(repo, path):
             continue
-        landed = _landed(semester_org, deploy, allow, readings)
+        landed = _landed(semester_org, deploy, allow, readings, aliases)
         if landed is not None:
             out.append(landed)
     return out
@@ -407,6 +412,7 @@ def _offplan_rows(
     rows: list[PlannedRow],
     allow: frozenset[str],
     live_repos: frozenset[str],
+    aliases: Aliases,
 ) -> list[tuple[str, _Row]]:
     """`(key, row)` for each off-plan folder (`schedule_plan.offplan_folders`; decision
     0013: it keeps a row, on its kind's tab): unnumbered, undated, named for its folder. A
@@ -416,7 +422,9 @@ def _offplan_rows(
 
     def land(repo: str, folder: str, readings: bool) -> list[_Landed]:
         deploy = schedule.Deploy("", folder, repo)
-        return _row_landed(semester_org, (deploy,), allow, live_repos, readings)
+        return _row_landed(
+            semester_org, (deploy,), allow, live_repos, readings, aliases
+        )
 
     folders = offplan_folders(
         (d for r in rows for d in r.deploys),
@@ -454,6 +462,7 @@ def _site_rows(
     rows: list[PlannedRow],
     allow: frozenset[str],
     live_repos: frozenset[str],
+    aliases: Aliases,
 ) -> tuple[dict[str, str], list[str]]:
     """The `_lectures` collection - one file per site row (`schedule_plan.site_rows`),
     plus the off-plan folders' rows - and the kind tabs it needs.
@@ -465,14 +474,16 @@ def _site_rows(
     for sr in site_rows(rows):
         r = sr.row
         landed = _row_landed(
-            semester_org, r.deploys, allow, live_repos, r.kind == "readings"
+            semester_org, r.deploys, allow, live_repos, r.kind == "readings", aliases
         )
         if not r.shown and all(item.root_file for item in landed):
             continue
         readings = []
         pending = False
         for attached in sr.readings:
-            got = _row_landed(semester_org, attached.deploys, allow, live_repos, True)
+            got = _row_landed(
+                semester_org, attached.deploys, allow, live_repos, True, aliases
+            )
             readings += got
             pending = pending or not got
         row = _Row(
@@ -489,7 +500,7 @@ def _site_rows(
             dests=r.dests,
         )
         built.append((r.key, row))
-    built += _offplan_rows(semester_org, rows, allow, live_repos)
+    built += _offplan_rows(semester_org, rows, allow, live_repos, aliases)
     out: dict[str, str] = {}
     tabs: dict[str, None] = {}
     for key, row in built:
@@ -902,13 +913,13 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # The rows: one per `releases:` entry, in date order, kind declared or inferred
         # once from where its first copy lands (the source repo's `materials.yml` aliases,
         # else the built-in ones).
-        planned = planned_rows(
-            sched, lambda repo: read_materials(course_org, repo).kinds
-        )
+        # An off-plan folder's copy names no source repo, and so no aliases.
+        kinds = lambda repo: read_materials(course_org, repo).kinds if repo else None
+        planned = planned_rows(sched, kinds)
         # The repos the release plan names or a released session was found in: never a
         # student's repo, whose folder names would reach this public site.
         live = frozenset(indexable)
-        rows, present = _site_rows(semester_org, planned, allow, live)
+        rows, present = _site_rows(semester_org, planned, allow, live, kinds)
         log_step(
             f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} row(s) "
             f"({sum('unreleased: true' in text for text in rows.values())} not released "

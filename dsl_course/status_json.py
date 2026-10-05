@@ -124,10 +124,10 @@ from .repos import default_branch
 from .schedule_plan import (
     Unnumbered,
     deploy_dest,
-    deploy_section,
     duplicate_numbers,
     duplicate_text,
     entry_kind,
+    entry_landing,
     own_number,
     planned_rows,
     site_rows,
@@ -872,15 +872,15 @@ def kindless_entry_problems(facts: SemesterFacts) -> list[dict]:
     """`kinds:<key>` for each shown `releases:` entry that declares no kind and lands in a
     folder no kind names: it was a lecture row before decision 0031 and is now supporting
     files, no row at all."""
+    aliases = lambda repo: facts.aliases.get(repo, {})
     out = []
     for r in facts.sched.releases:
-        if r.kind or not r.deploy or not r.show_on_site:
+        landing = entry_landing(r, aliases)
+        if landing.section is None or landing.named:
             continue
-        first = r.deploy[0]
-        kinds = facts.aliases.get(first.course_source_repo, {})
-        section = deploy_section(first, kinds)
-        if alias_kind(section, kinds):
+        if not r.show_on_site:
             continue
+        first, section = r.deploy[0], landing.section
         where = (
             f"{section}/"
             if "/" in deploy_dest(first)
