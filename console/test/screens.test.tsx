@@ -591,7 +591,8 @@ describe('S2 course and S17 template', () => {
     expect(out).toContain('/edit/solution/grading_config.yml');
     // No `starter:` and no tests: written by hand, so there is nothing to derive.
     expect(out).toMatch(/value="handwritten" checked/);
-    expect(out).toContain('Starter written by hand on main; nothing is derived.');
+    // No Student version panel for a hand-written starter (decision 0028 rule 4).
+    expect(out).not.toContain('<h3>Student version');
     expect(out).not.toContain('Derive student version');
   });
   const derivedFiles = () => new StaticFiles({ [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: `${GRADING}starter: derived\n` }, {}, TREE);
@@ -599,7 +600,7 @@ describe('S2 course and S17 template', () => {
     const out = html(<TemplateScreen {...cp} files={derivedFiles()} entry="assignment-3-f2026" />);
     expect(out).toMatch(/value="derived" checked/);
     expect(out).toContain('Derive student version');
-    expect(out).not.toContain('Starter written by hand on main');
+    expect(out).toContain('<h3>Student version');
     const st = { ...STATUS, course: { ...STATUS.course!, templates: [{ repo: 'assignment-3-f2026', slug: 'assignment-3-f2026', state: 'ready', starter: 'derived' as const }] } };
     const read = html(<TemplateScreen {...cp} loaded={{ ...ready, status: st } as Loaded} entry="assignment-3-f2026" />);
     expect(read).toMatch(/value="derived" checked/);

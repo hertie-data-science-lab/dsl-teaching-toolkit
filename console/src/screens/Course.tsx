@@ -800,17 +800,13 @@ export function TemplateScreen(p: CourseProps) {
               <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf'])} values={cur} onChange={change} />
               <Lives org={course.org} repo={repo} path="grading_config.yml" branch="solution" exists={gradingExists} />
             </div>
+            {/* A hand-written starter has nothing to derive: the radio's `?` says so (decision 0028 rule 4). */}
             {cur.starter === 'derived' ? (
               <div class="form-section">
                 <h3>Student version <Hint label="About the student version" doc={STARTER_DOC}>Write the solution once and mark the answers; Derive builds the starter students get by blanking them. Run it after every change to the solution.</Hint></h3>
                 <div class="actions"><OpButtons def={derive(scope, repo, repo, heading)} small /></div>
               </div>
-            ) : (
-              <div class="form-section">
-                <h3>Student version</h3>
-                <p class="footnote">Starter written by hand on main; nothing is derived.</p>
-              </div>
-            )}
+            ) : null}
             <div class="form-section">
               <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: course.org, repo, path: 'grading_config.yml', branch: 'solution', exists: gradingExists }} />
             </div>
