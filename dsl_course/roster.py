@@ -94,17 +94,24 @@ def known_role(value: str) -> bool:
     return value.strip().lower() in ("", ROLE_ENROLLED, ROLE_AUDITOR)
 
 
-def normalise_role(value: str) -> str:
+def normalise_role(value: str, lineno: int) -> str:
     """Map a raw `role` cell to `enrolled` / `auditor`.
 
     Blank (or a column that isn't there at all - a roster seeded before the column
     existed) means `enrolled`, so no deployed semester breaks. Anything unrecognised also
-    reads as `enrolled`, but says so on stderr rather than silently mis-classifying."""
+    reads as `enrolled`, but says so on stderr rather than silently mis-classifying.
+
+    The warning names the ROW, never the cell: a name with an unquoted comma shifts the
+    cells, so the `role` cell can hold a student's name or address, and this line lands in
+    the public run log of every faculty workflow that reads the roster."""
     role = value.strip().lower()
     if role == ROLE_AUDITOR:
         return ROLE_AUDITOR
     if not known_role(value):
-        log_err(f"unknown roster role '{value.strip()}' - treating as {ROLE_ENROLLED}")
+        log_err(
+            f"{ROSTER_PATH} row {lineno}: unrecognised role - treating as "
+            f"{ROLE_ENROLLED} (expected {ROLE_ENROLLED} or {ROLE_AUDITOR})"
+        )
     return ROLE_ENROLLED
 
 
@@ -153,7 +160,7 @@ def parse(text: str, faults: list[ConfigFault] | None = None) -> list[Student]:
                     f"(expected {ROLE_ENROLLED} or {ROLE_AUDITOR})",
                 )
             )
-        values["role"] = normalise_role(values["role"])
+        values["role"] = normalise_role(values["role"], lineno)
         if faults is not None:
             for column, seen in (("github_handle", handles), ("hertie_email", emails)):
                 cell = values[column].casefold()

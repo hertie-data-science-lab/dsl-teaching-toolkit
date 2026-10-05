@@ -46,7 +46,18 @@ def test_auditor_role_is_recognised_case_and_space_insensitively():
 def test_unknown_role_falls_back_to_enrolled_and_warns(capsys):
     (student,) = roster.parse(f"{HEADER}\nada@uni.edu,Ada,guest,ada-l,42,dsl-abc\n")
     assert student.role == roster.ROLE_ENROLLED
-    assert "guest" in capsys.readouterr().err  # a typo must be visible, not silent
+    # a typo must be visible, not silent: the warning points at the row
+    assert "row 2: unrecognised role" in capsys.readouterr().err
+
+
+def test_a_shifted_role_cell_is_never_echoed_to_the_log(capsys):
+    # an unquoted comma in a name shifts the cells, so `role` holds part of the name and
+    # `github_handle` the real role. The warning goes to every faculty workflow's PUBLIC
+    # run log, so it may carry the row number and the allowed values, never the cell.
+    roster.parse(f"{HEADER}\nada@uni.edu,Lovelace, Ada,enrolled,ada-l,42,dsl-abc\n")
+    err = capsys.readouterr().err
+    assert "row 2" in err and "expected enrolled or auditor" in err
+    assert "Ada" not in err and "ada" not in err
 
 
 def test_parse_tolerates_a_utf8_bom_from_excel():
