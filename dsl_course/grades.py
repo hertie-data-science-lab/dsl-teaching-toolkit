@@ -4291,6 +4291,13 @@ def distribute(
         "unknown": unknown,
         "failed": 0,
     }
+    if assignment and held.get(assignment) and not dry_run:
+        # A count: which marks are held is the sheet digest's to say, line by line.
+        log(
+            f"  {assignment} is not recorded as returned: "
+            f"{plural(len(held[assignment]), 'mark')} held until the sheet is fixed, "
+            f"and the automatic return asks again"
+        )
     for slug in sorted(held):
         for handle, (_unit, reason) in sorted(held[slug].items()):
             log_person(
@@ -4437,7 +4444,9 @@ def distribute(
     def finish(failed_mail: int, told: list[str], raised: bool = False) -> bool:
         """The final record: `told` as told, and every other address back as it was, so
         an email that did not go is retried by the next Return marks run. A run that
-        `raised` never marks the assignment returned."""
+        `raised` never marks the assignment returned, and nor does one that held any of
+        its marks: the automatic return asks again every tick, and each later run sends
+        only what `distributed.csv` says has not gone out yet."""
         for handle in told:
             record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
         counts["emails"] = len(told)
@@ -4455,6 +4464,7 @@ def distribute(
                 and not raised
                 and not counts["failed"]
                 and not (failed_mail and not told)
+                and not held.get(assignment)
                 else None
             ),
             now=now,

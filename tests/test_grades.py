@@ -3141,3 +3141,37 @@ def test_a_gradebook_whose_student_already_reads_it_is_not_granted_again(monkeyp
     for handle in handles:
         assert grades.provision_one("S", handle, existing, held) == "skipped"
     assert added == ["bo", "cy"]
+
+
+def test_a_held_mark_keeps_the_assignment_to_be_returned_again(tmp_path, monkeypatch):
+    # A typed-but-held mark (a Unicode minus) must not let the once-only record land:
+    # the automatic return would skip the assignment for good and that student would
+    # never get their mark. The rerun after the fix sends only what had not gone out.
+    held = _TWO_SHEET.replace(
+        "score_individual: 40\n    adjustment_individual:\n",
+        "score_individual: 40\n    adjustment_individual: −3\n",
+    )
+    assert held != _TWO_SHEET
+    first = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": held},
+        roster_rows=_TWO_ROSTER,
+        assignment="assignment-1",
+    )
+    ((_cfg, cfg_files, _d),) = first["config"]
+    assert grades.marks_return_record("assignment-1") not in cfg_files
+    assert [m[0] for batch in first["outbox"] for m in batch] == ["ada@uni.edu"]
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": _TWO_SHEET},
+        roster_rows=_TWO_ROSTER,
+        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+        exported=cfg_files[grades.SEMESTER_CSV_NAME],
+        assignment="assignment-1",
+    )
+    assert [repo for repo, _f, _d in again["gradebooks"]] == ["grades-ben-k"]
+    assert [m[0] for batch in again["outbox"] for m in batch] == ["ben@uni.edu"]
+    ((_cfg, cfg_files, _d),) = again["config"]
+    assert grades.marks_return_record("assignment-1") in cfg_files
