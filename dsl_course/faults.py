@@ -35,6 +35,21 @@ from enum import Enum, IntEnum
 
 from .course import CONFIG_REPO
 
+
+def parse_moment(raw: object) -> datetime | None:
+    """An ISO timestamp - a GitHub API `2026-09-04T09:12:00Z`, or one this toolkit wrote
+    into a marker - as a datetime, or None for anything that does not read as one.
+
+    None rather than an exception: a malformed row in a run listing, or a marker somebody
+    edited by hand, is no information, never a crash inside a tick."""
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw))
+    except ValueError:
+        return None
+
+
 # How close a source's moment has to be before anything is said, and how much louder each
 # step is. Deliberately tight - a day, half a day, a quarter of a day - because a source
 # is staged in minutes once somebody knows, and a week of warnings is a week of ignoring
