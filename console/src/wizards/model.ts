@@ -5,6 +5,7 @@
 import { neverMaterial } from '../edit/badges';
 import { compileAll, withheldBy } from '../edit/glob';
 import type { TreeEntry } from '../github/client';
+import { seasonOf, termRank } from '../model/catalogue';
 import { termOf } from '../model/discovery';
 import { kebab } from '../model/format';
 import { DEFAULT_FORMATS, HANDLE_RE, SUBMIT_VIA_DEFAULT } from '../model/policy';
@@ -49,14 +50,14 @@ export function cohortOrgName(courseOrg: string, code: string, term: string): st
 export const TERM_RE = /^[fs]\d{4}$/;
 
 export function termLabel(term: string): string {
-  return termOf(`x-${term}`).label;
+  return termOf(term).label;
 }
 
 /** The semester after `term`: f2026 -> s2027 -> f2027. */
 export function nextTerm(term: string): string {
-  const m = /^([fs])(\d{4})$/.exec(term);
-  if (!m) return term;
-  return m[1] === 'f' ? `s${Number(m[2]) + 1}` : `f${m[2]}`;
+  const k = seasonOf(term);
+  if (k?.season === 'f') return `s${k.year + 1}`;
+  return k?.season === 's' ? `f${k.year}` : term;
 }
 
 /** The semester a course starts next, from the date: Fall from January to July, else next Spring. */
@@ -99,12 +100,6 @@ export function ordinalInName(name: unknown): boolean {
 
 export const ORDINAL_WARNING =
   "The number is set when the assignment joins a semester's schedule: an assignment numbered 3 becomes assignment-3, and each student's copy assignment-3-<handle>. Keep the number in the name anyway?";
-
-/** A semester key's order: newest first (f2026 before s2026 before f2025). */
-const termRank = (term: string) => {
-  const m = /^([fswu])(\d{4})$/.exec(term);
-  return m ? Number(m[2]) * 10 + ({ s: 1, u: 2, f: 3, w: 4 } as Record<string, number>)[m[1]] : 0;
-};
 
 /** The semesters a template can be added to: the live ones, newest first. */
 export function liveSemesters<T extends { term: string }>(cohorts: T[], live: (c: T) => boolean): T[] {

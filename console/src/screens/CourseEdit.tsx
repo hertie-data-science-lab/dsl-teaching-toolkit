@@ -10,6 +10,7 @@ import { badgeFiles, denylisted, neverMaterial } from '../edit/badges';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, compact, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
+import { termRank } from '../model/catalogue';
 import { KIND_LABEL } from '../model/format';
 import { sameHandle } from '../model/people';
 import { ASSETS_KIND, DEFAULT_SYLLABUS, FOLDER_KINDS, MATERIALS_FILE, NOTHING_DECLARED, inferKind, readDeclared, withMark } from '../model/materialsRules';
@@ -403,16 +404,12 @@ export function websiteFileAfter(text: string | null, before: Website, after: We
 }
 
 /**
- * The newest materials repo by its semester tag (`workflows_render._newest_materials`): spring
- * before autumn within a year. The status lists repos by name, oldest first, so its first one is
- * never the default. Without a dated repo, the first one.
+ * The newest materials repo by its semester tag (`workflows_render._newest_materials`, in
+ * `catalogue.termRank`'s order): spring before autumn within a year. The status lists repos by
+ * name, oldest first, so its first one is never the default. Without a dated repo, the first one.
  */
 export function newestRepo(repos: string[]): string | undefined {
-  const key = (r: string) => {
-    const m = /-([fswu])(\d{4})$/.exec(r);
-    return m ? Number(m[2]) * 2 + (m[1] === 'f' ? 1 : 0) : -1;
-  };
-  return repos.reduce<string | undefined>((best, r) => (best === undefined || key(r) > key(best) ? r : best), undefined);
+  return repos.reduce<string | undefined>((best, r) => (best === undefined || termRank(r) > termRank(best) ? r : best), undefined);
 }
 
 /** A course fact the website shows, read-only here: its value, or that it is not set. */

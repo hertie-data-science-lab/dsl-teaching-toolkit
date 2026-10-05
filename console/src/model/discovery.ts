@@ -42,9 +42,9 @@ export const cohortName = (p: { course: Pick<Course, 'name'>; cohort: Pick<Cohor
 
 const SEASON: Record<string, string> = { f: 'Fall', s: 'Spring', w: 'Winter', u: 'Summer' };
 
-/** "hertie-dsl-demo-f2026" -> { term: "f2026", label: "Fall 2026" }. */
+/** "hertie-dsl-demo-f2026" (or the bare key "f2026") -> { term: "f2026", label: "Fall 2026" }. */
 export function termOf(org: string): { term: string; label: string } {
-  const m = /-([fswu])(\d{4})$/.exec(org);
+  const m = /(?:^|-)([fswu])(\d{4})$/.exec(org);
   if (!m) return { term: org.split('-').pop() ?? org, label: org };
   return { term: `${m[1]}${m[2]}`, label: `${SEASON[m[1]]} ${m[2]}` };
 }

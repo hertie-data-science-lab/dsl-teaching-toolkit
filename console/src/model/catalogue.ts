@@ -156,9 +156,9 @@ export async function loadCatalogue(client: GitHubClient, estate: Course[] = [],
   return list;
 }
 
-/** A semester key (`f2026`) as its season and year; null for an org name without one. */
-function seasonOf(org: string): { season: string; year: number } | null {
-  const m = /^([fswu])(\d{4})$/.exec(termOf(org).term);
+/** A semester key (`f2026`) as its season and year; null for anything else. */
+export function seasonOf(term: string): { season: string; year: number } | null {
+  const m = /^([fswu])(\d{4})$/.exec(term);
   return m ? { season: m[1], year: Number(m[2]) } : null;
 }
 
@@ -169,7 +169,7 @@ function seasonOf(org: string): { season: string; year: number } | null {
  */
 function endOf(s: CatalogueSemester): string | undefined {
   if (s.end) return s.end;
-  const k = seasonOf(s.org);
+  const k = seasonOf(termOf(s.org).term);
   if (!k) return undefined;
   const { season, year } = k;
   return { f: `${year + 1}-01-31`, s: `${year}-07-31`, u: `${year}-09-30`, w: `${year + 1}-03-31` }[season];
@@ -211,8 +211,8 @@ export function semesterOver(s: { org: string; termLabel: string; archived: bool
 
 const SEASON_ORDER: Record<string, number> = { s: 1, u: 2, f: 3, w: 4 };
 
-/** A semester org's place in time from its key: larger is newer; 0 for a name without one. */
+/** A semester org's (or a bare key's) place in time: larger is newer; 0 for a name without a key. */
 export function termRank(org: string): number {
-  const k = seasonOf(org);
+  const k = seasonOf(termOf(org).term);
   return k ? k.year * 10 + SEASON_ORDER[k.season] : 0;
 }
