@@ -326,7 +326,7 @@ Everything else is **cumulative**: material deploys, assignment handouts, the si
 
 ## Verifying your schedule
 
-**It checks itself.** Every commit touching `schedule.yml` or `assignments.yml` runs **Validate schedule** in `semester-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X** and a run summary naming what it dropped. That run emails nobody: the fault joins the standing *schedule.yml* [digest issue](#the-digest-issue) in `semester-config` instead, on the next tick - within the minute, since this push fires one - and that is what emails whoever wrote the line.
+**It checks itself.** Every commit touching `schedule.yml` or `assignments.yml` runs **Validate schedule** in `semester-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X** and a run summary naming what it dropped. That run emails nobody: the fault joins the standing *schedule.yml* [digest issue](#the-digest-issue) in `semester-config` instead, on the next tick - within the minute, since this push fires one - and that is what emails whoever wrote the line. An `assignments.yml` that is not YAML goes on its own digest issue instead, and the *schedule.yml* one is left as it stands until it parses.
 
 > The run happens *after* the push: Actions cannot gate a commit, so the red X and the digest issue are how a fault reaches you, rather than the commit being refused.
 
