@@ -40,12 +40,10 @@ function outOf(m: unknown): string {
   return pts == null || pts === '' ? '' : ` (out of ${String(pts)})`;
 }
 
-/** The late penalty the marks grid applies: the assignment's effective `late_penalty_per_day`, null while it is read. */
-function penaltyOf(p: ReadyProps, slug: string): { rate: number | null; known: boolean } {
-  const layers = assignmentSettings(p, slug);
-  if (!layers) return { rate: null, known: false };
-  const e = resolve('late_penalty_per_day', layers);
-  return { rate: penaltyRate(e.value), known: true };
+/** The late penalty the marks grid applies: the assignment's effective `late_penalty_per_day` as status states it (`status_json.run_settings`). */
+function penaltyOf(a: Assignment): number | null {
+  const settings = (a as Assignment & { settings?: Record<string, { value: unknown } | undefined> }).settings;
+  return penaltyRate(settings?.late_penalty_per_day?.value);
 }
 
 export function MarksTab(p: TabProps) {
@@ -67,7 +65,7 @@ export function MarksTab(p: TabProps) {
   const cfg = useGradingConfig(p, a.template);
   const questions = cfg.questions && typeof cfg.questions === 'object' ? (cfg.questions as Record<string, unknown>) : null;
   const qs = questions ? Object.entries(questions) : [];
-  const { rate } = penaltyOf(p, a.slug);
+  const rate = penaltyOf(a);
   const max = qs.reduce((n, [, m]) => n + (Number(questionPoints(m)) || 0), 0);
   const group = a.teams !== null && a.teams !== undefined;
   const scope = cohortScope(p);
