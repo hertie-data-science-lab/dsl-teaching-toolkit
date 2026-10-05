@@ -5169,3 +5169,18 @@ def test_an_unparseable_assignments_yml_holds_the_schedule_digest(monkeypatch):
         rc = scheduler.run("Course-Org", "Semester-Org", WHEN, release=release)
         assert rc == 0
         assert synced == ([(config_digest.ASSIGNMENTS, [broken])] if release else [])
+
+
+def test_a_tick_asks_for_each_template_once(monkeypatch):
+    # A missing template's 404 is not memoised, so every pass that asked re-probed it.
+    asked = []
+    monkeypatch.setattr(
+        scheduler,
+        "_assignment_template",
+        lambda org, slug, entry: asked.append(slug) or None,
+    )
+    templates: dict = {}
+    entry = _due(13)
+    for _ in range(3):
+        assert scheduler._template_for(templates, "C", "a1", entry) is None
+    assert asked == ["a1"]
