@@ -1897,14 +1897,24 @@ def run(
     preview: Summary | None = None
     if sched.instance_unparseable:
         # Every run setting is unknown, so nothing here may act on a default the semester
-        # did not choose. The tick stays green and the fault goes out on the schedule.yml
-        # digest, like an unreadable schedule.yml.
+        # did not choose. The tick stays green. The fault goes out on assignments.yml's own
+        # digest, and the schedule.yml digest is HELD: its window, number, marks-return
+        # and held-solution faults cannot be worked out without the settings, and syncing
+        # it without them posted Cleared for each (and a mail), then New again once fixed.
         log_err(
             f"{semester_org}/{schedule.CONFIG_REPO}/{schedule.ASSIGNMENTS_FILE} is not "
             f"valid YAML - nothing is released, handed out or graded until it is fixed"
         )
         if release:
-            _preflight_sources(course_org, semester_org, sched, now, dry_run, [])
+            _preflight_sources(course_org, semester_org, sched, now, dry_run, None)
+            _sync_config_digest(
+                config_digest.ASSIGNMENTS,
+                course_org,
+                semester_org,
+                [f for f in sched.faults if f.file == schedule.ASSIGNMENTS_FILE],
+                schedule.in_semester_zone(sched, now),
+                dry_run,
+            )
         return 0
     if release:
         # ONE listing of the semester for the whole tick, taken here at the start of it and
