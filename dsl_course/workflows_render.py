@@ -1086,6 +1086,27 @@ def render_sync_membership(semester_orgs: list[str]) -> str:
       trigger types skip that gate, same as the existing scheduler workflow already
       does for cron)
     """
+    auto = _sync_auto_job(
+        "Sync membership",
+        f"""          # The JSON boolean `true` and nothing else - a string "true" or a 1 is absent.
+          DISPATCH_ALL: ${{{{ {_PAYLOAD_ALL_SEMESTERS} }}}}
+{_OLD_PAYLOAD_ENV}{_DEPRECATED_ALL_ENV}# A fault in the course org's own config is emailed to its admins from this step (see
+# dsl_course.notify.route_course), so the automatic job carries the transport and the
+# address list alongside the token. The manual button does not: somebody is standing at
+# that run and reads its log.
+{_MAIL_ENV}
+{_COURSE_ADMIN_ENV}
+""",
+        f"""{_OLD_PAYLOAD_CHECK}{_DEPRECATED_ALL_NOTE}          # First, and never fatal: a push to either of the course's own config files is
+          # what this job is here for, and the reconcile below is what SKIPS the course
+          # when one of them cannot be read. Its own digest issue and mail are the report.
+          python3 -m dsl_course.scheduler --course-org "$COURSE" --check-course-config --no-preview
+          args=(--course-org "$COURSE" --no-preview)
+""",
+        'python3 -m dsl_course.sync_membership "${args[@]}"',
+        on_push=False,
+        all_from_payload=True,
+    )
     return f"""name: Sync membership
 
 on:
@@ -1118,39 +1139,60 @@ on:
           [ "$SEMESTER_ORG" != "{_FACULTY_ONLY}" ] && args+=(--semester-org "$SEMESTER_ORG")
           python3 -m dsl_course.sync_membership "${{args[@]}}"
 {_CRON_CLOSE}
-  sync-auto:
+{auto}"""
+
+
+def _sync_auto_job(
+    step: str,
+    env: str,
+    before: str,
+    cmd: str,
+    *,
+    on_push: bool,
+    all_from_payload: bool,
+) -> str:
+    """The `sync-auto` job a scheduled, pushed or dispatched sync runs: one step, `env`
+    after the shared payload lines, `before` (which sets `args`) ahead of the routing, and
+    `cmd` teed at the end.
+
+    The routing differs on purpose between its two users. `on_push` routes a push of the
+    workflow's own repo to every semester (the site; a push to membership's
+    reconciles the course alone).
+    `all_from_payload` reads every semester from the payload's `all_semesters` flag
+    (membership: a bare dispatch is the course alone); without it a dispatch naming no
+    semester means all of them (the site)."""
+    every = "push|schedule" if on_push else "schedule"
+    unnamed = (
+        """              elif [ "$DISPATCH_ALL" = "true" ]; then
+                args+=(--all-semesters)
+"""
+        if all_from_payload
+        else """              else
+                args+=(--all-semesters)
+"""
+    )
+    wins = (
+        "              # A named semester wins over all_semesters.\n"
+        if all_from_payload
+        else ""
+    )
+    return f"""  sync-auto:
     if: github.event_name != 'workflow_dispatch'
-{_ungated_preamble()}      - name: Sync membership
+{_ungated_preamble()}      - name: {step}
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           EVENT: ${{{{ github.event_name }}}}
           DISPATCH_SEMESTER: ${{{{ {_PAYLOAD_SEMESTER} }}}}
-          # The JSON boolean `true` and nothing else - a string "true" or a 1 is absent.
-          DISPATCH_ALL: ${{{{ {_PAYLOAD_ALL_SEMESTERS} }}}}
-{_OLD_PAYLOAD_ENV}{_DEPRECATED_ALL_ENV}# A fault in the course org's own config is emailed to its admins from this step (see
-# dsl_course.notify.route_course), so the automatic job carries the transport and the
-# address list alongside the token. The manual button does not: somebody is standing at
-# that run and reads its log.
-{_MAIL_ENV}
-{_COURSE_ADMIN_ENV}
-        run: |
-{_OLD_PAYLOAD_CHECK}{_DEPRECATED_ALL_NOTE}          # First, and never fatal: a push to either of the course's own config files is
-          # what this job is here for, and the reconcile below is what SKIPS the course
-          # when one of them cannot be read. Its own digest issue and mail are the report.
-          python3 -m dsl_course.scheduler --course-org "$COURSE" --check-course-config --no-preview
-          args=(--course-org "$COURSE" --no-preview)
-          case "$EVENT" in
-            schedule) args+=(--all-semesters) ;;
+{env}        run: |
+{before}          case "$EVENT" in
+            {every}) args+=(--all-semesters) ;;
             repository_dispatch)
-              # A named semester wins over all_semesters.
-              if [ -n "$DISPATCH_SEMESTER" ]; then
+{wins}              if [ -n "$DISPATCH_SEMESTER" ]; then
                 args+=(--semester-org "$DISPATCH_SEMESTER")
-              elif [ "$DISPATCH_ALL" = "true" ]; then
-                args+=(--all-semesters)
-              fi ;;
+{unnamed}              fi ;;
           esac
-          {_logged('python3 -m dsl_course.sync_membership "${args[@]}"')}
+          {_logged(cmd)}
 {_CRON_NOTICE}"""
 
 
@@ -2082,6 +2124,16 @@ def render_sync_site(semester_orgs: list[str]) -> str:
 
     Releases also call site.sync_site directly (immediate). The push/dispatch/cron paths
     skip the check-team gate (no actor), same as Sync membership and the scheduler."""
+    auto = _sync_auto_job(
+        "Sync site",
+        _OLD_PAYLOAD_ENV,
+        f"""{_OLD_PAYLOAD_CHECK}          gh auth setup-git
+          args=(--course-org "$COURSE")
+""",
+        'python3 -m dsl_course.site sync "${args[@]}"',
+        on_push=True,
+        all_from_payload=False,
+    )
     return f"""name: Sync site
 
 on:
@@ -2109,28 +2161,7 @@ on:
           gh auth setup-git
           python3 -m dsl_course.site sync --course-org "$COURSE" --semester-org "$SEMESTER_ORG"
 {_CRON_CLOSE}
-  sync-auto:
-    if: github.event_name != 'workflow_dispatch'
-{_ungated_preamble()}      - name: Sync site
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COURSE: ${{{{ github.repository_owner }}}}
-          EVENT: ${{{{ github.event_name }}}}
-          DISPATCH_SEMESTER: ${{{{ {_PAYLOAD_SEMESTER} }}}}
-{_OLD_PAYLOAD_ENV}        run: |
-{_OLD_PAYLOAD_CHECK}          gh auth setup-git
-          args=(--course-org "$COURSE")
-          case "$EVENT" in
-            push|schedule) args+=(--all-semesters) ;;
-            repository_dispatch)
-              if [ -n "$DISPATCH_SEMESTER" ]; then
-                args+=(--semester-org "$DISPATCH_SEMESTER")
-              else
-                args+=(--all-semesters)
-              fi ;;
-          esac
-          {_logged('python3 -m dsl_course.site sync "${args[@]}"')}
-{_CRON_NOTICE}"""
+{auto}"""
 
 
 def render_publish_site() -> str:
