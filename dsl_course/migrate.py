@@ -1269,10 +1269,10 @@ def _topics(listing: dict[str, dict]) -> set[str]:
 def _files(org: str, repo: str, branch: str = "") -> dict[str, str]:
     """`{path: blob sha}` of `repo`, or `{}` when the repo is not there. An absent repo
     (a 404) is "not migrated yet", never an error; any other failure raises."""
-    if repo not in _listing(org):
+    if (row := _listing(org).get(repo)) is None:
         return {}
     try:
-        branch = branch or default_branch(org, repo)
+        branch = branch or row.get("default_branch") or default_branch(org, repo)
     except RuntimeError:
         if repo_missing(org, repo):
             return {}

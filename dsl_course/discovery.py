@@ -236,6 +236,8 @@ def list_org_repos(org: str) -> list[dict]:
     `pushed_at` rides along because one listing answering "which of these has moved?" is
     what saves the sheet refresh a commits call per submission repo per tick (see
     `collect._provisional_pins`).
+    `default_branch` rides along for the same reason: a caller holding the listing reads
+    a repo's branch off its row instead of a `GET /repos` per repo.
 
     An empty list means the org genuinely holds no repos; a failed listing raises, since
     every caller reads "no repos" as "nothing to do" (refresh converges zero repos and
@@ -249,7 +251,8 @@ def list_org_repos(org: str) -> list[dict]:
         f"orgs/{org}/repos?per_page=100",
         "--jq",
         ".[] | {name, description, visibility, url: .html_url, "
-        "isTemplate: .is_template, archived, pushed_at, topics: (.topics // [])}",
+        "isTemplate: .is_template, archived, pushed_at, default_branch, "
+        "topics: (.topics // [])}",
     )
     if code != 0:
         raise RuntimeError(f"could not list repos in {org}: {out[:200]}")
