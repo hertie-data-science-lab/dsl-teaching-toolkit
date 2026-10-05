@@ -2,12 +2,12 @@
 
 PUBLIC: one `::notice title=dsl-outcome::<json>` annotation, which the console reads off the
 run. The Console workflow runs in the course org's public `.github`, so this half carries no
-`people` and no repo name of the `<slug>-<handle>` / `grades-<handle>` form - the same rule
-`log.log_person` keeps for every other line of a faculty workflow's log.
+repo name of the `<slug>-<handle>` / `grades-<handle>` form - the same rule `log.log_person`
+keeps for every other line of a faculty workflow's log.
 
-PRIVATE: `semester-config/.system/outcomes/<op>.json` in the semester org, which may carry the
-per-person lines. A course-wide op has no private repo to write to, so its file goes to the
-course org's `.github/.system/outcomes/<op>.json` in the public form.
+PRIVATE: `semester-config/.system/outcomes/<op>.json` in the semester org, unredacted. A
+course-wide op has no private repo to write to, so its file goes to the course org's
+`.github/.system/outcomes/<op>.json` in the public form.
 """
 
 from __future__ import annotations
@@ -64,7 +64,6 @@ class Outcome:
     reasons: list[dict] = field(default_factory=list)
     details: list[str] = field(default_factory=list)
     block: str = ""
-    people: list[dict] = field(default_factory=list)
     started: str = ""
     finished: str = ""
 
@@ -72,45 +71,32 @@ class Outcome:
         return {"schema": OUTCOME_SCHEMA, **asdict(self)}
 
 
-def redact(
-    text: str, handles: Collection[str] = frozenset(), names: Collection[str] = ()
-) -> str:
-    """`text` with every person-naming repo name and every known handle replaced.
-    `names` are the assignment names of the run's schedule (its keys and semester-side
+def redact(text: str, names: Collection[str] = ()) -> str:
+    """`text` with every person-naming repo name replaced. `names` are the assignment names of the run's schedule (its keys and semester-side
     names), each of which a submission repo is named after."""
     out = _GRADEBOOK_RE.sub(f"{GRADEBOOK_PREFIX}{HANDLE_MARK}", text)
     out = _SUBMISSION_RE.sub(rf"\1-{HANDLE_MARK}", out)
     for name in sorted(names, key=len, reverse=True):
         out = _named_submission_re(name).sub(rf"\1-{HANDLE_MARK}", out)
-    for handle in sorted(handles, key=len, reverse=True):
-        out = re.sub(
-            rf"(?<![A-Za-z0-9-]){re.escape(handle)}(?![A-Za-z0-9-])",
-            HANDLE_MARK,
-            out,
-            flags=re.IGNORECASE,
-        )
     return out
 
 
-def _redacted(value: object, handles: set[str], names: Collection[str]) -> object:
+def _redacted(value: object, names: Collection[str]) -> object:
     if isinstance(value, str):
-        return redact(value, handles, names)
+        return redact(value, names)
     if isinstance(value, dict):
-        return {k: _redacted(v, handles, names) for k, v in value.items()}
+        return {k: _redacted(v, names) for k, v in value.items()}
     if isinstance(value, list):
-        return [_redacted(v, handles, names) for v in value]
+        return [_redacted(v, names) for v in value]
     return value
 
 
 def public_dict(outcome: Outcome, names: Collection[str] = ()) -> dict:
-    """The outcome as a public surface may show it: no `people`, nothing naming anyone.
-    The actor is kept - it is the member of staff who pressed the button. `names`: as
-    `redact`."""
-    handles = {p["handle"] for p in outcome.people if p.get("handle")}
+    """The outcome as a public surface may show it: nothing naming anyone. The actor is
+    kept - it is the member of staff who pressed the button. `names`: as `redact`."""
     data = outcome.to_dict()
-    data.pop("people")
     actor = data.pop("actor")
-    return {"actor": actor, **_redacted(data, handles, names)}
+    return {"actor": actor, **_redacted(data, names)}
 
 
 def _escape_command(data: str) -> str:

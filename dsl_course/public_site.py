@@ -56,6 +56,7 @@ from .site_repo import (
     links_block,
     nav_yaml,
     people_yaml,
+    retired_pages,
     row_file,
     site_readme,
     site_templates,
@@ -167,8 +168,6 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[Link]:
     ]
     if any("/" not in rel for rel in rels):
         rels = [rel for rel in rels if "/" not in rel]
-    # No `view_url`: this site already hosts every file it links, so the name IS the
-    # hosted copy and there is no second destination to name.
     return [Link(rel, f"{url_prefix}/{quote(rel)}") for rel in rels]
 
 
@@ -397,10 +396,14 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                 # writes its front matter before any site sees it.
                 **site_templates(),
             },
-            # Templates this toolkit no longer ships (a semester site's retired sections),
-            # and the settings file an older publish kept here: `opencourse.yml` holds
-            # them now.
-            retire=(*RETIRED_TEMPLATES, PUBLISH_CONFIG),
+            # The Assignments tab a public site no longer has, templates this toolkit no
+            # longer ships (a semester site's retired sections), and the settings file an
+            # older publish kept here: `opencourse.yml` holds them now.
+            retire=(
+                *retired_pages(site_wd, ("assignments.md",)),
+                *RETIRED_TEMPLATES,
+                PUBLISH_CONFIG,
+            ),
             commit=f"site: publish public course site from {source_repo}",
             label="public site",
             title="Public website",

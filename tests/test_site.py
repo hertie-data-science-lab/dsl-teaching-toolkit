@@ -2065,11 +2065,13 @@ def _layout(
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", tree))
     monkeypatch.setattr(site, "read_materials", lambda o, r: materials.Declared())
     monkeypatch.setattr(site, "get_file_content", lambda o, r, p: f"- from {p}")
+    kinds = lambda repo: (aliases or {}).get(repo, {})
     out, _tabs = site._site_rows(
         "S",
-        schedule_plan.planned_rows(sched, lambda repo: (aliases or {}).get(repo, {})),
+        schedule_plan.planned_rows(sched, kinds),
         frozenset(),
         frozenset({"materials"}),
+        kinds,
     )
     return {name: _front(text) for name, text in out.items()}, tree
 

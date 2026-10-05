@@ -11,7 +11,7 @@ import json
 
 from ..course import COURSE_ADMIN_TEAM, INSTRUCTORS_TEAM
 from ..discovery import being_set_up, discover_semesters
-from ..faults import NOT_MIGRATED, moved_text, not_migrated_text
+from ..faults import NOT_MIGRATED, not_migrated_text
 from ..gh_teams import get_team_members, list_teams
 from ..schema_check import validate
 from .registry import (
@@ -53,30 +53,14 @@ RENAMED_REQUEST_ARGS = {
     "format": "formats",
     "include_solution": "solution_datetime",
 }
-# Args that went (decision 0009), with where the fact lives now: an older console build
-# sending one gets a sentence, not a schema error.
-MOVED_REQUEST_ARGS = {
-    "slug": "the schedule names the entry; a template two entries share is refused",
-    "team_formation": "it is set per semester in semester-config/assignments.yml",
-    "visibility": "it is set per semester in semester-config/assignments.yml",
-}
 
 
-# Args one op took and no longer does, with the sentence an older console build gets.
-RETIRED_OP_ARGS = {
-    ("assignment.create", "copy_from"): (
-        "An assignment template is no longer copied by the engine. Create it fresh, "
-        "then copy the files you want into it."
-    ),
-}
-
-
-def _refuse_old_spellings(
-    fields: object, renames: dict[str, str], where: str, say=not_migrated_text
-) -> None:
+def _refuse_old_spellings(fields: object, renames: dict[str, str], where: str) -> None:
     for old, new in renames.items():
         if isinstance(fields, dict) and old in fields:
-            raise RequestError(NOT_MIGRATED, f"{where}.{old}: {say(old, new)}.")
+            raise RequestError(
+                NOT_MIGRATED, f"{where}.{old}: {not_migrated_text(old, new)}."
+            )
 
 
 class RequestError(ValueError):
@@ -101,12 +85,6 @@ def parse_request(text: str) -> Request:
         RENAMED_REQUEST_ARGS,
         "$.args",
     )
-    _refuse_old_spellings(
-        raw.get("args") if isinstance(raw, dict) else None,
-        MOVED_REQUEST_ARGS,
-        "$.args",
-        moved_text,
-    )
     problems = validate(raw, REQUEST_JSON_SCHEMA)
     if problems:
         code = (
@@ -121,9 +99,6 @@ def parse_request(text: str) -> Request:
         raise RequestError(
             "BAD_ARGS", f"{op.name} was asked for with {'; '.join(problems)}."
         )
-    for (name, arg), refusal in RETIRED_OP_ARGS.items():
-        if op.name == name and arg in raw["args"]:
-            raise RequestError("BAD_ARGS", refusal)
     if op.scope == SEMESTER and not raw.get("semester_org"):
         raise RequestError("BAD_REQUEST", f"{op.name} needs a semester_org.")
     if op.scope == COURSE and raw.get("semester_org"):

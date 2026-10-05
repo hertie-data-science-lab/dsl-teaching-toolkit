@@ -3,6 +3,9 @@ import rules from '../schemas/materials.json';
 import { badgeFiles } from '../src/edit/badges';
 import { compileAll, withheldBy } from '../src/edit/glob';
 import { EMPTY_ENTRY_KIND, aliasKind, inferKind, landingSection, readDeclared } from '../src/model/materialsRules';
+import landingKinds from '../../tests/fixtures/landing_kinds.json';
+
+type Landing = { dest: string; repo: string; aliases: Record<string, string>; section: string; kind: string };
 
 describe('the withhold rule', () => {
   const withheldPaths = (files: string[], lines: string[]) => files.filter((f) => withheldBy(compileAll(lines), f) !== null);
@@ -36,17 +39,8 @@ describe('kinds', () => {
 
   // `schedule_plan.deploy_section` + `infer_kind` (#391): dest, repo, aliases -> section, kind.
   // Mirrors `tests/fixtures/landing_kinds.json` (W1) until that shared table is on this branch.
-  const LANDINGS: { dest: string; repo: string; aliases?: Record<string, string>; section: string; kind: string }[] = [
-    { dest: 'labs/01', repo: '', section: 'labs', kind: 'lab' },
-    { dest: 'week-1/lab', repo: '', section: 'week-1', kind: 'assets' },
-    { dest: 'lectures', repo: '', section: 'lectures', kind: 'lecture' },
-    { dest: 'labs', repo: 'labs-repo', section: 'labs', kind: 'lab' },
-    { dest: '01_x', repo: 'labs', section: 'labs', kind: 'lab' },
-    { dest: 'SYLLABUS.md', repo: '', section: 'materials', kind: 'assets' },
-    { dest: 'Slides', repo: '', aliases: { slides: 'lecture' }, section: 'Slides', kind: 'lecture' },
-    { dest: 'Slides', repo: '', section: 'materials', kind: 'assets' },
-  ];
-  for (const c of LANDINGS)
+  // One table for both rules: pytest runs it through `schedule_plan.entry_landing`.
+  for (const c of landingKinds.cases as Landing[])
     it(`lands ${c.dest} in ${c.repo || 'the default repo'} as the engine does`, () => {
       const section = landingSection({ folder: 'src/x', path: c.dest, dest: c.repo }, 'materials', c.aliases);
       expect(section).toBe(c.section);

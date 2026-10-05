@@ -702,7 +702,7 @@ def _unnumbered(
     try:
         kinds = kinds_reader(course_org)
         missing = schedule_plan.unnumbered(sched, kinds)
-        faults = schedule_plan.number_faults(sched, kinds)
+        faults = schedule_plan.number_faults(missing)
         unsure = sorted(
             {
                 r.deploy[0].course_source_repo

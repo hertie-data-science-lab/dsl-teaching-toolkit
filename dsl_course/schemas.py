@@ -44,7 +44,6 @@ from .grades import TEMPLATE_KEYS
 from .log import CLIParser, log_ok
 from .ops.outcome import CONCLUSIONS
 from .ops.registry import (
-    HANDLE_PATTERN,
     OUTCOME_SCHEMA,
     REGISTRY,
     STATUS_SCHEMA,
@@ -178,10 +177,6 @@ def outcome_schema() -> dict:
         },
         ("code", "text"),
     )
-    person = _obj(
-        {"handle": {"type": "string", "pattern": HANDLE_PATTERN}, "text": _str()},
-        ("handle", "text"),
-    )
     return _doc(
         OUTCOME_SCHEMA,
         _obj(
@@ -200,7 +195,6 @@ def outcome_schema() -> dict:
                 "reasons": {"type": "array", "items": reason},
                 "details": {"type": "array", "items": _str()},
                 "block": _str(),
-                "people": {"type": "array", "items": person},
                 "started": _str(),
                 "finished": _str(),
             },
@@ -232,7 +226,7 @@ def status_schema() -> dict:
     stage_why = {"type": "object", "additionalProperties": _str()}
     flags = {"type": "object", "additionalProperties": {"type": "boolean"}}
     nullable = {"type": ["string", "null"]}
-    unknown = {"type": ["boolean", "null"]}  # `app_installed` until decision 0002
+    unknown = {"type": ["boolean", "null"]}  # `staff.synced`: null when not known
     # A status problem's pointer: the line, screen and entry are what the fault knows,
     # and `ref` names the branch when it is not the default (a template's `solution`).
     # `url` is a fix that is a GitHub settings page rather than a file (its `path` is "").
@@ -303,7 +297,6 @@ def status_schema() -> dict:
             "org": _str(),
             "name": _str(),
             "code": _str(),
-            "app_installed": unknown,
             "stages": stages,
             "stage_why": stage_why,
             # Decision 0032, per stage id: may it be set aside, and is it.
@@ -331,7 +324,6 @@ def status_schema() -> dict:
             "live": {"type": "boolean"},
             # Past `semester_end` and not archived yet.
             "ended": {"type": "boolean"},
-            "app_installed": unknown,
             "stages": stages,
             "stage_why": stage_why,
             "archive_date": nullable,
@@ -372,13 +364,11 @@ def status_schema() -> dict:
             "id": _str(),
             "when": nullable,
             "kind": _str(),
-            "kind_inferred": {"type": "boolean"},
             "number": {"type": ["integer", "null"]},
             "title": _str(),
             "state": _enum(RELEASE_STATES),
             "source": place,
             "dest": place,
-            "copies": {"type": "integer"},
             "show_on_site": {"type": "boolean"},
             "tbc": {"type": "boolean"},
         },
@@ -398,7 +388,7 @@ def status_schema() -> dict:
             "grading_cutoff_datetime": nullable,
             "solution_shown": nullable,
             "solution_held_until": nullable,
-            "units": {"type": ["integer", "null"]},
+            "units": {"type": "integer"},
             "submissions": {"type": ["integer", "null"]},
             "teams": {"type": ["integer", "null"]},
             "marks": _obj(
@@ -459,13 +449,13 @@ def status_schema() -> dict:
                     "type": "array",
                     "items": _obj(
                         {
-                            "run_id": {"type": ["integer", "null"]},
+                            "run_id": {"type": "integer"},
                             "op": _str(),
                             "conclusion": _enum(CONCLUSIONS),
                             "summary": _str(),
                             "finished": _str(),
                         },
-                        ("op", "conclusion"),
+                        ("run_id", "op", "conclusion"),
                     ),
                 },
             },

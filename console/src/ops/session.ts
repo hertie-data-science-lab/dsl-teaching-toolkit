@@ -276,7 +276,7 @@ export class OpsSession {
       if (mine()) this.patch({ phase: 'ready', running: null, stopping: false, error: LOST_RUN });
       return;
     }
-    let result: Result = { outcome: null, people: [], leaked: [] };
+    let result: Result = { outcome: null };
     const tries = this.opts.outcomeTries ?? 3;
     for (let i = 0; i < tries; i++) {
       try {

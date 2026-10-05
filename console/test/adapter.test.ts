@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GitHubClient } from '../src/github/client';
-import { DispatchAdapter, RequestInvalid, buildRequest, leakedHandles, parseOutcome, stepsOf } from '../src/ops/adapter';
+import { DispatchAdapter, RequestInvalid, buildRequest, parseOutcome, stepsOf } from '../src/ops/adapter';
 import * as defs from '../src/ops/defs';
 import { OpsSession, mergeOperations } from '../src/ops/session';
 import { modeOf } from '../src/ops/registry';
@@ -15,25 +15,24 @@ const publicOutcome = {
   summary: 'Preview: 7 students would get a new code; their old codes would stop working.', counts: { would_send: 7 },
   reasons: [{ code: 'WOULD_SEND', text: '7 new codes' }], started: '2026-09-23T09:00:00Z', finished: '2026-09-23T09:01:00Z',
 };
-const privateOutcome = { ...publicOutcome, people: [{ handle: 'anna-a', text: 'would get a new code' }, { handle: 'ben-b', text: 'would get a new code' }] };
+const privateOutcome = { ...publicOutcome, summary: 'Preview: anna-a and 6 others would get a new code.' };
 
 function engine(opts: { annotation?: object; privateFile?: object; polls?: number } = {}) {
   let polls = 0;
   const gh = new FakeGitHub()
     .on('POST', `/repos/${COURSE}/.github/actions/workflows/console.yml/dispatches`, { workflow_run_id: 77, run_url: 'u', html_url: `https://github.com/${COURSE}/.github/actions/runs/77` })
-    .on('GET', RUNS, (req) => {
+    .on('GET', `${RUNS}/jobs`, (req) => {
       polls++;
-      if (polls > 1 && polls < (opts.polls ?? 3) && req.headers['If-None-Match'] === '"r1"') return json(null, 304, { etag: '"r1"' });
+      if (polls > 1 && polls < (opts.polls ?? 3) && req.headers['If-None-Match'] === '"j1"') return json(null, 304, { etag: '"j1"' });
       const done = polls >= (opts.polls ?? 3);
-      return json({ id: 77, status: done ? 'completed' : 'in_progress', conclusion: done ? 'success' : null, html_url: 'h' }, 200, { etag: done ? '"r2"' : '"r1"' });
+      return json({ jobs: [{ id: 901, name: 'console', status: done ? 'completed' : 'in_progress', conclusion: done ? 'success' : null, steps: [
+        { name: 'Set up job', status: 'completed', conclusion: 'success', number: 1 },
+        { name: 'Verify the user may run actions for THIS repo', status: 'completed', conclusion: 'success', number: 2 },
+        { name: 'Run actions/checkout@11d5960', status: 'completed', conclusion: 'success', number: 3 },
+        { name: 'Run the request', status: 'in_progress', conclusion: null, number: 5 },
+        { name: 'Complete job', status: 'queued', conclusion: null, number: 9 },
+      ] }] }, 200, { etag: done ? '"j2"' : '"j1"' });
     })
-    .on('GET', `${RUNS}/jobs`, { jobs: [{ id: 901, name: 'console', status: 'completed', conclusion: 'success', steps: [
-      { name: 'Set up job', status: 'completed', conclusion: 'success', number: 1 },
-      { name: 'Verify the user may run actions for THIS repo', status: 'completed', conclusion: 'success', number: 2 },
-      { name: 'Run actions/checkout@11d5960', status: 'completed', conclusion: 'success', number: 3 },
-      { name: 'Run the request', status: 'in_progress', conclusion: null, number: 5 },
-      { name: 'Complete job', status: 'queued', conclusion: null, number: 9 },
-    ] }] })
     .on('GET', `/repos/${COURSE}/.github/check-runs/901/annotations`, [
       { path: '.github', start_line: 1, annotation_level: 'notice', title: 'something else', message: 'x' },
       ...(opts.annotation ? [{ path: '.github', start_line: 1, annotation_level: 'notice', title: 'dsl-outcome', message: JSON.stringify(opts.annotation) }] : []),
@@ -47,13 +46,13 @@ const scope = { courseOrg: COURSE, cohortOrg: COHORT, where: 'Fall 2026' };
 
 describe('the request', () => {
   it('follows dsl.request/1 and carries no names', () => {
-    const r = buildRequest('a-example', { op: 'release.early', courseOrg: COURSE, cohortOrg: COHORT, args: { entry: 's5', semester_dest_repo: '' }, preview: true });
-    expect(r).toEqual({ schema: 'dsl.request/1', op: 'release.early', actor: 'a-example', course_org: COURSE, semester_org: COHORT, args: { entry: 's5' }, preview: true, client: 'console/0.1' });
+    const r = buildRequest('a-example', { op: 'release.entry', courseOrg: COURSE, cohortOrg: COHORT, args: { entry: 's5', semester_dest_repo: '' }, preview: true });
+    expect(r).toEqual({ schema: 'dsl.request/1', op: 'release.entry', actor: 'a-example', course_org: COURSE, semester_org: COHORT, args: { entry: 's5' }, preview: true, client: 'console/0.1' });
   });
   it('drops the cohort for a course op and refuses bad args, a missing cohort and an impossible preview', () => {
     expect(buildRequest('a', { op: 'assignment.derive_starter', courseOrg: COURSE, cohortOrg: COHORT, args: { course_source_repo: 'assignment-3-f2026' }, preview: true }).semester_org).toBeUndefined();
-    expect(() => buildRequest('a', { op: 'release.early', courseOrg: COURSE, cohortOrg: COHORT, args: {}, preview: false })).toThrow(RequestInvalid);
-    expect(() => buildRequest('a', { op: 'release.early', courseOrg: COURSE, cohortOrg: COHORT, args: { entry: '-rf' }, preview: false })).toThrow(/pattern/);
+    expect(() => buildRequest('a', { op: 'release.entry', courseOrg: COURSE, cohortOrg: COHORT, args: {}, preview: false })).toThrow(RequestInvalid);
+    expect(() => buildRequest('a', { op: 'release.entry', courseOrg: COURSE, cohortOrg: COHORT, args: { entry: '-rf' }, preview: false })).toThrow(/pattern/);
     expect(() => buildRequest('a', { op: 'semester.check', courseOrg: COURSE, args: {}, preview: false })).toThrow(/needs a semester/);
     expect(() => buildRequest('a', { op: 'site.update', courseOrg: COURSE, cohortOrg: COHORT, args: {}, preview: true })).toThrow(/no preview/);
   });
@@ -70,7 +69,7 @@ describe('DispatchAdapter', () => {
     expect(h.runId).toBe(77);
   });
 
-  it('polls the run with its ETag, taking a 304 as no change', async () => {
+  it('polls the run’s job with its ETag, taking a 304 as no change', async () => {
     const e = engine({ polls: 4 });
     const a = new DispatchAdapter(e.client, () => 'a-example', () => 'Sending new codes');
     const h = { op: 'roster.send_codes', runId: 77, htmlUrl: '', preview: true, courseOrg: COURSE, cohortOrg: COHORT };
@@ -78,35 +77,25 @@ describe('DispatchAdapter', () => {
     const second = await a.watch(h);
     expect(first.state).toBe('running');
     expect(second.state).toBe('running');
-    const runGets = e.gh.seen.filter((s) => s.url.endsWith('/runs/77'));
-    expect(runGets[1].headers['If-None-Match']).toBe('"r1"');
+    const jobGets = e.gh.seen.filter((s) => s.url.includes('/runs/77/jobs'));
+    expect(jobGets[1].headers['If-None-Match']).toBe('"j1"');
+    expect(e.gh.seen.some((s) => s.url.endsWith('/runs/77'))).toBe(false);
     expect(first.steps.map((s) => [s.name, s.state])).toEqual([['Checking you may do this', 'done'], ['Getting the engine', 'done'], ['Sending new codes', 'running']]);
     await a.watch(h);
     expect((await a.watch(h)).state).toBe('completed');
   });
 
-  it('reads the public annotation, adds the private people, and finds no leak', async () => {
+  it('prefers the public annotation over the private record', async () => {
     const e = engine({ annotation: publicOutcome, privateFile: privateOutcome });
     const r = await new DispatchAdapter(e.client, () => 'a').outcome({ op: 'roster.send_codes', runId: 77, htmlUrl: '', preview: true, courseOrg: COURSE, cohortOrg: COHORT });
     expect(r.outcome?.summary).toBe(publicOutcome.summary);
-    expect(r.outcome?.people).toBeUndefined();
-    expect(r.people.map((p) => p.handle)).toEqual(['anna-a', 'ben-b']);
-    expect(r.leaked).toEqual([]);
-  });
-
-  it('flags a handle from the private file that reached the public summary', async () => {
-    const leaky = { ...publicOutcome, summary: 'Preview: anna-a would get a new code.' };
-    const e = engine({ annotation: leaky, privateFile: privateOutcome });
-    const r = await new DispatchAdapter(e.client, () => 'a').outcome({ op: 'roster.send_codes', runId: 77, htmlUrl: '', preview: true, courseOrg: COURSE, cohortOrg: COHORT });
-    expect(r.leaked).toEqual(['anna-a']);
-    expect(leakedHandles(publicOutcome as never, [{ handle: 'anna' }])).toEqual([]);
   });
 
   it('falls back to the private record, and ignores one from another run', async () => {
     const e = engine({ privateFile: privateOutcome });
     const a = new DispatchAdapter(e.client, () => 'a');
     const r = await a.outcome({ op: 'roster.send_codes', runId: 77, htmlUrl: '', preview: true, courseOrg: COURSE, cohortOrg: COHORT });
-    expect(r.outcome?.summary).toBe(publicOutcome.summary);
+    expect(r.outcome?.summary).toBe(privateOutcome.summary);
     const other = engine({ privateFile: { ...privateOutcome, run_id: 12 } });
     expect((await new DispatchAdapter(other.client, () => 'a').outcome({ op: 'roster.send_codes', runId: 77, htmlUrl: '', preview: true, courseOrg: COURSE, cohortOrg: COHORT })).outcome).toBeNull();
   });
@@ -210,7 +199,7 @@ describe('the gate', () => {
   });
 
   it('merges this session’s runs into the status record, newest first, without duplicates', () => {
-    const a = { run_id: 1, op: 'release.now', conclusion: 'done' as const, summary: 'a', finished: '2026-09-22T10:00:00Z' };
+    const a = { run_id: 1, op: 'release.entry', conclusion: 'done' as const, summary: 'a', finished: '2026-09-22T10:00:00Z' };
     const b = { run_id: 2, op: 'site.update', conclusion: 'done' as const, summary: 'b', finished: '2026-09-23T10:00:00Z' };
     expect(mergeOperations([a], [b, a]).map((o) => o.run_id)).toEqual([2, 1]);
   });

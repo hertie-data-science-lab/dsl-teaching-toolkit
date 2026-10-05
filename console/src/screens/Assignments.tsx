@@ -177,7 +177,7 @@ function Overview(p: TabProps) {
     : a.state === 'teams_forming' ? `Teams forming. Handed out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}; no team has formed yet.`
     : a.state === 'blocked' ? 'Blocked: handed out, but you have not assigned any team yet.'
     : a.handout ? `Declared. Hands out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}.` : 'Declared. You hand it out from this page.';
-  const big = cur === 4 || cur === 5 ? a.marks.filled : cur <= 1 ? (a.teams ?? 0) : a.submissions;
+  const big = cur === 4 || cur === 5 ? a.marks.filled : cur <= 1 ? (a.teams ?? 0) : (a.submissions ?? 0);
   const bigOf = cur === 4 || cur === 5 ? a.marks.total : a.units;
   const scope = cohortScope(p);
   const ref: AsgRef = { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand', name: sheetName(p, a.slug) };
@@ -216,7 +216,7 @@ function Overview(p: TabProps) {
             <div class="big">{big} <small>/ {bigOf}</small></div>
             <div class="meter"><i style={`width:${bigOf ? ((big / bigOf) * 100).toFixed(1) : 0}%;background:var(--asg-ink)`} /></div>
             <p class="footnote">
-              {cur === 2 || cur === 3 ? `${a.units - a.submissions} have not pushed since hand out.` : cur >= 4 ? `${a.marks.total - a.marks.filled} still to mark.` : group ? (cur === 1 ? 'Each team gets its repo as it forms; students without a team get none.' : 'Teams form from hand out until late work closes.') : 'Nothing handed out yet.'}
+              {cur === 2 || cur === 3 ? `${a.units - (a.submissions ?? 0)} have not pushed since hand out.` : cur >= 4 ? `${a.marks.total - a.marks.filled} still to mark.` : group ? (cur === 1 ? 'Each team gets its repo as it forms; students without a team get none.' : 'Teams form from hand out until late work closes.') : 'Nothing handed out yet.'}
             </p>
           </section>
           <section class="panel section">

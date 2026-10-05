@@ -5,7 +5,6 @@ import ops from '../../schemas/ops.json';
 
 export interface OpSpec {
   name: string;
-  runs_as: 'dispatch' | 'edit';
   scope: 'course' | 'semester';
   required_team: string;
   args_schema: Record<string, unknown> & { properties?: Record<string, Record<string, unknown>>; required?: string[] };
@@ -50,9 +49,7 @@ export const PREVIEW_ONLY = new Set(['semester.preview_automation']);
  */
 export const PREVIEW_NOT_OFFERED = new Set([
   'assignment.derive_starter',
-  'release.now',
-  'release.early',
-  'release.rerun',
+  'release.entry',
   'release.adhoc',
   'release.propagate_back',
   'teams.open_window',

@@ -326,7 +326,7 @@ class Release:
     # section its first copy lands in (`schedule_plan.entry_kind`).
     kind: str = ""
     # The row's number ("Lecture 3"), when the entry writes one; else the label's own
-    # number, else none (decision 0020: never a position, `schedule_plan.own_number`).
+    # number, else none (decision 0020: never a position, `own_number`).
     number: int | None = None
     # `tbc: true` next to a REAL date = a provisional sketch: everything fires at that
     # date as normal, but the site marks it "(TBC)" to signal it may still move.
@@ -828,6 +828,19 @@ def _flag_bad_value(
     drops.note(where, str(key), f"unusable value {value!r} - ignored, so {cost}", lines)
 
 
+def _parse_number(
+    entry: dict, where: str, drops: Drops, lines: dict[str, int] | None, falls_back: str
+) -> int | None:
+    """An entry's `number:` (decision 0020), or None. A value that is not a positive
+    whole number is flagged; `falls_back` says what numbers the entry instead."""
+    if "number" not in entry:
+        return None
+    number = _whole_days(entry["number"]) or None
+    if number is None:
+        _flag_bad_value(drops, where, "number", entry["number"], falls_back, lines)
+    return number
+
+
 def _flagged_datetime(
     entry: dict,
     key: str,
@@ -1089,18 +1102,9 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
                 lines,
             )
             kind = policy.FALLBACK_KIND
-        number = None
-        if "number" in entry:
-            number = _whole_days(entry["number"]) or None
-            if number is None:
-                _flag_bad_value(
-                    drops,
-                    where,
-                    "number",
-                    entry["number"],
-                    "the row is numbered from its label instead",
-                    lines,
-                )
+        number = _parse_number(
+            entry, where, drops, lines, "the row is numbered from its label instead"
+        )
         out.append(
             Release(
                 label=str(label),
@@ -1364,18 +1368,13 @@ def _parse_assignments(
                 lines,
             )
             marks = None
-        number = None
-        if "number" in entry:
-            number = _whole_days(entry["number"]) or None
-            if number is None:
-                _flag_bad_value(
-                    drops,
-                    where,
-                    "number",
-                    entry["number"],
-                    "the assignment is numbered from its key or its due date instead",
-                    lines,
-                )
+        number = _parse_number(
+            entry,
+            where,
+            drops,
+            lines,
+            "the assignment is numbered from its key instead",
+        )
         out[str(slug)] = AssignmentEntry(
             due_datetime=due,
             course_source_repo=source_repo,
@@ -1826,6 +1825,12 @@ def label_number(label: str) -> int | None:
     return int(m.group(1) or m.group(2)) if m else None
 
 
+def own_number(number: int | None, key: str) -> int | None:
+    """An entry's number (decision 0020): its `number:`, else the number its label or key
+    carries (`lecture_03`, `assignment-3`: the instructor typed it). Never a position."""
+    return number or label_number(key)
+
+
 def assignment_pages(sched: Schedule) -> list[AssignmentPage]:
     """Every assignment of the plan, numbered - the ONE place that numbering is decided,
     because the team-formation mail, the lock and the Join-team form all link a page, and
@@ -1840,7 +1845,7 @@ def assignment_pages(sched: Schedule) -> list[AssignmentPage]:
     by_due = sorted(sched.assignments.items(), key=lambda kv: kv[1].due_datetime)
     return [
         AssignmentPage(
-            entry.number or label_number(key),
+            own_number(entry.number, key),
             semester_name(key, entry),
             entry.course_source_repo,
             (key, entry),

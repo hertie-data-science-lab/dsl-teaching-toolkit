@@ -73,11 +73,8 @@ export function OutcomeView({ result, def, url, stopped = false }: { result: Res
       <Mark tone={tone} />
       <p class="outcome-sentence">{o.summary}</p>
       {counts.length ? <div class="outcome-counts">{counts.map(([k, v]) => <div><div class="n">{v}</div><div class="l">{k.replace(/_/g, ' ')}</div></div>)}</div> : null}
-      {result.leaked.length ? (
-        <p class="check-line bad"><span>The public record of this run names {result.leaked.length === 1 ? 'a person' : `${result.leaked.length} people`}. Tell the lab: the console reports it so it can be fixed.</span></p>
-      ) : null}
       {block ? <Block text={block} /> : null}
-      {reasons.length || details.length || result.people.length ? (
+      {reasons.length || details.length ? (
         <details class="fold reasons">
           <summary>Details</summary>
           <div class="fold-body">
@@ -87,12 +84,6 @@ export function OutcomeView({ result, def, url, stopped = false }: { result: Res
               ))}</tbody></table>
             ) : null}
             {details.length ? <ul class="outcome-list">{details.map((d) => <li>{d}</li>)}</ul> : null}
-            {result.people.length ? (
-              <>
-                <p class="footnote">Per person (private; not in the public run log):</p>
-                <table><tbody>{result.people.map((p) => <tr><td class="mono">{p.handle}</td><td>{p.text}</td></tr>)}</tbody></table>
-              </>
-            ) : null}
           </div>
         </details>
       ) : null}

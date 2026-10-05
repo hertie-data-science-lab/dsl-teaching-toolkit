@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from dsl_course import (
+    gh_commits,
     grades,
     policy,
     releaseignore,
@@ -188,7 +189,7 @@ CONTRACT_EXAMPLE = {
     "operations": [
         {
             "run_id": 4821,
-            "op": "release.now",
+            "op": "release.entry",
             "conclusion": "done",
             "summary": "Released Session 3: 7 files to materials.",
             "finished": "2026-09-23T09:01:10Z",
@@ -345,7 +346,7 @@ def _keys(doc, prefix="") -> set[str]:
 def test_contract_example_validates():
     # WP1 exports the JSON Schema; until it lands, the contract's own example is the
     # shape. Every key path the example carries, the render carries too (the render may
-    # add: `app_installed`, `copies`, `fix.ref`).
+    # add: `fix.ref`).
     doc = _render(*_contract_scenario())
     doc["operations"] = [CONTRACT_EXAMPLE["operations"][0]]  # none in the fixture
     missing = _keys(CONTRACT_EXAMPLE) - _keys(doc)
@@ -533,15 +534,15 @@ def test_a_release_with_one_copy_landed_and_one_to_come_is_not_late():
     assert s5(dest_paths={"materials": {"lectures"}}) == "late"
 
 
-def test_an_undeclared_kind_is_inferred_through_the_repos_aliases_and_says_so():
+def test_an_undeclared_kind_is_inferred_through_the_repos_aliases():
     semester = _semester()
     semester.aliases = {"course-materials-f2026": {"lectures": "drop-in"}}
     doc = _render(semester=semester)
     s3 = next(r for r in doc["releases"] if r["id"] == "s3")
-    assert (s3["kind"], s3["kind_inferred"]) == ("drop-in", True)
+    assert s3["kind"] == "drop-in"
     semester.sched.releases[0].kind = "lab"
     s3 = next(r for r in _render(semester=semester)["releases"] if r["id"] == "s3")
-    assert (s3["kind"], s3["kind_inferred"]) == ("lab", False)
+    assert s3["kind"] == "lab"
 
 
 def test_a_materials_repo_by_its_old_name_only_is_not_migrated():
@@ -1068,11 +1069,15 @@ def test_write_after_op_refreshes_the_semester_then_the_course(monkeypatch):
     )
     request = {
         "schema": "dsl.request/1",
-        "op": "release.now",
+        "op": "release.entry",
         "course_org": COURSE,
         "semester_org": SEMESTER,
     }
     assert status.write_after_op(request) == 0
+    # A release changes nothing the course file says.
+    assert seen == [(COURSE, SEMESTER)]
+    seen.clear()
+    assert status.write_after_op({**request, "op": "semester.bootstrap"}) == 0
     assert seen == [(COURSE, SEMESTER), (COURSE, None)]
     seen.clear()
     assert status.write_after_op({"op": "assignment.create", "course_org": COURSE}) == 0
@@ -1084,7 +1089,8 @@ def test_write_after_op_never_raises(monkeypatch):
         raise RuntimeError("could not list repos")
 
     monkeypatch.setattr(status, "write", boom)
-    assert status.write_after_op({"course_org": COURSE, "semester_org": SEMESTER}) == 2
+    request = {"op": "semester.check", "course_org": COURSE, "semester_org": SEMESTER}
+    assert status.write_after_op(request) == 2
     assert status.write_after_op({}) == 1
 
 
@@ -1112,9 +1118,11 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         (SEMESTER, "semester-config", "grading_sheets/assignment-2.yml"): (
             "submissions:\n  ada:\n    score_individual: 7\n"
         ),
-        (SEMESTER, "semester-config", ".system/outcomes/release.now.json"): json.dumps(
-            CONTRACT_EXAMPLE["operations"][0]
-        ),
+        (
+            SEMESTER,
+            "semester-config",
+            ".system/outcomes/release.entry.json",
+        ): json.dumps(CONTRACT_EXAMPLE["operations"][0]),
         (COURSE, "course-materials-f2026", "SYLLABUS.md"): "# Syllabus",
         (COURSE, "assignment-2-f2026", "README.md"): "# Regression",
         (COURSE, "assignment-2-f2026", "grading_config.yml"): "autograde: sometimes\n",
@@ -1155,7 +1163,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         lambda org, repo, branch: (
             {"dsl-course.yml": "c0ffee"}
             if repo == ".github"
-            else {"schedule.yml": "5c4ed", ".system/outcomes/release.now.json": "0u7"}
+            else {"schedule.yml": "5c4ed", ".system/outcomes/release.entry.json": "0u7"}
         ),
     )
     monkeypatch.setattr(
@@ -1193,7 +1201,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         lambda org, repo: {"SYLLABUS.md": "file", "lectures": "dir", ".system": "dir"},
     )
     monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
-    monkeypatch.setattr(status_json, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
+    monkeypatch.setattr(gh_commits, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
     monkeypatch.setattr(status_json, "get_team_members", lambda org, team: {"prof"})
     monkeypatch.setattr(grades, "_org_settings_faults", lambda org: [])
 
@@ -1202,7 +1210,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     assert doc["inputs"]["schedule.yml"] == "5c4ed"
     assert doc["inputs"]["course/dsl-course.yml"] == "c0ffee"
     assert doc["staff"] == {"instructors": 1, "tas": 0, "synced": True}
-    assert doc["operations"][0]["op"] == "release.now"
+    assert doc["operations"][0]["op"] == "release.entry"
     a2 = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
     assert a2["marks"] == {"filled": 1, "total": 1}
     # The template's unreadable value, seen from the semester that cites it and from the
@@ -1627,7 +1635,7 @@ def test_an_assignments_yml_that_is_not_yaml_is_a_problem_not_a_crash(monkeypatc
     monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(status_json, "repo_path_shas", lambda *a, **k: {})
     monkeypatch.setattr(status_json, "get_file_content", lambda *a, **k: None)
-    monkeypatch.setattr(status_json, "_last_commit_at", lambda *a, **k: None)
+    monkeypatch.setattr(status_json, "last_commit_at", lambda *a, **k: None)
     monkeypatch.setattr(status_json, "_returned_at", lambda org: {})
     monkeypatch.setattr(
         status_json.sync_faculty, "read_semester_people", lambda org, found: []
@@ -2333,3 +2341,12 @@ def test_the_gather_reads_two_trees_and_the_record_never_a_source(monkeypatch):
     t = status_json.TemplateFacts("assignment-1", "# Trees")
     status_json._starter_facts(COURSE, t, None)
     assert t.starter == "handwritten"
+
+
+def test_an_operation_with_no_run_is_left_out():
+    # Every operations row opens its run; an outcome recorded outside one has none.
+    ran = {"op": "semester.check", "run_id": 7, "conclusion": "done", "finished": "b"}
+    local = {"op": "semester.check", "run_id": None, "conclusion": "done"}
+    assert status_json.render_operations([ran, local]) == [
+        {k: ran.get(k) for k in ("run_id", "op", "conclusion", "summary", "finished")}
+    ]

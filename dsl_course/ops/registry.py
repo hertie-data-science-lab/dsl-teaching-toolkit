@@ -38,7 +38,6 @@ REQUEST_SCHEMA = "dsl.request/1"
 OUTCOME_SCHEMA = "dsl.outcome/1"
 STATUS_SCHEMA = "dsl.status/1"
 
-DISPATCH = "dispatch"
 COURSE = "course"
 # The op scope and the `semester.*` op ids are what the console matches on (ops.json).
 SEMESTER = "semester"
@@ -53,7 +52,6 @@ REPO_PATTERN = r"^(?!-)[A-Za-z0-9._-]{1,100}$"
 PATH_PATTERN = r"^(?!-)[^\x00-\x1f]{1,1024}$"
 KEY_PATTERN = r"^(?!-)[A-Za-z0-9_.-]{1,100}$"
 SEMESTER_PATTERN = r"^[fs][0-9]{4}$"
-HANDLE_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
 FORMATS_PATTERN = (
     rf"^(?:none|(?:{'|'.join(STARTER_FORMATS)})(?:,(?:{'|'.join(STARTER_FORMATS)}))*)$"
 )
@@ -75,7 +73,6 @@ class Request:
 @dataclass(frozen=True)
 class Operation:
     name: str
-    runs_as: str
     scope: str
     required_team: str
     args_schema: dict
@@ -335,8 +332,6 @@ def _new_materials(request: Request) -> list[str]:
 def _new_assignment(request: Request) -> list[str]:
     # A box left out is the course's default, else the institution's - as the workflow's
     # own dropdowns send it (`scaffold.resolve_answers`, `scaffold._grading_config`).
-    # `number` and `semester` are accepted and ignored until the console stops sending
-    # them (decision 0014: a template has neither).
     argv = [
         "assignment",
         "--org",
@@ -384,7 +379,6 @@ _RELEASE_COUNTS = "Copied paths per destination, as deploy reports them."
 def _release(name: str, help_text: str, args_schema: dict) -> Operation:
     return Operation(
         name=name,
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=args_schema,
@@ -402,7 +396,6 @@ def _release(name: str, help_text: str, args_schema: dict) -> Operation:
 _OPS = (
     Operation(
         name="semester.check",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -414,7 +407,6 @@ _OPS = (
     ),
     Operation(
         name="semester.preview_automation",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -427,18 +419,8 @@ _OPS = (
         counts_doc="Reasons carry one entry per release that is due and would not go out.",
     ),
     _release(
-        "release.now",
-        "Release a scheduled entry now.",
-        _RELEASE_ENTRY_ARGS,
-    ),
-    _release(
-        "release.early",
-        "Release a planned entry before its scheduled time.",
-        _RELEASE_ENTRY_ARGS,
-    ),
-    _release(
-        "release.rerun",
-        "Release an entry again, to carry a fixed file.",
+        "release.entry",
+        "Release a schedule entry now: early, late, or again to carry a fixed file.",
         _RELEASE_ENTRY_ARGS,
     ),
     _release(
@@ -448,7 +430,6 @@ _OPS = (
     ),
     Operation(
         name="release.propagate_back",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -462,7 +443,6 @@ _OPS = (
     ),
     Operation(
         name="assignment.handout_now",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -486,7 +466,6 @@ _OPS = (
     ),
     Operation(
         name="assignment.update_copies",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -508,7 +487,6 @@ _OPS = (
     ),
     Operation(
         name="assignment.collect_now",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -526,7 +504,6 @@ _OPS = (
     ),
     Operation(
         name="grades.return",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -552,7 +529,6 @@ _OPS = (
     ),
     Operation(
         name="roster.send_codes",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -567,7 +543,6 @@ _OPS = (
     ),
     Operation(
         name="site.update",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -579,7 +554,6 @@ _OPS = (
     ),
     Operation(
         name="teams.open_window",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -598,7 +572,6 @@ _OPS = (
     ),
     Operation(
         name="access.check",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -612,7 +585,6 @@ _OPS = (
     ),
     Operation(
         name="semester.archive",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -628,7 +600,6 @@ _OPS = (
     ),
     Operation(
         name="course.publish_website",
-        runs_as=DISPATCH,
         scope=COURSE,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -640,7 +611,6 @@ _OPS = (
     ),
     Operation(
         name="assignment.derive_starter",
-        runs_as=DISPATCH,
         scope=COURSE,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -656,7 +626,6 @@ _OPS = (
     ),
     Operation(
         name="assignment.generate_syllabus",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -678,7 +647,6 @@ _OPS = (
     ),
     Operation(
         name="materials.create",
-        runs_as=DISPATCH,
         scope=COURSE,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -697,7 +665,6 @@ _OPS = (
     ),
     Operation(
         name="assignment.create",
-        runs_as=DISPATCH,
         scope=COURSE,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -715,12 +682,6 @@ _OPS = (
                 "autograde": _boolean("Seed tests and run them at the late cutoff"),
                 # Decision 0028; left out, derived when autograde is on.
                 "starter": _enum(STARTER_MODES, "How main's starter is written"),
-                # Ignored, until the console stops sending them.
-                "number": _string(r"^[0-9]{1,3}$", "Ignored"),
-                "semester": _string(SEMESTER_PATTERN, "Ignored"),
-                # Refused with a sentence (`request.RETIRED_OP_ARGS`), until the console
-                # stops sending it.
-                "copy_from": _string(REPO_PATTERN, "Refused: copying is the console's"),
             },
             required=("name",),
         ),
@@ -734,7 +695,6 @@ _OPS = (
     Operation(
         name=BOOTSTRAP_OP,
         done_text="Semester set up.",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=COURSE_ADMIN_TEAM,
         args_schema=_args(),
@@ -758,7 +718,6 @@ def public_view(op: Operation) -> dict:
     """What `ops.json` publishes of an op: everything but the callables."""
     return {
         "name": op.name,
-        "runs_as": op.runs_as,
         "scope": op.scope,
         "required_team": op.required_team,
         "help": op.help,

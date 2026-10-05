@@ -67,7 +67,7 @@ events:
 const STUDENTS = '﻿hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@students.example.org,Anna Adams,enrolled,anna-a,101,SECRETCODE1,2026-09-02T09:30:00Z\nben@example,Ben Baker,enrolled,,,,\ncarla@students.example.org,Carla Cohen,auditor,,,SECRETCODE3,2026-09-02T09:30:00Z\n';
 const PEOPLE = 'instructors:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n    photo: images/a.jpg\n  - github_handle: b-sample\n    role: teaching_assistant\n    email: b@staff.example.org\n    name: B. Sample\n    start: "2026-09-01"\n    end: "2026-12-31"\n';
 const GRADING = 'title: Group project\ntype: group\nteam_formation: self_select\nmax_team_size: 4\nsubmit_via: assignment_repo\nvisibility: private\nformats: [ipynb]\nautograde: sometimes\ncompletion_check: true\ngrader_pdf: false\nquestions:\n  proposal: 20\n  analysis: 30\n';
-const OUTCOME = JSON.stringify({ schema: 'dsl.outcome/1', op: 'release.now', run_id: 4821, actor: 'a', preview: false, conclusion: 'done', summary: 'x', counts: { files: 7 }, reasons: [{ code: 'RELEASED', text: 'lectures/03 copied' }] });
+const OUTCOME = JSON.stringify({ schema: 'dsl.outcome/1', op: 'release.entry', run_id: 4821, actor: 'a', preview: false, conclusion: 'done', summary: 'x', counts: { files: 7 }, reasons: [{ code: 'RELEASED', text: 'lectures/03 copied' }] });
 
 const TREE = { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/05_trees_and_ensembles/slides.html', 'lectures/05_trees_and_ensembles/notes.pdf', 'lectures/03_regularisation/slides.html'] };
 
@@ -76,7 +76,7 @@ const files = new StaticFiles(
     [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE,
     [`${COHORT_ORG}/semester-config/students.csv`]: STUDENTS,
     [`${COHORT_ORG}/semester-config/instructors.yml`]: PEOPLE,
-    [`${COHORT_ORG}/semester-config/.system/outcomes/release.now.json`]: OUTCOME,
+    [`${COHORT_ORG}/semester-config/.system/outcomes/release.entry.json`]: OUTCOME,
     [`${COHORT_ORG}/${COHORT_ORG}.github.io/index.md`]: '---\nlayout: home\n---\nWelcome to **Machine Learning**.\n',
     [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: GRADING,
   },
@@ -220,7 +220,7 @@ describe('S6 schedule and S11 release', () => {
   it('pre-selects the inferred kind: the engine’s for a saved entry, else from where the copy lands and the repo’s own aliases', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
     expect(out).toContain('<option value selected>Lecture (inferred)</option>');
-    const withKind = (kind: string | null): Loaded => ({ kind: 'ready', sha: 's', stale: [], status: { ...STATUS, releases: (STATUS.releases ?? []).map((r) => (r.id === 's5' ? { ...r, kind } : r)) } });
+    const withKind = (kind: string | null): Loaded => ({ kind: 'ready', sha: 's', stale: [], status: { ...STATUS, releases: (STATUS.releases ?? []).flatMap((r) => (r.id !== 's5' ? [r] : kind === null ? [] : [{ ...r, kind }])) } });
     expect(html(<ScheduleScreen {...props({ entry: 's5', loaded: withKind('lab') })} />)).toContain('<option value selected>Lab (inferred)</option>');
     const aliased = new StaticFiles({ ...Object.fromEntries(['schedule.yml'].map((f) => [`${COHORT_ORG}/semester-config/${f}`, SCHEDULE])), [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'kinds:\n  lectures: lab\n' }, {}, TREE);
     expect(html(<ScheduleScreen {...props({ entry: 's5', files: aliased, loaded: withKind(null) })} />)).toContain('<option value selected>Lab (inferred)</option>');
@@ -241,12 +241,12 @@ describe('S6 schedule and S11 release', () => {
   });
   const unstaged: Loaded = {
     kind: 'ready', sha: 's', stale: [],
-    status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', kind: null, title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
+    status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', kind: 'lecture', title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
   };
   it('renders a release with no deploy block as nothing to release, with no Release early', () => {
     const out = html(<ScheduleScreen {...props({ loaded: unstaged })} />);
     expect(out).toContain('<b>Lecture 12</b>: Review');
-    expect(out).toMatch(/<li class="trow term" data-entry="lecture-12"><span class="k">release<\/span>/);
+    expect(out).toMatch(/<li class="trow lec" data-entry="lecture-12"><span class="k">lecture<\/span>/);
     expect(out).toContain('Nothing to release yet: this entry has no deploy block');
     expect(out).toContain('href="#schedule-lecture-12"');
     expect(out).not.toContain('Release early');
@@ -263,7 +263,7 @@ describe('operation outcome', () => {
   it('shows the generated text directly, and what the op touched in the details fold', () => {
     const def = generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026', 'SYLLABUS.md');
     const outcome = { schema: 'dsl.outcome/1' as const, op: def.op, run_id: 7, actor: 'a', preview: true, conclusion: 'previewed' as const, summary: 'Preview: the weekly plan.', reasons: [{ code: 'NO_SOLUTION_REGION', text: 'solution.py\nhas no region' }], details: ['main/solution.py', 'main/README.md'], block: '## Course sessions and readings\n- Session 1: Intro' };
-    const out = html(<OutcomeView result={{ outcome, people: [], leaked: [] }} def={def} />);
+    const out = html(<OutcomeView result={{ outcome }} def={def} />);
     expect(out).toContain('<summary>Details</summary>');
     expect(out).toContain('<ul class="outcome-list"><li>main/solution.py</li><li>main/README.md</li></ul>');
     expect(out).toContain('<pre class="outcome-details">## Course sessions and readings\n- Session 1: Intro</pre>');

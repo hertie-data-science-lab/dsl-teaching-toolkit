@@ -27,6 +27,8 @@ from dsl_course.schedule import Deploy, Release, Schedule
 from dsl_course.site_repo import Link
 from tests.conftest import entry_links, repo_row
 
+_NO_ALIASES = lambda repo: None
+
 
 def test_semester_label():
     assert site._semester_label("Deep-Learning-f2026") == "Fall 2026"
@@ -236,9 +238,6 @@ def test_public_links_are_site_relative(tmp_path):
     assert link.url.startswith("/public-materials/")
     assert "%20" in link.url or "01%20intro" in link.url  # space URL-encoded
     assert "github.com" not in link.url and "raw." not in link.url
-    # The public course site HOSTS everything it links, so a link there never carries a
-    # second destination.
-    assert link.view_url == ""
 
 
 def test_public_lecture_entry_reading_list_mode_has_no_links():
@@ -334,7 +333,7 @@ def _deploy(path, repo="materials", dest=None):
 def _landed(monkeypatch, deploy, readings=False, gh=_tree_gh):
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", gh)
-    return site._landed("Semester-f2026", deploy, frozenset(), readings)
+    return site._landed("Semester-f2026", deploy, frozenset(), readings, _NO_ALIASES)
 
 
 def test_a_landed_folder_links_its_files_and_folds_its_subfolders(monkeypatch):
@@ -409,7 +408,9 @@ _READINGS_TREE = (
 
 def test_a_readings_row_inlines_its_overlay_and_lists_everything_else(monkeypatch):
     monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", _READINGS_TREE))
-    landed = site._landed("C", _deploy("readings/01_week-1"), frozenset(), True)
+    landed = site._landed(
+        "C", _deploy("readings/01_week-1"), frozenset(), True, _NO_ALIASES
+    )
     # Only the overlay is taken out: an uploaded `notes.md` or `refs.bib` is a reading.
     assert sorted(x.name for x in landed.links) == ["ch1.pdf", "notes.md", "refs.bib"]
     assert landed.overlays == ["readings/01_week-1/READINGS.md"]
@@ -418,7 +419,9 @@ def test_a_readings_row_inlines_its_overlay_and_lists_everything_else(monkeypatc
     )
     assert site._reading_list("C", [landed]) == "### Week 1\n\n- Blitzstein."
     # Any other kind keeps the overlay as a file.
-    other = site._landed("C", _deploy("readings/01_week-1"), frozenset(), False)
+    other = site._landed(
+        "C", _deploy("readings/01_week-1"), frozenset(), False, _NO_ALIASES
+    )
     assert "READINGS.md" in [x.name for x in other.links] and not other.overlays
 
 
@@ -451,7 +454,9 @@ def _intro(*deploys):
 def test_the_default_syllabus_is_pinned_where_its_copy_landed(monkeypatch):
     link = _syllabus(monkeypatch, [_intro(_deploy("SYLLABUS.md"))], ("SYLLABUS.md",))
     assert link == Link(
-        "SYLLABUS.md", "https://github.com/S/materials/blob/main/SYLLABUS.md"
+        "SYLLABUS.md",
+        "https://github.com/S/materials/blob/main/SYLLABUS.md",
+        "SYLLABUS.md",
     )
 
 
@@ -516,7 +521,7 @@ TREE = "https://github.com/o/r/tree/main/lectures/01_introduction"
 
 
 def test_shape_links_lists_root_files_and_folds_subfolders():
-    names = [x.name for x in site._shape_links(ITDS_SESSION_01, TREE, frozenset())]
+    names = [x.name for x in site_repo.shape_links(ITDS_SESSION_01, TREE, frozenset())]
     # 10 blobs -> 5 root files + one entry per subfolder, in path order, files first.
     assert names == [
         "01-introduction.Rmd",
@@ -531,7 +536,9 @@ def test_shape_links_lists_root_files_and_folds_subfolders():
 
 
 def test_shape_links_points_a_folded_folder_at_its_tree():
-    got = {x.name: x.url for x in site._shape_links(ITDS_SESSION_01, TREE, frozenset())}
+    got = {
+        x.name: x.url for x in site_repo.shape_links(ITDS_SESSION_01, TREE, frozenset())
+    }
     assert got["pics/ (2 files)"] == f"{TREE}/pics"
     # A file still links to the file, not to its folder.
     assert got["01-introduction.pdf"] == "https://x/pdf"
@@ -540,24 +547,24 @@ def test_shape_links_points_a_folded_folder_at_its_tree():
 def test_shape_links_allowlist_matches_at_any_depth_and_offers_the_folder():
     names = [
         x.name
-        for x in site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf", "css"}))
+        for x in site_repo.shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf", "css"}))
     ]
     # Nothing is hidden without a way back: the browse link is the escape hatch.
     assert names == [
         "01-introduction.pdf",
         "libs/remark-css/metropolis.css",
         "simons-touch.css",
-        site._BROWSE_ALL,
+        site_repo._BROWSE_ALL,
     ]
-    browse = site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf"}))[-1]
-    assert browse.name == site._BROWSE_ALL and browse.url == TREE
+    browse = site_repo.shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf"}))[-1]
+    assert browse.name == site_repo._BROWSE_ALL and browse.url == TREE
 
 
 def test_shape_links_leaves_a_flat_folder_untouched():
     # The worked example's shape: no subfolders, so there is nothing to fold and the row
     # reads exactly as it did before any of this.
     flat = [Link("slides.md", "https://x/1"), Link("demo.py", "https://x/2")]
-    assert site._shape_links(flat, TREE, frozenset()) == flat
+    assert site_repo.shape_links(flat, TREE, frozenset()) == flat
 
 
 def test_shape_links_lists_a_dotfile_but_not_a_never_material_name():
@@ -573,7 +580,7 @@ def test_shape_links_lists_a_dotfile_but_not_a_never_material_name():
         Link("media/fig.png", "https://x/fig"),
         Link("slides.pdf", "https://x/pdf"),
     ]
-    names = [x.name for x in site._shape_links(blobs, TREE, frozenset())]
+    names = [x.name for x in site_repo.shape_links(blobs, TREE, frozenset())]
     # ...and the fold counts what it shows: `media/` holds two blobs, one of them junk.
     assert names == [".Rprofile", "slides.pdf", "media/ (1 file)"]
 
@@ -585,8 +592,8 @@ def test_shape_links_drops_junk_from_the_allowlist_shape_too():
         Link(".ipynb_checkpoints/lab-checkpoint.ipynb", "https://x/ck"),
         Link("lab.ipynb", "https://x/lab"),
     ]
-    names = [x.name for x in site._shape_links(blobs, TREE, frozenset({"ipynb"}))]
-    assert names == ["lab.ipynb", site._BROWSE_ALL]
+    names = [x.name for x in site_repo.shape_links(blobs, TREE, frozenset({"ipynb"}))]
+    assert names == ["lab.ipynb", site_repo._BROWSE_ALL]
 
 
 def test_shape_links_matches_a_directory_component_and_ignores_case():
@@ -600,16 +607,16 @@ def test_shape_links_matches_a_directory_component_and_ignores_case():
         Link("data/Thumbs.db", "https://x/th"),
         Link("data/housing.csv", "https://x/csv"),
     ]
-    names = [x.name for x in site._shape_links(blobs, TREE, frozenset())]
+    names = [x.name for x in site_repo.shape_links(blobs, TREE, frozenset())]
     assert names == ["data/ (1 file)"]
 
 
 def test_ext_reads_the_extension_not_a_dotted_directory():
-    assert site._ext("notes.PDF") == "pdf"
-    assert site._ext("Makefile") == ""
-    assert site._ext("libs/remark-css/metropolis.css") == "css"
+    assert site_repo._ext("notes.PDF") == "pdf"
+    assert site_repo._ext("Makefile") == ""
+    assert site_repo._ext("libs/remark-css/metropolis.css") == "css"
     # A dot in a directory name is not the file's extension.
-    assert site._ext("v1.2/README") == ""
+    assert site_repo._ext("v1.2/README") == ""
 
 
 def test_the_allowlist_never_leaves_a_public_file_unreachable(tmp_path):
@@ -640,16 +647,16 @@ def test_public_links_lists_nested_files_when_nothing_sits_at_the_root(tmp_path)
 
 
 def test_link_extensions_accepts_a_list_or_a_bare_string():
-    assert site._link_extensions(
+    assert site_repo.link_extensions(
         {"site_link_extensions": [".PDF", "html"]}
     ) == frozenset({"pdf", "html"})
     # The shape faculty reach for first; refusing it would only mean a silently
     # unfiltered site.
-    assert site._link_extensions({"site_link_extensions": "pdf, html"}) == frozenset(
-        {"pdf", "html"}
-    )
-    assert site._link_extensions({}) == frozenset()
-    assert site._link_extensions({"site_link_extensions": []}) == frozenset()
+    assert site_repo.link_extensions(
+        {"site_link_extensions": "pdf, html"}
+    ) == frozenset({"pdf", "html"})
+    assert site_repo.link_extensions({}) == frozenset()
+    assert site_repo.link_extensions({"site_link_extensions": []}) == frozenset()
 
 
 # --------------------------------------------------------------- reading lists + blocks
@@ -854,6 +861,20 @@ def test_the_sync_retires_the_sections_a_calendar_has_no_more(tmp_path):
     assert "materials.md" not in retired
     assert "files" in retired and "_includes/open_in.html" in retired
     assert "_layouts/assignment.html" in retired
+
+
+def test_a_public_site_has_no_assignments_tab(tmp_path):
+    # The public site lists no assignments, so it gets no tab that would say "none yet"
+    # forever; one an older sync wrote is retired, and a hand-written page stays.
+    assert "assignments.md" not in site_repo.theme_pages(semester=False)
+    nav = yaml.safe_load(site_repo.nav_yaml(semester=False))["items"]
+    assert "/assignments/" not in [i["url"] for i in nav]
+    (tmp_path / "assignments.md").write_text(
+        "---\nlayout: assignments\ntitle: Assignments\npermalink: /assignments/\n---\n"
+    )
+    assert site_repo.retired_pages(tmp_path, ("assignments.md",)) == ("assignments.md",)
+    (tmp_path / "assignments.md").write_text("---\ntitle: Our projects\n---\nHi.\n")
+    assert site_repo.retired_pages(tmp_path, ("assignments.md",)) == ()
 
 
 def test_the_banner_links_this_semester_in_the_console():

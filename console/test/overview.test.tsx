@@ -29,7 +29,7 @@ const panelOf = (out: string, from: string) => out.slice(out.indexOf(from), out.
 const text = (v: preact.VNode) => render(v).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 
 const prob = (id: string, scope: 'course' | 'semester', stage = 'K4'): Problem => ({ id, scope, stage, text: `${id} broke.`, stops: 'Something stops.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', screen: 'schedule', entry: 's5' } });
-const op = (run_id: number, finished: string, o: Partial<Operation> = {}): Operation => ({ run_id, op: 'release.now', conclusion: 'done', summary: '', finished, ...o });
+const op = (run_id: number, finished: string, o: Partial<Operation> = {}): Operation => ({ run_id, op: 'release.entry', conclusion: 'done', summary: '', finished, ...o });
 
 describe('Problems roll-up', () => {
   it('lists the course’s first, then each live semester’s tagged, a repeated course fault once', () => {
@@ -136,8 +136,8 @@ describe('Recent activity', () => {
     expect(whoWord(undefined, 'octo')).toBeNull();
   });
   it('lists each operation with its semester, age and who, linked to its run', () => {
-    const outcome = JSON.stringify({ schema: 'dsl.outcome/1', op: 'release.now', run_id: 4821, actor: 'octo', preview: false, conclusion: 'done', summary: 'x' });
-    const files = new StaticFiles({ [`${COHORT_ORG}/semester-config/.system/outcomes/release.now.json`]: outcome });
+    const outcome = JSON.stringify({ schema: 'dsl.outcome/1', op: 'release.entry', run_id: 4821, actor: 'octo', preview: false, conclusion: 'done', summary: 'x' });
+    const files = new StaticFiles({ [`${COHORT_ORG}/semester-config/.system/outcomes/release.entry.json`]: outcome });
     const runs = signal([{ run_id: 99, op: 'site.update', conclusion: 'failed', summary: '', finished: new Date(NOW).toISOString(), course: COURSE_ORG }]);
     const env = { ops: { runs, current: signal(null) }, user: { login: 'octo' } } as unknown as Env;
     const at = { ...STATUS, operations: [{ ...STATUS.operations![0], finished: '2026-09-23T05:00:00Z' }] };

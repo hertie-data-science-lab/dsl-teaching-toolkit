@@ -5,6 +5,7 @@
 // changes nothing on GitHub (a check, an email) has none.
 
 import { COURSE_REPO } from '../model/names';
+import { ghUrl } from '../ui/bits';
 import { DEFAULT_DEST_REPO } from '../model/policy';
 import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ALWAYS, releaseAdhoc as adhocTiers, updateCopies as copiesTiers } from '../tiers/ops';
 import type { OpDef } from './session';
@@ -18,11 +19,10 @@ export interface Scope {
 
 const base = (s: Scope, op: string, key: string) => ({ op, key, courseOrg: s.courseOrg, cohortOrg: s.cohortOrg });
 
-const gh = (...parts: string[]) => `https://github.com/${parts.join('/')}`;
 /** The semester's repos whose name contains `q` (student copies, marks repos). */
 const reposLike = (org: string, q = '') => `https://github.com/orgs/${org}/repositories${q ? `?q=${encodeURIComponent(q)}` : ''}`;
 /** A folder in a semester repo (its default branch), or the repo itself. */
-const destUrl = (org: string, repo: string, path = '') => (path ? gh(org, repo, 'tree', 'main', path.replace(/^\/+|\/+$/g, '')) : gh(org, repo));
+const destUrl = (org: string, repo: string, path = '') => ghUrl(org, repo, path.replace(/^\/+|\/+$/g, ''), 'main', 'tree');
 
 export function checkNow(s: Scope): OpDef {
   return {
@@ -66,29 +66,30 @@ export interface ReleaseRef {
   dest?: { repo: string; path: string } | null;
 }
 
-// No Options: the engine rebuilds a schedule entry's source and destination from
-// schedule.yml (`console.entry_requests`), so a destination typed here would be dropped.
-function releaseDef(s: Scope, op: string, r: ReleaseRef, copy: Pick<OpDef, 'name' | 'intro' | 'verb' | 'running' | 'cancel' | 'where'>): OpDef {
+// One engine op, `release.entry`, in three wordings: early, again, now. No Options: the
+// engine rebuilds a schedule entry's source and destination from schedule.yml
+// (`console.entry_requests`), so a destination typed here would be dropped.
+function releaseDef(s: Scope, r: ReleaseRef, copy: Pick<OpDef, 'name' | 'intro' | 'verb' | 'running' | 'cancel' | 'where'>): OpDef {
   const target = destUrl(s.cohortOrg ?? s.courseOrg, r.dest?.repo || DEFAULT_DEST_REPO, r.dest?.path ?? '');
-  return { ...base(s, op, r.id), ...copy, title: `${r.ident}: ${r.title}`, args: { entry: r.id }, previewProposed: false, target };
+  return { ...base(s, 'release.entry', r.id), ...copy, title: `${r.ident}: ${r.title}`, args: { entry: r.id }, previewProposed: false, target };
 }
 
 export function releaseEarly(s: Scope, r: ReleaseRef): OpDef {
-  return releaseDef(s, 'release.early', r, {
+  return releaseDef(s, r, {
     name: 'Release early', where: `Scheduled ${r.when}`, intro: `Copies ${r.ident} to students now instead of at its time. The scheduled release then finds nothing left to do.`,
     verb: `Release ${r.ident} early`, running: `Releasing ${r.ident} early`, cancel: 'Stop before copying',
   });
 }
 
 export function releaseAgain(s: Scope, r: ReleaseRef): OpDef {
-  return releaseDef(s, 'release.rerun', r, {
+  return releaseDef(s, r, {
     name: 'Release again', where: `Released ${r.when}`, intro: `Copies the course’s current version of ${r.ident} to students again, for a fixed file.`,
     verb: `Release ${r.ident} again`, running: `Releasing ${r.ident} again`, cancel: 'Stop before copying',
   });
 }
 
 export function releaseNow(s: Scope, r: ReleaseRef): OpDef {
-  return releaseDef(s, 'release.now', r, {
+  return releaseDef(s, r, {
     name: 'Release now', where: `Due ${r.when}`, intro: `${r.ident} is late: copies it to students now.`,
     verb: `Release ${r.ident} now`, running: `Releasing ${r.ident}`, cancel: 'Stop before copying',
   });
@@ -146,7 +147,7 @@ export function collect(s: Scope, a: AsgRef): OpDef {
     verb: 'Collect now', running: 'Starting the collection', cancel: 'Stop',
     args: { course_source_repo: a.template, assignment: a.slug },
     // The Console run only starts the collection; it runs on in its own workflow, followed there.
-    target: gh(s.courseOrg, COURSE_REPO, 'actions', 'workflows', 'collect-submissions.yml'),
+    target: `${ghUrl(s.courseOrg, COURSE_REPO)}/actions/workflows/collect-submissions.yml`,
   };
 }
 
@@ -175,7 +176,7 @@ export function updateSite(s: Scope): OpDef {
     ...base(s, 'site.update', 'site'), name: 'Update site', title: 'Student site', where: s.where,
     intro: 'Rebuilds the student site from the schedule, instructors and materials. Automation does this after every change; do it by hand after a failure.',
     verb: 'Update site', running: 'Updating the student site', cancel: 'Stop; the site keeps its current version', args: {},
-    target: gh(s.cohortOrg ?? s.courseOrg, `${s.cohortOrg ?? s.courseOrg}.github.io`),
+    target: ghUrl(s.cohortOrg ?? s.courseOrg, `${s.cohortOrg ?? s.courseOrg}.github.io`),
   };
 }
 
@@ -203,7 +204,7 @@ export function publishWebsite(s: Scope, published: boolean): OpDef {
     ...base(s, 'course.publish_website', 'website'), name: 'Publish website', title: `${s.courseOrg}.github.io`, where: s.where,
     intro: 'Publishes the public website as its saved settings say. A daily update keeps it current.',
     verb: published ? 'Republish website' : 'Publish website', running: 'Publishing the public website', cancel: 'Stop; nothing is public until the last step',
-    args: {}, target: gh(s.courseOrg, `${s.courseOrg}.github.io`),
+    args: {}, target: ghUrl(s.courseOrg, `${s.courseOrg}.github.io`),
     needsCheck: { label: 'This replaces the live public site', sub: 'Publishing has no preview, so confirm instead.' },
   };
 }
@@ -222,7 +223,7 @@ export function derive(s: Scope, slug: string, repo: string, title: string): OpD
     ...base(s, 'assignment.derive_starter', slug), name: 'Derive student version', title, where: 'Template',
     intro: 'Builds the student starter on main from the solution branch by removing answers between the markers.',
     verb: 'Derive student version', running: 'Deriving the student version', cancel: 'Stop', args: { course_source_repo: repo },
-    target: gh(s.courseOrg, repo, 'tree', 'main'),
+    target: `${ghUrl(s.courseOrg, repo)}/tree/main`,
   };
 }
 
@@ -244,7 +245,7 @@ export function bootstrapCohort(s: Scope & { cohortOrg: string }, courseName: st
     ...base(s, 'semester.bootstrap', s.cohortOrg), name: 'Set up', title: `${courseName}, ${s.where}`, where: s.cohortOrg,
     intro: 'Makes the student site, the join form and the semester’s settings in the new org. It takes about a minute.',
     verb: `Set up ${s.where}`, running: `Setting up ${s.where}`, cancel: 'Stop; what is already made stays and a second run finishes it', args: {},
-    target: gh(s.cohortOrg),
+    target: ghUrl(s.cohortOrg ?? s.courseOrg),
   };
 }
 
@@ -253,7 +254,7 @@ export function createAssignment(s: Scope, repo: string, title: string, args: Re
   return {
     ...base(s, 'assignment.create', repo), name: 'New assignment', title, where: s.where,
     intro: `Creates ${repo}: a main branch for the brief students get and a solution branch for marking.${from ? ` The files you ticked in ${from} are copied into it next, as you.` : ''} Nothing reaches students until it is on a schedule.`,
-    verb: 'Create assignment', running: `Creating ${repo}`, cancel: 'Stop', args, target: gh(s.courseOrg, repo),
+    verb: 'Create assignment', running: `Creating ${repo}`, cancel: 'Stop', args, target: ghUrl(s.courseOrg, repo),
   };
 }
 
@@ -261,6 +262,6 @@ export function createMaterials(s: Scope, repo: string, args: Record<string, unk
   return {
     ...base(s, 'materials.create', repo), name: 'New handout materials', title: repo, where: s.where,
     intro: `Creates ${repo}, private to instructors until releases copy it to a semester.`,
-    verb: 'Create handout materials repo', running: `Creating ${repo}`, cancel: 'Stop', args, target: gh(s.courseOrg, repo),
+    verb: 'Create handout materials repo', running: `Creating ${repo}`, cancel: 'Stop', args, target: ghUrl(s.courseOrg, repo),
   };
 }

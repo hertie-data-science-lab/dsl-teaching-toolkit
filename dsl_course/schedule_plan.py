@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from typing import NamedTuple
 
 from . import policy, schedule
 from .faults import ConfigFault
@@ -26,7 +27,7 @@ from .materials import (
     infer_kind,
     publishable,
 )
-from .schedule import label_number
+from .schedule import own_number
 
 # A source repo -> its `materials.yml` folder aliases (None: the file does not parse).
 # The caller reads them; the plan stays pure.
@@ -44,9 +45,7 @@ def deploy_dest(deploy: schedule.Deploy) -> str:
     return (deploy.semester_dest_path or deploy.course_source_path).strip("/")
 
 
-def deploy_section(
-    deploy: schedule.Deploy, aliases: Mapping[str, str] | None = None
-) -> str:
+def deploy_section(deploy: schedule.Deploy, aliases: Mapping[str, str] | None) -> str:
     """The section a deploy lands in - the top-level directory of its destination path,
     or the destination repo itself when the copy lands at its root (a repo that IS one
     section, `semester_dest_repo: labs`).
@@ -54,26 +53,50 @@ def deploy_section(
     A destination with no `/` is one name at the repo's root: a whole folder copied
     (`lectures`) or one item (`SYLLABUS.md`, `01_x` in a `labs` repo). The name is the
     section when it names a kind (`aliases`, else a built-in one), else the repo is - the
-    order `offplan_folders` reads a tree in."""
+    order `offplan_folders` reads a tree in. `aliases` are the SOURCE repo's
+    `materials.yml` folder aliases (None: it has none), required so that the site, the
+    status and the console never place one copy in two sections."""
     head, sep, _ = deploy_dest(deploy).partition("/")
     if sep or (head and alias_kind(head, aliases)):
         return head
     return deploy.semester_dest_repo
 
 
+class Landing(NamedTuple):
+    """Where a `releases:` entry's first copy lands and the kind that gives it.
+
+    `section` is None for an entry that declares its kind (nothing is read to place it)
+    or copies nothing yet. `named`: a kind names the section (the source repo's alias or
+    a built-in one), so an undeclared kind is not left to the supporting-files default."""
+
+    section: str | None
+    kind: str
+    inferred: bool
+    named: bool
+
+
+def entry_landing(release: schedule.Release, aliases: Aliases = _no_aliases) -> Landing:
+    """The entry's `Landing`: its kind is the one it declares, else the kind the section
+    of its first copy implies (supporting files when no alias names it), else `lecture`
+    (an entry that copies nothing yet). The ONE place an entry's section and kind are
+    worked out."""
+    if release.kind:
+        return Landing(None, release.kind, False, False)
+    if not release.deploy:
+        return Landing(None, EMPTY_ENTRY_KIND, True, False)
+    first = release.deploy[0]
+    kinds = aliases(first.course_source_repo)
+    section = deploy_section(first, kinds)
+    named = alias_kind(section, kinds) is not None
+    return Landing(section, infer_kind(section, kinds), True, named)
+
+
 def entry_kind(
     release: schedule.Release, aliases: Aliases = _no_aliases
 ) -> tuple[str, bool]:
-    """`(kind, inferred)` for a `releases:` entry: the kind it declares, else the kind the
-    section of its first copy implies (supporting files when no alias names it), else
-    `lecture` (an entry that copies nothing yet)."""
-    if release.kind:
-        return release.kind, False
-    if release.deploy:
-        first = release.deploy[0]
-        kinds = aliases(first.course_source_repo)
-        return infer_kind(deploy_section(first, kinds), kinds), True
-    return EMPTY_ENTRY_KIND, True
+    """`(kind, inferred)` for a `releases:` entry (`entry_landing`)."""
+    landing = entry_landing(release, aliases)
+    return landing.kind, landing.inferred
 
 
 @dataclass
@@ -87,7 +110,6 @@ class PlannedRow:
     key: str
     kind: str
     when: date | datetime
-    kind_inferred: bool = False
     tbc: bool = False
     subtitle: str = ""
     details: str = ""
@@ -113,13 +135,12 @@ def planned_rows(
     rows = []
     dated = [r for r in sched.releases if r.when is not None]
     for release in sorted(dated, key=lambda r: r.when):
-        kind, inferred = entry_kind(release, aliases)
+        kind, _ = entry_kind(release, aliases)
         rows.append(
             PlannedRow(
                 key=release.label,
                 kind=kind,
                 when=release.when,
-                kind_inferred=inferred,
                 tbc=release.tbc,
                 subtitle=release.title,
                 details=release.details,
@@ -139,12 +160,6 @@ class SiteRow:
     row: PlannedRow
     number: int | None
     readings: list[PlannedRow] = field(default_factory=list)
-
-
-def own_number(number: int | None, key: str) -> int | None:
-    """An entry's number (decision 0020): its `number:`, else the number its label or key
-    carries (`lecture_03`, `assignment-3`: the instructor typed it). Never a position."""
-    return number or label_number(key)
 
 
 def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
@@ -288,8 +303,7 @@ def duplicate_numbers(
 
 def kind_plural(kind: str) -> str:
     """`lectures`, `labs`, `assignments`: the kind's label, as a plural noun."""
-    label = next((k["label"] for k in policy.kinds() if k["key"] == kind), kind)
-    return f"{label.lower()}s"
+    return f"{policy.kind_label(kind).lower()}s"
 
 
 def duplicate_text(kind: str, n: int, keys: list[str]) -> str:
@@ -298,13 +312,11 @@ def duplicate_text(kind: str, n: int, keys: list[str]) -> str:
     return f"{count} {kind_plural(kind)} are numbered {n}: {', '.join(keys)}"
 
 
-def number_faults(
-    sched: schedule.Schedule, aliases: Aliases = _no_aliases
-) -> list[ConfigFault]:
-    """One fault per entry with no number, for the schedule.yml digest: on the clock of
-    the release or hand-out it stops, like a source that is not found."""
+def number_faults(missing: list[Unnumbered]) -> list[ConfigFault]:
+    """One fault per entry with no number (`unnumbered`), for the schedule.yml digest: on
+    the clock of the release or hand-out it stops, like a source that is not found."""
     out = []
-    for m in unnumbered(sched, aliases):
+    for m in missing:
         if m.block == "assignments":
             cost = "the hand out is skipped until it has one"
         elif m.copies:

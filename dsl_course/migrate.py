@@ -121,13 +121,12 @@ from .repos import (
     set_repo_topics,
 )
 from .scaffold import materials_system_files, starter_line
+from .schedule import label_number, own_number
 from .schedule_plan import (
     Aliases,
     entry_kind,
-    label_number,
     needs_number,
     offplan_folders,
-    own_number,
     planned_rows,
 )
 from .setting_readers import RENAMED_SETTINGS, read_settings

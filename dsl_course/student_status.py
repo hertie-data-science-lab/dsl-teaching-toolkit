@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
@@ -47,9 +46,10 @@ from .course import (
 from .discovery import handed_out_assignments
 from .faults import Unusable
 from .gh_contents import get_file_content, repo_tree
+from .materials import publishable
 from .materials import read as read_materials
-from .readings import demote_headings, is_reading_overlay
-from .repos import default_branch, has_denied_component, has_never_material_component
+from .readings import demote_headings
+from .repos import default_branch
 from .schedule_plan import (
     PlannedRow,
     declared_syllabus,
@@ -57,15 +57,14 @@ from .schedule_plan import (
     planned_rows,
     site_rows,
 )
-from .site_repo import people_cards, yaml_file
-from .status_json import CourseFacts, SemesterFacts, handed_out
+from .site_repo import landed_links, link_extensions, people_cards, yaml_file
+from .status_json import CourseFacts, SemesterFacts, _iso, dumps, handed_out
 
 SCHEMA = "dsl.student-status/2"
 # In the SEMESTER org's `.github`, which is public.
 REPO = ".github"
 PATH = records.path("student_status")
 ANNOUNCEMENTS_DIR = "_announcements"
-SITE_HOME = "index.md"
 
 # ---------------------------------------------------------------- the allow-list
 
@@ -73,7 +72,6 @@ TOP_KEYS = (
     "schema",
     "semester",
     "course_name",
-    "term_label",
     "semester_start",
     "semester_end",
     "generated_at",
@@ -87,7 +85,6 @@ TOP_KEYS = (
     "instructors",
     "late_policy",
     "materials_repos",
-    "materials_index",
     "announcements",
 )
 ROW_KEYS = (
@@ -139,7 +136,6 @@ INSTRUCTOR_KEYS = ("name", "title", "webpage", "picture", "role", "email")
 ANNOUNCEMENT_KEYS = ("when", "title", "details")
 SYLLABUS_KEYS = ("repo", "path")
 KIND_KEYS = ("label", "colour", "background")
-INDEX_KEYS = ("repo", "paths")
 
 _S, _SN = {"type": "string"}, {"type": ["string", "null"]}
 _B, _IN = {"type": "boolean"}, {"type": ["integer", "null"]}
@@ -159,8 +155,9 @@ def _list(item: dict) -> dict:
 
 
 def json_schema() -> dict:
-    """The file's shape, every level closed: the allow-list the PII test holds it to, and
-    what the console validates against (`console/schemas/student-status.schema.json`)."""
+    """The file's shape, every level closed and built from the `*_KEYS` tuples: the
+    allow-list the PII test holds it to, and what the console validates against
+    (`console/schemas/student-status.schema.json`)."""
     link = _closed({k: _S for k in LINK_KEYS})
     row_types = {
         "number": _IN,
@@ -185,10 +182,16 @@ def json_schema() -> dict:
         "tbc": _B,
         "max_points": {"type": ["number", "null"]},
         "team_formation": _closed(
-            {"closes_datetime": _S, "max_team_size": _IN}, nullable=True
+            {k: {"max_team_size": _IN}.get(k, _S) for k in TEAM_FORMATION_KEYS},
+            nullable=True,
         ),
         "teams": _list(
-            _closed({"name": _S, "members": {"type": "integer"}, "cap": _IN})
+            _closed(
+                {
+                    k: {"members": {"type": "integer"}, "cap": _IN}.get(k, _S)
+                    for k in TEAM_KEYS
+                }
+            )
         ),
     }
     top_types = {
@@ -214,9 +217,6 @@ def json_schema() -> dict:
         ),
         "late_policy": _list(_S),
         "materials_repos": _list(_S),
-        "materials_index": _list(
-            _closed({"repo": _S, "paths": _list(_S)}),
-        ),
         "announcements": _list(_closed({k: _S for k in ANNOUNCEMENT_KEYS})),
     }
     body = _closed({k: top_types.get(k, _S) for k in TOP_KEYS})
@@ -240,6 +240,8 @@ class StudentFacts:
     # `{(repo, path): text}` of every reading-list overlay that landed.
     overlays: dict[tuple[str, str], str] = field(default_factory=dict)
     syllabus: tuple[str, str] | None = None
+    # The course's `site_link_extensions` (`site_repo.link_extensions`): what a row lists.
+    link_extensions: frozenset[str] = frozenset()
     # (instructors, teaching assistants) as site cards; None when instructors.yml
     # declares nobody.
     cards: tuple[list[dict], list[dict]] | None = None
@@ -250,85 +252,24 @@ class StudentFacts:
 # ---------------------------------------------------------------- pure core
 
 
-def _iso(when: datetime | date | None) -> str | None:
-    return when.isoformat() if when is not None else None
-
-
 def _all_day(when: datetime | date | None) -> bool:
     return when is not None and not isinstance(when, datetime)
 
 
-def _kind_label(kind: str) -> str:
-    return next((k["label"] for k in policy.kinds() if k["key"] == kind), kind)
-
-
-def _url(org: str, repo: str, path: str, folder: bool) -> str:
-    return f"https://github.com/{org}/{repo}/{'tree' if folder else 'blob'}/HEAD/{path}"
-
-
-def _material(path: str) -> bool:
-    """A released path the public may see named: not denylisted (`solution/`, `tests/`,
-    `grading_config.yml`), not machine clutter."""
-    return not has_denied_component(path) and not has_never_material_component(path)
-
-
-def _copy_links(
-    org: str, repo: str, dest: str, paths: Iterable[str], readings: bool
-) -> tuple[list[dict], list[str]]:
-    """(links, reading-list overlays) for what one copy has landed: a file is one link, a
-    folder its own files plus one link per subfolder (as GitHub lists it). A readings
-    copy's `READINGS.md` is prose, not a link."""
-    blobs = [p for p in paths if _material(p)]
-    if dest and dest in blobs:
-        name = dest.rsplit("/", 1)[-1]
-        if readings and is_reading_overlay(name):
-            return [], [dest]
-        return [
-            {
-                "name": name,
-                "repo": repo,
-                "path": dest,
-                "url": _url(org, repo, dest, False),
-            }
-        ], []
-    prefix = f"{dest}/" if dest else ""
-    inside = [p for p in blobs if p.startswith(prefix)]
-    overlays = [p for p in inside if readings and is_reading_overlay(p)]
-    files, folders = [], {}
-    for p in inside:
-        if p in overlays:
-            continue
-        rest = p[len(prefix) :]
-        head, sep, _ = rest.partition("/")
-        if sep:
-            folders[head] = folders.get(head, 0) + 1
-        else:
-            files.append(
-                {
-                    "name": rest,
-                    "repo": repo,
-                    "path": p,
-                    "url": _url(org, repo, p, False),
-                }
-            )
-    for head, n in folders.items():
-        path = f"{prefix}{head}"
-        files.append(
-            {
-                "name": f"{head}/ ({n} file{'' if n == 1 else 's'})",
-                "repo": repo,
-                "path": path,
-                "url": _url(org, repo, path, True),
-            }
-        )
-    return files, overlays
+def _files(paths: set[str]) -> list[str]:
+    """The files of a destination tree read with both kinds (`dest_paths`), sorted, minus
+    any path the public file may not name (`materials.publishable`): every path no other
+    path sits under."""
+    folders = {p.rsplit("/", 1)[0] for p in paths if "/" in p}
+    return sorted(p for p in paths if p not in folders and publishable(p))
 
 
 def _landed(
-    facts: SemesterFacts, row: PlannedRow, readings: bool
-) -> tuple[list[dict], list[str], bool]:
-    """(links, overlays, landed) for every copy of `row` that is in its destination. A
-    copy inside another copy of the same row (a lab's `solutions/`) is that one's."""
+    facts: SemesterFacts, row: PlannedRow, readings: bool, allow: frozenset[str]
+) -> tuple[list[dict], list[tuple[str, str]], bool]:
+    """(links, overlays, landed) for every copy of `row` that is in its destination,
+    listed as the semester site lists them (`site_repo.landed_links`). A copy inside
+    another copy of the same row (a lab's `solutions/`) is that one's."""
     dests = [
         (d.semester_dest_repo, "" if is_repo_root(deploy_dest(d)) else deploy_dest(d))
         for d in row.deploys
@@ -343,15 +284,17 @@ def _landed(
             for r, p in dests
         ):
             continue
-        if (
-            dest
-            and dest not in paths
-            and not any(p.startswith(f"{dest}/") for p in paths)
-        ):
+        branch = facts.dest_branches.get(repo, "main")
+        found = landed_links(
+            facts.org, repo, branch, _files(paths), dest, allow, readings
+        )
+        if found is None:
             continue
-        got, prose = _copy_links(facts.org, repo, dest, paths, readings)
+        got, prose = found
         landed = landed or bool(got or prose)
-        links += got
+        links += [
+            {"name": k.name, "repo": repo, "path": k.path, "url": k.url} for k in got
+        ]
         overlays += [(repo, p) for p in prose]
     return links, overlays, landed
 
@@ -412,16 +355,16 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
     for sr in site_rows(planned_rows(facts.sched, aliases)):
         r = sr.row
         own = r.kind == "readings"
-        links, prose, landed = _landed(facts, r, own)
+        links, prose, landed = _landed(facts, r, own, extra.link_extensions)
         if not r.shown and not landed:
             continue
         readings, pending = [], False
         for attached in sr.readings:
-            got, more, done = _landed(facts, attached, True)
+            got, more, done = _landed(facts, attached, True, extra.link_extensions)
             readings += got
             prose += more
             pending = pending or not done
-        label = _kind_label(r.kind)
+        label = policy.kind_label(r.kind)
         title = f"{label} {sr.number}" if sr.number is not None else label
         out.append(
             _row(
@@ -693,12 +636,10 @@ def render(
     rows.sort(key=lambda r: (r["when"] is None, str(r["when"] or ""), r["id"]))
     assignments = render_assignments(facts, extra, now)
     late = list(dict.fromkeys(a["late_rule"] for a in assignments if a["late_rule"]))
-    tag = semester_of(facts.org)
     return {
         "schema": SCHEMA,
         "semester": facts.org,
         "course_name": str((course.meta or {}).get("course_name") or ""),
-        "term_label": semester_label(tag) or "",
         # schedule.yml's dates, so the console counts "Week N of M" as the instructor's does.
         "semester_start": _iso(sched.semester_start),
         "semester_end": _iso(sched.semester_end),
@@ -724,13 +665,6 @@ def render(
         "instructors": render_instructors(facts.org, extra.cards),
         "late_policy": late,
         "materials_repos": sorted(facts.dest_paths),
-        "materials_index": [
-            {
-                "repo": repo,
-                "paths": sorted(p for p in facts.dest_paths[repo] if _material(p)),
-            }
-            for repo in sorted(facts.dest_paths)
-        ],
         "announcements": extra.announcements,
     }
 
@@ -779,7 +713,8 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
     `status_json.gather_semester` does."""
     org, sched = facts.org, facts.sched
     extra = StudentFacts(
-        handed_out=handed_out_assignments(list(facts.listing.values()))
+        handed_out=handed_out_assignments(list(facts.listing.values())),
+        link_extensions=link_extensions(course.meta or {}),
     )
     for key, entry in _public_assignments(sched):
         spec = facts.specs.get(key, grades.GradingSpec())
@@ -795,7 +730,7 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
     for sr in site_rows(planned_rows(sched, lambda repo: facts.aliases.get(repo, {}))):
         own = [sr.row] if sr.row.kind == "readings" else []
         for row in [*own, *sr.readings]:
-            for repo, path in _landed(facts, row, True)[1]:
+            for repo, path in _landed(facts, row, True, frozenset())[1]:
                 extra.overlays[(repo, path)] = get_file_content(org, repo, path) or ""
     try:
         extra.syllabus = declared_syllabus(
@@ -831,8 +766,3 @@ def settle(doc: dict, old_text: str | None) -> dict:
         k: v for k, v in new.items() if k != "generated_at"
     }
     return {**doc, "generated_at": old["generated_at"]} if same else doc
-
-
-def dumps(doc: dict) -> bytes:
-    """Stable bytes, so an unchanged semester makes no commit."""
-    return (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode()

@@ -583,18 +583,34 @@ def refresh(course_org: str, semester_org: str | None = None) -> int:
         return 1
 
 
+# The semester operations that change what the COURSE status says: the semesters it
+# lists (set up, archive), the course materials (the syllabus), or a fresh read of all of
+# it (Refresh). Every other semester operation leaves the course file as it was.
+COURSE_TOUCHING_OPS = frozenset(
+    {
+        "semester.check",
+        "semester.bootstrap",
+        "semester.archive",
+        "assignment.generate_syllabus",
+    }
+)
+
+
 def write_after_op(request: dict) -> int:
     """The hook the Console run calls at the end of every operation, with its
-    `dsl.request/1` request. Rewrites the semester's status when the request names one, and
-    the course's always - a course operation (a new template, a fixed dsl-course.yml)
-    changes what every semester's file says about the course too. Never raises; returns the
-    error count, which the caller may ignore: the operation's outcome is its own."""
+    `dsl.request/1` request. Rewrites the semester's status when the request names one,
+    and the course's after a course operation (a new template, a fixed dsl-course.yml) or
+    a semester one that changes the course's facts (`COURSE_TOUCHING_OPS`). Never raises;
+    returns the error count, which the caller may ignore: the operation's outcome is its
+    own."""
     course_org = str(request.get("course_org") or "")
     if not course_org:
         log_err("status.json not refreshed: the request names no course_org")
         return 1
     semester_org = str(request.get("semester_org") or "") or None
     errors = refresh(course_org, semester_org) if semester_org else 0
+    if semester_org and request.get("op") not in COURSE_TOUCHING_OPS:
+        return errors
     return errors + refresh(course_org)
 
 

@@ -92,6 +92,7 @@ from .discovery import (
     read_semester_registry,
 )
 from .faults import NOT_MIGRATED, ConfigFault, FaultKind, Unusable
+from .gh_commits import last_commit_at
 from .gh_contents import (
     file_exists,
     get_file_content,
@@ -102,7 +103,6 @@ from .gh_contents import (
     top_level,
 )
 from .gh_teams import get_team_members
-from .ghcli import gh
 from .materials import (
     ASSETS_KIND,
     DEFAULT_SYLLABUS,
@@ -124,10 +124,10 @@ from .repos import default_branch
 from .schedule_plan import (
     Unnumbered,
     deploy_dest,
-    deploy_section,
     duplicate_numbers,
     duplicate_text,
     entry_kind,
+    entry_landing,
     own_number,
     planned_rows,
     site_rows,
@@ -269,6 +269,7 @@ class SemesterFacts:
     # `{semester-side name: when its grading sheet last changed}`; None = not known.
     sheet_changed: dict[str, datetime | None] = field(default_factory=dict)
     dest_paths: dict[str, set[str]] = field(default_factory=dict)  # release dest trees
+    dest_branches: dict[str, str] = field(default_factory=dict)  # and their branches
     # `{source repo: its materials.yml folder aliases}` - what an undeclared kind is
     # inferred through.
     aliases: dict[str, dict[str, str]] = field(default_factory=dict)
@@ -871,15 +872,15 @@ def kindless_entry_problems(facts: SemesterFacts) -> list[dict]:
     """`kinds:<key>` for each shown `releases:` entry that declares no kind and lands in a
     folder no kind names: it was a lecture row before decision 0031 and is now supporting
     files, no row at all."""
+    aliases = lambda repo: facts.aliases.get(repo, {})
     out = []
     for r in facts.sched.releases:
-        if r.kind or not r.deploy or not r.show_on_site:
+        landing = entry_landing(r, aliases)
+        if landing.section is None or landing.named:
             continue
-        first = r.deploy[0]
-        kinds = facts.aliases.get(first.course_source_repo, {})
-        section = deploy_section(first, kinds)
-        if alias_kind(section, kinds):
+        if not r.show_on_site:
             continue
+        first, section = r.deploy[0], landing.section
         where = (
             f"{section}/"
             if "/" in deploy_dest(first)
@@ -1088,12 +1089,6 @@ def template_state(t: TemplateFacts) -> str:
     return "ready" if _written(t.readme) and not t.starter_todo else TODO
 
 
-def app_installed() -> bool | None:
-    """C1/K1's "App installed" predicate. TODO(decision 0002): there is no App yet, so
-    nothing can be asked; None is "not known", and no stage waits on it."""
-    return None
-
-
 def course_admin_count(meta: dict) -> int:
     faculty = sync_faculty.parse_faculty_from_meta(meta) if meta else {}
     today = date.today().isoformat()
@@ -1143,7 +1138,7 @@ def render_course(
     course block inside a semester's file marks the same stages its problem list does.
 
     Stage predicates (lifecycle, course stages):
-    - C1 the org resolves (`app_installed` is a stub until decision 0002);
+    - C1 the org resolves;
     - C2 `.github` holds dsl-course.yml and its seeded workflows;
     - C3 dsl-course.yml names the course, its code and description, and one course admin;
     - C4 any materials repo `ready` (decision 0022: the others are to-dos);
@@ -1172,7 +1167,6 @@ def render_course(
         "org": facts.org,
         "name": str(meta.get("course_name") or ""),
         "code": str(meta.get("course_code") or ""),
-        "app_installed": app_installed(),
         "stages": stages,
         "stage_why": stage_why(stages, todo, standing),
         # Decision 0032: which stages may be set aside, and which are.
@@ -1532,8 +1526,7 @@ def render_assignments(
 def render_releases(
     facts: SemesterFacts, faults: list[ConfigFault], now: datetime
 ) -> list[dict]:
-    """One row per `releases:` entry. Source and destination are the entry's FIRST copy;
-    `copies` says how many it has."""
+    """One row per `releases:` entry. Source and destination are the entry's FIRST copy."""
     rows = []
     aliases = lambda repo: facts.aliases.get(repo, {})
     # The number the site gives each row (`schedule_plan.site_rows`); None for a row it
@@ -1545,15 +1538,13 @@ def render_releases(
     for r in facts.sched.releases:
         own = [f for f in faults if f.is_source and f.where == f"releases.{r.label}"]
         first = r.deploy[0] if r.deploy else None
-        kind, inferred = entry_kind(r, aliases)
+        kind, _ = entry_kind(r, aliases)
         rows.append(
             {
                 "id": r.label,
                 "when": _iso(r.when),
-                # Inferred when the entry declares none, and said so: the console shows
-                # it for the instructor to confirm once.
+                # Inferred when the entry declares none (`schedule_plan.entry_kind`).
                 "kind": kind,
-                "kind_inferred": inferred,
                 "number": numbers.get(r.label),
                 "title": r.title,
                 "state": release_state(r, facts, own, now, r.label not in held),
@@ -1566,7 +1557,6 @@ def render_releases(
                 "dest": {"repo": first.semester_dest_repo, "path": deploy_dest(first)}
                 if first
                 else None,
-                "copies": len(r.deploy),
                 "show_on_site": r.show_on_site,
                 "tbc": r.tbc,
             }
@@ -1636,12 +1626,14 @@ def this_week(
 
 
 def render_operations(outcomes: list[dict]) -> list[dict]:
-    """The most recent operations first, off their private outcome files."""
+    """The most recent operations first, off their private outcome files. Each row
+    opens its run, so an outcome recorded outside a workflow run (no `run_id`) is left
+    out."""
     keep = ("run_id", "op", "conclusion", "summary", "finished")
     rows = [
         {k: o.get(k) for k in keep}
         for o in outcomes
-        if isinstance(o, dict) and o.get("op")
+        if isinstance(o, dict) and o.get("op") and isinstance(o.get("run_id"), int)
     ]
     rows.sort(key=lambda r: str(r.get("finished") or ""), reverse=True)
     return rows[:RECENT_OPERATIONS]
@@ -1797,7 +1789,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     fault is shown on every semester it will affect, tagged `scope: course`.
 
     Stage predicates (lifecycle, semester stages):
-    - K1 the org resolves (`app_installed` is a stub until decision 0002);
+    - K1 the org resolves;
     - K2 semester-config, join and the site repo exist, and the course registry lists it;
     - K3 instructors.yml is read, grants at least one instructor, and every entry has an email;
     - K4 schedule.yml parses, the term's start and end are set, and it plans something;
@@ -1870,7 +1862,6 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "ended": not facts.archived
             and sched.semester_end is not None
             and sched.semester_end < today,
-            "app_installed": app_installed(),
             "stages": stages,
             "stage_why": stage_why(stages, todo, problems),
             "archive_date": _iso(sched.archive.when if sched.archive else None),
@@ -1895,19 +1886,6 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
 
 
 # ---------------------------------------------------------------------- gh/git wiring
-
-
-def _last_commit_at(org: str, repo: str, path: str = "") -> datetime | None:
-    """When `path` (or the repo, for "") last changed on the default branch. None when
-    there is no such commit or it could not be read - staleness is a hint, not a gate."""
-    query = f"repos/{org}/{repo}/commits?per_page=1" + (f"&path={path}" if path else "")
-    code, out = gh("api", query, "--jq", ".[0].commit.committer.date // empty")
-    if code != 0 or not out.strip():
-        return None
-    try:
-        return datetime.fromisoformat(out.strip().replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def _declaration(org: str, repo: str) -> Declared:
@@ -2137,7 +2115,7 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
                 facts.sheets[name] = grades.parse_sheet(text)
             except grades.SheetUnreadable:
                 pass  # its fault is in sheet_faults
-            facts.sheet_changed[name] = _last_commit_at(
+            facts.sheet_changed[name] = last_commit_at(
                 semester_org, schedule.CONFIG_REPO, grades.sheet_path(name)
             )
     facts.returned_at = _returned_at(semester_org)
@@ -2149,19 +2127,15 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
         {d.semester_dest_repo for r in sched.releases for d in r.deploy}
     ):
         if repo in facts.listing:
-            facts.dest_paths[repo] = set(
-                repo_tree(
-                    semester_org,
-                    repo,
-                    default_branch(semester_org, repo, fallback="main"),
-                )
-            )
+            branch = default_branch(semester_org, repo, fallback="main")
+            facts.dest_branches[repo] = branch
+            facts.dest_paths[repo] = set(repo_tree(semester_org, repo, branch))
     site = pages_repo(semester_org)
     if site in facts.listing:
         facts.site_home = get_file_content(semester_org, site, SITE_HOME)
-        facts.site_last_update = _last_commit_at(semester_org, site)
+        facts.site_last_update = last_commit_at(semester_org, site)
     moments = [
-        _last_commit_at(semester_org, schedule.CONFIG_REPO, p)
+        last_commit_at(semester_org, schedule.CONFIG_REPO, p)
         for p in (schedule.SCHEDULE_PATH, sync_faculty.SEMESTER_PEOPLE_PATH)
     ]
     facts.config_last_update = max((m for m in moments if m), default=None)

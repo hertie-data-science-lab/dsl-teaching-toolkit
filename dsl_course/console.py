@@ -40,9 +40,9 @@ from .ops.registry import (
 )
 from .ops.request import RequestError, check_access, parse_request
 
-# The ops that release a named schedule entry: the console may send just the entry, and the
+# The op that releases a named schedule entry: the console may send just the entry, and the
 # deploy fields are read off the semester's schedule.yml here.
-_ENTRY_OPS = ("release.now", "release.early", "release.rerun")
+_ENTRY_OP = "release.entry"
 
 _REFRESH_FAILED = {
     "code": "REFRESH_FAILED",
@@ -97,7 +97,7 @@ def entry_requests(request: Request) -> list[Request]:
     """One request per source repo for a named schedule entry, the deploy fields filled in
     from the semester's schedule.yml. A request that already carries them passes through.
     Raises `RequestError` for an entry the schedule does not have."""
-    if request.op not in _ENTRY_OPS or request.args.get("course_source_repo"):
+    if request.op != _ENTRY_OP or request.args.get("course_source_repo"):
         return [request]
     entry = request.args["entry"]
     sched = schedule.load(request.semester_org)

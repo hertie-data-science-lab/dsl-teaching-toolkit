@@ -23,7 +23,7 @@ class Flaky implements Adapter {
     return { state: this.held ? 'running' : 'completed', conclusion: 'success', steps: [], htmlUrl: '' };
   }
   async outcome(): Promise<Result> {
-    return { outcome: { run_id: 5, op: 'check.now', conclusion: 'done', summary: 'Checked.', finished: '2026-10-05T10:00:00Z' } as Result['outcome'], people: [], leaked: [] };
+    return { outcome: { run_id: 5, op: 'check.now', conclusion: 'done', summary: 'Checked.', finished: '2026-10-05T10:00:00Z' } as Result['outcome'] };
   }
   async cancel(): Promise<void> {}
 }

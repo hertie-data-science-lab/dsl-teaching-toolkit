@@ -256,10 +256,7 @@
             "type": "string"
           },
           "units": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           }
         },
         "required": [
@@ -277,12 +274,6 @@
     "course": {
       "additionalProperties": false,
       "properties": {
-        "app_installed": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "code": {
           "type": "string"
         },
@@ -514,16 +505,14 @@
             "type": "string"
           },
           "run_id": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "summary": {
             "type": "string"
           }
         },
         "required": [
+          "run_id",
           "op",
           "conclusion"
         ],
@@ -612,9 +601,6 @@
       "items": {
         "additionalProperties": false,
         "properties": {
-          "copies": {
-            "type": "integer"
-          },
           "dest": {
             "additionalProperties": false,
             "properties": {
@@ -638,9 +624,6 @@
           },
           "kind": {
             "type": "string"
-          },
-          "kind_inferred": {
-            "type": "boolean"
           },
           "number": {
             "type": [
@@ -709,12 +692,6 @@
     "semester": {
       "additionalProperties": false,
       "properties": {
-        "app_installed": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "archive_date": {
           "type": [
             "string",
