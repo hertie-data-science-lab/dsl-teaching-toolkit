@@ -513,10 +513,12 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
     const lab = blankDraft('lab', { repo: 'm' }) as ReleaseDraft;
     expect(withNumber(lab, doc, kindOf).number).toBe(4);
     // Readings are numbered only to join a lecture: nothing is proposed.
-    expect(withNumber(blankDraft('readings', { repo: 'm' }) as ReleaseDraft, doc, kindOf).number).toBeUndefined();    // A draft whose kind is inferred takes that kind's number; inferred readings drop one held.
+    expect(withNumber(blankDraft('readings', { repo: 'm' }) as ReleaseDraft, doc, kindOf).number).toBeUndefined();
+    // A draft whose kind is inferred takes that kind's number; readings keep only one typed in.
     const inferred = { ...(blankDraft('lecture', { repo: 'm' }) as ReleaseDraft), type: '' };
     expect(withNumber(inferred, doc, kindOf, 'lab').number).toBe(4);
-    expect(withNumber({ ...inferred, number: 8 }, doc, kindOf, 'readings').number).toBeUndefined();
+    expect(withNumber({ ...inferred, number: 3 }, doc, kindOf, 'readings').number).toBe(3);
+    expect(withNumber({ ...inferred, number: '' }, doc, kindOf, 'readings').number).toBe('');
   });
 
   it('shows a saved entry its number, and requires one where the site shows the row', () => {
@@ -528,6 +530,8 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
     expect(draftErrors(ok, { kind: 'lecture' }).number).toBe('A number is needed.');
     expect(draftErrors({ ...ok, show: false }, { kind: 'lecture' }).number).toBeUndefined();
     expect(draftErrors(ok, { kind: 'readings' }).number).toBeUndefined();
+    // A readings key that carries a number joins that lecture: clearing the field cannot undo it.
+    expect(draftErrors({ ...ok, id: 'readings-3', number: '' }, { kind: 'readings' }).number).toBe('The key readings-3 carries the number 3. Rename the key in schedule.yml to make this a row of its own.');
     expect((readDraft(doc, 'project') as AssignmentDraft).number).toBe('');
   });
 
