@@ -40,6 +40,9 @@ export type Tiers = Record<string, FieldTier>;
 /** One option of a select or radio field. */
 export const opt = (value: string, label: string, sub?: string) => ({ value, label, sub });
 
+/** The fields of `t` named in `keys`, in that order; a name `t` lacks is left out. */
+export const pick = (t: Tiers, keys: string[]): Tiers => Object.fromEntries(keys.filter((k) => t[k]).map((k) => [k, t[k]]));
+
 type Option = { value: string; label: string; sub?: string };
 
 /**

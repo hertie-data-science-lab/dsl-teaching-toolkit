@@ -6,11 +6,9 @@
 
 import type { ComponentChildren } from 'preact';
 import { settingsTiers } from './grading';
-import { opt, type FieldTier, type Tiers } from './types';
+import { opt, pick, type FieldTier, type Tiers } from './types';
 import { ORG_NAME_RE } from '../model/policy';
 import { autogradeBlock, parseSource, templateRepo, termLabel } from '../wizards/model';
-
-const pick = (t: Tiers, keys: string[]): Tiers => Object.fromEntries(keys.map((k) => [k, t[k]]));
 
 export function orgField(why: string): FieldTier {
   return {

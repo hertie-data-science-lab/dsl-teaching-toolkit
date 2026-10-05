@@ -14,7 +14,7 @@ import { FormatPicker } from '../forms/FormatPicker';
 import { courseBlock, institutionLayer, lateWord, resolve, valueWord, type Layers } from '../model/cascade';
 import { DEFAULT_FORMATS, POLICY } from '../model/policy';
 import { formatsList, fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
-import type { Tiers, Values } from '../tiers/types';
+import { pick, type Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
 import type { CourseStatus, MaterialsCheck, MaterialsState, Operation, Outcome, Problem, SemesterStatus, Status, Todo } from '../model/types';
 import { nextEvent, nextEventWords, recentActivity, rollUpProblems, whoWord, type Activity } from '../model/status';
@@ -818,6 +818,3 @@ export function TemplateScreen(p: CourseProps) {
   );
 }
 
-function pick(t: Tiers, keys: string[]): Tiers {
-  return Object.fromEntries(keys.filter((k) => t[k]).map((k) => [k, t[k]]));
-}

@@ -7,6 +7,7 @@
 // student of a semester org.
 
 import { parse } from 'yaml';
+import { isObj } from '../edit/yamlText';
 import type { Author, GhRepo, GitHubClient } from '../github/client';
 import { str } from './format';
 import { SEMESTER_TOPIC } from './migration';
@@ -58,7 +59,7 @@ export function parseRegistry(text: string | null | undefined): string[] {
   } catch {
     return [];
   }
-  const list = data && typeof data === 'object' && !Array.isArray(data) ? (data as { semesters?: unknown }).semesters : data;
+  const list = isObj(data) ? data.semesters : data;
   return Array.isArray(list) ? list.filter((c): c is string => typeof c === 'string' && c.length > 0) : [];
 }
 
@@ -90,7 +91,7 @@ export function registryList(text: string): string[] | null {
     return null;
   }
   if (data === null) return [];
-  const list = data && typeof data === 'object' && !Array.isArray(data) ? (data as { semesters?: unknown }).semesters ?? [] : data;
+  const list = isObj(data) ? data.semesters ?? [] : data;
   return Array.isArray(list) && list.every((c) => typeof c === 'string') ? list.filter((c) => c.length > 0) : null;
 }
 

@@ -4,6 +4,7 @@
 // gives and where that comes from.
 
 import { RUN_KEYS, SOURCE_WORD, TEAM_FORMATION, VISIBILITY, valueWord, type Effective, type RunKey } from '../model/cascade';
+import { blank } from '../edit/yamlText';
 import { penaltyError } from '../model/policy';
 import { defaultFirst, opt, type FieldTier, type Tiers, type Values } from './types';
 
@@ -24,8 +25,6 @@ const REASON: Record<RunKey, string> = {
   visibility: 'Applies to copies handed out after this change; existing copies keep theirs.',
   submit_url: 'For assignments submitted elsewhere: shown on the student site beside the due date.',
 };
-
-const blank = (x: unknown) => x === undefined || x === null || x === '';
 
 /** Why the late pair as typed would not do what it says, or null. A layer naming one half sets the other to none. */
 export function lateError(v: Values): string | null {

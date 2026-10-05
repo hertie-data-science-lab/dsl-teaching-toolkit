@@ -6,6 +6,7 @@
 // without one, an approximate end from the semester key).
 
 import { parse } from 'yaml';
+import { isObj } from '../edit/yamlText';
 import type { GitHubClient } from '../github/client';
 import { CENTRAL } from './central';
 import { COURSE_META_PATH, parseRegistry, REGISTRY_PATH, termOf, type Course } from './discovery';
@@ -69,7 +70,7 @@ export interface CatalogueCourse {
 /** `orgs.yml`'s course orgs as spelt, in order (`dsl_course/org_registry.parse_names`); throws on any other shape. */
 export function parseOrgs(text: string): string[] {
   const doc: unknown = parse(text);
-  const orgs = doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as { course_orgs?: unknown }).course_orgs : undefined;
+  const orgs = isObj(doc) ? doc.course_orgs : undefined;
   if (!Array.isArray(orgs) || !orgs.every((o) => typeof o === 'string' && ORG_NAME_RE.test(o))) throw new Error('orgs.yml must be `course_orgs:` and a list of org names');
   return orgs as string[];
 }
