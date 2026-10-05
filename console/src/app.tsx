@@ -218,7 +218,8 @@ export function App({ state: s }: { state: AppState }) {
   const blocked = !!unmigrated || !!failed || pending;
   const cohortStates: Record<string, Loaded> = {};
   const wanted = blocked ? [] : screen === 'home' ? courses.filter((c) => c.write).flatMap((c) => c.cohorts) : ctx.course?.write ? ctx.course.cohorts : [];
-  for (const k of wanted) cohortStates[k.org] = s.statuses.cohort(k.org).value;
+  // Only the open semester's pages show staleness: every other semester read skips the tree.
+  for (const k of wanted) cohortStates[k.org] = s.statuses.cohort(k.org, k.org === ctx.cohort?.org).value;
   const cohortLoaded = ctx.cohort && ctx.course?.write && !blocked ? s.statuses.cohort(ctx.cohort.org).value : undefined;
   const navKey = COHORT_SCREENS[screen] ?? COURSE_SCREENS[screen] ?? (wiz ? WIZARD_NAV[wiz.name] : undefined) ?? screen;
   const navCourse = !blocked && !APP_SCREENS.includes(screen) ? ctx.course : undefined;

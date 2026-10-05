@@ -287,7 +287,8 @@ a first visit, mostly free 304s after).
   case-insensitively.
 - Status: `semester-config/.system/status.json` (semester) and `.github/.system/status.json`
   (course), validated against `schemas/status.schema.json`. Staleness compares the file's
-  `inputs` with one recursive tree read, by full path (`.system/assignments.lock.yml`
+  `inputs` with one recursive tree read (made beside the status read, and only for the open
+  semester, the one place it shows), by full path (`.system/assignments.lock.yml`
   included); an input recorded `null` is unchanged while the file is still absent. An absent
   status file shows "Status not computed yet".
 - Automation's heartbeat: the course's Scheduled release run list.

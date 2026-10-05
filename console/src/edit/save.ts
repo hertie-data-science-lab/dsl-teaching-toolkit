@@ -123,7 +123,7 @@ export async function saveText(env: Env, t: Target, text: string | null, sha: st
 }
 
 function statusProblems(env: Env, sr: [string, string], t: Target): Problem[] {
-  const l = env.statuses.get(sr[0], sr[1]).value;
+  const l = env.statuses.get(sr[0], sr[1], false).value;
   return l.kind === 'ready' ? problemsIn(l.status.problems, t) : [];
 }
 
