@@ -84,8 +84,9 @@ export interface SemesterStatus {
   /** `semester_start` / `semester_end` (yyyy-mm-dd); null while unset, absent on an older status. */
   start?: string | null;
   end?: string | null;
-  week: number;
-  weeks: number;
+  /** Null while either date is unset, 0 before the start; absent on an older status. */
+  week?: number | null;
+  weeks?: number | null;
   live: boolean;
   /** Past its end and not archived yet; absent on an older status. */
   ended?: boolean;

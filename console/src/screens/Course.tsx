@@ -31,6 +31,7 @@ import type { CourseProps } from './types';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from '../model/names';
 import { AsideFold, COURSE_FILE, Circle, SetAsideDialog, asideList, missingClause, setAsideText, stepAside, todoAside, type Ask } from './SetAside';
 import { REFRESH_HINT, tzOf, yearOf } from './common';
+import { weekWords } from '../model/week';
 
 /** The course block and course-scoped problems: from the course's own status, else a semester's. */
 export function courseView(p: Pick<CourseProps, 'loaded' | 'cohortStates'>): { course: CourseStatus | null; problems: Problem[]; computed: boolean } {
@@ -586,7 +587,7 @@ export function CourseScreen(p: CourseProps) {
               return (
                 <li>
                   <span class="r-title">{c.termLabel} {semesterChip(sem)}</span>
-                  <span class="r-sub">{sem ? `Week ${sem.week} of ${sem.weeks}` : l?.kind === 'absent' ? 'Status not computed yet' : c.termLabel}</span>
+                  <span class="r-sub">{sem ? weekWords(sem) : l?.kind === 'absent' ? 'Status not computed yet' : c.termLabel}</span>
                   {st && sem?.live !== false ? <span class="r-sub next-event">{nextEventWords(nextEvent(st, p.now), tzOf(st), yearOf(p.now, tzOf(st)))}</span> : null}
                   <span class="r-side">{n !== null ? <Probs n={n} /> : null}<a class="btn small quiet" href={`?cohort=${c.org}#dashboard`}>Open</a></span>
                 </li>

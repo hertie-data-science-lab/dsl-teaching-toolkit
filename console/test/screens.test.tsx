@@ -123,6 +123,11 @@ describe('S1 home', () => {
     expect(out).toContain('Session 3: Trees');
     expect(out).toMatch(/cohort-card ro[^"]*" href="\?cohort=hertie-ids-f2026/);
     expect(out.indexOf('Machine Learning, Fall 2026')).toBeLessThan(out.indexOf('Intro to Data Science, Fall 2026'));
+    const at = (semester: Partial<Status['semester']>) =>
+      html(<HomeScreen courses={[course]} cohortStates={{ [COHORT_ORG]: { ...ready, status: { ...STATUS, semester: { ...STATUS.semester!, ...semester } } } as Loaded }} now={NOW} user={{ login: 'a-example', id: 1, name: null, email: null, avatar_url: '' }} />);
+    expect(at({ week: 0 })).toContain('<span class="cc-week">Starts Mon 7 Sep</span>');
+    expect(at({ week: 0, start: null })).toContain('<span class="cc-week">Before week 1</span>');
+    expect(at({ week: null, weeks: null, start: null, end: null })).toContain('<span class="cc-week"></span>');
   });
 });
 

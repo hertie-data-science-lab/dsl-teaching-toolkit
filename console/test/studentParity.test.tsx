@@ -73,7 +73,7 @@ describe('the semester dates and when the file was written', () => {
   it('give the week as the instructor’s banner counts it: none before week 1, the last after the end', () => {
     const f = factsFromStatus(DOC);
     expect(semesterLine(f, NOW)).toEqual({ week: 'Week 3 of 15', dates: expect.stringMatching(/7 Sep.* to .*18 Dec/) });
-    expect(semesterLine(f, Date.parse('2026-09-01T12:00:00Z')).week).toBeUndefined();
+    expect(semesterLine(f, Date.parse('2026-09-01T12:00:00Z'))).toMatchObject({ week: undefined, starts: 'Starts Mon 7 Sep' });
     expect(semesterLine(f, Date.parse('2027-01-10T12:00:00Z')).week).toBe('Week 15 of 15');
     expect(semesterLine({ ...f, start: undefined }, NOW)).toEqual({});
   });

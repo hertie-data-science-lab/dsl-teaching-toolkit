@@ -12,6 +12,7 @@ import { isMarked, type Mine } from './mine';
 import { weekOf, type Term } from './schedule';
 import { nextEventWords } from './status';
 import { instant, startOfDay, type SemesterFacts } from './student';
+import type { SemesterStatus } from './types';
 
 export type WeekKind = 'due' | 'hand_out' | 'release' | 'exam' | 'event' | 'marks' | 'teams' | 'news' | 'patch';
 
@@ -120,7 +121,7 @@ export function termOfFacts(facts: Pick<SemesterFacts, 'start' | 'end'>): Term |
  * "Week N of M", clamped to the last week and absent before week 1, and the dates. Each is
  * left out when the facts do not carry the dates (an older file, or the site).
  */
-export function semesterLine(facts: Pick<SemesterFacts, 'start' | 'end' | 'timezone'>, now: number): { week?: string; dates?: string } {
+export function semesterLine(facts: Pick<SemesterFacts, 'start' | 'end' | 'timezone'>, now: number): { week?: string; starts?: string; dates?: string } {
   const term = termOfFacts(facts);
   if (!term) return {};
   const tz = facts.timezone || DEFAULT_TIMEZONE;
@@ -128,8 +129,20 @@ export function semesterLine(facts: Pick<SemesterFacts, 'start' | 'end' | 'timez
   const year = Number(term.start.slice(0, 4));
   return {
     week: w === 'before' ? undefined : `Week ${w === 'after' ? term.weeks : w} of ${term.weeks}`,
+    starts: w === 'before' ? `Starts ${fmtDay(term.start, tz, year)}` : undefined,
     dates: `${fmtDay(term.start, tz, year)} to ${fmtDay(term.end, tz, year)}`,
   };
+}
+
+/**
+ * An instructor's semester card's week, from the status (`semester_weeks`: both null while a
+ * date is unset, 0 before the start): "Week 3 of 15", "Starts Mon 7 Sep" before the start
+ * ("Before week 1" when the start is not in the status), else nothing.
+ */
+export function weekWords(sem: Pick<SemesterStatus, 'week' | 'weeks' | 'start' | 'timezone'>): string {
+  if (sem.week && sem.weeks) return `Week ${sem.week} of ${sem.weeks}`;
+  if (sem.week !== 0) return '';
+  return sem.start ? `Starts ${fmtDay(sem.start, sem.timezone || DEFAULT_TIMEZONE, Number(sem.start.slice(0, 4)))}` : 'Before week 1';
 }
 
 /** The event word a row's title lacks: a hand-out and a due row are titled by their assignment alone. */
