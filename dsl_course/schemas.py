@@ -226,7 +226,7 @@ def status_schema() -> dict:
     stage_why = {"type": "object", "additionalProperties": _str()}
     flags = {"type": "object", "additionalProperties": {"type": "boolean"}}
     nullable = {"type": ["string", "null"]}
-    unknown = {"type": ["boolean", "null"]}  # `app_installed` until decision 0002
+    unknown = {"type": ["boolean", "null"]}  # `staff.synced`: null when not known
     # A status problem's pointer: the line, screen and entry are what the fault knows,
     # and `ref` names the branch when it is not the default (a template's `solution`).
     # `url` is a fix that is a GitHub settings page rather than a file (its `path` is "").
@@ -297,7 +297,6 @@ def status_schema() -> dict:
             "org": _str(),
             "name": _str(),
             "code": _str(),
-            "app_installed": unknown,
             "stages": stages,
             "stage_why": stage_why,
             # Decision 0032, per stage id: may it be set aside, and is it.
@@ -325,7 +324,6 @@ def status_schema() -> dict:
             "live": {"type": "boolean"},
             # Past `semester_end` and not archived yet.
             "ended": {"type": "boolean"},
-            "app_installed": unknown,
             "stages": stages,
             "stage_why": stage_why,
             "archive_date": nullable,
@@ -366,13 +364,11 @@ def status_schema() -> dict:
             "id": _str(),
             "when": nullable,
             "kind": _str(),
-            "kind_inferred": {"type": "boolean"},
             "number": {"type": ["integer", "null"]},
             "title": _str(),
             "state": _enum(RELEASE_STATES),
             "source": place,
             "dest": place,
-            "copies": {"type": "integer"},
             "show_on_site": {"type": "boolean"},
             "tbc": {"type": "boolean"},
         },

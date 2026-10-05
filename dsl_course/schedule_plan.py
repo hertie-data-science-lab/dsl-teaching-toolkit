@@ -87,7 +87,6 @@ class PlannedRow:
     key: str
     kind: str
     when: date | datetime
-    kind_inferred: bool = False
     tbc: bool = False
     subtitle: str = ""
     details: str = ""
@@ -113,13 +112,12 @@ def planned_rows(
     rows = []
     dated = [r for r in sched.releases if r.when is not None]
     for release in sorted(dated, key=lambda r: r.when):
-        kind, inferred = entry_kind(release, aliases)
+        kind, _ = entry_kind(release, aliases)
         rows.append(
             PlannedRow(
                 key=release.label,
                 kind=kind,
                 when=release.when,
-                kind_inferred=inferred,
                 tbc=release.tbc,
                 subtitle=release.title,
                 details=release.details,

@@ -1088,12 +1088,6 @@ def template_state(t: TemplateFacts) -> str:
     return "ready" if _written(t.readme) and not t.starter_todo else TODO
 
 
-def app_installed() -> bool | None:
-    """C1/K1's "App installed" predicate. TODO(decision 0002): there is no App yet, so
-    nothing can be asked; None is "not known", and no stage waits on it."""
-    return None
-
-
 def course_admin_count(meta: dict) -> int:
     faculty = sync_faculty.parse_faculty_from_meta(meta) if meta else {}
     today = date.today().isoformat()
@@ -1143,7 +1137,7 @@ def render_course(
     course block inside a semester's file marks the same stages its problem list does.
 
     Stage predicates (lifecycle, course stages):
-    - C1 the org resolves (`app_installed` is a stub until decision 0002);
+    - C1 the org resolves;
     - C2 `.github` holds dsl-course.yml and its seeded workflows;
     - C3 dsl-course.yml names the course, its code and description, and one course admin;
     - C4 any materials repo `ready` (decision 0022: the others are to-dos);
@@ -1172,7 +1166,6 @@ def render_course(
         "org": facts.org,
         "name": str(meta.get("course_name") or ""),
         "code": str(meta.get("course_code") or ""),
-        "app_installed": app_installed(),
         "stages": stages,
         "stage_why": stage_why(stages, todo, standing),
         # Decision 0032: which stages may be set aside, and which are.
@@ -1532,8 +1525,7 @@ def render_assignments(
 def render_releases(
     facts: SemesterFacts, faults: list[ConfigFault], now: datetime
 ) -> list[dict]:
-    """One row per `releases:` entry. Source and destination are the entry's FIRST copy;
-    `copies` says how many it has."""
+    """One row per `releases:` entry. Source and destination are the entry's FIRST copy."""
     rows = []
     aliases = lambda repo: facts.aliases.get(repo, {})
     # The number the site gives each row (`schedule_plan.site_rows`); None for a row it
@@ -1545,15 +1537,13 @@ def render_releases(
     for r in facts.sched.releases:
         own = [f for f in faults if f.is_source and f.where == f"releases.{r.label}"]
         first = r.deploy[0] if r.deploy else None
-        kind, inferred = entry_kind(r, aliases)
+        kind, _ = entry_kind(r, aliases)
         rows.append(
             {
                 "id": r.label,
                 "when": _iso(r.when),
-                # Inferred when the entry declares none, and said so: the console shows
-                # it for the instructor to confirm once.
+                # Inferred when the entry declares none (`schedule_plan.entry_kind`).
                 "kind": kind,
-                "kind_inferred": inferred,
                 "number": numbers.get(r.label),
                 "title": r.title,
                 "state": release_state(r, facts, own, now, r.label not in held),
@@ -1566,7 +1556,6 @@ def render_releases(
                 "dest": {"repo": first.semester_dest_repo, "path": deploy_dest(first)}
                 if first
                 else None,
-                "copies": len(r.deploy),
                 "show_on_site": r.show_on_site,
                 "tbc": r.tbc,
             }
@@ -1797,7 +1786,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     fault is shown on every semester it will affect, tagged `scope: course`.
 
     Stage predicates (lifecycle, semester stages):
-    - K1 the org resolves (`app_installed` is a stub until decision 0002);
+    - K1 the org resolves;
     - K2 semester-config, join and the site repo exist, and the course registry lists it;
     - K3 instructors.yml is read, grants at least one instructor, and every entry has an email;
     - K4 schedule.yml parses, the term's start and end are set, and it plans something;
@@ -1870,7 +1859,6 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "ended": not facts.archived
             and sched.semester_end is not None
             and sched.semester_end < today,
-            "app_installed": app_installed(),
             "stages": stages,
             "stage_why": stage_why(stages, todo, problems),
             "archive_date": _iso(sched.archive.when if sched.archive else None),

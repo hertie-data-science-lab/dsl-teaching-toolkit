@@ -73,7 +73,6 @@ TOP_KEYS = (
     "schema",
     "semester",
     "course_name",
-    "term_label",
     "semester_start",
     "semester_end",
     "generated_at",
@@ -87,7 +86,6 @@ TOP_KEYS = (
     "instructors",
     "late_policy",
     "materials_repos",
-    "materials_index",
     "announcements",
 )
 ROW_KEYS = (
@@ -139,7 +137,6 @@ INSTRUCTOR_KEYS = ("name", "title", "webpage", "picture", "role", "email")
 ANNOUNCEMENT_KEYS = ("when", "title", "details")
 SYLLABUS_KEYS = ("repo", "path")
 KIND_KEYS = ("label", "colour", "background")
-INDEX_KEYS = ("repo", "paths")
 
 _S, _SN = {"type": "string"}, {"type": ["string", "null"]}
 _B, _IN = {"type": "boolean"}, {"type": ["integer", "null"]}
@@ -214,9 +211,6 @@ def json_schema() -> dict:
         ),
         "late_policy": _list(_S),
         "materials_repos": _list(_S),
-        "materials_index": _list(
-            _closed({"repo": _S, "paths": _list(_S)}),
-        ),
         "announcements": _list(_closed({k: _S for k in ANNOUNCEMENT_KEYS})),
     }
     body = _closed({k: top_types.get(k, _S) for k in TOP_KEYS})
@@ -693,12 +687,10 @@ def render(
     rows.sort(key=lambda r: (r["when"] is None, str(r["when"] or ""), r["id"]))
     assignments = render_assignments(facts, extra, now)
     late = list(dict.fromkeys(a["late_rule"] for a in assignments if a["late_rule"]))
-    tag = semester_of(facts.org)
     return {
         "schema": SCHEMA,
         "semester": facts.org,
         "course_name": str((course.meta or {}).get("course_name") or ""),
-        "term_label": semester_label(tag) or "",
         # schedule.yml's dates, so the console counts "Week N of M" as the instructor's does.
         "semester_start": _iso(sched.semester_start),
         "semester_end": _iso(sched.semester_end),
@@ -724,13 +716,6 @@ def render(
         "instructors": render_instructors(facts.org, extra.cards),
         "late_policy": late,
         "materials_repos": sorted(facts.dest_paths),
-        "materials_index": [
-            {
-                "repo": repo,
-                "paths": sorted(p for p in facts.dest_paths[repo] if _material(p)),
-            }
-            for repo in sorted(facts.dest_paths)
-        ],
         "announcements": extra.announcements,
     }
 

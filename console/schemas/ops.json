@@ -13,7 +13,6 @@
       "name": "semester.check",
       "preview": false,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -30,7 +29,6 @@
       "name": "semester.preview_automation",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -75,7 +73,6 @@
       "name": "release.entry",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -116,7 +113,6 @@
       "name": "release.adhoc",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -133,7 +129,6 @@
       "name": "release.propagate_back",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -165,7 +160,6 @@
       "name": "assignment.handout_now",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -205,7 +199,6 @@
       "name": "assignment.update_copies",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -235,7 +228,6 @@
       "name": "assignment.collect_now",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "workflow:collect-submissions.yml"
     },
@@ -270,7 +262,6 @@
       "name": "grades.return",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -287,7 +278,6 @@
       "name": "roster.send_codes",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -304,7 +294,6 @@
       "name": "site.update",
       "preview": false,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -329,7 +318,6 @@
       "name": "teams.open_window",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -346,7 +334,6 @@
       "name": "access.check",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -368,7 +355,6 @@
       "name": "semester.archive",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -385,7 +371,6 @@
       "name": "course.publish_website",
       "preview": false,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "course",
       "via": "inline"
     },
@@ -410,7 +395,6 @@
       "name": "assignment.derive_starter",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "course",
       "via": "inline"
     },
@@ -440,7 +424,6 @@
       "name": "assignment.generate_syllabus",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -470,7 +453,6 @@
       "name": "materials.create",
       "preview": false,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "course",
       "via": "inline"
     },
@@ -527,7 +509,6 @@
       "name": "assignment.create",
       "preview": false,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "course",
       "via": "inline"
     },
@@ -544,7 +525,6 @@
       "name": "semester.bootstrap",
       "preview": false,
       "required_team": "course-admin",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     }

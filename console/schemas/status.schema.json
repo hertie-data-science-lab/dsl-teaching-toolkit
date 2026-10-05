@@ -277,12 +277,6 @@
     "course": {
       "additionalProperties": false,
       "properties": {
-        "app_installed": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "code": {
           "type": "string"
         },
@@ -612,9 +606,6 @@
       "items": {
         "additionalProperties": false,
         "properties": {
-          "copies": {
-            "type": "integer"
-          },
           "dest": {
             "additionalProperties": false,
             "properties": {
@@ -638,9 +629,6 @@
           },
           "kind": {
             "type": "string"
-          },
-          "kind_inferred": {
-            "type": "boolean"
           },
           "number": {
             "type": [
@@ -709,12 +697,6 @@
     "semester": {
       "additionalProperties": false,
       "properties": {
-        "app_installed": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "archive_date": {
           "type": [
             "string",

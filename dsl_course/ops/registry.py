@@ -38,7 +38,6 @@ REQUEST_SCHEMA = "dsl.request/1"
 OUTCOME_SCHEMA = "dsl.outcome/1"
 STATUS_SCHEMA = "dsl.status/1"
 
-DISPATCH = "dispatch"
 COURSE = "course"
 # The op scope and the `semester.*` op ids are what the console matches on (ops.json).
 SEMESTER = "semester"
@@ -74,7 +73,6 @@ class Request:
 @dataclass(frozen=True)
 class Operation:
     name: str
-    runs_as: str
     scope: str
     required_team: str
     args_schema: dict
@@ -381,7 +379,6 @@ _RELEASE_COUNTS = "Copied paths per destination, as deploy reports them."
 def _release(name: str, help_text: str, args_schema: dict) -> Operation:
     return Operation(
         name=name,
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=args_schema,
@@ -399,7 +396,6 @@ def _release(name: str, help_text: str, args_schema: dict) -> Operation:
 _OPS = (
     Operation(
         name="semester.check",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -411,7 +407,6 @@ _OPS = (
     ),
     Operation(
         name="semester.preview_automation",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -435,7 +430,6 @@ _OPS = (
     ),
     Operation(
         name="release.propagate_back",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -449,7 +443,6 @@ _OPS = (
     ),
     Operation(
         name="assignment.handout_now",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -473,7 +466,6 @@ _OPS = (
     ),
     Operation(
         name="assignment.update_copies",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -495,7 +487,6 @@ _OPS = (
     ),
     Operation(
         name="assignment.collect_now",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -513,7 +504,6 @@ _OPS = (
     ),
     Operation(
         name="grades.return",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -539,7 +529,6 @@ _OPS = (
     ),
     Operation(
         name="roster.send_codes",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -554,7 +543,6 @@ _OPS = (
     ),
     Operation(
         name="site.update",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -566,7 +554,6 @@ _OPS = (
     ),
     Operation(
         name="teams.open_window",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -585,7 +572,6 @@ _OPS = (
     ),
     Operation(
         name="access.check",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -599,7 +585,6 @@ _OPS = (
     ),
     Operation(
         name="semester.archive",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -615,7 +600,6 @@ _OPS = (
     ),
     Operation(
         name="course.publish_website",
-        runs_as=DISPATCH,
         scope=COURSE,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
@@ -627,7 +611,6 @@ _OPS = (
     ),
     Operation(
         name="assignment.derive_starter",
-        runs_as=DISPATCH,
         scope=COURSE,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -643,7 +626,6 @@ _OPS = (
     ),
     Operation(
         name="assignment.generate_syllabus",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -665,7 +647,6 @@ _OPS = (
     ),
     Operation(
         name="materials.create",
-        runs_as=DISPATCH,
         scope=COURSE,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -684,7 +665,6 @@ _OPS = (
     ),
     Operation(
         name="assignment.create",
-        runs_as=DISPATCH,
         scope=COURSE,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
@@ -715,7 +695,6 @@ _OPS = (
     Operation(
         name=BOOTSTRAP_OP,
         done_text="Semester set up.",
-        runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=COURSE_ADMIN_TEAM,
         args_schema=_args(),
@@ -739,7 +718,6 @@ def public_view(op: Operation) -> dict:
     """What `ops.json` publishes of an op: everything but the callables."""
     return {
         "name": op.name,
-        "runs_as": op.runs_as,
         "scope": op.scope,
         "required_team": op.required_team,
         "help": op.help,

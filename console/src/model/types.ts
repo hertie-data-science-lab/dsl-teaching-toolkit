@@ -107,7 +107,6 @@ export interface Release {
   id: string;
   when: string;
   kind: string | null; // a policy kind (lecture, lab, readings, ...); the engine infers one when undeclared
-  kind_inferred?: boolean;
   number?: number | null; // the site row's number; null when the site does not number it
   title: string;
   state: ReleaseState;
@@ -115,7 +114,6 @@ export interface Release {
   dest: { repo: string; path: string } | null;
   show_on_site: boolean;
   tbc: boolean;
-  copies?: unknown;
 }
 
 export interface Assignment {
@@ -159,7 +157,6 @@ export interface Status {
   students?: { rows: number; codes_sent: number; joined: number };
   staff?: { instructors: number; tas: number; synced: boolean };
   site?: { url: string; last_update: string | null; stale: boolean };
-  app_installed?: boolean | null;
   operations?: Operation[];
 }
 

@@ -5,7 +5,6 @@ import ops from '../../schemas/ops.json';
 
 export interface OpSpec {
   name: string;
-  runs_as: 'dispatch' | 'edit';
   scope: 'course' | 'semester';
   required_team: string;
   args_schema: Record<string, unknown> & { properties?: Record<string, Record<string, unknown>>; required?: string[] };

@@ -345,7 +345,7 @@ def _keys(doc, prefix="") -> set[str]:
 def test_contract_example_validates():
     # WP1 exports the JSON Schema; until it lands, the contract's own example is the
     # shape. Every key path the example carries, the render carries too (the render may
-    # add: `app_installed`, `copies`, `fix.ref`).
+    # add: `fix.ref`).
     doc = _render(*_contract_scenario())
     doc["operations"] = [CONTRACT_EXAMPLE["operations"][0]]  # none in the fixture
     missing = _keys(CONTRACT_EXAMPLE) - _keys(doc)
@@ -533,15 +533,15 @@ def test_a_release_with_one_copy_landed_and_one_to_come_is_not_late():
     assert s5(dest_paths={"materials": {"lectures"}}) == "late"
 
 
-def test_an_undeclared_kind_is_inferred_through_the_repos_aliases_and_says_so():
+def test_an_undeclared_kind_is_inferred_through_the_repos_aliases():
     semester = _semester()
     semester.aliases = {"course-materials-f2026": {"lectures": "drop-in"}}
     doc = _render(semester=semester)
     s3 = next(r for r in doc["releases"] if r["id"] == "s3")
-    assert (s3["kind"], s3["kind_inferred"]) == ("drop-in", True)
+    assert s3["kind"] == "drop-in"
     semester.sched.releases[0].kind = "lab"
     s3 = next(r for r in _render(semester=semester)["releases"] if r["id"] == "s3")
-    assert (s3["kind"], s3["kind_inferred"]) == ("lab", False)
+    assert s3["kind"] == "lab"
 
 
 def test_a_materials_repo_by_its_old_name_only_is_not_migrated():

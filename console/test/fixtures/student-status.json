@@ -2,7 +2,6 @@
   "schema": "dsl.student-status/2",
   "semester": "hertie-dsl-demo-f2026",
   "course_name": "Deep Learning",
-  "term_label": "Fall 2026",
   "semester_start": "2026-09-07",
   "semester_end": "2026-12-18",
   "generated_at": "2026-09-23T09:00:00+00:00",
@@ -394,19 +393,6 @@
   ],
   "materials_repos": [
     "materials"
-  ],
-  "materials_index": [
-    {
-      "repo": "materials",
-      "paths": [
-        "SYLLABUS.md",
-        "lectures/01_intro/code/a.py",
-        "lectures/01_intro/code/b.py",
-        "lectures/01_intro/slides.pdf",
-        "readings/01_intro/READINGS.md",
-        "readings/01_intro/paper.pdf"
-      ]
-    }
   ],
   "announcements": [
     {

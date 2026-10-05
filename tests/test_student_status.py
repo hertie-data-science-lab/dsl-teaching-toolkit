@@ -230,7 +230,6 @@ ALLOWED = (
     | {f"instructors[].{k}" for k in student_status.INSTRUCTOR_KEYS}
     | {f"announcements[].{k}" for k in student_status.ANNOUNCEMENT_KEYS}
     | {f"syllabus.{k}" for k in student_status.SYLLABUS_KEYS}
-    | {f"materials_index[].{k}" for k in student_status.INDEX_KEYS}
     | {f"kinds.*.{k}" for k in student_status.KIND_KEYS}
     | {f"kinds.{k['key']}" for k in student_status.policy.kinds()}
 )
@@ -405,12 +404,9 @@ def test_home_text_fills_the_course_keys_and_drops_other_liquid():
     )
 
 
-def test_materials_index_and_syllabus():
+def test_materials_repos_and_syllabus():
     doc = _render()
     assert doc["materials_repos"] == ["materials"]
-    (index,) = doc["materials_index"]
-    assert "lectures/01_intro/solution/answers.py" not in index["paths"]
-    assert "SYLLABUS.md" in index["paths"]
     assert doc["syllabus"] == {"repo": "materials", "path": "SYLLABUS.md"}
 
 

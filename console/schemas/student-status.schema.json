@@ -259,28 +259,6 @@
       },
       "type": "array"
     },
-    "materials_index": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "paths": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "repo": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "repo",
-          "paths"
-        ],
-        "type": "object"
-      },
-      "type": "array"
-    },
     "materials_repos": {
       "items": {
         "type": "string"
@@ -458,9 +436,6 @@
         "null"
       ]
     },
-    "term_label": {
-      "type": "string"
-    },
     "timezone": {
       "type": "string"
     }
@@ -469,7 +444,6 @@
     "schema",
     "semester",
     "course_name",
-    "term_label",
     "semester_start",
     "semester_end",
     "generated_at",
@@ -483,7 +457,6 @@
     "instructors",
     "late_policy",
     "materials_repos",
-    "materials_index",
     "announcements"
   ],
   "title": "student-status.json",
