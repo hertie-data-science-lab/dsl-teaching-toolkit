@@ -1799,8 +1799,14 @@ def sync_sheet(
     button press, an autograde run - or the tick's own could not be read, and this takes
     its own, and only if it is going to derive anything at all."""
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
-    spec = sheet_spec(sched, key, slug, gspec, is_group)
     path = grades.sheet_path(slug)
+    if gspec.not_migrated:
+        # A refused definition is a default shape and late rule nobody wrote: refreshing
+        # off it rewrites a group sheet in the individual shape. Not a failed write - the
+        # digest carries the NOT_MIGRATED fault, and the hourly tick asks again.
+        log(f"  [skip] {path} - {GRADING_FILE} is NOT_MIGRATED; run the migration")
+        return SheetWrite(True)
+    spec = sheet_spec(sched, key, slug, gspec, is_group)
     entry = sched.assignments.get(key)
     due = entry.due_datetime if entry else None
 
@@ -3303,6 +3309,12 @@ def refresh_assignment_sheet(
         return 1
     key, slug = target
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
+    if gspec.not_migrated:
+        log_err(
+            f"{template}/{GRADING_FILE} is NOT_MIGRATED (an old key, or a run setting "
+            f"that moved to assignments.yml) - run the migration; nothing is refreshed"
+        )
+        return 1
     is_group = gspec.is_group
     ok = sync_sheet(
         course_org,

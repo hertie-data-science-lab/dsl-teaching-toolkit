@@ -167,7 +167,9 @@ Nothing is said twice: every send is recorded in `.system/gradebook/distributed.
 after one correction reaches one student. The emails are recorded just before they go, so a
 run that fails afterwards never mails anyone twice. If some emails fail, they are retried
 only when you press Return marks again; if every one fails, `marks_return_datetime` tries
-again on its own. Untick `notify` to skip the email.
+again on its own. It also keeps trying while any mark is held, and sends only what has not
+gone out. A `grading_config.yml` refused as `NOT_MIGRATED` stops its sheet refresh and
+Return marks until the migration runs. Untick `notify` to skip the email.
 
 Two options, both off by default. `include_feedback` puts the markers' feedback text into
 the email: the overall feedback, then each question's. `receipt_note` posts one line,

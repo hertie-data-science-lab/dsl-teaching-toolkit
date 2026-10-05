@@ -199,7 +199,7 @@ Beside `schedule.yml` in `semester-config`. Every key is optional; nearest wins:
 | Key | Where | Meaning |
 |---|---|---|
 | `late_window_days` | both | days after the due date that work is still accepted; `0` = none |
-| `late_penalty_per_day` | both | `10%` or `0.1`, of the earned mark, per day started |
+| `late_penalty_per_day` | both | `10%` or `0.1`, of the earned mark, per day started; `0` = no deduction |
 | `team_formation` | both | `self_select` (the Join team form) or `assigned` (you write teams.csv) |
 | `max_team_size` | both | group assignments only |
 | `visibility` | both | `private`, `public` or `student_choice`. Read when each repo is created: change it before the first hand out; afterwards a change is a problem, not a move |
