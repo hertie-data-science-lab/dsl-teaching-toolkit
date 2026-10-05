@@ -17,7 +17,7 @@ import pytest
 import yaml
 from conftest import source_fault
 
-from dsl_course import course, gh_contents, policy, schedule, settings
+from dsl_course import course, gh_contents, materials, policy, schedule, settings
 from dsl_course import faults as faults_module
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -1290,6 +1290,23 @@ def test_shipped_schedules_parse_with_nothing_dropped(path):
     sched, error = schedule.load_file(str(full))
     assert error is None, error
     assert sched.dropped == [], f"{path} drops entries:\n" + "\n".join(sched.dropped)
+
+
+def test_the_seeded_skeleton_states_the_numbering_and_kind_rules_the_engine_runs():
+    # It still said a row is numbered by its position and that an unknown folder is a
+    # lecture (decisions 0020, 0031): an instructor following it had a release skipped.
+    text = (
+        Path(__file__).resolve().parents[1] / "templates/semester-config/schedule.yml"
+    ).read_text()
+    assert "position" not in text and "anything else -> lecture" not in text
+    assert "anything else -> assets" in text
+    assert materials.infer_kind("week-1") == materials.ASSETS_KIND == "assets"
+    lines = text.splitlines()
+    head = lines.index("# assignments:                      ")
+    block = lines[head : head + 12]
+    assert any(
+        line.startswith("#     number:") and "REQUIRED" in line for line in block
+    )
 
 
 def test_the_worked_example_shows_the_archive_block():

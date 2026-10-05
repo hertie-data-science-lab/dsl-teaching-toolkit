@@ -7,7 +7,7 @@ import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
-import { courseFolder, defaultItem, folderExample, mainLabel, openItems, orgFolder, platformOf, schemeOk, withOverride, type RepoRef, type Setup } from '../src/model/open';
+import { courseFolder, defaultItem, folderExample, mainLabel, openItems, orgFolder, platformOf, repoCloneCommand, schemeOk, withOverride, type RepoRef, type Setup } from '../src/model/open';
 import { forgetStudentPrefs, rememberOpen, resetKeptSetups, saveYourSetup, yourSetup, type PrefStore } from '../src/model/prefs';
 import { SetupScreen } from '../src/screens/Setup';
 import { OpenButton } from '../src/ui/OpenButton';
@@ -22,7 +22,7 @@ function memStore(): PrefStore & { data: Map<string, string> } {
   return { data, getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v), removeItem: (k) => void data.delete(k), get length() { return data.size; }, key: (i) => [...data.keys()][i] ?? null };
 }
 const refusing: PrefStore = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
-const hrefs = (setup: Setup | null, ref = REF) => Object.fromEntries(openItems(ref, setup).map((i) => [i.choice, i.href ?? i.copy]));
+const hrefs = (setup: Setup | null, ref = REF) => Object.fromEntries(openItems(ref, setup).map((i) => [i.choice, i.href]));
 
 describe('Your setup in this browser', () => {
   it('round-trips per login, keeps the folder when a choice is remembered, and is kept across sign-out', () => {
@@ -32,7 +32,7 @@ describe('Your setup in this browser', () => {
     expect(yourSetup(LOGIN, store)).toEqual({ folder: '/Users/a/repos', editor: 'other', scheme: 'zed://file/{path}' });
     expect(yourSetup('someone-else', store)).toBeNull();
     expect(rememberOpen(LOGIN, 'githubdev', store)).toEqual({ folder: '/Users/a/repos', editor: 'other', scheme: 'zed://file/{path}', lastOpen: 'githubdev' });
-    expect(rememberOpen('b-example', 'clone', store)).toEqual({ folder: '', editor: 'vscode', lastOpen: 'clone' });
+    expect(rememberOpen('b-example', 'vsclone', store)).toEqual({ folder: '', editor: 'vscode', lastOpen: 'vsclone' });
     store.setItem(`dsl-console-visit:${LOGIN}:${ORG}`, '1');
     store.setItem(`dsl-console-paths:${LOGIN}`, '{}');
     forgetStudentPrefs(LOGIN, store);
@@ -65,8 +65,8 @@ describe('where each choice opens', () => {
       githubdev: `https://github.dev/${ORG}/assignment-2-f2026`,
       vscode: `vscode://vscode.git/clone?url=${encodeURIComponent(GH)}`,
       desktop: `x-github-client://openRepo/${GH}`,
-      clone: `git clone ${GH}.git`,
     });
+    expect(repoCloneCommand(REF, null)).toBe(`git clone ${GH}.git`);
     expect(openItems(REF, null).find((i) => i.choice === 'vscode')!.label).toBe('Clone in VS Code');
     // Another editor opens a folder or nothing: no folder, no entry.
     expect(hrefs({ folder: '', editor: 'other', scheme: 'zed://file/{path}' }).editor).toBeUndefined();
@@ -76,7 +76,7 @@ describe('where each choice opens', () => {
     const setup: Setup = { folder: '/Users/a b/repos/', editor: 'vscode' };
     const h = hrefs(setup);
     expect(h.vscode).toBe(`vscode://file/Users/a%20b/repos/${ORG}/assignment-2-f2026`);
-    expect(h.clone).toBe(`git clone ${GH}.git "/Users/a b/repos/${ORG}/assignment-2-f2026"`);
+    expect(repoCloneCommand(REF, setup)).toBe(`git clone ${GH}.git "/Users/a b/repos/${ORG}/assignment-2-f2026"`);
     expect(openItems(REF, setup).find((i) => i.choice === 'vscode')!.label).toBe('Open in VS Code');
     // A folder already named for the course org is not nested again.
     expect(orgFolder(`/Users/a/${ORG}`, ORG)).toBe(`/Users/a/${ORG}`);
@@ -87,7 +87,7 @@ describe('where each choice opens', () => {
   it('joins a Windows folder with backslashes and keeps the drive letter in the editor links', () => {
     const setup: Setup = { folder: 'C:\\Users\\a\\repos', editor: 'other', scheme: 'zed://file/{path}' };
     const h = hrefs(setup, { ...REF, path: 'notebooks/lab.ipynb' });
-    expect(h.clone).toBe(`git clone ${GH}.git "C:\\Users\\a\\repos\\${ORG}\\assignment-2-f2026"`);
+    expect(repoCloneCommand(REF, setup)).toBe(`git clone ${GH}.git "C:\\Users\\a\\repos\\${ORG}\\assignment-2-f2026"`);
     expect(h.vscode).toBe(`vscode://file/C:/Users/a/repos/${ORG}/assignment-2-f2026/notebooks/lab.ipynb`);
     expect(h.editor).toBe(`zed://file/C:/Users/a/repos/${ORG}/assignment-2-f2026/notebooks/lab.ipynb`);
     expect(h.github).toBe(`${GH}/tree/main/notebooks/lab.ipynb`);
@@ -107,7 +107,7 @@ describe('where each choice opens', () => {
     expect(pick({ folder: '', editor: 'desktop' })).toBe('github');
     expect(pick({ folder: '/r', editor: 'desktop' })).toBe('desktop');
     expect(pick({ folder: '/r', editor: 'other', scheme: 'zed://file/{path}' })).toBe('editor');
-    expect(pick({ folder: '/r', editor: 'vscode', lastOpen: 'clone' })).toBe('clone');
+    expect(pick({ folder: '/r', editor: 'vscode', lastOpen: 'vsclone' })).toBe('vsclone');
     // A last choice that is no longer offered (the editor changed) falls back.
     expect(pick({ folder: '', editor: 'vscode', lastOpen: 'editor' })).toBe('github');
   });
@@ -115,11 +115,11 @@ describe('where each choice opens', () => {
   it('with a folder offers both Open and Clone in VS Code; the folder check keeps the one that applies', () => {
     const setup: Setup = { folder: '/r', editor: 'other', scheme: 'zed://file/{path}' };
     const menu = (c?: boolean) => openItems(REF, setup, c).filter((i) => i.group === 'local').map((i) => i.label);
-    // Clone entries before Open entries, the clone command last.
-    expect(menu()).toEqual(['Clone in VS Code', 'Open in VS Code', 'Open in GitHub Desktop', 'Open in your editor', 'Copy the clone command']);
+    // Clone entries before Open entries; the clone command is in Clone's ?, not the menu.
+    expect(menu()).toEqual(['Clone in VS Code', 'Open in VS Code', 'Open in GitHub Desktop', 'Open in your editor']);
     expect(hrefs(setup).vsclone).toBe(`vscode://vscode.git/clone?url=${encodeURIComponent(GH)}`);
     expect(menu(true)).toEqual(['Open in VS Code', 'Open in GitHub Desktop', 'Open in your editor']);
-    expect(menu(false)).toEqual(['Clone in VS Code', 'Open in GitHub Desktop', 'Copy the clone command']);
+    expect(menu(false)).toEqual(['Clone in VS Code', 'Open in GitHub Desktop']);
     // Without a folder the check changes nothing.
     expect(openItems(REF, null, true)).toEqual(openItems(REF, null));
   });
@@ -130,10 +130,9 @@ describe('where each choice opens', () => {
     expect(pick({ ...vs, lastOpen: 'vsclone' })).toBe('vsclone');
     expect(pick({ ...vs, lastOpen: 'vscode' }, false)).toBe('vsclone');
     expect(pick({ ...vs, lastOpen: 'vsclone' }, true)).toBe('vscode');
-    expect(pick({ ...vs, lastOpen: 'clone' }, true)).toBe('vscode');
     // A VS Code clone becomes a VS Code open, whatever the editor setting.
     expect(pick({ folder: '/r', editor: 'desktop', lastOpen: 'vsclone' }, true)).toBe('vscode');
-    expect(pick({ folder: '/r', editor: 'other', scheme: 'zed://file/{path}', lastOpen: 'clone' }, true)).toBe('editor');
+    expect(pick({ folder: '/r', editor: 'other', scheme: 'zed://file/{path}' }, true)).toBe('editor');
     expect(pick({ folder: '/r', editor: 'other', scheme: 'zed://file/{path}', lastOpen: 'editor' }, false)).toBe('vsclone');
     expect(pick({ ...vs, lastOpen: 'desktop' }, false)).toBe('desktop');
     expect(pick(vs, false)).toBe('vsclone');
@@ -147,7 +146,7 @@ describe('where each choice opens', () => {
     expect(courseFolder(own, ORG)).toBe('/Users/a/teaching/ml');
     expect(courseFolder(own, 'another-org')).toBe('/Users/a/repos/another-org');
     expect(hrefs(own).vscode).toBe('vscode://file/Users/a/teaching/ml/assignment-2-f2026');
-    expect(hrefs(own).clone).toBe(`git clone ${GH}.git "/Users/a/teaching/ml/assignment-2-f2026"`);
+    expect(repoCloneCommand(REF, own)).toBe(`git clone ${GH}.git "/Users/a/teaching/ml/assignment-2-f2026"`);
     expect(withOverride(own, ORG, '')).toEqual(base);
     expect(withOverride(own, ORG, `/Users/a/repos/${ORG}`)).toEqual(base);
     // A course folder alone, with no root, is enough to open there.
@@ -174,7 +173,6 @@ describe('where each choice opens', () => {
     for (const c of [false, true, undefined]) expect(at({ ...vs, lastOpen: 'githubdev' }, c)).toEqual(['githubdev', 'Open on github.dev']);
     expect(at({ ...vs, lastOpen: 'github' }, false)).toEqual(['github', 'Open on GitHub']);
     expect(at({ folder: '/r', editor: 'desktop' }, false)).toEqual(['desktop', 'Clone']);
-    expect(at({ ...vs, lastOpen: 'clone' }, false)).toEqual(['clone', 'Copy the clone command']);
     expect(at({ folder: '/r', editor: 'other', scheme: 'zed://file/{path}' }, true)).toEqual(['editor', 'Open']);
     expect(at(null)).toEqual(['github', 'Open on GitHub']);
   });
@@ -225,10 +223,9 @@ describe('the Open button', () => {
     await key(items()[1], 'End');
     expect(document.activeElement?.textContent).toBe('Set up a local folder');
     await key(items()[0], 'ArrowUp');
-    expect(document.activeElement?.textContent).toMatch(/^Copy the clone command/);
     const desktop = items().find((i) => i.textContent === 'Open in GitHub Desktop')!;
-    await key(document.activeElement!, 'ArrowUp');
     expect(document.activeElement).toBe(desktop);
+    expect(items().some((i) => i.textContent === 'Copy the clone command')).toBe(false);
     desktop.addEventListener('click', (e) => e.preventDefault());
     await act(() => desktop.click());
     expect(q('[role="menu"]').hidden).toBe(true);
@@ -275,8 +272,6 @@ describe('the Open button', () => {
     expect(clone.getAttribute('aria-label')).toBe('About cloning in VS Code');
     expect(rows[1].textContent).toContain('Opens the repo’s folder on your computer. Clone it first if it is not there yet.');
     expect(rows[0].querySelector('.hint-pop')!.textContent).toBe(`VS Code asks where to put it; choose your course folder. Or run: git clone ${GH}.git "/Users/a/repos/${ORG}/assignment-2-f2026"`);
-    // The command no longer sits under the menu row.
-    expect(items().find((i) => i.textContent === 'Copy the clone command')!.querySelector('code')).toBeNull();
     // Each ? describes the item beside it.
     for (const r of rows) expect(r.querySelector('[role="menuitem"]')!.getAttribute('aria-describedby')).toBe(r.querySelector('.hint-pop')!.id);
     // Not an item: out of the tab order and skipped by the arrows.
@@ -299,41 +294,19 @@ describe('the Open button', () => {
     expect(rows[0].querySelector('.hint-pop')!.textContent).toBe(`VS Code asks where to put it. Or run: git clone ${GH}.git`);
   });
 
-  it('says Copy on the small button for the clone command, and links a student’s Profile by semester', async () => {
-    rememberOpen(LOGIN, 'clone');
+  it('links a student’s Profile by semester', async () => {
     await mount(<><OpenButton org={ORG} repo="materials" small /><OpenButton org={LOGIN} repo="materials" home="hertie-nlp-f2026" small /></>);
     const [a, b] = [...root!.querySelectorAll<HTMLElement>('.split')];
-    expect(a.querySelector('.split-main')!.textContent).toBe('Copy');
-    expect(a.querySelector('.split-main')!.getAttribute('aria-label')).toBe('Copy the clone command');
     const last = (el: Element) => [...el.querySelectorAll('[role="menuitem"]')].at(-1)!.getAttribute('href');
     expect(last(a)).toBe(`?course=${ORG}#profile`);
     expect(last(b)).toBe('?cohort=hertie-nlp-f2026#profile');
   });
 
-  it('shows the clone command under its entry when copying fails, and keeps the button label', async () => {
-    const clip = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } });
-    try {
-      rememberOpen(LOGIN, 'clone');
-      await mount(<OpenButton {...REF} />);
-      const main = q<HTMLButtonElement>('.split-main');
-      expect(main.textContent).toBe('Copy the clone command');
-      expect(root!.querySelector('.open-menu > .pm-cmd')).toBeNull();
-      await act(async () => {
-        main.click();
-        await new Promise((r) => setTimeout(r, 0));
-      });
-      expect(q('[role="menu"]').hidden).toBe(false);
-      expect(main.textContent).toBe('Copy the clone command');
-      expect(q('.sr[role="status"]').textContent).toBe('Could not copy: select it below');
-      const cmd = q('.open-menu > .pm-cmd');
-      expect(cmd.textContent).toBe(`git clone ${GH}.git`);
-      expect(cmd.getAttribute('role')).not.toBe('menuitem');
-      expect(cmd.previousElementSibling!.textContent).toBe('Copy the clone command');
-    } finally {
-      if (clip) Object.defineProperty(navigator, 'clipboard', clip);
-      else delete (navigator as { clipboard?: unknown }).clipboard;
-    }
+  it('drops a remembered choice the menu no longer offers', async () => {
+    localStorage.setItem(`dsl-console-setup:${LOGIN}`, JSON.stringify({ folder: '', editor: 'vscode', lastOpen: 'clone' }));
+    expect(yourSetup(LOGIN)).toEqual({ folder: '', editor: 'vscode' });
+    await mount(<OpenButton {...REF} />);
+    expect(q('.split-main').textContent).toBe('Open on GitHub');
   });
 });
 

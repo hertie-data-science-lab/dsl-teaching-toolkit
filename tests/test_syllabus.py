@@ -178,7 +178,56 @@ def test_a_marker_inside_a_sentence_is_prose():
     spaced = f"# Syl\n  {PLAN_START}  \nold\n\t{PLAN_END}\nEnd.\n"
     assert (
         syllabus.place(spaced, BLOCK)
-        == f"# Syl\n{PLAN_START}\n{BLOCK}{PLAN_END}\nEnd.\n"
+        == f"# Syl\n  {PLAN_START}\n{BLOCK}\t{PLAN_END}\nEnd.\n"
+    )
+
+
+def test_a_marker_line_in_the_plan_does_not_break_the_next_write():
+    # The U5 repro: a reading list holding a marker line made the second Write
+    # MARKERS_BROKEN (two ends), or cut the block short at the plan's own end marker.
+    body = f"### Session 1\n\n{PLAN_END}\nRead ch. 1.\n  {PLAN_START}\n"
+    once = syllabus.place("# Syl\n", body)
+    assert syllabus.place(once, body) == once
+    assert once.count(f"\n{PLAN_END}\n") == 1 and "Read ch. 1." in once
+    # Still an HTML comment, so the rendered page reads the same.
+    assert (
+        "<!--  /dsl:weekly-plan -->" in once and "  <!--  dsl:weekly-plan -->" in once
+    )
+    replaced = syllabus.place(once, BLOCK)
+    assert replaced == f"# Syl\n\n## Weekly plan\n\n{PLAN_START}\n{BLOCK}{PLAN_END}\n"
+
+
+def test_a_fence_the_plan_leaves_open_is_closed_inside_the_block():
+    # Left open, it would swallow the end marker on the next write.
+    once = syllabus.place("# Syl\n", "### Session 1\n\n~~~~\ncode\n")
+    assert once.endswith(f"~~~~\ncode\n~~~~\n{PLAN_END}\n")
+    assert syllabus.place(once, BLOCK).endswith(f"{PLAN_START}\n{BLOCK}{PLAN_END}\n")
+
+
+EXAMPLE = f"Paste this:\n\n```markdown\n{PLAN_START}\nyour plan\n{PLAN_END}\n```\n"
+
+
+def test_markers_shown_in_a_fenced_example_are_not_the_block():
+    once = syllabus.place(f"# Syl\n\n{EXAMPLE}", BLOCK)
+    assert once.startswith(f"# Syl\n\n{EXAMPLE}\n## Weekly plan\n\n{PLAN_START}\n")
+    assert syllabus.place(once, BLOCK) == once
+    # A real block before the example is found; the example stays as written.
+    text = f"{PLAN_START}\nold\n{PLAN_END}\n\n~~~\n{PLAN_END}\n```\n~~~\n"
+    assert syllabus.place(text, BLOCK) == text.replace("old\n", BLOCK)
+    # A lone marker in an example does not make the real pair broken.
+    assert syllabus.place(f"```\n{PLAN_END}\n```\n{text}", BLOCK) is not None
+
+
+def test_markers_inside_a_list_item_keep_their_indentation():
+    text = f"- Sessions:\n\n  {PLAN_START}\n  old\n  {PLAN_END}\n- Grading\n"
+    out = syllabus.place(text, BLOCK)
+    assert out == f"- Sessions:\n\n  {PLAN_START}\n{BLOCK}  {PLAN_END}\n- Grading\n"
+    assert syllabus.place(out, BLOCK) == out
+
+
+def test_an_end_marker_on_the_last_line_stays_the_last_line():
+    assert syllabus.place(f"{PLAN_START}\nold\n{PLAN_END}", BLOCK) == (
+        f"{PLAN_START}\n{BLOCK}{PLAN_END}"
     )
 
 

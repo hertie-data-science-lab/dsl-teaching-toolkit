@@ -24,7 +24,7 @@ import * as defs from '../src/ops/defs';
 import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
 import { ArchiveScreen } from '../src/screens/Archive';
-import { DetailsScreen, MaterialsScreen, WebsiteScreen, courseFileAfter, detailsOf } from '../src/screens/CourseEdit';
+import { DetailsScreen, MaterialsScreen, WebsiteScreen, courseFileAfter, detailsOf, missingAdmin } from '../src/screens/CourseEdit';
 import { AssignmentScreen } from '../src/screens/Assignments';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
@@ -423,6 +423,18 @@ describe('editing screens', () => {
     const broken = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: [\n' }, {}, TREES);
     expect(html(<DetailsScreen {...cp} files={broken} />)).toMatch(/id="cd-web" aria-describedby="cd-web-state" disabled\/>.*opencourse.yml does not parse; fix it in Manage\./);
   });
+  it('skips the account check when only a course admin handle’s case changes', async () => {
+    const src = 'course_name: ML\npeople:\n  course_admins:\n    - github_handle: octo\n      email: o@x.edu\n';
+    const meta = obj(new YamlText(src).toJS());
+    const before = detailsOf(meta);
+    const after = { ...before, admins: [{ ...before.admins[0], github_handle: 'Octo' }] };
+    const out = courseFileAfter(src, before, after, meta);
+    expect('text' in out && out.text).toContain('github_handle: Octo');
+    const looked: string[] = [];
+    const env = { client: { userExists: async (h: string) => (looked.push(h), false) } } as unknown as Env;
+    expect(await missingAdmin(env, before.admins, after.admins)).toBeNull();
+    expect(looked).toEqual([]);
+  });
   it('writes a contact and a licence into dsl-course.yml and a file without them still saves', () => {
     const src = 'course_name: ML\ncourse_code: E1\n';
     const meta = obj(new YamlText(src).toJS());
@@ -501,10 +513,12 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
     const lab = blankDraft('lab', { repo: 'm' }) as ReleaseDraft;
     expect(withNumber(lab, doc, kindOf).number).toBe(4);
     // Readings are numbered only to join a lecture: nothing is proposed.
-    expect(withNumber(blankDraft('readings', { repo: 'm' }) as ReleaseDraft, doc, kindOf).number).toBeUndefined();    // A draft whose kind is inferred takes that kind's number; inferred readings drop one held.
+    expect(withNumber(blankDraft('readings', { repo: 'm' }) as ReleaseDraft, doc, kindOf).number).toBeUndefined();
+    // A draft whose kind is inferred takes that kind's number; readings keep only one typed in.
     const inferred = { ...(blankDraft('lecture', { repo: 'm' }) as ReleaseDraft), type: '' };
     expect(withNumber(inferred, doc, kindOf, 'lab').number).toBe(4);
-    expect(withNumber({ ...inferred, number: 8 }, doc, kindOf, 'readings').number).toBeUndefined();
+    expect(withNumber({ ...inferred, number: 3 }, doc, kindOf, 'readings').number).toBe(3);
+    expect(withNumber({ ...inferred, number: '' }, doc, kindOf, 'readings').number).toBe('');
   });
 
   it('shows a saved entry its number, and requires one where the site shows the row', () => {
@@ -516,6 +530,8 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
     expect(draftErrors(ok, { kind: 'lecture' }).number).toBe('A number is needed.');
     expect(draftErrors({ ...ok, show: false }, { kind: 'lecture' }).number).toBeUndefined();
     expect(draftErrors(ok, { kind: 'readings' }).number).toBeUndefined();
+    // A readings key that carries a number joins that lecture: clearing the field cannot undo it.
+    expect(draftErrors({ ...ok, id: 'readings-3', number: '' }, { kind: 'readings' }).number).toBe('The key readings-3 carries the number 3. Rename the key in schedule.yml to make this a row of its own.');
     expect((readDraft(doc, 'project') as AssignmentDraft).number).toBe('');
   });
 

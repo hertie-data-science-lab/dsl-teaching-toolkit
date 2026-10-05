@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PatAuth, TOKEN_KEY } from '../src/auth/pat';
+import { PatAuth, RETRY_MS, TOKEN_KEY } from '../src/auth/pat';
 import type { TokenStore } from '../src/auth/types';
 import { FakeGitHub, json } from './fake';
 
@@ -66,6 +66,32 @@ describe('PatAuth', () => {
     expect((await new PatAuth({ fetch: ok.fetch, store: s }).restore())?.login).toBe('octo');
     const bad = new FakeGitHub().on('GET', '/user', () => json({}, 401));
     expect(await new PatAuth({ fetch: bad.fetch, store: s }).restore()).toBeNull();
+    expect(s.map.has(TOKEN_KEY)).toBe(false);
+  });
+
+  it('keeps a saved token GitHub did not answer for, and tries again until it does', async () => {
+    const s = store();
+    s.setItem(TOKEN_KEY, 'saved');
+    let calls = 0;
+    const flaky = async (): Promise<Response> => {
+      calls++;
+      if (calls === 1) throw new TypeError('Failed to fetch');
+      if (calls === 2) return json({ message: 'Bad gateway' }, 502);
+      return json(user, 200, { 'x-oauth-scopes': 'repo, workflow' });
+    };
+    const waits: number[] = [];
+    let retries = 0;
+    const auth = new PatAuth({ fetch: flaky, store: s, sleep: async (ms) => void waits.push(ms) });
+    expect((await auth.restore(() => retries++))?.login).toBe('octo');
+    expect([calls, retries, waits]).toEqual([3, 2, RETRY_MS.slice(0, 2)]);
+    expect(s.map.get(TOKEN_KEY)).toBe('saved');
+  });
+
+  it('forgets a saved token GitHub refuses with 403', async () => {
+    const s = store();
+    s.setItem(TOKEN_KEY, 'saved');
+    const no = new FakeGitHub().on('GET', '/user', () => json({ message: 'Forbidden' }, 403));
+    expect(await new PatAuth({ fetch: no.fetch, store: s, sleep: async () => {} }).restore()).toBeNull();
     expect(s.map.has(TOKEN_KEY)).toBe(false);
   });
 });

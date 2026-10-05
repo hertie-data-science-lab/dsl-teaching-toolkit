@@ -72,7 +72,7 @@ A week's readings often go out ahead of the lecture. Give them their own entry w
         course_source_path: readings/04_week-4
 ```
 
-A readings entry with a number - its `number:`, else its label's (`readings-4`) - belongs to the lecture with that number, silent or not, whatever its date: that lecture's row links the readings and inlines the reading list, the Readings tab lists it under the lecture's name, and until the files land the Readings tab says they are still to come. Any other readings entry, or one whose number no shown lecture has, is a row of its own; a silent one is on the Readings tab only, unnumbered.
+A readings entry with a number - its `number:`, else its label's (`readings-4`) - belongs to the lecture with that number, silent or not, whatever its date: that lecture's row links the readings and inlines the reading list, the Readings tab lists it under the lecture's name, and until the files land the Readings tab says they are still to come. Any other readings entry, or one whose number no shown lecture has, is a row of its own; a silent one is on the Readings tab only, unnumbered. In the console's schedule editor, **Joins lecture** on a readings entry sets its `number:`; leave it blank for a row of its own.
 
 Any other silent entry (setup files, a quiz solution) is no row: its files are in the student console's Materials, and the lectures around it keep their numbers. One that lands only root files (a `course-intro` shipping `SYLLABUS.md`) is a course document, pinned on the home page.
 
@@ -199,7 +199,7 @@ Beside `schedule.yml` in `semester-config`. Every key is optional; nearest wins:
 | Key | Where | Meaning |
 |---|---|---|
 | `late_window_days` | both | days after the due date that work is still accepted; `0` = none |
-| `late_penalty_per_day` | both | `10%` or `0.1`, of the earned mark, per day started |
+| `late_penalty_per_day` | both | `10%` or `0.1`, of the earned mark, per day started; `0` = no deduction |
 | `team_formation` | both | `self_select` (the Join team form) or `assigned` (you write teams.csv) |
 | `max_team_size` | both | group assignments only |
 | `visibility` | both | `private`, `public` or `student_choice`. Read when each repo is created: change it before the first hand out; afterwards a change is a problem, not a move |
@@ -326,7 +326,7 @@ Everything else is **cumulative**: material deploys, assignment handouts, the si
 
 ## Verifying your schedule
 
-**It checks itself.** Every commit touching `schedule.yml` or `assignments.yml` runs **Validate schedule** in `semester-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X** and a run summary naming what it dropped. That run emails nobody: the fault joins the standing *schedule.yml* [digest issue](#the-digest-issue) in `semester-config` instead, on the next tick - within the minute, since this push fires one - and that is what emails whoever wrote the line.
+**It checks itself.** Every commit touching `schedule.yml` or `assignments.yml` runs **Validate schedule** in `semester-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X** and a run summary naming what it dropped. That run emails nobody: the fault joins the standing *schedule.yml* [digest issue](#the-digest-issue) in `semester-config` instead, on the next tick - within the minute, since this push fires one - and that is what emails whoever wrote the line. An `assignments.yml` that is not YAML goes on its own digest issue instead, and the *schedule.yml* one is left as it stands until it parses.
 
 > The run happens *after* the push: Actions cannot gate a commit, so the red X and the digest issue are how a fault reaches you, rather than the commit being refused.
 

@@ -25,6 +25,7 @@ from dsl_course import (
     repos,
     roster,
     settings,
+    status_json,
 )
 from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER, repo_row
@@ -3141,3 +3142,157 @@ def test_a_gradebook_whose_student_already_reads_it_is_not_granted_again(monkeyp
     for handle in handles:
         assert grades.provision_one("S", handle, existing, held) == "skipped"
     assert added == ["bo", "cy"]
+
+
+def test_a_held_mark_keeps_the_assignment_to_be_returned_again(tmp_path, monkeypatch):
+    # A typed-but-held mark (a Unicode minus) must not let the once-only record land:
+    # the automatic return would skip the assignment for good and that student would
+    # never get their mark. The rerun after the fix sends only what had not gone out.
+    held = _TWO_SHEET.replace(
+        "score_individual: 40\n    adjustment_individual:\n",
+        "score_individual: 40\n    adjustment_individual: −3\n",
+    )
+    assert held != _TWO_SHEET
+    first = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": held},
+        roster_rows=_TWO_ROSTER,
+        assignment="assignment-1",
+    )
+    ((_cfg, cfg_files, _d),) = first["config"]
+    assert grades.marks_return_record("assignment-1") not in cfg_files
+    assert [m[0] for batch in first["outbox"] for m in batch] == ["ada@uni.edu"]
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": _TWO_SHEET},
+        roster_rows=_TWO_ROSTER,
+        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+        exported=cfg_files[grades.SEMESTER_CSV_NAME],
+        assignment="assignment-1",
+    )
+    assert [repo for repo, _f, _d in again["gradebooks"]] == ["grades-ben-k"]
+    assert [m[0] for batch in again["outbox"] for m in batch] == ["ben@uni.edu"]
+    ((_cfg, cfg_files, _d),) = again["config"]
+    assert grades.marks_return_record("assignment-1") in cfg_files
+
+
+def test_a_refused_definition_returns_no_marks(tmp_path, monkeypatch):
+    # A NOT_MIGRATED grading_config.yml reads as a default spec: individual, and the
+    # institution's late rule. Nothing goes out off it, and nothing is recorded returned.
+    monkeypatch.setattr(grades, "assignment_title", lambda org, repo, spec, name: name)
+    out = _distribute(
+        monkeypatch, tmp_path, grading="format: notebook\n", assignment="assignment-1"
+    )
+    assert out["rc"] == 1
+    assert out["gradebooks"] == [] and out["config"] == [] and out["outbox"] == []
+
+
+def test_a_refused_definition_is_not_due_for_return(monkeypatch):
+    sched = Schedule(
+        assignments={
+            "assignment-1": AssignmentEntry(
+                course_source_repo="assignment-1-f2026",
+                due_datetime=_DUE_PASSED,
+                marks_return_datetime=datetime(2026, 10, 1, tzinfo=timezone.utc),
+            )
+        },
+        org="SEMESTER",
+    )
+    monkeypatch.setattr(grades, "_grading_text", lambda org, tpl: "format: notebook\n")
+    monkeypatch.setattr(
+        grades,
+        "get_file_content",
+        lambda org, repo, path, **k: None if "marks" in path else _SHEET,
+    )
+    faults, ready = grades.marks_due(
+        "COURSE", "SEMESTER", sched, datetime(2026, 10, 5, tzinfo=timezone.utc)
+    )
+    assert ready == [] and faults == []
+
+
+@pytest.mark.parametrize(
+    ("config", "window", "penalty"),
+    [
+        ("late_penalty_per_day: 0", None, "0"),
+        ("late_window_days: 3\nlate_penalty_per_day: 0", 3, "0"),
+        ("late_window_days: 0\nlate_penalty_per_day: 0", 0, "0"),
+    ],
+    ids=["zero-penalty-alone", "zero-penalty-with-window", "both-zero"],
+)
+def test_an_explicit_zero_penalty_is_never_the_institution_default(
+    monkeypatch, config, window, penalty
+):
+    # A bare `0` was read as blank, so the layer dropped out and the institution's
+    # 10% a day for 10 days was deducted from every late mark and emailed.
+    spec = _semester_spec(monkeypatch, config)
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (window, penalty)
+    assert dict(spec.sources)["late_penalty_per_day"] == "assignment"
+    assert grades.penalty_rate(spec.late_penalty_per_day) == 0
+
+
+def _book_row(record: str, handle: str) -> tuple[str, str, str]:
+    return grades.parse_distributed(record)[(handle, "", grades.CHANNEL_GRADEBOOK)]
+
+
+def test_a_sheet_edit_that_moves_no_mark_keeps_the_marks_returned(
+    tmp_path, monkeypatch
+):
+    # A comment committed after the return rewrites no gradebook, so the record's moment
+    # stayed behind the sheet's last commit and the console read `marking` for good. The
+    # next run re-stamps it - and sends nothing.
+    record, _told, _legacy = _first_run(monkeypatch, tmp_path)
+    old = _book_row(record, "ada-l")
+    edited = datetime.now(timezone.utc) + timedelta(seconds=-1)
+    monkeypatch.setattr(grades, "git", lambda *a, cwd=None: (0, edited.isoformat()))
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": "# a grader's comment\n" + _SHEET},
+        distributed=record.replace(old[1], "2026-10-04T00:00:00+00:00"),
+    )
+    assert again["gradebooks"] == [] and again["outbox"] == []
+    ((_cfg, cfg_files, _d),) = again["config"]
+    digest, at, _issue = _book_row(cfg_files[grades.DISTRIBUTED_PATH], "ada-l")
+    assert digest == old[0] and datetime.fromisoformat(at) >= edited.replace(
+        microsecond=0
+    )
+    assert status_json.marks_returned(
+        grades.parse_sheet(_SHEET),
+        grades.SheetSpec(slug="assignment-1", title="", is_group=False),
+        {"ada-l": datetime.fromisoformat(at)},
+        edited.replace(microsecond=0),
+    )
+
+
+def test_a_held_mark_is_never_re_stamped_as_returned(tmp_path, monkeypatch):
+    # Ben's assignment-1 book is unchanged, but his assignment-2 mark is held: re-stamping
+    # him would make the console read assignment-2 as returned.
+    first = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _TWO_SHEET},
+        roster_rows=_TWO_ROSTER,
+    )
+    ((_cfg, cfg_files, _d),) = first["config"]
+    stale = "2026-10-04T00:00:00+00:00"
+    rows = grades.parse_distributed(cfg_files[grades.DISTRIBUTED_PATH])
+    rows = {k: (v[0], stale, v[2]) for k, v in rows.items()}
+    held = _TWO_SHEET.replace(
+        "score_individual: 40\n    adjustment_individual:\n",
+        "score_individual: 40\n    adjustment_individual: \u22123\n",
+    )
+    monkeypatch.setattr(
+        grades, "git", lambda *a, cwd=None: (0, "2026-10-05T00:00:00+00:00")
+    )
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": _TWO_SHEET, "assignment-2": held},
+        roster_rows=_TWO_ROSTER,
+        distributed=grades.dump_distributed(rows),
+    )
+    assert [repo for repo, _f, _d in again["gradebooks"]] == ["grades-ada-l"]
+    ((_cfg, cfg_files, _d),) = again["config"]
+    assert _book_row(cfg_files[grades.DISTRIBUTED_PATH], "ben-k")[1] == stale

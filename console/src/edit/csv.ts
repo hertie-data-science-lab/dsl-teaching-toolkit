@@ -3,19 +3,22 @@
 // untouched, and the engine's `require_csv_header` + `strip_bom` reading rules hold: a
 // leading BOM is dropped and the named columns must be present.
 
-import { parseCsv } from '../model/people';
+import { csvRecords } from '../model/people';
 
 export interface Table {
   header: string[];
   rows: Record<string, string>[];
+  /** Each row's line in the file read (header = 1, blank lines counted), as the engine's faults name it. */
+  lines?: number[];
 }
 
 export function readTable(text: string): Table {
-  const all = parseCsv(text);
-  if (!all.length) return { header: [], rows: [] };
-  const header = all[0].map((h) => h.trim());
-  const rows = all.slice(1).map((r) => Object.fromEntries(header.map((h, i) => [h, r[i] ?? ''])));
-  return { header, rows };
+  const all = csvRecords(text);
+  if (!all.length) return { header: [], rows: [], lines: [] };
+  const header = all[0].cells.map((h) => h.trim());
+  const body = all.slice(1);
+  const rows = body.map(({ cells }) => Object.fromEntries(header.map((h, i) => [h, cells[i] ?? ''])));
+  return { header, rows, lines: body.map((r) => r.line) };
 }
 
 /** The columns `required` lists that `header` lacks. */

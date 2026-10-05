@@ -330,13 +330,15 @@ export function nextNumber(doc: Raw, kind: string, kindOf: KindOf = spelledKind)
 /**
  * A new entry's draft with its number proposed, when it needs one and has none yet; any other
  * draft as it is. `kind` is a release's kind as the engine will read it (its own, else the one
- * inferred from its folder). A new readings entry carries no number: one would join a lecture;
- * nor does a supporting-files one, which is no row.
+ * inferred from its folder). Nothing is proposed for readings: a number joins that lecture
+ * (decision 0013 rule 3), so only one typed in is kept. A supporting-files entry carries none:
+ * it is no row.
  */
 export function withNumber<T extends Draft>(d: T, doc: Raw, kindOf: KindOf = spelledKind, kind?: string): T {
   if ((d.kind !== 'assignments' && d.kind !== 'releases') || d.id) return d;
   const k = d.kind === 'assignments' ? 'assignment' : kind || d.type || 'lecture';
-  if (k === 'readings' || k === 'assets') return d.number === undefined ? d : { ...d, number: undefined };
+  if (k === 'readings') return d;
+  if (k === 'assets') return d.number === undefined ? d : { ...d, number: undefined };
   return d.number !== undefined ? d : { ...d, number: nextNumber(doc, k, kindOf) };
 }
 
@@ -364,6 +366,8 @@ export function draftErrors(d: Draft, others?: { templateUsers?: (template: stri
     const kind = d.kind === 'assignments' ? 'assignment' : others?.kind ?? (d.type || 'lecture');
     if (d.number === '' || d.number === undefined) {
       if (needsNumber(d, kind)) e.number = 'A number is needed.';
+      // The key's own number joins the lecture whatever the field says (`readings-3`).
+      else if (kind === 'readings' && labelNumber(d.id) !== null) e.number = `The key ${d.id} carries the number ${labelNumber(d.id)}. Rename the key in schedule.yml to make this a row of its own.`;
     } else if (!(Number.isInteger(d.number) && d.number >= 1 && d.number <= 999)) e.number = 'A whole number from 1 to 999.';
     else if (d.kind === 'assignments' && !d.id && others?.doc && takenKeys(others.doc).has(assignmentKey(d.number))) e.number = `${assignmentKey(d.number)} is already in this schedule.`;
   }

@@ -12,7 +12,7 @@ import { NOTES_KEY, cellValue, finalGrade, gradebookWrites, penaltyText, questio
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
 import { assignmentSettings, sheetName } from './RunSettings';
 import { penaltyRate } from '../model/policy';
-import { parseRoster } from '../model/people';
+import { parseRoster, sameHandle } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
@@ -253,7 +253,7 @@ export function TeamsTab(p: TabProps) {
   const cur = draft ?? base;
   const students = roster.kind === 'ready' ? parseRoster(roster.text).rows : [];
   const joined = students.filter((s) => s.handle);
-  const nameOf = (h: string) => students.find((s) => s.handle.toLowerCase() === h.toLowerCase())?.name || h;
+  const nameOf = (h: string) => students.find((s) => sameHandle(s.handle, h))?.name || h;
   const inTeam = new Set(cur.teams.flatMap((t) => t.members.map((m) => m.toLowerCase())));
   const free = joined.filter((s) => !inTeam.has(s.handle.toLowerCase()));
   const notJoined = students.filter((s) => !s.handle).length;

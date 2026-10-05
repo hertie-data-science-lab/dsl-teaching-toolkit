@@ -11,6 +11,7 @@ import { invalidText, useSave } from '../edit/save';
 import { YamlText, compact, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { KIND_LABEL } from '../model/format';
+import { sameHandle } from '../model/people';
 import { ASSETS_KIND, DEFAULT_SYLLABUS, FOLDER_KINDS, MATERIALS_FILE, NOTHING_DECLARED, inferKind, readDeclared, withMark } from '../model/materialsRules';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
@@ -83,7 +84,7 @@ export function writeDetails(y: YamlText, before: Details, after: Details, meta:
     if (!deepEqual(before.defaults[k], after.defaults[k])) y.assign(['assignment_defaults', k], k === 'formats' ? formatsAfter(meta, after.defaults[k]) : after.defaults[k]);
   if (!deepEqual(before.admins, after.admins)) {
     const raws = (Array.isArray(obj(meta.people).course_admins) ? (obj(meta.people).course_admins as unknown[]) : []).map(obj);
-    const rawBy = (h: string) => raws.find((r) => String(r.github_handle ?? '') === h) ?? {};
+    const rawBy = (h: string) => raws.find((r) => sameHandle(String(r.github_handle ?? ''), h)) ?? {};
     y.assign(['people', 'course_admins'], after.admins.filter((a) => a.github_handle.trim()).map((a) => ({
       ...rawBy(a.github_handle), github_handle: a.github_handle.trim(), email: a.email.trim() || undefined, start: a.start || undefined, end: a.end || undefined,
     })));
@@ -109,7 +110,7 @@ export function courseFileAfter(text: string, before: Details, after: Details, m
 /** The first new admin handle with no GitHub account, or null (a failed lookup counts as there). */
 export async function missingAdmin(env: Env | null, before: Admin[], after: Admin[]): Promise<string | null> {
   if (!env) return null;
-  for (const a of after.filter((x) => x.github_handle.trim() && !before.some((b) => b.github_handle === x.github_handle))) {
+  for (const a of after.filter((x) => x.github_handle.trim() && !before.some((b) => sameHandle(b.github_handle, x.github_handle)))) {
     let ok = true;
     try {
       ok = await env.client.userExists(a.github_handle.trim());

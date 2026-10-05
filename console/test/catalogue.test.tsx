@@ -466,6 +466,11 @@ describe('All courses', () => {
       await flush();
       expect(sub(h)).toBe('you are a course admin');
     });
+    it('matches the course admin handle whatever its case, as GitHub does', async () => {
+      const h = mount(catalogueFake(), { courses: [{ ...course, admins: ['Octo'], cohorts: [sem] }], files: yml('teaching_assistant') });
+      await flush();
+      expect(sub(h)).toBe('you are a course admin');
+    });
     it('is the role in the newest running semester’s instructors.yml otherwise', async () => {
       const h = mount(catalogueFake(), { courses: [{ ...course, cohorts: [sem] }], files: yml('instructor') });
       await flush();

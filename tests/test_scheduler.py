@@ -5142,3 +5142,29 @@ def test_the_preview_names_an_entry_with_no_number(monkeypatch):
         "text": "project not released: Give project a number first.",
     } in summary.reasons
     assert summary.counts["held"] == 2
+
+
+def test_an_unparseable_assignments_yml_holds_the_schedule_digest(monkeypatch):
+    # It synced the schedule.yml digest with no window, number, marks-return or
+    # held-solution faults: Cleared for each, with a mail, then New again once fixed.
+    broken = ConfigFault(
+        "", "this file is not valid YAML", file=schedule_mod.ASSIGNMENTS_FILE
+    )
+    standing = ConfigFault("releases.wk1", "no number", file=schedule_mod.SCHEDULE_PATH)
+    sched = Schedule(faults=[broken, standing])
+    sched.instance_unparseable = True
+    monkeypatch.setattr(scheduler.schedule, "load", lambda semester: sched)
+    synced: list = []
+    monkeypatch.setattr(
+        scheduler.source_digest, "sync", lambda *a, **k: synced.append("schedule")
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_sync_config_digest",
+        lambda spec, course, semester, faults, *a: synced.append((spec, faults)),
+    )
+    for release in (True, False):
+        synced.clear()
+        rc = scheduler.run("Course-Org", "Semester-Org", WHEN, release=release)
+        assert rc == 0
+        assert synced == ([(config_digest.ASSIGNMENTS, [broken])] if release else [])

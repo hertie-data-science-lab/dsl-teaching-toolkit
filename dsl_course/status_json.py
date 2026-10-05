@@ -84,6 +84,7 @@ from .discovery import (
     SEMESTERS_PATH,
     TEMPLATE_TOPIC,
     assignment_rows,
+    handed_out_assignments,
     is_assignment_template,
     is_untopicked_template,
     list_org_repos,
@@ -1323,13 +1324,14 @@ def release_state(
     """`planned | will_be_skipped | released | late` (lifecycle, per scheduled release).
 
     released - every copy is on the destination's default branch (whenever it got there:
-    an early release is released); late - a copy is due and not there; will_be_skipped -
-    automation cannot perform it as written (a source not found or held back, or an entry
-    that needs a number and has none); planned otherwise. An entry with nothing to copy is
-    released once its moment has passed."""
+    an early release is released); late - a copy whose moment has passed is not there (a
+    copy that landed and another still to come is not late); will_be_skipped - automation
+    cannot perform it as written (a source not found or held back, or an entry that needs
+    a number and has none); planned otherwise. An entry with nothing to copy is released
+    once its moment has passed."""
     if release.deploy and all(_dest_present(facts, d) for d in release.deploy):
         return "released"
-    if release.due_deploys(now):
+    if any(not _dest_present(facts, d) for d in release.due_deploys(now)):
         return "late"
     if faults or (release.deploy and not numbered):
         return "will_be_skipped"
@@ -1359,6 +1361,20 @@ def sheet_counts(
     return filled, len(blocks), submitted
 
 
+def handed_out(
+    name: str,
+    entry: schedule.AssignmentEntry,
+    templates: frozenset[str],
+    now: datetime,
+) -> bool:
+    """Whether the assignment `name` (semester-side) is out: its semester template exists
+    (`handed_out_assignments`, whatever route fired the hand-out) or its
+    `handout_datetime` has passed. One answer for both consoles: the student file's
+    `handed_out` and the instructor's `open`."""
+    pinned = entry.handout_datetime is not None and entry.handout_datetime <= now
+    return name in templates or pinned
+
+
 def assignment_state(
     now: datetime,
     entry: schedule.AssignmentEntry,
@@ -1366,23 +1382,26 @@ def assignment_state(
     spec: grades.GradingSpec,
     units: int,
     returned: bool,
+    out: bool = False,
 ) -> str:
     """`declared | teams_forming | blocked | open | late_window | marking | returned`
     (lifecycle, per assignment), by the assignment's own clock:
 
     returned once marks have gone back for every unit; marking from the cutoff;
-    late_window between the due date and the cutoff; before the due date, open once any
-    copy is handed out. A group assignment past its hand-out moment with no copy yet is
-    teams_forming while students choose their own teams, blocked while the teaching team
-    has to assign them; declared before any of that. Which of the two is the EFFECTIVE
-    `team_formation` (the cascade's, `self_select` unless somebody declared `assigned`)."""
+    late_window between the due date and the cutoff; before the due date, open once the
+    work is out: any unit's copy handed out, or, for a shape with no repo per unit
+    (`external`, `shared_dropbox_repo`), the assignment `handed_out` (`out`). A group
+    assignment past its hand-out moment with no copy yet is teams_forming while students
+    choose their own teams, blocked while the teaching team has to assign them; declared
+    before any of that. Which of the two is the EFFECTIVE `team_formation` (the
+    cascade's, `self_select` unless somebody declared `assigned`)."""
     if returned:
         return "returned"
     if cutoff is not None and now >= cutoff:
         return "marking"
     if now >= entry.due_datetime:
         return "late_window"
-    if units > 0:
+    if units > 0 or (out and not spec.creates_unit_repos):
         return "open"
     if spec.is_group and entry.handout_datetime and now >= entry.handout_datetime:
         return (
@@ -1441,6 +1460,7 @@ def render_assignments(
 ) -> list[dict]:
     """One row per assignment the schedule declares."""
     flagged = _problem_entries(problems)
+    templates = handed_out_assignments(list(facts.listing.values()))
     sheet_specs = {}
     for k, e in facts.sched.assignments.items():
         name = schedule.semester_name(k, e)
@@ -1457,7 +1477,10 @@ def render_assignments(
         sheet, sspec = facts.sheets.get(name), sheet_specs.get(name)
         filled, on_sheet, submitted = sheet_counts(sheet, sspec)
         total = on_sheet or units
-        returned = (
+        # The automatic return's once-only record is written only when every unit went
+        # back, so it settles the question: a later sheet commit that changes no gradebook
+        # leaves `distributed_at` where it was, and the comparison would say marking.
+        returned = grades.marks_return_record(name) in facts.config_paths or (
             total > 0
             and filled == total
             and marks_returned(
@@ -1475,7 +1498,15 @@ def render_assignments(
                 "number": own_number(entry.number, slug),
                 "title": facts.titles.get(slug) or spec.title or slug,
                 "template": entry.course_source_repo,
-                "state": assignment_state(now, entry, cutoff, spec, units, returned),
+                "state": assignment_state(
+                    now,
+                    entry,
+                    cutoff,
+                    spec,
+                    units,
+                    returned,
+                    handed_out(name, entry, templates, now),
+                ),
                 "handout": _iso(entry.handout_datetime),
                 "due": _iso(entry.due_datetime),
                 "grading_cutoff_datetime": _iso(cutoff),

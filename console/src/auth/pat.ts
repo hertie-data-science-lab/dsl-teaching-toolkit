@@ -1,4 +1,4 @@
-import { GitHubError, type Fetch, type GhUser, API } from '../github/client';
+import { GitHubError, wait, type Fetch, type GhUser, API } from '../github/client';
 import { PROBE_LIMIT } from '../model/discovery';
 import { SignInError, browserStore, type Auth, type TokenStore } from './types';
 
@@ -19,18 +19,25 @@ export interface Reach {
  * Sign-in with a pasted personal access token, the no-server fallback (decision 0011).
  * Classic tokens carry `repo` and `workflow`; fine-grained tokens are accepted and probed
  * for the organisations they reach. The token lives in sessionStorage only: it is gone when
- * the tab closes, and it is never written anywhere else.
+ * the tab closes, and it is never written anywhere else. At reload the saved token is dropped
+ * only when GitHub refuses it (401 or 403, or a scope gone); while GitHub does not answer it
+ * is kept and the check is tried again (`RETRY_MS`), as the App sign-in keeps its session.
  */
+/** The waits between reload checks GitHub did not answer; the last repeats. */
+export const RETRY_MS = [2000, 5000, 10000, 30000];
+
 export class PatAuth implements Auth {
   private tok: string | null = null;
   private who: GhUser | null = null;
   private seen: Reach | null = null;
   private readonly store: TokenStore | null;
   private readonly fetchFn: Fetch;
+  private readonly sleep: (ms: number) => Promise<void>;
 
-  constructor(opts: { fetch?: Fetch; store?: TokenStore | null } = {}) {
+  constructor(opts: { fetch?: Fetch; store?: TokenStore | null; sleep?: (ms: number) => Promise<void> } = {}) {
     this.fetchFn = opts.fetch ?? ((i, init) => globalThis.fetch(i, init));
     this.store = opts.store === undefined ? browserStore() : opts.store;
+    this.sleep = opts.sleep ?? wait;
   }
 
   token(): string | null {
@@ -106,7 +113,11 @@ export class PatAuth implements Auth {
     return { seen: orgs.filter((_, i) => ok[i]), unseen: orgs.filter((_, i) => !ok[i]) };
   }
 
-  async restore(): Promise<GhUser | null> {
+  /**
+   * Sign in again with the token saved in this tab. Refused: forgotten, null. No answer (offline,
+   * a 5xx): kept, `onRetry` told, and tried again until GitHub answers.
+   */
+  async restore(onRetry?: () => void): Promise<GhUser | null> {
     let saved: string | null = null;
     try {
       saved = this.store?.getItem(TOKEN_KEY) ?? null;
@@ -114,11 +125,17 @@ export class PatAuth implements Auth {
       saved = null;
     }
     if (!saved) return null;
-    try {
-      return await this.signIn(saved);
-    } catch {
-      this.signOut();
-      return null;
+    for (let i = 0; ; i++) {
+      try {
+        return await this.signIn(saved);
+      } catch (e) {
+        if (e instanceof SignInError || (e instanceof GitHubError && (e.status === 401 || e.status === 403))) {
+          this.signOut();
+          return null;
+        }
+        onRetry?.();
+        await this.sleep(RETRY_MS[Math.min(i, RETRY_MS.length - 1)]);
+      }
     }
   }
 }

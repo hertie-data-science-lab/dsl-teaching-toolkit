@@ -123,6 +123,11 @@ describe('S1 home', () => {
     expect(out).toContain('Session 3: Trees');
     expect(out).toMatch(/cohort-card ro[^"]*" href="\?cohort=hertie-ids-f2026/);
     expect(out.indexOf('Machine Learning, Fall 2026')).toBeLessThan(out.indexOf('Intro to Data Science, Fall 2026'));
+    const at = (semester: Partial<Status['semester']>) =>
+      html(<HomeScreen courses={[course]} cohortStates={{ [COHORT_ORG]: { ...ready, status: { ...STATUS, semester: { ...STATUS.semester!, ...semester } } } as Loaded }} now={NOW} user={{ login: 'a-example', id: 1, name: null, email: null, avatar_url: '' }} />);
+    expect(at({ week: 0 })).toContain('<span class="cc-week">Starts Mon 7 Sep</span>');
+    expect(at({ week: 0, start: null })).toContain('<span class="cc-week">Before week 1</span>');
+    expect(at({ week: null, weeks: null, start: null, end: null })).toContain('<span class="cc-week"></span>');
   });
 });
 
@@ -310,6 +315,19 @@ describe('S8 students', () => {
     expect(out).toContain('Code sent; not joined');
     expect(out).toContain('Not sent');
     expect(out).not.toContain('SECRETCODE');
+  });
+});
+
+describe('S8 students, a fault on a row after a blank line', () => {
+  it('marks the row the engine names, by its line in the file', () => {
+    const csv = 'hertie_email,name,role\nanna@x.org,Anna Adams,enrolled\n\nben@x.org,Ben Baker,enroled\n';
+    const fault = { id: 'role', scope: 'semester' as const, stage: 'K5', text: 'Row 4 has a role nobody can act on.', stops: '', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'students.csv', screen: 'students', line: 4 } };
+    const out = html(<StudentsScreen {...props({ files: new StaticFiles({ [`${COHORT_ORG}/semester-config/students.csv`]: csv }), loaded: { ...ready, status: { ...STATUS, problems: [fault] } } as Loaded })} />);
+    const row = (line: number) => out.match(new RegExp(`<tr class(?:="([^"]*)")? id="line-${line}">`))?.[1] ?? '';
+    expect(out).toContain('id="line-2"');
+    expect(row(2)).toBe('');
+    expect(row(4)).toBe('fault');
+    expect(out).not.toContain('id="line-3"');
   });
 });
 
@@ -591,7 +609,8 @@ describe('S2 course and S17 template', () => {
     expect(out).toContain('/edit/solution/grading_config.yml');
     // No `starter:` and no tests: written by hand, so there is nothing to derive.
     expect(out).toMatch(/value="handwritten" checked/);
-    expect(out).toContain('Starter written by hand on main; nothing is derived.');
+    // No Student version panel for a hand-written starter (decision 0028 rule 4).
+    expect(out).not.toContain('<h3>Student version');
     expect(out).not.toContain('Derive student version');
   });
   const derivedFiles = () => new StaticFiles({ [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: `${GRADING}starter: derived\n` }, {}, TREE);
@@ -599,7 +618,7 @@ describe('S2 course and S17 template', () => {
     const out = html(<TemplateScreen {...cp} files={derivedFiles()} entry="assignment-3-f2026" />);
     expect(out).toMatch(/value="derived" checked/);
     expect(out).toContain('Derive student version');
-    expect(out).not.toContain('Starter written by hand on main');
+    expect(out).toContain('<h3>Student version');
     const st = { ...STATUS, course: { ...STATUS.course!, templates: [{ repo: 'assignment-3-f2026', slug: 'assignment-3-f2026', state: 'ready', starter: 'derived' as const }] } };
     const read = html(<TemplateScreen {...cp} loaded={{ ...ready, status: st } as Loaded} entry="assignment-3-f2026" />);
     expect(read).toMatch(/value="derived" checked/);

@@ -17,11 +17,11 @@ import { endedNow, loadCatalogue, runningNow, semesterOver, termRank, type Catal
 import type { Files } from '../model/files';
 import { fmtWhen } from '../model/format';
 import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
-import { parseInstructors } from '../model/people';
+import { parseInstructors, sameHandle } from '../model/people';
 import { currentOnly, myCoursesOnly, saveCurrentOnly, saveMyCoursesOnly, type CatalogueSection } from '../model/prefs';
 import type { Loaded } from '../model/status';
 import type { SemesterFacts } from '../model/student';
-import { nextLine, semesterLine } from '../model/week';
+import { nextLine, semesterLine, weekWords } from '../model/week';
 import { studentHref } from '../router';
 import { Crumbs, Probs, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
@@ -64,11 +64,11 @@ const ROLE_SUB: Record<string, string> = { instructor: 'you are an instructor', 
  * is unread or names no role, that they teach on it.
  */
 function roleSub(course: Course, user: GhUser, live: CohortRef | undefined, files: Files | undefined): string {
-  if (course.admins.includes(user.login)) return 'you are a course admin';
+  if (course.admins.some((h) => sameHandle(h, user.login))) return 'you are a course admin';
   // Read only: the card says so, and instructors.yml is not read.
   if (!course.write) return '';
   const f = live && files ? files.file(live.org, CONFIG_REPO, INSTRUCTORS_FILE) : undefined;
-  const me = f?.kind === 'ready' ? parseInstructors(f.text).find((p) => p.handle.toLowerCase() === user.login.toLowerCase()) : undefined;
+  const me = f?.kind === 'ready' ? parseInstructors(f.text).find((p) => sameHandle(p.handle, user.login)) : undefined;
   return ROLE_SUB[me?.role ?? ''] ?? 'you teach on this course';
 }
 
@@ -101,7 +101,7 @@ function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, sub: string
     };
   return {
     ...base,
-    week: base.past ? 'Ended, not archived' : s.semester ? `Week ${s.semester.week} of ${s.semester.weeks}` : '',
+    week: base.past ? 'Ended, not archived' : s.semester ? weekWords(s.semester) : '',
     status: <Probs n={n} />,
     next: base.past ? [] : (s.this_week ?? []).slice(0, 2).map((w) => [fmtWhen(w.when, tz), w.title] as [string, string]),
     ro: false,
@@ -195,6 +195,8 @@ function useCatalogue(courses: Course[]): CatalogueState {
 /** Whether a semester the person studies in is over, by its facts' last day once read (`semesterOver`). */
 export const studentPast = (s: Semester, facts: SemesterFacts | null | undefined, now: number) => semesterOver(s, now, facts?.end);
 
+const weekOrStart = (l: { week?: string; starts?: string }) => l.week ?? l.starts ?? '';
+
 /** A semester the person studies in, as the instructor's cards show theirs: its week and what comes next, once its facts are read. */
 function semesterCard(s: Semester, facts: SemesterFacts | null | undefined, now: number): Card {
   const past = studentPast(s, facts, now);
@@ -204,7 +206,7 @@ function semesterCard(s: Semester, facts: SemesterFacts | null | undefined, now:
     name: semesterName({ ...s, courseName: s.courseName || facts?.courseName || '' }),
     code: s.courseCode ?? '',
     sub: s.archived ? 'Archived; your work stays yours to read' : STUDENT,
-    week: live ? semesterLine(facts, now).week ?? '' : '',
+    week: live ? weekOrStart(semesterLine(facts, now)) : '',
     status: <span class="chip">{s.archived ? 'Archived' : past ? 'Ended' : 'Current'}</span>,
     next: live ? [['', nextLine(facts, now)]] : [],
     href: studentHref(s.org),

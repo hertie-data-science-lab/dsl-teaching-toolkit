@@ -145,10 +145,19 @@ def _repo_table_block(repos: list[dict]) -> str:
     )
 
 
-# The seeded page's first heading is `# <org>.`, and every self-reference below it - the
-# welcome line, the site link, the Join link - names that same org. So the heading is where
-# a rename shows up first, and it is enough to detect one.
+# Pages seeded before the course name existed open on `# <org>.`, and every self-reference
+# below it - the welcome line, the site link, the Join link - names that same org. So the
+# heading is where a rename shows up first. Today's seed opens on `# <course_name>`, which
+# defaults to an org slug, so the heading alone is only a candidate: see
+# `retitle_renamed_org`.
 _H1_ORG_RE = re.compile(r"^#\s+([A-Za-z0-9][\w.-]*?)\.?\s*$", re.MULTILINE)
+
+
+def _whole_name(name: str) -> str:
+    """A pattern for `name` as a whole org name: not part of a longer one. `\\b` is not
+    enough, because `-` is a word boundary, so `hertie-dl` would match inside
+    `hertie-dl-f2026`."""
+    return rf"(?<![\w-]){re.escape(name)}(?![\w-])"
 
 
 def retitle_renamed_org(existing: str, org: str) -> tuple[str, str | None]:
@@ -163,18 +172,25 @@ def retitle_renamed_org(existing: str, org: str) -> tuple[str, str | None]:
     narrower signal than "the page still looks generated", which is the heuristic that
     function's docstring rejects - it would flatten reworded prose, and this cannot.
 
-    Keyed on the H1, which the generator seeds as the org's own name. A page whose heading
-    an instructor has replaced with a human title matches nothing and is left alone, as is
-    one whose heading already names this org. Word-boundary substitution, so a name that is
-    a prefix of another (`hertie-nlp-f2026` inside `hertie-nlp-f2026-archive`) is not
-    corrupted."""
+    Keyed on the H1, which older seeds set to the org's own name. A page whose heading an
+    instructor has replaced with a human title matches nothing and is left alone, as is one
+    whose heading already names this org. The H1 is only a candidate: today's seed opens on
+    the course name, which defaults to an org slug (`hertie-dl` for the semester org
+    `hertie-dl-f2026`). So the page must also LINK to the candidate as an org - a
+    `github.com/<name>` path segment or a `<name>.github.io` host - before anything is
+    rewritten. Whole-name substitution, so a name that is a prefix of another (`hertie-dl`
+    inside `hertie-dl-f2026`) is never corrupted."""
     m = _H1_ORG_RE.search(existing)
     if m is None:
         return existing, None
     was = m.group(1)
     if was.casefold() == org.casefold() or "-" not in was:
         return existing, None
-    return re.sub(rf"\b{re.escape(was)}\b", org, existing), was
+    name = _whole_name(was)
+    linked = rf"github\.com/{name}|//{name}\.github\.io"
+    if not re.search(linked, existing, re.IGNORECASE):
+        return existing, None
+    return re.sub(name, org, existing, flags=re.IGNORECASE), was
 
 
 def splice_repo_table(existing: str, repos: list[dict]) -> str | None:

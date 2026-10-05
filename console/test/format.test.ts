@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { assignmentIdent, md, releaseIdent, templateName } from '../src/model/format';
+import { assignmentIdent, fmtWhen, md, releaseIdent, sortKey, templateName } from '../src/model/format';
+import { weekOf } from '../src/model/schedule';
 import type { Release } from '../src/model/types';
 
 describe('md', () => {
@@ -49,5 +50,19 @@ describe('releaseIdent', () => {
     expect(releaseIdent(rel('lecture_03', 'lecture', '1'))).toBe('Lecture 3');
     expect(releaseIdent(rel('01_lab', 'lab', '1'))).toBe('Lab 1');
     expect(releaseIdent(rel('wrap', 'lecture', '2026-09-08'))).toBe('Lecture');
+  });
+});
+
+describe('schedule times', () => {
+  const tz = 'Europe/Berlin';
+  it('read a space between date and time as the engine does (as T)', () => {
+    expect(fmtWhen('2026-10-07 10:00', tz)).toBe('Wed 7 Oct 10:00');
+    expect(fmtWhen('2026-10-07 10:00:00', tz)).toBe('Wed 7 Oct 10:00');
+    expect(fmtWhen('2026-10-07 10:00+02:00', tz)).toBe('Wed 7 Oct 10:00');
+    expect(sortKey('2026-10-07 10:00', tz)).toBe('2026-10-07T10:00');
+    expect(weekOf('2026-10-07 10:00', { start: '2026-09-07', end: '2026-12-18', weeks: 15 }, tz)).toBe(5);
+  });
+  it('still take a date-only value as that day', () => {
+    expect(fmtWhen('2026-10-07', tz)).toBe('Wed 7 Oct');
   });
 });

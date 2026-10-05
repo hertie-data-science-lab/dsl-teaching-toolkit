@@ -7,7 +7,7 @@ import { useSave } from '../edit/save';
 import { YamlText } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { fmtShort } from '../model/format';
-import { ROLE_WORD, ROSTER_HEADER, parseInstructors, type Person } from '../model/people';
+import { ROLE_WORD, ROSTER_HEADER, parseInstructors, sameHandle, type Person } from '../model/people';
 import { checkAccess, sendCodes } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import { PERSON, displayOnly } from '../tiers/people';
@@ -49,6 +49,11 @@ function Students(p: ReadyProps) {
   const waiting = Math.max(0, s.codes_sent - s.joined);
 
   const base = table?.rows ?? [];
+  // Edits are keyed by row (`i + 2`); the line shown, and matched with the engine's faults, is
+  // the row's line in the file, which blank lines and quoted newlines move. A row added here,
+  // or a replacement's, is numbered on from the file's last row.
+  const lines = replacement ? [] : (table?.lines ?? []);
+  const fileLine = (i: number) => (i < lines.length ? lines[i] : (lines[lines.length - 1] ?? 1) + i - lines.length + 1);
   const current: Row[] = replacement ? replacement.rows : [...base.map((r, i) => ({ ...r, ...(edits[i + 2] ?? {}) })), ...added];
   const nEdits = replacement ? 1 : Object.keys(edits).filter((l) => EDITED.some((k) => (edits[+l][k] ?? '') !== (base[+l - 2]?.[k] ?? ''))).length + added.filter((r) => r.hertie_email || r.name).length;
   const badEmail = current.filter((r) => (r.hertie_email || r.name) && !EMAIL_RE.test(r.hertie_email ?? ''));
@@ -70,7 +75,7 @@ function Students(p: ReadyProps) {
   const doSave = async () => {
     if (!table || file.kind !== 'ready') return;
     if (badEmail.length) return setSave({ kind: 'bad', text: `${badEmail.length} row${badEmail.length > 1 ? 's have' : ' has'} an email that is not an address; no code can be sent to it.` });
-    const switched = replacement ? [] : base.map((r, i) => (edits[i + 2]?.github_handle ?? r.github_handle ?? '').trim()).filter((h, i) => h.toLowerCase() !== (base[i].github_handle ?? '').trim().toLowerCase());
+    const switched = replacement ? [] : base.map((r, i) => (edits[i + 2]?.github_handle ?? r.github_handle ?? '').trim()).filter((h, i) => !sameHandle(h, base[i].github_handle ?? ''));
     if (switched.includes('')) return setSave({ kind: 'bad', text: 'A joined student’s GitHub handle cannot be blank. Put back the old one, or type their new account.' });
     for (const handle of switched) {
       setSave({ kind: 'busy', text: `Checking that ${handle} exists on GitHub…` });
@@ -92,11 +97,11 @@ function Students(p: ReadyProps) {
     }
   };
   const input = (line: number, r: Row, k: string, label: string, type = 'text') => (
-    <input type={type} value={r[k] ?? ''} aria-label={`${label}, line ${line}`} aria-invalid={k === 'hertie_email' && (r.hertie_email || r.name) && !EMAIL_RE.test(r.hertie_email ?? '') ? 'true' : undefined} disabled={!!replacement}
+    <input type={type} value={r[k] ?? ''} aria-label={`${label}, line ${fileLine(line - 2)}`} aria-invalid={k === 'hertie_email' && (r.hertie_email || r.name) && !EMAIL_RE.test(r.hertie_email ?? '') ? 'true' : undefined} disabled={!!replacement}
       onInput={(e) => (line > base.length + 1 ? setAdded(added.map((x, i) => (i === line - base.length - 2 ? { ...x, [k]: (e.target as HTMLInputElement).value } : x))) : setCell(line, k, (e.target as HTMLInputElement).value))} />
   );
   const role = (line: number, r: Row) => (
-    <select aria-label={`Role, line ${line}`} disabled={!!replacement} onChange={(e) => (line > base.length + 1 ? setAdded(added.map((x, i) => (i === line - base.length - 2 ? { ...x, role: (e.target as HTMLSelectElement).value } : x))) : setCell(line, 'role', (e.target as HTMLSelectElement).value))}>
+    <select aria-label={`Role, line ${fileLine(line - 2)}`} disabled={!!replacement} onChange={(e) => (line > base.length + 1 ? setAdded(added.map((x, i) => (i === line - base.length - 2 ? { ...x, role: (e.target as HTMLSelectElement).value } : x))) : setCell(line, 'role', (e.target as HTMLSelectElement).value))}>
       <option value="enrolled" selected={(r.role || 'enrolled') === 'enrolled'}>enrolled</option>
       <option value="auditor" selected={r.role === 'auditor'}>auditor</option>
     </select>
@@ -158,10 +163,11 @@ function Students(p: ReadyProps) {
                 <tbody>
                   {current.map((r, i) => {
                     const line = i + 2;
+                    const at = fileLine(i);
                     const changed = !replacement && (edits[line] || i >= base.length);
                     return (
-                      <tr class={`${faultLines.has(line) ? 'fault' : ''}${changed ? ' changed' : ''}`} id={`line-${line}`}>
-                        <td class="line">{line}</td>
+                      <tr class={`${faultLines.has(at) ? 'fault' : ''}${changed ? ' changed' : ''}`} id={`line-${at}`}>
+                        <td class="line">{at}</td>
                         <td>{input(line, r, 'hertie_email', 'Email', 'email')}</td>
                         <td>{input(line, r, 'name', 'Name')}</td>
                         <td>{role(line, r)}</td>
@@ -177,8 +183,8 @@ function Students(p: ReadyProps) {
             </div>
             <ul class="roster-cards">
               {current.map((r, i) => (
-                <li class={`rcard${faultLines.has(i + 2) ? ' fault' : ''}`}>
-                  <div class="rc-top">{r.name}<span>line {i + 2}</span></div>
+                <li class={`rcard${faultLines.has(fileLine(i)) ? ' fault' : ''}`}>
+                  <div class="rc-top">{r.name}<span>line {fileLine(i)}</span></div>
                   <div class="field"><span class="label">Email</span>{input(i + 2, r, 'hertie_email', 'Email', 'email')}</div>
                   <div class="field"><span class="label">Role</span>{role(i + 2, r)}</div>
                   <div class="rc-status"><RowStatus r={r} />{r.github_handle ? ` as ${r.github_handle}` : ''}</div>
@@ -258,7 +264,7 @@ function Instructors(p: ReadyProps) {
     if (Object.keys(errs).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
     const handle = String(v.github_handle ?? '').trim();
     const before = editing.idx === 'new' ? null : people[editing.idx];
-    if (handle && (!before || before.handle.toLowerCase() !== handle.toLowerCase())) {
+    if (handle && (!before || !sameHandle(before.handle, handle))) {
       setSave({ kind: 'busy', text: `Checking that ${handle} exists on GitHub…` });
       let ok = false;
       try {

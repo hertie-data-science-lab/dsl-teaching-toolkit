@@ -7,11 +7,12 @@
 // Schedule's week headings) and a semester card's "Next: ..." line.
 
 import { DEFAULT_TIMEZONE } from './policy';
-import { daysBetween, fmtDay } from './format';
+import { daysBetween, fmtDay, fmtWhen } from './format';
 import { isMarked, type Mine } from './mine';
 import { weekOf, type Term } from './schedule';
 import { nextEventWords } from './status';
 import { instant, startOfDay, type SemesterFacts } from './student';
+import type { SemesterStatus } from './types';
 
 export type WeekKind = 'due' | 'hand_out' | 'release' | 'exam' | 'event' | 'marks' | 'teams' | 'news' | 'patch';
 
@@ -39,6 +40,27 @@ export interface WeekItem {
 }
 
 const DAY = 864e5;
+
+type Formation = SemesterFacts['assignments'][number]['teamFormation'];
+
+/** A close written as a date (`2026-11-09T23:59:00+01:00`, `2026-11-09 23:59`), as the engine writes it; null for free text. */
+const closeAt = (closes: string, tz: string): number | null => {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(closes.trim())) return null;
+  const at = instant(closes, tz);
+  return Number.isNaN(at) ? null : at;
+};
+
+/** Team formation still open at `now`: no close given, or a close not passed yet. A close that is not a date (the site's free text) counts as open. */
+export function formingAt(tf: Formation, now: number, tz: string): boolean {
+  if (!tf) return false;
+  const at = tf.closes ? closeAt(tf.closes, tz) : null;
+  return at === null || at > now;
+}
+
+/** A team formation's close as the console writes dates ("Mon 9 Nov 23:59"); text that is not a date stays as written. */
+export function closesWords(closes: string, tz: string): string {
+  return closeAt(closes, tz) === null ? closes : fmtWhen(closes, tz);
+}
 
 const name = (title: string, subtitle: string) => (subtitle ? `${title}: ${subtitle}` : title);
 
@@ -88,13 +110,13 @@ export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, 
     }
   }
   for (const a of facts.assignments) {
-    if (!a.teamFormation || auditor) continue;
+    if (!formingAt(a.teamFormation, now, tz) || auditor) continue;
     const u = mine?.units[a.slug];
     add({
       at: now,
       when: '',
       kind: 'teams',
-      text: `Team formation is open for ${a.title}${a.teamFormation.closes ? ` until ${a.teamFormation.closes}` : ''}`,
+      text: `Team formation is open for ${a.title}${a.teamFormation!.closes ? ` until ${closesWords(a.teamFormation!.closes, tz)}` : ''}`,
       screen: 'join',
       note: mine && !u?.team ? 'you have no team yet' : undefined,
     });
@@ -120,7 +142,7 @@ export function termOfFacts(facts: Pick<SemesterFacts, 'start' | 'end'>): Term |
  * "Week N of M", clamped to the last week and absent before week 1, and the dates. Each is
  * left out when the facts do not carry the dates (an older file, or the site).
  */
-export function semesterLine(facts: Pick<SemesterFacts, 'start' | 'end' | 'timezone'>, now: number): { week?: string; dates?: string } {
+export function semesterLine(facts: Pick<SemesterFacts, 'start' | 'end' | 'timezone'>, now: number): { week?: string; starts?: string; dates?: string } {
   const term = termOfFacts(facts);
   if (!term) return {};
   const tz = facts.timezone || DEFAULT_TIMEZONE;
@@ -128,8 +150,20 @@ export function semesterLine(facts: Pick<SemesterFacts, 'start' | 'end' | 'timez
   const year = Number(term.start.slice(0, 4));
   return {
     week: w === 'before' ? undefined : `Week ${w === 'after' ? term.weeks : w} of ${term.weeks}`,
+    starts: w === 'before' ? `Starts ${fmtDay(term.start, tz, year)}` : undefined,
     dates: `${fmtDay(term.start, tz, year)} to ${fmtDay(term.end, tz, year)}`,
   };
+}
+
+/**
+ * An instructor's semester card's week, from the status (`semester_weeks`: both null while a
+ * date is unset, 0 before the start): "Week 3 of 15", "Starts Mon 7 Sep" before the start
+ * ("Before week 1" when the start is not in the status), else nothing.
+ */
+export function weekWords(sem: Pick<SemesterStatus, 'week' | 'weeks' | 'start' | 'timezone'>): string {
+  if (sem.week && sem.weeks) return `Week ${sem.week} of ${sem.weeks}`;
+  if (sem.week !== 0) return '';
+  return sem.start ? `Starts ${fmtDay(sem.start, sem.timezone || DEFAULT_TIMEZONE, Number(sem.start.slice(0, 4)))}` : 'Before week 1';
 }
 
 /** The event word a row's title lacks: a hand-out and a due row are titled by their assignment alone. */

@@ -7,6 +7,7 @@ import { STARTER_COPY, fromConfig, settingsTiers, starterOf, toConfig } from '..
 import { RETURN_MARKS, releaseAdhoc } from '../src/tiers/ops';
 import { matches } from '../src/edit/glob';
 import { diffRoster, readTable, writeTable } from '../src/edit/csv';
+import { parseRoster } from '../src/model/people';
 
 describe('the tiered form', () => {
   const tiers = settingsTiers();
@@ -106,6 +107,13 @@ describe('roster tables', () => {
     t.rows[0].name = 'Anna Adams';
     const out = writeTable(t);
     expect(out).toBe('hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,anna-a,1,CODE1,2026-09-02\nben@x.org,"Baker, Ben",,,,,\n');
+  });
+  it('numbers each row by its line in the file, blank lines and quoted newlines counted, as the engine does', () => {
+    const t = readTable('hertie_email,name,role\r\nanna@x.org,Anna,\r\n\r\nben@x.org,"Ben\nBaker",\ncarla@x.org,Carla,\n');
+    expect(t.rows.map((r) => r.hertie_email)).toEqual(['anna@x.org', 'ben@x.org', 'carla@x.org']);
+    expect(t.lines).toEqual([2, 5, 6]);
+    expect(t.rows[1].name).toBe('Ben\nBaker');
+    expect(parseRoster('hertie_email,name,role\n\nanna@x.org,Anna,\n').rows.map((r) => r.line)).toEqual([3]);
   });
   it('diffs a replacement by email, keeping system columns', () => {
     const cur = readTable(src).rows;

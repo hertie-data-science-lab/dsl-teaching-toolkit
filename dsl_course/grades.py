@@ -28,7 +28,7 @@ import tempfile
 import textwrap
 import time
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -90,7 +90,7 @@ from .gh_contents import (
     yaml_mark_line,
     yaml_problem,
 )
-from .ghcli import bot_login, clone, gh, is_missing_resource
+from .ghcli import bot_login, clone, gh, git, is_missing_resource
 from .issues import close_issues_titled, upsert_issue
 from .log import (
     CLIParser,
@@ -328,6 +328,10 @@ class SheetSpec(_Shape):
     # before the submission facts behind it exist (`_undue_marks`). None for a sheet whose
     # assignment the schedule no longer declares - there is no date to read.
     due_at: datetime | None = None
+    # The template's `grading_config.yml` was refused (`GradingSpec.not_migrated`): the
+    # shape and late rule above are defaults nobody wrote, so nothing may be derived from
+    # them - no sheet refresh, no return (decision 0009).
+    not_migrated: bool = False
 
     @property
     def container_key(self) -> str:
@@ -921,7 +925,7 @@ def penalty_rate(text: object) -> Decimal | None:
     said out loud, once, when the assignment's definition was read."""
     if penalty_fault(text):
         return None
-    raw = str(text or "").strip()
+    raw = "" if text is None else str(text).strip()
     if not raw:
         return None
     return as_decimal(raw[:-1]) / 100 if raw.endswith("%") else as_decimal(raw)
@@ -2042,6 +2046,7 @@ def sheet_spec(
             sched.timezone,
         ),
         due_at=entry.due_datetime if entry else None,
+        not_migrated=gspec.not_migrated,
     )
 
 
@@ -3666,6 +3671,10 @@ def marks_due(
         except SheetUnreadable:
             sheet = None  # the sheet's own digest says why
         spec = specs[name]
+        if spec.not_migrated:
+            # Its definition is refused, and the digest already carries that fault: a
+            # return off a default-shaped spec would read the wrong container.
+            continue
         units = ((sheet or {}).get(spec.container_key) or {}) if sheet else {}
         blank = _not_marked(spec, sheet) if sheet else {}
         if sheet and units and not blank:
@@ -3956,6 +3965,42 @@ def _marks_digest(book: dict[str, dict]) -> str:
 # The data file of a gradebook. The commit is over the whole book; the email's LEGACY
 # digest was over this file alone, and is recognised by hashing it (see `distribute`).
 GRADES_DATA = "grades.yml"
+
+
+def _sheets_changed_at(wd: Path, slugs: Iterable[str]) -> dict[str, datetime]:
+    """When each sheet last changed, off the clone's own history: the committer date,
+    which is the moment the console's `returned` state compares a gradebook's record with.
+    A sheet whose date cannot be read is left out (its records are simply not re-stamped).
+    """
+    out: dict[str, datetime] = {}
+    for slug in slugs:
+        code, text = git(
+            "log", "-1", "--format=%cI", "--", f"{SHEETS_DIR}/{slug}.yml", cwd=str(wd)
+        )
+        if code != 0:
+            continue
+        try:
+            out[slug] = datetime.fromisoformat(text.strip())
+        except ValueError:
+            continue
+    return out
+
+
+def _stale_record(
+    entry: tuple[str, str, str] | None, book: dict[str, dict], changed: dict
+) -> bool:
+    """Whether a gradebook record that still matches its content predates a later commit
+    to one of the sheets it is rendered from. Its moment then says "current as of" too
+    early, and the console reads the assignment as still being marked for good, since a
+    sheet commit that moves no mark (a comment, a reorder) rewrites no gradebook."""
+    try:
+        at = datetime.fromisoformat(entry[1]) if entry else None
+    except ValueError:
+        return False
+    if at is None:
+        return False
+    at = at if at.tzinfo else at.replace(tzinfo=UTC)
+    return any(changed[slug] > at for slug in book if slug in changed)
 
 
 def _gradebook_files(
@@ -4265,10 +4310,22 @@ def distribute(
         for slug, sheet in sheets.items():
             specs.setdefault(slug, _spec_from_sheet(slug, sheet))
             sources[slug] = (specs[slug], sheet)
+        refused = sorted(slug for slug in sources if specs[slug].not_migrated)
+        if refused:
+            # Nothing goes out, as for an unreadable sheet: its shape and late rule would
+            # be defaults nobody wrote, and leaving it out of the books would take an
+            # already-returned mark away from every gradebook.
+            log_err(
+                f"{', '.join(refused)}: {GRADING_FILE} is NOT_MIGRATED (an old key, or "
+                f"a run setting that moved to {ASSIGNMENTS_FILE}) - nothing sent; run "
+                f"the migration"
+            )
+            return 1
         titles = {slug: specs[slug].title for slug in sources}
         books, unknown = _on_the_roster(build_gradebooks(sources), students)
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd)
+        changed = {} if dry_run else _sheets_changed_at(wd, sheets)
         export = _told_grades(wd) if dry_run else ({}, set())
 
     held = _hold_undecided(
@@ -4291,6 +4348,13 @@ def distribute(
         "unknown": unknown,
         "failed": 0,
     }
+    if assignment and held.get(assignment) and not dry_run:
+        # A count: which marks are held is the sheet digest's to say, line by line.
+        log(
+            f"  {assignment} is not recorded as returned: "
+            f"{plural(len(held[assignment]), 'mark')} held until the sheet is fixed, "
+            f"and the automatic return asks again"
+        )
     for slug in sorted(held):
         for handle, (_unit, reason) in sorted(held[slug].items()):
             log_person(
@@ -4327,8 +4391,16 @@ def distribute(
         digest = content_hash("".join(f.decode() for f in files.values()))
         marks = _marks_digest(books[handle])
         legacy[handle] = content_hash(files[GRADES_DATA].decode())
-        if record.get((handle, "", CHANNEL_GRADEBOOK), ("",))[0] == digest:
+        entry = record.get((handle, "", CHANNEL_GRADEBOOK))
+        if entry and entry[0] == digest:
             live[handle] = marks
+            # Unchanged, but checked against a newer sheet: the record's moment moves up,
+            # so `returned` holds through an edit that changed no mark. Never for a
+            # student with a mark held, whose return is not done.
+            if not any(handle in whose for whose in held.values()) and _stale_record(
+                entry, books[handle], changed
+            ):
+                record[(handle, "", CHANNEL_GRADEBOOK)] = (digest, now, entry[2])
             continue
         if dry_run:
             live[handle] = marks
@@ -4437,7 +4509,9 @@ def distribute(
     def finish(failed_mail: int, told: list[str], raised: bool = False) -> bool:
         """The final record: `told` as told, and every other address back as it was, so
         an email that did not go is retried by the next Return marks run. A run that
-        `raised` never marks the assignment returned."""
+        `raised` never marks the assignment returned, and nor does one that held any of
+        its marks: the automatic return asks again every tick, and each later run sends
+        only what `distributed.csv` says has not gone out yet."""
         for handle in told:
             record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
         counts["emails"] = len(told)
@@ -4455,6 +4529,7 @@ def distribute(
                 and not raised
                 and not counts["failed"]
                 and not (failed_mail and not told)
+                and not held.get(assignment)
                 else None
             ),
             now=now,
