@@ -13,6 +13,8 @@ export class ConsoleAuth implements Auth {
   notice: string | null = null;
   /** Called when a GitHub App session ends by itself (its refresh token was refused). */
   onLost: (() => void) | null = null;
+  /** Called each time the saved token's check at reload got no answer from GitHub (it is kept and tried again). */
+  onRetry: (() => void) | null = null;
   private active: Auth | null = null;
 
   constructor(
@@ -59,7 +61,7 @@ export class ConsoleAuth implements Auth {
     for (const a of [this.app, this.pat]) {
       if (!a) continue;
       try {
-        const u = await a.restore();
+        const u = await (a === this.pat ? this.pat.restore(() => this.onRetry?.()) : a.restore());
         if (u) {
           this.active = a;
           return u;
