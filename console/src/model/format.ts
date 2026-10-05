@@ -28,8 +28,13 @@ export interface Zoned {
   hasTime: boolean;
 }
 
-/** Calendar parts of `iso` in `tz`. A date-only value ("2026-10-07") is taken as that day. */
-export function zoned(iso: string, tz = DEFAULT_TIMEZONE): Zoned {
+/**
+ * Calendar parts of `iso` in `tz`. A date-only value ("2026-10-07") is taken as that day. A
+ * space between date and time ("2026-10-07 10:00") reads as the `T` the engine also accepts
+ * (`datetime.fromisoformat`).
+ */
+export function zoned(when: string, tz = DEFAULT_TIMEZONE): Zoned {
+  const iso = when.trim().replace(/^(\d{4}-\d{2}-\d{2}) +(?=\d{2}:\d{2})/, '$1T');
   const naive = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(:\d{2})?$/.exec(iso);
   if (naive) {
     // A schedule.yml time with no offset is already wall-clock time in the semester's timezone.
