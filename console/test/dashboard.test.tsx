@@ -9,9 +9,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
 import { fmtDays } from '../src/model/format';
-import { inWeeks, parseSchedule, scheduleRows, termOf, weekOf } from '../src/model/schedule';
+import { inWeeks, parseSchedule, scheduleRows, termOf, weekGroups, weekOf } from '../src/model/schedule';
 import type { Status } from '../src/model/types';
-import { CohortScreen, headerLine, weekGroups } from '../src/screens/Cohort';
+import { CohortScreen, headerLine } from '../src/screens/Cohort';
 import example from './fixtures/status.example.json';
 
 const STATUS = example as unknown as Status;
@@ -68,7 +68,7 @@ describe('term weeks', () => {
   });
 
   it('group every week under All weeks, empty ones too, and out-of-term rows in their buckets', () => {
-    const groups = weekGroups(rows, term, TZ, 'all');
+    const groups = weekGroups(rows, (r) => r.when, term, TZ, 'all');
     expect(groups[0]).toMatchObject({ key: 'before', label: 'Before the semester' });
     expect(groups[0].rows.map((r) => r.entry)).toEqual(['orientation']);
     expect(groups.filter((g) => typeof g.key === 'number')).toHaveLength(15);
@@ -76,7 +76,7 @@ describe('term weeks', () => {
     const after = groups.find((g) => g.key === 'after')!;
     expect(after.rows.map((r) => r.entry)).toEqual(['archive']);
     // A chosen week list shows only those weeks that hold something, in term order.
-    expect(weekGroups(rows, term, TZ, [7, 3, 4]).map((g) => g.key)).toEqual([3, 7]);
+    expect(weekGroups(rows, (r) => r.when, term, TZ, [7, 3, 4]).map((g) => g.key)).toEqual([3, 7]);
   });
 
   it('keep undated items apart from the dated ones in the selected weeks', () => {
