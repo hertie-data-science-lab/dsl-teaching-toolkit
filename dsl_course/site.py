@@ -30,7 +30,6 @@ from datetime import UTC, date, datetime, timedelta
 from functools import cache
 from pathlib import Path
 from textwrap import indent
-from urllib.parse import quote
 
 import yaml
 
@@ -65,10 +64,9 @@ from .log import CLIParser, log_err, log_step
 from .materials import ASSETS_KIND
 from .materials import read as read_materials
 from .public_site import publish as publish_public_site
-from .readings import demote_headings, is_reading_overlay
+from .readings import demote_headings
 from .repos import (
     default_branch,
-    has_never_material_component,
 )
 from .schedule_plan import (
     PlannedRow,
@@ -84,8 +82,12 @@ from .site_repo import (
     SitePlan,
     block,
     console_yaml,
+    file_link,
+    gh_url,
     iso_when,
     kinds_yaml,
+    landed_links,
+    link_extensions,
     links_block,
     nav_yaml,
     people_yaml,
@@ -141,97 +143,6 @@ def _repo_tree(org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     return branch, repo_tree(org, repo, branch, "blob")
 
 
-def _ext(name: str) -> str:
-    """A file name's extension, lowercased and without the dot ('' when it has none). Not
-    `Path().suffix`, which would call the whole of `Makefile` an extension-less name but
-    read `figure-1` in `figure-1.tar.gz` inconsistently with the allowlist faculty write."""
-    return name.rsplit(".", 1)[-1].lower() if "." in name.rsplit("/", 1)[-1] else ""
-
-
-def _gh_url(org: str, repo: str, branch: str, kind: str, path: str) -> str:
-    """A GitHub `blob`/`tree` URL for a path in a repo. One template, every caller."""
-    return f"https://github.com/{org}/{repo}/{kind}/{branch}/{quote(path)}"
-
-
-def _file_link(semester_org: str, repo: str, branch: str, path: str, name: str) -> Link:
-    """One released file as a link to its GitHub blob. The semester site hosts no copies
-    (decision 0011 rule 5): the student console opens files from the private repo."""
-    return Link(name, _gh_url(semester_org, repo, branch, "blob", path))
-
-
-# The link name for the escape hatch out of an allowlist: whatever the list does not
-# name is still one click away, rather than invisible.
-_BROWSE_ALL = "browse the folder"
-
-
-def _link_extensions(meta: dict) -> frozenset[str]:
-    """`site_link_extensions` from a course's `dsl-course.yml`, lowercased and dot-stripped.
-
-    The OPTIONAL allowlist narrowing what a session row links (see `_shape_links`); absent
-    or empty means the default folder-shaped listing. A bare string
-    (`site_link_extensions: pdf, html`) is accepted alongside a list - it is the shape
-    faculty reach for first, and refusing it would only produce a silently unfiltered site."""
-    raw = meta.get("site_link_extensions") or []
-    if isinstance(raw, str):
-        raw = raw.replace(",", " ").split()
-    return frozenset(str(x).strip().lstrip(".").lower() for x in raw if str(x).strip())
-
-
-def _shape_links(
-    blobs: list[Link], tree_base: str, allow: frozenset[str]
-) -> list[Link]:
-    """The links a row actually SHOWS, out of every file one of its folders released.
-
-    Release is recursive because a release copies a folder wholesale, and it must stay that way. DISPLAY must not be: a rendered Quarto/Rmd deck is
-    one deliverable plus hundreds of assets (`libs/`, `pics/`, `<name>_files/`), and linking
-    each of them put 1,641 links across 27 rows on a live semester site - burying the three
-    files a student actually opens. Nothing here changes what ships, only what is listed.
-
-    Two shapes, and neither leaves a released file unreachable from the page:
-
-    - DEFAULT (`allow` empty) - the folder as GitHub shows it. A file at the session
-      folder's root links to the file; each immediate subfolder gets ONE link to its tree,
-      named with its file count. Nothing to configure, and a course that keeps handouts in
-      `handouts/` reaches them in one more click rather than losing them.
-    - ALLOWLIST (`site_link_extensions`) - only files with those extensions, at any depth,
-      plus one "browse the folder" link, so a file the list does not name is still one
-      click away instead of invisible.
-
-    A rule about DOTS is still refused, for the reason it always was: `__pycache__/`,
-    `.ipynb_checkpoints/` and `node_modules/` are all clutter and none of them starts with
-    a dot, while `.Rprofile`, `.env.example` and a `.devcontainer/` are real course
-    material such a rule would hide. What is filtered is narrower and can be written
-    honestly - the short closed list of NAMES that are never course material in any course
-    (`repos.NEVER_MATERIAL`), dropped before the counts are taken so a folder cannot be
-    listed as "3 files" while showing two.
-
-    The site applies it as well as the release, not instead: a semester site showed
-    `labs/01_session-1/.gitkeep` and a `readings/.DS_Store` as materials, and neither had
-    passed through a release copy that day or would ever pass through one again. Junk
-    committed straight into a semester's own content repo never meets the release filter, so
-    a release-only rule leaves it listed for the rest of the term.
-
-    `blobs` is every file under the folder, named by path relative to it (`_landed`);
-    `tree_base` is the folder's own GitHub tree URL. Order follows `blobs` (path
-    sorted), files before folders, for a stable diff."""
-    blobs = [b for b in blobs if not has_never_material_component(b.name)]
-    if allow:
-        return [b for b in blobs if _ext(b.name) in allow] + [
-            Link(_BROWSE_ALL, tree_base)
-        ]
-    files = [b for b in blobs if "/" not in b.name]
-    counts: dict[str, int] = {}
-    for b in blobs:
-        head, sep, _rest = b.name.partition("/")
-        if sep:
-            counts[head] = counts.get(head, 0) + 1
-    folders = [
-        Link(f"{d}/ ({n} file{'' if n == 1 else 's'})", f"{tree_base}/{quote(d)}")
-        for d, n in counts.items()
-    ]
-    return files + folders
-
-
 @dataclass
 class _Landed:
     """What one copy of a row has landed in the semester, found in its repo's tree: the
@@ -252,37 +163,17 @@ def _landed(
     allow: frozenset[str],
     readings: bool,
 ) -> _Landed | None:
-    """What `deploy` has landed, or None while nothing has: a file is one link, a folder
-    is its files as GitHub shows it (`_shape_links`), the repo root the whole repo.
-
-    Read off the destination repo's memoised tree (`_repo_tree`), so a released folder
-    whose name carries no ordinal is as linked as one that does. `readings` takes the
-    reading-list overlay (`READINGS.md`) out of the links: the row inlines its text."""
+    """What `deploy` has landed, or None while nothing has (`site_repo.landed_links`),
+    read off the destination repo's memoised tree (`_repo_tree`), so a released folder
+    whose name carries no ordinal is as linked as one that does."""
     repo, path = deploy.semester_dest_repo, deploy_dest(deploy)
     branch, blobs = _repo_tree(semester_org, repo)
-    section = deploy_section(deploy)
-    if path and path in blobs:
-        name = path.rsplit("/", 1)[-1]
-        if readings and is_reading_overlay(name):
-            return _Landed(repo, section, [], [path])
-        link = _file_link(semester_org, repo, branch, path, name)
-        return _Landed(repo, section, [link], root_file="/" not in path)
-    prefix = f"{path}/" if path else ""
-    inside = [b for b in blobs if b.startswith(prefix)]
-    if not inside:
+    found = landed_links(semester_org, repo, branch, blobs, path, allow, readings)
+    if found is None:
         return None
-    overlays = [b for b in inside if readings and is_reading_overlay(b)]
-    files = [
-        _file_link(semester_org, repo, branch, b, b[len(prefix) :])
-        for b in inside
-        if b not in overlays
-    ]
-    tree = (
-        _gh_url(semester_org, repo, branch, "tree", path)
-        if path
-        else f"https://github.com/{semester_org}/{repo}/tree/{branch}"
-    )
-    return _Landed(repo, section, _shape_links(files, tree, allow), overlays)
+    links, overlays = found
+    root_file = bool(path) and path in blobs and "/" not in path
+    return _Landed(repo, deploy_section(deploy), links, overlays, root_file)
 
 
 def _row_landed(
@@ -380,7 +271,7 @@ def _dest_link(semester_org: str, dest: str, live_repos: frozenset[str]) -> str:
         if not any(b == candidate or b.startswith(f"{candidate}/") for b in blobs):
             break
         here = candidate
-    return f"[`{dest}`]({_gh_url(semester_org, repo, branch, 'tree', here) if here else f'https://github.com/{semester_org}/{repo}'})"
+    return f"[`{dest}`]({gh_url(semester_org, repo, branch, 'tree', here) if here else f'https://github.com/{semester_org}/{repo}'})"
 
 
 def _details(text: str) -> str:
@@ -627,7 +518,7 @@ def _declared_syllabus(
         return None
     repo, path = found
     branch, _blobs = _repo_tree(semester_org, repo)
-    return _file_link(semester_org, repo, branch, path, path.rsplit("/", 1)[-1])
+    return file_link(semester_org, repo, branch, path, path.rsplit("/", 1)[-1])
 
 
 def _assignment_entry(
@@ -1002,7 +893,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
 
         # What a row LINKS, out of everything it released - the default
         # folder-shaped listing unless this course declared an extension allowlist.
-        allow = _link_extensions(meta)
+        allow = link_extensions(meta)
         # The repos this semester actually releases into - the only ones the index and
         # the syllabus lookup may read (see `_indexable_repos`).
         indexable = sorted(

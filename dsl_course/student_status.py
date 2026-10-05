@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
@@ -49,7 +48,7 @@ from .faults import Unusable
 from .gh_contents import get_file_content, repo_tree
 from .materials import publishable
 from .materials import read as read_materials
-from .readings import demote_headings, is_reading_overlay
+from .readings import demote_headings
 from .repos import default_branch
 from .schedule_plan import (
     PlannedRow,
@@ -58,7 +57,7 @@ from .schedule_plan import (
     planned_rows,
     site_rows,
 )
-from .site_repo import people_cards, yaml_file
+from .site_repo import landed_links, link_extensions, people_cards, yaml_file
 from .status_json import CourseFacts, SemesterFacts, _iso, dumps, handed_out
 
 SCHEMA = "dsl.student-status/2"
@@ -241,6 +240,8 @@ class StudentFacts:
     # `{(repo, path): text}` of every reading-list overlay that landed.
     overlays: dict[tuple[str, str], str] = field(default_factory=dict)
     syllabus: tuple[str, str] | None = None
+    # The course's `site_link_extensions` (`site_repo.link_extensions`): what a row lists.
+    link_extensions: frozenset[str] = frozenset()
     # (instructors, teaching assistants) as site cards; None when instructors.yml
     # declares nobody.
     cards: tuple[list[dict], list[dict]] | None = None
@@ -255,67 +256,20 @@ def _all_day(when: datetime | date | None) -> bool:
     return when is not None and not isinstance(when, datetime)
 
 
-def _url(org: str, repo: str, path: str, folder: bool) -> str:
-    return f"https://github.com/{org}/{repo}/{'tree' if folder else 'blob'}/HEAD/{path}"
-
-
-def _copy_links(
-    org: str, repo: str, dest: str, paths: Iterable[str], readings: bool
-) -> tuple[list[dict], list[str]]:
-    """(links, reading-list overlays) for what one copy has landed: a file is one link, a
-    folder its own files plus one link per subfolder (as GitHub lists it). A readings
-    copy's `READINGS.md` is prose, not a link."""
-    blobs = [p for p in paths if publishable(p)]
-    if dest and dest in blobs:
-        name = dest.rsplit("/", 1)[-1]
-        if readings and is_reading_overlay(name):
-            return [], [dest]
-        return [
-            {
-                "name": name,
-                "repo": repo,
-                "path": dest,
-                "url": _url(org, repo, dest, False),
-            }
-        ], []
-    prefix = f"{dest}/" if dest else ""
-    inside = [p for p in blobs if p.startswith(prefix)]
-    overlays = [p for p in inside if readings and is_reading_overlay(p)]
-    files, folders = [], {}
-    for p in inside:
-        if p in overlays:
-            continue
-        rest = p[len(prefix) :]
-        head, sep, _ = rest.partition("/")
-        if sep:
-            folders[head] = folders.get(head, 0) + 1
-        else:
-            files.append(
-                {
-                    "name": rest,
-                    "repo": repo,
-                    "path": p,
-                    "url": _url(org, repo, p, False),
-                }
-            )
-    for head, n in folders.items():
-        path = f"{prefix}{head}"
-        files.append(
-            {
-                "name": f"{head}/ ({n} file{'' if n == 1 else 's'})",
-                "repo": repo,
-                "path": path,
-                "url": _url(org, repo, path, True),
-            }
-        )
-    return files, overlays
+def _files(paths: set[str]) -> list[str]:
+    """The files of a destination tree read with both kinds (`dest_paths`), sorted, minus
+    any path the public file may not name (`materials.publishable`): every path no other
+    path sits under."""
+    folders = {p.rsplit("/", 1)[0] for p in paths if "/" in p}
+    return sorted(p for p in paths if p not in folders and publishable(p))
 
 
 def _landed(
-    facts: SemesterFacts, row: PlannedRow, readings: bool
-) -> tuple[list[dict], list[str], bool]:
-    """(links, overlays, landed) for every copy of `row` that is in its destination. A
-    copy inside another copy of the same row (a lab's `solutions/`) is that one's."""
+    facts: SemesterFacts, row: PlannedRow, readings: bool, allow: frozenset[str]
+) -> tuple[list[dict], list[tuple[str, str]], bool]:
+    """(links, overlays, landed) for every copy of `row` that is in its destination,
+    listed as the semester site lists them (`site_repo.landed_links`). A copy inside
+    another copy of the same row (a lab's `solutions/`) is that one's."""
     dests = [
         (d.semester_dest_repo, "" if is_repo_root(deploy_dest(d)) else deploy_dest(d))
         for d in row.deploys
@@ -330,15 +284,17 @@ def _landed(
             for r, p in dests
         ):
             continue
-        if (
-            dest
-            and dest not in paths
-            and not any(p.startswith(f"{dest}/") for p in paths)
-        ):
+        branch = facts.dest_branches.get(repo, "main")
+        found = landed_links(
+            facts.org, repo, branch, _files(paths), dest, allow, readings
+        )
+        if found is None:
             continue
-        got, prose = _copy_links(facts.org, repo, dest, paths, readings)
+        got, prose = found
         landed = landed or bool(got or prose)
-        links += got
+        links += [
+            {"name": k.name, "repo": repo, "path": k.path, "url": k.url} for k in got
+        ]
         overlays += [(repo, p) for p in prose]
     return links, overlays, landed
 
@@ -399,12 +355,12 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
     for sr in site_rows(planned_rows(facts.sched, aliases)):
         r = sr.row
         own = r.kind == "readings"
-        links, prose, landed = _landed(facts, r, own)
+        links, prose, landed = _landed(facts, r, own, extra.link_extensions)
         if not r.shown and not landed:
             continue
         readings, pending = [], False
         for attached in sr.readings:
-            got, more, done = _landed(facts, attached, True)
+            got, more, done = _landed(facts, attached, True, extra.link_extensions)
             readings += got
             prose += more
             pending = pending or not done
@@ -757,7 +713,8 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
     `status_json.gather_semester` does."""
     org, sched = facts.org, facts.sched
     extra = StudentFacts(
-        handed_out=handed_out_assignments(list(facts.listing.values()))
+        handed_out=handed_out_assignments(list(facts.listing.values())),
+        link_extensions=link_extensions(course.meta or {}),
     )
     for key, entry in _public_assignments(sched):
         spec = facts.specs.get(key, grades.GradingSpec())
@@ -773,7 +730,7 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
     for sr in site_rows(planned_rows(sched, lambda repo: facts.aliases.get(repo, {}))):
         own = [sr.row] if sr.row.kind == "readings" else []
         for row in [*own, *sr.readings]:
-            for repo, path in _landed(facts, row, True)[1]:
+            for repo, path in _landed(facts, row, True, frozenset())[1]:
                 extra.overlays[(repo, path)] = get_file_content(org, repo, path) or ""
     try:
         extra.syllabus = declared_syllabus(

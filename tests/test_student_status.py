@@ -384,8 +384,34 @@ def test_a_released_row_links_its_files_and_carries_its_readings():
     assert lec["reading_list"] == "### Read\n\nChapter 1."
     assert lec["released"] and not lec["readings_pending"]
     assert lec["links"][0]["url"] == (
-        f"https://github.com/{SEMESTER}/materials/blob/HEAD/lectures/01_intro/slides.pdf"
+        f"https://github.com/{SEMESTER}/materials/blob/main/lectures/01_intro/slides.pdf"
     )
+
+
+def test_a_row_lists_its_files_as_the_semester_site_does():
+    # One listing rule (`site_repo.landed_links`): the tree's folders are not files, the
+    # course's `site_link_extensions` narrows the list, and URLs carry the branch.
+    facts = _facts()
+    facts.dest_paths["materials"] |= {
+        "lectures",
+        "lectures/01_intro",
+        "lectures/01_intro/code",
+    }
+    facts.dest_branches["materials"] = "trunk"
+    extra = _extra(facts)
+    plain = student_status.render(_course(), facts, extra, NOW)
+    lec = next(r for r in plain["rows"] if r["id"] == "lecture_01")
+    assert [k["name"] for k in lec["links"]] == [
+        "slides.pdf",
+        "code/ (2 files)",
+        "paper.pdf",
+    ]
+    assert lec["links"][1]["path"] == "lectures/01_intro/code"
+    assert "/tree/trunk/lectures/01_intro/code" in lec["links"][1]["url"]
+    extra.link_extensions = frozenset({"pdf"})
+    narrowed = student_status.render(_course(), facts, extra, NOW)
+    lec = next(r for r in narrowed["rows"] if r["id"] == "lecture_01")
+    assert [k["name"] for k in lec["links"]][:2] == ["slides.pdf", "browse the folder"]
 
 
 def test_an_unreleased_row_is_on_the_calendar_with_nothing_to_open():

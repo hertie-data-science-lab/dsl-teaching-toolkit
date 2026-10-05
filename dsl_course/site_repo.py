@@ -13,20 +13,28 @@ import re
 import shutil
 import tempfile
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from functools import cache
 from pathlib import Path
+from urllib.parse import quote
 
 from . import issues, notify, policy, scaffold, welcome
-from .course import INSTRUCTORS_TEAM, active_today, pages_repo, people_by_role
+from .course import (
+    INSTRUCTORS_TEAM,
+    active_today,
+    is_repo_root,
+    pages_repo,
+    people_by_role,
+)
 from .discovery import course_org_for_semester, list_org_repos
 from .gh_contents import load_yaml_config
 from .gh_teams import acting_login
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import Summary, log, log_err, log_ok, log_step, plural
-from .repos import repo_exists, repo_is_archived
+from .readings import is_reading_overlay
+from .repos import has_never_material_component, repo_exists, repo_is_archived
 
 # RETIRED (decision 0016): the settings an older publish committed into the site repo.
 # `opencourse.yml` holds them now; every publish deletes this, the migration reads it.
@@ -809,10 +817,13 @@ def _singular(label: str) -> str:
 
 @dataclass(frozen=True)
 class Link:
-    """One file link on a site row: the name a reader clicks and the `url` behind it."""
+    """One file link on a site row: the name a reader clicks, the `url` behind it, and
+    the file's or folder's `path` in its repo (the student file names it; the site's
+    front matter does not)."""
 
     name: str
     url: str
+    path: str = ""
 
 
 def links_block(sections: list[tuple[str, list[Link]]]) -> str:
@@ -841,6 +852,141 @@ def links_block(sections: list[tuple[str, list[Link]]]) -> str:
                 + f'      section: "{q(_singular(label))}"'
             )
     return ("links:\n" + "\n".join(rows)) if rows else "links: []"
+
+
+def _ext(name: str) -> str:
+    """A file name's extension, lowercased and without the dot ('' when it has none). Not
+    `Path().suffix`, which would call the whole of `Makefile` an extension-less name but
+    read `figure-1` in `figure-1.tar.gz` inconsistently with the allowlist faculty write."""
+    return name.rsplit(".", 1)[-1].lower() if "." in name.rsplit("/", 1)[-1] else ""
+
+
+def gh_url(org: str, repo: str, branch: str, kind: str, path: str) -> str:
+    """A GitHub `blob`/`tree` URL for a path in a repo. One template, every caller."""
+    return f"https://github.com/{org}/{repo}/{kind}/{branch}/{quote(path)}"
+
+
+def file_link(semester_org: str, repo: str, branch: str, path: str, name: str) -> Link:
+    """One released file as a link to its GitHub blob. The semester site hosts no copies
+    (decision 0011 rule 5): the student console opens files from the private repo."""
+    return Link(name, gh_url(semester_org, repo, branch, "blob", path), path)
+
+
+# The link name for the escape hatch out of an allowlist: whatever the list does not
+# name is still one click away, rather than invisible.
+_BROWSE_ALL = "browse the folder"
+
+
+def link_extensions(meta: dict) -> frozenset[str]:
+    """`site_link_extensions` from a course's `dsl-course.yml`, lowercased and dot-stripped.
+
+    The OPTIONAL allowlist narrowing what a session row links (see `shape_links`); absent
+    or empty means the default folder-shaped listing. A bare string
+    (`site_link_extensions: pdf, html`) is accepted alongside a list - it is the shape
+    faculty reach for first, and refusing it would only produce a silently unfiltered site."""
+    raw = meta.get("site_link_extensions") or []
+    if isinstance(raw, str):
+        raw = raw.replace(",", " ").split()
+    return frozenset(str(x).strip().lstrip(".").lower() for x in raw if str(x).strip())
+
+
+def shape_links(
+    blobs: list[Link], tree_base: str, allow: frozenset[str], base: str = ""
+) -> list[Link]:
+    """The links a row actually SHOWS, out of every file one of its folders released.
+
+    Release is recursive because a release copies a folder wholesale, and it must stay that way. DISPLAY must not be: a rendered Quarto/Rmd deck is
+    one deliverable plus hundreds of assets (`libs/`, `pics/`, `<name>_files/`), and linking
+    each of them put 1,641 links across 27 rows on a live semester site - burying the three
+    files a student actually opens. Nothing here changes what ships, only what is listed.
+
+    Two shapes, and neither leaves a released file unreachable from the page:
+
+    - DEFAULT (`allow` empty) - the folder as GitHub shows it. A file at the session
+      folder's root links to the file; each immediate subfolder gets ONE link to its tree,
+      named with its file count. Nothing to configure, and a course that keeps handouts in
+      `handouts/` reaches them in one more click rather than losing them.
+    - ALLOWLIST (`site_link_extensions`) - only files with those extensions, at any depth,
+      plus one "browse the folder" link, so a file the list does not name is still one
+      click away instead of invisible.
+
+    A rule about DOTS is still refused, for the reason it always was: `__pycache__/`,
+    `.ipynb_checkpoints/` and `node_modules/` are all clutter and none of them starts with
+    a dot, while `.Rprofile`, `.env.example` and a `.devcontainer/` are real course
+    material such a rule would hide. What is filtered is narrower and can be written
+    honestly - the short closed list of NAMES that are never course material in any course
+    (`repos.NEVER_MATERIAL`), dropped before the counts are taken so a folder cannot be
+    listed as "3 files" while showing two.
+
+    The site applies it as well as the release, not instead: a semester site showed
+    `labs/01_session-1/.gitkeep` and a `readings/.DS_Store` as materials, and neither had
+    passed through a release copy that day or would ever pass through one again. Junk
+    committed straight into a semester's own content repo never meets the release filter, so
+    a release-only rule leaves it listed for the rest of the term.
+
+    `blobs` is every file under the folder, named by path relative to it
+    (`landed_links`); `tree_base` is the folder's own GitHub tree URL and `base` its path
+    in the repo ("" for the root). Order follows `blobs` (path
+    sorted), files before folders, for a stable diff."""
+    blobs = [b for b in blobs if not has_never_material_component(b.name)]
+    if allow:
+        return [b for b in blobs if _ext(b.name) in allow] + [
+            Link(_BROWSE_ALL, tree_base, base)
+        ]
+    files = [b for b in blobs if "/" not in b.name]
+    counts: dict[str, int] = {}
+    for b in blobs:
+        head, sep, _rest = b.name.partition("/")
+        if sep:
+            counts[head] = counts.get(head, 0) + 1
+    folders = [
+        Link(
+            f"{d}/ ({n} file{'' if n == 1 else 's'})",
+            f"{tree_base}/{quote(d)}",
+            f"{base}/{d}" if base else d,
+        )
+        for d, n in counts.items()
+    ]
+    return files + folders
+
+
+def landed_links(
+    org: str,
+    repo: str,
+    branch: str,
+    blobs: Sequence[str],
+    path: str,
+    allow: frozenset[str],
+    readings: bool,
+) -> tuple[list[Link], list[str]] | None:
+    """(links, reading-list overlays) for what a copy into `repo/path` has landed, or None
+    while nothing has: a file is one link, a folder its files as GitHub shows them
+    (`shape_links`), the repo root the whole repo. `blobs` is every file of the repo,
+    sorted. `readings` takes the reading-list overlay (`READINGS.md`) out of the links:
+    the row inlines its text. The ONE listing rule: the semester site and the student
+    file both read it."""
+    path = "" if is_repo_root(path) else path.strip("/")
+    if path and path in blobs:
+        name = path.rsplit("/", 1)[-1]
+        if readings and is_reading_overlay(name):
+            return [], [path]
+        return [file_link(org, repo, branch, path, name)], []
+    prefix = f"{path}/" if path else ""
+    inside = [b for b in blobs if b.startswith(prefix)]
+    if not inside:
+        return None
+    overlays = [b for b in inside if readings and is_reading_overlay(b)]
+    files = [
+        file_link(org, repo, branch, b, b[len(prefix) :])
+        for b in inside
+        if b not in overlays
+    ]
+    tree = (
+        gh_url(org, repo, branch, "tree", path)
+        if path
+        else f"https://github.com/{org}/{repo}/tree/{branch}"
+    )
+    return shape_links(files, tree, allow, path), overlays
 
 
 def iso_when(when: date | datetime, fallback_time: str = "09:00:00") -> str:

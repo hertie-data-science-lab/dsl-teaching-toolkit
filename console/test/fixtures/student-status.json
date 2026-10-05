@@ -101,19 +101,19 @@
           "name": "slides.pdf",
           "repo": "materials",
           "path": "lectures/01_intro/slides.pdf",
-          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/HEAD/lectures/01_intro/slides.pdf"
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/main/lectures/01_intro/slides.pdf"
         },
         {
           "name": "code/ (2 files)",
           "repo": "materials",
           "path": "lectures/01_intro/code",
-          "url": "https://github.com/hertie-dsl-demo-f2026/materials/tree/HEAD/lectures/01_intro/code"
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/tree/main/lectures/01_intro/code"
         },
         {
           "name": "paper.pdf",
           "repo": "materials",
           "path": "readings/01_intro/paper.pdf",
-          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/HEAD/readings/01_intro/paper.pdf"
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/main/readings/01_intro/paper.pdf"
         }
       ],
       "readings": [
@@ -121,7 +121,7 @@
           "name": "paper.pdf",
           "repo": "materials",
           "path": "readings/01_intro/paper.pdf",
-          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/HEAD/readings/01_intro/paper.pdf"
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/main/readings/01_intro/paper.pdf"
         }
       ],
       "reading_list": "### Read\n\nChapter 1.",

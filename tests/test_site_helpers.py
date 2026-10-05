@@ -448,7 +448,9 @@ def _intro(*deploys):
 def test_the_default_syllabus_is_pinned_where_its_copy_landed(monkeypatch):
     link = _syllabus(monkeypatch, [_intro(_deploy("SYLLABUS.md"))], ("SYLLABUS.md",))
     assert link == Link(
-        "SYLLABUS.md", "https://github.com/S/materials/blob/main/SYLLABUS.md"
+        "SYLLABUS.md",
+        "https://github.com/S/materials/blob/main/SYLLABUS.md",
+        "SYLLABUS.md",
     )
 
 
@@ -513,7 +515,7 @@ TREE = "https://github.com/o/r/tree/main/lectures/01_introduction"
 
 
 def test_shape_links_lists_root_files_and_folds_subfolders():
-    names = [x.name for x in site._shape_links(ITDS_SESSION_01, TREE, frozenset())]
+    names = [x.name for x in site_repo.shape_links(ITDS_SESSION_01, TREE, frozenset())]
     # 10 blobs -> 5 root files + one entry per subfolder, in path order, files first.
     assert names == [
         "01-introduction.Rmd",
@@ -528,7 +530,9 @@ def test_shape_links_lists_root_files_and_folds_subfolders():
 
 
 def test_shape_links_points_a_folded_folder_at_its_tree():
-    got = {x.name: x.url for x in site._shape_links(ITDS_SESSION_01, TREE, frozenset())}
+    got = {
+        x.name: x.url for x in site_repo.shape_links(ITDS_SESSION_01, TREE, frozenset())
+    }
     assert got["pics/ (2 files)"] == f"{TREE}/pics"
     # A file still links to the file, not to its folder.
     assert got["01-introduction.pdf"] == "https://x/pdf"
@@ -537,24 +541,24 @@ def test_shape_links_points_a_folded_folder_at_its_tree():
 def test_shape_links_allowlist_matches_at_any_depth_and_offers_the_folder():
     names = [
         x.name
-        for x in site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf", "css"}))
+        for x in site_repo.shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf", "css"}))
     ]
     # Nothing is hidden without a way back: the browse link is the escape hatch.
     assert names == [
         "01-introduction.pdf",
         "libs/remark-css/metropolis.css",
         "simons-touch.css",
-        site._BROWSE_ALL,
+        site_repo._BROWSE_ALL,
     ]
-    browse = site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf"}))[-1]
-    assert browse.name == site._BROWSE_ALL and browse.url == TREE
+    browse = site_repo.shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf"}))[-1]
+    assert browse.name == site_repo._BROWSE_ALL and browse.url == TREE
 
 
 def test_shape_links_leaves_a_flat_folder_untouched():
     # The worked example's shape: no subfolders, so there is nothing to fold and the row
     # reads exactly as it did before any of this.
     flat = [Link("slides.md", "https://x/1"), Link("demo.py", "https://x/2")]
-    assert site._shape_links(flat, TREE, frozenset()) == flat
+    assert site_repo.shape_links(flat, TREE, frozenset()) == flat
 
 
 def test_shape_links_lists_a_dotfile_but_not_a_never_material_name():
@@ -570,7 +574,7 @@ def test_shape_links_lists_a_dotfile_but_not_a_never_material_name():
         Link("media/fig.png", "https://x/fig"),
         Link("slides.pdf", "https://x/pdf"),
     ]
-    names = [x.name for x in site._shape_links(blobs, TREE, frozenset())]
+    names = [x.name for x in site_repo.shape_links(blobs, TREE, frozenset())]
     # ...and the fold counts what it shows: `media/` holds two blobs, one of them junk.
     assert names == [".Rprofile", "slides.pdf", "media/ (1 file)"]
 
@@ -582,8 +586,8 @@ def test_shape_links_drops_junk_from_the_allowlist_shape_too():
         Link(".ipynb_checkpoints/lab-checkpoint.ipynb", "https://x/ck"),
         Link("lab.ipynb", "https://x/lab"),
     ]
-    names = [x.name for x in site._shape_links(blobs, TREE, frozenset({"ipynb"}))]
-    assert names == ["lab.ipynb", site._BROWSE_ALL]
+    names = [x.name for x in site_repo.shape_links(blobs, TREE, frozenset({"ipynb"}))]
+    assert names == ["lab.ipynb", site_repo._BROWSE_ALL]
 
 
 def test_shape_links_matches_a_directory_component_and_ignores_case():
@@ -597,16 +601,16 @@ def test_shape_links_matches_a_directory_component_and_ignores_case():
         Link("data/Thumbs.db", "https://x/th"),
         Link("data/housing.csv", "https://x/csv"),
     ]
-    names = [x.name for x in site._shape_links(blobs, TREE, frozenset())]
+    names = [x.name for x in site_repo.shape_links(blobs, TREE, frozenset())]
     assert names == ["data/ (1 file)"]
 
 
 def test_ext_reads_the_extension_not_a_dotted_directory():
-    assert site._ext("notes.PDF") == "pdf"
-    assert site._ext("Makefile") == ""
-    assert site._ext("libs/remark-css/metropolis.css") == "css"
+    assert site_repo._ext("notes.PDF") == "pdf"
+    assert site_repo._ext("Makefile") == ""
+    assert site_repo._ext("libs/remark-css/metropolis.css") == "css"
     # A dot in a directory name is not the file's extension.
-    assert site._ext("v1.2/README") == ""
+    assert site_repo._ext("v1.2/README") == ""
 
 
 def test_the_allowlist_never_leaves_a_public_file_unreachable(tmp_path):
@@ -637,16 +641,16 @@ def test_public_links_lists_nested_files_when_nothing_sits_at_the_root(tmp_path)
 
 
 def test_link_extensions_accepts_a_list_or_a_bare_string():
-    assert site._link_extensions(
+    assert site_repo.link_extensions(
         {"site_link_extensions": [".PDF", "html"]}
     ) == frozenset({"pdf", "html"})
     # The shape faculty reach for first; refusing it would only mean a silently
     # unfiltered site.
-    assert site._link_extensions({"site_link_extensions": "pdf, html"}) == frozenset(
-        {"pdf", "html"}
-    )
-    assert site._link_extensions({}) == frozenset()
-    assert site._link_extensions({"site_link_extensions": []}) == frozenset()
+    assert site_repo.link_extensions(
+        {"site_link_extensions": "pdf, html"}
+    ) == frozenset({"pdf", "html"})
+    assert site_repo.link_extensions({}) == frozenset()
+    assert site_repo.link_extensions({"site_link_extensions": []}) == frozenset()
 
 
 # --------------------------------------------------------------- reading lists + blocks

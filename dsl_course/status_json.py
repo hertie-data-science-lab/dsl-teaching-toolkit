@@ -269,6 +269,7 @@ class SemesterFacts:
     # `{semester-side name: when its grading sheet last changed}`; None = not known.
     sheet_changed: dict[str, datetime | None] = field(default_factory=dict)
     dest_paths: dict[str, set[str]] = field(default_factory=dict)  # release dest trees
+    dest_branches: dict[str, str] = field(default_factory=dict)  # and their branches
     # `{source repo: its materials.yml folder aliases}` - what an undeclared kind is
     # inferred through.
     aliases: dict[str, dict[str, str]] = field(default_factory=dict)
@@ -2139,13 +2140,9 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
         {d.semester_dest_repo for r in sched.releases for d in r.deploy}
     ):
         if repo in facts.listing:
-            facts.dest_paths[repo] = set(
-                repo_tree(
-                    semester_org,
-                    repo,
-                    default_branch(semester_org, repo, fallback="main"),
-                )
-            )
+            branch = default_branch(semester_org, repo, fallback="main")
+            facts.dest_branches[repo] = branch
+            facts.dest_paths[repo] = set(repo_tree(semester_org, repo, branch))
     site = pages_repo(semester_org)
     if site in facts.listing:
         facts.site_home = get_file_content(semester_org, site, SITE_HOME)
