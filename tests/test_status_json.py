@@ -504,6 +504,35 @@ def test_release_states_follow_the_destination():
     )
 
 
+def test_a_release_with_one_copy_landed_and_one_to_come_is_not_late():
+    sched = _sched(
+        SCHEDULE.replace(
+            """        course_source_path: lectures/05_trees
+""",
+            """        course_source_path: lectures/05_trees
+        deploy_datetime: 2026-09-30T10:00
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/05_trees
+""",
+        )
+    )
+    landed = {"materials": {"lectures", "lectures/05_trees"}}
+    first_out = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+
+    def s5(**over):
+        doc = _render(
+            semester=_semester(**({"sched": sched, "dest_paths": landed} | over)),
+            now=first_out,
+        )
+        return next(r for r in doc["releases"] if r["id"] == "s5")["state"]
+
+    assert s5() == "planned"
+    # The labs copy cannot be made when its moment comes: skipped, not late.
+    assert s5(schedule_faults=[_missing_s5()]) == "will_be_skipped"
+    # The lectures copy is due and missing: late.
+    assert s5(dest_paths={"materials": {"lectures"}}) == "late"
+
+
 def test_an_undeclared_kind_is_inferred_through_the_repos_aliases_and_says_so():
     semester = _semester()
     semester.aliases = {"course-materials-f2026": {"lectures": "drop-in"}}

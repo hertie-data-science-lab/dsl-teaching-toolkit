@@ -1322,13 +1322,14 @@ def release_state(
     """`planned | will_be_skipped | released | late` (lifecycle, per scheduled release).
 
     released - every copy is on the destination's default branch (whenever it got there:
-    an early release is released); late - a copy is due and not there; will_be_skipped -
-    automation cannot perform it as written (a source not found or held back, or an entry
-    that needs a number and has none); planned otherwise. An entry with nothing to copy is
-    released once its moment has passed."""
+    an early release is released); late - a copy whose moment has passed is not there (a
+    copy that landed and another still to come is not late); will_be_skipped - automation
+    cannot perform it as written (a source not found or held back, or an entry that needs
+    a number and has none); planned otherwise. An entry with nothing to copy is released
+    once its moment has passed."""
     if release.deploy and all(_dest_present(facts, d) for d in release.deploy):
         return "released"
-    if release.due_deploys(now):
+    if any(not _dest_present(facts, d) for d in release.due_deploys(now)):
         return "late"
     if faults or (release.deploy and not numbered):
         return "will_be_skipped"
