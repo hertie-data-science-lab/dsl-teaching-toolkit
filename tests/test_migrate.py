@@ -16,6 +16,7 @@ import yaml
 
 from dsl_course import (
     discovery,
+    gh_commits,
     migrate,
     opencourse,
     records,
@@ -345,6 +346,7 @@ def fake(monkeypatch):
         monkeypatch.setattr(migrate, name, getattr(f, name))
     # The REAL default_branch / repo_missing, over the same stub: a 404 is a 404.
     monkeypatch.setattr(repos, "gh", f.gh)
+    monkeypatch.setattr(gh_commits, "gh", f.gh)
     monkeypatch.setattr(migrate, "central_ref_for", lambda org: "main")
     # The checkout is the pinned ref, unless a test says otherwise.
     monkeypatch.setattr(migrate, "git", lambda *a, **k: (0, ""))

@@ -49,7 +49,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import sleep
 from time import time as clock
-from urllib.parse import quote
 
 import yaml
 
@@ -92,6 +91,7 @@ from .discovery import (
     list_org_repos,
 )
 from .faults import NOT_MIGRATED, NotMigrated
+from .gh_commits import first_landed
 from .gh_contents import (
     LINES,
     blob_sha,
@@ -1097,22 +1097,6 @@ PROPOSAL_HEADER = f"""\
 # not). `course_source_repo: {SETTING_PLACEHOLDER}`: no one course repo holds that
 # folder - name the one it came from.
 """
-
-
-def first_landed(org: str, repo: str, folder: str) -> datetime | None:
-    """When the first commit touching `folder` landed in `org/repo` (its oldest commit
-    date), or None when no commit touches it. Raises when GitHub cannot say."""
-    code, out = gh(
-        "api",
-        "--paginate",
-        f"repos/{org}/{repo}/commits?path={quote(folder)}&per_page=100",
-        "--jq",
-        ".[-1].commit.committer.date",
-    )
-    if code != 0:
-        raise RuntimeError(f"could not read the history of {org}/{repo}: {out[:200]}")
-    dates = [line.strip() for line in out.splitlines() if line.strip()]
-    return datetime.fromisoformat(dates[-1].replace("Z", "+00:00")) if dates else None
 
 
 def _folder_slug(name: str) -> str:
