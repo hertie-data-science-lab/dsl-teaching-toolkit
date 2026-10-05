@@ -23,7 +23,7 @@ import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import { STARTERS, STARTER_COPY, formatWord, formatsList, questionFileError, questionsValue, toConfig, type QuestionRow } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { assignmentMarking, assignmentName, assignmentStart, assignmentWork } from '../tiers/wizard';
-import { CheckLine, Loading } from '../ui/bits';
+import { CheckLine, Loading, uploadUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveLine } from '../ui/edit';
 import { Ext } from '../ui/icons';
@@ -422,7 +422,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
           <>
             <Verified>Created. Nothing reaches students until you add it to a schedule.</Verified>
             <div class="actions">
-              <OpenButton org={course.org} repo={repo} /><a class="btn outline" href={`https://github.com/${course.org}/${repo}/upload/main`} target="_blank" rel="noopener">Upload files on GitHub <Ext /></a>
+              <OpenButton org={course.org} repo={repo} /><a class="btn outline" href={uploadUrl(course.org, repo)} target="_blank" rel="noopener">Upload files on GitHub <Ext /></a>
             </div>
             {starterChoice(v) === 'derived' ? (
               <div class="actions">

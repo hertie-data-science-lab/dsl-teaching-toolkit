@@ -724,8 +724,8 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         <section class="panel section">
           <h2>From and to</h2>
           <dl class="kv">
-            <dt>From</dt><dd><a href={ghUrl(p.course.org, ref.source.repo, ref.source.path, 'main').replace('/blob/', '/tree/')} target="_blank" rel="noopener">{p.course.org}/{ref.source.repo}/{ref.source.path}</a></dd>
-            <dt>To</dt><dd><a href={ghUrl(p.cohort.org, dest, destPath, 'main').replace('/blob/', '/tree/')} target="_blank" rel="noopener">{p.cohort.org}/{dest}/{destPath}</a></dd>
+            <dt>From</dt><dd><a href={ghUrl(p.course.org, ref.source.repo, ref.source.path, 'main', 'tree')} target="_blank" rel="noopener">{p.course.org}/{ref.source.repo}/{ref.source.path}</a></dd>
+            <dt>To</dt><dd><a href={ghUrl(p.cohort.org, dest, destPath, 'main', 'tree')} target="_blank" rel="noopener">{p.cohort.org}/{dest}/{destPath}</a></dd>
             <dt>On the student site</dt><dd>{rel.show_on_site ? 'Shown' : 'Hidden'}{rel.tbc ? ', TBC' : ''}</dd>
           </dl>
         </section>
