@@ -272,13 +272,20 @@ export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
   );
 }
 
+/** Each grading_config.yml text read so far -> its title, so a re-render parses no YAML. */
+const titles = new Map<string, string>();
+
 /** A template's title from its grading_config.yml, as loaded; '' until then. */
 export function templateTitle(files: CourseProps['files'], org: string, repo: string): string {
   const f = files.file(org, repo, 'grading_config.yml', 'solution');
   if (f.kind !== 'ready') return '';
-  const y = new YamlText(f.text);
-  const t = y.errors.length ? undefined : (y.toJS() as Record<string, unknown> | null)?.title;
-  return typeof t === 'string' ? t : '';
+  let title = titles.get(f.text);
+  if (title === undefined) {
+    const y = new YamlText(f.text);
+    const t = y.errors.length ? undefined : (y.toJS() as Record<string, unknown> | null)?.title;
+    titles.set(f.text, (title = typeof t === 'string' ? t : ''));
+  }
+  return title;
 }
 
 /** A semester's state: live, ended but not archived, or archived. */
