@@ -2474,3 +2474,77 @@ def test_the_publishing_answers_reach_the_scaffolder():
     assert step["env"]["PUBLIC_DIRS"] == "${{ inputs.public_dirs }}"
     assert step["env"]["PUBLIC_TYPES"] == "${{ inputs.public_types }}"
     assert "--public-dirs" in step["run"] and "--public-types" in step["run"]
+
+
+def _graded_outputs(work, legs: str, rows: list[str]) -> tuple[dict, int]:
+    """Run the grading report's `graded` step under `bash -e`. The fake `gh` answers each
+    jobs-API call with the next of `rows` (the `<conclusion> <id>` its --jq filter prints)
+    and `sleep` is a no-op, so the retry loop costs nothing. Returns the step's outputs and
+    how many times the API was asked."""
+    step = next(
+        s
+        for s in _jobs_of(workflows_render.render_scheduler())["autograde-report"][
+            "steps"
+        ]
+        if s.get("id") == "graded"
+    )
+    assert step["env"]["LEGS"] == "${{ needs.autograde.result }}"
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "rows").write_text("".join(f"{r}\n" for r in rows))
+    (work / "calls").write_text("")
+    (work / "gh").write_text(
+        "#!/bin/sh\n"
+        'echo x >>"$WORK/calls"\n'
+        'n=$(wc -l <"$WORK/calls")\n'
+        'sed -n "${n}p" "$WORK/rows"\n'
+    )
+    (work / "sleep").write_text("#!/bin/sh\n")
+    for fake in ("gh", "sleep"):
+        (work / fake).chmod(0o755)
+    outputs = work / "github_output"
+    outputs.write_text("")
+    subprocess.run(
+        # `bash -e`, which is how GitHub runs a `run:` block.
+        ["bash", "-e", "-c", step["run"]],
+        env={
+            "PATH": f"{work}:{os.environ['PATH']}",
+            "WORK": str(work),
+            "GITHUB_OUTPUT": str(outputs),
+            "REPO": "Course-Org/.github",
+            "RUN_ID": "1",
+            "ATTEMPT": "1",
+            "COHORT": "cohort-a",
+            "LEGS": legs,
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    pairs = (line.split("=", 1) for line in outputs.read_text().splitlines())
+    return dict(pairs), len((work / "calls").read_text().splitlines())
+
+
+def test_a_green_grading_matrix_is_not_reported_while_the_api_lags(tmp_path):
+    # The jobs API read a just-finished leg's conclusion as null, the report filed a
+    # failure issue and mailed the maintainer for a leg that had passed. A green matrix is
+    # settled in `needs:` before this job starts, so it never asks the API at all.
+    outputs, calls = _graded_outputs(tmp_path / "green", "success", ["null 7"])
+    assert outputs == {"result": "success"}
+    assert calls == 0
+    # A red matrix still has to say WHICH leg failed, so it asks - and asks again while
+    # the answer is null rather than reporting the lag as this cohort's failure.
+    outputs, calls = _graded_outputs(
+        tmp_path / "lagging", "failure", ["null 7", "null 7", "success 7"]
+    )
+    assert outputs == {"result": "success", "job_id": "7"}
+    assert calls == 3
+    outputs, _ = _graded_outputs(tmp_path / "red", "failure", ["failure 7"])
+    assert outputs == {"result": "failure", "job_id": "7"}
+    # A null that never settles is reported, not swallowed: the leg did finish.
+    outputs, calls = _graded_outputs(tmp_path / "stuck", "failure", ["null 7"] * 9)
+    assert outputs == {"result": "null", "job_id": "7"}
+    assert calls == 5
+    # No leg for this cohort is still "nothing to report", and is not retried.
+    outputs, calls = _graded_outputs(tmp_path / "absent", "failure", [])
+    assert outputs == {"result": "skipped"}
+    assert calls == 1
