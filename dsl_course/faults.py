@@ -542,3 +542,23 @@ def csv_row(lineno: int | None) -> str:
     public repo, and a students.csv cell is a name, an address or an enrolment code. The
     header is row 1, which is what `csv.reader.line_num` already calls it."""
     return f"row {lineno}" if lineno else "row"
+
+
+def csv_row_fault(
+    file: str, lineno: int, field: str, what: str, fix: str = ""
+) -> ConfigFault:
+    """One row of a hand-edited CSV (students.csv, teams.csv) the toolkit cannot use as
+    written.
+
+    ROW AND COLUMN ONLY. Never the cell: a roster cell is a name, an address, a handle or
+    an enrolment code, a teams.csv cell is a handle or a team name a student typed into a
+    public form, and this text travels to an email, to a digest issue and to a run log.
+    The row number is enough to open the file at the line. `fix` adds to the remedy."""
+    return ConfigFault(
+        csv_row(lineno),
+        what,
+        file=file,
+        field=field,
+        lineno=lineno,
+        fix_text=f"fix row {lineno} of {file}{f'; {fix}' if fix else ''}",
+    )

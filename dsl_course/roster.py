@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from functools import cache
 
 from .course import CONFIG_REPO
-from .faults import ConfigFault, csv_row
+from .faults import ConfigFault, csv_row_fault
 from .gh_contents import get_file_content, read_csv
 from .log import log_err
 
@@ -89,46 +89,17 @@ def known_role(value: str) -> bool:
     """Whether this `role` cell is one the engine understands - blank included, since a
     roster seeded before the column existed has no cell at all.
 
-    Asked by `normalise_role` (which logs) and by `parse` (which records the fault), so
-    the two cannot disagree about what counts as a typo."""
+    Asked by `parse`, which records and logs the fault."""
     return value.strip().lower() in ("", ROLE_ENROLLED, ROLE_AUDITOR)
 
 
-def normalise_role(value: str, lineno: int) -> str:
+def normalise_role(value: str) -> str:
     """Map a raw `role` cell to `enrolled` / `auditor`.
 
     Blank (or a column that isn't there at all - a roster seeded before the column
     existed) means `enrolled`, so no deployed semester breaks. Anything unrecognised also
-    reads as `enrolled`, but says so on stderr rather than silently mis-classifying.
-
-    The warning names the ROW, never the cell: a name with an unquoted comma shifts the
-    cells, so the `role` cell can hold a student's name or address, and this line lands in
-    the public run log of every faculty workflow that reads the roster."""
-    role = value.strip().lower()
-    if role == ROLE_AUDITOR:
-        return ROLE_AUDITOR
-    if not known_role(value):
-        log_err(
-            f"{ROSTER_PATH} row {lineno}: unrecognised role - treating as "
-            f"{ROLE_ENROLLED} (expected {ROLE_ENROLLED} or {ROLE_AUDITOR})"
-        )
-    return ROLE_ENROLLED
-
-
-def _row_fault(lineno: int, field: str, what: str) -> ConfigFault:
-    """One students.csv row the toolkit cannot use as written.
-
-    ROW AND COLUMN ONLY. Never the cell: every cell of this file is a name, an address, a
-    handle or an enrolment code, and this text travels to an email, to a digest issue and
-    to a run log. The row number is enough to open the file at the line."""
-    return ConfigFault(
-        csv_row(lineno),
-        what,
-        file=ROSTER_PATH,
-        field=field,
-        lineno=lineno,
-        fix_text=f"fix row {lineno} of {ROSTER_PATH}",
-    )
+    reads as `enrolled`; `parse` says so, once, through the row's fault."""
+    return ROLE_AUDITOR if value.strip().lower() == ROLE_AUDITOR else ROLE_ENROLLED
 
 
 def parse(text: str, faults: list[ConfigFault] | None = None) -> list[Student]:
@@ -151,16 +122,21 @@ def parse(text: str, faults: list[ConfigFault] | None = None) -> list[Student]:
         # actually read, so this is the line an editor jumps to.
         lineno = reader.line_num
         values = {f: (row.get(f) or "").strip() for f in FIELDS}
-        if faults is not None and not known_role(values["role"]):
-            faults.append(
-                _row_fault(
-                    lineno,
-                    "role",
-                    f"unrecognised role - the row is treated as {ROLE_ENROLLED} "
-                    f"(expected {ROLE_ENROLLED} or {ROLE_AUDITOR})",
-                )
+        if not known_role(values["role"]):
+            # The ROW, never the cell: a name with an unquoted comma shifts the cells, so
+            # the `role` cell can hold a student's name or address, and this line lands
+            # in the public run log of every faculty workflow that reads the roster.
+            fault = csv_row_fault(
+                ROSTER_PATH,
+                lineno,
+                "role",
+                f"unrecognised role - the row is treated as {ROLE_ENROLLED} "
+                f"(expected {ROLE_ENROLLED} or {ROLE_AUDITOR})",
             )
-        values["role"] = normalise_role(values["role"], lineno)
+            log_err(f"{ROSTER_PATH} {fault.where}: {fault.what}")
+            if faults is not None:
+                faults.append(fault)
+        values["role"] = normalise_role(values["role"])
         if faults is not None:
             for column, seen in (("github_handle", handles), ("hertie_email", emails)):
                 cell = values[column].casefold()
@@ -168,7 +144,8 @@ def parse(text: str, faults: list[ConfigFault] | None = None) -> list[Student]:
                     continue
                 if cell in seen:
                     faults.append(
-                        _row_fault(
+                        csv_row_fault(
+                            ROSTER_PATH,
                             lineno,
                             column,
                             f"this {column} is already on row {seen[cell]} - the two "
