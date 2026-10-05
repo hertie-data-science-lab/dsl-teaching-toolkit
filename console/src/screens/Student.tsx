@@ -20,7 +20,7 @@ import { gradebookUrl, isMarked, knownAuditor, patchLines, patchNotes, readAllRe
 import { lastVisit, markVisit } from '../model/prefs';
 import { weekGroups } from '../model/schedule';
 import { IMG_HOSTS, MY_STATE_WORD, STUDENT_CHOICE, StatusFileSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
-import { ROW_CLASS, ROW_WORD, semesterLine, termOfFacts, weekItems, type WeekItem } from '../model/week';
+import { ROW_CLASS, ROW_WORD, semesterLine, termOfFacts, weekItems, type WeekLine } from '../model/week';
 import { STUDENT_SCREENS, studentHref } from '../router';
 import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
@@ -248,7 +248,7 @@ export function ArchiveNotice({ when, tz, now }: { when: string; tz: string; now
 
 // --------------------------------------------------------------------------- This week
 
-export function WeekList({ items, tz, org }: { items: WeekItem[]; tz: string; org: string }) {
+export function WeekList({ items, tz, org }: { items: WeekLine[]; tz: string; org: string }) {
   if (!items.length) return <p class="footnote">Nothing is due, handed out or released this week.</p>;
   return (
     <ul class="timeline week-list">

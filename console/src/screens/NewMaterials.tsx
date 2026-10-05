@@ -14,7 +14,7 @@ import { contentTerms, materialsArgs, materialsRepo } from '../wizards/model';
 import { allOk, checkFree, checkRepoExists, useLive, type Check } from '../wizards/verify';
 import { Checks, Verified } from '../wizards/Wizard';
 import { courseView } from './Course';
-import { courseScope } from './CourseEdit';
+import { courseScope } from './common';
 import type { CourseProps } from './types';
 
 export function NewMaterialsScreen(p: CourseProps) {

@@ -26,11 +26,11 @@ import { Hint } from '../ui/Hint';
 import { Check, Ext, Fail } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { formatError } from '../wizards/model';
-import { courseScope, detailsOf, newestScope, websiteUrl } from './CourseEdit';
+import { detailsOf, newestScope, websiteUrl } from './CourseEdit';
 import type { CourseProps } from './types';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from '../model/names';
 import { AsideFold, COURSE_FILE, Circle, SetAsideDialog, asideList, missingClause, setAsideText, stepAside, todoAside, type Ask } from './SetAside';
-import { REFRESH_HINT, tzOf, yearOf } from './common';
+import { REFRESH_HINT, courseScope, tzOf, yearOf } from './common';
 import { weekWords } from '../model/week';
 
 /** The course block and course-scoped problems: from the course's own status, else a semester's. */

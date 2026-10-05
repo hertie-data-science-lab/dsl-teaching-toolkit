@@ -37,7 +37,7 @@ import {
 import { allOk, checkFree, checkTemplate, readSource, useLive, type Check, type SourceBranch, type SourceRead } from '../wizards/verify';
 import { Checks, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
 import { Questions, STARTER_DOC, courseView } from './Course';
-import { courseScope } from './CourseEdit';
+import { courseScope } from './common';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
 

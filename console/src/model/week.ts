@@ -22,7 +22,7 @@ export interface PatchLine {
   when: string;
 }
 
-export interface WeekItem {
+export interface WeekLine {
   at: number;
   /** The row's own time, as the schedule writes it (for the date shown). */
   when: string;
@@ -79,13 +79,13 @@ const name = (title: string, subtitle: string) => (subtitle ? `${title}: ${subti
  * `patches` are the student's patch notes; one shows when it is newer than `lastVisit` (the
  * start of the previous visit), or from the last seven days when there was none.
  */
-export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, patches: PatchLine[] = [], lastVisit: number | null = null): WeekItem[] {
+export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, patches: PatchLine[] = [], lastVisit: number | null = null): WeekLine[] {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const start = startOfDay(now, tz);
   const end = start + 7 * DAY;
   const recent = start - 7 * DAY;
-  const out: WeekItem[] = [];
-  const add = (i: Omit<WeekItem, 'label' | 'cls'> & Partial<Pick<WeekItem, 'label' | 'cls'>>) =>
+  const out: WeekLine[] = [];
+  const add = (i: Omit<WeekLine, 'label' | 'cls'> & Partial<Pick<WeekLine, 'label' | 'cls'>>) =>
     out.push({ label: WORD[i.kind], cls: CLASS[i.kind], tz, ...i });
   const auditor = mine?.auditor === true;
   for (const r of facts.rows) {

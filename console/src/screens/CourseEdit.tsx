@@ -28,14 +28,11 @@ import { PatternTree } from '../ui/PatternTree';
 import { Check, Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { courseView, MaterialsChecklist, StateChip } from './Course';
+import { courseScope } from './common';
 import type { CourseProps } from './types';
 import { COURSE_REPO, OPENCOURSE_FILE } from '../model/names';
 
 const validCourse = validator(courseSchema);
-
-export function courseScope(p: Pick<CourseProps, 'course'>): Scope {
-  return { courseOrg: p.course.org, where: p.course.name };
-}
 
 /** The course's newest semester, for the course-page ops the engine runs per semester. */
 export function newestScope(p: Pick<CourseProps, 'course'>): Scope | null {

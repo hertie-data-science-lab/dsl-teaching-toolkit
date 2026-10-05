@@ -20,12 +20,6 @@ export function readSchedule(p: CohortProps): Schedule | null {
   return f.kind === 'ready' ? parseSchedule(f.text) : null;
 }
 
-/** "Session 3: Trees" -> <b>Session 3</b>: Trees */
-export function IdentTitle({ text }: { text: string }) {
-  const i = text.indexOf(': ');
-  return i < 0 ? <b>{text}</b> : <><b>{text.slice(0, i)}</b>: {text.slice(i + 2)}</>;
-}
-
 export function asgSummary(a: Assignment, tz: string, year: number): string {
   switch (a.state) {
     case 'open':

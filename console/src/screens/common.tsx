@@ -13,7 +13,7 @@ import { mergeOperations, type OpDef } from '../ops/session';
 import { CheckLine, Loading, Soon, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
-import type { CohortProps, ReadyProps } from './types';
+import type { CohortProps, CourseProps, ReadyProps } from './types';
 
 export { cohortName };
 
@@ -50,6 +50,11 @@ export function gradingConfig(p: ReadyProps, template: string): Record<string, u
 export function useGradingConfig(p: ReadyProps, template: string): Record<string, unknown> {
   const text = configText(p, template);
   return useMemo(() => parseConfig(text), [text]);
+}
+
+/** Who an operation on the course acts for. */
+export function courseScope(p: Pick<CourseProps, 'course'>): Scope {
+  return { courseOrg: p.course.org, where: p.course.name };
 }
 
 /** Who an operation on this semester acts for. */
