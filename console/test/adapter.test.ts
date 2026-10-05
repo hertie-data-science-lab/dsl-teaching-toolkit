@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GitHubClient } from '../src/github/client';
-import { DispatchAdapter, RequestInvalid, buildRequest, leakedHandles, parseOutcome, stepsOf } from '../src/ops/adapter';
+import { DispatchAdapter, RequestInvalid, buildRequest, parseOutcome, stepsOf } from '../src/ops/adapter';
 import * as defs from '../src/ops/defs';
 import { OpsSession, mergeOperations } from '../src/ops/session';
 import { modeOf } from '../src/ops/registry';
@@ -15,7 +15,7 @@ const publicOutcome = {
   summary: 'Preview: 7 students would get a new code; their old codes would stop working.', counts: { would_send: 7 },
   reasons: [{ code: 'WOULD_SEND', text: '7 new codes' }], started: '2026-09-23T09:00:00Z', finished: '2026-09-23T09:01:00Z',
 };
-const privateOutcome = { ...publicOutcome, people: [{ handle: 'anna-a', text: 'would get a new code' }, { handle: 'ben-b', text: 'would get a new code' }] };
+const privateOutcome = { ...publicOutcome, summary: 'Preview: anna-a and 6 others would get a new code.' };
 
 function engine(opts: { annotation?: object; privateFile?: object; polls?: number } = {}) {
   let polls = 0;
@@ -85,28 +85,17 @@ describe('DispatchAdapter', () => {
     expect((await a.watch(h)).state).toBe('completed');
   });
 
-  it('reads the public annotation, adds the private people, and finds no leak', async () => {
+  it('prefers the public annotation over the private record', async () => {
     const e = engine({ annotation: publicOutcome, privateFile: privateOutcome });
     const r = await new DispatchAdapter(e.client, () => 'a').outcome({ op: 'roster.send_codes', runId: 77, htmlUrl: '', preview: true, courseOrg: COURSE, cohortOrg: COHORT });
     expect(r.outcome?.summary).toBe(publicOutcome.summary);
-    expect(r.outcome?.people).toBeUndefined();
-    expect(r.people.map((p) => p.handle)).toEqual(['anna-a', 'ben-b']);
-    expect(r.leaked).toEqual([]);
-  });
-
-  it('flags a handle from the private file that reached the public summary', async () => {
-    const leaky = { ...publicOutcome, summary: 'Preview: anna-a would get a new code.' };
-    const e = engine({ annotation: leaky, privateFile: privateOutcome });
-    const r = await new DispatchAdapter(e.client, () => 'a').outcome({ op: 'roster.send_codes', runId: 77, htmlUrl: '', preview: true, courseOrg: COURSE, cohortOrg: COHORT });
-    expect(r.leaked).toEqual(['anna-a']);
-    expect(leakedHandles(publicOutcome as never, [{ handle: 'anna' }])).toEqual([]);
   });
 
   it('falls back to the private record, and ignores one from another run', async () => {
     const e = engine({ privateFile: privateOutcome });
     const a = new DispatchAdapter(e.client, () => 'a');
     const r = await a.outcome({ op: 'roster.send_codes', runId: 77, htmlUrl: '', preview: true, courseOrg: COURSE, cohortOrg: COHORT });
-    expect(r.outcome?.summary).toBe(publicOutcome.summary);
+    expect(r.outcome?.summary).toBe(privateOutcome.summary);
     const other = engine({ privateFile: { ...privateOutcome, run_id: 12 } });
     expect((await new DispatchAdapter(other.client, () => 'a').outcome({ op: 'roster.send_codes', runId: 77, htmlUrl: '', preview: true, courseOrg: COURSE, cohortOrg: COHORT })).outcome).toBeNull();
   });

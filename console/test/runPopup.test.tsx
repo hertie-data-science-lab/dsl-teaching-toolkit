@@ -71,7 +71,7 @@ class Scripted implements Adapter {
       : { state: 'running', conclusion: null, steps: [{ name: 'Checking you may do this', state: 'done' }, { name: 'Running', state: 'running' }], htmlUrl: 'https://github.com/run/77' };
   }
   async outcome(): Promise<Result> {
-    return { outcome: this.outcome_, people: [], leaked: [] };
+    return { outcome: this.outcome_ };
   }
   async cancel(h: Handle): Promise<void> {
     if (this.cancelError) throw this.cancelError;

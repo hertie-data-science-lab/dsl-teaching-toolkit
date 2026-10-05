@@ -124,7 +124,6 @@ CONTRACT_OUTCOME = {
             },
         }
     ],
-    "people": [{"handle": "octocat", "text": "No repo: not joined yet."}],
     "started": "2026-09-23T09:00:03Z",
     "finished": "2026-09-23T09:01:10Z",
 }

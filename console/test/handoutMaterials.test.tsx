@@ -43,7 +43,7 @@ class DispatchStub implements Adapter {
     return { state: 'completed' as const, conclusion: 'success', steps: [], htmlUrl: '' };
   }
   async outcome(h: Handle) {
-    return { outcome: { schema: 'dsl.outcome/1' as const, op: h.op, run_id: 1, actor: 'a', preview: h.preview, conclusion: 'previewed' as const, summary: 'Built.', block: this.block }, people: [], leaked: [] };
+    return { outcome: { schema: 'dsl.outcome/1' as const, op: h.op, run_id: 1, actor: 'a', preview: h.preview, conclusion: 'previewed' as const, summary: 'Built.', block: this.block } };
   }
   async cancel() {}
 }

@@ -44,7 +44,6 @@ from .grades import TEMPLATE_KEYS
 from .log import CLIParser, log_ok
 from .ops.outcome import CONCLUSIONS
 from .ops.registry import (
-    HANDLE_PATTERN,
     OUTCOME_SCHEMA,
     REGISTRY,
     STATUS_SCHEMA,
@@ -178,10 +177,6 @@ def outcome_schema() -> dict:
         },
         ("code", "text"),
     )
-    person = _obj(
-        {"handle": {"type": "string", "pattern": HANDLE_PATTERN}, "text": _str()},
-        ("handle", "text"),
-    )
     return _doc(
         OUTCOME_SCHEMA,
         _obj(
@@ -200,7 +195,6 @@ def outcome_schema() -> dict:
                 "reasons": {"type": "array", "items": reason},
                 "details": {"type": "array", "items": _str()},
                 "block": _str(),
-                "people": {"type": "array", "items": person},
                 "started": _str(),
                 "finished": _str(),
             },

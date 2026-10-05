@@ -303,7 +303,7 @@ def test_the_annotation_names_nobody():
         actor="prof",
         preview=False,
         conclusion="done",
-        summary="Patched assignment-3-octocat and grades-octocat; octocat pulled. 10% late.",
+        summary="Patched assignment-3-octocat and grades-octocat. 10% late.",
         reasons=[
             {
                 "code": "SKIPPED",
@@ -311,14 +311,12 @@ def test_the_annotation_names_nobody():
                 "fix": {"repo": f"{SEMESTER}/assignment-3-octocat"},
             }
         ],
-        people=[{"handle": "octocat", "text": "No repo: not joined yet."}],
     )
     line = annotation(out)
     assert line.startswith("::notice title=dsl-outcome::")
     assert "octocat" not in line.lower()
     assert "10%25 late" in line
     body = json.loads(line.split("::", 2)[2].replace("%25", "%"))
-    assert "people" not in body
     assert body["actor"] == "prof"
     assert (
         "assignment-3-<handle>" in body["summary"]

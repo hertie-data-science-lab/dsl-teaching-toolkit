@@ -70,10 +70,6 @@ export interface Progress {
 export interface Result {
   /** The public outcome, or the private record when the annotation could not be read. */
   outcome: Outcome | null;
-  /** Per-person lines, from the private file only. */
-  people: { handle: string; text: string }[];
-  /** Handles from the private file that the PUBLIC outcome names: an engine redaction bug. */
-  leaked: string[];
 }
 
 export interface Adapter {
@@ -137,14 +133,6 @@ export function parseOutcome(message: string): Outcome | null {
     return null;
   }
   return outcomeValidator(data) ? (data as unknown as Outcome) : null;
-}
-
-/** Every handle in `people` that appears anywhere in the public outcome. */
-export function leakedHandles(pub: Outcome, people: { handle: string }[]): string[] {
-  const text = JSON.stringify({ ...pub, actor: '' });
-  return people
-    .map((p) => p.handle)
-    .filter((h) => /^[A-Za-z0-9-]+$/.test(h) && new RegExp(`(?<![A-Za-z0-9-])${h}(?![A-Za-z0-9-])`, 'i').test(text));
 }
 
 const STEP_WORDS: [RegExp, string][] = [
@@ -219,9 +207,7 @@ export class DispatchAdapter implements Adapter {
     } catch {
       priv = null;
     }
-    const people = priv?.people ?? [];
-    const outcome: Outcome | null = pub ?? (priv ? { ...priv, people: undefined } : null);
-    return { outcome, people, leaked: pub ? leakedHandles(pub, people) : [] };
+    return { outcome: pub ?? priv };
   }
 
   /** Cancel the run (Actions cancel API). A run that has already ended answers 409: nothing left to stop. */
