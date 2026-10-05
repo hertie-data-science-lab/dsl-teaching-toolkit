@@ -47,9 +47,10 @@ from .course import (
 from .discovery import handed_out_assignments
 from .faults import Unusable
 from .gh_contents import get_file_content, repo_tree
+from .materials import publishable
 from .materials import read as read_materials
 from .readings import demote_headings, is_reading_overlay
-from .repos import default_branch, has_denied_component, has_never_material_component
+from .repos import default_branch
 from .schedule_plan import (
     PlannedRow,
     declared_syllabus,
@@ -58,14 +59,13 @@ from .schedule_plan import (
     site_rows,
 )
 from .site_repo import people_cards, yaml_file
-from .status_json import CourseFacts, SemesterFacts, handed_out
+from .status_json import CourseFacts, SemesterFacts, _iso, dumps, handed_out
 
 SCHEMA = "dsl.student-status/2"
 # In the SEMESTER org's `.github`, which is public.
 REPO = ".github"
 PATH = records.path("student_status")
 ANNOUNCEMENTS_DIR = "_announcements"
-SITE_HOME = "index.md"
 
 # ---------------------------------------------------------------- the allow-list
 
@@ -251,26 +251,12 @@ class StudentFacts:
 # ---------------------------------------------------------------- pure core
 
 
-def _iso(when: datetime | date | None) -> str | None:
-    return when.isoformat() if when is not None else None
-
-
 def _all_day(when: datetime | date | None) -> bool:
     return when is not None and not isinstance(when, datetime)
 
 
-def _kind_label(kind: str) -> str:
-    return next((k["label"] for k in policy.kinds() if k["key"] == kind), kind)
-
-
 def _url(org: str, repo: str, path: str, folder: bool) -> str:
     return f"https://github.com/{org}/{repo}/{'tree' if folder else 'blob'}/HEAD/{path}"
-
-
-def _material(path: str) -> bool:
-    """A released path the public may see named: not denylisted (`solution/`, `tests/`,
-    `grading_config.yml`), not machine clutter."""
-    return not has_denied_component(path) and not has_never_material_component(path)
 
 
 def _copy_links(
@@ -279,7 +265,7 @@ def _copy_links(
     """(links, reading-list overlays) for what one copy has landed: a file is one link, a
     folder its own files plus one link per subfolder (as GitHub lists it). A readings
     copy's `READINGS.md` is prose, not a link."""
-    blobs = [p for p in paths if _material(p)]
+    blobs = [p for p in paths if publishable(p)]
     if dest and dest in blobs:
         name = dest.rsplit("/", 1)[-1]
         if readings and is_reading_overlay(name):
@@ -422,7 +408,7 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
             readings += got
             prose += more
             pending = pending or not done
-        label = _kind_label(r.kind)
+        label = policy.kind_label(r.kind)
         title = f"{label} {sr.number}" if sr.number is not None else label
         out.append(
             _row(
@@ -823,8 +809,3 @@ def settle(doc: dict, old_text: str | None) -> dict:
         k: v for k, v in new.items() if k != "generated_at"
     }
     return {**doc, "generated_at": old["generated_at"]} if same else doc
-
-
-def dumps(doc: dict) -> bytes:
-    """Stable bytes, so an unchanged semester makes no commit."""
-    return (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode()

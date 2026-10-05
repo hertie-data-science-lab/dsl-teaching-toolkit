@@ -408,11 +408,6 @@ def _details(text: str) -> str:
     return f'details: "{q(text)}"\n'
 
 
-def _kind_label(kind: str) -> str:
-    """The policy's label for a kind ("Lecture", "Drop-in"); the key when unknown."""
-    return next((k["label"] for k in policy.kinds() if k["key"] == kind), kind)
-
-
 # The section label an attached readings entry's links are filed under, so the Readings
 # tab can pick them off a lecture's row whatever the folder is called.
 READINGS_LINKS = "readings"
@@ -450,7 +445,7 @@ def _row_entry(
     `unreleased: true` and a line naming where the copies will land. `readings_pending`:
     readings attached to it that have not landed yet. `off_schedule`: a `show_on_site: false`
     row, left off the schedule and the Updates box. `undated`: an off-plan folder."""
-    label = _kind_label(row.kind)
+    label = policy.kind_label(row.kind)
     title = f"{label} {row.number}" if row.number is not None else label
     # `row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
     # "Lab 1 / Lab 1" - faculty repeat the identifier as readily in the plan as in a README.
