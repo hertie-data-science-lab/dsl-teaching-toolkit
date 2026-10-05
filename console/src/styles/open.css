@@ -16,7 +16,6 @@
 .open-menu .hint-wrap:hover .hint-btn, .open-menu .hint-btn:focus-visible { border-color: var(--ink-2); color: var(--ink); }
 .open-menu .pm-cmd { display: block; margin-top: 6px; font-family: var(--font-code); font-size: 12px; white-space: normal; overflow-wrap: anywhere; user-select: all; }
 /* The command under its entry when copying it failed: text to select, not an item. */
-.open-menu > .pm-cmd { padding: 0 10px 6px; color: var(--muted); }
 .open-menu svg { width: 12px; height: 12px; color: var(--muted); flex: none; }
 
 /* ================= Profile (screens/Setup.tsx) ================= */

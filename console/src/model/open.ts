@@ -1,12 +1,12 @@
 // Where a course repo opens: on GitHub, on github.dev, in VS Code, in GitHub Desktop, in
-// another editor by its link scheme, or from a clone command. One Open button for both
+// another editor by its link scheme. One Open button for both
 // roles (decisions 0017, 0027): instructors on their course screens, students on Set up. The
 // folder and editor come from Profile (`model/prefs.ts`); nothing here reads storage.
 
 // `vscode` opens the local folder (or, with no folder set up, clones); `vsclone` clones with a
 // folder set up, beside it (decision 0023).
-export type OpenChoice = 'github' | 'githubdev' | 'vscode' | 'desktop' | 'editor' | 'clone' | 'vsclone';
-export const OPEN_CHOICES: OpenChoice[] = ['github', 'githubdev', 'vscode', 'desktop', 'editor', 'clone', 'vsclone'];
+export type OpenChoice = 'github' | 'githubdev' | 'vscode' | 'desktop' | 'editor' | 'vsclone';
+export const OPEN_CHOICES: OpenChoice[] = ['github', 'githubdev', 'vscode', 'desktop', 'editor', 'vsclone'];
 
 export type Editor = 'vscode' | 'desktop' | 'other';
 export const EDITORS: Editor[] = ['vscode', 'desktop', 'other'];
@@ -93,13 +93,11 @@ const inRepo = (r: RepoRef) => (r.path || r.branch ? `/tree/${r.branch ?? 'main'
 
 export const repoUrl = (r: RepoRef) => `https://github.com/${r.org}/${r.repo}`;
 
-/** One entry of the Open menu: a link, or a command to copy. */
+/** One entry of the Open menu. */
 export interface OpenItem {
   choice: OpenChoice;
   label: string;
-  href?: string;
-  /** The text to copy, for the clone command. */
-  copy?: string;
+  href: string;
   /** Where it sits in the menu. */
   group: 'online' | 'local';
   /** Which `?` the menu gives it: VS Code's clone or its open (decision 0024 rule 7). */
@@ -113,7 +111,7 @@ export interface OpenItem {
 export const profileHref = (org: string, semester = false) => `?${semester ? 'cohort' : 'course'}=${encodeURIComponent(org)}#profile`;
 
 /**
- * Every way to open `r` with this setup, in menu order, the clone command last. With a folder set up, VS Code both
+ * Every way to open `r` with this setup, in menu order. With a folder set up, VS Code both
  * opens it and clones (decision 0023); `cloned` (from the folder check) keeps only the one
  * that applies: Open when the repo is there, Clone when it is not. Undefined keeps both.
  */
@@ -138,13 +136,15 @@ export function openItems(r: RepoRef, setup: Setup | null, cloned?: boolean): Op
   // Another editor opens a folder or nothing: with no folder set up, the menu's last line
   // ("Set up a local folder") is its way in.
   if (canOpen && schemeOk(scheme)) items.push({ choice: 'editor', label: 'Open in your editor', href: scheme.replace('{path}', urlPath(inside)), group: 'local' });
-  if (canClone) items.push({ choice: 'clone', label: 'Copy the clone command', copy: cloneCommand(url, parent, r.repo), group: 'local' });
   return items;
 }
 
+/** The clone command for `r` into its course folder, which Clone's `?` gives (decisions 0024 rule 7, 0027 rule 2). */
+export const repoCloneCommand = (r: RepoRef, setup: Setup | null) => cloneCommand(repoUrl(r), courseFolder(setup, r.home ?? r.org), r.repo);
+
 const EDITOR_CHOICE: Record<Editor, OpenChoice> = { vscode: 'vscode', desktop: 'desktop', other: 'editor' };
 
-const CLONES: OpenChoice[] = ['vsclone', 'desktop', 'clone'];
+const CLONES: OpenChoice[] = ['vsclone', 'desktop'];
 const OPENS: OpenChoice[] = ['vscode', 'desktop', 'editor'];
 
 /**
@@ -171,10 +171,10 @@ export function defaultItem(items: OpenItem[], setup: Setup | null, cloned?: boo
 
 /**
  * The words on the button: Clone or Open when the folder check tells, "Open or clone" when
- * it cannot and the action is on this computer; a web page's or the clone command's own label.
+ * it cannot and the action is on this computer; a web page's own label.
  */
 export function mainLabel(item: OpenItem, cloned?: boolean): string {
-  if (item.group === 'online' || item.copy) return item.label;
+  if (item.group === 'online') return item.label;
   return cloned === false ? 'Clone' : cloned === true ? 'Open' : 'Open or clone';
 }
 
