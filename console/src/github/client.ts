@@ -179,25 +179,21 @@ export interface ClientOptions {
 
 export const API = 'https://api.github.com';
 
-/** Base64 of UTF-8 text, and back. */
-export function encodeBase64(text: string): string {
-  const bytes = new TextEncoder().encode(text);
+/** Base64 of bytes, built in chunks so a large file does not overflow the argument list. */
+export function toBase64(bytes: Uint8Array): string {
   let bin = '';
-  for (const b of bytes) bin += String.fromCharCode(b);
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(bin);
 }
 
-export function decodeBase64(b64: string): string {
-  const bin = atob(b64.replace(/\s/g, ''));
-  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+/** Bytes of base64 (whitespace allowed). */
+export function fromBase64(b64: string): Uint8Array {
+  return Uint8Array.from(atob(b64.replace(/\s/g, '')), (c) => c.charCodeAt(0));
 }
 
-/** Bytes of base64 (whitespace allowed). */
-export function decodeBytes(b64: string): Uint8Array {
-  const bin = atob(b64.replace(/\s/g, ''));
-  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
-}
+/** Base64 of UTF-8 text, and back. */
+export const encodeBase64 = (text: string) => toBase64(new TextEncoder().encode(text));
+export const decodeBase64 = (b64: string) => new TextDecoder().decode(fromBase64(b64));
 
 /** The contents API's base64 ceiling: above it a file's bytes come from the blob API. */
 export const ONE_MB = 1024 * 1024;
@@ -607,7 +603,7 @@ export class GitHubClient {
     this.noteRateLimit(res);
     if (!res.ok) return this.fail(res, url);
     const body = (await res.json()) as { content?: string; encoding?: string };
-    return decodeBytes(body.content ?? '');
+    return fromBase64(body.content ?? '');
   }
 
   /** GitHub's own rendering of markdown (sanitised by GitHub), with `context` (`owner/repo`) for its links. */
@@ -666,7 +662,7 @@ export class GitHubClient {
   /** A small file's bytes through the contents API (up to 1 MB), or null when it is absent. */
   async getSmallBytes(owner: string, repo: string, path: string): Promise<Uint8Array | null> {
     const r = await this.getOrNull<{ type?: string; content?: string }>(`/repos/${owner}/${repo}/contents/${enc(path)}`);
-    return r && r.type === 'file' && r.content ? decodeBytes(r.content) : null;
+    return r && r.type === 'file' && r.content ? fromBase64(r.content) : null;
   }
 
   /** Whether `user` is a member of `org` (as far as the caller may see). */

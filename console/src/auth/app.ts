@@ -1,4 +1,4 @@
-import { API, GitHubError, type Fetch, type GhUser } from '../github/client';
+import { API, GitHubError, toBase64, type Fetch, type GhUser } from '../github/client';
 import { SignInError, browserStore, type Auth, type TokenStore } from './types';
 
 export const AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
@@ -38,7 +38,7 @@ export interface AppAuthOptions {
 }
 
 function b64url(bytes: Uint8Array): string {
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return toBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function random(n = 32): string {
