@@ -9,7 +9,7 @@ import subprocess
 
 import pytest
 
-from dsl_course import repos
+from dsl_course import ghcli, repos
 
 
 def test_an_internal_repo_is_not_a_private_one():
@@ -158,6 +158,53 @@ def test_a_failed_repo_read_is_retried_not_pinned_for_the_run(monkeypatch):
     assert repos.default_branch("Org", "r", fallback="main") == "main"
     assert repos.default_branch("Org", "r") == "main"
     assert answers == []
+
+
+def _github(monkeypatch, repo: dict) -> list[tuple[str, ...]]:
+    """A fake GitHub behind the real `gh`, so the write listeners fire as they do live:
+    `repo` is the one repo object, a PATCH merges its fields in, a DELETE empties it."""
+    calls: list[tuple[str, ...]] = []
+
+    def ladder(args, stdin, retries):
+        calls.append(args)
+        if "PATCH" in args:
+            for field in args:
+                key, eq, val = field.partition("=")
+                if eq:
+                    repo[key] = val
+            return 0, "{}", ""
+        if "DELETE" in args:
+            repo.clear()
+            return 0, "", ""
+        if "POST" in args:
+            repo["default_branch"] = "main"
+            return 0, "{}", ""
+        if not repo:
+            return 1, "", "gh: Not Found (HTTP 404)"
+        return 0, json.dumps(repo), ""
+
+    monkeypatch.setattr(ghcli, "_run_gh_ladder", ladder)
+    return calls
+
+
+def test_a_default_branch_write_is_read_back_not_answered_from_the_memo(monkeypatch):
+    # `ghcli.written` files the PATCH carrying `default_branch=` under FILES on that repo,
+    # which the repo memo did not hear: every later question answered the old branch.
+    _github(monkeypatch, {"default_branch": "master"})
+    assert repos.default_branch("Org", "r") == "master"
+    assert repos.set_default_branch("Org", "r", "main")
+    assert repos.default_branch("Org", "r") == "main"
+
+
+def test_a_deleted_repo_is_created_again_not_skipped_on_the_memo(monkeypatch):
+    # `create_repo` short-circuits on a memoised repo; a delete in between must end that.
+    calls = _github(monkeypatch, {"default_branch": "main"})
+    assert repos.repo_exists("Org", "r")
+    ghcli.gh("api", "--method", "DELETE", "repos/Org/r")
+    assert not repos.repo_exists("Org", "r")
+    assert repos.create_repo("Org", "r")
+    assert any("POST" in c for c in calls)
+    assert repos.repo_exists("Org", "r")
 
 
 def test_default_branch_raises_for_a_writer_and_falls_back_for_a_reader(monkeypatch):
