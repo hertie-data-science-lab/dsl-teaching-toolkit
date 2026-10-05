@@ -117,6 +117,7 @@ from .profile_readme import profile_files, update_profile_readme
 from .repos import (
     current_description,
     default_branch,
+    rename_repo,
     repo_missing,
     set_repo_topics,
 )
@@ -1355,18 +1356,6 @@ def _alive(targets: list[tuple[str, str]]) -> list[str]:
     return out
 
 
-def _rename(org: str, old: str, new: str, description: str | None = None) -> bool:
-    """Rename `org/old` to `new`, and - in the same PATCH - bring its description to the
-    current wording when it still carries a superseded one."""
-    fields = ["-f", f"name={new}"]
-    if description:
-        fields += ["-f", f"description={description}"]
-    code, out = gh("api", "--method", "PATCH", f"repos/{org}/{old}", *fields)
-    if code != 0:
-        log_err(f"could not rename {org}/{old} to {new}: {out[:200]}")
-    return code == 0
-
-
 def _redirects(org: str, old: str, new: str) -> bool:
     """Whether `org/old` answers as `org/new`: GitHub's 301 from a renamed repo's old
     name, which gh follows. What keeps the old URLs in mails and bookmarks working."""
@@ -2150,7 +2139,9 @@ class Semester:
             if new in names:
                 log_err(f"{self.org} has both {old} and {new} - resolve by hand")
                 return False
-            if not _rename(self.org, old, new, self.description(old)):
+            if not rename_repo(
+                self.org, old, new, description=self.description(old) or None
+            ):
                 return False
             self.renamed_now[old] = new
         return True

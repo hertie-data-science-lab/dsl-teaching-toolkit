@@ -325,7 +325,7 @@ class FakeGitHub:
                 self.redirects[key] = fields["name"]
             if key in self.actions:  # a repo keeps its settings across a rename
                 self.actions[new] = self.actions.pop(key)
-            return 0, ""
+            return 0, fields["name"]  # the `--jq .name` of GitHub's answer
         if len(parts) == 3:
             return 0, json.dumps({"default_branch": "main", "name": key[1]})
         raise AssertionError(f"unexpected gh call {args}")
