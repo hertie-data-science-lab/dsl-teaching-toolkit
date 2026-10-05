@@ -2815,7 +2815,16 @@ def test_the_course_writes_each_templates_starter_from_its_markers_once(
     solution["solution/starter.py"] = b"### BEGIN SOLUTION\nx = 1\n### END SOLUTION\n"
     assert _main(monkeypatch, COURSE) == 0
     assert "starter: derived (read from its answer markers)" in capsys.readouterr().out
+    # The sources are read once per run, however often the step asks for its work.
+    reads = []
+    real = migrate.Course.solution_sources
+    monkeypatch.setattr(
+        migrate.Course,
+        "solution_sources",
+        lambda self, repo: reads.append(repo) or real(self, repo),
+    )
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    assert reads.count("assignment-1-f2026") == 1
     grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
     assert yaml.safe_load(grading)["starter"] == "derived"
     assert grading.decode().endswith(f"{scaffold.starter_line('derived')}\n")

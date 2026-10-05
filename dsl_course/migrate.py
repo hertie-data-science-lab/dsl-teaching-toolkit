@@ -2795,6 +2795,11 @@ class Course:
     def __init__(self, org: str) -> None:
         self.org = org
         self.pause = Pause(org, self.targets)
+        # `{template: its starter mode}`, read off every derivable source on its solution
+        # branch - notebooks, often hundreds of KB - so read once per run, not by every
+        # done/plan/do/verify of the starter step. Nothing else in a run writes those
+        # sources; `write_starters` clears it all the same.
+        self._starter_modes: dict[str, str] = {}
 
     def targets(self) -> list[tuple[str, str]]:
         """`.github` and every content repo and template that carries a workflow."""
@@ -2990,7 +2995,11 @@ class Course:
                 continue
             if not isinstance(data, dict) or "starter" in data:
                 continue
-            mode = starter_mode(None, self.solution_sources(repo))
+            if repo not in self._starter_modes:
+                self._starter_modes[repo] = starter_mode(
+                    None, self.solution_sources(repo)
+                )
+            mode = self._starter_modes[repo]
             out[repo] = (mode, f"{text.rstrip()}\n{starter_line(mode)}\n")
         return out
 
@@ -3004,6 +3013,8 @@ class Course:
         return {p: t for p, t in texts.items() if t is not None}
 
     def write_starters(self) -> bool:
+        left = self.starters_left()
+        self._starter_modes.clear()
         return all(
             move_files(
                 self.org,
@@ -3013,7 +3024,7 @@ class Course:
                 files={GRADING_FILE: text.encode()},
                 branch=SOLUTION_BRANCH,
             )
-            for repo, (_, text) in self.starters_left().items()
+            for repo, (_, text) in left.items()
         )
 
     # seeded text -----------------------------------------------------------
