@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from dsl_course import schedule_plan
+from dsl_course import schedule, schedule_plan
 from dsl_course.schedule import Deploy, Release, Schedule
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -195,7 +195,7 @@ def test_a_label_carries_its_number_at_either_end():
         "course-intro": None,
         "week3": 3,
     }.items():
-        assert schedule_plan.label_number(label) == n, label
+        assert schedule.label_number(label) == n, label
 
 
 def _shown(rows):

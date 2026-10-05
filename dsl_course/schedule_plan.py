@@ -26,7 +26,7 @@ from .materials import (
     infer_kind,
     publishable,
 )
-from .schedule import label_number
+from .schedule import own_number
 
 # A source repo -> its `materials.yml` folder aliases (None: the file does not parse).
 # The caller reads them; the plan stays pure.
@@ -137,12 +137,6 @@ class SiteRow:
     row: PlannedRow
     number: int | None
     readings: list[PlannedRow] = field(default_factory=list)
-
-
-def own_number(number: int | None, key: str) -> int | None:
-    """An entry's number (decision 0020): its `number:`, else the number its label or key
-    carries (`lecture_03`, `assignment-3`: the instructor typed it). Never a position."""
-    return number or label_number(key)
 
 
 def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
