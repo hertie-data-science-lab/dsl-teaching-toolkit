@@ -66,7 +66,7 @@ from typing import NamedTuple
 
 from . import config_digest, grades, mailer, records, roster, schedule, teams
 from .course import CONFIG_REPO, course_phrase
-from .discovery import course_name_of, join_issue_url, semester_is_live
+from .discovery import course_name_or, join_issue_url, semester_is_live
 from .faults import ConfigFault, Unusable
 from .gh_contents import dump_csv, get_file_with_sha, put_file_as_read, read_csv
 from .grades import self_select_keys
@@ -785,20 +785,6 @@ def _release(semester_org: str, unsent: set[Claim], stamp: str) -> None:
     )
 
 
-def _course_name(course_org: str) -> str:
-    """The course's name for the subject line, or "" if it cannot be read.
-
-    Never fatal: `course_name_of` raises on a dsl-course.yml that is malformed or that the
-    API would not hand over, and a name is not worth losing a semester's only notice of team
-    formation over. A course carrying no name keeps the generic wording (`course_phrase`)
-    rather than mailing a blank."""
-    try:
-        return course_name_of(course_org)
-    except Exception as exc:
-        log_err(f"could not read the course name ({exc}) - mailing without it")
-        return ""
-
-
 def _messages(
     nudges: list[_Nudge],
     semester_org: str,
@@ -845,7 +831,7 @@ def _preview(
     subjects, and puts the masked recipients on `log_person`. The sample is
     `sample_message`'s placeholders and never one of the bodies about to go out, which is
     the rule `grades._email_updates` follows."""
-    course_name = _course_name(course_org)
+    course_name = course_name_or(course_org)
     for window in windows:
         owed = [n for n in nudges if n.window.key == window.key]
         phases = ", ".join(sorted({n.phase for n in owed})) or "nothing"
@@ -983,7 +969,7 @@ def notify_windows(
     messages = _messages(
         mine,
         semester_org,
-        _course_name(course_org),
+        course_name_or(course_org),
         sched.timezone,
         schedule.assignment_pages_by_key(sched),
     )

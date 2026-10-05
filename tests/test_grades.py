@@ -17,6 +17,7 @@ import yaml
 
 from dsl_course import (
     course,
+    discovery,
     gh_contents,
     ghcli,
     grades,
@@ -391,7 +392,7 @@ def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
         "bob@uni.edu,Bob,enrolled,bob-b,43,dsl-def\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(grades, "course_name_for_semester", lambda org: "")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "")
     monkeypatch.setattr(
         grades.mailer,
         "send_bulk",
@@ -418,14 +419,16 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
         ),
     )
 
-    monkeypatch.setattr(grades, "course_name_for_semester", lambda org: "Deep Learning")
+    monkeypatch.setattr(
+        discovery, "course_name_for_semester", lambda org: "Deep Learning"
+    )
     grades._email_updates("SEMESTER", ["ada-l"])
     _to, subject, body = sent[-1][0]
     assert "Your grades for the Deep Learning course have been updated." in body
     # and in the SUBJECT - the inbox list is where a student tells two courses apart
     assert subject == "Your grades for Deep Learning have been updated"
 
-    monkeypatch.setattr(grades, "course_name_for_semester", lambda org: "")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "")
     grades._email_updates("SEMESTER", ["ada-l"])
     _to, subject, body = sent[-1][0]
     assert "Your grades for the course have been updated." in body
@@ -437,7 +440,9 @@ def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(grades, "course_name_for_semester", lambda org: "Deep Learning")
+    monkeypatch.setattr(
+        discovery, "course_name_for_semester", lambda org: "Deep Learning"
+    )
     seen: dict = {}
     monkeypatch.setattr(
         grades.mailer,
@@ -464,7 +469,7 @@ def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,Ada-L,42,dsl-abc\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(grades, "course_name_for_semester", lambda org: "")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "")
     sent: list[list] = []
     monkeypatch.setattr(
         grades.mailer,
@@ -822,7 +827,7 @@ def _distribute(
         None if roster_rows is None else roster.parse(ROSTER_HEADER + roster_rows)
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(grades, "course_name_for_semester", course_name)
+    monkeypatch.setattr(discovery, "course_name_for_semester", course_name)
 
     def fake_send_bulk(msgs, dry_run=False, sample=None):
         if send_error is not None:

@@ -661,9 +661,7 @@ def post(monkeypatch):
         monkeypatch.setattr(team_formation.mailer, "send_bulk", sender.send_bulk)
         monkeypatch.setattr(team_formation.mailer, "send_indexed", sender.send_indexed)
         monkeypatch.setattr(team_formation.mailer, "preflight", sender.preflight)
-        monkeypatch.setattr(
-            team_formation, "course_name_of", lambda org: "Deep Learning"
-        )
+        monkeypatch.setattr(discovery, "course_name_of", lambda org: "Deep Learning")
         return rec, sender
 
     return _wire

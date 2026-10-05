@@ -47,7 +47,7 @@ from . import mailer, roster, status
 from .course import course_phrase
 from .discovery import (
     SEMESTERS_PATH,
-    course_name_for_semester,
+    course_name_or,
     discover_semesters,
     join_issue_url,
     semester_is_live,
@@ -332,16 +332,9 @@ def run(semester_org: str) -> Outcome:
             f"no mail transport for {semester_org} - nothing claimed, nothing sent."
         )
         return Outcome.NO_TRANSPORT
-    # The codes are already committed to students.csv by this point, and
-    # load_yaml_config RAISES on a malformed dsl-course.yml or a non-404 read failure -
-    # while main() catches only RuntimeError. Unguarded, a bad course file meant a
-    # traceback with the codes persisted and not one email sent. Same guard as
-    # grades._email_updates, for the same reason.
-    try:
-        course_name = course_name_for_semester(semester_org)
-    except Exception as exc:  # a name is never worth losing the codes email over
-        log_err(f"could not read the course name ({exc}) - mailing without it")
-        course_name = ""
+    # The codes are already committed to students.csv by this point: a course file that
+    # cannot be read costs the name, never the email.
+    course_name = course_name_or(semester_org=semester_org)
     messages = [code_message(s, join_url, course_name) for s in targets]
     recipients = [s.hertie_email for s in targets]
     # CLAIM, then send. `write_column` reports a refused write by RETURNING - it never
@@ -471,11 +464,7 @@ def resend_unjoined(
         counts["students"] = 0
         log_ok(f"Done - {json.dumps(counts)}")
         return Outcome.NOTHING_TO_SEND, counts
-    try:
-        course_name = course_name_for_semester(semester_org)
-    except Exception as exc:  # a name is never worth losing the codes email over
-        log_err(f"could not read the course name ({exc}) - mailing without it")
-        course_name = ""
+    course_name = course_name_or(semester_org=semester_org)
     join_url = join_issue_url(semester_org)
     recipients = [s.hertie_email for s in to_mail]
     stamp = datetime.now(UTC).isoformat(timespec="seconds")

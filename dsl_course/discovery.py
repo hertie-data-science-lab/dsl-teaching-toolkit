@@ -494,6 +494,28 @@ def course_name_for_semester(semester_org: str) -> str:
     return course_name_of(course_org_for_semester(semester_org))
 
 
+def course_name_or(
+    course_org: str = "", *, semester_org: str = "", fallback: str = ""
+) -> str:
+    """The course's name for an email - `course_name_of(course_org)`, or
+    `course_name_for_semester(semester_org)` - else `fallback`. Never raises.
+
+    Both readers raise on a dsl-course.yml that is malformed or that the API would not
+    hand over (`load_yaml_config`), and a name is never worth losing the email over: a
+    grade notice, a code or the one fault mail about that very file. A course carrying no
+    name keeps the generic wording rather than mailing a blank."""
+    try:
+        name = (
+            course_name_for_semester(semester_org)
+            if semester_org
+            else course_name_of(course_org)
+        )
+    except Exception as exc:  # a name is never worth losing the email over
+        log_err(f"could not read the course name ({exc}) - mailing without it")
+        return fallback
+    return name or fallback
+
+
 def course_org_for_semester(semester_org: str) -> str:
     """The COURSE org this semester belongs to, from its own `course:` pointer
     (`semester_pointer`). "" when the pointer is missing or unreadable.

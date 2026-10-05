@@ -9,7 +9,7 @@ import re
 
 import pytest
 
-from dsl_course import enrol_codes, gh_contents, mailer, roster
+from dsl_course import discovery, enrol_codes, gh_contents, mailer, roster
 
 HEADER = "hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\n"
 ROSTER = (
@@ -46,7 +46,7 @@ def _drive(monkeypatch, *, dry_run: bool, transport: bool = True, sends=None):
         return True
 
     monkeypatch.setattr(gh_contents, "put_file", put_file)
-    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "ML")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "ML")
     monkeypatch.setattr(enrol_codes, "join_issue_url", lambda org: "https://w")
 
     def send_bulk(messages, dry_run=False, sample=None):
@@ -148,7 +148,7 @@ def test_everyone_joining_mid_run_is_nothing_to_send(monkeypatch, capsys):
         return expected_sha == "sha2"
 
     monkeypatch.setattr(gh_contents, "put_file", put_file)
-    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "ML")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "ML")
     monkeypatch.setattr(enrol_codes, "join_issue_url", lambda org: "https://w")
     monkeypatch.setattr(
         enrol_codes.mailer, "send_bulk", lambda *a, **k: pytest.fail("mailed")

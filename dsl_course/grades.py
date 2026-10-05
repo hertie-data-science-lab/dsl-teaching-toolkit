@@ -71,7 +71,7 @@ from .course import (
 )
 from .discovery import (
     assignment_rows,
-    course_name_for_semester,
+    course_name_or,
     course_org_for_semester,
     discover_semesters,
     exists_in,
@@ -4827,7 +4827,9 @@ def _preview_body(
         # Rendered exactly as the send renders it, course name and all: a preview that
         # showed the generic wording while the real mail named the course was reviewing
         # text nobody would ever receive.
-        subject, body = sample_message(semester_org, _course_name(semester_org))
+        subject, body = sample_message(
+            semester_org, course_name_or(semester_org=semester_org)
+        )
         tail = [
             "",
             "<details><summary>The email they would get</summary>",
@@ -4921,22 +4923,6 @@ def sample_body(
     return sample_message(semester_org, course_name, feedback)[1]
 
 
-def _course_name(semester_org: str) -> str:
-    """The course's name for the subject and the body of an email, or "" if it cannot be
-    read.
-
-    Never fatal, and never skipped by the preview: the grades are already pushed by the
-    time the send runs, so a transient read failure or a malformed dsl-course.yml must not
-    turn a successful distribution into a traceback with zero notifications sent
-    (`load_yaml_config` deliberately RAISES on both). A course that carries no name yet
-    keeps the generic wording rather than emailing a blank."""
-    try:
-        return course_name_for_semester(semester_org)
-    except Exception as exc:  # a name is never worth losing the notifications over
-        log_err(f"could not read the course name ({exc}) - the email goes without it")
-        return ""
-
-
 def _email_updates(
     semester_org: str,
     handles: list[str],
@@ -4969,7 +4955,7 @@ def _email_updates(
     # "your grades have been updated" from another. Read live from the course org's
     # dsl-course.yml; a course that carries no name yet keeps the generic wording rather
     # than emailing a blank.
-    course_name = _course_name(semester_org)
+    course_name = course_name_or(semester_org=semester_org)
     messages = []
     # Keyed on the ADDRESS, holding every handle that maps to it: two roster rows sharing
     # an address (one student, two accounts) would otherwise record only the last, leaving

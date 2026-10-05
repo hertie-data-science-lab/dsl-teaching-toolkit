@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import NameOID
 
-from dsl_course import enrol_codes, gh_contents, mailer, roster
+from dsl_course import discovery, enrol_codes, gh_contents, mailer, roster
 from dsl_course.gh_contents import read_csv
 from tests.conftest import ROSTER_HEADER
 
@@ -396,7 +396,7 @@ def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
             expected_sha == "fresh"
         ),
     )
-    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "Test")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
     _transport(monkeypatch, True)
     sent: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
@@ -485,7 +485,7 @@ def _run_with(monkeypatch, roster_text, *, sends=None, writes_ok=True, transport
         return True
 
     monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
-    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "Test")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
     monkeypatch.setattr(
         enrol_codes.mailer,
         "send_bulk",
@@ -600,7 +600,7 @@ def test_a_transport_that_raises_gives_the_claim_back_before_it_propagates(monke
             written.append(content.decode()) or True
         ),
     )
-    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "Test")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
     monkeypatch.setattr(
         enrol_codes.mailer,
         "send_bulk",
@@ -640,7 +640,7 @@ def test_a_claim_that_cannot_be_released_names_the_exact_stamp_to_clear(
         lambda org, repo, path: (written[-1] if written else text, "sha"),
     )
     monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
-    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "Test")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
     monkeypatch.setattr(enrol_codes.mailer, "send_bulk", lambda *a, **k: [])
     assert enrol_codes.run("SEMESTER") is enrol_codes.Outcome.FAILED
     err = capsys.readouterr().err
