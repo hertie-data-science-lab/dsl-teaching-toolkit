@@ -278,7 +278,10 @@ class _Repo:
         monkeypatch.setattr(
             derive,
             "repo_path_shas",
-            lambda o, r, b: {"solution": "tree1", **dict.fromkeys(self.files, "b")},
+            lambda o, r, b: {
+                "solution": "tree1",
+                **{p: gh_contents.blob_sha(t.encode()) for p, t in self.files.items()},
+            },
         )
         monkeypatch.setattr(
             derive,
@@ -609,6 +612,26 @@ def test_a_blank_file_is_copied_rather_than_blocking_the_derive(monkeypatch):
     assert out == 0 and out.reasons == []
     assert repo.written["src/__init__.py"] == b""
     assert derive.PY_PLACEHOLDER in repo.written["src/pipeline.py"].decode()
+
+
+def test_a_source_over_1_mib_is_read_by_its_blob_and_never_written_empty(monkeypatch):
+    # The Contents API sends `content: ""` for a file over 1 MiB, which read as a blank
+    # file and was written to main as an empty starter on a green run.
+    repo = _Repo({"solution/big.py": FENCED_PY}).install(monkeypatch)
+    monkeypatch.setattr(derive, "get_file_content", lambda o, r, path, ref="": "")
+    blobs = {gh_contents.blob_sha(FENCED_PY.encode()): FENCED_PY.encode()}
+    monkeypatch.setattr(derive, "get_blob", lambda o, r, sha: blobs.get(sha))
+    assert derive.derive_student_version("Course", "assignment-3-f2026", False) == 0
+    assert derive.PY_PLACEHOLDER in repo.written["big.py"].decode()
+
+    # A blob that cannot be read (or is not text) is refused by name, and main is left.
+    repo = _Repo({"solution/big.py": FENCED_PY}).install(monkeypatch)
+    monkeypatch.setattr(derive, "get_file_content", lambda o, r, path, ref="": "")
+    for blob in (None, b"\xff\xfe"):
+        monkeypatch.setattr(derive, "get_blob", lambda o, r, sha, b=blob: b)
+        out = derive.derive_student_version("Course", "assignment-3-f2026", False)
+        assert out == 1 and [r["code"] for r in out.reasons] == ["TOO_LARGE"]
+        assert repo.written == {} and repo.commits == 0
 
 
 # ------------------------------------------------- the starter: derived or by hand (0028)
