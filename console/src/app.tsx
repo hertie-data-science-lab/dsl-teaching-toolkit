@@ -11,7 +11,7 @@ import { GitHubClient, type GhUser } from './github/client';
 import { discoverEstate, isInstructor, studentSemesters, type Estate, type Mode } from './model/discovery';
 import { semesterOver } from './model/catalogue';
 import { LiveFiles } from './model/files';
-import { forgetMyTeams } from './model/mine';
+import { forgetMine, forgetMyTeams } from './model/mine';
 import { forgetStudentPrefs } from './model/prefs';
 import { courseLeftovers, semesterLeftovers, type Leftover } from './model/migration';
 import { loadHeartbeat, type Heartbeat } from './model/heartbeat';
@@ -472,6 +472,7 @@ export function createState({ auth, client }: AppDeps) {
       if (login) forgetStudentPrefs(login);
       forgetRendered();
       forgetMyTeams(client);
+      forgetMine(client);
       forgetStudentData(client);
       auth.signOut();
       client.clearCache();

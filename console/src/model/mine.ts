@@ -178,6 +178,31 @@ export function myTeams(client: GitHubClient): Promise<GhTeam[]> {
 /** Drop the session's team list (sign-out). */
 export const forgetMyTeams = (client: GitHubClient) => teamLists.delete(client);
 
+/**
+ * How long a student's own reads (readMine, readReceipts) are reused: every student
+ * screen change remounts its body, and this keeps moving between screens free. Short, unlike a
+ * semester's facts, so a receipt the engine just posted shows within a minute.
+ */
+export const MINE_FRESH_MS = 60 * 1000;
+
+const reads = new WeakMap<GitHubClient, Map<string, { at: number; p: Promise<unknown> }>>();
+
+/** `read()`, or its answer from the last MINE_FRESH_MS for this client and key; a failed read is not kept. */
+function fresh<T>(client: GitHubClient, key: string, read: () => Promise<T>, now = Date.now()): Promise<T> {
+  let m = reads.get(client);
+  if (!m) reads.set(client, (m = new Map()));
+  const hit = m.get(key);
+  if (hit && now - hit.at < MINE_FRESH_MS) return hit.p as Promise<T>;
+  const p = read();
+  const entry = { at: now, p };
+  m.set(key, entry);
+  p.catch(() => m.get(key) === entry && m.delete(key));
+  return p;
+}
+
+/** Drop the session's own reads (sign-out). */
+export const forgetMine = (client: GitHubClient) => reads.delete(client);
+
 /** Semesters (lower-cased org) where the person is known to audit, from the last readMine: the nav hides Marks and Join there. */
 export const auditing = signal<ReadonlySet<string>>(new Set());
 
@@ -198,7 +223,11 @@ function noteRole(org: string, auditor: boolean) {
  * cannot be read: a screen then promises nothing, rather than treating a possible auditor as
  * a student.
  */
-export async function readMine(client: GitHubClient, org: string, login: string, assignments: SemesterAssignment[]): Promise<Mine> {
+export function readMine(client: GitHubClient, org: string, login: string, assignments: SemesterAssignment[]): Promise<Mine> {
+  return fresh(client, `mine|${org.toLowerCase()}|${login.toLowerCase()}|${assignments.map((a) => `${a.slug}:${a.group ? 1 : 0}`).join(',')}`, () => readMineNow(client, org, login, assignments));
+}
+
+async function readMineNow(client: GitHubClient, org: string, login: string, assignments: SemesterAssignment[]): Promise<Mine> {
   const book = `grades-${login}`;
   const groups = assignments.some((a) => a.group);
   const [repos, grades, updated, audit, teams] = await Promise.all([
@@ -256,7 +285,11 @@ export const patchNotes = (r: Receipts | null | undefined) => (r?.thread ?? []).
 export const readable = (body: string) => body.replace(/<!--[\s\S]*?-->/g, '').trim();
 
 /** The Submission receipts issue of `repo` and its newest receipt; null when the repo has none. */
-export async function readReceipts(client: GitHubClient, org: string, repo: string): Promise<Receipts | null> {
+export function readReceipts(client: GitHubClient, org: string, repo: string): Promise<Receipts | null> {
+  return fresh(client, `receipts|${org.toLowerCase()}|${repo.toLowerCase()}`, () => readReceiptsNow(client, org, repo));
+}
+
+async function readReceiptsNow(client: GitHubClient, org: string, repo: string): Promise<Receipts | null> {
   const pick = (list: GhIssue[]) => {
     const issues = list.filter((i) => !i.pull_request);
     return issues.find((i) => i.title === RECEIPTS_TITLE) ?? issues[0];

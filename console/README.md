@@ -255,7 +255,8 @@ unchanged 304 costs nothing). Opening a semester reads its `student-status.json`
 semester without one: its site, 9 fixed reads plus one per generated file).
 Then the repo list, the gradebook and its last commit, the auditors membership, and one call
 per team; `/user/teams` is read once per session, not per semester. This week and Assignments
-add two calls per private repo (receipts issue, comments). A brief or the home text is
+add two calls per private repo (receipts issue, comments). These student reads are reused for
+a minute (`MINE_FRESH_MS`), so moving between screens does not repeat them. A brief or the home text is
 rendered once per page load (one `/markdown` call, a brief only when its fold opens); a
 site-hosted card picture is one call. Set up adds one call per materials repo. A file costs
 one call, a markdown file or notebook two, an HTML page one per bundle file it uses (at most

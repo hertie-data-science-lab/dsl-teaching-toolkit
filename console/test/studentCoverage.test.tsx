@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, type GhTeam } from '../src/github/client';
 import { discoverEstate, invitationUrl, pendingOrgs, type Semester } from '../src/model/discovery';
-import { forgetMyTeams, knownAuditor, parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
+import { forgetMine, forgetMyTeams, knownAuditor, parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
 import { forgetStudentPrefs, lastVisit, markVisit } from '../src/model/prefs';
 import type { KeyStore } from '../src/auth/types';
 import { SiteSource, homeText, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
@@ -283,6 +283,18 @@ describe('6. the team of a drop-box or external group', () => {
     expect(m.units['assignment-7'].team).toBeNull();
   });
 
+  it('reuses a semester’s own reads for a minute, per session', async () => {
+    const fake = new FakeGitHub().on('GET', /^\/orgs\/[^/]+\/repos/, []);
+    const c = client(fake);
+    const lists = () => fake.seen.filter((x) => x.url.includes('/repos?')).length;
+    await readMine(c, ORG, LOGIN, [box]);
+    await readMine(c, ORG, LOGIN, [box]);
+    expect(lists()).toBe(1);
+    forgetMine(c); // sign-out
+    await readMine(c, ORG, LOGIN, [box]);
+    expect(lists()).toBe(2);
+  });
+
   it('reads /user/teams once per session, not once per semester', async () => {
     const fake = new FakeGitHub()
       .on('GET', /^\/orgs\/[^/]+\/repos/, [])
@@ -292,6 +304,7 @@ describe('6. the team of a drop-box or external group', () => {
     await readMine(c, 'hertie-other-f2026', LOGIN, [box]);
     expect(fake.seen.filter((s) => s.url.includes('/user/teams'))).toHaveLength(1);
     forgetMyTeams(c);
+    forgetMine(c);
     await readMine(c, ORG, LOGIN, [box]);
     expect(fake.seen.filter((s) => s.url.includes('/user/teams'))).toHaveLength(2);
   });
