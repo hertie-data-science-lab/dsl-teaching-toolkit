@@ -403,7 +403,8 @@ same kind of file, twice: in each semester's private `semester-config`, and in t
 public `.github` (counts only, never a handle or an email). `seed.refresh` rewrites every live
 semester's and the course's; the single-semester run of each of the four semester-config dispatch
 targets (scheduler, Sync membership, Send enrolment codes, Sync site) rewrites that semester's;
-every Console run rewrites its semester's and the course's (`status.write_after_op`). It records
+every Console run rewrites its semester's, and the course's after a course op or one of
+`status.COURSE_TOUCHING_OPS` (`status.write_after_op`). It records
 the git shas of its inputs, never a timestamp, so an unchanged render makes no commit. Its
 problems are the teaching team's to fix: students still without a team at an OPEN formation
 window are left out (`status_json.faculty_window_faults`; the schedule digest still lists them),

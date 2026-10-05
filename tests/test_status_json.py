@@ -1074,6 +1074,10 @@ def test_write_after_op_refreshes_the_semester_then_the_course(monkeypatch):
         "semester_org": SEMESTER,
     }
     assert status.write_after_op(request) == 0
+    # A release changes nothing the course file says.
+    assert seen == [(COURSE, SEMESTER)]
+    seen.clear()
+    assert status.write_after_op({**request, "op": "semester.bootstrap"}) == 0
     assert seen == [(COURSE, SEMESTER), (COURSE, None)]
     seen.clear()
     assert status.write_after_op({"op": "assignment.create", "course_org": COURSE}) == 0
@@ -1085,7 +1089,8 @@ def test_write_after_op_never_raises(monkeypatch):
         raise RuntimeError("could not list repos")
 
     monkeypatch.setattr(status, "write", boom)
-    assert status.write_after_op({"course_org": COURSE, "semester_org": SEMESTER}) == 2
+    request = {"op": "semester.check", "course_org": COURSE, "semester_org": SEMESTER}
+    assert status.write_after_op(request) == 2
     assert status.write_after_op({}) == 1
 
 
