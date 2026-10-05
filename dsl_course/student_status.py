@@ -156,8 +156,9 @@ def _list(item: dict) -> dict:
 
 
 def json_schema() -> dict:
-    """The file's shape, every level closed: the allow-list the PII test holds it to, and
-    what the console validates against (`console/schemas/student-status.schema.json`)."""
+    """The file's shape, every level closed and built from the `*_KEYS` tuples: the
+    allow-list the PII test holds it to, and what the console validates against
+    (`console/schemas/student-status.schema.json`)."""
     link = _closed({k: _S for k in LINK_KEYS})
     row_types = {
         "number": _IN,
@@ -182,10 +183,16 @@ def json_schema() -> dict:
         "tbc": _B,
         "max_points": {"type": ["number", "null"]},
         "team_formation": _closed(
-            {"closes_datetime": _S, "max_team_size": _IN}, nullable=True
+            {k: {"max_team_size": _IN}.get(k, _S) for k in TEAM_FORMATION_KEYS},
+            nullable=True,
         ),
         "teams": _list(
-            _closed({"name": _S, "members": {"type": "integer"}, "cap": _IN})
+            _closed(
+                {
+                    k: {"members": {"type": "integer"}, "cap": _IN}.get(k, _S)
+                    for k in TEAM_KEYS
+                }
+            )
         ),
     }
     top_types = {

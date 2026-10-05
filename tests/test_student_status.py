@@ -243,6 +243,25 @@ def test_every_key_at_every_level_is_on_the_allow_list():
     assert _keys(doc) - ALLOWED == set()
 
 
+def _schema_keys(schema: dict, where: str = "") -> set[str]:
+    """Every key path the schema allows, as `_keys` spells them."""
+    out: set[str] = set()
+    for k, sub in schema.get("properties", {}).items():
+        path = f"{where}.{k}" if where else k
+        out.add(path)
+        out |= _schema_keys(sub, path)
+    if "items" in schema:
+        out |= _schema_keys(schema["items"], f"{where}[]")
+    if isinstance(schema.get("additionalProperties"), dict):
+        out |= _schema_keys(schema["additionalProperties"], f"{where}.*")
+    return out
+
+
+def test_the_schema_allows_nothing_the_allow_list_does_not():
+    # The schema is built from the same `*_KEYS` tuples, so the two cannot drift apart.
+    assert _schema_keys(student_status.json_schema()) - ALLOWED == set()
+
+
 def test_the_exported_schema_is_closed_at_every_level_and_the_render_fits_it():
     doc = _render()
     schema = student_status.json_schema()
