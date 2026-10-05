@@ -1120,8 +1120,9 @@ changed (`ghcli.written`, `ghcli.on_write`):
   nothing and forgets that name only;
 - a repo's settings or topics (`PATCH` without `name=`, `topics`, `gh repo edit/archive`)
   forget that repo's metadata and its org's listing, and no file - except a new
-  `default_branch`, which forgets that repo's files;
-- an issue write forgets that repo's issue listing only;
+  `default_branch`, which forgets that repo's files and metadata;
+- an issue write forgets that repo's issue listing only, and an issue CREATE lists the
+  repo afresh first (another run may have opened the same title since);
 - every other write (teams, collaborators, invitations, secrets, Actions settings,
   dispatches) forgets nothing.
 
