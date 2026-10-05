@@ -2204,6 +2204,18 @@ def test_a_renamed_orgs_profile_page_stops_naming_the_dead_org():
     assert out.count("hertie-nlp-f2026") == 5  # heading, prose, link text, both URLs
 
 
+def test_a_course_named_after_its_slug_keeps_its_own_join_link():
+    # `course_name` defaults to the org slug, so the seeded page can open on `# hertie-dl`
+    # while every link names the semester org `hertie-dl-f2026`. That heading is a course
+    # name, not a former org name: rewriting it once turned the Join link into
+    # `github.com/hertie-dl-f2026-f2026/join`, an org that does not exist.
+    page = profile_readme.render_profile_readme(
+        "hertie-dl-f2026", "hertie-dl", [], True, central_ref="release"
+    )
+    assert page.startswith("<!--") and "\n# hertie-dl\n" in page
+    assert profile_readme.retitle_renamed_org(page, "hertie-dl-f2026") == (page, None)
+
+
 def test_a_page_already_naming_its_own_org_is_untouched():
     page = "# hertie-nlp-f2026.\n\nWelcome to **hertie-nlp-f2026**.\n"
     assert profile_readme.retitle_renamed_org(page, "hertie-nlp-f2026") == (page, None)
