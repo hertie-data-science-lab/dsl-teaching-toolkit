@@ -7,7 +7,7 @@ import { useSave } from '../edit/save';
 import { YamlText } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { fmtShort } from '../model/format';
-import { ROLE_WORD, ROSTER_HEADER, parseInstructors, type Person } from '../model/people';
+import { ROLE_WORD, ROSTER_HEADER, parseInstructors, sameHandle, type Person } from '../model/people';
 import { checkAccess, sendCodes } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import { PERSON, displayOnly } from '../tiers/people';
@@ -70,7 +70,7 @@ function Students(p: ReadyProps) {
   const doSave = async () => {
     if (!table || file.kind !== 'ready') return;
     if (badEmail.length) return setSave({ kind: 'bad', text: `${badEmail.length} row${badEmail.length > 1 ? 's have' : ' has'} an email that is not an address; no code can be sent to it.` });
-    const switched = replacement ? [] : base.map((r, i) => (edits[i + 2]?.github_handle ?? r.github_handle ?? '').trim()).filter((h, i) => h.toLowerCase() !== (base[i].github_handle ?? '').trim().toLowerCase());
+    const switched = replacement ? [] : base.map((r, i) => (edits[i + 2]?.github_handle ?? r.github_handle ?? '').trim()).filter((h, i) => !sameHandle(h, base[i].github_handle ?? ''));
     if (switched.includes('')) return setSave({ kind: 'bad', text: 'A joined student’s GitHub handle cannot be blank. Put back the old one, or type their new account.' });
     for (const handle of switched) {
       setSave({ kind: 'busy', text: `Checking that ${handle} exists on GitHub…` });
@@ -258,7 +258,7 @@ function Instructors(p: ReadyProps) {
     if (Object.keys(errs).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
     const handle = String(v.github_handle ?? '').trim();
     const before = editing.idx === 'new' ? null : people[editing.idx];
-    if (handle && (!before || before.handle.toLowerCase() !== handle.toLowerCase())) {
+    if (handle && (!before || !sameHandle(before.handle, handle))) {
       setSave({ kind: 'busy', text: `Checking that ${handle} exists on GitHub…` });
       let ok = false;
       try {

@@ -24,7 +24,7 @@ import * as defs from '../src/ops/defs';
 import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
 import { ArchiveScreen } from '../src/screens/Archive';
-import { DetailsScreen, MaterialsScreen, WebsiteScreen, courseFileAfter, detailsOf } from '../src/screens/CourseEdit';
+import { DetailsScreen, MaterialsScreen, WebsiteScreen, courseFileAfter, detailsOf, missingAdmin } from '../src/screens/CourseEdit';
 import { AssignmentScreen } from '../src/screens/Assignments';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
@@ -422,6 +422,18 @@ describe('editing screens', () => {
     expect(html(<DetailsScreen {...cp} files={new StaticFiles(none, {}, TREES)} />)).toContain('aria-live="polite">Off</span>');
     const broken = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: [\n' }, {}, TREES);
     expect(html(<DetailsScreen {...cp} files={broken} />)).toMatch(/id="cd-web" aria-describedby="cd-web-state" disabled\/>.*opencourse.yml does not parse; fix it in Manage\./);
+  });
+  it('skips the account check when only a course admin handle’s case changes', async () => {
+    const src = 'course_name: ML\npeople:\n  course_admins:\n    - github_handle: octo\n      email: o@x.edu\n';
+    const meta = obj(new YamlText(src).toJS());
+    const before = detailsOf(meta);
+    const after = { ...before, admins: [{ ...before.admins[0], github_handle: 'Octo' }] };
+    const out = courseFileAfter(src, before, after, meta);
+    expect('text' in out && out.text).toContain('github_handle: Octo');
+    const looked: string[] = [];
+    const env = { client: { userExists: async (h: string) => (looked.push(h), false) } } as unknown as Env;
+    expect(await missingAdmin(env, before.admins, after.admins)).toBeNull();
+    expect(looked).toEqual([]);
   });
   it('writes a contact and a licence into dsl-course.yml and a file without them still saves', () => {
     const src = 'course_name: ML\ncourse_code: E1\n';

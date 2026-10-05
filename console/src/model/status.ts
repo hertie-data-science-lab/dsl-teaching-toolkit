@@ -8,6 +8,7 @@ import schema from '../../schemas/status.schema.json';
 import type { GitHubClient, Tree } from '../github/client';
 import { assignmentIdent, fmtDay, releaseIdent } from './format';
 import { DEFAULT_TIMEZONE } from './policy';
+import { sameHandle } from './people';
 import { instant } from './student';
 import type { Operation, Problem, Status } from './types';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from './names';
@@ -189,5 +190,5 @@ export function recentActivity(lists: Activity[][], n = 5): Activity[] {
 export function whoWord(actor: string | undefined, login: string): string | null {
   if (actor === undefined) return null;
   if (!actor) return 'automation';
-  return actor.toLowerCase() === login.toLowerCase() ? 'you' : actor;
+  return sameHandle(actor, login) ? 'you' : actor;
 }

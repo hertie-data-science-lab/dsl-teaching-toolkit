@@ -3,6 +3,9 @@
 
 import { parse } from 'yaml';
 
+/** Whether two GitHub handles name the same account: GitHub ignores case. */
+export const sameHandle = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
 /** RFC 4180 rows; a leading BOM is dropped, as the engine's strip_bom does. */
 export function parseCsv(text: string): string[][] {
   const src = text.replace(/^﻿/, '');
