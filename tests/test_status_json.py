@@ -1939,6 +1939,30 @@ def test_a_shown_entry_landing_in_a_kindless_folder_is_a_problem():
     assert status_json.kindless_entry_problems(facts) == []
 
 
+def test_a_whole_folder_copy_is_read_as_that_folder():
+    # `lectures` copied whole is a lecture row, not a root landing in `materials`.
+    sched = _sched(
+        "timezone: Europe/Berlin\n"
+        "releases:\n"
+        "  lectures:\n"
+        "    event_datetime: 2026-09-01T10:00\n"
+        "    deploy:\n"
+        "    - course_source_repo: cm\n"
+        "      course_source_path: lectures\n"
+        "  misc:\n"
+        "    event_datetime: 2026-09-02T10:00\n"
+        "    deploy:\n"
+        "    - course_source_repo: cm\n"
+        "      course_source_path: misc\n"
+    )
+    facts = _semester(sched=sched)
+    assert [p["id"] for p in status_json.kindless_entry_problems(facts)] == [
+        "kinds:misc"
+    ]
+    facts.aliases = {"cm": {"misc": "lab"}}
+    assert status_json.kindless_entry_problems(facts) == []
+
+
 def test_the_kind_folder_why_and_never_released_folders_skipped():
     # Only never-released folders: as good as none.
     only = _materials("m", folders=("solution",))

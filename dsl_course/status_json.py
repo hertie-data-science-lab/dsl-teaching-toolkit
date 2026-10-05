@@ -875,8 +875,9 @@ def kindless_entry_problems(facts: SemesterFacts) -> list[dict]:
         if r.kind or not r.deploy or not r.show_on_site:
             continue
         first = r.deploy[0]
-        section = deploy_section(first)
-        if alias_kind(section, facts.aliases.get(first.course_source_repo, {})):
+        kinds = facts.aliases.get(first.course_source_repo, {})
+        section = deploy_section(first, kinds)
+        if alias_kind(section, kinds):
             continue
         where = (
             f"{section}/"
