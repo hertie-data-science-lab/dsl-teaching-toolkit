@@ -138,32 +138,41 @@ export function termOfFacts(facts: Pick<SemesterFacts, 'start' | 'end'>): Term |
 }
 
 /**
- * The course banner's semester line for a student, as the instructor's (the engine's `semester_weeks`):
- * "Week N of M", clamped to the last week and absent before week 1, and the dates. Each is
- * left out when the facts do not carry the dates (an older file, or the site).
+ * The semester's week in words, for instructor and student cards alike (`week`/`weeks` as the
+ * engine's `semester_weeks` counts them: both null while a date is unset, 0 before the start):
+ * "Week 3 of 15", "Starts Mon 7 Sep" before the start ("Before week 1" when the start is not
+ * known), else nothing.
+ */
+export function weekPhrase(week: number | null | undefined, weeks: number | null | undefined, start: string | null | undefined, tz: string): string {
+  if (week && weeks) return `Week ${week} of ${weeks}`;
+  if (week !== 0) return '';
+  return start ? `Starts ${fmtDay(start, tz, Number(start.slice(0, 4)))}` : 'Before week 1';
+}
+
+/**
+ * The course banner's semester line for a student, as the instructor's: "Week N of M" from
+ * week 1 (clamped to the last week), `starts` before it, and the dates. The week is worked out
+ * from the facts' dates (the site carries no week), and each part is left out when the facts
+ * do not carry the dates (an older file, or the site).
  */
 export function semesterLine(facts: Pick<SemesterFacts, 'start' | 'end' | 'timezone'>, now: number): { week?: string; starts?: string; dates?: string } {
   const term = termOfFacts(facts);
   if (!term) return {};
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const w = weekOf(new Date(now).toISOString(), term, tz);
+  const week = w === 'before' ? 0 : w === 'after' ? term.weeks : w;
+  const phrase = weekPhrase(week, term.weeks, term.start, tz);
   const year = Number(term.start.slice(0, 4));
   return {
-    week: w === 'before' ? undefined : `Week ${w === 'after' ? term.weeks : w} of ${term.weeks}`,
-    starts: w === 'before' ? `Starts ${fmtDay(term.start, tz, year)}` : undefined,
+    week: week ? phrase : undefined,
+    starts: week ? undefined : phrase,
     dates: `${fmtDay(term.start, tz, year)} to ${fmtDay(term.end, tz, year)}`,
   };
 }
 
-/**
- * An instructor's semester card's week, from the status (`semester_weeks`: both null while a
- * date is unset, 0 before the start): "Week 3 of 15", "Starts Mon 7 Sep" before the start
- * ("Before week 1" when the start is not in the status), else nothing.
- */
+/** An instructor's semester card's week, from the status (`weekPhrase`). */
 export function weekWords(sem: Pick<SemesterStatus, 'week' | 'weeks' | 'start' | 'timezone'>): string {
-  if (sem.week && sem.weeks) return `Week ${sem.week} of ${sem.weeks}`;
-  if (sem.week !== 0) return '';
-  return sem.start ? `Starts ${fmtDay(sem.start, sem.timezone || DEFAULT_TIMEZONE, Number(sem.start.slice(0, 4)))}` : 'Before week 1';
+  return weekPhrase(sem.week, sem.weeks, sem.start, sem.timezone || DEFAULT_TIMEZONE);
 }
 
 /** The event word a row's title lacks: a hand-out and a due row are titled by their assignment alone. */
