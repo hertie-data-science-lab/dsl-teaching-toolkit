@@ -105,8 +105,8 @@ An instructor always lands on **All courses** (decision 0030): every course the 
 from the toolkit's public `orgs.yml`, in three sections, **DSL courses**, **This semester**
 (running semesters) and **Past semesters** (archived or past their end, newest first, ten at a
 time with Show more; always shown, saying so when the person has none). A semester whose end
-cannot be read ends on a date its key implies (a fall semester on 1 February, spring 1 August,
-summer 1 October, winter 1 April). The person's own rows are in colour and ordered by what needs
+cannot be read ends on a last day its key implies (a fall semester on 31 January, spring 31 July,
+summer 30 September, winter 31 March), over once the next day starts in its timezone. The person's own rows are in colour and ordered by what needs
 them, each card with the course code on a quiet line under its title and naming their role
 (course admin from `dsl-course.yml`, else instructor or teaching assistant from the newest
 running semester's `instructors.yml`, else "you teach on this course"); the others are greyed,
