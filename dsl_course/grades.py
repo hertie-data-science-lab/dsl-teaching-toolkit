@@ -115,8 +115,8 @@ from .setting_readers import (
     SPEC_KEYS,
     Dropped,
     as_decimal,
-    penalty_fault,
     question_files,
+    read_penalty,
     read_settings,
     refuse_renamed,
 )
@@ -921,14 +921,9 @@ def score_total(
 def penalty_rate(text: object) -> Decimal | None:
     """`late_penalty_per_day` as a fraction: `10%` and `0.1` both give 0.10.
 
-    None for anything `penalty_fault` refuses - which `parse_grading_spec` has already
+    None for anything `read_penalty` refuses - which `parse_grading_spec` has already
     said out loud, once, when the assignment's definition was read."""
-    if penalty_fault(text):
-        return None
-    raw = "" if text is None else str(text).strip()
-    if not raw:
-        return None
-    return as_decimal(raw[:-1]) / 100 if raw.endswith("%") else as_decimal(raw)
+    return read_penalty(text)[0]
 
 
 def final_grade(

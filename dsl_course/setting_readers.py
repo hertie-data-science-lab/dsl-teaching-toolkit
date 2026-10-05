@@ -64,30 +64,36 @@ _PENALTY_FAULTS = {
 }
 
 
-def penalty_fault(text: object) -> str:
-    """Why `late_penalty_per_day` cannot be used, as a `_PENALTY_FAULTS` key, or "".
+def read_penalty(text: object) -> tuple[Decimal | None, str]:
+    """`late_penalty_per_day` as `(fraction, fault)`: `10%` and `0.1` both give 0.10 and
+    no fault. The ONE reader of the key - the setting's parse, the grade arithmetic and
+    the fault text all go through it, so an edge case is fixed once.
 
-    Blank and absent are not faults - plenty of assignments accept no late work at all, or
-    accept it without a deduction."""
-    if text is None:
-        return ""
-    raw = str(text).strip()
+    The fault is a `_PENALTY_FAULTS` key, with the rate None. Blank and absent are
+    `(None, "")`, not faults - plenty of assignments accept no late work at all, or accept
+    it without a deduction. A bare `0` is a rate somebody wrote (no deduction)."""
+    raw = "" if text is None else str(text).strip()
     if not raw:
-        return ""
+        return None, ""
     percent = raw.endswith("%")
     rate = as_decimal(raw[:-1] if percent else raw)
     if rate is None:
-        return "unwritten"
+        return None, "unwritten"
     if percent:
         rate /= 100
     elif rate >= 1:
         # A BARE `10` is read neither as 1000% nor, silently, as 10%. The two spellings a
         # course actually writes are the percentage and the fraction; guessing between
         # them on a number that multiplies every late mark is not a guess worth making.
-        return "bare"
+        return None, "bare"
     if rate < 0:
-        return "negative"
-    return "over" if rate > 1 else ""
+        return None, "negative"
+    return (None, "over") if rate > 1 else (rate, "")
+
+
+def penalty_fault(text: object) -> str:
+    """Why `late_penalty_per_day` cannot be used, as a `_PENALTY_FAULTS` key, or ""."""
+    return read_penalty(text)[1]
 
 
 class Dropped(str):
@@ -348,8 +354,7 @@ def _penalty(value: object, where: str, dropped: list[str]) -> str | None:
     raw = "" if value is None else str(value).strip()
     if not raw:
         return None
-    fault = penalty_fault(raw)
-    if fault:
+    if fault := penalty_fault(raw):
         dropped.append(
             Dropped(
                 where,

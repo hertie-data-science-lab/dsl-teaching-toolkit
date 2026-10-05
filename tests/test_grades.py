@@ -3296,3 +3296,19 @@ def test_a_held_mark_is_never_re_stamped_as_returned(tmp_path, monkeypatch):
     assert [repo for repo, _f, _d in again["gradebooks"]] == ["grades-ada-l"]
     ((_cfg, cfg_files, _d),) = again["config"]
     assert _book_row(cfg_files[grades.DISTRIBUTED_PATH], "ben-k")[1] == stale
+
+
+def test_one_penalty_reader_gives_the_rate_and_the_fault_together():
+    # The setting's parse, the grade arithmetic and the fault text read the key through
+    # one function, so `0` and `10%` mean the same thing to all three.
+    from decimal import Decimal
+
+    from dsl_course.setting_readers import read_penalty
+
+    assert read_penalty("10%") == (Decimal("0.1"), "")
+    assert read_penalty("0.1") == (Decimal("0.1"), "")
+    assert read_penalty(0) == (Decimal(0), "")
+    assert read_penalty(None) == read_penalty("  ") == (None, "")
+    for raw, fault in (("10", "bare"), ("-5%", "negative"), ("x", "unwritten")):
+        assert read_penalty(raw) == (None, fault)
+    assert read_penalty("150%") == (None, "over")
