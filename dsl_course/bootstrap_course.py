@@ -53,7 +53,7 @@ from .log import CLIParser, log, log_err, log_ok, log_step
 from .opencourse import OPENCOURSE_FILE
 from .opencourse import seed_text as opencourse_seed
 from .profile_readme import update_profile_readme
-from .repos import create_repo, repo_exists, repo_is_private, set_repo_topics
+from .repos import create_repo, repo_is_private, repo_missing, set_repo_topics
 from .welcome import (
     CONFIG_SCAFFOLDS,
     refresh_config_system_files,
@@ -134,10 +134,16 @@ def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
     private/faculty-only, the same trust tier as `.github`.
 
     The value goes over stdin - `gh secret set` reads it from there whenever `--body` is
-    omitted - never argv, so it is not visible in `ps` to anyone on the runner."""
-    infra = [r for r in (".github", JOIN_REPO, CONFIG_REPO) if repo_exists(org, r)] or [
-        ".github"
-    ]
+    omitted - never argv, so it is not visible in `ps` to anyone on the runner.
+
+    A repo is left out only on a definite 404 (`repo_missing`). The repo list is a durable
+    setting the nightly refresh never corrects, so a probe that merely failed must not drop
+    `join` from it: onboarding would then run without the token until someone re-ran
+    bootstrap. Kept in, a repo that turns out not to exist fails the `gh secret set` loudly
+    instead."""
+    infra = [
+        r for r in (".github", JOIN_REPO, CONFIG_REPO) if not repo_missing(org, r)
+    ] or [".github"]
     code, out = gh(
         "secret",
         "set",

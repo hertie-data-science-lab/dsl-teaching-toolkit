@@ -109,7 +109,7 @@ def test_the_maintainer_address_travels_by_the_org_secret_route(monkeypatch):
     # PRIVATE infra repo gets the mirror the Free-plan delivery gap needs.
     calls: list = []
     monkeypatch.setenv(mailer.MAINTAINER_ENV, ADDRESS)
-    monkeypatch.setattr(bc, "repo_exists", lambda org, r: True)
+    monkeypatch.setattr(bc, "repo_missing", lambda org, r: False)
     monkeypatch.setattr(bc, "repo_is_private", lambda org, r: r == "semester-config")
     monkeypatch.setattr(bc, "gh", lambda *a, **k: calls.append((a, k)) or (0, ""))
 
@@ -129,7 +129,7 @@ def test_the_maintainer_address_never_reaches_the_log(monkeypatch, capsys):
     # The log of a course org's `.github` is world-readable, and this address is a real
     # person's inbox. The NAME is what a maintainer needs to see; the value never is.
     monkeypatch.setenv(mailer.MAINTAINER_ENV, ADDRESS)
-    monkeypatch.setattr(bc, "repo_exists", lambda org, r: True)
+    monkeypatch.setattr(bc, "repo_missing", lambda org, r: False)
     monkeypatch.setattr(bc, "repo_is_private", lambda org, r: False)
     monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
 
@@ -211,7 +211,7 @@ def test_a_failed_admin_address_write_reds_the_bootstrap(monkeypatch):
 
 def test_no_course_admin_address_ever_reaches_the_log(monkeypatch, capsys):
     monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, ADMINS)
-    monkeypatch.setattr(bc, "repo_exists", lambda org, r: r == ".github")
+    monkeypatch.setattr(bc, "repo_missing", lambda org, r: r != ".github")
     monkeypatch.setattr(bc, "repo_is_private", lambda org, r: False)
     monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
 
