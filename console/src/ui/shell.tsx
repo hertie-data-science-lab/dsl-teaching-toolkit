@@ -4,6 +4,7 @@
 
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
+import { readText, safeStorage, writeText } from '../auth/types';
 import type { GhUser } from '../github/client';
 import type { Course, CohortRef, Semester } from '../model/discovery';
 import { semesterOver, termRank } from '../model/catalogue';
@@ -16,6 +17,14 @@ import { Bldg, Ext, Gh, Pin } from './icons';
 function initials(u: GhUser): string {
   const n = (u.name || u.login).split(/\s+/).filter(Boolean);
   return (n.length > 1 ? n[0][0] + n[n.length - 1][0] : n[0].slice(0, 2)).toUpperCase();
+}
+
+const THEME_KEY = 'console-theme';
+
+/** The theme chosen in this browser ('dark' or 'light'), or null to follow the system. */
+export function savedTheme(): 'dark' | 'light' | null {
+  const t = readText(safeStorage('local'), THEME_KEY);
+  return t === 'dark' || t === 'light' ? t : null;
 }
 
 function useTheme(): [boolean, () => void] {
@@ -31,11 +40,7 @@ function useTheme(): [boolean, () => void] {
     () => {
       const next = effective() ? 'light' : 'dark';
       root?.setAttribute('data-theme', next);
-      try {
-        localStorage.setItem('console-theme', next);
-      } catch {
-        /* storage unavailable */
-      }
+      writeText(safeStorage('local'), THEME_KEY, next);
       setDark(next === 'dark');
     },
   ];

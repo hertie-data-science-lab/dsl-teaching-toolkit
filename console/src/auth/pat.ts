@@ -1,6 +1,6 @@
 import { GitHubError, wait, type Fetch, type GhUser, API } from '../github/client';
 import { PROBE_LIMIT } from '../model/discovery';
-import { SignInError, browserStore, type Auth, type TokenStore } from './types';
+import { SignInError, readText, remove, safeStorage, writeText, type Auth, type KeyStore } from './types';
 
 export const TOKEN_KEY = 'dsl-console-token';
 export const REQUIRED_SCOPES = ['repo', 'workflow'];
@@ -30,13 +30,13 @@ export class PatAuth implements Auth {
   private tok: string | null = null;
   private who: GhUser | null = null;
   private seen: Reach | null = null;
-  private readonly store: TokenStore | null;
+  private readonly store: KeyStore | null;
   private readonly fetchFn: Fetch;
   private readonly sleep: (ms: number) => Promise<void>;
 
-  constructor(opts: { fetch?: Fetch; store?: TokenStore | null; sleep?: (ms: number) => Promise<void> } = {}) {
+  constructor(opts: { fetch?: Fetch; store?: KeyStore | null; sleep?: (ms: number) => Promise<void> } = {}) {
     this.fetchFn = opts.fetch ?? ((i, init) => globalThis.fetch(i, init));
-    this.store = opts.store === undefined ? browserStore() : opts.store;
+    this.store = opts.store === undefined ? safeStorage('session') : opts.store;
     this.sleep = opts.sleep ?? wait;
   }
 
@@ -75,11 +75,7 @@ export class PatAuth implements Auth {
     this.seen = header === null ? await this.probe(t, user.login) : null;
     this.tok = t;
     this.who = user;
-    try {
-      this.store?.setItem(TOKEN_KEY, t);
-    } catch {
-      /* storage unavailable: the session lasts until reload */
-    }
+    writeText(this.store, TOKEN_KEY, t); // refused: the session lasts until reload
     return user;
   }
 
@@ -87,11 +83,7 @@ export class PatAuth implements Auth {
     this.tok = null;
     this.who = null;
     this.seen = null;
-    try {
-      this.store?.removeItem(TOKEN_KEY);
-    } catch {
-      /* ignore */
-    }
+    remove(this.store, TOKEN_KEY);
   }
 
   /**
@@ -118,12 +110,7 @@ export class PatAuth implements Auth {
    * a 5xx): kept, `onRetry` told, and tried again until GitHub answers.
    */
   async restore(onRetry?: () => void): Promise<GhUser | null> {
-    let saved: string | null = null;
-    try {
-      saved = this.store?.getItem(TOKEN_KEY) ?? null;
-    } catch {
-      saved = null;
-    }
+    const saved = readText(this.store, TOKEN_KEY);
     if (!saved) return null;
     for (let i = 0; ; i++) {
       try {

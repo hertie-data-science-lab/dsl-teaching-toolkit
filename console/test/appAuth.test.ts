@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APP_PENDING_KEY, APP_SESSION_KEY, AppAuth, AUTHORIZE_URL, NOT_CONFIGURED, type AppAuthOptions } from '../src/auth/app';
 import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth, TOKEN_KEY } from '../src/auth/pat';
-import type { TokenStore } from '../src/auth/types';
+import type { KeyStore } from '../src/auth/types';
 import { FakeGitHub, json } from './fake';
 
 const RELAY = 'https://relay.example';
@@ -10,7 +10,7 @@ const HOME = 'https://console.example/app/';
 const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: 'a' };
 const HOUR = 3600 * 1000;
 
-function store(): TokenStore & { map: Map<string, string> } {
+function store(): KeyStore & { map: Map<string, string> } {
   const map = new Map<string, string>();
   return { map, getItem: (k) => map.get(k) ?? null, setItem: (k, v) => void map.set(k, v), removeItem: (k) => void map.delete(k) };
 }

@@ -8,7 +8,8 @@ import { act } from 'preact/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { courseFolder, defaultItem, folderExample, mainLabel, openItems, orgFolder, platformOf, repoCloneCommand, schemeOk, withOverride, type RepoRef, type Setup } from '../src/model/open';
-import { forgetStudentPrefs, rememberOpen, resetKeptSetups, saveYourSetup, yourSetup, type PrefStore } from '../src/model/prefs';
+import { forgetStudentPrefs, rememberOpen, resetKeptSetups, saveYourSetup, yourSetup } from '../src/model/prefs';
+import type { KeyStore } from '../src/auth/types';
 import { SetupScreen } from '../src/screens/Setup';
 import { OpenButton } from '../src/ui/OpenButton';
 
@@ -17,11 +18,11 @@ const ORG = 'hertie-dsl-demo-course-e1234';
 const REF: RepoRef = { org: ORG, repo: 'assignment-2-f2026' };
 const GH = `https://github.com/${ORG}/assignment-2-f2026`;
 
-function memStore(): PrefStore & { data: Map<string, string> } {
+function memStore(): KeyStore & { data: Map<string, string> } {
   const data = new Map<string, string>();
   return { data, getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v), removeItem: (k) => void data.delete(k), get length() { return data.size; }, key: (i) => [...data.keys()][i] ?? null };
 }
-const refusing: PrefStore = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
+const refusing: KeyStore = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
 const hrefs = (setup: Setup | null, ref = REF) => Object.fromEntries(openItems(ref, setup).map((i) => [i.choice, i.href]));
 
 describe('Your setup in this browser', () => {

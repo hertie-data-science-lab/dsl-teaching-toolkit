@@ -5,33 +5,20 @@
 // wizard works without it.
 
 import { useState } from 'preact/hooks';
+import { readJson, remove, safeStorage, writeJson } from '../auth/types';
 
 const PREFIX = 'dsl-console:wizard:';
-
-function store(): Storage | null {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
-  } catch {
-    return null;
-  }
-}
+const store = () => safeStorage('local');
 
 export function loadDraft<T extends object>(key: string, fallback: T): T {
-  try {
-    const raw = store()?.getItem(PREFIX + key);
-    return raw ? { ...fallback, ...(JSON.parse(raw) as Partial<T>) } : fallback;
-  } catch {
-    return fallback;
-  }
+  const v = readJson<Partial<T>>(store(), PREFIX + key);
+  return v && typeof v === 'object' ? { ...fallback, ...v } : fallback;
 }
 
+/** Refused storage: the wizard still works; it just will not remember. */
 export function saveDraft(key: string, value: object | null): void {
-  try {
-    if (value === null) store()?.removeItem(PREFIX + key);
-    else store()?.setItem(PREFIX + key, JSON.stringify(value));
-  } catch {
-    /* the wizard still works; it just will not remember */
-  }
+  if (value === null) remove(store(), PREFIX + key);
+  else writeJson(store(), PREFIX + key, value);
 }
 
 /** A draft held in state and mirrored to storage; `clear` forgets it once the wizard is done. */
@@ -56,22 +43,12 @@ export const INSTALL_RETURN_MS = 60 * 60 * 1000;
 
 /** The wizard step (`?course=x#new-semester-1`) to reopen when GitHub sends the person back from installing the app. */
 export function rememberInstallReturn(where: string, now = Date.now()): void {
-  try {
-    store()?.setItem(INSTALL_RETURN, JSON.stringify({ where, at: now }));
-  } catch {
-    /* the return lands on New course instead */
-  }
+  writeJson(store(), INSTALL_RETURN, { where, at: now }); // refused: the return lands on New course instead
 }
 
 /** The remembered step, forgotten as it is read; null when there is none or it is over an hour old. */
 export function takeInstallReturn(now = Date.now()): string | null {
-  try {
-    const s = store();
-    const raw = s?.getItem(INSTALL_RETURN) ?? null;
-    s?.removeItem(INSTALL_RETURN);
-    const v = raw ? (JSON.parse(raw) as { where?: unknown; at?: unknown }) : null;
-    return v && typeof v.where === 'string' && typeof v.at === 'number' && now - v.at <= INSTALL_RETURN_MS ? v.where : null;
-  } catch {
-    return null;
-  }
+  const v = readJson<{ where?: unknown; at?: unknown }>(store(), INSTALL_RETURN);
+  remove(store(), INSTALL_RETURN);
+  return v && typeof v.where === 'string' && typeof v.at === 'number' && now - v.at <= INSTALL_RETURN_MS ? v.where : null;
 }

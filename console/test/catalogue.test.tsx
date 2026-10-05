@@ -13,7 +13,8 @@ import { GitHubClient } from '../src/github/client';
 import { endedNow, loadCatalogue, over, parseOrgs, pool, runningNow, semesterOver, termRank } from '../src/model/catalogue';
 import type { Loaded } from '../src/model/status';
 import { discoverEstate, studentSemesters, type Course, type Semester } from '../src/model/discovery';
-import { myCoursesOnly, saveMyCoursesOnly, type PrefStore } from '../src/model/prefs';
+import { myCoursesOnly, saveMyCoursesOnly } from '../src/model/prefs';
+import type { KeyStore } from '../src/auth/types';
 import { HomeScreen } from '../src/screens/Home';
 import { StaticFiles } from '../src/model/files';
 import { CONFIG_REPO, INSTRUCTORS_FILE } from '../src/model/names';
@@ -224,7 +225,7 @@ describe('loading the catalogue', () => {
 describe('the My courses pref', () => {
   const memory = () => {
     const m = new Map<string, string>();
-    return { m, store: { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) } as PrefStore };
+    return { m, store: { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) } as KeyStore };
   };
   it('is on by default, round-trips per login and per section, and survives a refusing store', () => {
     const { store } = memory();
@@ -235,7 +236,7 @@ describe('the My courses pref', () => {
     expect(myCoursesOnly('other', 'courses', store)).toBe(true);
     saveMyCoursesOnly('octo', 'courses', true, store);
     expect(myCoursesOnly('octo', 'courses', store)).toBe(true);
-    const refusing: PrefStore = { getItem: () => { throw new Error('no'); }, setItem: () => { throw new Error('no'); } };
+    const refusing: KeyStore = { getItem: () => { throw new Error('no'); }, setItem: () => { throw new Error('no'); } };
     expect(() => saveMyCoursesOnly('octo', 'past', false, refusing)).not.toThrow();
     expect(myCoursesOnly('octo', 'past', refusing)).toBe(true);
     expect(myCoursesOnly('octo', 'past', null)).toBe(true);

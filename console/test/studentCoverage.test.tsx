@@ -9,7 +9,8 @@ import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, type GhTeam } from '../src/github/client';
 import { discoverEstate, invitationUrl, pendingOrgs, type Semester } from '../src/model/discovery';
 import { forgetMyTeams, knownAuditor, parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
-import { forgetStudentPrefs, lastVisit, markVisit, resetVisits, type PrefStore } from '../src/model/prefs';
+import { forgetStudentPrefs, lastVisit, markVisit, resetVisits } from '../src/model/prefs';
+import type { KeyStore } from '../src/auth/types';
 import { SiteSource, homeText, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
 import { ArchivedSemester, AboutView, AssignmentsView, AuditorNote, InstructorsView, MarksView, ScheduleView, WeekList } from '../src/screens/Student';
@@ -68,11 +69,11 @@ function receiptsFake(): FakeGitHub {
     ]);
 }
 
-function memStore(): PrefStore & { data: Map<string, string> } {
+function memStore(): KeyStore & { data: Map<string, string> } {
   const data = new Map<string, string>();
   return { data, getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
 }
-const refusing: PrefStore = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
+const refusing: KeyStore = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
 
 describe('1. the assignment brief', () => {
   it('is the page body out of its raw guard, only once handed out', async () => {
@@ -181,7 +182,7 @@ describe('3. the whole receipts thread', () => {
       [`dsl-console-visit:${LOGIN}:${ORG}`, '1'], [`dsl-console-visit:${LOGIN}:other-f2026`, '2'], [`dsl-console-paths:${LOGIN}`, '{}'],
       ['dsl-console-visit:someone:x', '3'], ['dsl-console-paths:someone', '{}'], ['console-theme', 'dark'],
     ]);
-    const store: PrefStore = { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v), removeItem: (k) => void data.delete(k), get length() { return data.size; }, key: (i) => [...data.keys()][i] ?? null };
+    const store: KeyStore = { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v), removeItem: (k) => void data.delete(k), get length() { return data.size; }, key: (i) => [...data.keys()][i] ?? null };
     resetVisits();
     lastVisit(LOGIN, ORG, store);
     forgetStudentPrefs(LOGIN, store);

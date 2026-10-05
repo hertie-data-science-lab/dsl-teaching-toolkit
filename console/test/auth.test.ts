@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { PatAuth, RETRY_MS, TOKEN_KEY } from '../src/auth/pat';
-import type { TokenStore } from '../src/auth/types';
+import type { KeyStore } from '../src/auth/types';
 import { FakeGitHub, json } from './fake';
 
-function store(): TokenStore & { map: Map<string, string> } {
+function store(): KeyStore & { map: Map<string, string> } {
   const map = new Map<string, string>();
   return { map, getItem: (k) => map.get(k) ?? null, setItem: (k, v) => void map.set(k, v), removeItem: (k) => void map.delete(k) };
 }
