@@ -504,6 +504,35 @@ def test_release_states_follow_the_destination():
     )
 
 
+def test_a_release_with_one_copy_landed_and_one_to_come_is_not_late():
+    sched = _sched(
+        SCHEDULE.replace(
+            """        course_source_path: lectures/05_trees
+""",
+            """        course_source_path: lectures/05_trees
+        deploy_datetime: 2026-09-30T10:00
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/05_trees
+""",
+        )
+    )
+    landed = {"materials": {"lectures", "lectures/05_trees"}}
+    first_out = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+
+    def s5(**over):
+        doc = _render(
+            semester=_semester(**({"sched": sched, "dest_paths": landed} | over)),
+            now=first_out,
+        )
+        return next(r for r in doc["releases"] if r["id"] == "s5")["state"]
+
+    assert s5() == "planned"
+    # The labs copy cannot be made when its moment comes: skipped, not late.
+    assert s5(schedule_faults=[_missing_s5()]) == "will_be_skipped"
+    # The lectures copy is due and missing: late.
+    assert s5(dest_paths={"materials": {"lectures"}}) == "late"
+
+
 def test_an_undeclared_kind_is_inferred_through_the_repos_aliases_and_says_so():
     semester = _semester()
     semester.aliases = {"course-materials-f2026": {"lectures": "drop-in"}}
@@ -699,6 +728,30 @@ def test_a_group_assignment_with_no_copies_after_hand_out_is_forming_teams():
     assert row["state"] == "blocked"
 
 
+@pytest.mark.parametrize("via", ["external", "shared_dropbox_repo"])
+@pytest.mark.parametrize("kind", ["individual", "group"])
+def test_a_shape_with_no_repo_per_unit_is_open_once_handed_out(via, kind):
+    # Handed out 15 Sep, due 27 Sep: no unit has a repo of its own, so the hand-out
+    # itself is what opens it, as the student file's `handed_out` says.
+    spec = grades.GradingSpec(type=kind, submit_via=via, team_formation="assigned")
+    semester = _semester(specs={"assignment-2": spec})
+    row = next(
+        a
+        for a in _render(semester=semester)["assignments"]
+        if a["slug"] == "assignment-2"
+    )
+    assert row["state"] == "open"
+    entry = semester.sched.assignments["assignment-2"]
+    assert status_json.handed_out("assignment-2", entry, frozenset(), NOW)
+    before = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
+    row = next(
+        a
+        for a in _render(semester=semester, now=before)["assignments"]
+        if a["slug"] == "assignment-2"
+    )
+    assert row["state"] == "declared"
+
+
 def test_a_group_assignment_nobody_declared_a_formation_for_is_forming_teams(
     monkeypatch,
 ):
@@ -750,6 +803,35 @@ def test_marks_are_counted_off_the_sheet_and_returned_once_every_unit_is():
     assert state({"ada": later}) == (False, "marking")
     # A mark changed on the sheet after the return is not returned yet.
     assert state(back, changed=later + timedelta(hours=1)) == (False, "marking")
+
+
+def test_the_returned_record_keeps_an_assignment_returned_after_a_sheet_commit():
+    sheet = {
+        "submissions": {
+            "ada": {"info": {"submitted": "2026-09-27"}, "score_individual": 8},
+            "bob": {"info": {"submitted": None}, "score_individual": 5},
+        }
+    }
+    later = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+    back = {"ada": later, "bob": later}
+    # A comment committed to the sheet after the return: no gradebook changed, so none
+    # was written again.
+    commented = later + timedelta(hours=1)
+
+    def state(config_paths):
+        semester = _semester(
+            sheets={"assignment-2": sheet},
+            returned_at=back,
+            sheet_changed={"assignment-2": commented},
+        )
+        semester.config_paths = semester.config_paths | config_paths
+        doc = _render(semester=semester, now=later)
+        row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+        return row["returned"], row["state"]
+
+    assert state({}) == (False, "marking")
+    record = grades.marks_return_record("assignment-2")
+    assert state({record: "f00d"}) == (True, "returned")
 
 
 def test_returned_is_read_off_the_gradebook_rows_distribute_writes(monkeypatch):

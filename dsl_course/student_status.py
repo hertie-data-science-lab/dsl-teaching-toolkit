@@ -58,7 +58,7 @@ from .schedule_plan import (
     site_rows,
 )
 from .site_repo import people_cards, yaml_file
-from .status_json import CourseFacts, SemesterFacts
+from .status_json import CourseFacts, SemesterFacts, handed_out
 
 SCHEMA = "dsl.student-status/2"
 # In the SEMESTER org's `.github`, which is public.
@@ -552,8 +552,7 @@ def render_assignments(
         spec = facts.specs.get(key, grades.GradingSpec())
         name = schedule.semester_name(key, entry)
         title = identifier(name)
-        pinned = entry.handout_datetime is not None and entry.handout_datetime <= now
-        out_now = name in extra.handed_out or pinned
+        out_now = handed_out(name, entry, extra.handed_out, now)
         heading, brief = _brief(extra.readmes.get(key, "")) if out_now else ("", "")
         window, shuts = schedule.formation_state(facts.sched, key, now)
         forming = (
@@ -785,8 +784,7 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
     for key, entry in _public_assignments(sched):
         spec = facts.specs.get(key, grades.GradingSpec())
         name = schedule.semester_name(key, entry)
-        pinned = entry.handout_datetime is not None and entry.handout_datetime <= now
-        if name in extra.handed_out or pinned:
+        if handed_out(name, entry, extra.handed_out, now):
             extra.readmes[key] = (
                 get_file_content(course.org, entry.course_source_repo, "README.md")
                 or ""
