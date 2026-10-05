@@ -550,6 +550,9 @@ status.json as `ASSIGNMENTS`. The late cutoff has one resolver,
 `dsl-course.yml` or `assignments.yml` that fails other than with a 404 raises and is not
 cached (an `assignments.yml` that is not YAML raises `Unusable`); a value a reader refuses
 states nothing, and the next layer answers.
+An `assignments.yml` that is not YAML is the exception to the ride: the scheduler files it
+on the `assignments.yml` digest and holds the `schedule.yml` digest as it stands for that
+tick, since its window, number and marks faults need the settings to be worked out.
 `grades.load_grading_spec(course, template, semester_org=, slug=)`
 hands every reader the effective values, with `GradingSpec.sources`; `status.json` carries
 them per assignment (`settings`). `settings` is the only module that reads

@@ -1843,6 +1843,62 @@ def test_a_cutoff_that_is_not_whole_days_after_the_due_date_is_named():
     assert "2026-10-15 20:00" in note and "2026-10-15 12:00" in note
 
 
+# The old seeded skeleton filled in by hand: a line left commented out, and a blank
+# line, inside the retired `enrolment:` block, which comes straight after `events:`.
+INTERIOR_SCHEDULE = """assignments:
+  a1:
+    title: Regression
+
+    # kept for the record
+    due_datetime: 2026-10-13
+events:
+  exam:
+    kind: exam
+enrolment:
+  send_codes_datetime: 2026-08-24T08:00
+#   send_until: 2026-09-01
+
+  show_on_site: true
+
+# the weekly sessions
+releases:
+  s1:
+    event_datetime: 2026-10-01T09:00
+"""
+
+
+def test_a_blank_or_comment_line_inside_a_cut_block_does_not_end_it():
+    # It used to: `show_on_site: true` was kept and became an entry of `events:`, and
+    # `due_datetime` stayed under a1 only by luck of its indent.
+    new = migrate.schedule_timing(INTERIOR_SCHEDULE)
+    meta = yaml.safe_load(new)
+    assert set(meta) == {"assignments", "events", "releases"}
+    assert set(meta["events"]) == {"exam"}
+    assert set(meta["assignments"]["a1"]) == {"due_datetime"}
+    assert "send_until" not in new and "# the weekly sessions\nreleases:" in new
+    assert migrate.entries_kept(INTERIOR_SCHEDULE, new)
+
+
+def test_a_rewrite_that_moves_or_breaks_an_entry_is_refused(capsys):
+    before = "events:\n  exam:\n    kind: exam\nenrolment:\n  show_on_site: true\n"
+    moved = "events:\n  exam:\n    kind: exam\n  show_on_site: true\n"
+    assert not migrate.entries_kept(before, moved)
+    assert "change the entries of events" in capsys.readouterr().err
+    assert not migrate.entries_kept(before, "events:\n  exam: [\n")
+    assert "not be valid YAML" in capsys.readouterr().err
+    assert migrate.entries_kept(before, "events:\n  exam:\n    kind: exam\n")
+
+
+def test_the_keys_step_commits_a_schedule_with_every_entry_where_it_was(
+    fake, semester, monkeypatch
+):
+    fake.tree(SEM, OLD_CONFIG_REPO)["schedule.yml"] = INTERIOR_SCHEDULE.encode()
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    meta = yaml.safe_load(fake.tree(SEM, CONFIG_REPO)["schedule.yml"])
+    assert set(meta) == {"assignments", "events", "releases"}
+    assert set(meta["events"]) == {"exam"}
+
+
 def test_the_run_keys_are_written_into_the_skeleton_and_read_back():
     skeleton = migrate.semester_scaffold(SEM, "assignments.yml", "main")
     text = migrate.with_instance_keys(
