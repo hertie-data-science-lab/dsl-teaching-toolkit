@@ -53,7 +53,7 @@ from .discovery import (
     semester_is_live,
 )
 from .faults import Unusable
-from .gh_contents import get_file_with_sha, put_file, read_csv
+from .gh_contents import get_file_with_sha, put_file_as_read, read_csv
 from .log import (
     CLIParser,
     Summary,
@@ -143,11 +143,6 @@ def rows_for_values(text: str, items: list[tuple[int, str, str]]) -> dict[int, s
     return placed
 
 
-# Bounded: each attempt costs a read and a write, and a roster being edited faster than
-# that is a person at a keyboard, not a race worth grinding against.
-WRITE_ATTEMPTS = 3
-
-
 def write_column(
     semester_org: str,
     raw: str,
@@ -157,42 +152,28 @@ def write_column(
     message: str,
     replacing: str | None = "",
 ) -> str | None:
-    """Commit one column into students.csv without clobbering a concurrent edit.
-    Returns the roster text AS COMMITTED, or None if no attempt was accepted.
+    """Commit one column into students.csv without clobbering a concurrent edit
+    (`put_file_as_read`). Returns the roster text AS COMMITTED, or None if no attempt was
+    accepted.
 
-    `put_file`'s ordinary path re-reads the sha immediately before writing, so the write
-    succeeds however stale its content is: a Join binding committed while Send codes was
-    running was silently reverted, and the student's handle was simply gone. The sha the
-    roster was READ at is sent instead, so GitHub refuses a write onto a file that has
-    moved on. We then re-read, re-apply only the values THIS run produced onto the fresh
-    text - `fill_column_in_csv` fills blank cells only, so a value that arrived in
-    between is left exactly as it is - and try again.
+    A refused write re-applies only the values THIS run produced onto the fresh text -
+    `fill_column_in_csv` fills blank cells only, so a value that arrived in between is
+    left exactly as it is. Which is exactly why the committed TEXT is returned rather than
+    a bare success: after a retry the roster can hold a different code from the one this
+    run generated, and the caller must email what the roster holds."""
 
-    Which is exactly why the committed TEXT is returned rather than a bare success: after
-    a retry the roster can hold a different code from the one this run generated, and the
-    caller must email what the roster holds."""
-    for attempt in range(1, WRITE_ATTEMPTS + 1):
-        body = fill_column_in_csv(raw, column, rows_for_values(raw, items), replacing)
-        if put_file(
-            semester_org,
-            roster.CONFIG_REPO,
-            roster.ROSTER_PATH,
-            body.encode(),
-            message,
-            expected_sha=sha,
-        ):
-            return body
-        if attempt == WRITE_ATTEMPTS:
-            break
-        log_err(
-            f"{roster.ROSTER_PATH} in {semester_org} could not be written as read - "
-            f"re-reading and retrying ({attempt}/{WRITE_ATTEMPTS - 1})"
-        )
-        fresh = get_file_with_sha(semester_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
-        if fresh is None:
-            break
-        raw, sha = fresh
-    return None
+    def fill(text: str) -> str:
+        return fill_column_in_csv(text, column, rows_for_values(text, items), replacing)
+
+    return put_file_as_read(
+        semester_org,
+        roster.CONFIG_REPO,
+        roster.ROSTER_PATH,
+        fill(raw),
+        sha,
+        lambda fresh: None if fresh is None else fill(fresh),
+        message,
+    )
 
 
 def assign_codes(students: list[roster.Student], gen=make_code) -> int:

@@ -793,9 +793,14 @@ def test_record_handout_round_trips_through_the_parser(monkeypatch):
     monkeypatch.setattr(
         S, "get_file_with_sha", lambda org, repo, path: (store["text"], "sha0")
     )
+    monkeypatch.setattr(
+        gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path: (store["text"], "sha0"),
+    )
     writes = []
     monkeypatch.setattr(
-        "dsl_course.schedule.put_file",
+        "dsl_course.gh_contents.put_file",
         lambda org, repo, path, content, msg, expected_sha=None: (
             writes.append(content.decode()) or True
         ),
@@ -831,9 +836,12 @@ def test_the_plan_is_read_once_per_semester_and_a_handout_reopens_it(monkeypatch
     schedule.load("Semester-f2027")
     assert len(reads) == 2, "one semester's plan answered for another"
 
-    monkeypatch.setattr(schedule, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(
         schedule, "get_file_with_sha", lambda org, repo, path: ("", "sha0")
+    )
+    monkeypatch.setattr(
+        gh_contents, "get_file_with_sha", lambda org, repo, path: ("", "sha0")
     )
     schedule.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
     schedule.load("Semester-f2026")
@@ -1664,7 +1672,10 @@ def test_record_handout_says_so_loudly_when_the_file_shape_defeats_the_edit(
     flow = "assignments: {assignment-1: {due_datetime: 2026-10-13}}\n"
     monkeypatch.setattr(S, "get_file_with_sha", lambda org, repo, path: (flow, "sha0"))
     monkeypatch.setattr(
-        "dsl_course.schedule.put_file",
+        gh_contents, "get_file_with_sha", lambda org, repo, path: (flow, "sha0")
+    )
+    monkeypatch.setattr(
+        "dsl_course.gh_contents.put_file",
         lambda *a, **k: pytest.fail("must not write into a shape it cannot parse"),
     )
 
@@ -1684,7 +1695,10 @@ def test_record_handout_says_so_loudly_when_the_write_itself_fails(monkeypatch, 
 
     good = "assignments:\n  assignment-1:\n    due_datetime: 2026-10-13\n"
     monkeypatch.setattr(S, "get_file_with_sha", lambda org, repo, path: (good, "sha0"))
-    monkeypatch.setattr("dsl_course.schedule.put_file", lambda *a, **k: False)
+    monkeypatch.setattr(
+        gh_contents, "get_file_with_sha", lambda org, repo, path: (good, "sha0")
+    )
+    monkeypatch.setattr("dsl_course.gh_contents.put_file", lambda *a, **k: False)
 
     S.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
 
@@ -1705,6 +1719,11 @@ def test_record_handout_never_reverts_an_edit_made_while_it_ran(monkeypatch):
     monkeypatch.setattr(
         S, "get_file_with_sha", lambda org, repo, path: (store["text"], store["sha"])
     )
+    monkeypatch.setattr(
+        gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path: (store["text"], store["sha"]),
+    )
     writes: list[str] = []
 
     def fake_put(org, repo, path, content, msg, expected_sha=None):
@@ -1717,7 +1736,7 @@ def test_record_handout_never_reverts_an_edit_made_while_it_ran(monkeypatch):
         writes.append(store["text"])
         return True
 
-    monkeypatch.setattr("dsl_course.schedule.put_file", fake_put)
+    monkeypatch.setattr("dsl_course.gh_contents.put_file", fake_put)
     # the edit lands between the read and the write
     original_read = S.get_file_with_sha
 
@@ -1728,6 +1747,7 @@ def test_record_handout_never_reverts_an_edit_made_while_it_ran(monkeypatch):
         return text, sha
 
     monkeypatch.setattr(S, "get_file_with_sha", moving_read)
+    monkeypatch.setattr(gh_contents, "get_file_with_sha", moving_read)
 
     S.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
 

@@ -1135,6 +1135,53 @@ def get_file_with_sha(
     return _whole(org, repo, path, _decoded(encoded), sha), sha
 
 
+# Bounded: each attempt costs a read and a write, and a file being edited faster than that
+# is a person at a keyboard, not a race worth grinding against.
+WRITE_ATTEMPTS = 3
+
+
+def put_file_as_read(
+    org: str,
+    repo: str,
+    path: str,
+    body: str,
+    sha: str | None,
+    rebuild: Callable[[str | None], str | None],
+    message: str | Callable[[], str],
+    attempts: int = WRITE_ATTEMPTS,
+) -> str | None:
+    """Write `body` over `path` at `sha`, the blob sha the text it was built from was READ
+    at, without clobbering a concurrent edit. Returns the text AS COMMITTED (or already
+    there), or None when no attempt was accepted.
+
+    `put_file`'s ordinary path re-reads the sha immediately before writing, so the write
+    succeeds however stale its content is: a Join binding committed while Send codes was
+    running was silently reverted. Sending the read sha makes GitHub refuse a write onto a
+    file that has moved on - and `""` (a file that was absent) refuses one that has been
+    created since. On a refusal the file is read again and `rebuild(fresh text, or None
+    when it is gone)` re-applies only THIS run's change: it returns the new text, the
+    fresh text unchanged when nothing is left to write (`put_file` then writes nothing),
+    or None to give up. `message` may be a callable, for a commit message that counts
+    what the latest `rebuild` decided."""
+    for attempt in range(1, attempts + 1):
+        said = message() if callable(message) else message
+        if put_file(org, repo, path, body.encode(), said, expected_sha=sha):
+            return body
+        if attempt == attempts:
+            break
+        log_err(
+            f"{path} in {org}/{repo} could not be written as read - re-reading and "
+            f"retrying ({attempt}/{attempts - 1})"
+        )
+        fresh = get_file_with_sha(org, repo, path)
+        text, sha = fresh if fresh is not None else (None, "")
+        rebuilt = rebuild(text)
+        if rebuilt is None:
+            break
+        body = rebuilt
+    return None
+
+
 _EMPTY_BLOB = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"  # blob_sha(b"")
 
 

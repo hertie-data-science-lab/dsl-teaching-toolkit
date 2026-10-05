@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import enrol_codes, grades, relink, roster, teams
+from dsl_course import enrol_codes, gh_contents, grades, relink, roster, teams
 from dsl_course.gh_contents import blob_sha, read_csv
 from tests.conftest import ROSTER_HEADER, repo_row
 
@@ -153,6 +153,7 @@ def world(monkeypatch) -> World:
 
     monkeypatch.setattr(relink, "get_file_with_sha", roster_read)
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", roster_read)
+    monkeypatch.setattr(gh_contents, "get_file_with_sha", roster_read)
 
     def roster_write(org, repo, path, content, message, expected_sha=None, **k):
         if w.failing("id") or expected_sha != blob_sha(w.roster.encode()):
@@ -160,7 +161,7 @@ def world(monkeypatch) -> World:
         w.roster = content.decode()
         return True
 
-    monkeypatch.setattr(enrol_codes, "put_file", roster_write)
+    monkeypatch.setattr(gh_contents, "put_file", roster_write)
 
     def record(org, repo, path, content, message, person=False, **k):
         if w.failing("record"):
@@ -360,7 +361,7 @@ def test_a_dry_run_moves_nothing(world):
 def test_a_failure_at_any_step_leaves_the_id_and_the_next_run_finishes(world, step):
     world.fail = step
     # The roster write retries on its own; a failure there is one that outlasts them.
-    world.fail_times = enrol_codes.WRITE_ATTEMPTS if step == "id" else 1
+    world.fail_times = gh_contents.WRITE_ATTEMPTS if step == "id" else 1
     assert run(world)[0] == 1
     assert world.stored_id() == OLD_ID, "the id must be the last thing written"
     assert run(world)[0] == 0
@@ -550,7 +551,7 @@ def test_the_id_write_never_reverts_a_roster_edit_that_landed_meanwhile(
 ):
     # `write_column` sends the sha it read at and re-applies only this row's cell on a
     # refusal, so a row somebody added in between survives.
-    real = enrol_codes.put_file
+    real = gh_contents.put_file
     added = "c@x.edu,Cy,,,,,"
 
     def racing(*a, **k):
@@ -558,7 +559,7 @@ def test_the_id_write_never_reverts_a_roster_edit_that_landed_meanwhile(
             world.roster += added + "\n"
         return real(*a, **k)
 
-    monkeypatch.setattr(enrol_codes, "put_file", racing)
+    monkeypatch.setattr(gh_contents, "put_file", racing)
     assert run(world)[0] == 0
     assert world.stored_id() == NEW_ID and added in world.roster
 
