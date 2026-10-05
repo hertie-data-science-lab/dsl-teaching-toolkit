@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from dsl_course import (
+    gh_commits,
     grades,
     policy,
     releaseignore,
@@ -1195,7 +1196,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         lambda org, repo: {"SYLLABUS.md": "file", "lectures": "dir", ".system": "dir"},
     )
     monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
-    monkeypatch.setattr(status_json, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
+    monkeypatch.setattr(gh_commits, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
     monkeypatch.setattr(status_json, "get_team_members", lambda org, team: {"prof"})
     monkeypatch.setattr(grades, "_org_settings_faults", lambda org: [])
 
@@ -1629,7 +1630,7 @@ def test_an_assignments_yml_that_is_not_yaml_is_a_problem_not_a_crash(monkeypatc
     monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(status_json, "repo_path_shas", lambda *a, **k: {})
     monkeypatch.setattr(status_json, "get_file_content", lambda *a, **k: None)
-    monkeypatch.setattr(status_json, "_last_commit_at", lambda *a, **k: None)
+    monkeypatch.setattr(status_json, "last_commit_at", lambda *a, **k: None)
     monkeypatch.setattr(status_json, "_returned_at", lambda org: {})
     monkeypatch.setattr(
         status_json.sync_faculty, "read_semester_people", lambda org, found: []

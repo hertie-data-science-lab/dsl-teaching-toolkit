@@ -92,6 +92,7 @@ from .discovery import (
     read_semester_registry,
 )
 from .faults import NOT_MIGRATED, ConfigFault, FaultKind, Unusable
+from .gh_commits import last_commit_at
 from .gh_contents import (
     file_exists,
     get_file_content,
@@ -102,7 +103,6 @@ from .gh_contents import (
     top_level,
 )
 from .gh_teams import get_team_members
-from .ghcli import gh
 from .materials import (
     ASSETS_KIND,
     DEFAULT_SYLLABUS,
@@ -1888,19 +1888,6 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
 # ---------------------------------------------------------------------- gh/git wiring
 
 
-def _last_commit_at(org: str, repo: str, path: str = "") -> datetime | None:
-    """When `path` (or the repo, for "") last changed on the default branch. None when
-    there is no such commit or it could not be read - staleness is a hint, not a gate."""
-    query = f"repos/{org}/{repo}/commits?per_page=1" + (f"&path={path}" if path else "")
-    code, out = gh("api", query, "--jq", ".[0].commit.committer.date // empty")
-    if code != 0 or not out.strip():
-        return None
-    try:
-        return datetime.fromisoformat(out.strip().replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
 def _declaration(org: str, repo: str) -> Declared:
     """`repo`'s `materials.yml`, or the defaults when it does not parse: the status is no
     place to stop over it, and the site sync names the fault."""
@@ -2128,7 +2115,7 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
                 facts.sheets[name] = grades.parse_sheet(text)
             except grades.SheetUnreadable:
                 pass  # its fault is in sheet_faults
-            facts.sheet_changed[name] = _last_commit_at(
+            facts.sheet_changed[name] = last_commit_at(
                 semester_org, schedule.CONFIG_REPO, grades.sheet_path(name)
             )
     facts.returned_at = _returned_at(semester_org)
@@ -2146,9 +2133,9 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
     site = pages_repo(semester_org)
     if site in facts.listing:
         facts.site_home = get_file_content(semester_org, site, SITE_HOME)
-        facts.site_last_update = _last_commit_at(semester_org, site)
+        facts.site_last_update = last_commit_at(semester_org, site)
     moments = [
-        _last_commit_at(semester_org, schedule.CONFIG_REPO, p)
+        last_commit_at(semester_org, schedule.CONFIG_REPO, p)
         for p in (schedule.SCHEDULE_PATH, sync_faculty.SEMESTER_PEOPLE_PATH)
     ]
     facts.config_last_update = max((m for m in moments if m), default=None)
