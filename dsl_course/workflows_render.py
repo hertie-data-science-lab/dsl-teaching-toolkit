@@ -643,14 +643,29 @@ _AUTOGRADE_OUTCOME = """      - name: How this semester's grading leg ended
           RUN_ID: ${{ github.run_id }}
           ATTEMPT: ${{ github.run_attempt }}
           SEMESTER: ${{ matrix.semester }}
+          LEGS: ${{ needs.autograde.result }}
         run: |
+          # The matrix's combined result is `success` only when every leg succeeded, and it
+          # is settled the moment this job starts - unlike the jobs API below, which can
+          # still read a just-finished leg's conclusion as null. So a green matrix never
+          # asks it, and a lagging API cannot file a failure for a leg that passed.
+          if [ "$LEGS" = "success" ]; then
+            echo "graded leg concluded: success"
+            echo "result=success" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # The leg's `name:` is `autograde <semester>`, set explicitly on the job so this
           # lookup matches a string the workflow declares rather than one GitHub composes.
           # `|| true` and a `head`: under `bash -e` a transient search failure would
           # otherwise abort the job that exists to report, and a re-run reads its OWN
-          # attempt.
-          row=$(gh api "repos/$REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs" --paginate \\
-            --jq ".jobs[] | select(.name == \\"autograde $SEMESTER\\") | \\"\\(.conclusion) \\(.id)\\"" | head -n 1) || true
+          # attempt. A null conclusion is the API lagging behind a leg `needs:` says has
+          # finished, so it is asked again for about a minute before it is believed.
+          for pause in 0 5 10 20 30; do
+            sleep "$pause"
+            row=$(gh api "repos/$REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs" --paginate \\
+              --jq ".jobs[] | select(.name == \\"autograde $SEMESTER\\") | \\"\\(.conclusion) \\(.id)\\"" | head -n 1) || true
+            if [ "${row%% *}" != "null" ]; then break; fi
+          done
           if [ -z "$row" ]; then
             # No leg for this semester in this attempt - a semester registered between the two
             # jobs, or a matrix leg GitHub never started. Nothing happened, so nothing is

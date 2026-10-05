@@ -2551,3 +2551,79 @@ def test_the_course_page_lists_the_console_as_auto_handled():
     (row,) = [line for line in auto.splitlines() if "console.yml" in line]
     assert "Runs what the Instructor Console asks for" in row
     assert row.rstrip().endswith("| Auto-handled |")
+
+
+# The grading report's `graded` step, as the scheduler renders it.
+_GRADED_STEP = next(
+    s
+    for s in _jobs_of(ALL_RENDERED["scheduler"])["autograde-report"]["steps"]
+    if s.get("id") == "graded"
+)
+
+
+def _graded_outputs(work: Path, legs: str, rows: list[str]) -> tuple[dict, int]:
+    """Run the `graded` step under `bash -e`. The fake `gh` answers each jobs-API call
+    with the next of `rows` (the `<conclusion> <id>` its --jq filter prints) and `sleep`
+    is a no-op, so the retry loop costs nothing. Returns the step's outputs and how many
+    times the API was asked."""
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "rows").write_text("".join(f"{r}\n" for r in rows))
+    (work / "calls").write_text("")
+    (work / "gh").write_text(
+        "#!/bin/sh\n"
+        'echo x >>"$WORK/calls"\n'
+        'n=$(wc -l <"$WORK/calls")\n'
+        'sed -n "${n}p" "$WORK/rows"\n'
+    )
+    (work / "sleep").write_text("#!/bin/sh\n")
+    for fake in ("gh", "sleep"):
+        (work / fake).chmod(0o755)
+    outputs = work / "github_output"
+    subprocess.run(
+        # `bash -e`, which is how GitHub runs a `run:` block.
+        ["bash", "-e", "-c", _GRADED_STEP["run"]],
+        env={
+            "PATH": f"{work}:{os.environ['PATH']}",
+            "WORK": str(work),
+            "GITHUB_OUTPUT": str(outputs),
+            "REPO": "Course-Org/.github",
+            "RUN_ID": "1",
+            "ATTEMPT": "1",
+            "SEMESTER": "semester-a",
+            "LEGS": legs,
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return _step_outputs(outputs), len((work / "calls").read_text().splitlines())
+
+
+def test_a_green_grading_matrix_never_asks_the_jobs_api(tmp_path):
+    # The jobs API read a just-finished leg's conclusion as null, and the report filed a
+    # failure issue and mailed the maintainer for a leg that had passed. A green matrix is
+    # settled in `needs:` before this job starts, so it never asks the API at all.
+    assert _GRADED_STEP["env"]["LEGS"] == "${{ needs.autograde.result }}"
+    assert _graded_outputs(tmp_path, "success", ["null 7"]) == (
+        {"result": "success"},
+        0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("rows", "outputs", "calls"),
+    [
+        # A lagging API is asked again rather than reported as this semester's failure.
+        (["null 7", "null 7", "success 7"], {"result": "success", "job_id": "7"}, 3),
+        (["failure 7"], {"result": "failure", "job_id": "7"}, 1),
+        # A null that never settles is reported, not swallowed: the leg did finish.
+        (["null 7"] * 9, {"result": "null", "job_id": "7"}, 5),
+        # No leg for this semester is still "nothing to report", and is not retried.
+        ([], {"result": "skipped"}, 1),
+    ],
+    ids=["lagging", "red", "stuck", "absent"],
+)
+def test_a_red_grading_matrix_names_its_leg_once_the_api_settles(
+    tmp_path, rows, outputs, calls
+):
+    assert _graded_outputs(tmp_path, "failure", rows) == (outputs, calls)
