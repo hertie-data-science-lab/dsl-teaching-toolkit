@@ -305,11 +305,22 @@ def question_files(value: object, where: str, dropped: list[str]) -> dict[str, s
     return out
 
 
-def _whole_days(value: object, where: str, dropped: list[str]) -> int | None:
-    """`late_window_days` as a whole number of days, or None with a warning."""
+def whole_days(value: object) -> int | None:
+    """A non-negative whole number of days, or None when `value` cannot be one. A YAML
+    `true` is not a number of days, though Python would count it as 1."""
+    if isinstance(value, bool):
+        return None
     try:
-        return max(0, int(str(value).strip()))
+        days = int(str(value).strip())
     except (TypeError, ValueError):
+        return None
+    return days if days >= 0 else None
+
+
+def _whole_days(value: object, where: str, dropped: list[str]) -> int | None:
+    """`late_window_days` as a whole number of days (`whole_days`), or None with a
+    warning."""
+    if (days := whole_days(value)) is None:
         dropped.append(
             Dropped(
                 where,
@@ -317,7 +328,7 @@ def _whole_days(value: object, where: str, dropped: list[str]) -> int | None:
                 f"`late_window_days: {value}` is not a whole number of days - ignored",
             )
         )
-        return None
+    return days
 
 
 def _team_cap(value: object, where: str, dropped: list[str]) -> int | None:

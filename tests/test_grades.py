@@ -3317,3 +3317,15 @@ def test_one_penalty_reader_gives_the_rate_and_the_fault_together():
     for raw, fault in (("10", "bare"), ("-5%", "negative"), ("x", "unwritten")):
         assert read_penalty(raw) == (None, fault)
     assert read_penalty("150%") == (None, "over")
+
+
+def test_a_whole_number_of_days_is_read_by_one_rule():
+    # `late_window_days` and the schedule's day counts share the parse: a negative or a
+    # YAML `true` is not a number of days, and the late window warns rather than
+    # silently reading it as 0.
+    from dsl_course.setting_readers import _whole_days, whole_days
+
+    assert [whole_days(v) for v in (3, "7", 0)] == [3, 7, 0]
+    assert [whole_days(v) for v in (-1, True, "x", None)] == [None] * 4
+    dropped: list[str] = []
+    assert _whole_days(-1, "where", dropped) is None and len(dropped) == 1
