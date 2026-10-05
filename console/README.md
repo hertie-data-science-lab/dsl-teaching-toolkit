@@ -311,7 +311,7 @@ a first visit, mostly free 304s after).
   console follows the commit's checks and says what they found.
 - Operations, through the course org's Console workflow (`.github/.github/workflows/console.yml`,
   ref `main`, one `request` input; contracts section 1). `src/ops/adapter.ts` dispatches with
-  `return_run_details`, polls the run (`src/github/poll.ts`, the one poll loop: every 3 s, every
+  `return_run_details`, polls the run's job listing alone (`src/github/poll.ts`, the one poll loop: every 3 s, every
   10 s after 30 s, nothing while the tab is hidden), and reads the public `dsl-outcome` annotation and the
   private outcome file. Hand out, return marks, archive, update every copy and send new codes
   unlock only after a preview in the same session; publishing the public website, which has no

@@ -21,19 +21,18 @@ function engine(opts: { annotation?: object; privateFile?: object; polls?: numbe
   let polls = 0;
   const gh = new FakeGitHub()
     .on('POST', `/repos/${COURSE}/.github/actions/workflows/console.yml/dispatches`, { workflow_run_id: 77, run_url: 'u', html_url: `https://github.com/${COURSE}/.github/actions/runs/77` })
-    .on('GET', RUNS, (req) => {
+    .on('GET', `${RUNS}/jobs`, (req) => {
       polls++;
-      if (polls > 1 && polls < (opts.polls ?? 3) && req.headers['If-None-Match'] === '"r1"') return json(null, 304, { etag: '"r1"' });
+      if (polls > 1 && polls < (opts.polls ?? 3) && req.headers['If-None-Match'] === '"j1"') return json(null, 304, { etag: '"j1"' });
       const done = polls >= (opts.polls ?? 3);
-      return json({ id: 77, status: done ? 'completed' : 'in_progress', conclusion: done ? 'success' : null, html_url: 'h' }, 200, { etag: done ? '"r2"' : '"r1"' });
+      return json({ jobs: [{ id: 901, name: 'console', status: done ? 'completed' : 'in_progress', conclusion: done ? 'success' : null, steps: [
+        { name: 'Set up job', status: 'completed', conclusion: 'success', number: 1 },
+        { name: 'Verify the user may run actions for THIS repo', status: 'completed', conclusion: 'success', number: 2 },
+        { name: 'Run actions/checkout@11d5960', status: 'completed', conclusion: 'success', number: 3 },
+        { name: 'Run the request', status: 'in_progress', conclusion: null, number: 5 },
+        { name: 'Complete job', status: 'queued', conclusion: null, number: 9 },
+      ] }] }, 200, { etag: done ? '"j2"' : '"j1"' });
     })
-    .on('GET', `${RUNS}/jobs`, { jobs: [{ id: 901, name: 'console', status: 'completed', conclusion: 'success', steps: [
-      { name: 'Set up job', status: 'completed', conclusion: 'success', number: 1 },
-      { name: 'Verify the user may run actions for THIS repo', status: 'completed', conclusion: 'success', number: 2 },
-      { name: 'Run actions/checkout@11d5960', status: 'completed', conclusion: 'success', number: 3 },
-      { name: 'Run the request', status: 'in_progress', conclusion: null, number: 5 },
-      { name: 'Complete job', status: 'queued', conclusion: null, number: 9 },
-    ] }] })
     .on('GET', `/repos/${COURSE}/.github/check-runs/901/annotations`, [
       { path: '.github', start_line: 1, annotation_level: 'notice', title: 'something else', message: 'x' },
       ...(opts.annotation ? [{ path: '.github', start_line: 1, annotation_level: 'notice', title: 'dsl-outcome', message: JSON.stringify(opts.annotation) }] : []),
@@ -70,7 +69,7 @@ describe('DispatchAdapter', () => {
     expect(h.runId).toBe(77);
   });
 
-  it('polls the run with its ETag, taking a 304 as no change', async () => {
+  it('polls the run’s job with its ETag, taking a 304 as no change', async () => {
     const e = engine({ polls: 4 });
     const a = new DispatchAdapter(e.client, () => 'a-example', () => 'Sending new codes');
     const h = { op: 'roster.send_codes', runId: 77, htmlUrl: '', preview: true, courseOrg: COURSE, cohortOrg: COHORT };
@@ -78,8 +77,9 @@ describe('DispatchAdapter', () => {
     const second = await a.watch(h);
     expect(first.state).toBe('running');
     expect(second.state).toBe('running');
-    const runGets = e.gh.seen.filter((s) => s.url.endsWith('/runs/77'));
-    expect(runGets[1].headers['If-None-Match']).toBe('"r1"');
+    const jobGets = e.gh.seen.filter((s) => s.url.includes('/runs/77/jobs'));
+    expect(jobGets[1].headers['If-None-Match']).toBe('"j1"');
+    expect(e.gh.seen.some((s) => s.url.endsWith('/runs/77'))).toBe(false);
     expect(first.steps.map((s) => [s.name, s.state])).toEqual([['Checking you may do this', 'done'], ['Getting the engine', 'done'], ['Sending new codes', 'running']]);
     await a.watch(h);
     expect((await a.watch(h)).state).toBe('completed');

@@ -3,7 +3,7 @@
 //
 // DispatchAdapter (contracts sections 1, 2 and 5): builds a `dsl.request/1`, validates it
 // against request.schema.json and the op's args schema, dispatches the course org's
-// Console workflow with `return_run_details`, polls the run and its job (the client
+// Console workflow with `return_run_details`, polls the run's job (the client
 // revalidates with ETags, so an unchanged poll is a 304), then reads the public
 // `dsl-outcome` annotation off the job's check run and the private outcome file.
 
@@ -181,11 +181,12 @@ export class DispatchAdapter implements Adapter {
     return { op: input.op, runId: r.workflow_run_id, htmlUrl: r.html_url, preview: input.preview, courseOrg: input.courseOrg, cohortOrg: req.semester_org };
   }
 
+  /** The run's one job carries its status and conclusion; no job yet means it is queued. */
   async watch(h: Handle): Promise<Progress> {
-    const run = await this.client.getRun(h.courseOrg, CONSOLE_REPO, h.runId);
-    const jobs = run.status === 'queued' ? [] : await this.client.listJobs(h.courseOrg, CONSOLE_REPO, h.runId);
-    const state = run.status === 'completed' ? 'completed' : run.status === 'in_progress' ? 'running' : 'queued';
-    return { state, conclusion: run.conclusion, steps: stepsOf(jobs[0], this.running(h.op)), htmlUrl: run.html_url || h.htmlUrl };
+    const jobs = await this.client.listJobs(h.courseOrg, CONSOLE_REPO, h.runId);
+    const job = jobs[0];
+    const state = !job ? 'queued' : job.status === 'completed' ? 'completed' : job.status === 'in_progress' ? 'running' : 'queued';
+    return { state, conclusion: job?.conclusion ?? null, steps: stepsOf(job, this.running(h.op)), htmlUrl: h.htmlUrl };
   }
 
   async outcome(h: Handle): Promise<Result> {

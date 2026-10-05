@@ -123,8 +123,7 @@ describe('Stop', () => {
   it('cancels the workflow run through the Actions API, says Stopping, then Stopped', async () => {
     const gh = new FakeGitHub()
       .on('POST', `/repos/${COURSE}/.github/actions/workflows/console.yml/dispatches`, { workflow_run_id: 77, html_url: 'h' })
-      .on('GET', `/repos/${COURSE}/.github/actions/runs/77`, () => json({ id: 77, status: cancelled ? 'completed' : 'in_progress', conclusion: cancelled ? 'cancelled' : null, html_url: 'h' }))
-      .on('GET', `/repos/${COURSE}/.github/actions/runs/77/jobs`, { jobs: [] })
+      .on('GET', `/repos/${COURSE}/.github/actions/runs/77/jobs`, () => json({ jobs: [{ id: 901, name: 'console', status: cancelled ? 'completed' : 'in_progress', conclusion: cancelled ? 'cancelled' : null, steps: [] }] }))
       .on('POST', `/repos/${COURSE}/.github/actions/runs/77/cancel`, () => ((cancelled = true), json({}, 202)))
       .on('GET', /contents/, () => json({ message: 'Not Found' }, 404));
     let cancelled = false;
@@ -212,8 +211,7 @@ describe('Stop', () => {
     const done = { schema: 'dsl.outcome/1', op: 'site.update', run_id: 77, actor: 'a', preview: false, conclusion: 'done', summary: 'Updated the site.', started: 's', finished: 'f' };
     const gh = new FakeGitHub()
       .on('POST', `/repos/${COURSE}/.github/actions/workflows/console.yml/dispatches`, { workflow_run_id: 77, html_url: 'h' })
-      .on('GET', `/repos/${COURSE}/.github/actions/runs/77`, () => json({ id: 77, status: ++polls > 2 ? 'completed' : 'in_progress', conclusion: polls > 2 ? 'success' : null, html_url: 'h' }))
-      .on('GET', `/repos/${COURSE}/.github/actions/runs/77/jobs`, { jobs: [{ id: 901, name: 'console', status: 'completed', conclusion: 'success', steps: [] }] })
+      .on('GET', `/repos/${COURSE}/.github/actions/runs/77/jobs`, () => json({ jobs: [{ id: 901, name: 'console', status: ++polls > 2 ? 'completed' : 'in_progress', conclusion: polls > 2 ? 'success' : null, steps: [] }] }))
       .on('GET', `/repos/${COURSE}/.github/check-runs/901/annotations`, [{ path: '.github', start_line: 1, annotation_level: 'notice', title: 'dsl-outcome', message: JSON.stringify(done) }])
       .on('POST', `/repos/${COURSE}/.github/actions/runs/77/cancel`, () => json({ message: 'Cannot cancel a workflow run that is completed.' }, 409))
       .on('GET', /contents/, () => json({ message: 'Not Found' }, 404));
