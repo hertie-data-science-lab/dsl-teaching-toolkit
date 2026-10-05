@@ -17,7 +17,7 @@ import { endedNow, loadCatalogue, runningNow, semesterOver, termRank, type Catal
 import type { Files } from '../model/files';
 import { fmtWhen } from '../model/format';
 import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
-import { parseInstructors } from '../model/people';
+import { parseInstructors, sameHandle } from '../model/people';
 import { currentOnly, myCoursesOnly, saveCurrentOnly, saveMyCoursesOnly, type CatalogueSection } from '../model/prefs';
 import type { Loaded } from '../model/status';
 import type { SemesterFacts } from '../model/student';
@@ -64,11 +64,11 @@ const ROLE_SUB: Record<string, string> = { instructor: 'you are an instructor', 
  * is unread or names no role, that they teach on it.
  */
 function roleSub(course: Course, user: GhUser, live: CohortRef | undefined, files: Files | undefined): string {
-  if (course.admins.includes(user.login)) return 'you are a course admin';
+  if (course.admins.some((h) => sameHandle(h, user.login))) return 'you are a course admin';
   // Read only: the card says so, and instructors.yml is not read.
   if (!course.write) return '';
   const f = live && files ? files.file(live.org, CONFIG_REPO, INSTRUCTORS_FILE) : undefined;
-  const me = f?.kind === 'ready' ? parseInstructors(f.text).find((p) => p.handle.toLowerCase() === user.login.toLowerCase()) : undefined;
+  const me = f?.kind === 'ready' ? parseInstructors(f.text).find((p) => sameHandle(p.handle, user.login)) : undefined;
   return ROLE_SUB[me?.role ?? ''] ?? 'you teach on this course';
 }
 

@@ -1,8 +1,7 @@
 // The Open split button (decision 0017), modelled on GitHub's Code button, on the instructor
 // screens and the student Set up page alike (decision 0027): the main part does the last
 // choice made (remembered per login in this browser), the arrow opens every choice: on
-// GitHub, on github.dev, in VS Code, in GitHub Desktop, in the editor Profile names, or the
-// clone command to copy. Where the folder check can tell (decision 0023), it offers Open or
+// GitHub, on github.dev, in VS Code, in GitHub Desktop, or in the editor Profile names. Where the folder check can tell (decision 0023), it offers Open or
 // Clone, whichever applies, and the main part reads "Clone" or "Open"; it renders with both
 // and "Open or clone" and narrows once it knows, and the arrow's click asks for read
 // permission after a reload. Clone and Open in VS Code
@@ -14,7 +13,7 @@
 import { signal } from '@preact/signals';
 import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { courseFolder, defaultItem, isWeb, mainLabel, openItems, profileHref, type OpenItem, type RepoRef, type Setup } from '../model/open';
+import { courseFolder, defaultItem, isWeb, mainLabel, openItems, profileHref, repoCloneCommand, type OpenItem, type RepoRef, type Setup } from '../model/open';
 import { askFolderOnce, folderChanged, isCloned } from '../model/localFolder';
 import { rememberOpen, yourSetup } from '../model/prefs';
 import { Hint } from './Hint';
@@ -53,26 +52,6 @@ function useCloned(login: string, home: string, repo: string, setup: Setup | nul
   return answer.key === key ? answer.cloned : undefined;
 }
 
-/** A short note (Copied) that clears itself after two seconds. */
-export function useFlash(): [string | null, (note: string | null) => void] {
-  const [note, setNote] = useState<string | null>(null);
-  useEffect(() => {
-    if (!note) return;
-    const t = setTimeout(() => setNote(null), 2000);
-    return () => clearTimeout(t);
-  }, [note]);
-  return [note, setNote];
-}
-
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean; quiet?: boolean }) {
   const env = useEnv();
   const login = env?.user.login ?? '';
@@ -84,9 +63,6 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
   const label = mainLabel(main, cloned);
   const [open, setOpen] = useState(false);
   const [focusAt, setFocusAt] = useState<'first' | 'last' | null>(null);
-  const [note, setNote] = useFlash();
-  // The copy failed: the command shows under its entry, to select by hand.
-  const [copyFailed, setCopyFailed] = useState(false);
   const id = useId();
   const wrap = useRef<HTMLDivElement>(null);
   const caret = useRef<HTMLButtonElement>(null);
@@ -130,14 +106,6 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
     remember(item);
     // From the menu, focus goes back to the arrow rather than to the page.
     if (open) shut();
-    setCopyFailed(false);
-    if (item.copy) {
-      void copyText(item.copy).then((ok) => {
-        setNote(ok ? 'Copied' : 'Could not copy: select it below');
-        setCopyFailed(!ok);
-        if (!ok) setOpen(true);
-      });
-    }
   };
   const onCaretKey = (e: KeyboardEvent) => {
     if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
@@ -170,36 +138,29 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
   };
 
   const cls = `btn${quiet ? ' quiet' : ''}${small ? ' small' : ''}`;
-  const link = (item: OpenItem, extra: Record<string, unknown>, children: preact.ComponentChildren) =>
-    item.href ? (
-      <a href={item.href} {...(isWeb(item.href) ? { target: '_blank', rel: 'noopener' } : {})} onClick={() => choose(item)} {...extra}>{children}</a>
-    ) : (
-      <button type="button" onClick={() => choose(item)} {...extra}>{children}</button>
-    );
-  const command = items.find((i) => i.copy)?.copy;
+  const link = (item: OpenItem, extra: Record<string, unknown>, children: preact.ComponentChildren) => (
+    <a href={item.href} {...(isWeb(item.href) ? { target: '_blank', rel: 'noopener' } : {})} onClick={() => choose(item)} {...extra}>{children}</a>
+  );
   const folder = !!courseFolder(setup, home);
   const hints = {
     open: <Hint label="About opening in VS Code">Opens the repo’s folder on your computer. Clone it first if it is not there yet.</Hint>,
-    clone: <Hint label="About cloning in VS Code">VS Code asks where to put it{folder ? '; choose your course folder' : ''}.{command ? <> Or run: <code class="pm-cmd">{command}</code></> : null}</Hint>,
+    clone: <Hint label="About cloning in VS Code">VS Code asks where to put it{folder ? '; choose your course folder' : ''}. Or run: <code class="pm-cmd">{repoCloneCommand(ref, setup)}</code></Hint>,
   };
   const entry = (item: OpenItem) => {
     const row = link(item, { role: 'menuitem', tabIndex: -1 }, (
       <>
         <span>{item.label}</span>
-        {item.href && isWeb(item.href) ? <Ext /> : null}
+        {isWeb(item.href) ? <Ext /> : null}
       </>
     ));
-    if (item.hint) return <div class="pm-row" role="none">{row}{hints[item.hint]}</div>;
-    // Not an item: the command to select by hand when copying it failed.
-    if (item.copy && copyFailed) return <>{row}<code class="pm-cmd" role="none">{item.copy}</code></>;
-    return row;
+    return item.hint ? <div class="pm-row" role="none">{row}{hints[item.hint]}</div> : row;
   };
   const online = items.filter((i) => i.group === 'online');
   const local = items.filter((i) => i.group === 'local');
   return (
     <div class={`split${small ? ' small' : ''}`} ref={wrap}>
       {/* The small button keeps one short word; its title and name carry the whole label. */}
-      {link(main, { class: `${cls} split-main`, ...(small ? { title: label, 'aria-label': label } : {}) }, <>{note === 'Copied' && main.copy ? note : small ? (main.copy ? 'Copy' : cloned === false ? 'Clone' : 'Open') : label}{main.href && isWeb(main.href) ? <Ext /> : null}</>)}
+      {link(main, { class: `${cls} split-main`, ...(small ? { title: label, 'aria-label': label } : {}) }, <>{small ? (cloned === false ? 'Clone' : 'Open') : label}{isWeb(main.href) ? <Ext /> : null}</>)}
       <button ref={caret} type="button" class={`${cls} split-caret`} aria-haspopup="menu" aria-expanded={open} aria-controls={id} aria-label={`More ways to open ${ref.repo}`}
         onClick={() => (open ? setOpen(false) : show('first'))} onKeyDown={onCaretKey} onKeyUp={onCaretKeyUp}>
         <span class="caret" aria-hidden="true" />
@@ -215,7 +176,6 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
           <span>{folder ? 'Change your profile' : 'Set up a local folder'}</span>
         </a>
       </div>
-      <span class="sr" role="status">{note ?? ''}</span>
     </div>
   );
 }

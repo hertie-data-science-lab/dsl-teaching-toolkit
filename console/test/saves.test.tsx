@@ -140,12 +140,13 @@ describe('Save on the Overview form', () => {
 
 describe('Save on the schedule’s new release, its kind inferred from the folder', () => {
   const sched = 'timezone: Europe/Berlin\nreleases:\n  lab-2:\n    event_datetime: 2026-09-15T10:00\n    kind: lab\n    deploy:\n      - course_source_repo: course-materials-f2026\n        course_source_path: labs/02_x\n';
-  async function addRelease(gh: FakeGitHub, f: StaticFiles, folder: string) {
+  async function addRelease(gh: FakeGitHub, f: StaticFiles, folder: string, number?: string) {
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new' })} />);
     await click(button('lecture'));
     await type('#e-type', '', 'change');
     await type('#e-d0-folder', folder);
     await type('#e-date', '2026-10-01');
+    if (number !== undefined) await type('#e-num', number);
     await click(buttons('Save')[0]);
     await settle(() => puts(gh, 'schedule.yml').length > 0);
     return parse(body(puts(gh, 'schedule.yml')[0])).releases;
@@ -181,6 +182,32 @@ describe('Save on the schedule’s new release, its kind inferred from the folde
     // No digit in the key: `readings-1` would join lecture 1 (decision 0013 rule 3).
     expect(Object.keys(out)).toEqual(['lab-2', 'readings']);
     expect(out.readings).not.toHaveProperty('number');
+  });
+
+  it('asks readings which lecture they join, prefilled with nothing, and writes the number typed', async () => {
+    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new' })} />);
+    await click(button('readings'));
+    expect(q('#e-num').closest('.field')!.querySelector('.label')!.textContent).toMatch(/^Joins lecture \(optional\)/);
+    expect(q<HTMLInputElement>('#e-num').value).toBe('');
+    render(null, root!);
+    root!.remove();
+    const out = await addRelease(gh, f, 'readings/week_3', '3');
+    expect(Object.keys(out)).toEqual(['lab-2', 'readings-3']);
+    expect(out['readings-3'].number).toBe(3);
+  });
+
+  it('drops the number when a readings entry’s Joins lecture is cleared', async () => {
+    const own = `${sched}  readings-week:\n    event_datetime: 2026-09-16T10:00\n    kind: readings\n    number: 2\n    deploy:\n      - course_source_repo: course-materials-f2026\n        course_source_path: readings/week_2\n`;
+    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: own });
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-week' })} />);
+    expect(q<HTMLInputElement>('#e-num').value).toBe('2');
+    await type('#e-num', '');
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    const out = parse(body(puts(gh, 'schedule.yml')[0])).releases;
+    expect(out['readings-week']).not.toHaveProperty('number');
+    expect(out['readings-week'].kind).toBe('readings');
   });
 });
 
