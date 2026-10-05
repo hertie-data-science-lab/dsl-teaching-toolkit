@@ -4706,10 +4706,6 @@ _HOLD_PREVIEW = {
 }
 
 
-def _counted(n: int, one: str, many: str) -> str:
-    return f"{n} {one if n == 1 else many}"
-
-
 def _preview_body(
     semester_org: str,
     specs: dict[str, SheetSpec],
@@ -4751,7 +4747,7 @@ def _preview_body(
         for blank, whose in sorted(by_blank.items(), key=lambda kv: (bool(kv[0]), kv)):
             what = f"{', '.join(blank)} blank" if blank else "no mark yet"
             unmarked.append(
-                f"- **{slug}** · {_counted(len(whose), *noun)}: "
+                f"- **{slug}** · {plural(len(whose), *noun)}: "
                 f"{', '.join(f'`{u}`' for u in whose)} ({what})"
             )
 
