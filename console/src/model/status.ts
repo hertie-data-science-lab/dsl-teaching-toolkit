@@ -1,5 +1,5 @@
 // Reads `status.json` (contracts section 3), validates it against the exported schema and
-// decides whether it is stale by comparing its `inputs` with one tree read of the repo. Also
+// decides whether it is stale by comparing its `inputs` with one recursive tree read of the repo. Also
 // the course overview's readings of loaded statuses (decision 0025): the problems roll-up, a
 // semester's next automatic event and the recent-activity list.
 
@@ -32,20 +32,26 @@ export function validateStatus(data: unknown): string[] {
 
 /**
  * The inputs whose sha no longer matches the tree: a file edited, added under a tracked name
- * or removed since the status was computed. `inputs` keys are paths in the repo that holds the
- * status file; a key under `course/` names a file in the course's `.github` and is compared
- * only when `courseTree` is given (a semester read makes one tree read, of its own repo).
+ * or removed since the status was computed. `inputs` keys are full paths in the repo that
+ * holds the status file (nested ones like `.system/assignments.lock.yml` included, so the tree
+ * must be the recursive one); a key under `course/` names a file in the course's `.github` and
+ * is compared only when `courseTree` is given. A `null` sha records an input that was absent:
+ * it is unchanged while the path is still absent. A truncated tree cannot prove a path absent,
+ * so a path it lacks is not counted.
  */
-export function staleInputs(inputs: Record<string, string>, tree: Tree, courseTree?: Tree): string[] {
-  const shaOf = (t: Tree, path: string) => t.tree.find((e) => e.path === path)?.sha;
+export function staleInputs(inputs: Record<string, string | null>, tree: Tree, courseTree?: Tree): string[] {
+  const changed = (t: Tree, path: string, sha: string | null) => {
+    const found = t.tree.find((e) => e.path === path)?.sha;
+    if (found === undefined && t.truncated) return false;
+    return (found ?? null) !== sha;
+  };
   const stale: string[] = [];
   for (const [key, sha] of Object.entries(inputs)) {
     if (key.startsWith('course/')) {
-      if (!courseTree) continue;
-      if (shaOf(courseTree, key.slice('course/'.length)) !== sha) stale.push(key);
+      if (courseTree && changed(courseTree, key.slice('course/'.length), sha)) stale.push(key);
       continue;
     }
-    if (shaOf(tree, key) !== sha) stale.push(key);
+    if (changed(tree, key, sha)) stale.push(key);
   }
   return stale;
 }
@@ -63,7 +69,7 @@ export async function loadStatus(client: GitHubClient, owner: string, repo: stri
     const errors = validateStatus(data);
     if (errors.length) return { kind: 'invalid', errors };
     const status = data as Status;
-    const tree = await client.listTree(owner, repo, 'HEAD');
+    const tree = await client.listTree(owner, repo, 'HEAD', true);
     const stale = tree ? staleInputs(status.inputs, tree) : [];
     return { kind: 'ready', status, sha: file.sha, stale };
   } catch (e) {

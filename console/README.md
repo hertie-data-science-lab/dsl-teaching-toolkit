@@ -280,7 +280,9 @@ a first visit, mostly free 304s after).
   case-insensitively.
 - Status: `semester-config/.system/status.json` (semester) and `.github/.system/status.json`
   (course), validated against `schemas/status.schema.json`. Staleness compares the file's
-  `inputs` with one tree read. An absent file shows "Status not computed yet".
+  `inputs` with one recursive tree read, by full path (`.system/assignments.lock.yml`
+  included); an input recorded `null` is unchanged while the file is still absent. An absent
+  status file shows "Status not computed yet".
 - Automation's heartbeat: the course's Scheduled release run list.
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
   `students.csv`, `instructors.yml`, a template's `grading_config.yml`, the site's `index.md`.

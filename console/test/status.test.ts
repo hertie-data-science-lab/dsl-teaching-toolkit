@@ -6,11 +6,13 @@ import { FakeGitHub, fileBody } from './fake';
 
 const treeOf = (entries: Record<string, string>): Tree => ({
   sha: 'root', truncated: false,
-  tree: Object.entries(entries).map(([path, sha]) => ({ path, sha, mode: '100644', type: path === 'grading_sheets' ? 'tree' : 'blob' })),
+  tree: Object.entries(entries).map(([path, sha]) => ({ path, sha, mode: '100644', type: ['grading_sheets', '.system'].includes(path) ? 'tree' : 'blob' })),
 });
+// The recursive tree the engine recorded from: every present input (nested ones included,
+// under their directory's entry); `teams.csv` is recorded `null`, so it is absent.
 const matching = () => {
-  const { 'course/dsl-course.yml': _course, ...own } = example.inputs;
-  return treeOf(own);
+  const own = Object.entries(example.inputs).filter(([k, v]) => !k.startsWith('course/') && v !== null) as [string, string][];
+  return treeOf({ '.system': 'sys-tree', ...Object.fromEntries(own) });
 };
 
 describe('status', () => {
@@ -29,10 +31,26 @@ describe('status', () => {
     expect(staleInputs(example.inputs, matching())).toEqual([]);
   });
 
-  it('names the inputs that changed or went missing', () => {
+  it('matches a nested input by its full path and a recorded null by an absent file', () => {
+    expect(example.inputs['.system/assignments.lock.yml']).toBe('sha-6');
+    expect(example.inputs['teams.csv']).toBeNull();
+    expect(staleInputs(example.inputs, matching())).toEqual([]);
+  });
+
+  it('names the inputs that changed, went missing or appeared', () => {
     const t = matching();
-    t.tree = t.tree.filter((e) => e.path !== 'teams.csv').map((e) => (e.path === 'schedule.yml' ? { ...e, sha: 'edited' } : e));
-    expect(staleInputs(example.inputs, t).sort()).toEqual(['schedule.yml', 'teams.csv']);
+    t.tree = t.tree
+      .filter((e) => e.path !== 'students.csv')
+      .map((e) => (e.path === 'schedule.yml' || e.path === '.system/assignments.lock.yml' ? { ...e, sha: 'edited' } : e));
+    t.tree.push({ path: 'teams.csv', sha: 'new', mode: '100644', type: 'blob' });
+    expect(staleInputs(example.inputs, t).sort()).toEqual(['.system/assignments.lock.yml', 'schedule.yml', 'students.csv', 'teams.csv']);
+  });
+
+  it('does not count a path a truncated tree lacks', () => {
+    const t = matching();
+    t.truncated = true;
+    t.tree = t.tree.filter((e) => e.path !== '.system/assignments.lock.yml');
+    expect(staleInputs(example.inputs, t)).toEqual([]);
   });
 
   it('compares course/ inputs only against the course tree', () => {
@@ -46,18 +64,18 @@ describe('status', () => {
     expect(await loadStatus(c, 'o', 'semester-config')).toEqual({ kind: 'absent' });
   });
 
-  it('loads, validates and checks staleness with one tree read', async () => {
+  it('loads, validates and checks staleness with one recursive tree read', async () => {
     const t = matching();
     const gh = new FakeGitHub()
       .on('GET', `/repos/o/semester-config/contents/${STATUS_PATH}`, fileBody(STATUS_PATH, JSON.stringify(example), 'st'))
-      .on('GET', '/repos/o/semester-config/git/trees/HEAD', t);
+      .on('GET', '/repos/o/semester-config/git/trees/HEAD?recursive=1', t);
     const l = await loadStatus(new GitHubClient({ token: () => 't', fetch: gh.fetch }), 'o', 'semester-config');
     expect(l.kind).toBe('ready');
     if (l.kind === 'ready') {
       expect(l.stale).toEqual([]);
       expect(l.status.semester?.label).toBe('Fall 2026');
     }
-    expect(gh.seen.filter((s) => s.url.includes('/git/trees/'))).toHaveLength(1);
+    expect(gh.seen.filter((s) => s.url.includes('/git/trees/')).map((s) => s.url)).toEqual(['https://api.github.com/repos/o/semester-config/git/trees/HEAD?recursive=1']);
   });
 
   it('reports a file that is not JSON, or not the shape, as invalid', async () => {

@@ -148,7 +148,7 @@ export interface Operation {
 
 export interface Status {
   schema: 'dsl.status/1';
-  inputs: Record<string, string>;
+  inputs: Record<string, string | null>;
   course?: CourseStatus;
   semester?: SemesterStatus;
   problems?: Problem[];
