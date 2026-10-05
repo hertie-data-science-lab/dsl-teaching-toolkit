@@ -18,7 +18,7 @@ import { CourseHeaderActions, CourseScreen, SETTLING_COLUMNS, SetupList, Templat
 import { HomeScreen, ReadonlyScreen, SignInScreen } from '../src/screens/Home';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
-import { OperationsScreen, SiteScreen } from '../src/screens/Site';
+import { OperationsScreen, SiteScreen, announcementFile, readAnnouncement } from '../src/screens/Site';
 import type { CohortProps } from '../src/screens/types';
 import { generateSyllabus } from '../src/ops/defs';
 import { OutcomeView } from '../src/ops/Panel';
@@ -701,5 +701,13 @@ describe('explicit numbers (decision 0020)', () => {
     expect(out).toMatch(/<input id="e-num" type="number" min="1" max="999" value="5"/);
     const t = text(<ReleaseScreen {...props({ loaded: numbered, files: guestFiles, entry: 'guest' })} />);
     expect(t).toContain('Automation will skip this until it has a number.');
+  });
+});
+
+describe('an announcement file', () => {
+  it('reads back what it writes, and reads a CRLF file the same way', () => {
+    const f = announcementFile('2026-10-05', 'Room change: B2.01');
+    expect(readAnnouncement(f.content)).toEqual({ date: '2026-10-05', text: 'Room change: B2.01' });
+    expect(readAnnouncement('---\r\ndate: 2026-10-05\r\n---\r\nNo class today.\r\n')).toEqual({ date: '2026-10-05', text: 'No class today.' });
   });
 });

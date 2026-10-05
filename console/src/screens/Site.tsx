@@ -1,13 +1,13 @@
 // S14 Site (home text and announcements, Update site) and S18 Operations list.
 
 import { useState } from 'preact/hooks';
-import { parse } from 'yaml';
 import { useEnv } from '../env';
 import { useSave } from '../edit/save';
 import { render } from '../edit/yamlText';
 import { Field } from '../forms/Form';
 import { ago, fmtWhen } from '../model/format';
 import { parseInstructors } from '../model/people';
+import { bodyOf, frontMatter } from '../model/student';
 import type { Outcome } from '../model/types';
 import { outcomePath } from '../ops/adapter';
 import { updateSite } from '../ops/defs';
@@ -20,24 +20,10 @@ import { WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from '.
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
 
-const FRONT = /^---\n([\s\S]*?)\n---\n?/;
-
-/** index.md without its Jekyll front matter. */
-export function stripFrontMatter(text: string): string {
-  return text.replace(FRONT, '');
-}
-
 /** A hand-written announcement's date and text, from its front matter (or its body). */
 export function readAnnouncement(text: string): { date: string; text: string } {
-  const m = FRONT.exec(text);
-  let fm: Record<string, unknown> = {};
-  try {
-    fm = (m ? parse(m[1]) : {}) ?? {};
-  } catch {
-    fm = {};
-  }
-  const body = stripFrontMatter(text).trim();
-  return { date: fm.date == null ? '' : String(fm.date).slice(0, 10), text: fm.details == null ? body : String(fm.details) };
+  const fm = frontMatter(text);
+  return { date: fm.date == null ? '' : String(fm.date).slice(0, 10), text: fm.details == null ? bodyOf(text).trim() : String(fm.details) };
 }
 
 export function announcementFile(date: string, text: string): { path: string; content: string } {
@@ -77,11 +63,11 @@ function Site(p: ReadyProps) {
   const [homeSave, runHome] = useSave(env);
   const [newAnn, setNewAnn] = useState<{ date: string; text: string }>({ date: todayOf(now, tz), text: '' });
   const [annSave, runAnn, setAnnSave] = useSave(env);
-  const homeText = home.kind === 'ready' ? stripFrontMatter(home.text) : '';
+  const homeText = home.kind === 'ready' ? bodyOf(home.text) : '';
   const shown = body ?? homeText;
   const saveHome = async () => {
     if (home.kind !== 'ready' || body === null) return;
-    const front = FRONT.exec(home.text)?.[0] ?? '';
+    const front = home.text.slice(0, home.text.length - bodyOf(home.text).length);
     if (await runHome({ owner: p.cohort.org, repo, path: 'index.md' }, `${front}${body.endsWith('\n') ? body : `${body}\n`}`, home.sha, { message: 'site: edit the home text, from the DSL Teaching Console' })) setBody(null);
   };
   const addAnn = async () => {
