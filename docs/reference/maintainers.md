@@ -619,7 +619,7 @@ under an older one is still found, updated and closed.
 | issue title | file | where it lives |
 | --- | --- | --- |
 | `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` and `assignments.yml` | semester `semester-config` |
-| `people.yml has entries the sync cannot use` | `instructors.yml` | semester `semester-config` |
+| `instructors.yml has entries the sync cannot use` (was `people.yml ...`) | `instructors.yml` | semester `semester-config` |
 | `students.csv has rows the toolkit cannot use` | `students.csv` | semester `semester-config` |
 | `teams.csv has rows the toolkit cannot use` | `teams.csv` | semester `semester-config` |
 | `grading sheets have entries the grader cannot read` | `grading_sheets/` | semester `semester-config` |
@@ -936,8 +936,7 @@ Promote.
 | status `inputs` key `assignments.lock.yml` | `.system/assignments.lock.yml` | `dsl.status/1` |
 | toolkit `templates/classroom-config/`, `templates/welcome/`, `templates/cohort/` | `templates/semester-config/`, `templates/join/`, `templates/semester/` | this repo only |
 
-Not renamed here, deliberately: the frozen doc filenames, the digest issue titles (so `people.yml has entries the sync
-cannot use` keeps its old word), the site's `_data/people.yml` the pinned theme reads, the
+Not renamed here, deliberately: the frozen doc filenames, the site's `_data/people.yml` the pinned theme reads, the
 `SCOPED_RUN_TITLE` run-name the cadence check reads back, the `dsl_course.welcome` module
 name (not a CLI), and the site's `files/materials/` dest.
 
