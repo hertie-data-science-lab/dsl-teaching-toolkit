@@ -236,9 +236,6 @@ def test_public_links_are_site_relative(tmp_path):
     assert link.url.startswith("/public-materials/")
     assert "%20" in link.url or "01%20intro" in link.url  # space URL-encoded
     assert "github.com" not in link.url and "raw." not in link.url
-    # The public course site HOSTS everything it links, so a link there never carries a
-    # second destination.
-    assert link.view_url == ""
 
 
 def test_public_lecture_entry_reading_list_mode_has_no_links():
@@ -854,6 +851,20 @@ def test_the_sync_retires_the_sections_a_calendar_has_no_more(tmp_path):
     assert "materials.md" not in retired
     assert "files" in retired and "_includes/open_in.html" in retired
     assert "_layouts/assignment.html" in retired
+
+
+def test_a_public_site_has_no_assignments_tab(tmp_path):
+    # The public site lists no assignments, so it gets no tab that would say "none yet"
+    # forever; one an older sync wrote is retired, and a hand-written page stays.
+    assert "assignments.md" not in site_repo.theme_pages(semester=False)
+    nav = yaml.safe_load(site_repo.nav_yaml(semester=False))["items"]
+    assert "/assignments/" not in [i["url"] for i in nav]
+    (tmp_path / "assignments.md").write_text(
+        "---\nlayout: assignments\ntitle: Assignments\npermalink: /assignments/\n---\n"
+    )
+    assert site_repo.retired_pages(tmp_path, ("assignments.md",)) == ("assignments.md",)
+    (tmp_path / "assignments.md").write_text("---\ntitle: Our projects\n---\nHi.\n")
+    assert site_repo.retired_pages(tmp_path, ("assignments.md",)) == ()
 
 
 def test_the_banner_links_this_semester_in_the_console():

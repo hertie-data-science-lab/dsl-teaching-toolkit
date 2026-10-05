@@ -90,13 +90,6 @@ def q(value: str) -> str:
     return " ".join(value.replace("\\", "\\\\").replace('"', "'").split())
 
 
-def liquid_raw(text: str) -> str:
-    """Fence faculty-written text that is inlined verbatim into a Jekyll document. A `{{`
-    or `{%` in it would otherwise run as Liquid, and a malformed tag fails the whole build;
-    `{% raw %}` renders it literally."""
-    return f"{{% raw %}}\n{text}\n{{% endraw %}}"
-
-
 def block(key: str, text: str) -> str:
     """A multi-line front-matter value as a YAML literal block - faculty-written text (a
     reading list) inlined verbatim, rather than folded onto one line by `q`.
@@ -105,7 +98,7 @@ def block(key: str, text: str) -> str:
     indentation from its first non-empty line, so a list that happens to start indented
     would make every following line look like the end of the block and break the whole
     file. Tabs are expanded for the same reason. Front matter is data, not a Liquid
-    template, so unlike the body route (`liquid_raw`) a `{{` in the text needs no fence.
+    template, so a `{{` in the text needs no fence.
 
     Always at column zero. A caller that needs the block nested under a parent key shifts
     the whole thing with `textwrap.indent` - a uniform shift, so the `|2` indicator still
@@ -326,18 +319,6 @@ _PUBLIC_ROW_PAGES = (
     ),
 )
 
-_ASSIGNMENTS_PAGE = _ThemePage(
-    "assignments.md",
-    "assignments",
-    "Assignments",
-    "/assignments/",
-    "fas fa-user-graduate",
-    # The layout says "No assignments released yet." when the collection is empty, so
-    # this line is only ever shown beside an actual list.
-    "Assignments repos are only accessible to enrolled students.",
-    "Assignments by hand-out date.",
-)
-
 # The pages and templates of the sections a semester site no longer has (decision 0011
 # rule 5: a public calendar only). The pages go only where the sync wrote them; the
 # templates and the hosted copies were always the sync's.
@@ -354,18 +335,25 @@ RETIRED_TEMPLATES = (
 HOSTED_COPIES_DIR = "files"
 
 
-def retired_sections(site_wd: Path) -> tuple[str, ...]:
-    """For a semester site's `SitePlan.retire`: its Assignments, All Materials and Your
-    Profile tabs (when the sync wrote them), the templates only they used, and the hosted
-    copies under `files/`."""
+def retired_pages(site_wd: Path, names: Iterable[str]) -> tuple[str, ...]:
+    """Those of `names` that are a retired section's page the sync wrote (never one
+    somebody wrote by hand)."""
     pages = []
-    for name in ("assignments.md", "materials.md", "profile.md"):
+    for name in names:
         try:
             text = (site_wd / name).read_text(encoding="utf-8")
         except OSError:
             continue
         if _RETIRED_PAGES.match(text):
             pages.append(name)
+    return tuple(pages)
+
+
+def retired_sections(site_wd: Path) -> tuple[str, ...]:
+    """For a semester site's `SitePlan.retire`: its Assignments, All Materials and Your
+    Profile tabs (when the sync wrote them), the templates only they used, and the hosted
+    copies under `files/`."""
+    pages = retired_pages(site_wd, ("assignments.md", "materials.md", "profile.md"))
     return (*pages, *RETIRED_TEMPLATES, HOSTED_COPIES_DIR)
 
 
@@ -465,10 +453,11 @@ def retired_kind_pages(present: Iterable[str], site_wd: Path) -> tuple[str, ...]
 
 def _site_pages(semester: bool, kinds: Iterable[str] = ()) -> tuple[_ThemePage, ...]:
     """The pages this kind of site gets, in nav order: a semester site's kind tabs; the
-    public site's fixed row pages, Assignments and its `/materials/` readings page."""
+    public site's fixed row pages and its `/materials/` readings page (no Assignments:
+    a public site lists none)."""
     if semester:
         return kind_pages(kinds)
-    return (*_PUBLIC_ROW_PAGES, _ASSIGNMENTS_PAGE, _PUBLIC_MATERIALS_PAGE)
+    return (*_PUBLIC_ROW_PAGES, _PUBLIC_MATERIALS_PAGE)
 
 
 def theme_pages(semester: bool, kinds: Iterable[str] = ()) -> dict[str, str]:
@@ -820,20 +809,10 @@ def _singular(label: str) -> str:
 
 @dataclass(frozen=True)
 class Link:
-    """One file link on a site row: the name a reader clicks, the `url` behind it, and -
-    only when the semester site hosts a public copy of that file - the `view_url` of the
-    copy.
-
-    A record rather than a pair because a link now carries two destinations for one file
-    and the templates have to tell them apart: the name opens `view_url` where there is
-    one (the rendered copy, which is the whole point of publishing it) and `url` otherwise,
-    with `url` shown beside it as `[source]`. Empty by default, because on every site that
-    publishes nothing every link has exactly one destination and the front matter must stay
-    byte-identical to what it was."""
+    """One file link on a site row: the name a reader clicks and the `url` behind it."""
 
     name: str
     url: str
-    view_url: str = ""
 
 
 def links_block(sections: list[tuple[str, list[Link]]]) -> str:
@@ -850,11 +829,6 @@ def links_block(sections: list[tuple[str, list[Link]]]) -> str:
     was showing; and a file genuinely named `reading - notes.pdf` released into `lectures/`
     matched both pages. A field the templates can test is the same routing without either.
 
-    `view_url:` is written only when the link has one, so a course that publishes nothing
-    gets the same three lines per link it has always got. An empty key would be a field
-    every template then has to test for emptiness rather than for presence, on every row of
-    every site, to gain nothing.
-
     Escaping is per FIELD, not over the pair: `q` escapes `\` and `"`, and a filename
     carrying a backslash (`\sigma.pdf`) is an invalid YAML escape that fails the whole
     Jekyll build."""
@@ -863,7 +837,6 @@ def links_block(sections: list[tuple[str, list[Link]]]) -> str:
         for link in links:
             rows.append(
                 f"    - url: {link.url}\n"
-                + (f"      view_url: {link.view_url}\n" if link.view_url else "")
                 + f'      name: "{q(link.name)}"\n'
                 + f'      section: "{q(_singular(label))}"'
             )

@@ -190,37 +190,28 @@ def test_no_comment_means_a_silent_body_edit(gh):
 # ------------------------------------------------------------- the issue somebody closed
 
 
-def test_both_halves_of_the_title_come_back(gh):
-    # A caller whose state lives in the body it last wrote needs the newest thing it
-    # wrote, open or closed. The closed half is a title search of its own.
+def test_the_closed_half_alone_is_one_search(gh):
     fake = gh(
-        [_issue(11, TITLE, "current")],
+        [_issue(11, TITLE)],
         closed=[_issue(3, TITLE, "older"), _issue(9, TITLE, "newest")],
     )
-    found = issues.find_issues(REPO, TITLE)
-    assert found.open == issues.Issue(11, "current")
-    assert found.last_closed == issues.Issue(9, "newest", closed=True)
-    listed, searched = fake.did("issue", "list")
-    assert listed[listed.index("--state") + 1] == "open"
+    assert issues.find_closed(REPO, TITLE) == issues.Issue(9, "newest", closed=True)
+    (searched,) = fake.did("issue", "list")
     assert searched[searched.index("--state") + 1] == "closed"
     assert searched[searched.index("--search") + 1] == f"{TITLE} in:title"
 
 
-def test_the_closed_half_alone_is_one_search(gh):
-    fake = gh([_issue(11, TITLE)], closed=[_issue(9, TITLE, "newest")])
-    assert issues.find_closed(REPO, TITLE) == issues.Issue(9, "newest", closed=True)
-    (searched,) = fake.did("issue", "list")
-    assert searched[searched.index("--state") + 1] == "closed"
-
-
 def test_a_closed_issue_a_human_titled_similarly_is_not_ours_either(gh):
     gh([], closed=[_issue(3, f"re: {TITLE}", "my notes")])
-    assert issues.find_issues(REPO, TITLE) == (None, None)
+    assert issues.find_closed(REPO, TITLE) is None
 
 
-def test_nothing_of_that_title_at_all_is_two_nones(gh):
+def test_nothing_of_that_title_at_all_is_none(gh):
     gh([])
-    assert issues.find_issues(REPO, TITLE) == (None, None)
+    assert (issues.find_issue(REPO, TITLE), issues.find_closed(REPO, TITLE)) == (
+        None,
+        None,
+    )
 
 
 # ---------------------------------------------------------- the listing already made
