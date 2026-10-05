@@ -245,7 +245,8 @@ export const TYPE_LABEL: Record<string, string> = {
 
 // ------------------------------------------------------------------ markdown (as the site renders `details`)
 
-function esc(s: string): string {
+/** HTML-escape text for an attribute or element body. */
+export function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
