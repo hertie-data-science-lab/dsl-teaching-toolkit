@@ -139,14 +139,19 @@ def place(text: str, body: str) -> str | None:
 def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
     """A readings entry's reading list, from what its copies take out of the COURSE org:
     a file, a folder, or a whole repo, each through `readings_block`, the rule the site
-    uses too."""
+    uses too. A repo that cannot be read raises, naming it."""
     parts = []
     for d in row.deploys:
         repo, src = d.course_source_repo, d.course_source_path.strip("/")
         if repo not in trees:
-            trees[repo] = repo_tree(
-                course_org, repo, default_branch(course_org, repo), "blob"
-            )
+            try:
+                trees[repo] = repo_tree(
+                    course_org, repo, default_branch(course_org, repo), "blob"
+                )
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    f"could not read {course_org}/{repo}: {exc}"
+                ) from exc
         if src in trees[repo]:  # one file
             base, _, name = src.rpartition("/")
             names = [name]
@@ -235,6 +240,12 @@ def main() -> int:
         body, sessions = build(a.course_org, a.semester_org)
     except Unusable as exc:
         return _unusable(exc)
+    except RuntimeError as exc:
+        # A repo a row names that is renamed, gone or unreadable: an outcome the console
+        # shows, not a traceback in the public Actions log.
+        log_err(str(exc))
+        text = f"The weekly plan could not be built: {exc}."
+        return Summary(text, reasons=[{"code": "READ_FAILED", "text": text}], code=1)
     if not sessions:
         log_err(
             f"{a.semester_org}'s schedule.yml names no dated sessions, so there is nothing "

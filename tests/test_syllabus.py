@@ -298,6 +298,25 @@ def _argv(monkeypatch, *extra):
     )
 
 
+def test_a_materials_repo_that_cannot_be_read_is_an_outcome_not_a_traceback(
+    monkeypatch, capsys, wired
+):
+    # A readings row naming a renamed or unreadable repo raised out of `build` into the
+    # public Actions log, with no outcome for the console. Now a refusal naming the repo.
+    written = _writable(monkeypatch)
+
+    def unreadable(o, r, b, k):
+        raise RuntimeError("gh: HTTP 502")
+
+    monkeypatch.setattr(syllabus, "repo_tree", unreadable)
+    _argv(monkeypatch, "--no-preview")
+    out = syllabus.main()
+    assert out == 1 and written == {}
+    assert out.reasons[0]["code"] == "READ_FAILED"
+    assert "C/cm" in out.text and "HTTP 502" in out.text
+    assert "C/cm" in capsys.readouterr().err
+
+
 def test_preview_and_write_both_hand_the_block_to_the_outcome(monkeypatch, wired):
     # MA1: the console panel shows the generated list; it used to live in the run log only.
     written = _writable(monkeypatch)
