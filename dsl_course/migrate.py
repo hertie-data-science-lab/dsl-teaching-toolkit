@@ -100,6 +100,7 @@ from .gh_contents import (
     move_files,
     refuse_clashes,
     repo_blob_shas,
+    top_level,
 )
 from .ghcli import forget_all, gh, git
 from .grades import (
@@ -1320,22 +1321,32 @@ LIVE_RUN_STATES = ("queued", "in_progress", "waiting", "requested", "pending")
 CENTRAL_REFRESHERS = ("deploy-main.yml", "deploy-preview.yml", "promote.yml")
 
 
+def _live_runs(org: str, repo: str) -> list[str]:
+    """The workflow file (`.github/workflows/x.yml`) of every run of `org/repo` not yet
+    finished, off ONE listing of its latest runs filtered here - a run that is queued or
+    going is among the newest. Raises when GitHub cannot say."""
+    code, out = gh(
+        "api",
+        f"repos/{org}/{repo}/actions/runs?per_page=50",
+        "--jq",
+        '.workflow_runs[] | select(.status != "completed") | .path',
+    )
+    if code != 0:
+        raise RuntimeError(f"could not list the runs of {org}/{repo}: {out[:200]}")
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
 def _alive(targets: list[tuple[str, str]]) -> list[str]:
     """The target repos with a run not yet finished, and each central deploy not yet
-    finished."""
-    out = [
-        f"{org}/{repo}"
-        for org, repo in targets
-        if any(_run_count(org, repo, f"status={s}") for s in LIVE_RUN_STATES)
-    ]
-    central_org, central_repo = CENTRAL.split("/", 1)
+    finished: one runs listing per repo and one for the toolkit, where asking per state
+    cost five calls per repo and fifteen for the toolkit on every poll."""
+    out = [f"{org}/{repo}" for org, repo in targets if _live_runs(org, repo)]
+    going = _live_runs(*CENTRAL.split("/", 1))
     out += [
         f"{CENTRAL} ({workflow})"
         for workflow in CENTRAL_REFRESHERS
-        if any(
-            _run_count(central_org, central_repo, f"status={s}", workflow)
-            for s in LIVE_RUN_STATES
-        )
+        # `path` can carry the ref it ran from (`...yml@refs/heads/main`).
+        if any(path.split("@")[0].endswith(f"/{workflow}") for path in going)
     ]
     return out
 
@@ -1357,14 +1368,15 @@ def _yaml(text: str | None) -> dict:
 
 
 def _with_workflows(org: str, candidates: list[str]) -> list[tuple[str, str]]:
-    """`(org, repo)` for each live candidate repo that carries a workflow."""
+    """`(org, repo)` for each live candidate repo that carries a workflow - one Contents
+    read of its workflows folder, not a recursive tree of the whole repo."""
     listing = _listing(org)
     return [
         (org, repo)
         for repo in candidates
         if repo in listing
         and not listing[repo].get("archived")
-        and any(p.startswith(WORKFLOWS_DIR) for p in _files(org, repo))
+        and top_level(org, repo, WORKFLOWS_DIR)
     ]
 
 
@@ -1613,6 +1625,9 @@ def settle(
 
 
 def _settle(targets: Callable[[], list[tuple[str, str]]], before_switch: bool) -> bool:
+    # Worked out ONCE: nothing writes while this waits, so the repo set cannot change, and
+    # each poll used to re-read every repo's tree to find it again.
+    waited_on = targets()
     deadline = clock() + QUIET_WAIT
     while True:
         left = next_tick(clock())
@@ -1621,7 +1636,7 @@ def _settle(targets: Callable[[], list[tuple[str, str]]], before_switch: bool) -
             sleep(left + QUIET_POLL)
             deadline = clock() + QUIET_WAIT
             continue
-        alive = _alive(targets())
+        alive = _alive(waited_on)
         if not alive:
             return True
         if clock() >= deadline:

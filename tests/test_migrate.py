@@ -204,6 +204,14 @@ class FakeGitHub:
             return {}
         return {p: blob_sha(b) for p, b in found["branches"].get(branch, {}).items()}
 
+    def top_level(self, org, repo, folder=""):
+        found = self._repo(org, repo)
+        prefix = folder.strip("/") + "/"
+        tree = found["branches"]["main"] if found else {}
+        return {
+            p[len(prefix) :].split("/")[0]: "file" for p in tree if p.startswith(prefix)
+        }
+
     def get_file_content(self, org, repo, path, ref=""):
         found = self._repo(org, repo)
         if found is None:
@@ -259,12 +267,13 @@ class FakeGitHub:
         if parts[0] != "repos":
             raise AssertionError(f"unexpected gh call {args}")
         org, name = parts[1], parts[2]
-        if f"{org}/{name}" == migrate.CENTRAL and parts[3:5] == [
-            "actions",
-            "workflows",
-        ]:
-            state = query.split("=", 1)[1]
-            return 0, str(self.central_runs.get(parts[5], []).count(state))
+        if f"{org}/{name}" == migrate.CENTRAL and parts[3:] == ["actions", "runs"]:
+            return 0, "\n".join(
+                f".github/workflows/{workflow}"
+                for workflow, states in self.central_runs.items()
+                for state in states
+                if state != "completed"
+            )
         if self._repo(org, name) is None:
             return 1, "gh: Not Found (HTTP 404)"
         key = (org, self._name(org, name))
@@ -307,6 +316,12 @@ class FakeGitHub:
             self.calls.append(f"runs {key[0]}/{key[1]}")
             self.clock.at += self.run_query_seconds
             params = dict(p.split("=", 1) for p in query.split("&"))
+            if "select(" in args[-1]:  # the latest runs, the unfinished ones' files
+                return 0, "\n".join(
+                    ".github/workflows/x.yml"
+                    for _at, state in self.runs.get(key, [])
+                    if state != "completed"
+                )
             since = params.get("created", "%3E%3D").split("%3E%3D", 1)[1]
             state = params.get("status")
             return 0, str(
@@ -339,6 +354,7 @@ def fake(monkeypatch):
         "list_org_repos",
         "repo_blob_shas",
         "get_file_content",
+        "top_level",
         "move_files",
         "set_repo_topics",
         "gh",
@@ -2339,7 +2355,7 @@ def test_the_switch_waits_past_a_tick_the_slow_poll_ran_into(
     # Clear of the tick when the poll starts, inside the margin by the time it ends: the
     # switch is re-checked immediately before it lands.
     fake.clock.at = 1_790_337_780.0 + 12 * 60 - 90  # 90 s before the quarter hour
-    fake.run_query_seconds = 2  # 25 listings: 50 s, into the margin
+    fake.run_query_seconds = 10  # slow listings: the poll ends inside the margin
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     quarter = 1_790_337_780.0 + 12 * 60
     assert fake.off_at and min(fake.off_at) > quarter
