@@ -4,7 +4,9 @@ A static web app (Vite + TypeScript + Preact) that shows an instructor their cou
 semesters as the lifecycle model describes them, and a student their semesters, reading GitHub
 with the person's own token.
 Deployed by `.github/workflows/console-pages.yml` to
-https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/.
+https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/ on every push to `main` that
+touches `console/` (and, until it merges, to `feature/instructor-console`); the build reads
+`orgs.yml` from the branch it was built from.
 
 ## Run it locally
 
@@ -21,7 +23,11 @@ Node 22 or newer (`.nvmrc` pins 26).
 
 Three paths, all behind the `Auth` interface in `src/auth/` (`ConsoleAuth` holds them).
 Whichever is used, the console can read or change exactly what that account can on GitHub,
-and the token stays in `sessionStorage`: it is gone when the tab closes.
+and the token stays in `sessionStorage`: it is gone when the tab closes. At reload a saved
+token or App session is dropped only when GitHub (or the relay) refuses it. With no answer
+an App session is kept for the next reload; a pasted token is kept and checked again, the
+screen saying it is retrying. Sign-out also
+ends any run the console is following and forgets this session's runs and previews.
 
 - **Sign in with GitHub** (`AppAuth`, decisions 0002 and 0011): the default where an
   institution runs the relay. The web flow goes to GitHub with a `state` and a PKCE
@@ -280,7 +286,9 @@ a first visit, mostly free 304s after).
   case-insensitively.
 - Status: `semester-config/.system/status.json` (semester) and `.github/.system/status.json`
   (course), validated against `schemas/status.schema.json`. Staleness compares the file's
-  `inputs` with one tree read. An absent file shows "Status not computed yet".
+  `inputs` with one recursive tree read, by full path (`.system/assignments.lock.yml`
+  included); an input recorded `null` is unchanged while the file is still absent. An absent
+  status file shows "Status not computed yet".
 - Automation's heartbeat: the course's Scheduled release run list.
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
   `students.csv`, `instructors.yml`, a template's `grading_config.yml`, the site's `index.md`.

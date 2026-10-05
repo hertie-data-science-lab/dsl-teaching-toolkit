@@ -4,10 +4,10 @@
     "schedule.yml": "sha-0",
     "instructors.yml": "sha-1",
     "students.csv": "sha-2",
-    "teams.csv": "sha-3",
+    "teams.csv": null,
     "grading_sheets": "sha-4",
     "course/dsl-course.yml": "sha-5",
-    "assignments.lock.yml": "sha-6"
+    ".system/assignments.lock.yml": "sha-6"
   },
   "course": {
     "org": "hertie-dsl-demo-course-e1234",

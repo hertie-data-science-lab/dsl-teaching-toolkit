@@ -126,7 +126,7 @@ export function App({ state: s }: { state: AppState }) {
       <>
         <Topbar user={null} />
         <div class="shell" style="grid-template-columns:minmax(0,1fr)">
-          <main>{s.restoring.value ? <Loading what="Signing in" /> : <SignInScreen auth={auth} onSignedIn={s.signedIn} />}</main>
+          <main>{s.restoring.value ? <Loading what={s.offline.value ? OFFLINE_RETRY : 'Signing in'} /> : <SignInScreen auth={auth} onSignedIn={s.signedIn} />}</main>
         </div>
         <Footer />
       </>
@@ -360,6 +360,9 @@ export function subPages(course: Course, loaded: Loaded, cohortStates: Record<st
 
 export type AppState = ReturnType<typeof createState>;
 
+/** The sign-in screen's line while the saved token waits for GitHub to answer. */
+export const OFFLINE_RETRY = 'Offline: GitHub is not answering, retrying the sign-in';
+
 export function createState({ auth, client }: AppDeps) {
   const statuses = new StatusStore(client);
   const files = new LiveFiles(client);
@@ -388,6 +391,8 @@ export function createState({ auth, client }: AppDeps) {
     auth,
     user: signal<GhUser | null>(null),
     restoring: signal(true),
+    /** The saved token's check at reload got no answer: it is kept and tried again. */
+    offline: signal(false),
     /** Every course and semester the person can see, and their role in each; null until discovered. */
     estate,
     /** Which shell renders: a semester's student screens, or the instructor screens. */
@@ -455,6 +460,7 @@ export function createState({ auth, client }: AppDeps) {
     signedIn(u: GhUser) {
       st.user.value = u;
       st.restoring.value = false;
+      st.offline.value = false;
       st.error.value = null;
       st.discover()
         .then((e) => (st.estate.value = e))
@@ -473,7 +479,7 @@ export function createState({ auth, client }: AppDeps) {
       beats.clear();
       archived.clear();
       left.clear();
-      ops.current.value = null;
+      ops.reset();
       env = null;
       st.user.value = null;
       st.estate.value = null;
@@ -485,5 +491,6 @@ export function createState({ auth, client }: AppDeps) {
     },
   };
   auth.onLost = () => st.signOut();
+  auth.onRetry = () => (st.offline.value = true);
   return st;
 }

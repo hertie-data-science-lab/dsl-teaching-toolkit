@@ -15,7 +15,8 @@ import { fmtWhen } from '../model/format';
 import { readable, type Mine } from '../model/mine';
 import { JOIN_MARKERS, JOIN_REPO } from '../model/names';
 import type { SemesterFacts } from '../model/student';
-import { ORG_NAME_RE } from '../model/policy';
+import { DEFAULT_TIMEZONE, ORG_NAME_RE } from '../model/policy';
+import { closesWords, formingAt } from '../model/week';
 import { CheckLine, Crumbs, Md } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
@@ -156,8 +157,9 @@ function SendRequest({ org, title, body, ready, fallback, label, onSent }: { org
   );
 }
 
-export function TeamForm({ org, assignments, mine, onSent }: { org: string; assignments: SemesterFacts['assignments']; mine: Mine | null; onSent?: () => void }) {
-  const open = assignments.filter((a) => a.teamFormation);
+/** `tz` and `now` decide which formations are still open and how their close reads. */
+export function TeamForm({ org, assignments, mine, onSent, tz = DEFAULT_TIMEZONE, now = Date.now() }: { org: string; assignments: SemesterFacts['assignments']; mine: Mine | null; onSent?: () => void; tz?: string; now?: number }) {
+  const open = assignments.filter((a) => formingAt(a.teamFormation, now, tz));
   const [slug, setSlug] = useState(open[0]?.slug ?? '');
   const [action, setAction] = useState<'join' | 'create'>('join');
   const [team, setTeam] = useState('');
@@ -179,7 +181,7 @@ export function TeamForm({ org, assignments, mine, onSent }: { org: string; assi
           {open.map((x) => <option value={x.slug}>{x.title}{x.subtitle ? `: ${x.subtitle}` : ''}</option>)}
         </select>
         <p class="hint">
-          {a.teamFormation?.closes ? `Teams can form until ${a.teamFormation.closes}. ` : ''}
+          {a.teamFormation?.closes ? `Teams can form until ${closesWords(a.teamFormation.closes, tz)}. ` : ''}
           {a.teamFormation?.cap ? `At most ${a.teamFormation.cap} in a team. ` : ''}
           {current ? `You are in ${current}; joining or creating another moves you out of it.` : 'You have no team yet.'}
         </p>
@@ -232,7 +234,7 @@ export function JoinScreen({ org, facts, mine, studentView }: { org: string; fac
         <h2 id="h-team">Join or create a team</h2>
         {studentView ? <p class="footnote">A student forms teams here; the form opens the semester’s Join team issue.</p>
           : mine?.auditor ? <p class="footnote">As an auditor you do not join a team.</p>
-          : <TeamForm org={org} assignments={facts.assignments} mine={mine} onSent={() => setSent(sent + 1)} />}
+          : <TeamForm org={org} assignments={facts.assignments} mine={mine} tz={facts.timezone || DEFAULT_TIMEZONE} onSent={() => setSent(sent + 1)} />}
       </section>
       {studentView ? null : <JoinRequests org={org} sent={sent} />}
     </div>

@@ -79,6 +79,14 @@ describe('a semester’s next automatic event', () => {
     const t = text(<CourseScreen course={course} loaded={{ kind: 'absent' }} cohortStates={{ [COHORT_ORG]: ready(s) }} files={new StaticFiles()} now={NOW} />);
     expect(t).toContain('Fall 2026 Live Week 3 of 15 Next: Assignment 2 hand out, Tue 6 Oct');
   });
+  it('says when the semester starts before week 1, and no week while its dates are unset', () => {
+    const row = (semester: Partial<Status['semester']>) =>
+      text(<CourseScreen course={course} loaded={{ kind: 'absent' }} cohortStates={{ [COHORT_ORG]: ready({ ...s, semester: { ...s.semester!, ...semester } }) }} files={new StaticFiles()} now={NOW} />);
+    expect(row({ week: 0 })).toContain('Fall 2026 Live Starts Mon 7 Sep Next:');
+    const unset = row({ week: null, weeks: null, start: null, end: null });
+    expect(unset).toContain('Fall 2026 Live Next:');
+    expect(unset).not.toMatch(/Week (null|undefined|0)/);
+  });
 });
 
 describe('the public website indicator', () => {

@@ -19,9 +19,9 @@ import type { Semester } from '../src/model/discovery';
 import type { Mine } from '../src/model/mine';
 import { STUDENT_STATUS_PATH } from '../src/model/names';
 import { StatusFileSource, factsFromStatus, type SemesterFacts } from '../src/model/student';
-import { nextLine, semesterLine } from '../src/model/week';
+import { closesWords, formingAt, nextLine, semesterLine, weekItems } from '../src/model/week';
 import { STUDENT_HINTS, ScheduleView, StudentBanner, StudentScreen } from '../src/screens/Student';
-import { AskedList } from '../src/screens/StudentJoin';
+import { AskedList, TeamForm } from '../src/screens/StudentJoin';
 import { MaterialsTree } from '../src/screens/StudentMaterials';
 import { RECHECK_FOR_MS, RECHECK_MS, SetupView } from '../src/screens/StudentSetup';
 import { FakeGitHub, fileBody } from './fake';
@@ -70,10 +70,26 @@ describe('the semester dates and when the file was written', () => {
     expect([old?.start, old?.end, old?.generatedAt]).toEqual([undefined, undefined, undefined]);
   });
 
+  it('write a team formation’s close as every other date, and close it at that instant', () => {
+    const f = factsFromStatus(DOC);
+    const a = f.assignments.find((x) => x.teamFormation)!;
+    const tz = 'Europe/Berlin';
+    const teams = (now: number) => weekItems(f, null, now).filter((i) => i.kind === 'teams').map((i) => i.text);
+    expect(teams(NOW)).toEqual([`Team formation is open for ${a.title} until Mon 9 Nov 23:59`]);
+    const after = Date.parse('2026-11-10T00:00:00+01:00');
+    expect(teams(after)).toEqual([]);
+    expect(formingAt(a.teamFormation, Date.parse('2026-11-09T23:58:00+01:00'), tz)).toBe(true);
+    expect(formingAt(a.teamFormation, Date.parse('2026-11-09T23:59:00+01:00'), tz)).toBe(false);
+    expect(closesWords('2026-11-09 23:59', tz)).toBe('Mon 9 Nov 23:59');
+    expect(closesWords('26th Oct', tz)).toBe('26th Oct');
+    expect(html(<TeamForm org={ORG} assignments={[a]} mine={null} tz={tz} now={NOW} />)).toContain('Teams can form until Mon 9 Nov 23:59.');
+    expect(html(<TeamForm org={ORG} assignments={[a]} mine={null} tz={tz} now={after} />)).toContain('No assignment is forming teams now.');
+  });
+
   it('give the week as the instructor’s banner counts it: none before week 1, the last after the end', () => {
     const f = factsFromStatus(DOC);
     expect(semesterLine(f, NOW)).toEqual({ week: 'Week 3 of 15', dates: expect.stringMatching(/7 Sep.* to .*18 Dec/) });
-    expect(semesterLine(f, Date.parse('2026-09-01T12:00:00Z')).week).toBeUndefined();
+    expect(semesterLine(f, Date.parse('2026-09-01T12:00:00Z'))).toMatchObject({ week: undefined, starts: 'Starts Mon 7 Sep' });
     expect(semesterLine(f, Date.parse('2027-01-10T12:00:00Z')).week).toBe('Week 15 of 15');
     expect(semesterLine({ ...f, start: undefined }, NOW)).toEqual({});
   });
