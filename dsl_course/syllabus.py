@@ -11,9 +11,14 @@ The syllabus is a faculty document, so a write touches ONLY the block between
 `## Weekly plan` heading, at the end; the course team may move the marked block anywhere in
 the file and the next write updates it in place. Markers in any other state (one alone,
 out of order, twice) refuse the write: appending then would leave a stray marker that the
-next write treats as the block's edge, deleting the faculty's text in between. A syllabus
-that is not Markdown (a PDF), not UTF-8, or too large to read is never written: the
-preview hands the block over to paste.
+next write treats as the block's edge, deleting the faculty's text in between. A marker is
+a line holding the marker alone (indentation and trailing blanks allowed) outside fenced
+code, so a syllabus may show the markers in a ``` example; a rewrite keeps each marker
+line's indentation. A plan line that would read as a marker (a reading list quoting one)
+is written with a second space after `<!--`, and a fence the plan leaves open is closed
+inside the block, so no plan can break the next write. A syllabus that is not Markdown (a
+PDF), not UTF-8, or too large to read is never written: the preview hands the block over
+to paste.
 
 Readings are read from the COURSE org's source repos, not from what has been released: a
 syllabus is written before the term starts, when nothing has shipped yet. Sessions, their
@@ -68,33 +73,67 @@ _READINGS_SHIFT = 3
 PLAN_HEADING = "## Weekly plan"
 
 
-def _marker_line(marker: str) -> re.Pattern[str]:
-    """A line that is the marker and nothing else (blanks around it allowed): a marker
-    quoted inside a sentence is prose, not a marker."""
-    return re.compile(rf"^[ \t]*{re.escape(marker)}[ \t]*(?=\r?$)", re.MULTILINE)
+_MARKERS = (PLAN_START, PLAN_END)
+_FENCE = re.compile(r"`{3,}|~{3,}")
 
 
-_START_LINE = _marker_line(PLAN_START)
-_END_LINE = _marker_line(PLAN_END)
+def _markers(lines: list[str]) -> tuple[list[int], str]:
+    """The indexes of the marker lines in `lines` outside fenced code, and the fence still
+    open after the last line ("" when none). A marker quoted inside a sentence is prose."""
+    found, fence = [], ""
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if fence:
+            if len(s) >= len(fence) and s == fence[0] * len(s):
+                fence = ""
+        elif m := _FENCE.match(s):
+            fence = m.group()
+        elif s in _MARKERS:
+            found.append(i)
+    return found, fence
+
+
+def _plan_lines(body: str) -> list[str]:
+    """`body` as the block's lines, with nothing in it that the next write could read as a
+    marker: a marker line gets a second space after `<!--` (still a comment, still the
+    same to read), and a fence left open is closed before the end marker."""
+    lines = [
+        line.replace("<!-- ", "<!--  ", 1) if line.strip() in _MARKERS else line
+        for line in body.strip().splitlines()
+    ]
+    _, fence = _markers(lines)
+    return [*lines, fence] if fence else lines
+
+
+def _indent(line: str) -> str:
+    return line[: len(line) - len(line.lstrip())]
 
 
 def place(text: str, body: str) -> str | None:
     """`text` (the syllabus) with `body` between the plan markers, in the file's own line
-    endings. Exactly one start line followed by exactly one end line: the block between
-    them is replaced. No marker at all: the markers and block are appended at the end
-    under `## Weekly plan`. Anything else (one marker alone, the two out of order, either
-    twice) is None: which text the plan owns is not known, so nothing may be written.
-    Nothing outside the markers ever changes."""
+    endings. Exactly one start line followed by exactly one end line, outside fenced code:
+    the block between them is replaced, each marker line keeping its indentation. No
+    marker at all: the markers and block are appended at the end under `## Weekly plan`.
+    Anything else (one marker alone, the two out of order, either twice) is None: which
+    text the plan owns is not known, so nothing may be written. Nothing outside the
+    markers ever changes."""
     nl = "\r\n" if "\r\n" in text else "\n"
-    block = nl.join([PLAN_START, *body.strip().splitlines(), PLAN_END])
-    starts, ends = list(_START_LINE.finditer(text)), list(_END_LINE.finditer(text))
-    if not starts and not ends:
+    plan = _plan_lines(body)
+    lines = text.splitlines(keepends=True)
+    found, _ = _markers(lines)
+    if not found:
         head = text.rstrip("\r\n")
         lead = f"{head}{nl}{nl}" if head else ""
+        block = nl.join([PLAN_START, *plan, PLAN_END])
         return f"{lead}{PLAN_HEADING}{nl}{nl}{block}{nl}"
-    if len(starts) != 1 or len(ends) != 1 or ends[0].start() < starts[0].end():
+    if [lines[i].strip() for i in found] != list(_MARKERS):
         return None
-    return text[: starts[0].start()] + block + text[ends[0].end() :]
+    start, end = found
+    tail = lines[end][len(lines[end].rstrip("\r\n")) :]
+    block = nl.join(
+        [_indent(lines[start]) + PLAN_START, *plan, _indent(lines[end]) + PLAN_END]
+    )
+    return "".join([*lines[:start], block, tail, *lines[end + 1 :]])
 
 
 def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
