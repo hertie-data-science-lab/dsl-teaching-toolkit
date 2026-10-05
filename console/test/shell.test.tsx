@@ -4,7 +4,7 @@
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import { App, createState, subPages } from '../src/app';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import type { Loaded } from '../src/model/status';
 import { AppAuth } from '../src/auth/app';
 import { ConsoleAuth } from '../src/auth/console';

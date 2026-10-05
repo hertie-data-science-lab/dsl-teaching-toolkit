@@ -3,7 +3,7 @@
 // dsl-course.yml, then check. Revision brief v3 section 2, design/inputs.md "Set up a course".
 
 import type { ComponentChildren } from 'preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { useSave } from '../edit/save';
 import { YamlText, deepEqual, obj } from '../edit/yamlText';
@@ -68,6 +68,9 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
   const step = openAt(done, asked);
   usePoll(orgLive, !!env && !!org && step === 1 && !allOk(orgChecks));
   const [run, setRun] = useState<CentralRun | null>(null);
+  // Leaving the screen (sign-out included) stops following the set-up run.
+  const leaving = useRef(new AbortController());
+  useEffect(() => () => leaving.current.abort(), []);
   const [err, setErr] = useState<string | null>(null);
   const [save, runSave, setSave] = useSave(env);
   const file = step >= 2 && setUp && allOk(setUp) ? files.file(org, COURSE_REPO, 'dsl-course.yml') : null;
@@ -98,8 +101,10 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     if (!env) return;
     setErr(null);
     try {
-      const r = await runBootstrap(env.client, { org, courseName: d.course_name || org, code: d.course_code ?? '', admins: d.admins.map((a) => a.github_handle) }, setRun);
-      if (r.conclusion !== 'success') setErr('The set-up run did not finish cleanly. Open it on GitHub to see why; running it again is safe.');
+      const r = await runBootstrap(env.client, { org, courseName: d.course_name || org, code: d.course_code ?? '', admins: d.admins.map((a) => a.github_handle) }, setRun, { signal: leaving.current.signal });
+      if (leaving.current.signal.aborted) return;
+      if (r.state !== 'completed') setErr('Could not read the set-up run on GitHub, so the console stopped following it. Open it on GitHub to see how it ended.');
+      else if (r.conclusion !== 'success') setErr('The set-up run did not finish cleanly. Open it on GitHub to see why; running it again is safe.');
       files.refresh(org, COURSE_REPO, 'dsl-course.yml');
       setupLive.run();
       void env.rediscover?.();

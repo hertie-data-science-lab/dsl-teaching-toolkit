@@ -1,7 +1,8 @@
 // Reading one released file for the student's Materials screen, with the student's token:
 // the bytes (contents API up to 1 MB, blob API above, nothing past GitHub's 100 MB), then
 // the shape the screen shows. Markdown and notebook text is rendered by GitHub's own
-// markdown endpoint (one call per file; its output is sanitised by GitHub); an HTML file's
+// markdown endpoint (one call per file, kept by blob sha for the session, so reopening costs
+// nothing; its output is sanitised by GitHub); an HTML file's
 // `_files/` bundle is read file by file, one call each, up to ASSET_LIMIT.
 
 import { ONE_MB, type GitHubClient, type TreeEntry } from '../github/client';
@@ -37,9 +38,28 @@ async function rendered(client: GitHubClient, text: string, context: string): Pr
   }
 }
 
+/** Rendered markdown and notebooks per session, by repo and blob sha: a blob's text never changes. */
+const renders = new WeakMap<GitHubClient, Map<string, Shown>>();
+
+/** Drop the session's rendered files (sign-out). */
+export const forgetShown = (client: GitHubClient) => renders.delete(client);
+
 /** What to show for `entry`, a blob of `tree` (the repo's recursive tree). */
 export async function showFile(client: GitHubClient, org: string, repo: string, entry: TreeEntry, tree: TreeEntry[]): Promise<Shown> {
   if ((entry.size ?? 0) > API_CEILING) return { kind: 'too_large' };
+  const kind = viewKind(entry.path);
+  if (kind !== 'markdown' && kind !== 'notebook') return show(client, org, repo, entry, tree);
+  let kept = renders.get(client);
+  if (!kept) renders.set(client, (kept = new Map()));
+  const key = `${org}/${repo}@${entry.sha}:${kind}`.toLowerCase();
+  const hit = kept.get(key);
+  if (hit) return hit;
+  const shown = await show(client, org, repo, entry, tree);
+  kept.set(key, shown);
+  return shown;
+}
+
+async function show(client: GitHubClient, org: string, repo: string, entry: TreeEntry, tree: TreeEntry[]): Promise<Shown> {
   const kind = viewKind(entry.path);
   const bytes = await bytesOf(client, org, repo, entry);
   const context = `${org}/${repo}`;

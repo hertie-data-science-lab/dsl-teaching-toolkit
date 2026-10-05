@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import type { Course, Estate, Role, Semester } from '../src/model/discovery';
-import { currentOnly, saveCurrentOnly, type PrefStore } from '../src/model/prefs';
+import { currentOnly, saveCurrentOnly } from '../src/model/prefs';
+import type { KeyStore } from '../src/auth/types';
 import { modeOf, parseSearch, studentContext, studentLanding } from '../src/router';
 import { HomeScreen, studentPast } from '../src/screens/Home';
 import type { SemesterFacts } from '../src/model/student';
@@ -104,7 +105,7 @@ describe('Home groups', () => {
   });
 
   it('the toggle survives storage that is missing or refuses', () => {
-    const refusing: PrefStore = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
+    const refusing: KeyStore = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
     expect(currentOnly('octo', refusing)).toBe(false);
     expect(() => saveCurrentOnly('octo', true, refusing)).not.toThrow();
     expect(currentOnly('octo', null)).toBe(false);

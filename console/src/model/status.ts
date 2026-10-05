@@ -1,5 +1,6 @@
-// Reads `status.json` (contracts section 3), validates it against the exported schema and
-// decides whether it is stale by comparing its `inputs` with one recursive tree read of the repo. Also
+// Reads `status.json` (contracts section 3), validates it against the exported schema and,
+// where a screen shows it (a semester's own pages), decides whether it is stale by comparing
+// its `inputs` with one recursive tree read of the repo, read alongside it. Also
 // the course overview's readings of loaded statuses (decision 0025): the problems roll-up, a
 // semester's next automatic event and the recent-activity list.
 
@@ -56,9 +57,10 @@ export function staleInputs(inputs: Record<string, string | null>, tree: Tree, c
   return stale;
 }
 
-export async function loadStatus(client: GitHubClient, owner: string, repo: string): Promise<Loaded> {
+/** The status file; with `withStale`, the repo's tree is read at the same time for `stale` (else `stale` is []). */
+export async function loadStatus(client: GitHubClient, owner: string, repo: string, withStale = true): Promise<Loaded> {
   try {
-    const file = await client.getContents(owner, repo, STATUS_PATH);
+    const [file, tree] = await Promise.all([client.getContents(owner, repo, STATUS_PATH), withStale ? client.listTree(owner, repo, 'HEAD', true) : null]);
     if (!file) return { kind: 'absent' };
     let data: unknown;
     try {
@@ -69,7 +71,6 @@ export async function loadStatus(client: GitHubClient, owner: string, repo: stri
     const errors = validateStatus(data);
     if (errors.length) return { kind: 'invalid', errors };
     const status = data as Status;
-    const tree = await client.listTree(owner, repo, 'HEAD', true);
     const stale = tree ? staleInputs(status.inputs, tree) : [];
     return { kind: 'ready', status, sha: file.sha, stale };
   } catch (e) {
@@ -77,44 +78,53 @@ export async function loadStatus(client: GitHubClient, owner: string, repo: stri
   }
 }
 
-/** One signal per status file, loaded on first ask and reloaded on demand. */
+/**
+ * One signal per status file, loaded on first ask and reloaded on demand. Staleness costs a
+ * tree read, so it is read only once a screen that shows it asks (`withStale`); a file first
+ * loaded without it is read again with it then, and its reloads keep it.
+ */
 export class StatusStore {
   private signals = new Map<string, Signal<Loaded>>();
+  private stale = new Set<string>();
   constructor(private readonly client: GitHubClient) {}
 
   private key(owner: string, repo: string) {
     return `${owner}/${repo}`;
   }
 
-  get(owner: string, repo: string): Signal<Loaded> {
+  get(owner: string, repo: string, withStale = true): Signal<Loaded> {
     const k = this.key(owner, repo);
     let s = this.signals.get(k);
+    const upgrade = withStale && !this.stale.has(k);
+    if (withStale) this.stale.add(k);
     if (!s) {
       s = signal<Loaded>({ kind: 'loading' });
       this.signals.set(k, s);
       void this.reload(owner, repo);
-    }
+    } else if (upgrade) void this.reload(owner, repo);
     return s;
   }
 
-  /** The semester's private status, in its config repo. */
-  cohort(org: string): Signal<Loaded> {
-    return this.get(org, CONFIG_REPO);
+  /** The semester's private status, in its config repo; `withStale` false for a screen that does not show staleness (Home, the course pages). */
+  cohort(org: string, withStale = true): Signal<Loaded> {
+    return this.get(org, CONFIG_REPO, withStale);
   }
 
-  /** The course's public status, in `.github` (counts only). */
+  /** The course's public status, in `.github` (counts only); no screen shows its staleness. */
   course(org: string): Signal<Loaded> {
-    return this.get(org, COURSE_REPO);
+    return this.get(org, COURSE_REPO, false);
   }
 
   forget(): void {
     this.signals.clear();
+    this.stale.clear();
   }
 
   async reload(owner: string, repo: string): Promise<void> {
-    const s = this.signals.get(this.key(owner, repo)) ?? signal<Loaded>({ kind: 'loading' });
-    this.signals.set(this.key(owner, repo), s);
-    s.value = await loadStatus(this.client, owner, repo);
+    const k = this.key(owner, repo);
+    const s = this.signals.get(k) ?? signal<Loaded>({ kind: 'loading' });
+    this.signals.set(k, s);
+    s.value = await loadStatus(this.client, owner, repo, this.stale.has(k));
   }
 }
 

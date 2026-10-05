@@ -10,7 +10,7 @@ import { parse } from 'yaml';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Assignment, Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';

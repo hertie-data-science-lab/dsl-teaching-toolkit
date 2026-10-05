@@ -4,6 +4,7 @@
 // place in src/ that spells a retired name.
 
 import { parse } from 'yaml';
+import { isObj } from '../edit/yamlText';
 import type { GitHubClient } from '../github/client';
 import { CONFIG_REPO, COURSE_REPO, INSTRUCTORS_FILE, JOIN_REPO, NAMES, REGISTRY_FILE } from './names';
 
@@ -42,21 +43,25 @@ const has = (paths: string[], p: string) => paths.some((x) => x === p || x.start
 /**
  * What a semester org still carries under a retired name: the topic on its `.github`, its
  * config and join repos, and in the config repo, people.yml and `.dsl/`. Empty when migrated.
+ * A retired repo name is probed only when the new one is absent, and the config repo's paths
+ * come from the recursive tree the semester's status read uses too (an ETag'd repeat), so a
+ * migrated org costs three reads and the tree.
  */
 export async function semesterLeftovers(client: GitHubClient, org: string, topics?: string[]): Promise<Leftover[]> {
-  const [cfg, oldCfg, join, oldJoin, tagged] = await Promise.all([
+  const [cfg, join, tagged] = await Promise.all([
     client.getRepo(org, CONFIG_REPO),
-    client.getRepo(org, RETIRED.config_repo),
     client.getRepo(org, JOIN_REPO),
-    client.getRepo(org, RETIRED.join_repo),
     topics ?? client.getRepo(org, COURSE_REPO).then(async (r) => (r ? r.topics ?? (await client.getRepoTopics(org, COURSE_REPO)) : [])),
   ]);
+  const [oldCfg, oldJoin] = await Promise.all([cfg ? null : client.getRepo(org, RETIRED.config_repo), join ? null : client.getRepo(org, RETIRED.join_repo)]);
   const out: Leftover[] = [];
   if (tagged.includes(RETIRED.semester_topic) && !tagged.includes(SEMESTER_TOPIC)) out.push({ old: RETIRED.semester_topic, new: SEMESTER_TOPIC });
-  if (oldCfg && !cfg) out.push({ old: RETIRED.config_repo, new: CONFIG_REPO });
-  if (oldJoin && !join) out.push({ old: RETIRED.join_repo, new: JOIN_REPO });
+  if (oldCfg) out.push({ old: RETIRED.config_repo, new: CONFIG_REPO });
+  if (oldJoin) out.push({ old: RETIRED.join_repo, new: JOIN_REPO });
   const repo = cfg ? CONFIG_REPO : oldCfg ? RETIRED.config_repo : null;
-  const tree = repo ? await client.listTree(org, repo, 'HEAD') : null;
+  let tree = repo ? await client.listTree(org, repo, 'HEAD', true) : null;
+  // A cut-short recursive listing may miss a root name: the root listing then answers.
+  if (repo && tree?.truncated) tree = await client.listTree(org, repo, 'HEAD');
   if (repo && !tree) throw new Error(`${org}/${repo} could not be listed`);
   const paths = tree?.tree.map((e) => e.path) ?? [];
   if (has(paths, RETIRED.people_file)) out.push({ old: RETIRED.people_file, new: INSTRUCTORS_FILE });
@@ -68,7 +73,7 @@ export async function semesterLeftovers(client: GitHubClient, org: string, topic
 const keysOf = (text: string | undefined): string[] => {
   try {
     const d: unknown = text ? parse(text) : null;
-    return d && typeof d === 'object' && !Array.isArray(d) ? Object.keys(d) : [];
+    return isObj(d) ? Object.keys(d) : [];
   } catch {
     return [];
   }

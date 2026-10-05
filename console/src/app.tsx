@@ -11,7 +11,7 @@ import { GitHubClient, type GhUser } from './github/client';
 import { discoverEstate, isInstructor, studentSemesters, type Estate, type Mode } from './model/discovery';
 import { semesterOver } from './model/catalogue';
 import { LiveFiles } from './model/files';
-import { forgetMyTeams } from './model/mine';
+import { forgetMine, forgetMyTeams } from './model/mine';
 import { forgetStudentPrefs } from './model/prefs';
 import { courseLeftovers, semesterLeftovers, type Leftover } from './model/migration';
 import { loadHeartbeat, type Heartbeat } from './model/heartbeat';
@@ -45,6 +45,7 @@ import type { CohortProps, CourseProps } from './screens/types';
 import { Loading, ghUrl } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
 import { forgetRendered } from './ui/rendered';
+import { forgetShown } from './model/materials';
 import { CourseBanner, Footer, Sidenav, StudentNav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
 import { fmtDay } from './model/format';
 import { DEFAULT_TIMEZONE } from './model/policy';
@@ -218,7 +219,8 @@ export function App({ state: s }: { state: AppState }) {
   const blocked = !!unmigrated || !!failed || pending;
   const cohortStates: Record<string, Loaded> = {};
   const wanted = blocked ? [] : screen === 'home' ? courses.filter((c) => c.write).flatMap((c) => c.cohorts) : ctx.course?.write ? ctx.course.cohorts : [];
-  for (const k of wanted) cohortStates[k.org] = s.statuses.cohort(k.org).value;
+  // Only the open semester's pages show staleness: every other semester read skips the tree.
+  for (const k of wanted) cohortStates[k.org] = s.statuses.cohort(k.org, k.org === ctx.cohort?.org).value;
   const cohortLoaded = ctx.cohort && ctx.course?.write && !blocked ? s.statuses.cohort(ctx.cohort.org).value : undefined;
   const navKey = COHORT_SCREENS[screen] ?? COURSE_SCREENS[screen] ?? (wiz ? WIZARD_NAV[wiz.name] : undefined) ?? screen;
   const navCourse = !blocked && !APP_SCREENS.includes(screen) ? ctx.course : undefined;
@@ -471,6 +473,8 @@ export function createState({ auth, client }: AppDeps) {
       if (login) forgetStudentPrefs(login);
       forgetRendered();
       forgetMyTeams(client);
+      forgetMine(client);
+      forgetShown(client);
       forgetStudentData(client);
       auth.signOut();
       client.clearCache();

@@ -1,14 +1,11 @@
 import { render } from 'preact';
 import { App, createDeps, createState } from './app';
+import { savedTheme } from './ui/shell';
 import './styles/tokens.css';
 import './styles/console.css';
 import './styles/open.css';
 
-try {
-  const saved = localStorage.getItem('console-theme');
-  if (saved === 'dark' || saved === 'light') document.documentElement.setAttribute('data-theme', saved);
-} catch {
-  /* storage unavailable */
-}
+const theme = savedTheme();
+if (theme) document.documentElement.setAttribute('data-theme', theme);
 
 render(<App state={createState(createDeps())} />, document.getElementById('app')!);

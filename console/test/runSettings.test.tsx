@@ -7,7 +7,7 @@ import { act } from 'preact/test-utils';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import type { Loaded } from '../src/model/status';
 import type { Assignment, Status } from '../src/model/types';
 import * as defs from '../src/ops/defs';

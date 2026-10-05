@@ -8,7 +8,7 @@ import { afterEach, expect, it } from 'vitest';
 import { App, OFFLINE_RETRY, createState } from '../src/app';
 import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth, TOKEN_KEY } from '../src/auth/pat';
-import type { TokenStore } from '../src/auth/types';
+import type { KeyStore } from '../src/auth/types';
 import { GitHubClient } from '../src/github/client';
 import { FakeGitHub } from './fake';
 
@@ -19,7 +19,7 @@ afterEach(() => {
   root = null;
 });
 
-const store = (token: string): TokenStore => {
+const store = (token: string): KeyStore => {
   const map = new Map([[TOKEN_KEY, token]]);
   return { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => void map.set(k, v), removeItem: (k) => void map.delete(k) };
 };

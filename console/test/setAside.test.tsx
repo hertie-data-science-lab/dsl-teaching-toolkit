@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { CourseStatus, Status } from '../src/model/types';
 import { CONFLICT } from '../src/edit/save';

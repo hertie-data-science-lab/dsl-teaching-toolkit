@@ -8,7 +8,8 @@ import { act } from 'preact/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { courseFolder, defaultItem, folderExample, mainLabel, openItems, orgFolder, platformOf, repoCloneCommand, schemeOk, withOverride, type RepoRef, type Setup } from '../src/model/open';
-import { forgetStudentPrefs, rememberOpen, resetKeptSetups, saveYourSetup, yourSetup, type PrefStore } from '../src/model/prefs';
+import { forgetStudentPrefs, rememberOpen, saveYourSetup, yourSetup } from '../src/model/prefs';
+import type { KeyStore } from '../src/auth/types';
 import { SetupScreen } from '../src/screens/Setup';
 import { OpenButton } from '../src/ui/OpenButton';
 
@@ -17,11 +18,12 @@ const ORG = 'hertie-dsl-demo-course-e1234';
 const REF: RepoRef = { org: ORG, repo: 'assignment-2-f2026' };
 const GH = `https://github.com/${ORG}/assignment-2-f2026`;
 
-function memStore(): PrefStore & { data: Map<string, string> } {
+function memStore(): KeyStore & { data: Map<string, string> } {
   const data = new Map<string, string>();
   return { data, getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v), removeItem: (k) => void data.delete(k), get length() { return data.size; }, key: (i) => [...data.keys()][i] ?? null };
 }
-const refusing: PrefStore = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
+/** Storage that refuses everything; each call is a new page load. */
+const refused = (): KeyStore => ({ getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } });
 const hrefs = (setup: Setup | null, ref = REF) => Object.fromEntries(openItems(ref, setup).map((i) => [i.choice, i.href]));
 
 describe('Your setup in this browser', () => {
@@ -34,9 +36,8 @@ describe('Your setup in this browser', () => {
     expect(rememberOpen(LOGIN, 'githubdev', store)).toEqual({ folder: '/Users/a/repos', editor: 'other', scheme: 'zed://file/{path}', lastOpen: 'githubdev' });
     expect(rememberOpen('b-example', 'vsclone', store)).toEqual({ folder: '', editor: 'vscode', lastOpen: 'vsclone' });
     store.setItem(`dsl-console-visit:${LOGIN}:${ORG}`, '1');
-    store.setItem(`dsl-console-paths:${LOGIN}`, '{}');
     forgetStudentPrefs(LOGIN, store);
-    // Visit times and the old student folders go; Profile stays (decision 0021 rule 3).
+    // Visit times go; Profile stays (decision 0021 rule 3).
     expect([...store.data.keys()].sort()).toEqual([`dsl-console-setup:${LOGIN}`, 'dsl-console-setup:b-example']);
     expect(yourSetup(LOGIN, store)?.folder).toBe('/Users/a/repos');
   });
@@ -47,14 +48,14 @@ describe('Your setup in this browser', () => {
     expect(yourSetup(LOGIN, store)).toEqual({ folder: '', editor: 'vscode' });
     store.setItem(`dsl-console-setup:${LOGIN}`, '{not json');
     expect(yourSetup(LOGIN, store)).toBeNull();
+    const refusing = refused();
     expect(yourSetup(LOGIN, refusing)).toBeNull();
     // A refused write is kept until reload, across sign-out too.
     expect(saveYourSetup(LOGIN, { folder: '/x', editor: 'vscode' }, refusing)).toBe(false);
     expect(yourSetup(LOGIN, refusing)).toEqual({ folder: '/x', editor: 'vscode' });
     forgetStudentPrefs(LOGIN, refusing);
     expect(yourSetup(LOGIN, refusing)).toEqual({ folder: '/x', editor: 'vscode' });
-    resetKeptSetups();
-    expect(yourSetup(LOGIN, refusing)).toBeNull();
+    expect(yourSetup(LOGIN, refused())).toBeNull(); // the next page load
   });
 });
 

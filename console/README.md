@@ -24,9 +24,9 @@ Node 22 or newer (`.nvmrc` pins 26).
 Three paths, all behind the `Auth` interface in `src/auth/` (`ConsoleAuth` holds them).
 Whichever is used, the console can read or change exactly what that account can on GitHub,
 and the token stays in `sessionStorage`: it is gone when the tab closes. At reload a saved
-token or App session is dropped only when GitHub (or the relay) refuses it. With no answer
-an App session is kept for the next reload; a pasted token is kept and checked again, the
-screen saying it is retrying. Sign-out also
+token or App session is dropped only when GitHub (or the relay) refuses it (401 or 403). With
+no answer either is kept and checked again (`untilAnswered`, one policy for both), the screen
+saying it is retrying. Sign-out also
 ends any run the console is following and forgets this session's runs and previews.
 
 - **Sign in with GitHub** (`AppAuth`, decisions 0002 and 0011): the default where an
@@ -61,7 +61,7 @@ The deployed console gets them in `.github/workflows/console-pages.yml`, as an `
 
 The first step of New course and New semester lists the three things only a person can do on
 GitHub, each with a tick that appears by itself (the step re-checks every 10 seconds and when
-the window regains focus, until all pass): create the org, install the console app on it,
+the window regains focus, never while the tab is hidden, until all pass): create the org, install the console app on it,
 and invite `hertie-dsl-bot` as an Owner. The bot accepts the invitation itself, on the
 scheduler's next quarter-hourly run in any course org, once the maintainers have added the org
 to `orgs.yml` (`dsl_course/invitations.py`; maintainers.md, "The course org registry"). New
@@ -188,7 +188,7 @@ Each screen reads with the student's own account:
 | Assignments | dates (TBC), late cutoff, late rule, points, how to hand in, solution shown, the shape note, the brief (a fold, rendered by GitHub), the course's late-work sentences | `<slug>-<handle>`, a team repo they can push to, the drop box; their team (from the repo, else from `GET /user/teams` by the `<slug>-` prefix, so a drop-box or external group finds it too) and its members; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos): its body, the newest receipt, a patch note as "pull before you continue", every comment in a fold; the CONTRIBUTIONS.md ask on a team repo; for a student-choice repo after the cutoff, the Settings link to make it public |
 | Marks | assignment titles | `grades-<handle>/grades.yml`: final grade, score (per question when given), penalty, feedback overall and per question, team and team feedback, a term total if present |
 | Materials | the materials repos; each session's readings | the repo's recursive tree (supporting folders such as `data/` and `img/` last, folded, under "Supporting files"); each file read when opened |
-| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, for up to 5 minutes, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decision 0027) |
+| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, every 30 s after the first minute, for up to 5 minutes of the tab being shown, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decision 0027) |
 | Join | assignments forming teams, and each one's teams so far (name, headcount, cap; never who) with a Pick that fills in the team | their own Join course / Join team issues in `join` and the automation's last reply; after "You joined", the invitation's accept link |
 | Instructors | the cards, with an email only where the instructor chose to show it | none (a picture hosted on the semester site is read through the API and shown as `data:`) |
 
@@ -245,7 +245,8 @@ under a hidden first line (`names.json` `join_markers`). GitHub drops the form's
 issue an account without push creates that way, so the `join` workflows route on that line
 as well as on the label. When the API refuses, the console offers GitHub's own form,
 prefilled (text inputs by field id). The answer is polled from the student's issues every
-15 s for up to 5 minutes while one still waits. `?join=<org>`
+15 s for up to 5 minutes (not while the tab is hidden; comments are re-read only for an issue
+whose comment count moved) while one still waits. `?join=<org>`
 (and Home's "Have an enrolment code?") opens Join course for a semester the person is not a
 member of yet.
 
@@ -254,10 +255,11 @@ unchanged 304 costs nothing). Opening a semester reads its `student-status.json`
 semester without one: its site, 9 fixed reads plus one per generated file).
 Then the repo list, the gradebook and its last commit, the auditors membership, and one call
 per team; `/user/teams` is read once per session, not per semester. This week and Assignments
-add two calls per private repo (receipts issue, comments). A brief or the home text is
+add two calls per private repo (receipts issue, comments). These student reads are reused for
+a minute (`MINE_FRESH_MS`), so moving between screens does not repeat them. A brief or the home text is
 rendered once per page load (one `/markdown` call, a brief only when its fold opens); a
 site-hosted card picture is one call. Set up adds one call per materials repo. A file costs
-one call, a markdown file or notebook two, an HTML page one per bundle file it uses (at most
+one call, a markdown file or notebook two (its rendering is kept by blob sha for the session), an HTML page one per bundle file it uses (at most
 80); file bytes are kept by blob sha (up to 64 MB), so reopening costs nothing. **Home's This
 week costs all of that again for each semester shown**: its site read, the repo list,
 gradebook, role and teams, and the receipts reads (about 50 calls per semester on the demo on
@@ -286,7 +288,8 @@ a first visit, mostly free 304s after).
   case-insensitively.
 - Status: `semester-config/.system/status.json` (semester) and `.github/.system/status.json`
   (course), validated against `schemas/status.schema.json`. Staleness compares the file's
-  `inputs` with one recursive tree read, by full path (`.system/assignments.lock.yml`
+  `inputs` with one recursive tree read (made beside the status read, and only for the open
+  semester, the one place it shows), by full path (`.system/assignments.lock.yml`
   included); an input recorded `null` is unchanged while the file is still absent. An absent
   status file shows "Status not computed yet".
 - Automation's heartbeat: the course's Scheduled release run list.
@@ -308,7 +311,8 @@ a first visit, mostly free 304s after).
   console follows the commit's checks and says what they found.
 - Operations, through the course org's Console workflow (`.github/.github/workflows/console.yml`,
   ref `main`, one `request` input; contracts section 1). `src/ops/adapter.ts` dispatches with
-  `return_run_details`, polls the run, and reads the public `dsl-outcome` annotation and the
+  `return_run_details`, polls the run (`src/github/poll.ts`, the one poll loop: every 3 s, every
+  10 s after 30 s, nothing while the tab is hidden), and reads the public `dsl-outcome` annotation and the
   private outcome file. Hand out, return marks, archive, update every copy and send new codes
   unlock only after a preview in the same session; publishing the public website, which has no
   engine preview, asks for a confirmation instead. Other previews are offered only where they

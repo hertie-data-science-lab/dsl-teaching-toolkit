@@ -1,5 +1,5 @@
-import { API, GitHubError, type Fetch, type GhUser } from '../github/client';
-import { SignInError, browserStore, type Auth, type TokenStore } from './types';
+import { API, GitHubError, toBase64, wait, type Fetch, type GhUser } from '../github/client';
+import { SignInError, readJson, remove, safeStorage, untilAnswered, writeJson, type Auth, type KeyStore } from './types';
 
 export const AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
 export const APP_SESSION_KEY = 'dsl-console-app-session';
@@ -28,17 +28,19 @@ export interface AppAuthOptions {
   /** Where GitHub sends the browser back: the console's own URL, as registered on the App. */
   redirectUri: string;
   fetch?: Fetch;
-  store?: TokenStore | null;
+  store?: KeyStore | null;
   /** The current URL, and a way to replace it without a reload (history.replaceState). */
   location?: () => string;
   replaceUrl?: (url: string) => void;
   navigate?: (url: string) => void;
   /** Called when the session ends by itself (the refresh token was refused). */
   onLost?: () => void;
+  /** Tests: the wait between reload checks GitHub did not answer. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 function b64url(bytes: Uint8Array): string {
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return toBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function random(n = 32): string {
@@ -64,12 +66,12 @@ export class AppAuth implements Auth {
   private callback: { code: string; verifier: string } | { error: string } | null = null;
   private readonly opts: AppAuthOptions;
   private readonly fetchFn: Fetch;
-  private readonly store: TokenStore | null;
+  private readonly store: KeyStore | null;
 
   constructor(opts: AppAuthOptions) {
     this.opts = opts;
     this.fetchFn = opts.fetch ?? ((i, init) => globalThis.fetch(i, init));
-    this.store = opts.store === undefined ? browserStore() : opts.store;
+    this.store = opts.store === undefined ? safeStorage('session') : opts.store;
   }
 
   token(): string | null {
@@ -90,8 +92,8 @@ export class AppAuth implements Auth {
     const state = here.searchParams.get('state');
     const error = here.searchParams.get('error');
     if (!state || (!code && !error)) return;
-    const pending = this.read<Pending>(APP_PENDING_KEY);
-    this.remove(APP_PENDING_KEY);
+    const pending = readJson<Pending>(this.store, APP_PENDING_KEY);
+    remove(this.store, APP_PENDING_KEY);
     for (const k of ['code', 'state', 'error', 'error_description', 'error_uri']) here.searchParams.delete(k);
     this.replace(pending?.back ?? here.toString());
     if (!pending || pending.state !== state) this.callback = { error: 'The sign-in answer from GitHub did not match this tab. Try again.' };
@@ -102,7 +104,7 @@ export class AppAuth implements Auth {
   /** Go to GitHub to sign in. The page leaves, so the promise never settles. */
   async signIn(): Promise<GhUser> {
     const pending: Pending = { state: random(), verifier: random(), back: this.opts.location?.() ?? globalThis.location.href };
-    this.write(APP_PENDING_KEY, pending);
+    writeJson(this.store, APP_PENDING_KEY, pending);
     const url = new URL(AUTHORIZE_URL);
     url.searchParams.set('client_id', this.opts.clientId);
     url.searchParams.set('redirect_uri', this.opts.redirectUri);
@@ -118,39 +120,38 @@ export class AppAuth implements Auth {
     this.timer = null;
     this.session = null;
     this.who = null;
-    this.remove(APP_SESSION_KEY);
+    remove(this.store, APP_SESSION_KEY);
   }
 
   /**
    * Finish a sign-in GitHub just sent back (see takeCallback), or pick up this tab's
    * session. Throws a SignInError only for a callback that failed, so the sign-in screen
-   * can say why; a stale saved session is dropped quietly.
+   * can say why. A saved session GitHub or the relay refuses is dropped quietly; while
+   * neither answers it is kept and tried again (`untilAnswered`, as the token path does).
    */
-  async restore(): Promise<GhUser | null> {
+  async restore(onRetry?: () => void): Promise<GhUser | null> {
     const cb = this.callback;
     this.callback = null;
     if (cb && 'error' in cb) throw new SignInError(cb.error);
     if (cb) return this.start(await this.relay('/exchange', { code: cb.code, code_verifier: cb.verifier, redirect_uri: this.opts.redirectUri }));
-    const saved = this.read<Session>(APP_SESSION_KEY);
+    const saved = readJson<Session>(this.store, APP_SESSION_KEY);
     if (!saved) return null;
-    try {
+    const u = await untilAnswered(async () => {
       if (saved.refresh_token && saved.expires_at - Date.now() < REFRESH_EARLY_MS) {
         try {
           return await this.start(await this.relay('/refresh', { refresh_token: saved.refresh_token }));
         } catch (e) {
           // No answer, but the access token still works: use it and keep trying to refresh.
           if (e instanceof SignInError || saved.expires_at <= Date.now()) throw e;
-          const u = await this.start(saved);
+          const user = await this.start(saved);
           this.retryLater();
-          return u;
+          return user;
         }
       }
-      return await this.start(saved);
-    } catch (e) {
-      // Refused (by GitHub or the relay): the session is over. No answer: keep it for a reload.
-      if (e instanceof SignInError || e instanceof GitHubError) this.signOut();
-      return null;
-    }
+      return this.start(saved);
+    }, onRetry, this.opts.sleep ?? wait);
+    if (!u) this.signOut();
+    return u;
   }
 
   private async start(s: Session): Promise<GhUser> {
@@ -164,7 +165,7 @@ export class AppAuth implements Auth {
   private keep(s: Session): void {
     this.session = s;
     this.failures = 0;
-    this.write(APP_SESSION_KEY, s);
+    writeJson(this.store, APP_SESSION_KEY, s);
     if (s.refresh_token && s.expires_at) this.schedule(s.expires_at - Date.now() - REFRESH_EARLY_MS);
   }
 
@@ -218,30 +219,5 @@ export class AppAuth implements Auth {
 
   private replace(url: string): void {
     (this.opts.replaceUrl ?? ((u) => globalThis.history.replaceState(null, '', u)))(url);
-  }
-
-  private read<T>(key: string): T | null {
-    try {
-      const v = this.store?.getItem(key);
-      return v ? (JSON.parse(v) as T) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  private write(key: string, value: unknown): void {
-    try {
-      this.store?.setItem(key, JSON.stringify(value));
-    } catch {
-      /* storage unavailable: the session lasts until reload */
-    }
-  }
-
-  private remove(key: string): void {
-    try {
-      this.store?.removeItem(key);
-    } catch {
-      /* ignore */
-    }
   }
 }

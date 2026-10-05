@@ -15,7 +15,7 @@ import { ASSETS_KIND, aliasKind } from '../model/materialsRules';
 import { showFile, type Shown } from '../model/materials';
 import { sortedRows, type SemesterFacts } from '../model/student';
 import { studentHref } from '../router';
-import { CheckLine, Loading, Md } from '../ui/bits';
+import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
 import { FileHead, FolderHead } from '../ui/FileTree';
 import { Ext } from '../ui/icons';
 import { useLoad } from '../ui/load';
@@ -30,8 +30,6 @@ export function splitEntry(entry: string, repos: string[]): { repo: string; path
   const repo = entry.slice(0, i);
   return repos.includes(repo) ? { repo, path: entry.slice(i + 1) } : null;
 }
-
-const ghBlob = (org: string, repo: string, path: string) => `https://github.com/${org}/${repo}/blob/HEAD/${path.split('/').map(encodeURIComponent).join('/')}`;
 
 export function MaterialsView({ org, repos, entry }: { org: string; repos: string[]; entry?: string }) {
   const env = useEnv();
@@ -115,7 +113,7 @@ function FileView({ org, repo, entry, tree }: { org: string; repo: string; entry
   const name = entry.path.split('/').pop() ?? entry.path;
   return (
     <section class="panel section" aria-label={name}>
-      <div class="a-head"><h2 class="mono">{entry.path}</h2><a class="textlink" href={ghBlob(org, repo, entry.path)} target="_blank" rel="noopener">On GitHub <Ext /></a></div>
+      <div class="a-head"><h2 class="mono">{entry.path}</h2><a class="textlink" href={ghUrl(org, repo, entry.path, 'HEAD')} target="_blank" rel="noopener">On GitHub <Ext /></a></div>
       {shown.kind === 'loading' ? <Loading what={`Reading ${name}`} /> : shown.kind === 'failed' ? <CheckLine cls="bad">{name} could not be read: {shown.error}</CheckLine> : <ShownView shown={shown.value} name={name} />}
     </section>
   );

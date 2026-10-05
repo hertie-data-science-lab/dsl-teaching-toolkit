@@ -12,7 +12,7 @@ import { fieldErrors } from '../src/forms/Form';
 import { COURSE_FACTS } from '../src/tiers/course';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import { POLICY, penaltyRate } from '../src/model/policy';
 import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
 import { assignmentKey, blankDraft, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';

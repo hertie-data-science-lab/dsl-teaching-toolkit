@@ -1,12 +1,14 @@
 // The operation panel's state: the one operation open at a time, what this session has
-// previewed (the gate), and the runs this session finished (for the Operations list). A
-// run that cannot be read `maxMisses` times in a row is given up on; sign-out (`reset`) ends
-// every watch and forgets the runs and the gate, so the next person starts clean.
+// previewed (the gate), and the runs this session finished (for the Operations list). A run
+// is followed with `poll`: every 3 s, every 10 s once it has run for 30 s, nothing while the
+// tab is hidden, and given up on after `maxMisses` unreadable polls in a row; sign-out
+// (`reset`) ends every watch and forgets the runs and the gate, so the next person starts clean.
 
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
 import { effective } from '../forms/Form';
 import { wait } from '../github/client';
+import { poll } from '../github/poll';
 import type { Operation } from '../model/types';
 import type { Tiers } from '../tiers/types';
 import type { Adapter, Handle, Progress, Result } from './adapter';
@@ -69,6 +71,7 @@ export interface Current {
 
 export interface SessionOptions {
   pollMs?: number;
+  /** Tests: the pause between polls (default: poll's own, cut short when the tab comes back). */
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   /** Called after a run (not a preview) finishes, to refresh what the screens show. */
@@ -106,8 +109,8 @@ export class OpsSession {
   private readonly pollMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
-  /** Bumped by `reset`: a watch started under an older one stops without recording anything. */
-  private generation = 0;
+  /** Aborted by `reset`: a watch started before it stops without recording anything. */
+  private watches = new AbortController();
 
   constructor(
     private readonly adapter: Adapter,
@@ -120,7 +123,8 @@ export class OpsSession {
 
   /** Sign-out: stop following every run and forget this session's runs, previews and panel. */
   reset(): void {
-    this.generation++;
+    this.watches.abort();
+    this.watches = new AbortController();
     this.current.value = null;
     this.runs.value = [];
     this.previewed.value = {};
@@ -234,8 +238,8 @@ export class OpsSession {
     if (kind === 'run' && !this.canRun(c)) return;
     const def = c.def;
     const preview = kind === 'preview';
-    const generation = this.generation;
-    const gone = () => this.generation !== generation;
+    const signal = this.watches.signal;
+    const gone = () => signal.aborted;
     const args = requestArgs(def, c.values, c.checked);
     this.patch({ phase: 'running', running: kind, error: null, progress: null, handle: null, stopping: false, stopRequested: false, stopped: false, ...(preview ? { dry: null } : { result: null }) });
     let handle: Handle;
@@ -250,25 +254,27 @@ export class OpsSession {
     this.patch({ handle });
     if (this.current.value?.stopping) void this.sendCancel(handle);
     const mine = () => this.current.value?.handle === handle;
-    const maxMisses = this.opts.maxMisses ?? 20;
-    let progress: Progress | null = null;
-    for (let misses = 0; ; ) {
-      try {
-        progress = await this.adapter.watch(handle);
-        misses = 0;
-        if (gone()) return;
-        if (mine()) this.patch({ progress, ...(this.current.value!.error === MISSED_POLL ? { error: null } : {}) });
-      } catch {
-        if (gone()) return;
-        if (++misses >= maxMisses) {
-          if (mine()) this.patch({ phase: 'ready', running: null, stopping: false, error: LOST_RUN });
-          return;
-        }
-        if (mine()) this.patch({ error: MISSED_POLL });
-      }
-      if (progress?.state === 'completed') break;
-      await this.sleep(this.pollMs);
-      if (gone()) return;
+    let progress = null as Progress | null;
+    const end = await poll(
+      async () => {
+        const p = await this.adapter.watch(handle);
+        progress = p;
+        if (!gone() && mine()) this.patch({ progress: p, ...(this.current.value!.error === MISSED_POLL ? { error: null } : {}) });
+        return p.state === 'completed';
+      },
+      {
+        every: this.pollMs,
+        backoff: { after: 30_000, every: Math.max(this.pollMs, 10_000) },
+        maxMisses: this.opts.maxMisses ?? 20,
+        signal,
+        sleep: this.opts.sleep,
+        onMiss: () => mine() && this.patch({ error: MISSED_POLL }),
+      },
+    );
+    if (end === 'stopped') return;
+    if (end === 'lost') {
+      if (mine()) this.patch({ phase: 'ready', running: null, stopping: false, error: LOST_RUN });
+      return;
     }
     let result: Result = { outcome: null, people: [], leaked: [] };
     const tries = this.opts.outcomeTries ?? 3;

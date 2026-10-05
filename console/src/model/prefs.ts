@@ -6,73 +6,65 @@
 // window, blocked site data); the console then shows every semester, calls nothing new, and
 // keeps Profile in memory until reload.
 
+import { readJson, readText, remove, safeStorage, writeJson, writeText, type KeyStore } from '../auth/types';
 import { EDITORS, OPEN_CHOICES, type Editor, type OpenChoice, type Setup } from './open';
 
-export interface PrefStore {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem?(key: string): void;
-  readonly length?: number;
-  key?(index: number): string | null;
-}
+const localStore = () => safeStorage('local');
 
-function localStore(): PrefStore | null {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
+/**
+ * This page load's answers, per store: the visit times read (kept all load), and Profiles
+ * kept in memory when storage refused them. The browser's store is one object for the whole
+ * load; a test that hands in a fresh store object starts a fresh load.
+ */
+interface Load {
+  visits: Map<string, number | null>;
+  kept: Map<string, Setup>;
+}
+const loads = new WeakMap<object, Load>();
+const NO_STORE = {};
+function loadOf(store: KeyStore | null): Load {
+  const k = store ?? NO_STORE;
+  let l = loads.get(k);
+  if (!l) loads.set(k, (l = { visits: new Map(), kept: new Map() }));
+  return l;
 }
 
 const visitKey = (login: string, org: string) => `dsl-console-visit:${login}:${org.toLowerCase()}`;
-const visits = new Map<string, number | null>();
 
 /**
  * When `login` last opened `org` before this page load (epoch ms), or null for a first visit.
  * Read once per page load and kept, so a line new since the last visit stays shown all load
  * even after `markVisit` stores the new time.
  */
-export function lastVisit(login: string, org: string, store: PrefStore | null = localStore()): number | null {
+export function lastVisit(login: string, org: string, store: KeyStore | null = localStore()): number | null {
   const key = visitKey(login, org);
+  const { visits } = loadOf(store);
   if (visits.has(key)) return visits.get(key)!;
-  let before: number | null = null;
-  try {
-    const v = Number(store?.getItem(key) ?? '');
-    before = Number.isFinite(v) && v > 0 ? v : null;
-  } catch {
-    /* storage unavailable: every visit is a first one */
-  }
+  // Storage unavailable: every visit is a first one.
+  const v = Number(readText(store, key) ?? '');
+  const before = Number.isFinite(v) && v > 0 ? v : null;
   visits.set(key, before);
   return before;
 }
 
 /** Store `now` as `login`'s visit to `org`: called only once the receipts it compares against have been read, so a failed read does not hide a note next time. */
-export function markVisit(login: string, org: string, now: number, store: PrefStore | null = localStore()): void {
+export function markVisit(login: string, org: string, now: number, store: KeyStore | null = localStore()): void {
   lastVisit(login, org, store); // keep this load's answer first
-  try {
-    store?.setItem(visitKey(login, org), String(now));
-  } catch {
-    /* storage unavailable */
-  }
+  writeText(store, visitKey(login, org), String(now));
 }
 
-/** Forget this page load's answers (tests). */
-export const resetVisits = () => visits.clear();
-
 /**
- * On sign-out: every visit time of `login` in this browser (and the old student folders), and this load's answers. Profile
+ * On sign-out: every visit time of `login` in this browser, and this load's answers. Profile
  * is kept: a folder and an editor are not secrets (decision 0021).
  */
-export function forgetStudentPrefs(login: string, store: PrefStore | null = localStore()): void {
-  visits.clear();
+export function forgetStudentPrefs(login: string, store: KeyStore | null = localStore()): void {
+  loadOf(store).visits.clear();
   try {
     if (!store?.key || store.length === undefined || !store.removeItem) return;
     const mine = [];
     for (let i = 0; i < store.length; i++) {
       const k = store.key(i);
-      // `dsl-console-paths:` held the student folders Set up had before Profile served both
-      // roles (decision 0027): removed here once, so an old browser does not keep them.
-      if (k && (k.startsWith(`dsl-console-visit:${login}:`) || k === `dsl-console-paths:${login}`)) mine.push(k);
+      if (k?.startsWith(`dsl-console-visit:${login}:`)) mine.push(k);
     }
     for (const k of mine) store.removeItem(k);
   } catch {
@@ -81,47 +73,34 @@ export function forgetStudentPrefs(login: string, store: PrefStore | null = loca
 }
 
 const setupKey = (login: string) => `dsl-console-setup:${login}`;
-/** Profile per login when storage refuses it: it then lasts until reload. */
-const kept = new Map<string, Setup>();
-
-/** Forget the in-memory copies kept when storage refused (tests). */
-export const resetKeptSetups = () => kept.clear();
-
 /** `login`'s Profile, or null when nothing is stored (and nothing kept since storage refused). */
-export function yourSetup(login: string, store: PrefStore | null = localStore()): Setup | null {
-  try {
-    const raw = store?.getItem(setupKey(login));
-    if (!raw) return kept.get(login) ?? null;
-    const v = JSON.parse(raw) as Partial<Record<keyof Setup, unknown>>;
-    const setup: Setup = {
-      folder: typeof v.folder === 'string' ? v.folder : '',
-      editor: EDITORS.includes(v.editor as Editor) ? (v.editor as Editor) : 'vscode',
-    };
-    if (typeof v.scheme === 'string' && v.scheme) setup.scheme = v.scheme;
-    if (OPEN_CHOICES.includes(v.lastOpen as OpenChoice)) setup.lastOpen = v.lastOpen as OpenChoice;
-    const overrides = v.overrides && typeof v.overrides === 'object' ? Object.entries(v.overrides).filter((e): e is [string, string] => typeof e[1] === 'string' && !!e[1].trim()) : [];
-    if (overrides.length) setup.overrides = Object.fromEntries(overrides);
-    return setup;
-  } catch {
-    return kept.get(login) ?? null;
-  }
+export function yourSetup(login: string, store: KeyStore | null = localStore()): Setup | null {
+  const v = readJson<Partial<Record<keyof Setup, unknown>>>(store, setupKey(login));
+  if (!v || typeof v !== 'object') return loadOf(store).kept.get(login) ?? null;
+  const setup: Setup = {
+    folder: typeof v.folder === 'string' ? v.folder : '',
+    editor: EDITORS.includes(v.editor as Editor) ? (v.editor as Editor) : 'vscode',
+  };
+  if (typeof v.scheme === 'string' && v.scheme) setup.scheme = v.scheme;
+  if (OPEN_CHOICES.includes(v.lastOpen as OpenChoice)) setup.lastOpen = v.lastOpen as OpenChoice;
+  const overrides = v.overrides && typeof v.overrides === 'object' ? Object.entries(v.overrides).filter((e): e is [string, string] => typeof e[1] === 'string' && !!e[1].trim()) : [];
+  if (overrides.length) setup.overrides = Object.fromEntries(overrides);
+  return setup;
 }
 
 /** Store `setup`; false when storage refused and it is kept only until reload. */
-export function saveYourSetup(login: string, setup: Setup, store: PrefStore | null = localStore()): boolean {
-  try {
-    if (!store) throw new Error('no storage');
-    store.setItem(setupKey(login), JSON.stringify(setup));
+export function saveYourSetup(login: string, setup: Setup, store: KeyStore | null = localStore()): boolean {
+  const { kept } = loadOf(store);
+  if (writeJson(store, setupKey(login), setup)) {
     kept.delete(login);
     return true;
-  } catch {
-    kept.set(login, setup);
-    return false;
   }
+  kept.set(login, setup); // refused: Profile lasts until reload
+  return false;
 }
 
 /** Keep `choice` as the Open button's default, leaving the rest of the setup as it is. */
-export function rememberOpen(login: string, choice: OpenChoice, store: PrefStore | null = localStore()): Setup {
+export function rememberOpen(login: string, choice: OpenChoice, store: KeyStore | null = localStore()): Setup {
   const next: Setup = { ...(yourSetup(login, store) ?? { folder: '', editor: 'vscode' }), lastOpen: choice };
   saveYourSetup(login, next, store);
   return next;
@@ -143,21 +122,13 @@ const myCoursesKey = (login: string, section: CatalogueSection) => `dsl-console-
 const oldMyCoursesKeys = (login: string) => [`dsl-console-my-courses:${login}`, ...(['courses', 'now', 'past'] as const).map((s) => `dsl-console-my-courses:${login}:${s}`)];
 
 /** Whether `login` chose to see only their own rows in `section` of All courses; on unless that section was switched off. */
-export function myCoursesOnly(login: string, section: CatalogueSection, store: PrefStore | null = localStore()): boolean {
-  try {
-    for (const k of oldMyCoursesKeys(login)) store?.removeItem?.(k);
-    return store?.getItem(myCoursesKey(login, section)) !== '0';
-  } catch {
-    return true;
-  }
+export function myCoursesOnly(login: string, section: CatalogueSection, store: KeyStore | null = localStore()): boolean {
+  for (const k of oldMyCoursesKeys(login)) remove(store, k);
+  return readText(store, myCoursesKey(login, section)) !== '0';
 }
 
-export function saveMyCoursesOnly(login: string, section: CatalogueSection, on: boolean, store: PrefStore | null = localStore()): void {
-  try {
-    store?.setItem(myCoursesKey(login, section), on ? '1' : '0');
-  } catch {
-    /* storage unavailable: the choice lasts until reload */
-  }
+export function saveMyCoursesOnly(login: string, section: CatalogueSection, on: boolean, store: KeyStore | null = localStore()): void {
+  writeText(store, myCoursesKey(login, section), on ? '1' : '0'); // refused: the choice lasts until reload
 }
 
 // --------------------------------------------------------------------------- Current only (decision 0029)
@@ -165,18 +136,10 @@ export function saveMyCoursesOnly(login: string, section: CatalogueSection, on: 
 const currentKey = (login: string) => `dsl-console-current-only:${login}`;
 
 /** Whether `login` chose to see only their current semesters on Your semesters; off by default. */
-export function currentOnly(login: string, store: PrefStore | null = localStore()): boolean {
-  try {
-    return store?.getItem(currentKey(login)) === '1';
-  } catch {
-    return false;
-  }
+export function currentOnly(login: string, store: KeyStore | null = localStore()): boolean {
+  return readText(store, currentKey(login)) === '1';
 }
 
-export function saveCurrentOnly(login: string, on: boolean, store: PrefStore | null = localStore()): void {
-  try {
-    store?.setItem(currentKey(login), on ? '1' : '0');
-  } catch {
-    /* storage unavailable: the choice lasts until reload */
-  }
+export function saveCurrentOnly(login: string, on: boolean, store: KeyStore | null = localStore()): void {
+  writeText(store, currentKey(login), on ? '1' : '0'); // refused: the choice lasts until reload
 }
