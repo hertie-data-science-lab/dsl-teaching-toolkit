@@ -25,6 +25,7 @@ from dsl_course import (
     repos,
     roster,
     settings,
+    status_json,
 )
 from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER, repo_row
@@ -3229,3 +3230,69 @@ def test_an_explicit_zero_penalty_is_never_the_institution_default(
     assert (spec.late_window_days, spec.late_penalty_per_day) == (window, penalty)
     assert dict(spec.sources)["late_penalty_per_day"] == "assignment"
     assert grades.penalty_rate(spec.late_penalty_per_day) == 0
+
+
+def _book_row(record: str, handle: str) -> tuple[str, str, str]:
+    return grades.parse_distributed(record)[(handle, "", grades.CHANNEL_GRADEBOOK)]
+
+
+def test_a_sheet_edit_that_moves_no_mark_keeps_the_marks_returned(
+    tmp_path, monkeypatch
+):
+    # A comment committed after the return rewrites no gradebook, so the record's moment
+    # stayed behind the sheet's last commit and the console read `marking` for good. The
+    # next run re-stamps it - and sends nothing.
+    record, _told, _legacy = _first_run(monkeypatch, tmp_path)
+    old = _book_row(record, "ada-l")
+    edited = datetime.now(timezone.utc) + timedelta(seconds=-1)
+    monkeypatch.setattr(grades, "git", lambda *a, cwd=None: (0, edited.isoformat()))
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": "# a grader's comment\n" + _SHEET},
+        distributed=record.replace(old[1], "2026-10-04T00:00:00+00:00"),
+    )
+    assert again["gradebooks"] == [] and again["outbox"] == []
+    ((_cfg, cfg_files, _d),) = again["config"]
+    digest, at, _issue = _book_row(cfg_files[grades.DISTRIBUTED_PATH], "ada-l")
+    assert digest == old[0] and datetime.fromisoformat(at) >= edited.replace(
+        microsecond=0
+    )
+    assert status_json.marks_returned(
+        grades.parse_sheet(_SHEET),
+        grades.SheetSpec(slug="assignment-1", title="", is_group=False),
+        {"ada-l": datetime.fromisoformat(at)},
+        edited.replace(microsecond=0),
+    )
+
+
+def test_a_held_mark_is_never_re_stamped_as_returned(tmp_path, monkeypatch):
+    # Ben's assignment-1 book is unchanged, but his assignment-2 mark is held: re-stamping
+    # him would make the console read assignment-2 as returned.
+    first = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _TWO_SHEET},
+        roster_rows=_TWO_ROSTER,
+    )
+    ((_cfg, cfg_files, _d),) = first["config"]
+    stale = "2026-10-04T00:00:00+00:00"
+    rows = grades.parse_distributed(cfg_files[grades.DISTRIBUTED_PATH])
+    rows = {k: (v[0], stale, v[2]) for k, v in rows.items()}
+    held = _TWO_SHEET.replace(
+        "score_individual: 40\n    adjustment_individual:\n",
+        "score_individual: 40\n    adjustment_individual: \u22123\n",
+    )
+    monkeypatch.setattr(
+        grades, "git", lambda *a, cwd=None: (0, "2026-10-05T00:00:00+00:00")
+    )
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": _TWO_SHEET, "assignment-2": held},
+        roster_rows=_TWO_ROSTER,
+        distributed=grades.dump_distributed(rows),
+    )
+    assert [repo for repo, _f, _d in again["gradebooks"]] == ["grades-ada-l"]
+    ((_cfg, cfg_files, _d),) = again["config"]
+    assert _book_row(cfg_files[grades.DISTRIBUTED_PATH], "ben-k")[1] == stale

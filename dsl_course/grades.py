@@ -28,7 +28,7 @@ import tempfile
 import textwrap
 import time
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -90,7 +90,7 @@ from .gh_contents import (
     yaml_mark_line,
     yaml_problem,
 )
-from .ghcli import bot_login, clone, gh, is_missing_resource
+from .ghcli import bot_login, clone, gh, git, is_missing_resource
 from .issues import close_issues_titled, upsert_issue
 from .log import (
     CLIParser,
@@ -3967,6 +3967,42 @@ def _marks_digest(book: dict[str, dict]) -> str:
 GRADES_DATA = "grades.yml"
 
 
+def _sheets_changed_at(wd: Path, slugs: Iterable[str]) -> dict[str, datetime]:
+    """When each sheet last changed, off the clone's own history: the committer date,
+    which is the moment the console's `returned` state compares a gradebook's record with.
+    A sheet whose date cannot be read is left out (its records are simply not re-stamped).
+    """
+    out: dict[str, datetime] = {}
+    for slug in slugs:
+        code, text = git(
+            "log", "-1", "--format=%cI", "--", f"{SHEETS_DIR}/{slug}.yml", cwd=str(wd)
+        )
+        if code != 0:
+            continue
+        try:
+            out[slug] = datetime.fromisoformat(text.strip())
+        except ValueError:
+            continue
+    return out
+
+
+def _stale_record(
+    entry: tuple[str, str, str] | None, book: dict[str, dict], changed: dict
+) -> bool:
+    """Whether a gradebook record that still matches its content predates a later commit
+    to one of the sheets it is rendered from. Its moment then says "current as of" too
+    early, and the console reads the assignment as still being marked for good, since a
+    sheet commit that moves no mark (a comment, a reorder) rewrites no gradebook."""
+    try:
+        at = datetime.fromisoformat(entry[1]) if entry else None
+    except ValueError:
+        return False
+    if at is None:
+        return False
+    at = at if at.tzinfo else at.replace(tzinfo=UTC)
+    return any(changed[slug] > at for slug in book if slug in changed)
+
+
 def _gradebook_files(
     handle: str, book: dict[str, dict], titles: dict[str, str]
 ) -> dict[str, bytes]:
@@ -4289,6 +4325,7 @@ def distribute(
         books, unknown = _on_the_roster(build_gradebooks(sources), students)
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd)
+        changed = {} if dry_run else _sheets_changed_at(wd, sheets)
         export = _told_grades(wd) if dry_run else ({}, set())
 
     held = _hold_undecided(
@@ -4354,8 +4391,16 @@ def distribute(
         digest = content_hash("".join(f.decode() for f in files.values()))
         marks = _marks_digest(books[handle])
         legacy[handle] = content_hash(files[GRADES_DATA].decode())
-        if record.get((handle, "", CHANNEL_GRADEBOOK), ("",))[0] == digest:
+        entry = record.get((handle, "", CHANNEL_GRADEBOOK))
+        if entry and entry[0] == digest:
             live[handle] = marks
+            # Unchanged, but checked against a newer sheet: the record's moment moves up,
+            # so `returned` holds through an edit that changed no mark. Never for a
+            # student with a mark held, whose return is not done.
+            if not any(handle in whose for whose in held.values()) and _stale_record(
+                entry, books[handle], changed
+            ):
+                record[(handle, "", CHANNEL_GRADEBOOK)] = (digest, now, entry[2])
             continue
         if dry_run:
             live[handle] = marks
