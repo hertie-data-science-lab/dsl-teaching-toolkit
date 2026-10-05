@@ -334,8 +334,6 @@ def _new_materials(request: Request) -> list[str]:
 def _new_assignment(request: Request) -> list[str]:
     # A box left out is the course's default, else the institution's - as the workflow's
     # own dropdowns send it (`scaffold.resolve_answers`, `scaffold._grading_config`).
-    # `number` and `semester` are accepted and ignored until the console stops sending
-    # them (decision 0014: a template has neither).
     argv = [
         "assignment",
         "--org",
@@ -704,12 +702,6 @@ _OPS = (
                 "autograde": _boolean("Seed tests and run them at the late cutoff"),
                 # Decision 0028; left out, derived when autograde is on.
                 "starter": _enum(STARTER_MODES, "How main's starter is written"),
-                # Ignored, until the console stops sending them.
-                "number": _string(r"^[0-9]{1,3}$", "Ignored"),
-                "semester": _string(SEMESTER_PATTERN, "Ignored"),
-                # Refused with a sentence (`request.RETIRED_OP_ARGS`), until the console
-                # stops sending it.
-                "copy_from": _string(REPO_PATTERN, "Refused: copying is the console's"),
             },
             required=("name",),
         ),

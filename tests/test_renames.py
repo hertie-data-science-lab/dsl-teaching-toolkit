@@ -199,7 +199,7 @@ def test_a_request_takes_semester_org_and_refuses_cohort_org():
     [
         ("release.entry", {"entry": "s5", "cohort_dest_repo": "slides"}),
         ("materials.create", {"tag": "f2026"}),
-        ("assignment.create", {"number": "1", "semester": "f2026", "format": "py"}),
+        ("assignment.create", {"name": "trees", "format": "py"}),
         (
             "assignment.handout_now",
             {"course_source_repo": "a1", "include_solution": True},
@@ -939,25 +939,6 @@ def test_semester_cards_never_come_from_the_old_people_shape(monkeypatch):
         "Course", {"people": {"instructors": [{"name": "Prof"}]}}, edit_at="x"
     )
     assert "Prof" in course_page  # a COURSE file's `people:` block is its own shape
-
-
-@pytest.mark.parametrize(
-    ("op", "arg"),
-    [
-        ("assignment.collect_now", "slug"),
-        ("assignment.create", "team_formation"),
-        ("assignment.create", "visibility"),
-    ],
-)
-def test_an_arg_that_went_is_refused_with_where_it_lives_now(op, arg):
-    # An older console build still sending one gets a sentence, not a schema error.
-    with pytest.raises(RequestError) as caught:
-        parse_request(
-            _request(
-                op=op, semester_org="S", args={"course_source_repo": "a1", arg: "x"}
-            )
-        )
-    assert caught.value.code == NOT_MIGRATED and "no longer read" in caught.value.text
 
 
 def _gate_store(monkeypatch, *, put_ok=True) -> dict:
