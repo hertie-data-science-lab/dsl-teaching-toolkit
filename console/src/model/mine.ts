@@ -9,6 +9,7 @@
 import { signal } from '@preact/signals';
 import { parse } from 'yaml';
 import type { GhIssue, GhRepo, GhTeam, GitHubClient } from '../github/client';
+import { ghUrl } from '../ui/bits';
 import type { SemesterAssignment } from './student';
 import type { PatchLine } from './week';
 
@@ -308,8 +309,8 @@ async function readReceiptsNow(client: GitHubClient, org: string, repo: string):
   return { url: issue.html_url, last: last ? { text: last.text, when: last.when } : null, body: readable(issue.body ?? ''), thread };
 }
 
-export const repoUrl = (org: string, repo: string) => `https://github.com/${org}/${repo}`;
-export const gradebookUrl = (org: string, login: string) => `https://github.com/${org}/grades-${login}`;
+export const repoUrl = (org: string, repo: string) => ghUrl(org, repo);
+export const gradebookUrl = (org: string, login: string) => ghUrl(org, `grades-${login}`);
 
 /** The Submission receipts issues of the student's private repos in the semester, by repo (one that cannot be read is null). */
 export async function readAllReceipts(client: GitHubClient, org: string, assignments: SemesterAssignment[], mine: Mine): Promise<Record<string, Receipts | null>> {

@@ -1,6 +1,7 @@
 // The mockup's shared pieces: crumbs, problem cards, the stage rail, footnotes.
 
 import type { ComponentChildren } from 'preact';
+import { encPath } from '../github/client';
 import { COHORT_STAGES, COURSE_STAGES, PROBLEM_AREA, STAGE_WORD, md, opLabel, ago } from '../model/format';
 import type { TaggedProblem } from '../model/status';
 import type { Operation, Outcome, Problem, StageState } from '../model/types';
@@ -9,8 +10,7 @@ import { Alert, Check, Eye, Ext, Fail, Skip } from './icons';
 export const DOCS = 'https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/';
 export const SOON = 'Coming in this build';
 
-/** A repo path as a GitHub URL carries it: each segment encoded, the slashes kept. */
-export const encPath = (path: string): string => path.split('/').map(encodeURIComponent).join('/');
+export { encPath };
 
 /**
  * The GitHub page of an org, a repo, or a file (`blob`) or folder (`tree`) in it. The one rule

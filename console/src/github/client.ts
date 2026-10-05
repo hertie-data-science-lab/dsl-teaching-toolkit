@@ -203,7 +203,8 @@ export const BYTES_KEPT = 64 * ONE_MB;
 /** Resolve after `ms` milliseconds: the pause between polls. */
 export const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-function enc(path: string): string {
+/** A repo path as GitHub's API and pages carry it: each segment encoded, the slashes kept. */
+export function encPath(path: string): string {
   return path.split('/').map(encodeURIComponent).join('/');
 }
 
@@ -402,7 +403,7 @@ export class GitHubClient {
   async getContents(owner: string, repo: string, path: string, ref?: string): Promise<FileContent | null> {
     const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
     const r = await this.getOrNull<{ type: string; path: string; sha: string; content?: string; encoding?: string } | DirEntry[]>(
-      `/repos/${owner}/${repo}/contents/${enc(path)}${q}`,
+      `/repos/${owner}/${repo}/contents/${encPath(path)}${q}`,
     );
     if (!r || Array.isArray(r) || r.type !== 'file') return null;
     const text = r.encoding === 'base64' && r.content !== undefined ? decodeBase64(r.content) : (r.content ?? '');
@@ -418,7 +419,7 @@ export class GitHubClient {
   /** A directory listing, or null when the directory is absent. */
   async listDir(owner: string, repo: string, path: string, ref?: string): Promise<DirEntry[] | null> {
     const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-    const r = await this.getOrNull<DirEntry[] | object>(`/repos/${owner}/${repo}/contents/${enc(path)}${q}`);
+    const r = await this.getOrNull<DirEntry[] | object>(`/repos/${owner}/${repo}/contents/${encPath(path)}${q}`);
     return Array.isArray(r) ? r : null;
   }
 
@@ -446,7 +447,7 @@ export class GitHubClient {
     if (args.branch) body.branch = args.branch;
     const r = await this.send<{ content: { sha: string }; commit: { sha: string } }>(
       'PUT',
-      `/repos/${args.owner}/${args.repo}/contents/${enc(args.path)}`,
+      `/repos/${args.owner}/${args.repo}/contents/${encPath(args.path)}`,
       body,
     );
     return { sha: r!.content.sha, commit: r!.commit.sha };
@@ -456,7 +457,7 @@ export class GitHubClient {
   async deleteContents(args: { owner: string; repo: string; path: string; sha: string; message: string; author: Author; branch?: string }): Promise<{ commit: string }> {
     const body: Record<string, unknown> = { message: args.message, sha: args.sha, author: args.author, committer: args.author };
     if (args.branch) body.branch = args.branch;
-    const r = await this.send<{ commit: { sha: string } }>('DELETE', `/repos/${args.owner}/${args.repo}/contents/${enc(args.path)}`, body);
+    const r = await this.send<{ commit: { sha: string } }>('DELETE', `/repos/${args.owner}/${args.repo}/contents/${encPath(args.path)}`, body);
     return { commit: r!.commit.sha };
   }
 
@@ -568,7 +569,7 @@ export class GitHubClient {
 
   /** Move a branch to `sha`, fast-forward only: a branch that moved meanwhile is refused (422). */
   async updateRef(owner: string, repo: string, branch: string, sha: string): Promise<void> {
-    await this.send('PATCH', `/repos/${owner}/${repo}/git/refs/heads/${enc(branch)}`, { sha, force: false });
+    await this.send('PATCH', `/repos/${owner}/${repo}/git/refs/heads/${encPath(branch)}`, { sha, force: false });
   }
 
   // ---------------------------------------------------------------- student screens
@@ -598,7 +599,7 @@ export class GitHubClient {
   }
 
   private async fetchBytes(owner: string, repo: string, path: string, sha: string, size: number): Promise<Uint8Array> {
-    const url = this.url(size > ONE_MB ? `/repos/${owner}/${repo}/git/blobs/${sha}` : `/repos/${owner}/${repo}/contents/${enc(path)}`);
+    const url = this.url(size > ONE_MB ? `/repos/${owner}/${repo}/git/blobs/${sha}` : `/repos/${owner}/${repo}/contents/${encPath(path)}`);
     const res = await this.fetchFn(url, { method: 'GET', headers: this.headers(), cache: 'no-store' });
     this.noteRateLimit(res);
     if (!res.ok) return this.fail(res, url);
@@ -661,7 +662,7 @@ export class GitHubClient {
 
   /** A small file's bytes through the contents API (up to 1 MB), or null when it is absent. */
   async getSmallBytes(owner: string, repo: string, path: string): Promise<Uint8Array | null> {
-    const r = await this.getOrNull<{ type?: string; content?: string }>(`/repos/${owner}/${repo}/contents/${enc(path)}`);
+    const r = await this.getOrNull<{ type?: string; content?: string }>(`/repos/${owner}/${repo}/contents/${encPath(path)}`);
     return r && r.type === 'file' && r.content ? fromBase64(r.content) : null;
   }
 

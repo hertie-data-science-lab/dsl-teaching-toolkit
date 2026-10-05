@@ -340,7 +340,7 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
     const l = cohortStates[k.org];
     const f = cohortFlags(l);
     const sem = l?.kind === 'ready' ? l.status.semester : undefined;
-    const over = f.archived || sem?.ended === true || semesterOver({ org: k.org, termLabel: k.termLabel, archived: f.archived }, now, sem?.end ?? undefined);
+    const over = f.archived || sem?.ended === true || semesterOver({ org: k.org, termLabel: k.termLabel, archived: f.archived }, now, sem?.end ?? undefined, sem?.timezone);
     return { ...f, over };
   };
   const { ordered, shown } = liveThenPast(course.cohorts, (k) => !flags(k).over);

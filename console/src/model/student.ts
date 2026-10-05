@@ -16,6 +16,7 @@ import { addDays, str } from './format';
 import { DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from './policy';
 import { COURSE_REPO, STUDENT_STATUS_PATH } from './names';
 import { dataUrl, extOf, viewKind } from './viewer';
+import { ghUrl } from '../ui/bits';
 
 /** One row of the semester calendar. `when` is wall-clock time in the semester's timezone ("2026-09-22T10:00:00") or a full ISO instant. */
 export interface ScheduleRow {
@@ -544,7 +545,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
     materialsRepos: (Array.isArray(doc.materials_repos) ? doc.materials_repos : []).map(str).filter(Boolean),
     homeMarkdown: str(doc.home_markdown),
     announcements: arr(doc.announcements).map((a) => ({ when: str(a.when), title: str(a.title), details: str(a.details) })).sort((a, b) => instant(b.when) - instant(a.when)),
-    syllabus: syl && syllabusPath ? { name: syllabusPath.split('/').pop() ?? syllabusPath, repo: str(syl.repo), path: syllabusPath, url: `https://github.com/${org}/${str(syl.repo)}/blob/HEAD/${syllabusPath}` } : null,
+    syllabus: syl && syllabusPath ? { name: syllabusPath.split('/').pop() ?? syllabusPath, repo: str(syl.repo), path: syllabusPath, url: ghUrl(org, str(syl.repo), syllabusPath, 'HEAD') } : null,
     kinds,
     ...(doc.semester_start ? { start: str(doc.semester_start) } : {}),
     ...(doc.semester_end ? { end: str(doc.semester_end) } : {}),

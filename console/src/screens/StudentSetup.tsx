@@ -16,7 +16,7 @@ import { poll } from '../github/poll';
 import type { Mine } from '../model/mine';
 import { yourSetup } from '../model/prefs';
 import type { SemesterFacts } from '../model/student';
-import { CheckLine, Loading } from '../ui/bits';
+import { CheckLine, Loading, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
@@ -65,7 +65,7 @@ export function SetupView({ org, facts, mine, studentView }: { org: string; fact
       {yourSetup(login)?.folder.trim() ? null : <p><a href="?#profile">Set your folder and editor in Profile</a></p>}
       {repos.map((repo, i) => {
         const f = forks?.[i] ?? null;
-        const upstream = `https://github.com/${org}/${repo}`;
+        const upstream = ghUrl(org, repo);
         return (
           <section class="panel section" aria-label={repo}>
             <h2>{repo}</h2>

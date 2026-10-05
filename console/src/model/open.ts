@@ -3,6 +3,8 @@
 // roles (decisions 0017, 0027): instructors on their course screens, students on Set up. The
 // folder and editor come from Profile (`model/prefs.ts`); nothing here reads storage.
 
+import { ghUrl } from '../ui/bits';
+
 // `vscode` opens the local folder (or, with no folder set up, clones); `vsclone` clones with a
 // folder set up, beside it (decision 0023).
 export type OpenChoice = 'github' | 'githubdev' | 'vscode' | 'desktop' | 'editor' | 'vsclone';
@@ -91,7 +93,7 @@ export const lastSegment = (folder: string) => folder.trim().replace(/[\\/]+$/, 
 /** `/tree/<branch>/<path>` inside a repo on github.com or github.dev; nothing for the repo's root on its default branch. */
 const inRepo = (r: RepoRef) => (r.path || r.branch ? `/tree/${r.branch ?? 'main'}${r.path ? `/${r.path.split('/').filter(Boolean).map(encodeURIComponent).join('/')}` : ''}` : '');
 
-export const repoUrl = (r: RepoRef) => `https://github.com/${r.org}/${r.repo}`;
+export const repoUrl = (r: RepoRef) => ghUrl(r.org, r.repo);
 
 /** One entry of the Open menu. */
 export interface OpenItem {

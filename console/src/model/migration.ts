@@ -4,6 +4,7 @@
 // place in src/ that spells a retired name.
 
 import { parse } from 'yaml';
+import { isObj } from '../edit/yamlText';
 import type { GitHubClient } from '../github/client';
 import { CONFIG_REPO, COURSE_REPO, INSTRUCTORS_FILE, JOIN_REPO, NAMES, REGISTRY_FILE } from './names';
 
@@ -72,7 +73,7 @@ export async function semesterLeftovers(client: GitHubClient, org: string, topic
 const keysOf = (text: string | undefined): string[] => {
   try {
     const d: unknown = text ? parse(text) : null;
-    return d && typeof d === 'object' && !Array.isArray(d) ? Object.keys(d) : [];
+    return isObj(d) ? Object.keys(d) : [];
   } catch {
     return [];
   }
