@@ -1638,7 +1638,7 @@ def test_set_org_secret_sends_the_value_over_stdin(monkeypatch):
     # expose the bot token to anything else on the box. Both the org secret and the
     # private-infra-repo mirror go over stdin.
     calls: list = []
-    monkeypatch.setattr(bc, "repo_exists", lambda org, r: r in (".github", "join"))
+    monkeypatch.setattr(bc, "repo_missing", lambda org, r: r not in (".github", "join"))
     monkeypatch.setattr(bc, "repo_is_private", lambda org, r: r == "join")
     monkeypatch.setattr(bc, "gh", lambda *a, **k: calls.append((a, k)) or (0, ""))
 
@@ -1650,12 +1650,35 @@ def test_set_org_secret_sends_the_value_over_stdin(monkeypatch):
         assert k.get("stdin") == "s3cret"
 
 
+def test_set_org_secret_keeps_a_repo_whose_probe_failed(monkeypatch):
+    # The repo list is durable: the nightly refresh never corrects it. So a `join` probe
+    # that hit a 502 must not drop `join` from it - onboarding would run without the token
+    # until someone re-ran bootstrap. Only a definite 404 leaves a repo out.
+    from dsl_course import repos
+
+    def probe(*args, **kwargs):
+        if args == ("api", "repos/Course-Org/join"):
+            return 1, "gh: HTTP 502: Bad Gateway"
+        if args == ("api", "repos/Course-Org/semester-config"):
+            return 1, "gh: Not Found (HTTP 404)"
+        return 0, '{"private": false}'
+
+    monkeypatch.setattr(repos, "gh", probe)
+    calls: list = []
+    monkeypatch.setattr(bc, "repo_is_private", lambda org, r: False)
+    monkeypatch.setattr(bc, "gh", lambda *a, **k: calls.append(a) or (0, ""))
+
+    assert bc.set_org_secret("Course-Org", "DSL_BOT_TOKEN", "s3cret") is True
+    (org_set,) = calls
+    assert org_set[org_set.index("--repos") + 1] == ".github,join"
+
+
 def test_set_org_secret_reds_when_a_private_infra_mirror_fails(monkeypatch, capsys):
     # The org-secret write succeeding is not success on its own: on GitHub Free an org
     # secret is never delivered to a PRIVATE repo, so a failed semester-config mirror
     # re-arms exactly the delivery gap the mirror exists to close - its dispatch
     # workflows read an empty DSL_BOT_TOKEN while the bootstrap reports green.
-    monkeypatch.setattr(bc, "repo_exists", lambda org, r: True)
+    monkeypatch.setattr(bc, "repo_missing", lambda org, r: False)
     monkeypatch.setattr(bc, "repo_is_private", lambda org, r: r == "semester-config")
     monkeypatch.setattr(
         bc, "gh", lambda *a, **k: (1, "gh: HTTP 403") if "--repo" in a else (0, "")

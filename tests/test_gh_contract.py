@@ -59,7 +59,7 @@ def _record_secret_set_calls(monkeypatch) -> list[tuple[str, ...]]:
 
     monkeypatch.setattr(seed, "gh", fake_gh)
     monkeypatch.setattr(bc, "gh", fake_gh)
-    monkeypatch.setattr(bc, "repo_exists", lambda org, r: True)
+    monkeypatch.setattr(bc, "repo_missing", lambda org, r: False)
     monkeypatch.setattr(bc, "repo_is_private", lambda org, r: True)
     monkeypatch.setenv("DSL_BOT_TOKEN", "s3cret")
 
