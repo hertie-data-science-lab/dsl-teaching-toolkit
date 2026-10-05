@@ -318,6 +318,19 @@ describe('S8 students', () => {
   });
 });
 
+describe('S8 students, a fault on a row after a blank line', () => {
+  it('marks the row the engine names, by its line in the file', () => {
+    const csv = 'hertie_email,name,role\nanna@x.org,Anna Adams,enrolled\n\nben@x.org,Ben Baker,enroled\n';
+    const fault = { id: 'role', scope: 'semester' as const, stage: 'K5', text: 'Row 4 has a role nobody can act on.', stops: '', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'students.csv', screen: 'students', line: 4 } };
+    const out = html(<StudentsScreen {...props({ files: new StaticFiles({ [`${COHORT_ORG}/semester-config/students.csv`]: csv }), loaded: { ...ready, status: { ...STATUS, problems: [fault] } } as Loaded })} />);
+    const row = (line: number) => out.match(new RegExp(`<tr class(?:="([^"]*)")? id="line-${line}">`))?.[1] ?? '';
+    expect(out).toContain('id="line-2"');
+    expect(row(2)).toBe('');
+    expect(row(4)).toBe('fault');
+    expect(out).not.toContain('id="line-3"');
+  });
+});
+
 describe('S7 staff', () => {
   it('lists instructors and teaching assistants with access and dates', () => {
     const t = text(<InstructorsScreen {...props()} />);

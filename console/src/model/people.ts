@@ -6,26 +6,42 @@ import { parse } from 'yaml';
 /** Whether two GitHub handles name the same account: GitHub ignores case. */
 export const sameHandle = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** RFC 4180 rows; a leading BOM is dropped, as the engine's strip_bom does. */
-export function parseCsv(text: string): string[][] {
+/** One CSV record and the file line it ends on (header = 1), as Python's `csv` reader's `line_num` counts. */
+export interface CsvRecord {
+  cells: string[];
+  line: number;
+}
+
+/**
+ * RFC 4180 records with their line numbers; a leading BOM is dropped, as the engine's
+ * strip_bom does, and blank records are skipped. The line counts every physical line read,
+ * blank ones and quoted newlines included, so it is the line the engine's faults name.
+ */
+export function csvRecords(text: string): CsvRecord[] {
   const src = text.replace(/^﻿/, '');
-  const rows: string[][] = [];
-  let row: string[] = [], field = '', q = false;
+  const out: CsvRecord[] = [];
+  let row: string[] = [], field = '', q = false, line = 1;
   for (let i = 0; i < src.length; i++) {
     const c = src[i];
+    const nl = c === '\n' || c === '\r';
+    if (nl && c === '\r' && src[i + 1] === '\n') i++;
     if (q) {
       if (c === '"' && src[i + 1] === '"') { field += '"'; i++; }
       else if (c === '"') q = false;
-      else field += c;
+      else { field += nl && c === '\r' && src[i] === '\n' ? '\r\n' : c; if (nl) line++; }
     } else if (c === '"') q = true;
     else if (c === ',') { row.push(field); field = ''; }
-    else if (c === '\n' || c === '\r') {
-      if (c === '\r' && src[i + 1] === '\n') i++;
-      row.push(field); rows.push(row); row = []; field = '';
+    else if (nl) {
+      row.push(field); out.push({ cells: row, line }); row = []; field = ''; line++;
     } else field += c;
   }
-  if (field !== '' || row.length) { row.push(field); rows.push(row); }
-  return rows.filter((r) => r.some((f) => f.trim() !== ''));
+  if (field !== '' || row.length) { row.push(field); out.push({ cells: row, line }); }
+  return out.filter((r) => r.cells.some((f) => f.trim() !== ''));
+}
+
+/** RFC 4180 rows; a leading BOM is dropped, as the engine's strip_bom does. */
+export function parseCsv(text: string): string[][] {
+  return csvRecords(text).map((r) => r.cells);
 }
 
 export interface RosterRow {
@@ -41,15 +57,15 @@ export interface RosterRow {
 export const ROSTER_HEADER = ['hertie_email', 'name', 'role'];
 
 export function parseRoster(text: string): { rows: RosterRow[]; error: string | null } {
-  const all = parseCsv(text);
+  const all = csvRecords(text);
   if (!all.length) return { rows: [], error: null };
-  const head = all[0].map((h) => h.trim());
+  const head = all[0].cells.map((h) => h.trim());
   const missing = ROSTER_HEADER.filter((h) => !head.includes(h));
   if (missing.length) return { rows: [], error: `students.csv is missing the ${missing.join(', ')} column${missing.length > 1 ? 's' : ''}.` };
   const col = (r: string[], k: string) => (head.indexOf(k) >= 0 ? (r[head.indexOf(k)] ?? '').trim() : '');
   return {
-    rows: all.slice(1).map((r, i) => ({
-      line: i + 2,
+    rows: all.slice(1).map(({ cells: r, line }) => ({
+      line,
       email: col(r, 'hertie_email'),
       name: col(r, 'name'),
       role: col(r, 'role') || 'enrolled',
