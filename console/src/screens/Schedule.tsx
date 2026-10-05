@@ -118,13 +118,19 @@ function FolderCheck({ p, dp, i, onSuggest }: { p: ReadyProps; dp: DeployDraft; 
   return <span class="valid-msg"><Check />Ready; {files.length} file{files.length === 1 ? '' : 's'}{withheld ? `, ${withheld} withheld` : ''}</span>;
 }
 
-/** The kind an entry that names none takes (`schedule_plan.entry_kind`): from where its first copy lands. */
-export function inferredKind(p: ReadyProps, d: ReleaseDraft): string {
+/** The kind an entry that names none takes (`schedule_plan.entry_kind`). A saved entry that names
+ * none and whose copies are as saved has the engine's answer in status; the local rule covers the
+ * rest (a draft): from where its first copy lands. */
+export function inferredKind(p: ReadyProps, d: ReleaseDraft, saved: Draft | null = null): string {
+  if (saved?.kind === 'releases' && !saved.type && deepEqual(saved.deploys, d.deploys)) {
+    const engine = (p.status.releases ?? []).find((r) => r.id === saved.id)?.kind;
+    if (engine) return engine;
+  }
   const first = d.deploys[0];
   if (!first) return EMPTY_ENTRY_KIND;
   const mat = first.repo ? p.files.file(p.course.org, first.repo, MATERIALS_FILE) : null;
   const aliases = (mat?.kind === 'ready' ? readDeclared(mat.text) : null)?.kinds ?? {};
-  return inferKind(landingSection(first, DEFAULT_DEST_REPO), aliases).kind;
+  return inferKind(landingSection(first, DEFAULT_DEST_REPO, aliases), aliases).kind;
 }
 
 /** Every repo a copy may come from: the materials repos, then the course's Other repos. */
@@ -134,10 +140,9 @@ export function sourceRepos(p: ReadyProps, materials: string[]): { materials: st
   return { materials, others: listing.kind === 'ready' ? otherRepos(p.course.org, listing.repos, known).map((r) => r.name) : [] };
 }
 
-function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDraft; set: Setter<ReleaseDraft>; errors: Record<string, string>; repos: string[] }) {
+function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d: ReleaseDraft; set: Setter<ReleaseDraft>; errors: Record<string, string>; repos: string[]; inferred: string }) {
   const tz = tzOf(p.status);
   const setDeploy = (i: number, patch: Partial<DeployDraft>) => set({ deploys: d.deploys.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
-  const inferred = inferredKind(p, d);
   const kinds = [...CONTENT_KINDS, ...(d.type && !CONTENT_KINDS.includes(d.type) ? [d.type] : [])];
   const from = sourceRepos(p, repos);
   return (
@@ -408,7 +413,8 @@ function View(p: ReadyProps) {
   const statusKind = Object.fromEntries((status.releases ?? []).map((r) => [r.id, r.kind]));
   const kindOf: KindOf = (k, e) => statusKind[k] ?? (String((e as { kind?: unknown })?.kind ?? '') || 'lecture');
   // A release's kind as the engine will read it: its own, else the one its folder implies.
-  const kindFor = (d: Draft): string | undefined => (d.kind === 'releases' ? d.type || inferredKind(p, d) : undefined);
+  const inferredOf = (d: ReleaseDraft): string => inferredKind(p, d, d.id ? baseOf(d.id) : null);
+  const kindFor = (d: Draft): string | undefined => (d.kind === 'releases' ? d.type || inferredOf(d) : undefined);
   // A new entry shows the number it will get until one is typed (decision 0020).
   const prefill = (d: Draft): Draft => withNumber(d, doc, kindOf, kindFor(d));
   const draftOf = (k: string): Draft | null => (drafts[k] ? prefill(drafts[k]) : baseOf(k));
@@ -586,7 +592,7 @@ function View(p: ReadyProps) {
             {probs.length ? <ProblemCards list={probs} /> : null}
             <div class="form">
               {d.kind !== 'semester' && d.kind !== 'archive' ? <div class="field"><span class="label">Identifier</span><div class="ident">{ident}<span>derived, as the student site does</span></div></div> : null}
-              {d.kind === 'releases' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} />
+              {d.kind === 'releases' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} inferred={inferredOf(d)} />
                 : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
                 : d.kind === 'events' ? <EventForm d={d} set={set} errors={errors} />
                 : d.kind === 'semester' ? <SemesterForm d={d} set={set} errors={errors} />

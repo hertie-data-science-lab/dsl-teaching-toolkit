@@ -217,11 +217,13 @@ describe('S6 schedule and S11 release', () => {
     expect(out).toContain('lectures/05_trees_and_ensembles');
     expect(out).toContain('schedule.yml#L5');
   });
-  it('pre-selects the inferred kind, from the folder the copy lands in and the repo’s own aliases', () => {
+  it('pre-selects the inferred kind: the engine’s for a saved entry, else from where the copy lands and the repo’s own aliases', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
     expect(out).toContain('<option value selected>Lecture (inferred)</option>');
+    const withKind = (kind: string | null): Loaded => ({ kind: 'ready', sha: 's', stale: [], status: { ...STATUS, releases: (STATUS.releases ?? []).map((r) => (r.id === 's5' ? { ...r, kind } : r)) } });
+    expect(html(<ScheduleScreen {...props({ entry: 's5', loaded: withKind('lab') })} />)).toContain('<option value selected>Lab (inferred)</option>');
     const aliased = new StaticFiles({ ...Object.fromEntries(['schedule.yml'].map((f) => [`${COHORT_ORG}/semester-config/${f}`, SCHEDULE])), [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'kinds:\n  lectures: lab\n' }, {}, TREE);
-    expect(html(<ScheduleScreen {...props({ entry: 's5', files: aliased })} />)).toContain('<option value selected>Lab (inferred)</option>');
+    expect(html(<ScheduleScreen {...props({ entry: 's5', files: aliased, loaded: withKind(null) })} />)).toContain('<option value selected>Lab (inferred)</option>');
   });
   it('lists the materials repos and the Other repos to release from', () => {
     const listed = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE }, {}, TREE, { [COURSE_ORG]: [{ name: '.github' }, { name: 'course-materials-f2026' }, { name: 'lecture-code-f2026' }, { name: 'assignment-3-f2026' }] });
