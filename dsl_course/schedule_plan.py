@@ -280,8 +280,7 @@ def duplicate_numbers(
 
 def kind_plural(kind: str) -> str:
     """`lectures`, `labs`, `assignments`: the kind's label, as a plural noun."""
-    label = next((k["label"] for k in policy.kinds() if k["key"] == kind), kind)
-    return f"{label.lower()}s"
+    return f"{policy.kind_label(kind).lower()}s"
 
 
 def duplicate_text(kind: str, n: int, keys: list[str]) -> str:
@@ -290,13 +289,11 @@ def duplicate_text(kind: str, n: int, keys: list[str]) -> str:
     return f"{count} {kind_plural(kind)} are numbered {n}: {', '.join(keys)}"
 
 
-def number_faults(
-    sched: schedule.Schedule, aliases: Aliases = _no_aliases
-) -> list[ConfigFault]:
-    """One fault per entry with no number, for the schedule.yml digest: on the clock of
-    the release or hand-out it stops, like a source that is not found."""
+def number_faults(missing: list[Unnumbered]) -> list[ConfigFault]:
+    """One fault per entry with no number (`unnumbered`), for the schedule.yml digest: on
+    the clock of the release or hand-out it stops, like a source that is not found."""
     out = []
-    for m in unnumbered(sched, aliases):
+    for m in missing:
         if m.block == "assignments":
             cost = "the hand out is skipped until it has one"
         elif m.copies:
