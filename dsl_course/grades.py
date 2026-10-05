@@ -328,6 +328,10 @@ class SheetSpec(_Shape):
     # before the submission facts behind it exist (`_undue_marks`). None for a sheet whose
     # assignment the schedule no longer declares - there is no date to read.
     due_at: datetime | None = None
+    # The template's `grading_config.yml` was refused (`GradingSpec.not_migrated`): the
+    # shape and late rule above are defaults nobody wrote, so nothing may be derived from
+    # them - no sheet refresh, no return (decision 0009).
+    not_migrated: bool = False
 
     @property
     def container_key(self) -> str:
@@ -2042,6 +2046,7 @@ def sheet_spec(
             sched.timezone,
         ),
         due_at=entry.due_datetime if entry else None,
+        not_migrated=gspec.not_migrated,
     )
 
 
@@ -3666,6 +3671,10 @@ def marks_due(
         except SheetUnreadable:
             sheet = None  # the sheet's own digest says why
         spec = specs[name]
+        if spec.not_migrated:
+            # Its definition is refused, and the digest already carries that fault: a
+            # return off a default-shaped spec would read the wrong container.
+            continue
         units = ((sheet or {}).get(spec.container_key) or {}) if sheet else {}
         blank = _not_marked(spec, sheet) if sheet else {}
         if sheet and units and not blank:
@@ -4265,6 +4274,17 @@ def distribute(
         for slug, sheet in sheets.items():
             specs.setdefault(slug, _spec_from_sheet(slug, sheet))
             sources[slug] = (specs[slug], sheet)
+        refused = sorted(slug for slug in sources if specs[slug].not_migrated)
+        if refused:
+            # Nothing goes out, as for an unreadable sheet: its shape and late rule would
+            # be defaults nobody wrote, and leaving it out of the books would take an
+            # already-returned mark away from every gradebook.
+            log_err(
+                f"{', '.join(refused)}: {GRADING_FILE} is NOT_MIGRATED (an old key, or "
+                f"a run setting that moved to {ASSIGNMENTS_FILE}) - nothing sent; run "
+                f"the migration"
+            )
+            return 1
         titles = {slug: specs[slug].title for slug in sources}
         books, unknown = _on_the_roster(build_gradebooks(sources), students)
         distributed, migrating = _read_distributed(wd)

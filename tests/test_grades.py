@@ -3175,3 +3175,37 @@ def test_a_held_mark_keeps_the_assignment_to_be_returned_again(tmp_path, monkeyp
     assert [m[0] for batch in again["outbox"] for m in batch] == ["ben@uni.edu"]
     ((_cfg, cfg_files, _d),) = again["config"]
     assert grades.marks_return_record("assignment-1") in cfg_files
+
+
+def test_a_refused_definition_returns_no_marks(tmp_path, monkeypatch):
+    # A NOT_MIGRATED grading_config.yml reads as a default spec: individual, and the
+    # institution's late rule. Nothing goes out off it, and nothing is recorded returned.
+    monkeypatch.setattr(grades, "assignment_title", lambda org, repo, spec, name: name)
+    out = _distribute(
+        monkeypatch, tmp_path, grading="format: notebook\n", assignment="assignment-1"
+    )
+    assert out["rc"] == 1
+    assert out["gradebooks"] == [] and out["config"] == [] and out["outbox"] == []
+
+
+def test_a_refused_definition_is_not_due_for_return(monkeypatch):
+    sched = Schedule(
+        assignments={
+            "assignment-1": AssignmentEntry(
+                course_source_repo="assignment-1-f2026",
+                due_datetime=_DUE_PASSED,
+                marks_return_datetime=datetime(2026, 10, 1, tzinfo=timezone.utc),
+            )
+        },
+        org="SEMESTER",
+    )
+    monkeypatch.setattr(grades, "_grading_text", lambda org, tpl: "format: notebook\n")
+    monkeypatch.setattr(
+        grades,
+        "get_file_content",
+        lambda org, repo, path, **k: None if "marks" in path else _SHEET,
+    )
+    faults, ready = grades.marks_due(
+        "COURSE", "SEMESTER", sched, datetime(2026, 10, 5, tzinfo=timezone.utc)
+    )
+    assert ready == [] and faults == []

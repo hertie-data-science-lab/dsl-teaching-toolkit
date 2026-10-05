@@ -7220,3 +7220,37 @@ def test_collect_now_refuses_an_entry_with_no_number(monkeypatch, flags):
     assert out.reasons == [
         {"code": "NOT_NUMBERED", "text": "Give project a number first."}
     ]
+
+
+def test_a_refused_definition_never_drives_the_sheet_refresh(monkeypatch):
+    # A template still carrying a run key is refused as NOT_MIGRATED. Refreshed off the
+    # default spec it would rewrite a group sheet in the individual shape; the digest
+    # carries the fault, so the tick skips it without going red.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS,
+        grading="type: group\nlate_window_days: 3\n",
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Semester",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=True,
+        now=datetime(2026, 10, 6, tzinfo=BERLIN),
+    ).written
+    assert written == []
+
+
+def test_the_refresh_button_refuses_a_refused_definition(monkeypatch, capsys):
+    written = _sheet_env(
+        monkeypatch, targets=SOLO_TARGETS, grading="type: group\nvisibility: public\n"
+    )
+    monkeypatch.setattr(collect.schedule, "load", lambda org: _sched())
+    assert (
+        collect.refresh_assignment_sheet("Course", "assignment-1-f2026", "Semester")
+        == 1
+    )
+    assert written == [] and "NOT_MIGRATED" in capsys.readouterr().err
