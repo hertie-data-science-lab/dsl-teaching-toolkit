@@ -388,7 +388,7 @@ def status_schema() -> dict:
             "grading_cutoff_datetime": nullable,
             "solution_shown": nullable,
             "solution_held_until": nullable,
-            "units": {"type": ["integer", "null"]},
+            "units": {"type": "integer"},
             "submissions": {"type": ["integer", "null"]},
             "teams": {"type": ["integer", "null"]},
             "marks": _obj(
@@ -449,13 +449,13 @@ def status_schema() -> dict:
                     "type": "array",
                     "items": _obj(
                         {
-                            "run_id": {"type": ["integer", "null"]},
+                            "run_id": {"type": "integer"},
                             "op": _str(),
                             "conclusion": _enum(CONCLUSIONS),
                             "summary": _str(),
                             "finished": _str(),
                         },
-                        ("op", "conclusion"),
+                        ("run_id", "op", "conclusion"),
                     ),
                 },
             },

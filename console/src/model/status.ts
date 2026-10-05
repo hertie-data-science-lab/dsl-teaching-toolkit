@@ -161,7 +161,7 @@ export interface NextEvent {
 export function nextEvent(s: Status, now: number): NextEvent | null {
   const tz = s.semester?.timezone ?? DEFAULT_TIMEZONE;
   const all: NextEvent[] = [];
-  for (const r of s.releases ?? []) if (r.state === 'planned') all.push({ title: releaseIdent(r), word: 'release', when: r.when });
+  for (const r of s.releases ?? []) if (r.state === 'planned' && r.when) all.push({ title: releaseIdent(r), word: 'release', when: r.when });
   for (const a of s.assignments ?? []) {
     const title = assignmentIdent(a.slug, a.title, a.number);
     if (a.handout && (a.state === 'declared' || a.state === 'teams_forming')) all.push({ title, word: 'hand out', when: a.handout });

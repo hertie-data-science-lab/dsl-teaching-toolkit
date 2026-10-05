@@ -152,7 +152,7 @@ export function ProblemCards({ list, cohort }: { list: TaggedProblem[]; cohort?:
             <p class="p-effect">{p.stops}</p>
             <div class="p-fix">
               {href ? <a class="btn small" href={href}>Fix</a> : null}
-              {p.fix && org && repo ? <EditFile org={org} repo={repo} path={p.fix.path} branch={p.fix.ref ?? (p.fix.screen === 'template' ? 'solution' : 'main')} line={p.fix.line} /> : null}
+              {p.fix && org && repo ? <EditFile org={org} repo={repo} path={p.fix.path} branch={p.fix.ref ?? (p.fix.screen === 'template' ? 'solution' : 'main')} line={p.fix.line ?? undefined} /> : null}
             </div>
           </li>
         );

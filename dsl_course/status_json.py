@@ -1625,12 +1625,14 @@ def this_week(
 
 
 def render_operations(outcomes: list[dict]) -> list[dict]:
-    """The most recent operations first, off their private outcome files."""
+    """The most recent operations first, off their private outcome files. Each row
+    opens its run, so an outcome recorded outside a workflow run (no `run_id`) is left
+    out."""
     keep = ("run_id", "op", "conclusion", "summary", "finished")
     rows = [
         {k: o.get(k) for k in keep}
         for o in outcomes
-        if isinstance(o, dict) and o.get("op")
+        if isinstance(o, dict) and o.get("op") and isinstance(o.get("run_id"), int)
     ]
     rows.sort(key=lambda r: str(r.get("finished") or ""), reverse=True)
     return rows[:RECENT_OPERATIONS]

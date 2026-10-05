@@ -241,12 +241,12 @@ describe('S6 schedule and S11 release', () => {
   });
   const unstaged: Loaded = {
     kind: 'ready', sha: 's', stale: [],
-    status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', kind: null, title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
+    status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', kind: 'lecture', title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
   };
   it('renders a release with no deploy block as nothing to release, with no Release early', () => {
     const out = html(<ScheduleScreen {...props({ loaded: unstaged })} />);
     expect(out).toContain('<b>Lecture 12</b>: Review');
-    expect(out).toMatch(/<li class="trow term" data-entry="lecture-12"><span class="k">release<\/span>/);
+    expect(out).toMatch(/<li class="trow lec" data-entry="lecture-12"><span class="k">lecture<\/span>/);
     expect(out).toContain('Nothing to release yet: this entry has no deploy block');
     expect(out).toContain('href="#schedule-lecture-12"');
     expect(out).not.toContain('Release early');

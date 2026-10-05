@@ -2335,3 +2335,12 @@ def test_the_gather_reads_two_trees_and_the_record_never_a_source(monkeypatch):
     t = status_json.TemplateFacts("assignment-1", "# Trees")
     status_json._starter_facts(COURSE, t, None)
     assert t.starter == "handwritten"
+
+
+def test_an_operation_with_no_run_is_left_out():
+    # Every operations row opens its run; an outcome recorded outside one has none.
+    ran = {"op": "semester.check", "run_id": 7, "conclusion": "done", "finished": "b"}
+    local = {"op": "semester.check", "run_id": None, "conclusion": "done"}
+    assert status_json.render_operations([ran, local]) == [
+        {k: ran.get(k) for k in ("run_id", "op", "conclusion", "summary", "finished")}
+    ]

@@ -256,10 +256,7 @@
             "type": "string"
           },
           "units": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           }
         },
         "required": [
@@ -508,16 +505,14 @@
             "type": "string"
           },
           "run_id": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "summary": {
             "type": "string"
           }
         },
         "required": [
+          "run_id",
           "op",
           "conclusion"
         ],
