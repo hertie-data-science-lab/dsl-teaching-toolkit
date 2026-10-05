@@ -341,8 +341,11 @@ def _penalty(value: object, where: str, dropped: list[str]) -> str | None:
     Checked here, once per spec, like every other malformed field: the derivation itself
     stays pure and is called per student. Refusing without saying so meant every late mark
     in that semester quietly lost its deduction while the sheet's header still advertised
-    one."""
-    raw = str(value or "").strip()
+    one.
+
+    Absent is None and nothing else: a bare `0` is a rate somebody wrote (no deduction),
+    and reading it as blank handed the assignment to the next layer's penalty."""
+    raw = "" if value is None else str(value).strip()
     if not raw:
         return None
     fault = penalty_fault(raw)

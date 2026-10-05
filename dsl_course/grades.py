@@ -925,7 +925,7 @@ def penalty_rate(text: object) -> Decimal | None:
     said out loud, once, when the assignment's definition was read."""
     if penalty_fault(text):
         return None
-    raw = str(text or "").strip()
+    raw = "" if text is None else str(text).strip()
     if not raw:
         return None
     return as_decimal(raw[:-1]) / 100 if raw.endswith("%") else as_decimal(raw)

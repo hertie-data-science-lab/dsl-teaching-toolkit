@@ -3209,3 +3209,23 @@ def test_a_refused_definition_is_not_due_for_return(monkeypatch):
         "COURSE", "SEMESTER", sched, datetime(2026, 10, 5, tzinfo=timezone.utc)
     )
     assert ready == [] and faults == []
+
+
+@pytest.mark.parametrize(
+    ("config", "window", "penalty"),
+    [
+        ("late_penalty_per_day: 0", None, "0"),
+        ("late_window_days: 3\nlate_penalty_per_day: 0", 3, "0"),
+        ("late_window_days: 0\nlate_penalty_per_day: 0", 0, "0"),
+    ],
+    ids=["zero-penalty-alone", "zero-penalty-with-window", "both-zero"],
+)
+def test_an_explicit_zero_penalty_is_never_the_institution_default(
+    monkeypatch, config, window, penalty
+):
+    # A bare `0` was read as blank, so the layer dropped out and the institution's
+    # 10% a day for 10 days was deducted from every late mark and emailed.
+    spec = _semester_spec(monkeypatch, config)
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (window, penalty)
+    assert dict(spec.sources)["late_penalty_per_day"] == "assignment"
+    assert grades.penalty_rate(spec.late_penalty_per_day) == 0
