@@ -11,8 +11,25 @@ import { EDITORS, OPEN_CHOICES, type Editor, type OpenChoice, type Setup } from 
 
 const localStore = () => safeStorage('local');
 
+/**
+ * This page load's answers, per store: the visit times read (kept all load), and Profiles
+ * kept in memory when storage refused them. The browser's store is one object for the whole
+ * load; a test that hands in a fresh store object starts a fresh load.
+ */
+interface Load {
+  visits: Map<string, number | null>;
+  kept: Map<string, Setup>;
+}
+const loads = new WeakMap<object, Load>();
+const NO_STORE = {};
+function loadOf(store: KeyStore | null): Load {
+  const k = store ?? NO_STORE;
+  let l = loads.get(k);
+  if (!l) loads.set(k, (l = { visits: new Map(), kept: new Map() }));
+  return l;
+}
+
 const visitKey = (login: string, org: string) => `dsl-console-visit:${login}:${org.toLowerCase()}`;
-const visits = new Map<string, number | null>();
 
 /**
  * When `login` last opened `org` before this page load (epoch ms), or null for a first visit.
@@ -21,6 +38,7 @@ const visits = new Map<string, number | null>();
  */
 export function lastVisit(login: string, org: string, store: KeyStore | null = localStore()): number | null {
   const key = visitKey(login, org);
+  const { visits } = loadOf(store);
   if (visits.has(key)) return visits.get(key)!;
   // Storage unavailable: every visit is a first one.
   const v = Number(readText(store, key) ?? '');
@@ -35,15 +53,12 @@ export function markVisit(login: string, org: string, now: number, store: KeySto
   writeText(store, visitKey(login, org), String(now));
 }
 
-/** Forget this page load's answers (tests). */
-export const resetVisits = () => visits.clear();
-
 /**
  * On sign-out: every visit time of `login` in this browser (and the old student folders), and this load's answers. Profile
  * is kept: a folder and an editor are not secrets (decision 0021).
  */
 export function forgetStudentPrefs(login: string, store: KeyStore | null = localStore()): void {
-  visits.clear();
+  loadOf(store).visits.clear();
   try {
     if (!store?.key || store.length === undefined || !store.removeItem) return;
     const mine = [];
@@ -60,16 +75,10 @@ export function forgetStudentPrefs(login: string, store: KeyStore | null = local
 }
 
 const setupKey = (login: string) => `dsl-console-setup:${login}`;
-/** Profile per login when storage refuses it: it then lasts until reload. */
-const kept = new Map<string, Setup>();
-
-/** Forget the in-memory copies kept when storage refused (tests). */
-export const resetKeptSetups = () => kept.clear();
-
 /** `login`'s Profile, or null when nothing is stored (and nothing kept since storage refused). */
 export function yourSetup(login: string, store: KeyStore | null = localStore()): Setup | null {
   const v = readJson<Partial<Record<keyof Setup, unknown>>>(store, setupKey(login));
-  if (!v || typeof v !== 'object') return kept.get(login) ?? null;
+  if (!v || typeof v !== 'object') return loadOf(store).kept.get(login) ?? null;
   const setup: Setup = {
     folder: typeof v.folder === 'string' ? v.folder : '',
     editor: EDITORS.includes(v.editor as Editor) ? (v.editor as Editor) : 'vscode',
@@ -83,11 +92,12 @@ export function yourSetup(login: string, store: KeyStore | null = localStore()):
 
 /** Store `setup`; false when storage refused and it is kept only until reload. */
 export function saveYourSetup(login: string, setup: Setup, store: KeyStore | null = localStore()): boolean {
+  const { kept } = loadOf(store);
   if (writeJson(store, setupKey(login), setup)) {
     kept.delete(login);
     return true;
   }
-  kept.set(login, setup);
+  kept.set(login, setup); // refused: Profile lasts until reload
   return false;
 }
 

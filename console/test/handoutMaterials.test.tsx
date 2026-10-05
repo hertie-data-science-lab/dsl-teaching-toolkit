@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, type GhRepo } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import { KIND_LABEL } from '../src/model/format';
 import { CONTENT_KINDS, inferKind } from '../src/model/materialsRules';
 import { StatusStore } from '../src/model/status';

@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { bannerLine } from '../src/app';
 import { EnvCtx, type Env } from '../src/env';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import { nextEvent, nextEventWords, recentActivity, rollUpProblems, whoWord, type Activity } from '../src/model/status';
 import type { Loaded } from '../src/model/status';
 import type { Operation, Problem, Status } from '../src/model/types';

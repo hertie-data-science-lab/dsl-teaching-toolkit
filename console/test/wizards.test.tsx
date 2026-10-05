@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { layout } from '../src/forms/Form';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { validateArgs } from '../src/ops/adapter';

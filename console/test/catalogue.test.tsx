@@ -16,7 +16,7 @@ import { discoverEstate, studentSemesters, type Course, type Semester } from '..
 import { myCoursesOnly, saveMyCoursesOnly } from '../src/model/prefs';
 import type { KeyStore } from '../src/auth/types';
 import { HomeScreen } from '../src/screens/Home';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import { CONFIG_REPO, INSTRUCTORS_FILE } from '../src/model/names';
 import { FakeGitHub, fileBody, json } from './fake';
 

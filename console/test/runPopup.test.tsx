@@ -8,7 +8,7 @@ import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient } from '../src/github/client';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import { StatusStore } from '../src/model/status';
 import { DispatchAdapter, stepsOf, type Adapter, type Handle, type Progress, type Result } from '../src/ops/adapter';
 import * as defs from '../src/ops/defs';

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import { NewAssignmentScreen, S1, S2, S3, S4, S5 } from '../src/screens/NewAssignment';
 import { signature } from '../src/wizards/model';
 import { NewCohortScreen } from '../src/screens/NewCohort';

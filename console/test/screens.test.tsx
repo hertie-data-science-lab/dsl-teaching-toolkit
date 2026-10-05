@@ -7,7 +7,7 @@ import { AppAuth } from '../src/auth/app';
 import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import { signal } from '@preact/signals';
 import { EnvCtx, type Env } from '../src/env';
 import type { Loaded } from '../src/model/status';

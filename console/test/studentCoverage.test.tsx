@@ -9,7 +9,7 @@ import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, type GhTeam } from '../src/github/client';
 import { discoverEstate, invitationUrl, pendingOrgs, type Semester } from '../src/model/discovery';
 import { forgetMyTeams, knownAuditor, parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
-import { forgetStudentPrefs, lastVisit, markVisit, resetVisits } from '../src/model/prefs';
+import { forgetStudentPrefs, lastVisit, markVisit } from '../src/model/prefs';
 import type { KeyStore } from '../src/auth/types';
 import { SiteSource, homeText, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
@@ -69,8 +69,8 @@ function receiptsFake(): FakeGitHub {
     ]);
 }
 
-function memStore(): KeyStore & { data: Map<string, string> } {
-  const data = new Map<string, string>();
+/** A store over `data`: a new one over the same data is the next page load. */
+function memStore(data = new Map<string, string>()): KeyStore & { data: Map<string, string> } {
   return { data, getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
 }
 const refusing: KeyStore = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
@@ -162,19 +162,15 @@ describe('3. the whole receipts thread', () => {
   });
 
   it('stores the visit only when marked, keeps this load’s answer, and survives blocked storage', () => {
-    resetVisits();
-    const store = memStore();
-    expect(lastVisit(LOGIN, ORG, store)).toBeNull();
-    resetVisits();
+    const data = new Map<string, string>();
+    expect(lastVisit(LOGIN, ORG, memStore(data))).toBeNull();
+    const store = memStore(data); // the next page load
     expect(lastVisit(LOGIN, ORG, store)).toBeNull(); // never marked: a failed read stores nothing
     markVisit(LOGIN, ORG, 1000, store);
     expect(lastVisit(LOGIN, ORG, store)).toBeNull(); // same load, same answer
-    resetVisits();
-    expect(lastVisit(LOGIN, ORG, store)).toBe(1000);
-    resetVisits();
+    expect(lastVisit(LOGIN, ORG, memStore(data))).toBe(1000);
     expect(lastVisit(LOGIN, 'other-f2026', refusing)).toBeNull();
     expect(() => markVisit(LOGIN, 'other-f2026', 1, refusing)).not.toThrow();
-    resetVisits();
   });
 
   it('forgets every visit time and the old student folders of the signed-out person, and no one else’s', () => {
@@ -183,14 +179,12 @@ describe('3. the whole receipts thread', () => {
       ['dsl-console-visit:someone:x', '3'], ['dsl-console-paths:someone', '{}'], ['console-theme', 'dark'],
     ]);
     const store: KeyStore = { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v), removeItem: (k) => void data.delete(k), get length() { return data.size; }, key: (i) => [...data.keys()][i] ?? null };
-    resetVisits();
     lastVisit(LOGIN, ORG, store);
     forgetStudentPrefs(LOGIN, store);
     expect([...data.keys()].sort()).toEqual(['console-theme', 'dsl-console-paths:someone', 'dsl-console-visit:someone:x']);
     data.set(`dsl-console-visit:${LOGIN}:${ORG}`, '5');
     expect(lastVisit(LOGIN, ORG, store)).toBe(5); // the in-memory answers went too
     expect(() => forgetStudentPrefs(LOGIN, refusing)).not.toThrow();
-    resetVisits();
   });
 });
 

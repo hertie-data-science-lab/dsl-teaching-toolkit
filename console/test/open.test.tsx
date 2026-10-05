@@ -8,7 +8,7 @@ import { act } from 'preact/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { courseFolder, defaultItem, folderExample, mainLabel, openItems, orgFolder, platformOf, repoCloneCommand, schemeOk, withOverride, type RepoRef, type Setup } from '../src/model/open';
-import { forgetStudentPrefs, rememberOpen, resetKeptSetups, saveYourSetup, yourSetup } from '../src/model/prefs';
+import { forgetStudentPrefs, rememberOpen, saveYourSetup, yourSetup } from '../src/model/prefs';
 import type { KeyStore } from '../src/auth/types';
 import { SetupScreen } from '../src/screens/Setup';
 import { OpenButton } from '../src/ui/OpenButton';
@@ -22,7 +22,8 @@ function memStore(): KeyStore & { data: Map<string, string> } {
   const data = new Map<string, string>();
   return { data, getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v), removeItem: (k) => void data.delete(k), get length() { return data.size; }, key: (i) => [...data.keys()][i] ?? null };
 }
-const refusing: KeyStore = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
+/** Storage that refuses everything; each call is a new page load. */
+const refused = (): KeyStore => ({ getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } });
 const hrefs = (setup: Setup | null, ref = REF) => Object.fromEntries(openItems(ref, setup).map((i) => [i.choice, i.href]));
 
 describe('Your setup in this browser', () => {
@@ -48,14 +49,14 @@ describe('Your setup in this browser', () => {
     expect(yourSetup(LOGIN, store)).toEqual({ folder: '', editor: 'vscode' });
     store.setItem(`dsl-console-setup:${LOGIN}`, '{not json');
     expect(yourSetup(LOGIN, store)).toBeNull();
+    const refusing = refused();
     expect(yourSetup(LOGIN, refusing)).toBeNull();
     // A refused write is kept until reload, across sign-out too.
     expect(saveYourSetup(LOGIN, { folder: '/x', editor: 'vscode' }, refusing)).toBe(false);
     expect(yourSetup(LOGIN, refusing)).toEqual({ folder: '/x', editor: 'vscode' });
     forgetStudentPrefs(LOGIN, refusing);
     expect(yourSetup(LOGIN, refusing)).toEqual({ folder: '/x', editor: 'vscode' });
-    resetKeptSetups();
-    expect(yourSetup(LOGIN, refusing)).toBeNull();
+    expect(yourSetup(LOGIN, refused())).toBeNull(); // the next page load
   });
 });
 
