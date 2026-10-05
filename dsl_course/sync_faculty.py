@@ -125,7 +125,11 @@ def _people_fault(
 
 
 def _declared(
-    meta: dict, faults: list[ConfigFault] | None, file: str, repo: str
+    meta: dict,
+    faults: list[ConfigFault] | None,
+    file: str,
+    repo: str,
+    skipped: list[str],
 ) -> dict[str, list[tuple[str, object]]] | None:
     """`{role key: [(where, entry)]}` from either shape of a people block, or None.
 
@@ -142,6 +146,7 @@ def _declared(
             if role is None:
                 lines = take_lines(p) if isinstance(p, dict) else {}
                 log_err(f"  ! skipping {where}: `role:` is not one of {_ROLE_WORDS}")
+                skipped.append(where)
                 if faults is not None:
                     faults.append(
                         _people_fault(
@@ -176,6 +181,7 @@ def parse_faculty_from_meta(
     faults: list[ConfigFault] | None = None,
     file: str = SEMESTER_PEOPLE_PATH,
     repo: str = CONFIG_REPO,
+    skipped: list[str] | None = None,
 ) -> dict[str, list[dict]]:
     """Parse an already-loaded config mapping's `people:` block (course org's
     dsl-course.yml, or a semester's instructors.yml - same schema) for the roles in ROLE_TEAM.
@@ -192,10 +198,16 @@ def parse_faculty_from_meta(
     `semester-config/instructors.yml` and a course org's `.github/dsl-course.yml`, and a fault
     that cited the wrong one would link a reader at a file that does not exist.
 
+    `skipped` collects the place (`instructors[2]`) of every entry that could not be
+    placed - no valid `role:`, no `github_handle:`, a handle that is not a GitHub
+    username - so a sweep can hold its removals: such an entry's person is in nobody's
+    desired set, and pruning to it would take their access away.
+
     The line stamps (`take_lines`) are consumed here whether or not anybody asked for
     faults, so no consumer downstream can ever render the loader's reserved key."""
     faculty: dict[str, list[dict]] = {}
-    declared = _declared(meta, faults, file, repo)
+    skipped = [] if skipped is None else skipped
+    declared = _declared(meta, faults, file, repo, skipped)
     if declared is None:
         return {}
     for role in ROLE_TEAM:
@@ -207,21 +219,21 @@ def parse_faculty_from_meta(
                 # Not logged here: `desired_team_members` says it, in the place that
                 # acts on it. This is the same fact on the channel that reaches somebody
                 # who is not reading a cron's log.
-                if faults is not None and not is_valid_github_username(
-                    str(p["github_handle"])
-                ):
-                    faults.append(
-                        _people_fault(
-                            where,
-                            "github_handle",
-                            "this is not a valid GitHub username - the entry is "
-                            "skipped, so it grants no access (adding it to a team "
-                            "would invite an arbitrary account to the org)",
-                            lines,
-                            file,
-                            repo,
+                if not is_valid_github_username(str(p["github_handle"])):
+                    skipped.append(where)
+                    if faults is not None:
+                        faults.append(
+                            _people_fault(
+                                where,
+                                "github_handle",
+                                "this is not a valid GitHub username - the entry is "
+                                "skipped, so it grants no access (adding it to a team "
+                                "would invite an arbitrary account to the org)",
+                                lines,
+                                file,
+                                repo,
+                            )
                         )
-                    )
                 # A course admin's `email:` is OPTIONAL: when any admin declares one,
                 # `mailer.course_admin_addresses` prefers them over the
                 # `DSL_COURSE_ADMIN_EMAILS` org secret. Absent is fine; present and
@@ -280,6 +292,7 @@ def parse_faculty_from_meta(
                 )
             else:
                 log_err(f"  ! skipping {role} entry with no github_handle: {p!r}")
+                skipped.append(where)
                 if faults is not None:
                     faults.append(
                         _people_fault(
@@ -462,18 +475,18 @@ def load_semester_faculty(semester_org: str) -> dict[str, list[dict]] | None:
 
 
 @cache
-def _semester_faculty(semester_org: str) -> tuple[dict[str, list[dict]] | None, bool]:
-    """`load_semester_faculty`'s answer, and whether any entry of the file names no
-    role: the sweep then adds but never removes (a misspelt `role:` is a fault to report,
+def _semester_faculty(
+    semester_org: str,
+) -> tuple[dict[str, list[dict]] | None, tuple[str, ...]]:
+    """`load_semester_faculty`'s answer, and the entries the parse could not place: the
+    sweep then adds but never removes (a misspelt `role:` or handle is a fault to report,
     never a reason to take somebody's access away)."""
     meta, path = _load_semester_file(semester_org)
     if meta is None:
-        return None, False
-    unknown = any(
-        instructor_role(p.get("role") if isinstance(p, dict) else "") is None
-        for p in meta["instructors"]
-    )
-    return _semester_roles_only(parse_faculty_from_meta(meta, file=path)), unknown
+        return None, ()
+    skipped: list[str] = []
+    faculty = parse_faculty_from_meta(meta, file=path, skipped=skipped)
+    return _semester_roles_only(faculty), tuple(skipped)
 
 
 class NoInstructorsList(Unusable):
@@ -735,7 +748,7 @@ def sync_semester_instructors(
     (rather than re-discovered here) so a multi-semester `sync()` fetches them once,
     not once per semester."""
     try:
-        faculty, unknown_role = _semester_faculty(semester_org)
+        faculty, skipped = _semester_faculty(semester_org)
     except (NotMigrated, NoInstructorsList) as exc:
         # Fail CLOSED: an old or empty file is no desired set to prune to. Skip this
         # semester's instructors sweep - the digest issue carries the fault - and stay green.
@@ -756,15 +769,15 @@ def sync_semester_instructors(
             f"absent config would prune every instructor); skipping"
         )
         return 0
-    # The faculty-access FLOOR: an entry whose `role:` names no role is left out of the
+    # The faculty-access FLOOR: an entry the parse could not place is left out of the
     # desired set, and pruning to that set would remove its person. Hold the removals
     # until it is fixed; the digest issue carries the fault.
-    prune = not unknown_role
-    if unknown_role:
+    prune = not skipped
+    if skipped:
         log_err(
-            f"  ! {SEMESTER_PEOPLE_PATH} has an entry whose `role:` is not one of "
-            f"{_ROLE_WORDS} - nobody is removed from {semester_org}'s teaching teams "
-            f"until it is fixed"
+            f"  ! {SEMESTER_PEOPLE_PATH} has {len(skipped)} entry(ies) that could not be "
+            f"placed ({', '.join(skipped)}) - nobody is removed from {semester_org}'s "
+            f"teaching teams until they are fixed"
         )
     desired = _desired_for(faculty, INSTRUCTORS_TEAM, date.today().isoformat())
     errors = reconcile_team_members(

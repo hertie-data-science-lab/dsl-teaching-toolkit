@@ -47,7 +47,7 @@ Never edit the GitHub teams directly; the file is the auditable record.
        email: "another@example.org"
    ```
 
-   `role:` ignores case. An entry whose `role:` is neither value is reported on the
+   `role:` ignores case. An entry with no valid `role:` or `github_handle:` is reported on the
    `instructors.yml` issue, and nobody is removed from the teaching teams until it is fixed.
 
    A semester that still has the old `people.yml` is refused as `NOT_MIGRATED` until the
