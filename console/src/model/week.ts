@@ -7,7 +7,7 @@
 // Schedule's week headings) and a semester card's "Next: ..." line.
 
 import { DEFAULT_TIMEZONE } from './policy';
-import { daysBetween, fmtDay } from './format';
+import { daysBetween, fmtDay, fmtWhen } from './format';
 import { isMarked, type Mine } from './mine';
 import { weekOf, type Term } from './schedule';
 import { nextEventWords } from './status';
@@ -40,6 +40,27 @@ export interface WeekItem {
 }
 
 const DAY = 864e5;
+
+type Formation = SemesterFacts['assignments'][number]['teamFormation'];
+
+/** A close written as a date (`2026-11-09T23:59:00+01:00`, `2026-11-09 23:59`), as the engine writes it; null for free text. */
+const closeAt = (closes: string, tz: string): number | null => {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(closes.trim())) return null;
+  const at = instant(closes, tz);
+  return Number.isNaN(at) ? null : at;
+};
+
+/** Team formation still open at `now`: no close given, or a close not passed yet. A close that is not a date (the site's free text) counts as open. */
+export function formingAt(tf: Formation, now: number, tz: string): boolean {
+  if (!tf) return false;
+  const at = tf.closes ? closeAt(tf.closes, tz) : null;
+  return at === null || at > now;
+}
+
+/** A team formation's close as the console writes dates ("Mon 9 Nov 23:59"); text that is not a date stays as written. */
+export function closesWords(closes: string, tz: string): string {
+  return closeAt(closes, tz) === null ? closes : fmtWhen(closes, tz);
+}
 
 const name = (title: string, subtitle: string) => (subtitle ? `${title}: ${subtitle}` : title);
 
@@ -89,13 +110,13 @@ export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, 
     }
   }
   for (const a of facts.assignments) {
-    if (!a.teamFormation || auditor) continue;
+    if (!formingAt(a.teamFormation, now, tz) || auditor) continue;
     const u = mine?.units[a.slug];
     add({
       at: now,
       when: '',
       kind: 'teams',
-      text: `Team formation is open for ${a.title}${a.teamFormation.closes ? ` until ${a.teamFormation.closes}` : ''}`,
+      text: `Team formation is open for ${a.title}${a.teamFormation!.closes ? ` until ${closesWords(a.teamFormation!.closes, tz)}` : ''}`,
       screen: 'join',
       note: mine && !u?.team ? 'you have no team yet' : undefined,
     });
