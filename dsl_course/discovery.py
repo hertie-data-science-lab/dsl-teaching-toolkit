@@ -236,6 +236,8 @@ def list_org_repos(org: str) -> list[dict]:
     `pushed_at` rides along because one listing answering "which of these has moved?" is
     what saves the sheet refresh a commits call per submission repo per tick (see
     `collect._provisional_pins`).
+    `default_branch` rides along for the same reason: a caller holding the listing reads
+    a repo's branch off its row instead of a `GET /repos` per repo.
 
     An empty list means the org genuinely holds no repos; a failed listing raises, since
     every caller reads "no repos" as "nothing to do" (refresh converges zero repos and
@@ -249,7 +251,8 @@ def list_org_repos(org: str) -> list[dict]:
         f"orgs/{org}/repos?per_page=100",
         "--jq",
         ".[] | {name, description, visibility, url: .html_url, "
-        "isTemplate: .is_template, archived, pushed_at, topics: (.topics // [])}",
+        "isTemplate: .is_template, archived, pushed_at, default_branch, "
+        "topics: (.topics // [])}",
     )
     if code != 0:
         raise RuntimeError(f"could not list repos in {org}: {out[:200]}")
@@ -492,6 +495,28 @@ def course_name_for_semester(semester_org: str) -> str:
     where the course name belongs.
     """
     return course_name_of(course_org_for_semester(semester_org))
+
+
+def course_name_or(
+    course_org: str = "", *, semester_org: str = "", fallback: str = ""
+) -> str:
+    """The course's name for an email - `course_name_of(course_org)`, or
+    `course_name_for_semester(semester_org)` - else `fallback`. Never raises.
+
+    Both readers raise on a dsl-course.yml that is malformed or that the API would not
+    hand over (`load_yaml_config`), and a name is never worth losing the email over: a
+    grade notice, a code or the one fault mail about that very file. A course carrying no
+    name keeps the generic wording rather than mailing a blank."""
+    try:
+        name = (
+            course_name_for_semester(semester_org)
+            if semester_org
+            else course_name_of(course_org)
+        )
+    except Exception as exc:  # a name is never worth losing the email over
+        log_err(f"could not read the course name ({exc}) - mailing without it")
+        return fallback
+    return name or fallback
 
 
 def course_org_for_semester(semester_org: str) -> str:

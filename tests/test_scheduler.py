@@ -990,7 +990,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all",
-        lambda course_org, template, semester_org, solution=False, touch_existing=True, scheduled=False, slug="", listing=None: (
+        lambda course_org, template, semester_org, solution=False, touch_existing=True, scheduled=False, slug="", listing=None, sync=True: (
             (
                 calls.append(
                     (
@@ -1001,6 +1001,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
                         touch_existing,
                         scheduled,
                         slug,
+                        sync,
                     )
                 ),
                 (0, True),
@@ -1023,6 +1024,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
         False,
         True,
         "assignment-2",
+        False,  # the tick syncs the site once, after every handout
     )
 
     # The solution release is the SAME call, asked to push the solution too - so a
@@ -1041,6 +1043,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
         False,
         True,
         "assignment-2",
+        False,
     )
 
 
@@ -1996,7 +1999,7 @@ def test_an_unreadable_source_repo_still_hands_out(monkeypatch):
 def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 0):
     """Record collect() calls. `marked` = slugs whose autograde/<slug>/ already exists;
     `templates` = the template repos that exist in the course org."""
-    graded: list[tuple[str, str, str, str, bool, bool, str]] = []
+    graded: list[tuple[str, str, str, bool, str]] = []
     monkeypatch.setattr(
         scheduler, "has_autograde_results", lambda org, slug: slug in marked
     )
@@ -2009,8 +2012,8 @@ def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 
         "dsl_course.scheduler.collect",
         # `scheduled=True` is the cron's contract with collect (an empty target list is a
         # "not yet", not a permanent skip) - a scheduler that stopped passing it fails here.
-        lambda m, t, c, deadline=None, group=False, *, scheduled, slug: (
-            graded.append((m, t, c, deadline, group, scheduled, slug)) or rc
+        lambda m, t, c, *, scheduled, slug: (
+            graded.append((m, t, c, scheduled, slug)) or rc
         ),
     )
     return graded
@@ -2185,14 +2188,12 @@ def test_run_autogrades_a_passed_deadline_with_no_marker(monkeypatch):
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
     assert scheduler.run("Course-Org", "Semester-f2026", now) == 0
-    ((course, template, semester, deadline, group, scheduled, slug),) = graded
+    ((course, template, semester, scheduled, slug),) = graded
     assert (course, template, semester) == (
         "Course-Org",
         "assignment-1-f2026",
         "Semester-f2026",
     )
-    # graded at exactly the instant the snapshot froze, and never guessed as a group run
-    assert deadline.startswith("2026-10-13T23:59:59") and group is False
     # ... and told WHICH entry it is, so two on one template cannot be confused
     assert slug == "assignment-1"
     assert (
@@ -2323,7 +2324,7 @@ def test_run_autogrades_at_the_late_cutoff(monkeypatch):
         )
         == 0
     )
-    assert graded[0][3].startswith("2026-10-15T23:59:59")
+    assert len(graded) == 1  # `collect` pins the same cutoff itself
 
 
 def test_main_all_semesters_with_none_registered_is_a_noop(monkeypatch):
@@ -5168,3 +5169,18 @@ def test_an_unparseable_assignments_yml_holds_the_schedule_digest(monkeypatch):
         rc = scheduler.run("Course-Org", "Semester-Org", WHEN, release=release)
         assert rc == 0
         assert synced == ([(config_digest.ASSIGNMENTS, [broken])] if release else [])
+
+
+def test_a_tick_asks_for_each_template_once(monkeypatch):
+    # A missing template's 404 is not memoised, so every pass that asked re-probed it.
+    asked = []
+    monkeypatch.setattr(
+        scheduler,
+        "_assignment_template",
+        lambda org, slug, entry: asked.append(slug) or None,
+    )
+    templates: dict = {}
+    entry = _due(13)
+    for _ in range(3):
+        assert scheduler._template_for(templates, "C", "a1", entry) is None
+    assert asked == ["a1"]

@@ -126,7 +126,7 @@ from .gh_contents import (
     get_file_with_sha,
     line_of,
     load_yaml_lines,
-    put_file,
+    put_file_as_read,
     repo_tree,
     take_lines,
     yaml_mark_line,
@@ -2600,37 +2600,32 @@ def _insert_handout(text: str, slug: str, stamp: str) -> str | _Declined | None:
 def _put_handout(
     semester_org: str, slug: str, stamp: str, body: str, sha: str | None
 ) -> bool:
-    """Write the recorded handout over schedule.yml at the sha its text was READ at, so a
-    faculty edit committed during the run is refused rather than reverted; on a refusal,
-    re-read, re-apply the handout to the fresh text and try once more."""
-    message = f"schedule: record {slug} handout ({stamp})"
+    """Write the recorded handout over schedule.yml at the sha its text was READ at
+    (`put_file_as_read`), so a faculty edit committed during the run is refused rather
+    than reverted; on a refusal, re-read, re-apply the handout to the fresh text and try
+    once more."""
 
-    def write(text: str, at: str | None) -> bool:
-        return put_file(
+    def reapply(fresh: str | None) -> str | None:
+        if fresh is None:
+            return None
+        rebuilt = _insert_handout(fresh, slug, stamp)
+        if rebuilt is None:
+            return fresh  # the edit that beat us recorded the same handout
+        return None if isinstance(rebuilt, _Declined) else rebuilt
+
+    return (
+        put_file_as_read(
             semester_org,
             CONFIG_REPO,
             SCHEDULE_PATH,
-            text.encode(),
-            message,
-            expected_sha=at,
+            body,
+            sha,
+            reapply,
+            f"schedule: record {slug} handout ({stamp})",
+            attempts=2,
         )
-
-    if write(body, sha):
-        return True
-    log_err(
-        f"{SCHEDULE_PATH} in {semester_org} was edited while {slug} was being handed out - "
-        f"re-reading and retrying once"
+        is not None
     )
-    read = get_file_with_sha(semester_org, CONFIG_REPO, SCHEDULE_PATH)
-    if read is None:
-        return False
-    fresh, fresh_sha = read
-    rebuilt = _insert_handout(fresh, slug, stamp)
-    if rebuilt is None:
-        return True  # the edit that beat us recorded the same handout
-    if isinstance(rebuilt, _Declined):
-        return False
-    return write(rebuilt, fresh_sha)
 
 
 def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> None:

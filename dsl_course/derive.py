@@ -71,7 +71,6 @@ from .course import (
 )
 from .gh_contents import (
     blob_sha,
-    get_blob,
     get_file_content,
     put_files,
     repo_path_shas,
@@ -593,31 +592,6 @@ def _handwritten(course_org: str, template: str) -> Summary:
     )
 
 
-def _large_source(
-    course_org: str, template: str, path: str, sha: str, reasons: list[dict]
-) -> str | None:
-    """`path`'s text read through the blobs API, for a file the Contents API sent no
-    content for. None, with the reason added, when it cannot be read that way either:
-    never an empty starter in its place."""
-    try:
-        blob = get_blob(course_org, template, sha)
-        text = None if blob is None else blob.decode()
-    except (RuntimeError, UnicodeDecodeError) as exc:
-        log_err(f"  ! {path} is too large to read as text: {exc}")
-        text = None
-    if not text:
-        reasons.append(
-            _refused(
-                "TOO_LARGE",
-                f"{path} is too large to be read here, so no starter was derived from "
-                "it. Make it smaller (clear notebook outputs, move data out) and run "
-                "this again.",
-            )
-        )
-        return None
-    return text
-
-
 def derive_student_version(
     course_org: str, template: str, dry_run: bool = True
 ) -> Summary:
@@ -673,9 +647,10 @@ def derive_student_version(
     for path in sources:
         try:
             text = get_file_content(course_org, template, path, ref=SOLUTION_BRANCH)
-        except RuntimeError as exc:
-            # GitHub refused the read (permission, rate limit, network). Its answer names
-            # the file and says why; it is the course's own template, so it may be shown.
+        except (RuntimeError, UnicodeDecodeError) as exc:
+            # GitHub refused the read (permission, rate limit, network), or the file is
+            # not text. The answer names the file and says why; it is the course's own
+            # template, so it may be shown.
             log_err(f"  ! {exc}")
             reasons.append(_refused("READ_FAILED", f"{path} could not be read: {exc}."))
             continue
@@ -685,12 +660,6 @@ def derive_student_version(
             log_err(f"  ! {path} could not be read - not derived")
             reasons.append(_refused("SOURCE_UNREADABLE", f"{path} could not be read."))
             continue
-        if not text and tree[path] != blob_sha(b""):
-            # The Contents API sends no content for a file over 1 MiB: read as text it
-            # is blank, and the "starter" written to main would be an empty file.
-            text = _large_source(course_org, template, path, tree[path], reasons)
-            if text is None:
-                continue
         texts[path] = text
     # A template that predates the key and marks nothing is hand-written (0028 rule 6).
     # Only on a full read: an unread file may be the one that carries the marker.

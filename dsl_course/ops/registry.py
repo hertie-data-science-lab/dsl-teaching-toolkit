@@ -207,6 +207,10 @@ def _scheduler(request: Request) -> list[str]:
 
 
 def _deploy(request: Request) -> list[str]:
+    if _a(request, "entry") and not _a(request, "course_source_repo"):
+        # A schedule entry by its key: deploy reads every copy off the plan and releases
+        # them in one batch with one site sync, however many source repos they draw on.
+        return [*_course_semester(request), "--entry", _a(request, "entry")]
     return [
         "--course-org",
         request.course_org,

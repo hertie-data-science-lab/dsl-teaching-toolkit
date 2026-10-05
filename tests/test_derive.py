@@ -614,23 +614,23 @@ def test_a_blank_file_is_copied_rather_than_blocking_the_derive(monkeypatch):
     assert derive.PY_PLACEHOLDER in repo.written["src/pipeline.py"].decode()
 
 
-def test_a_source_over_1_mib_is_read_by_its_blob_and_never_written_empty(monkeypatch):
-    # The Contents API sends `content: ""` for a file over 1 MiB, which read as a blank
-    # file and was written to main as an empty starter on a green run.
-    repo = _Repo({"solution/big.py": FENCED_PY}).install(monkeypatch)
-    monkeypatch.setattr(derive, "get_file_content", lambda o, r, path, ref="": "")
-    blobs = {gh_contents.blob_sha(FENCED_PY.encode()): FENCED_PY.encode()}
-    monkeypatch.setattr(derive, "get_blob", lambda o, r, sha: blobs.get(sha))
-    assert derive.derive_student_version("Course", "assignment-3-f2026", False) == 0
-    assert derive.PY_PLACEHOLDER in repo.written["big.py"].decode()
+def test_a_source_that_cannot_be_read_as_text_is_refused_and_main_is_left(monkeypatch):
+    # A file over 1 MiB is read by its blob inside `get_file_content`; one that still
+    # cannot be read (a gone blob, bytes that are not text) is refused by name, never
+    # derived as an empty starter.
+    for failure in (
+        RuntimeError("could not read big.py"),
+        UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+    ):
+        repo = _Repo({"solution/big.py": FENCED_PY}).install(monkeypatch)
 
-    # A blob that cannot be read (or is not text) is refused by name, and main is left.
-    repo = _Repo({"solution/big.py": FENCED_PY}).install(monkeypatch)
-    monkeypatch.setattr(derive, "get_file_content", lambda o, r, path, ref="": "")
-    for blob in (None, b"\xff\xfe"):
-        monkeypatch.setattr(derive, "get_blob", lambda o, r, sha, b=blob: b)
+        def unreadable(o, r, path, ref="", exc=failure):
+            if path == "solution/big.py":
+                raise exc
+
+        monkeypatch.setattr(derive, "get_file_content", unreadable)
         out = derive.derive_student_version("Course", "assignment-3-f2026", False)
-        assert out == 1 and [r["code"] for r in out.reasons] == ["TOO_LARGE"]
+        assert out == 1 and [r["code"] for r in out.reasons] == ["READ_FAILED"]
         assert repo.written == {} and repo.commits == 0
 
 

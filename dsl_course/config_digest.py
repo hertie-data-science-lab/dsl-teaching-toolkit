@@ -68,6 +68,7 @@ from .faults import (
     FaultKind,
     Severity,
     hours,
+    parse_moment,
     zone_name,
 )
 from .grades import GRADING_FILE, SHEETS_DIR
@@ -672,18 +673,8 @@ def oldest_seen(faults: list[SourceFault], seen: dict[str, str]) -> datetime | N
     rather than sorted last: a hand-edited marker used to pit a naive sentinel against the
     aware stamps beside it, and the `TypeError` stopped the digest updating at all until
     somebody fixed the marker by hand."""
-    known = [m for m in (_moment(seen.get(f.key)) for f in faults) if m]
+    known = [m for m in (parse_moment(seen.get(f.key)) for f in faults) if m]
     return min(known, default=None)
-
-
-def _moment(iso: str | None) -> datetime | None:
-    """An ISO timestamp this module wrote, back as a datetime. None for anything it
-    cannot read - a marker somebody edited by hand is no information, not a crash inside a
-    release tick."""
-    try:
-        return datetime.fromisoformat(iso) if iso else None
-    except ValueError:
-        return None
 
 
 def _seen_line(iso: str | None, fault: SourceFault) -> str:
@@ -692,7 +683,7 @@ def _seen_line(iso: str | None, fault: SourceFault) -> str:
     read, and the two sit in one issue."""
     if fault.is_source:
         return "_no date (tbc)_"
-    when = _moment(iso)
+    when = parse_moment(iso)
     return f"_first seen {when:%a %d %b %Y}_" if when else "_first seen just now_"
 
 

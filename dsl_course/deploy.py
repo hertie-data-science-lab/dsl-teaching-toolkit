@@ -20,11 +20,15 @@ same five fields as a `deploy:` entry).
 The workflow's `course_source_path`/`semester_dest_path` are comma-separated PARALLEL lists
 paired by index (parse_path_pairs) - one Deploy per pair, one deploy_many call for the batch.
 
+`--entry KEY` releases one schedule.yml entry instead: every copy it lists, from every
+source repo it draws on, in ONE deploy_many call with one site sync.
+
 Usage:
     python3 -m dsl_course.deploy \\
         --course-org COURSE --course-source-repo course-materials-f2026 \\
         --semester-org SEMESTER --semester-dest-repo materials \\
         --course-source-path "lectures/02_intro,labs/02_lab" [--semester-dest-path "week02/lecture,week02/lab"]
+    python3 -m dsl_course.deploy --course-org COURSE --semester-org SEMESTER --entry lecture-2
 """
 
 from __future__ import annotations
@@ -750,12 +754,24 @@ def parse_path_pairs(
     return list(zip(sources, dests))
 
 
+def _entry_deploys(sched: schedule.Schedule, label: str) -> list[Deploy] | str:
+    """Every copy of the schedule entry `label`, or the refusal to say instead."""
+    found = next((r for r in sched.releases if r.label == label), None)
+    if found is None:
+        return f"{label} is not an entry in this semester's schedule.yml."
+    return list(found.deploy)
+
+
+def _named(names: list[str], what: str) -> str:
+    """One repo by name, or several by count - the Summary's subject or object."""
+    unique = list(dict.fromkeys(names))
+    return unique[0] if len(unique) == 1 else plural(len(unique), what)
+
+
 def main() -> int:
     parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True, help="Course org (source)")
-    parser.add_argument(
-        "--course-source-repo", required=True, help="Source repo holding the path(s)"
-    )
+    parser.add_argument("--course-source-repo", help="Source repo holding the path(s)")
     parser.add_argument("--semester-org", required=True, help="Semester org (target)")
     parser.add_argument(
         "--semester-dest-repo",
@@ -765,7 +781,6 @@ def main() -> int:
     )
     parser.add_argument(
         "--course-source-path",
-        required=True,
         help="Source path(s) to release - a folder/file, or a comma-separated list",
     )
     parser.add_argument(
@@ -774,23 +789,18 @@ def main() -> int:
         help="Destination path(s), paired with --course-source-path by index "
         "(default: mirror each --course-source-path)",
     )
+    parser.add_argument(
+        "--entry",
+        default="",
+        help="A schedule.yml releases key: release every copy it lists, from every "
+        "source repo, in one batch with one site sync (instead of the four fields above)",
+    )
     add_preview_flag(
         parser,
         "Print the resolved source -> dest path pairs and exit without cloning or copying anything (default).",
     )
     args = parser.parse_args()
 
-    dest_repo = args.semester_dest_repo.strip() or DEFAULT_DEST_REPO
-    if (args.course_org, args.course_source_repo) == (args.semester_org, dest_repo):
-        log_err("source and target must differ.")
-        return 1
-    try:
-        pairs = parse_path_pairs(args.course_source_path, args.semester_dest_path)
-    except ValueError as e:
-        log_err(f"{e}.")
-        return 1
-    # A copy the plan names under an entry that needs a number and has none is refused,
-    # as the scheduled release skips it (decision 0020 rule 3). Off the plan it goes.
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
@@ -798,31 +808,63 @@ def main() -> int:
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
-    refusal = unnumbered_release(
-        sched,
-        args.course_source_repo,
-        [src for src, _ in pairs],
-        kinds_reader(args.course_org),
-    )
-    if refusal:
-        return refuse_unnumbered(refusal)
+    if args.entry:
+        deploys = _entry_deploys(sched, args.entry)
+        if isinstance(deploys, str):
+            log_err(deploys)
+            return 1
+    else:
+        if not (args.course_source_repo and args.course_source_path):
+            log_err("give --entry, or --course-source-repo and --course-source-path.")
+            return 1
+        dest_repo = args.semester_dest_repo.strip() or DEFAULT_DEST_REPO
+        try:
+            pairs = parse_path_pairs(args.course_source_path, args.semester_dest_path)
+        except ValueError as e:
+            log_err(f"{e}.")
+            return 1
+        deploys = [
+            Deploy(args.course_source_repo, src, dest_repo, dest) for src, dest in pairs
+        ]
+    if any(
+        (args.course_org, d.course_source_repo)
+        == (args.semester_org, d.semester_dest_repo)
+        for d in deploys
+    ):
+        log_err("source and target must differ.")
+        return 1
+    # A copy the plan names under an entry that needs a number and has none is refused,
+    # as the scheduled release skips it (decision 0020 rule 3). Off the plan it goes.
+    aliases = kinds_reader(args.course_org)
+    for repo in dict.fromkeys(d.course_source_repo for d in deploys):
+        refusal = unnumbered_release(
+            sched,
+            repo,
+            [d.course_source_path for d in deploys if d.course_source_repo == repo],
+            aliases,
+        )
+        if refusal:
+            return refuse_unnumbered(refusal)
 
+    sources = _named([d.course_source_repo for d in deploys], "source repo")
+    dests = _named([d.semester_dest_repo for d in deploys], "repo")
+    what = plural(len(deploys), "item")
     if args.preview:
         log_step(
-            f"PREVIEW release {len(pairs)} path(s) from "
-            f"{args.course_org}/{args.course_source_repo} -> {args.semester_org}/{dest_repo}"
+            f"PREVIEW release {len(deploys)} path(s) from {args.course_org}/{sources} "
+            f"-> {args.semester_org}/{dests}"
         )
         # The cheap structural checks need no clone, so catch them here: a source path that
-        # strips to the repo root (drags the source's own .git/.github over the dest), or one
-        # that contains `..` (rejected at run for resolving to the root or escaping the clone).
+        # contains `..` (rejected at run for resolving to the root or escaping the clone).
         # (The full clone-relative escape-check stays at copy time in deploy_many.)
         unsafe = False
-        for src, dest in pairs:
+        for d in deploys:
+            src = d.course_source_path
             # The root is a legal path now (it means "everything"), so only an escaping
             # path is still unsafe - that half of the check survives unchanged.
             if ".." in src.strip("/").split("/"):
                 log(
-                    f"  UNSAFE  {args.course_source_repo}/{src}: escapes the clone - "
+                    f"  UNSAFE  {d.course_source_repo}/{src}: escapes the clone - "
                     f"release a path inside the repo"
                 )
                 unsafe = True
@@ -830,51 +872,42 @@ def main() -> int:
             # Mirror deploy_many's own destination rule exactly (a root path means the dest
             # repo's ROOT, with no mirror-the-source fallback) - a dry-run that models the
             # release differently from the release is worse than no dry-run.
-            landing = (dest or src).strip("/")
+            landing = (d.semester_dest_path or src).strip("/")
             log(
-                f"  PREVIEW  {args.course_source_repo}/{src} -> "
-                f"{dest_repo}/{landing or '(repo root)'}"
+                f"  PREVIEW  {d.course_source_repo}/{src} -> "
+                f"{d.semester_dest_repo}/{landing or '(repo root)'}"
             )
         if unsafe:
             return 1
         return Summary(
-            f"Preview: {plural(len(pairs), 'item')} from {args.course_source_repo} "
-            f"would be released to {dest_repo}.",
-            {"items": len(pairs)},
+            f"Preview: {what} from {sources} would be released to {dests}.",
+            {"items": len(deploys)},
         )
 
     log_step(
-        f"Releasing {len(pairs)} path(s) from {args.course_org}/{args.course_source_repo} -> "
-        f"{args.semester_org}/{dest_repo}"
+        f"Releasing {len(deploys)} path(s) from {args.course_org}/{sources} -> "
+        f"{args.semester_org}/{dests}"
     )
-    # A read helper that couldn't reach the API raises; in an Actions log a one-line
-    # error beats a traceback, and the run still goes red.
+    # ONE batch, whatever the entry draws from: each repo clones once and the site syncs
+    # once, as the scheduler's own release pass does.
     try:
-        errors, changed = deploy_many(
-            args.course_org,
-            args.semester_org,
-            [
-                Deploy(args.course_source_repo, src, dest_repo, dest)
-                for src, dest in pairs
-            ],
-        )
+        errors, changed = deploy_many(args.course_org, args.semester_org, deploys)
     except RuntimeError as e:
         log_err(str(e))
         return 1
     if errors:
         return 1
     log("done")
-    what = plural(len(pairs), "item")
     if not changed:
         return Summary(
-            f"Nothing new to release: {what} from {args.course_source_repo} "
-            f"{'is' if len(pairs) == 1 else 'are'} already in {dest_repo}.",
-            {"items": len(pairs)},
+            f"Nothing new to release: {what} from {sources} "
+            f"{'is' if len(deploys) == 1 else 'are'} already in {dests}.",
+            {"items": len(deploys)},
             conclusion="nothing_to_do",
         )
     return Summary(
-        f"Released {what} from {args.course_source_repo} to {dest_repo}.",
-        {"items": len(pairs)},
+        f"Released {what} from {sources} to {dests}.",
+        {"items": len(deploys)},
     )
 
 

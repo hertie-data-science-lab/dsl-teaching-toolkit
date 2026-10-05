@@ -278,8 +278,35 @@ def test_an_empty_file_is_empty_and_not_absent(monkeypatch):
     # The API sends `content: ""` for a file with no bytes in it, and None is reserved for
     # a 404 - a caller that reads "" as "not configured yet" seeds over a file faculty
     # deliberately emptied.
-    _stub_gh(monkeypatch, lambda *a, **k: (0, ""))
+    empty = _blob_sha(b"")
+    _stub_gh(monkeypatch, lambda *a, **k: (0, empty if a[-1] == ".sha" else ""))
     assert gh_contents.get_file_content("Org", "repo", "students.csv") == ""
+
+
+def test_a_file_over_1_mib_is_read_by_its_blob_and_never_as_empty(monkeypatch):
+    # The Contents API answers `content: ""` for anything over 1 MiB: read as text that
+    # was an empty notebook, written back as one. Every reader here takes the blob.
+    big = b"x" * 10
+    sha = _blob_sha(big)
+
+    def fake(*a, **k):
+        if "git/blobs" in a[1]:
+            return 0, base64.b64encode(big).decode()
+        return 0, {".sha": sha, ".content": ""}.get(a[-1], f"{sha}\n")
+
+    _stub_gh(monkeypatch, fake)
+    assert gh_contents.get_file_content("Org", "repo", "big.ipynb") == "xxxxxxxxxx"
+    assert gh_contents.get_file_with_sha("Org", "repo", "big.ipynb") == (
+        "xxxxxxxxxx",
+        sha,
+    )
+    # A blob that is gone is a failure, not an empty file.
+    _stub_gh(
+        monkeypatch,
+        lambda *a, **k: (1, "HTTP 404") if "git/blobs" in a[1] else fake(*a),
+    )
+    with pytest.raises(RuntimeError, match="is gone"):
+        gh_contents.get_file_content("Org", "repo", "big.ipynb")
 
 
 def test_load_yaml_config_distinguishes_absent_empty_and_malformed(monkeypatch):

@@ -533,6 +533,9 @@ def test_a_template_naming_only_format_is_refused_whole(monkeypatch, capsys):
     monkeypatch.setattr(grades, "_grading_text", lambda org, t, **_: "format: ipynb\n")
     assert grades.load_grading_spec("C", "a1").not_migrated
     assert grades.declared_grading_spec("C", "a1").not_migrated
+    student = assign.roster.Student("a@x", "A", "ada", "", "", "student")
+    monkeypatch.setattr(assign.roster, "load", lambda org: [student])
+    monkeypatch.setattr(assign.schedule, "load", lambda org: citing("a1"))
     assert assign.provision_all("C", "a1", "S") == (1, False)
     assert NOT_MIGRATED in capsys.readouterr().err
     faults, parsed = grades.grading_spec_faults(

@@ -21,7 +21,7 @@ from __future__ import annotations
 from functools import cache
 
 from .course import CONFIG_REPO, INSTRUCTORS_TEAM, ROLE_TEAMS
-from .faults import ConfigFault, csv_row
+from .faults import ConfigFault, csv_row_fault
 from .gh_contents import get_file_content, read_csv
 
 TEAMS_PATH = "teams.csv"
@@ -48,22 +48,7 @@ def is_reserved_slug(slug: str) -> bool:
     return slug in RESERVED_TEAM_SLUGS or slug.startswith(f"{INSTRUCTORS_TEAM}-")
 
 
-def _row_fault(lineno: int, field: str, what: str) -> ConfigFault:
-    """One teams.csv row the toolkit will not act on.
-
-    ROW AND COLUMN ONLY - never the handle and never the team name. This file is written
-    by students through a public issue form, and the fault text reaches a mail, an issue
-    and a run log."""
-    return ConfigFault(
-        csv_row(lineno),
-        what,
-        file=TEAMS_PATH,
-        field=field,
-        lineno=lineno,
-        fix_text=(
-            f"fix row {lineno} of {TEAMS_PATH}; handles must be onboarded roster handles"
-        ),
-    )
+_HANDLES_FIX = "handles must be onboarded roster handles"
 
 
 def parse(
@@ -133,39 +118,47 @@ def _row_faults(
     slug = team_slug(assignment, team)
     if is_reserved_slug(slug):
         found.append(
-            _row_fault(
+            csv_row_fault(
+                TEAMS_PATH,
                 lineno,
                 "team",
                 "this row names a FACULTY team - the toolkit will not manage one from "
                 "teams.csv, so the row is ignored",
+                fix=_HANDLES_FIX,
             )
         )
     was = claimed.get((assignment, handle))
     if was and was[0] != team:
         found.append(
-            _row_fault(
+            csv_row_fault(
+                TEAMS_PATH,
                 lineno,
                 "team",
                 f"this handle is already in another team for the same assignment "
                 f"(row {was[1]}) - two teams cannot claim one student",
+                fix=_HANDLES_FIX,
             )
         )
     elif was:
         found.append(
-            _row_fault(
+            csv_row_fault(
+                TEAMS_PATH,
                 lineno,
                 "github_handle",
                 f"this handle is already listed for this team on row {was[1]} - the "
                 f"duplicate row is ignored",
+                fix=_HANDLES_FIX,
             )
         )
     if known_handles is not None and handle not in known_handles:
         found.append(
-            _row_fault(
+            csv_row_fault(
+                TEAMS_PATH,
                 lineno,
                 "github_handle",
                 "this handle is not an onboarded roster handle - it is NOT added to the "
                 "team (adding it would invite an arbitrary GitHub account to the org)",
+                fix=_HANDLES_FIX,
             )
         )
     return found

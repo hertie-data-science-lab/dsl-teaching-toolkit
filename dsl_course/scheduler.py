@@ -431,6 +431,8 @@ def _execute_nondeploy(
             # and adds every repo it creates to - so the next release in this same tick
             # sees them (see `assign.provision_all`).
             listing=listing,
+            # The tick syncs the site once after every release it fired (`run`).
+            sync=False,
         )
         if failed != 0:
             errors += 1
@@ -451,6 +453,7 @@ def _snapshot_passed_deadlines(
     now: datetime,
     dry_run: bool,
     listing: dict[str, dict] | None,
+    templates: dict[str, str | None] | None = None,
 ) -> int:
     """Freeze every passed-deadline assignment that has no snapshot yet. Write-once: an
     assignment already frozen is skipped silently, so this is a no-op on every tick after
@@ -480,7 +483,7 @@ def _snapshot_passed_deadlines(
         # grading_config.yml - so the snapshot freezes the exact repos grading scores.
         # A template that cannot be found leaves it individual, which is the parse's
         # default anyway.
-        template = _assignment_template(course_org, slug, entry)
+        template = _template_for(templates, course_org, slug, entry)
         # The SHAPE, off the same one read: which repos are frozen (one per unit, or one
         # drop box with a folder each) and whether each pin is narrowed to a folder. A
         # template that cannot be found leaves both at the parse's own defaults.
@@ -503,6 +506,23 @@ def _snapshot_passed_deadlines(
         if result is SnapshotResult.FAILED:
             errors += 1
     return errors
+
+
+def _template_for(
+    templates: dict[str, str | None] | None,
+    course_org: str,
+    slug: str,
+    entry: schedule.AssignmentEntry,
+) -> str | None:
+    """`_assignment_template`, asked once per assignment per tick: `templates` is the
+    tick's answers so far (`_release_phase`), which the freeze, the sheet refresh and the
+    handouts all read. A repo GET is memoised but a 404 is not, so a MISSING template was
+    re-probed by every pass. None is a caller with no tick to share."""
+    if templates is None:
+        return _assignment_template(course_org, slug, entry)
+    if slug not in templates:
+        templates[slug] = _assignment_template(course_org, slug, entry)
+    return templates[slug]
 
 
 def _assignment_template(
@@ -577,12 +597,7 @@ def _autograde_passed_deadlines(
         log_step(f"  autograde {slug} via {template} (deadline {deadline})")
         # `slug` here is the schedule KEY (`due_snapshots` yields keys), which is exactly
         # what `collect` needs to tell two entries on one template apart.
-        if (
-            collect(
-                course_org, template, semester_org, deadline, scheduled=True, slug=slug
-            )
-            != 0
-        ):
+        if collect(course_org, template, semester_org, scheduled=True, slug=slug) != 0:
             errors += 1
     return errors
 
@@ -731,7 +746,11 @@ def _held(release: Release, releases: set[str], assignments: set[str]) -> bool:
 
 
 def _handout_releases(
-    course_org: str, semester_org: str, sched: schedule.Schedule, now: datetime
+    course_org: str,
+    semester_org: str,
+    sched: schedule.Schedule,
+    now: datetime,
+    templates: dict[str, str | None] | None = None,
 ) -> list[Release]:
     """Synthetic releases for `assignments.<slug>.handout_datetime` - the whole assignment
     lifecycle (handout_datetime/due_datetime/solution_datetime) is declared in ONE block,
@@ -760,7 +779,7 @@ def _handout_releases(
     for slug, entry in sched.assignments.items():
         if entry.handout_datetime is None:
             continue
-        template = _assignment_template(course_org, slug, entry)
+        template = _template_for(templates, course_org, slug, entry)
         if template is None:
             log(f"  [skip] handout {slug} - no template repo for it in {course_org}")
             continue
@@ -1178,6 +1197,7 @@ def _refresh_sheets(
     now: datetime,
     dry_run: bool,
     listing: dict[str, dict] | None,
+    templates: dict[str, str | None] | None = None,
 ) -> int:
     """Keep every open assignment's grading sheet current: one pass, after the freeze.
 
@@ -1203,7 +1223,7 @@ def _refresh_sheets(
         name = schedule.semester_name(slug, entry)
         if name in sealed:
             continue
-        template = _assignment_template(course_org, slug, entry)
+        template = _template_for(templates, course_org, slug, entry)
         if not template:
             continue  # no template to read the assignment's definition from
         if dry_run:
@@ -1636,10 +1656,14 @@ def _release_phase(
 
     `listing` is this tick's one listing of the semester (see `run`), handed to each pass
     below in the order they already run in. None means it could not be read."""
+    # Which course-org template each assignment hands out from, asked once for the tick
+    # and shared by the handouts, the freeze and the sheet refresh (`_template_for`).
+    templates: dict[str, str | None] = {}
     # Re-sorted, not just concatenated: the synthesised handouts carry their own datetimes
     # and would otherwise land after every scheduled release whatever their date.
     releases = sorted(
-        sched.releases + _handout_releases(course_org, semester_org, sched, now),
+        sched.releases
+        + _handout_releases(course_org, semester_org, sched, now, templates),
         key=release_order,
     )
     due = due_releases(releases, now)
@@ -1679,12 +1703,14 @@ def _release_phase(
     # snapshot. Independent of the release plan - a semester can pin due dates without
     # scheduling a single release.
     errors += _snapshot_passed_deadlines(
-        course_org, semester_org, sched, now, dry_run, listing
+        course_org, semester_org, sched, now, dry_run, listing, templates
     )
     # Then the sheets, in the same pass and straight after: the freeze has just settled
     # every assignment past its cutoff, and everything else that is past its DUE date
     # gets its `info:` refreshed here.
-    errors += _refresh_sheets(course_org, semester_org, sched, now, dry_run, listing)
+    errors += _refresh_sheets(
+        course_org, semester_org, sched, now, dry_run, listing, templates
+    )
     # And then the one shape whose visibility the toolkit does not own: a `student_choice`
     # repo published before its cutoff is closed again here. After the freeze above, so a
     # repo made public on the morning of the deadline is still snapshotted from the work
