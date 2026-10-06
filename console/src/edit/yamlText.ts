@@ -37,7 +37,10 @@ function scalarText(v: unknown): string {
 }
 
 const isPlain = (v: unknown) => v === null || ['string', 'number', 'boolean'].includes(typeof v);
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+/** Whether `v` is a plain mapping (not null, not a list). */
+export const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+/** Whether a value counts as not given: absent, null, or text that is only spaces. */
+export const blank = (v: unknown): boolean => v === null || v === undefined || String(v).trim() === '';
 /** `v` when it is a plain mapping, else an empty one. */
 export const obj = (v: unknown): Record<string, unknown> => (isObj(v) ? v : {});
 

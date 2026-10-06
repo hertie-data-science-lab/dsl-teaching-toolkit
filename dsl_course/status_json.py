@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -46,6 +47,7 @@ import yaml
 
 from . import (
     grades,
+    policy,
     records,
     roster,
     schedule,
@@ -63,11 +65,20 @@ from .course import (
     MATERIALS_REPO_PREFIX,
     SELF_SELECT,
     SOLUTION_BRANCH,
+    SOLUTION_DIR,
+    STARTER_DERIVED,
+    STARTER_HANDWRITTEN,
     active_today,
     is_repo_root,
     pages_repo,
     semester_label,
     semester_of,
+    session_number,
+)
+from .derive import (
+    STARTER_RECORD,
+    declared_starter,
+    derivable_sources,
 )
 from .discovery import (
     SEMESTERS_PATH,
@@ -81,25 +92,34 @@ from .discovery import (
     read_semester_registry,
 )
 from .faults import NOT_MIGRATED, ConfigFault, FaultKind, Unusable
+from .gh_commits import last_commit_at
 from .gh_contents import (
+    file_exists,
     get_file_content,
     is_untouched_stub,
     line_of,
     repo_path_shas,
     repo_tree,
+    top_level,
 )
 from .gh_teams import get_team_members
-from .ghcli import gh
 from .materials import (
+    ASSETS_KIND,
     DEFAULT_SYLLABUS,
+    MATERIALS_FILE,
     MATERIALS_TOPIC,
+    PLAN_START,
     Declared,
+    alias_kind,
+    infer_kind,
     is_materials_repo,
+    publishable,
 )
 from .materials import read as read_materials
 from .opencourse import read as read_opencourse
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
+from .releaseignore import RELEASEIGNORE, REVIEWED_MARK, listed
 from .repos import default_branch
 from .schedule_plan import (
     Unnumbered,
@@ -107,6 +127,7 @@ from .schedule_plan import (
     duplicate_numbers,
     duplicate_text,
     entry_kind,
+    entry_landing,
     own_number,
     planned_rows,
     site_rows,
@@ -162,6 +183,12 @@ class TemplateFacts:
     faults: list[ConfigFault] = field(default_factory=list)
     # False for an `assignment-*` GitHub template without the `dsl-assignment` topic yet.
     topic: bool = True
+    # Decision 0028: how `main` is written (the key, else read off the solution tree).
+    starter: str = STARTER_DERIVED
+    # What the starter still needs (`starter_check`), None when it is in place.
+    starter_todo: str | None = None
+    # Derived: the first recorded starter file whose blob on `main` is not Derive's.
+    main_edited: str | None = None
 
 
 @dataclass
@@ -175,6 +202,15 @@ class MaterialsFacts:
     syllabus_path: str = DEFAULT_SYLLABUS
     # False for a `course-materials-*` repo without the `dsl-materials` topic yet.
     topic: bool = True
+    # The top-level folders (dot-folders left out) and `materials.yml`'s `kinds`.
+    folders: tuple[str, ...] = ()
+    kinds: Mapping[str, str] = field(default_factory=dict)
+    # The top-level `.releaseignore`'s text; None when there is none.
+    releaseignore: str | None = None
+    # The released top folders no kind names (no `kinds:` entry, no alias) that hold
+    # numbered subfolders: each got rows under the old `lecture` default and is now
+    # supporting files (`kindless_problems`).
+    numbered: tuple[str, ...] = ()
 
 
 @dataclass
@@ -233,6 +269,7 @@ class SemesterFacts:
     # `{semester-side name: when its grading sheet last changed}`; None = not known.
     sheet_changed: dict[str, datetime | None] = field(default_factory=dict)
     dest_paths: dict[str, set[str]] = field(default_factory=dict)  # release dest trees
+    dest_branches: dict[str, str] = field(default_factory=dict)  # and their branches
     # `{source repo: its materials.yml folder aliases}` - what an undeclared kind is
     # inferred through.
     aliases: dict[str, dict[str, str]] = field(default_factory=dict)
@@ -660,12 +697,120 @@ def _syllabus_written(m: MaterialsFacts) -> bool:
     return m.syllabus == "" or _written(m.syllabus)
 
 
+def _released_folders(m: MaterialsFacts) -> list[str]:
+    """The top folders a release can copy: `solution/`, `tests/` and the like never go
+    anywhere, so they need no kind."""
+    return [f for f in m.folders if publishable(f)]
+
+
+def _reviewed(text: str | None) -> bool:
+    """A `.releaseignore` somebody has been through: one pattern (a line that is not blank
+    or a comment), or the mark the console writes when nothing is withheld. The seeded one
+    is every line a comment (`scaffold`), in every wording it has had."""
+    lines = [line.strip() for line in (text or "").splitlines()]
+    return REVIEWED_MARK in lines or any(
+        line and not line.startswith("#") for line in lines
+    )
+
+
+def _syllabus_why(m: MaterialsFacts) -> str:
+    if m.syllabus is None:
+        return f"There is no {m.syllabus_path} yet."
+    return f"{m.syllabus_path} is still the placeholder."
+
+
+def _plan_written(m: MaterialsFacts) -> bool:
+    """The Markdown syllabus carries the weekly plan's marked block."""
+    return PLAN_START in (m.syllabus or "")
+
+
+def _plan_why(m: MaterialsFacts) -> str:
+    if m.syllabus == "":
+        return (
+            f"{m.syllabus_path} is not Markdown: copy the weekly plan and paste it in."
+        )
+    return f"The weekly plan is not in {m.syllabus_path} yet."
+
+
+def _kinds_found(m: MaterialsFacts) -> list[dict]:
+    """Every content kind but supporting files, in the policy's order, each with the
+    released top folders of that kind; empty for a kind no folder has, so the console shows
+    which kinds are present and which are not."""
+    named = {f: alias_kind(f, m.kinds) for f in _released_folders(m)}
+    return [
+        {"kind": kind, "folders": [f for f, k in named.items() if k == kind]}
+        for kind in policy.content_kinds()
+        if kind != ASSETS_KIND
+    ]
+
+
+def _shown_folders(m: MaterialsFacts) -> list[str]:
+    """The released top folders of a kind the sites show: a supporting-files folder (any
+    folder no kind names) is released but gets no page, so on its own it does not make a
+    repo releasable."""
+    return [f for f in _released_folders(m) if infer_kind(f, m.kinds) != ASSETS_KIND]
+
+
+def _kind_folder_why(released: list[str]) -> str:
+    if not released:
+        return (
+            "There is no lectures/, labs/ or readings/ folder yet; add one or set a "
+            "folder's kind under Folder kinds."
+        )
+    return "Only supporting files so far; set a folder's kind under Folder kinds."
+
+
+def materials_checks(m: MaterialsFacts) -> list[dict]:
+    """Decision 0022 rule 5: a materials repo's checklist, folder kinds first, then the
+    syllabus, the weekly plan it carries, and the withheld patterns. Every folder has a
+    kind since decision 0031 (supporting files by default), so there is no check that
+    each is mapped: `kindless_problems` names the folders the new default hid.
+    `blocks` marks the checks `ready` needs; `why` names what is missing, None once the
+    check is done; `kind_folder` carries `detail`, the folders found per content kind."""
+    rows = (
+        (
+            "kind_folder",
+            "At least one folder of a content kind",
+            True,
+            bool(_shown_folders(m)),
+            _kind_folder_why(_released_folders(m)),
+        ),
+        ("syllabus", "Syllabus written", True, _syllabus_written(m), _syllabus_why(m)),
+        (
+            "sessions",
+            "Weekly plan in the syllabus",
+            False,
+            _plan_written(m),
+            _plan_why(m),
+        ),
+        (
+            "withheld",
+            "Withheld patterns reviewed",
+            False,
+            _reviewed(m.releaseignore),
+            "Nothing is withheld from students yet; review the withheld patterns.",
+        ),
+    )
+    return [
+        {
+            "id": cid,
+            "label": label,
+            "done": done,
+            "why": None if done else why,
+            "blocks": blocks,
+            **({"detail": _kinds_found(m)} if cid == "kind_folder" else {}),
+        }
+        for cid, label, blocks, done, why in rows
+    ]
+
+
 def materials_state(m: MaterialsFacts) -> str:
-    """C4, per repo: `problem` until the migration gives it the topic; `ready` once its
-    declared syllabus is written."""
+    """C4, per repo: `problem` until the migration gives it the topic; `ready` once every
+    blocking check of `materials_checks` is done."""
     if not m.topic:
         return PROBLEM
-    return "ready" if _syllabus_written(m) else TODO
+    blocking = (c for c in materials_checks(m) if c["blocks"])
+    return "ready" if all(c["done"] for c in blocking) else TODO
 
 
 def materials_problem(m: MaterialsFacts, org: str) -> dict:
@@ -688,6 +833,77 @@ def materials_problem(m: MaterialsFacts, org: str) -> dict:
             "url": f"https://github.com/{org}/{m.repo}",
         },
     }
+
+
+# Decision 0031 rule 10: a folder no kind names is supporting files, where it used to be a
+# lecture. Content that got rows under the old default would vanish from the sites without a
+# word, so each such folder is a problem until a kind is set.
+KINDLESS_STOPS = "Its files are still released, but get no page of their own."
+
+
+def kindless_problems(m: MaterialsFacts, org: str) -> list[dict]:
+    """`kinds:<repo>:<folder>` for each top folder of a materials repo that no kind names
+    and that holds numbered subfolders (`MaterialsFacts.numbered`): sessions the public
+    website and an unkinded schedule entry showed as lectures before."""
+    return [
+        {
+            "id": f"kinds:{_slugify(m.repo)}:{_slugify(folder)}",
+            "scope": "course",
+            "stage": "C4",
+            "text": (
+                f"{folder}/ in {m.repo} has numbered folders but no kind; set its kind "
+                "under Folder kinds."
+            ),
+            "stops": KINDLESS_STOPS,
+            "fix": {
+                "repo": f"{org}/{m.repo}",
+                "path": MATERIALS_FILE,
+                "line": None,
+                "screen": "materials",
+                "entry": m.repo,
+            },
+        }
+        for folder in m.numbered
+        if alias_kind(folder, m.kinds) is None
+    ]
+
+
+def kindless_entry_problems(facts: SemesterFacts) -> list[dict]:
+    """`kinds:<key>` for each shown `releases:` entry that declares no kind and lands in a
+    folder no kind names: it was a lecture row before decision 0031 and is now supporting
+    files, no row at all."""
+    aliases = lambda repo: facts.aliases.get(repo, {})
+    out = []
+    for r in facts.sched.releases:
+        landing = entry_landing(r, aliases)
+        if landing.section is None or landing.named:
+            continue
+        if not r.show_on_site:
+            continue
+        first, section = r.deploy[0], landing.section
+        where = (
+            f"{section}/"
+            if "/" in deploy_dest(first)
+            else f"the top of {first.semester_dest_repo}"
+        )
+        # Folder kinds lists the source repo's top folders: it can settle this only when
+        # the copy lands in a folder of the same name. Otherwise only the entry can.
+        source_top, sep, _ = first.course_source_path.strip("/").partition("/")
+        if sep and source_top.lower() == section.lower():
+            fix = "set its kind under Folder kinds, or give the entry a kind"
+        else:
+            fix = "give the entry a kind"
+        out.append(
+            {
+                "id": f"kinds:{_slugify(r.label)}",
+                "scope": "semester",
+                "stage": "K4",
+                "text": f"{r.label} lands in {where}, which has no kind; {fix}.",
+                "stops": "It gets no row on the student site.",
+                "fix": _schedule_fix(facts.org, r.label, line_of(r.lines, "kind")),
+            }
+        )
+    return out
 
 
 def template_problem(t: TemplateFacts, org: str) -> dict:
@@ -791,19 +1007,86 @@ def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
     return out
 
 
+MAIN_EDITED = "MAIN_EDITED"
+# The branch a template hands out: the starter students receive (decision 0028).
+TEMPLATE_MAIN = "main"
+
+
+def main_edited_problem(t: TemplateFacts, org: str) -> dict:
+    """Decision 0028 rule 2: a derived template's `main` carries a commit Derive did not
+    make, which the next Derive overwrites."""
+    return {
+        "id": f"template:{_slugify(t.repo)}:{MAIN_EDITED}",
+        "scope": "course",
+        "stage": "C5",
+        "text": "main is derived; edit the solution branch and derive again.",
+        "stops": (
+            f"{t.main_edited} on main is not what Derive wrote; the next Derive "
+            f"overwrites it."
+        ),
+        "fix": {
+            "repo": f"{org}/{t.repo}",
+            "path": "",
+            "line": None,
+            "screen": "template",
+            "entry": t.repo,
+        },
+    }
+
+
+def template_problems(t: TemplateFacts, org: str) -> list[dict]:
+    """A template's own problems beside its grading_config.yml faults: NOT_MIGRATED
+    without the topic, MAIN_EDITED on a derived one."""
+    if not t.topic:
+        return [template_problem(t, org)]
+    return [main_edited_problem(t, org)] if t.main_edited else []
+
+
+def _record(text: str | None) -> dict | None:
+    """Derive's `.system/starter.json`, or None when it is absent or not its shape."""
+    try:
+        record = json.loads(text) if text else None
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(record, dict) or not isinstance(record.get("files"), dict):
+        return None
+    return record
+
+
+def starter_check(
+    starter: str,
+    solution: Mapping[str, str],
+    main: Mapping[str, str],
+    record_text: str | None,
+) -> tuple[str | None, str | None]:
+    """`(to-do, hand-edited path)` for one template's starter (decision 0028), off the two
+    trees (`{path: sha}`) and Derive's record. Hand-written: `main` holds something other
+    than the brief. Derived: a source to derive from, a record, every recorded blob still
+    on `main` (else that path is a hand edit), and the solution unchanged since."""
+    if starter == STARTER_HANDWRITTEN:
+        filled = any(p != README_FILE and not p.startswith(".") for p in main)
+        return (None if filled else "main has no starter files yet."), None
+    if not derivable_sources(list(solution)):
+        return f"There is nothing under {SOLUTION_DIR}/ to derive a starter from.", None
+    record = _record(record_text)
+    if record is None:
+        return "Derive has not been run yet.", None
+    edited = next(
+        (p for p, sha in sorted(record["files"].items()) if main.get(p) != sha), None
+    )
+    if record.get("solution_tree") != solution.get(SOLUTION_DIR):
+        return "The solution changed since the last Derive; derive again.", edited
+    return None, edited
+
+
 def template_state(t: TemplateFacts) -> str:
-    """C5, per template: `problem` until the migration gives it the topic, or while its
-    grading_config.yml will not grade as written; `ready` once its README is written,
-    `todo` before that."""
-    if t.faults or not t.topic:
+    """C5, per template: `problem` until the migration gives it the topic, while its
+    grading_config.yml will not grade as written, or while a derived `main` carries a
+    hand edit; `ready` once its README is written and its starter is in place (derived:
+    `starter_check` finds nothing to do), `todo` before."""
+    if t.faults or template_problems(t, ""):
         return PROBLEM
-    return "ready" if _written(t.readme) else TODO
-
-
-def app_installed() -> bool | None:
-    """C1/K1's "App installed" predicate. TODO(decision 0002): there is no App yet, so
-    nothing can be asked; None is "not known", and no stage waits on it."""
-    return None
+    return "ready" if _written(t.readme) and not t.starter_todo else TODO
 
 
 def course_admin_count(meta: dict) -> int:
@@ -816,6 +1099,28 @@ def course_admin_count(meta: dict) -> int:
 
 # The course stages a new semester needs done (decision 0019); C4-C6 are listed, optional.
 REQUIRED_COURSE_STAGES = COURSE_STAGES[:3]
+# `dsl-course.yml`'s list of optional setup steps and to-dos the course has set aside
+# (decision 0032).
+SET_ASIDE_KEY = "set_aside"
+
+
+def set_aside_ids(meta: dict) -> frozenset[str]:
+    """The ids `dsl-course.yml` sets aside: its `set_aside:` list, the strings in it. Any
+    other shape, or an absent key, sets nothing aside; an unknown id is never a fault, it
+    simply matches nothing (decision 0032 rule 2)."""
+    raw = meta.get(SET_ASIDE_KEY)
+    if not isinstance(raw, list):
+        return frozenset()
+    return frozenset(x.strip() for x in raw if isinstance(x, str) and x.strip())
+
+
+def stage_set_aside(stages: dict[str, str], aside: frozenset[str]) -> dict[str, bool]:
+    """Decision 0032: an optional stage that is not done and that the course lists. A
+    required stage's id, or a done stage's, is ignored."""
+    return {
+        s: s not in REQUIRED_COURSE_STAGES and state != DONE and s in aside
+        for s, state in stages.items()
+    }
 
 
 def course_ready(stages: dict[str, str], problems: list[dict]) -> bool:
@@ -833,22 +1138,27 @@ def render_course(
     course block inside a semester's file marks the same stages its problem list does.
 
     Stage predicates (lifecycle, course stages):
-    - C1 the org resolves (`app_installed` is a stub until decision 0002);
+    - C1 the org resolves;
     - C2 `.github` holds dsl-course.yml and its seeded workflows;
     - C3 dsl-course.yml names the course, its code and description, and one course admin;
-    - C4 at least one materials repo, every one of them `ready`;
-    - C5 at least one template, every one of them `ready`;
+    - C4 any materials repo `ready` (decision 0022: the others are to-dos);
+    - C5 any template `ready`;
     - C6 `opencourse.yml` turns the public website on and its repo exists.
     `ready` (decision 0019) is C1-C3 done and no course-scope problem standing: a new
-    semester can start. Materials, templates and the website are listed but optional."""
+    semester can start. Materials, templates and the website are listed but optional:
+    `dsl-course.yml`'s `set_aside:` may list them (decision 0032), and `stage_set_aside`
+    marks those still not done."""
     problems = [problem_from_fault(f, facts.org, now) for f in facts.faults]
     problems += [
         materials_problem(m, facts.org) for m in facts.materials if not m.topic
     ]
-    problems += [template_problem(t, facts.org) for t in facts.templates if not t.topic]
+    problems += [p for m in facts.materials for p in kindless_problems(m, facts.org)]
+    for t in facts.templates:
+        problems += template_problems(t, facts.org)
     for t in facts.templates:
         problems += [problem_from_fault(f, facts.org, now) for f in t.faults]
     meta = facts.meta
+    aside = set_aside_ids(meta)
     todo = course_checks(facts)
     done = {stage: todo[stage] is None for stage in COURSE_STAGES}
     standing = [*problems, *rolled_up]
@@ -857,39 +1167,90 @@ def render_course(
         "org": facts.org,
         "name": str(meta.get("course_name") or ""),
         "code": str(meta.get("course_code") or ""),
-        "app_installed": app_installed(),
         "stages": stages,
         "stage_why": stage_why(stages, todo, standing),
+        # Decision 0032: which stages may be set aside, and which are.
+        "stage_optional": {s: s not in REQUIRED_COURSE_STAGES for s in stages},
+        "stage_set_aside": stage_set_aside(stages, aside),
         "ready": course_ready(stages, standing),
         "materials": [
-            {"repo": m.repo, "state": materials_state(m)} for m in facts.materials
+            {
+                "repo": m.repo,
+                "state": materials_state(m),
+                "checks": materials_checks(m),
+            }
+            for m in facts.materials
         ],
         "templates": [
             {
                 "repo": t.repo,
                 "slug": t.repo,
                 "state": template_state(t),
+                "starter": t.starter,
             }
             for t in facts.templates
         ],
         "semesters": list(facts.registry),
+        "todo": course_todo(facts, aside),
     }
     return block, problems
 
 
-def _materials_why(m: MaterialsFacts) -> str:
-    if not m.topic:
-        return f"{m.repo} is not migrated yet (no {MATERIALS_TOPIC} topic)"
-    if m.syllabus is None:
-        return f"{m.repo} has no {m.syllabus_path} yet"
-    return f"{m.repo}'s {m.syllabus_path} is still the placeholder"
-
-
-def _first_of(what: str, reasons: list[str]) -> str:
-    """One sentence about the first of several things that are not ready."""
-    if len(reasons) == 1:
-        return f"{reasons[0]}."
-    return f"{len(reasons)} {what} are not ready yet; the first: {reasons[0]}."
+def course_todo(facts: CourseFacts, aside: frozenset[str] = frozenset()) -> list[dict]:
+    """Decision 0022 rule 3: work started and not finished, one entry per missing item -
+    every unmet check of a materials repo (the non-blocking ones of a ready repo too) and
+    every template whose brief is the placeholder or whose starter is not in place.
+    Materials first, then by repo, then check order. Never a problem: a repo without its
+    topic is the migration's problem, not a to-do.
+    Decision 0032: `optional` is a to-do that blocks nothing (a materials check that does
+    not block `ready`); `set_aside` is an optional one whose id is in `aside`. A required
+    to-do's id in `aside` is ignored."""
+    out = []
+    for m in facts.materials:
+        if not m.topic:
+            continue
+        out += [
+            {
+                "id": f"materials:{_slugify(m.repo)}:{c['id']}",
+                "kind": "materials",
+                "repo": m.repo,
+                "text": c["why"],
+                "screen": "materials",
+                "entry": m.repo,
+                "optional": not c["blocks"],
+            }
+            for c in materials_checks(m)
+            if not c["done"]
+        ]
+    out += [
+        {
+            "id": f"template:{_slugify(t.repo)}:brief",
+            "kind": "template",
+            "repo": t.repo,
+            "text": f"The brief ({README_FILE}) is not written yet.",
+            "screen": "template",
+            "entry": t.repo,
+            "optional": False,
+        }
+        for t in facts.templates
+        if t.topic and not _written(t.readme)
+    ]
+    out += [
+        {
+            "id": f"template:{_slugify(t.repo)}:starter",
+            "kind": "template",
+            "repo": t.repo,
+            "text": text,
+            "screen": "template",
+            "entry": t.repo,
+            "optional": False,
+        }
+        for t in facts.templates
+        if t.topic and (text := t.starter_todo)
+    ]
+    for e in out:
+        e["set_aside"] = e["optional"] and e["id"] in aside
+    return sorted(out, key=lambda e: (e["kind"] != "materials", e["repo"]))
 
 
 def course_checks(facts: CourseFacts) -> dict[str, str | None]:
@@ -910,26 +1271,15 @@ def course_checks(facts: CourseFacts) -> dict[str, str | None]:
         out["C3"] = "Course details have no description yet."
     elif course_admin_count(meta) == 0:
         out["C3"] = "No course admin is declared in course details yet."
+    # Decision 0022 rule 2: done once ANY repo is ready; the rest are to-dos.
     if not facts.materials:
         out["C4"] = "There is no materials repo yet."
-    else:
-        pending = [
-            _materials_why(m) for m in facts.materials if materials_state(m) != "ready"
-        ]
-        if pending:
-            out["C4"] = _first_of("materials repos", pending)
+    elif not any(materials_state(m) == "ready" for m in facts.materials):
+        out["C4"] = "No materials repo is ready yet."
     if not facts.templates:
         out["C5"] = "There is no assignment template yet."
-    else:
-        pending = [
-            f"{t.repo}'s README.md is still the placeholder"
-            for t in facts.templates
-            if template_state(t) == TODO
-        ]
-        if pending:
-            out["C5"] = _first_of("assignment templates", pending)
-        elif any(template_state(t) != "ready" for t in facts.templates):
-            out["C5"] = "An assignment template has settings that need fixing."
+    elif not any(template_state(t) == "ready" for t in facts.templates):
+        out["C5"] = "No assignment template is ready yet."
     if facts.website_unusable:
         out["C6"] = "The public website settings file does not parse."
     elif not facts.website_on:
@@ -1176,8 +1526,7 @@ def render_assignments(
 def render_releases(
     facts: SemesterFacts, faults: list[ConfigFault], now: datetime
 ) -> list[dict]:
-    """One row per `releases:` entry. Source and destination are the entry's FIRST copy;
-    `copies` says how many it has."""
+    """One row per `releases:` entry. Source and destination are the entry's FIRST copy."""
     rows = []
     aliases = lambda repo: facts.aliases.get(repo, {})
     # The number the site gives each row (`schedule_plan.site_rows`); None for a row it
@@ -1189,15 +1538,13 @@ def render_releases(
     for r in facts.sched.releases:
         own = [f for f in faults if f.is_source and f.where == f"releases.{r.label}"]
         first = r.deploy[0] if r.deploy else None
-        kind, inferred = entry_kind(r, aliases)
+        kind, _ = entry_kind(r, aliases)
         rows.append(
             {
                 "id": r.label,
                 "when": _iso(r.when),
-                # Inferred when the entry declares none, and said so: the console shows
-                # it for the instructor to confirm once.
+                # Inferred when the entry declares none (`schedule_plan.entry_kind`).
                 "kind": kind,
-                "kind_inferred": inferred,
                 "number": numbers.get(r.label),
                 "title": r.title,
                 "state": release_state(r, facts, own, now, r.label not in held),
@@ -1210,7 +1557,6 @@ def render_releases(
                 "dest": {"repo": first.semester_dest_repo, "path": deploy_dest(first)}
                 if first
                 else None,
-                "copies": len(r.deploy),
                 "show_on_site": r.show_on_site,
                 "tbc": r.tbc,
             }
@@ -1280,12 +1626,14 @@ def this_week(
 
 
 def render_operations(outcomes: list[dict]) -> list[dict]:
-    """The most recent operations first, off their private outcome files."""
+    """The most recent operations first, off their private outcome files. Each row
+    opens its run, so an outcome recorded outside a workflow run (no `run_id`) is left
+    out."""
     keep = ("run_id", "op", "conclusion", "summary", "finished")
     rows = [
         {k: o.get(k) for k in keep}
         for o in outcomes
-        if isinstance(o, dict) and o.get("op")
+        if isinstance(o, dict) and o.get("op") and isinstance(o.get("run_id"), int)
     ]
     rows.sort(key=lambda r: str(r.get("finished") or ""), reverse=True)
     return rows[:RECENT_OPERATIONS]
@@ -1328,6 +1676,20 @@ def _no_email_problem(
             },
         }
     ]
+
+
+def faculty_window_faults(
+    sched: schedule.Schedule, windows: list[team_formation.Window] | None
+) -> list[ConfigFault]:
+    """The team-formation faults that are the teaching team's (decision 0031 rule 3).
+
+    While a window is open, students still without a team are theirs to fix: joining a team
+    is a student's step, like joining the course, so it is not a Problem on the overview.
+    The mail `team_formation.notify_windows` sends is what reaches them, and the schedule
+    digest still lists the fault. Once the window has SHUT, nobody but an instructor can
+    place the students left over, so that fault stays."""
+    shut = [w for w in windows or [] if w.shut]
+    return team_formation.window_faults(sched, shut) or []
 
 
 def semester_checks(
@@ -1427,7 +1789,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     fault is shown on every semester it will affect, tagged `scope: course`.
 
     Stage predicates (lifecycle, semester stages):
-    - K1 the org resolves (`app_installed` is a stub until decision 0002);
+    - K1 the org resolves;
     - K2 semester-config, join and the site repo exist, and the course registry lists it;
     - K3 instructors.yml is read, grants at least one instructor, and every entry has an email;
     - K4 schedule.yml parses, the term's start and end are set, and it plans something;
@@ -1455,12 +1817,12 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     ]
     problems += _no_email_problem(facts.org, facts.people)
     problems += number_problems(facts, now)
+    problems += kindless_entry_problems(facts)
     problems += [
         materials_problem(m, course.org) for m in course.materials if not m.topic
     ]
-    problems += [
-        template_problem(t, course.org) for t in course.templates if not t.topic
-    ]
+    problems += [p for m in course.materials for p in kindless_problems(m, course.org)]
+    problems += [p for t in course.templates for p in template_problems(t, course.org)]
     problems = _unique_ids(problems)
     course_block, _ = render_course(
         course, now, [p for p in problems if p["scope"] == "course"]
@@ -1500,7 +1862,6 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "ended": not facts.archived
             and sched.semester_end is not None
             and sched.semester_end < today,
-            "app_installed": app_installed(),
             "stages": stages,
             "stage_why": stage_why(stages, todo, problems),
             "archive_date": _iso(sched.archive.when if sched.archive else None),
@@ -1527,19 +1888,6 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
 # ---------------------------------------------------------------------- gh/git wiring
 
 
-def _last_commit_at(org: str, repo: str, path: str = "") -> datetime | None:
-    """When `path` (or the repo, for "") last changed on the default branch. None when
-    there is no such commit or it could not be read - staleness is a hint, not a gate."""
-    query = f"repos/{org}/{repo}/commits?per_page=1" + (f"&path={path}" if path else "")
-    code, out = gh("api", query, "--jq", ".[0].commit.committer.date // empty")
-    if code != 0 or not out.strip():
-        return None
-    try:
-        return datetime.fromisoformat(out.strip().replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
 def _declaration(org: str, repo: str) -> Declared:
     """`repo`'s `materials.yml`, or the defaults when it does not parse: the status is no
     place to stop over it, and the site sync names the fault."""
@@ -1551,16 +1899,50 @@ def _declaration(org: str, repo: str) -> Declared:
 
 def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
     """A materials repo's C4 facts: its declared syllabus (markdown read, anything else
-    only looked for)."""
-    path = _declaration(course_org, repo).syllabus
+    only looked for), its top folders and declared kinds, its `.releaseignore`, and the
+    unkinded top folders holding numbered folders. The top is listed (and each unkinded
+    folder's own top), never the whole tree: a repo too large for one recursive listing
+    must not fail the course's status."""
+    declared = _declaration(course_org, repo)
+    path = declared.syllabus
+    top = top_level(course_org, repo)
     if path.lower().endswith((".md", ".markdown")):
         syllabus = get_file_content(course_org, repo, path)
+    elif "/" in path:
+        syllabus = "" if file_exists(course_org, repo, path) else None
     else:
-        tree = repo_path_shas(
-            course_org, repo, default_branch(course_org, repo, fallback="main")
+        syllabus = "" if path in top else None
+    folders = sorted(
+        name for name, kind in top.items() if kind == "dir" and not name.startswith(".")
+    )
+    releaseignore = (
+        get_file_content(course_org, repo, RELEASEIGNORE)
+        if RELEASEIGNORE in top
+        else None
+    )
+    withheld = listed((releaseignore or "").splitlines())
+    # Only a folder no kind names, and that a release copies, is listed (one read each,
+    # usually none): the rest cannot have lost their rows.
+    numbered = tuple(
+        f
+        for f in folders
+        if publishable(f)
+        and not withheld.excludes(f, lambda _rel: True)
+        and alias_kind(f, declared.kinds) is None
+        and any(
+            kind == "dir" and session_number(name) is not None
+            for name, kind in top_level(course_org, repo, f).items()
         )
-        syllabus = "" if path in (tree or {}) else None
-    return MaterialsFacts(repo, syllabus, path)
+    )
+    return MaterialsFacts(
+        repo,
+        syllabus,
+        path,
+        folders=tuple(folders),
+        kinds=declared.kinds,
+        releaseignore=releaseignore,
+        numbered=numbered,
+    )
 
 
 def gather_course(course_org: str) -> CourseFacts:
@@ -1604,6 +1986,8 @@ def gather_course(course_org: str) -> CourseFacts:
                 t.faults, _ = grades.grading_spec_faults(
                     name, name, course_org, text, None
                 )
+            if t.topic:
+                _starter_facts(course_org, t, text)
             facts.templates.append(t)
     facts.public_site = pages_repo(course_org) in listing
     try:
@@ -1613,6 +1997,25 @@ def gather_course(course_org: str) -> CourseFacts:
         facts.website_unusable = True
     facts.website_on = bool(oc and oc.enabled)
     return facts
+
+
+def _starter_facts(org: str, t: TemplateFacts, config: str | None) -> None:
+    """Decision 0028's facts for one template, from the solution and `main` trees and,
+    for a derived one, Derive's record: three reads, never a source file's content. With
+    no `starter:` key a template reads as derived when `solution/` holds a derivable
+    source (Derive itself reads the markers; the migration writes the key)."""
+    solution = repo_path_shas(org, t.repo, SOLUTION_BRANCH)
+    has_source = bool(derivable_sources(list(solution)))
+    t.starter = declared_starter(config) or (
+        STARTER_DERIVED if has_source else STARTER_HANDWRITTEN
+    )
+    main = repo_path_shas(org, t.repo, TEMPLATE_MAIN)
+    record = (
+        get_file_content(org, t.repo, STARTER_RECORD, ref=TEMPLATE_MAIN)
+        if t.starter == STARTER_DERIVED and has_source
+        else None
+    )
+    t.starter_todo, t.main_edited = starter_check(t.starter, solution, main, record)
 
 
 def _outcomes(semester_org: str, paths: dict[str, str]) -> list[dict]:
@@ -1650,7 +2053,8 @@ def _returned_at(semester_org: str) -> dict[str, datetime]:
 
 def gather_semester(course_org: str, semester_org: str, now: datetime) -> SemesterFacts:
     """Read one semester, through the same loaders its digest issues are built by, so a
-    problem here is the fault that issue lists. A read that fails raises."""
+    problem here is the fault that issue lists, except an open team-formation window's
+    (`faculty_window_faults`). A read that fails raises."""
     facts = SemesterFacts(org=semester_org)
     facts.listing = {r["name"]: r for r in list_org_repos(semester_org)}
     branch = default_branch(semester_org, schedule.CONFIG_REPO, fallback="main")
@@ -1664,12 +2068,13 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
     # The schedule.yml digest's own sources (`scheduler._preflight_sources`): the sources
     # the plan cites, the entries the parser dropped (assignments.yml's with them), the
     # team-formation windows somebody is still waiting on (None = the roster could not be
-    # read), and the marks due but not all written.
+    # read), and the marks due but not all written. Of the windows, only the shut ones
+    # (`faculty_window_faults`): an open one is the students' to act on.
     windows = team_formation.open_windows(course_org, semester_org, sched, now)
     facts.schedule_faults = [
         *schedule.source_faults(sched, course_org),
         *sched.faults,
-        *(team_formation.window_faults(sched, windows) or []),
+        *faculty_window_faults(sched, windows),
         *grades.marks_due(course_org, semester_org, sched, now)[0],
     ]
     facts.people = sync_faculty.read_semester_people(semester_org, facts.people_faults)
@@ -1710,7 +2115,7 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
                 facts.sheets[name] = grades.parse_sheet(text)
             except grades.SheetUnreadable:
                 pass  # its fault is in sheet_faults
-            facts.sheet_changed[name] = _last_commit_at(
+            facts.sheet_changed[name] = last_commit_at(
                 semester_org, schedule.CONFIG_REPO, grades.sheet_path(name)
             )
     facts.returned_at = _returned_at(semester_org)
@@ -1722,19 +2127,15 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
         {d.semester_dest_repo for r in sched.releases for d in r.deploy}
     ):
         if repo in facts.listing:
-            facts.dest_paths[repo] = set(
-                repo_tree(
-                    semester_org,
-                    repo,
-                    default_branch(semester_org, repo, fallback="main"),
-                )
-            )
+            branch = default_branch(semester_org, repo, fallback="main")
+            facts.dest_branches[repo] = branch
+            facts.dest_paths[repo] = set(repo_tree(semester_org, repo, branch))
     site = pages_repo(semester_org)
     if site in facts.listing:
         facts.site_home = get_file_content(semester_org, site, SITE_HOME)
-        facts.site_last_update = _last_commit_at(semester_org, site)
+        facts.site_last_update = last_commit_at(semester_org, site)
     moments = [
-        _last_commit_at(semester_org, schedule.CONFIG_REPO, p)
+        last_commit_at(semester_org, schedule.CONFIG_REPO, p)
         for p in (schedule.SCHEDULE_PATH, sync_faculty.SEMESTER_PEOPLE_PATH)
     ]
     facts.config_last_update = max((m for m in moments if m), default=None)

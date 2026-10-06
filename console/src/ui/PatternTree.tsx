@@ -1,13 +1,15 @@
 // A repo's files as a clickable tree over one withhold list (decision 0016). A click on a file
 // or folder adds or removes its exact line; a path a broader line withholds says which, and a
 // click re-includes it with `!path` only where git allows it. The badges follow the draft.
-// `exclude` mode (Materials, Public website) has a button per row; `select` mode (the import
-// picker) has a tick per row, everything ticked until a line leaves it out.
+// `exclude` mode (Handout materials, Public website) has a right-aligned button per row; `select` mode
+// (the import picker) has a tick per row, everything ticked until a line leaves it out. It reads as a
+// file tree (decision 0026 rule 5): indent guides, folder and file icons, withheld rows greyed with
+// the name struck through (`ft-out`), the kind chip on top folders.
 
 import { useState } from 'preact/hooks';
 import { buildTree, neverMaterial, standing, toggle, type Standing, type TreeNode } from '../edit/badges';
 import { compileAll, withheldBy, type Rule } from '../edit/glob';
-import { editUrl } from './bits';
+import { FileHead, FolderHead } from './FileTree';
 
 export interface PatternTreeProps {
   files: string[];
@@ -20,19 +22,12 @@ export interface PatternTreeProps {
   releasedWord?: string;
   /** A path no list can release, and the word for it (e.g. never-material names), or null. */
   fixed?: (path: string) => string | null;
-  /** For Edit links; left out while the default branch is unknown (null). */
-  org?: string;
-  repo?: string;
-  branch?: string | null;
   /** A top-level folder's kind label. */
   kinds?: Record<string, string>;
 }
 
 interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 'mode' | 'withheldWord' | 'releasedWord' | 'fixed' | 'kinds'>> {
   rules: Rule[];
-  org?: string;
-  repo?: string;
-  branch?: string | null;
   note: { path: string; text: string } | null;
   setNote: (n: { path: string; text: string } | null) => void;
 }
@@ -81,24 +76,23 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
   if (!dir) {
     const word = fixed ?? (out ? c.withheldWord : c.releasedWord);
     return (
-      <li class="ft-file">
+      <li class={`ft-file${fixed || out ? ' ft-out' : ''}`}>
         {c.mode === 'select' ? control : null}
-        <span class="ft-name">{n.name}</span>
+        <FileHead name={n.name} />
         <span class={`chip ${fixed || out ? 'amber' : ''}`}>{word}</span>
         <Why s={s} word={c.withheldWord} />
         {c.mode === 'exclude' ? control : null}
         {note}
-        {c.org && c.repo && c.branch ? <a class="textlink" href={editUrl(c.org, c.repo, n.path, c.branch)} target="_blank" rel="noopener" aria-label={`Edit ${n.path} on GitHub`}>Edit on GitHub</a> : null}
       </li>
     );
   }
   const count = withheldCount(n, c);
   return (
-    <li class="ft-dir">
+    <li class={`ft-dir${out ? ' ft-out' : ''}`}>
       <details open={depth === 0}>
         <summary>
           {c.mode === 'select' ? control : null}
-          <span class="ft-name">{n.name}/</span>
+          <FolderHead name={n.name} />
           {depth === 0 && c.kinds[n.name] ? <span class="chip">{c.kinds[n.name]}</span> : null}
           {out ? <span class="chip amber">{c.withheldWord}</span> : count ? <span class="chip amber">{count} {c.withheldWord}</span> : null}
           <Why s={s} word={c.withheldWord} />
@@ -118,7 +112,7 @@ export function PatternTree(p: PatternTreeProps) {
     patterns: p.patterns, onChange: p.onChange, mode: p.mode ?? 'exclude',
     withheldWord: p.withheldWord ?? 'withheld', releasedWord: p.releasedWord ?? 'released to students',
     fixed: p.fixed ?? defaultFixed, kinds: p.kinds ?? {}, rules: compileAll(p.patterns),
-    org: p.org, repo: p.repo, branch: p.branch, note, setNote,
+    note, setNote,
   };
   return <ul class={`file-tree${c.mode === 'select' ? ' select' : ''}`}>{buildTree(p.files).map((n) => <Node n={n} depth={0} c={c} />)}</ul>;
 }

@@ -5,7 +5,6 @@ import ops from '../../schemas/ops.json';
 
 export interface OpSpec {
   name: string;
-  runs_as: 'dispatch' | 'edit';
   scope: 'course' | 'semester';
   required_team: string;
   args_schema: Record<string, unknown> & { properties?: Record<string, Record<string, unknown>>; required?: string[] };
@@ -40,6 +39,24 @@ export const GATED = new Set([
 /** An op that is itself a look, never a change: it always runs as a preview. */
 export const PREVIEW_ONLY = new Set(['semester.preview_automation']);
 
+/**
+ * Ops the engine can preview whose preview the console does not offer (decision 0031 rule
+ * 6): it shows nothing anyone acts on. Derive and the releases report a count (a release's
+ * path checks refuse the real run just the same, before it copies anything); Keep for
+ * future semesters proposes changes you accept on GitHub anyway;
+ * the team-window email and instructor access report a count; Collect now's preview only
+ * starts another workflow the panel does not follow.
+ */
+export const PREVIEW_NOT_OFFERED = new Set([
+  'assignment.derive_starter',
+  'release.entry',
+  'release.adhoc',
+  'release.propagate_back',
+  'teams.open_window',
+  'access.check',
+  'assignment.collect_now',
+]);
+
 export type OpMode = 'gated' | 'preview' | 'direct' | 'previewOnly';
 
 /**
@@ -50,6 +67,6 @@ export type OpMode = 'gated' | 'preview' | 'direct' | 'previewOnly';
 export function modeOf(op: string): OpMode {
   const s = opSpec(op);
   if (PREVIEW_ONLY.has(op)) return 'previewOnly';
-  if (!s.preview) return 'direct';
+  if (!s.preview || PREVIEW_NOT_OFFERED.has(op)) return 'direct';
   return GATED.has(op) ? 'gated' : 'preview';
 }

@@ -39,10 +39,17 @@ def _seed_source(root: Path) -> None:
         "labs/01_first-lab/data/rows.csv": "a,b",  # nested - must still be published
         "labs/02_second-lab/lab.ipynb": "notebook",
         "faq/02_second-lab/faq.md": "Q: why? A: because.",
+        # faq/ is no kind's name: published as lecture-row files only because it is
+        # declared so (decision 0031 rule 10).
+        "materials.yml": "kinds:\n  faq: lecture\n",
+        # A numbered section no kind names: supporting files, never a row.
+        "code/02_second-lab/run.py": "print(1)",
         "readings/01_first-lab/READINGS.md": "- Smith 2020, ch.1",
         "readings/01_first-lab/paper.pdf": "%PDF-1.4 copyrighted",
         "readings/03_third-session/READINGS.md": "- Jones 2021, ch.3",
         "README.md": "# materials",  # not a section
+        # Supporting files (decision 0026): a section, but never a row.
+        "data/01_first-lab/rows.csv": "a,b",
         # What a faculty member keeps beside the lab, and the public must never see.
         "labs/01_first-lab/solution/answers.ipynb": "the answers",
         "labs/01_first-lab/grading_config.yml": "points: 10",
@@ -382,3 +389,22 @@ def test_a_symlink_cannot_smuggle_a_denied_file_onto_the_public_site(published):
     files = published(readings_mode="actual-readings")
     assert f"{SERVED}/session-1/labs/lab.ipynb" in files
     assert "the answers" not in files.get(f"{SERVED}/session-1/labs/handout.pdf", "")
+
+
+def test_supporting_files_sections_are_no_row(published):
+    files = published(readings_mode="none")
+    assert not [p for p in files if p.startswith(f"{SERVED}/session-1/data/")]
+    # An unkinded section is supporting files too (decision 0031 rule 10).
+    assert not [p for p in files if "/code/" in p]
+    assert ("code", "run.py") not in entry_links(files["_lectures/session-02.md"])
+    # Session 1 has labs and data only: still no lecture row.
+    assert "_lectures/session-01.md" not in files
+    assert public_site.shown_sections(
+        ["labs", "Data", "quiz", "code", "faq"], {"quiz": "assets", "faq": "lecture"}
+    ) == ["labs", "faq"]
+
+
+def test_a_lab_kind_section_makes_lab_rows():
+    assert public_site.row_kind("tutorials", {}) == "lab"
+    assert public_site.row_kind("seminars", {"seminars": "lab"}) == "lab"
+    assert public_site.row_kind("lectures", {}) == "lecture"

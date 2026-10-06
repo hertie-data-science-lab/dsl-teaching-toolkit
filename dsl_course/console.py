@@ -22,7 +22,6 @@ import importlib
 import json
 import os
 import sys
-from dataclasses import replace
 from datetime import datetime, timezone
 
 from . import schedule, status
@@ -40,9 +39,9 @@ from .ops.registry import (
 )
 from .ops.request import RequestError, check_access, parse_request
 
-# The ops that release a named schedule entry: the console may send just the entry, and the
+# The op that releases a named schedule entry: the console may send just the entry, and the
 # deploy fields are read off the semester's schedule.yml here.
-_ENTRY_OPS = ("release.now", "release.early", "release.rerun")
+_ENTRY_OP = "release.entry"
 
 _REFRESH_FAILED = {
     "code": "REFRESH_FAILED",
@@ -94,10 +93,11 @@ def run_cli(module: str, argv: list[str]) -> tuple[int, Summary | None, bool]:
 
 
 def entry_requests(request: Request) -> list[Request]:
-    """One request per source repo for a named schedule entry, the deploy fields filled in
-    from the semester's schedule.yml. A request that already carries them passes through.
-    Raises `RequestError` for an entry the schedule does not have."""
-    if request.op not in _ENTRY_OPS or request.args.get("course_source_repo"):
+    """The request for a named schedule entry, checked against the semester's
+    schedule.yml: `[]` for an entry with nothing to copy, and `RequestError` for one the
+    schedule does not have. `deploy --entry` reads the copies itself and releases them in
+    one batch, so a request that names only the entry stays one request."""
+    if request.op != _ENTRY_OP or request.args.get("course_source_repo"):
         return [request]
     entry = request.args["entry"]
     sched = schedule.load(request.semester_org)
@@ -107,31 +107,14 @@ def entry_requests(request: Request) -> list[Request]:
             "ENTRY_NOT_FOUND",
             f"{entry} is not an entry in this semester's schedule.yml.",
         )
-    groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
-    for d in found.deploy:
-        key = (d.course_source_repo, d.semester_dest_repo or schedule.DEFAULT_DEST_REPO)
-        dest = d.semester_dest_path or d.course_source_path
-        groups.setdefault(key, []).append((d.course_source_path, dest))
-    return [
-        replace(
-            request,
-            args={
-                "entry": entry,
-                "course_source_repo": repo,
-                "course_source_path": ",".join(src for src, _ in pairs),
-                "semester_dest_repo": dest_repo,
-                "semester_dest_path": ",".join(dst for _, dst in pairs),
-            },
-        )
-        for (repo, dest_repo), pairs in groups.items()
-    ]
+    return [request] if found.deploy else []
 
 
 def combine(
     summaries: list[Summary],
 ) -> tuple[str, dict, list[dict], list[str], str, str | None]:
     """`(text, counts, reasons, details, block, conclusion)` of the op, from the Summary of each CLI call
-    it made - one, except for a release entry drawn from several source repos. Counts
+    it made. Counts
     add up; different sentences are joined into one; the conclusion override stands
     only when every call agreed on it."""
     texts = list(dict.fromkeys(s.text for s in summaries if s.text))

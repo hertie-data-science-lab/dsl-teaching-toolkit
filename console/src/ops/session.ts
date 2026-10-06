@@ -1,12 +1,14 @@
 // The operation panel's state: the one operation open at a time, what this session has
-// previewed (the gate), and the runs this session finished (for the Operations list). A
-// run that cannot be read `maxMisses` times in a row is given up on; sign-out (`reset`) ends
-// every watch and forgets the runs and the gate, so the next person starts clean.
+// previewed (the gate), and the runs this session finished (for the Operations list). A run
+// is followed with `poll`: every 3 s, every 10 s once it has run for 30 s, nothing while the
+// tab is hidden, and given up on after `maxMisses` unreadable polls in a row; sign-out
+// (`reset`) ends every watch and forgets the runs and the gate, so the next person starts clean.
 
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
 import { effective } from '../forms/Form';
 import { wait } from '../github/client';
+import { poll } from '../github/poll';
 import type { Operation } from '../model/types';
 import type { Tiers } from '../tiers/types';
 import type { Adapter, Handle, Progress, Result } from './adapter';
@@ -36,10 +38,12 @@ export interface OpDef {
   needsCheck?: { label: string; sub: string; arg?: string };
   proposed?: boolean;
   previewProposed?: boolean;
+  /** The preview's button in the panel and on the screen, where it is not a preview to the user ("Copy"). */
+  previewLabel?: string;
   /** An information panel with no operation behind it (Export). */
   info?: ComponentChildren;
-  /** Links shown once the verb has run. */
-  after?: { label: string; href: string }[];
+  /** Where on GitHub the verb's change shows (a repo, branch or file): "See on GitHub" once it has run. A function reads the run's args. */
+  target?: string | ((args: Record<string, unknown>) => string);
 }
 
 export type Phase = 'ready' | 'running' | 'done';
@@ -57,10 +61,17 @@ export interface Current {
   result: Result | null; // the verb's result
   error: string | null;
   min: boolean;
+  /** Stop was pressed and GitHub has not ended the run yet. */
+  stopping: boolean;
+  /** Stop was pressed for this run and GitHub took the cancel (a 409 included: it had already ended). */
+  stopRequested: boolean;
+  /** The last run was stopped: GitHub says `cancelled`, or Stop was pressed and the run ended anyway. */
+  stopped: boolean;
 }
 
 export interface SessionOptions {
   pollMs?: number;
+  /** Tests: the pause between polls (default: poll's own, cut short when the tab comes back). */
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   /** Called after a run (not a preview) finishes, to refresh what the screens show. */
@@ -92,12 +103,14 @@ export class OpsSession {
   readonly runs = signal<(Operation & { cohort?: string; course: string })[]>([]);
   /** The gate: per op and scope, the args its last good preview in this session ran with. */
   readonly previewed = signal<Record<string, string>>({});
+  /** Per op and scope, the generated text its last good preview carried (`outcome.block`). */
+  readonly blocks = signal<Record<string, string>>({});
   readonly notice = signal<string | null>(null);
   private readonly pollMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
-  /** Bumped by `reset`: a watch started under an older one stops without recording anything. */
-  private generation = 0;
+  /** Aborted by `reset`: a watch started before it stops without recording anything. */
+  private watches = new AbortController();
 
   constructor(
     private readonly adapter: Adapter,
@@ -110,10 +123,12 @@ export class OpsSession {
 
   /** Sign-out: stop following every run and forget this session's runs, previews and panel. */
   reset(): void {
-    this.generation++;
+    this.watches.abort();
+    this.watches = new AbortController();
     this.current.value = null;
     this.runs.value = [];
     this.previewed.value = {};
+    this.blocks.value = {};
     this.notice.value = null;
   }
 
@@ -127,6 +142,11 @@ export class OpsSession {
    */
   isPreviewed(def: OpDef, values: Record<string, unknown> = def.args, checked = false): boolean {
     return this.previewed.value[this.gateKey(def)] === argsKey(requestArgs(def, values, checked));
+  }
+
+  /** The text the last good preview of `def` in this session generated, or null. */
+  lastBlock(def: OpDef): string | null {
+    return this.blocks.value[this.gateKey(def)] ?? null;
   }
 
   /** Whether the verb may run now: gated ops need this session's preview, a check box its tick. */
@@ -161,7 +181,7 @@ export class OpsSession {
     }
     this.current.value = {
       def, mode: modeOf(def.op), values: { ...def.args }, checked: false, phase: 'ready', running: null,
-      handle: null, progress: null, dry: null, result: null, error: null, min: false,
+      handle: null, progress: null, dry: null, result: null, error: null, min: false, stopping: false, stopRequested: false, stopped: false,
     };
     if (def.info) return;
     const cur = this.current.value;
@@ -192,13 +212,22 @@ export class OpsSession {
     else this.current.value = null;
   }
 
+  /**
+   * Press Stop: cancel the workflow run. Pressed before GitHub has named the run, the cancel
+   * goes as soon as it does. The panel says "Stopping" until the run ends, then "Stopped".
+   */
   async cancel(): Promise<void> {
     const c = this.current.value;
-    if (!c?.handle || c.phase !== 'running') return;
+    if (!c || c.phase !== 'running' || c.stopping) return;
+    this.patch({ stopping: true, stopRequested: true, error: null });
+    if (c.handle) await this.sendCancel(c.handle);
+  }
+
+  private async sendCancel(handle: Handle): Promise<void> {
     try {
-      await this.adapter.cancel(c.handle);
+      await this.adapter.cancel(handle);
     } catch (e) {
-      this.patch({ error: `Could not stop it: ${e instanceof Error ? e.message : String(e)}` });
+      if (this.current.value?.handle === handle) this.patch({ stopping: false, stopRequested: false, error: `Could not stop it: ${e instanceof Error ? e.message : String(e)}` });
     }
   }
 
@@ -209,42 +238,45 @@ export class OpsSession {
     if (kind === 'run' && !this.canRun(c)) return;
     const def = c.def;
     const preview = kind === 'preview';
-    const generation = this.generation;
-    const gone = () => this.generation !== generation;
+    const signal = this.watches.signal;
+    const gone = () => signal.aborted;
     const args = requestArgs(def, c.values, c.checked);
-    this.patch({ phase: 'running', running: kind, error: null, progress: null, handle: null, ...(preview ? { dry: null } : { result: null }) });
+    this.patch({ phase: 'running', running: kind, error: null, progress: null, handle: null, stopping: false, stopRequested: false, stopped: false, ...(preview ? { dry: null } : { result: null }) });
     let handle: Handle;
     try {
       handle = await this.adapter.submit({ op: def.op, courseOrg: def.courseOrg, cohortOrg: def.cohortOrg, args, preview });
     } catch (e) {
       if (gone()) return;
-      this.patch({ phase: 'ready', running: null, error: e instanceof Error ? e.message : String(e) });
+      this.patch({ phase: 'ready', running: null, stopping: false, error: e instanceof Error ? e.message : String(e) });
       return;
     }
     if (gone()) return;
     this.patch({ handle });
+    if (this.current.value?.stopping) void this.sendCancel(handle);
     const mine = () => this.current.value?.handle === handle;
-    const maxMisses = this.opts.maxMisses ?? 20;
-    let progress: Progress | null = null;
-    for (let misses = 0; ; ) {
-      try {
-        progress = await this.adapter.watch(handle);
-        misses = 0;
-        if (gone()) return;
-        if (mine()) this.patch({ progress, ...(this.current.value!.error === MISSED_POLL ? { error: null } : {}) });
-      } catch {
-        if (gone()) return;
-        if (++misses >= maxMisses) {
-          if (mine()) this.patch({ phase: 'ready', running: null, error: LOST_RUN });
-          return;
-        }
-        if (mine()) this.patch({ error: MISSED_POLL });
-      }
-      if (progress?.state === 'completed') break;
-      await this.sleep(this.pollMs);
-      if (gone()) return;
+    let progress = null as Progress | null;
+    const end = await poll(
+      async () => {
+        const p = await this.adapter.watch(handle);
+        progress = p;
+        if (!gone() && mine()) this.patch({ progress: p, ...(this.current.value!.error === MISSED_POLL ? { error: null } : {}) });
+        return p.state === 'completed';
+      },
+      {
+        every: this.pollMs,
+        backoff: { after: 30_000, every: Math.max(this.pollMs, 10_000) },
+        maxMisses: this.opts.maxMisses ?? 20,
+        signal,
+        sleep: this.opts.sleep,
+        onMiss: () => mine() && this.patch({ error: MISSED_POLL }),
+      },
+    );
+    if (end === 'stopped') return;
+    if (end === 'lost') {
+      if (mine()) this.patch({ phase: 'ready', running: null, stopping: false, error: LOST_RUN });
+      return;
     }
-    let result: Result = { outcome: null, people: [], leaked: [] };
+    let result: Result = { outcome: null };
     const tries = this.opts.outcomeTries ?? 3;
     for (let i = 0; i < tries; i++) {
       try {
@@ -257,18 +289,22 @@ export class OpsSession {
     }
     if (gone()) return;
     const o = result.outcome;
+    const stopped = progress?.conclusion === 'cancelled' || !!this.current.value?.stopRequested;
     const finished = o?.finished || new Date(this.now()).toISOString();
     this.runs.value = [
       {
-        run_id: handle.runId, op: def.op, conclusion: o?.conclusion ?? 'failed', finished, course: def.courseOrg, cohort: def.cohortOrg,
-        summary: o?.summary ?? (progress?.conclusion === 'cancelled' ? 'Stopped before it finished.' : 'The run ended without reporting what it did. Open the run on GitHub.'),
+        run_id: handle.runId, op: def.op, conclusion: o?.conclusion ?? (stopped ? 'skipped' : 'failed'), finished, course: def.courseOrg, cohort: def.cohortOrg,
+        summary: o?.summary ?? (stopped ? 'Stopped before it finished.' : 'The run ended without reporting what it did. Open the run on GitHub.'),
       },
       ...this.runs.value,
     ];
     const ok = !!o && o.conclusion !== 'failed';
     if (preview && ok) this.previewed.value = { ...this.previewed.value, [this.gateKey(def)]: argsKey(args) };
+    if (preview && ok && o.block) this.blocks.value = { ...this.blocks.value, [this.gateKey(def)]: o.block };
     if (this.current.value?.handle === handle) {
-      this.patch(preview ? { phase: 'ready', running: null, dry: result } : { phase: 'done', running: null, result });
+      // A refused cancel's error is about a run that has now ended either way.
+      const ended = { running: null, stopping: false, stopped, error: null };
+      this.patch(preview ? { ...ended, phase: 'ready', dry: result } : { ...ended, phase: 'done', result });
     }
     if (!preview) this.opts.onFinished?.(def);
   }

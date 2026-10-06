@@ -175,3 +175,40 @@ export function inWeeks<T>(items: T[], when: (t: T) => string | null | undefined
   }
   return { dated, undated };
 }
+
+/** A semester week's first day (yyyy-mm-dd): week 1 starts on the semester's start. */
+export const weekStart = (term: Term, w: number): string => addDays(term.start, (w - 1) * 7);
+
+/** A week key's place in time: before the semester, its weeks, after it, then no date yet. */
+export const weekRank = (k: WeekKey | 'none', term: Term): number => (k === 'before' ? 0 : k === 'after' ? term.weeks + 1 : k === 'none' ? term.weeks + 2 : k);
+
+/** A group of items under one heading: a semester week, the before or after bucket, or no date yet. */
+export interface WeekGroup<T> {
+  key: WeekKey | 'none';
+  label: string;
+  /** A semester week's first day, for its heading; none for the buckets. */
+  from?: string;
+  rows: T[];
+}
+
+/**
+ * Items grouped by semester week, in order, for the instructor's and the student's schedules
+ * alike (`when` gives an item's time; one with none is No date yet). `all` gives every week of
+ * the semester, empty ones too, and each bucket that has items; otherwise only the weeks in
+ * `keys` that have items.
+ */
+export function weekGroups<T>(items: T[], when: (t: T) => string | null | undefined, term: Term, tz: string, keys: WeekKey[] | 'all'): WeekGroup<T>[] {
+  const by = new Map<WeekKey | 'none', T[]>();
+  for (const it of items) {
+    const w = when(it);
+    const k = w ? weekOf(w, term, tz) : 'none';
+    by.set(k, [...(by.get(k) ?? []), it]);
+  }
+  const label = (k: WeekKey | 'none') => (k === 'before' ? 'Before the semester' : k === 'after' ? 'After the semester' : k === 'none' ? 'No date yet' : `Week ${k}`);
+  const order: (WeekKey | 'none')[] = keys === 'all'
+    ? ['before', ...Array.from({ length: term.weeks }, (_, i) => i + 1), 'after', 'none']
+    : [...keys].sort((a, b) => weekRank(a, term) - weekRank(b, term));
+  return order
+    .filter((k) => (keys === 'all' && typeof k === 'number') || by.has(k))
+    .map((k) => ({ key: k, label: label(k), ...(typeof k === 'number' ? { from: weekStart(term, k) } : {}), rows: by.get(k) ?? [] }));
+}

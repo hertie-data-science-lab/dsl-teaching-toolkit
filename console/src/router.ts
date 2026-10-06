@@ -2,13 +2,15 @@
 // a problem's fix `{screen, entry}` is the route `#<screen>-<entry>`. An assignment's tabs
 // ride after a slash (`#assignment-assignment-2/marks`); the retired `#teams-<slug>` and
 // `#marks-<slug>` screens parse to those tabs, and the hashes decisions 0012 and 0015 renamed
-// (`#cohort`, `#staff`, `#new-cohort-<n>`, `#schedule-term`; `#semester` to `#dashboard`) to
+// (`#cohort`, `#staff`, `#new-cohort-<n>`, `#schedule-term`; `#semester` to `#dashboard`) and
+// 0021 (`#setup` to `#profile`, instructor screens only: a student's Set up is still `#setup`) to
 // their new names, so old links still land. Which course or semester the page is about rides in the query string
 // (`?cohort=<org>` or `?course=<org>`: `?semester=` is taken by the student screens), so a
 // link from a fault mail can name both. `?semester=<org>` opens that semester's student screens:
 // a student's own, or an instructor's Student view. `?join=<org>` opens the Join course form
 // of a semester the person is not a member of yet.
 
+import { semesterOver } from './model/catalogue';
 import { ORG_NAME_RE } from './model/policy';
 import { isInstructor, roleOf, type Course, type CohortRef, type Estate, type Mode, type Semester } from './model/discovery';
 
@@ -24,18 +26,20 @@ const TABS: AssignmentTab[] = ['overview', 'teams', 'marks'];
 
 const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'marks', 'teams', 'materials'];
 
-/** Hashes decisions 0012 and 0015 renamed, old -> new. */
-const RENAMED: [RegExp, string][] = [
+/** Hashes decisions 0012, 0015 and 0021 renamed, old -> new; the last flag marks an instructor-only rename. */
+const RENAMED: [RegExp, string, boolean?][] = [
   [/^(cohort|semester)$/, 'dashboard'],
   [/^staff$/, 'instructors'],
   [/^new-cohort(-\d)?$/, 'new-semester$1'],
   [/^schedule-term$/, 'schedule-semester'],
+  [/^setup$/, 'profile', true],
 ];
 
-export function parseHash(hash: string): Route {
+/** The route a hash names; `student` when it is read by a semester's student screens. */
+export function parseHash(hash: string, student = false): Route {
   let r = decodeURIComponent(hash.replace(/^#/, ''));
   if (!r) return { screen: '' };
-  for (const [re, to] of RENAMED) if (re.test(r)) r = r.replace(re, to);
+  for (const [re, to, instructorOnly] of RENAMED) if (!(student && instructorOnly) && re.test(r)) r = r.replace(re, to);
   if (r === 'teams') return { screen: 'assignments' };
   for (const s of ENTRY_SCREENS) {
     if (!r.startsWith(`${s}-`)) continue;
@@ -56,9 +60,9 @@ export function hashOf(r: Route): string {
 }
 
 /** The hash to write instead of `hash` (an old Teams, Marks or renamed link), or null when it is already canonical. */
-export function movedHash(hash: string): string | null {
+export function movedHash(hash: string, student = false): string | null {
   if (!hash || hash === '#') return null;
-  const canonical = hashOf(parseHash(hash));
+  const canonical = hashOf(parseHash(hash, student));
   return decodeURIComponent(hash) === canonical ? null : canonical;
 }
 
@@ -139,15 +143,19 @@ export function wizardOf(screen: string): { name: string; step?: number } | null
 }
 
 /** The nav key each wizard lights up. */
-export const WIZARD_NAV: Record<string, string> = { 'new-course': 'home', 'new-semester': 'details', 'new-assignment': 'templates', 'new-materials': 'materials' };
+export const WIZARD_NAV: Record<string, string> = { 'new-course': 'home', 'new-semester': 'course', 'new-assignment': 'templates', 'new-materials': 'materials' };
 
 export interface Context {
   course?: Course;
   cohort?: CohortRef;
 }
 
-/** The course and cohort a URL is about, falling back to the newest semester of the first writable course. */
+/**
+ * The course and cohort a URL is about, falling back to the newest semester of the first
+ * writable course. Home (All courses) is about none, whatever the query names.
+ */
 export function resolveContext(courses: Course[], sel: Selection, route: Route): Context {
+  if (route.screen === 'home') return {};
   if (sel.cohort) {
     for (const c of courses) {
       const k = c.cohorts.find((x) => x.org === sel.cohort);
@@ -156,15 +164,22 @@ export function resolveContext(courses: Course[], sel: Selection, route: Route):
   }
   const byCourse = sel.course ? courses.find((c) => c.org === sel.course) : undefined;
   if (byCourse) return { course: byCourse, cohort: route.screen in COHORT_SCREENS ? byCourse.cohorts[0] : undefined };
-  if (route.screen === 'home' || wizardOf(route.screen)?.name === 'new-course') return {};
+  if (wizardOf(route.screen)?.name === 'new-course') return {};
   const first = courses.find((c) => c.write && c.cohorts.length) ?? courses.find((c) => c.cohorts.length) ?? courses[0];
   return first ? { course: first, cohort: first.cohorts[0] } : {};
 }
 
-/** Where sign-in lands: Dashboard when there is exactly one writable course with a semester, else Home. */
-export function landing(courses: Course[]): string {
-  const writable = courses.filter((c) => c.write && c.cohorts.length);
-  return writable.length === 1 ? 'dashboard' : 'home';
+/**
+ * Where a URL that names no page lands (decision 0030 rule 1): an instructor always on All
+ * courses (Home); a person who teaches nothing (decision 0029 rule 3):
+ * the org of their one live semester, whose This week opens; null (Your semesters) otherwise.
+ * Live is neither archived nor ended, the end judged by the semester key: facts are not read
+ * yet when the page is routed (decision 0031).
+ */
+export function studentLanding(estate: Estate, now: number = Date.now()): string | null {
+  if (estate.courses.length || isInstructor(estate)) return null;
+  const live = estate.semesters.filter((s) => s.role === 'student' && !semesterOver(s, now));
+  return live.length === 1 ? live[0].org : null;
 }
 
 /** The student screens, in nav order, with their labels; `week` is where a semester opens. */

@@ -15,6 +15,8 @@ import type { DirEntry, GitHubClient } from '../github/client';
 import { addDays, str } from './format';
 import { DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from './policy';
 import { COURSE_REPO, STUDENT_STATUS_PATH } from './names';
+import { dataUrl, extOf, viewKind } from './viewer';
+import { ghUrl } from '../ui/bits';
 
 /** One row of the semester calendar. `when` is wall-clock time in the semester's timezone ("2026-09-22T10:00:00") or a full ISO instant. */
 export interface ScheduleRow {
@@ -139,6 +141,11 @@ export interface SemesterFacts {
   syllabus: FileLink | null;
   /** The institution's row kinds (label and colours), when the source carries them. */
   kinds?: Record<string, RowKind>;
+  /** `semester_start` / `semester_end` (yyyy-mm-dd), when the source carries them: week 1 starts on `start`. */
+  start?: string;
+  end?: string;
+  /** When the engine last found the facts changed (an ISO instant); absent when the source does not say. */
+  generatedAt?: string;
 }
 
 export interface RowKind {
@@ -168,14 +175,6 @@ export function sitePicture(url: string, org: string): [string, string] | null {
   } catch {
     return null;
   }
-}
-
-const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
-
-function bytesToBase64(b: Uint8Array): string {
-  let bin = '';
-  for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode(...b.subarray(i, i + 0x8000));
-  return btoa(bin);
 }
 
 /** How long a semester's facts are reused before they are read again (ETag'd: an unchanged file costs no rate limit). */
@@ -388,10 +387,10 @@ export class SiteSource implements StudentData {
   async picture(org: string, url: string): Promise<string> {
     if (IMG_HOSTS.test(url)) return url;
     const at = sitePicture(url, org);
-    const mime = MIME[at?.[1].split('.').pop()?.toLowerCase() ?? ''];
-    if (!at || !mime) return '';
+    // A raster picture only, as before: an SVG is not read.
+    if (!at || viewKind(at[1]) !== 'image' || extOf(at[1]) === 'svg') return '';
     const b = await this.client.getSmallBytes(org, at[0], at[1]);
-    return b ? `data:${mime};base64,${bytesToBase64(b)}` : '';
+    return b ? dataUrl(at[1], b) : '';
   }
 
   /** Read once per semester and kept for FRESH_MS, so moving between screens costs nothing. */
@@ -464,8 +463,10 @@ export class SiteSource implements StudentData {
 
 // --------------------------------------------------------------------------- the status file
 
-/** `student-status.json` (`dsl.student-status/1`), as the engine writes it (`dsl_course/student_status.py`). */
-export const STUDENT_STATUS_SCHEMA = 'dsl.student-status/1';
+/** `student-status.json` (`dsl.student-status/2`), as the engine writes it (`dsl_course/student_status.py`). */
+export const STUDENT_STATUS_SCHEMA = 'dsl.student-status/2';
+/** The schemas read: /1 lacks the semester dates and `generated_at`, which are then unknown. */
+const READ_SCHEMAS = ['dsl.student-status/1', STUDENT_STATUS_SCHEMA];
 
 type Obj = Record<string, unknown>;
 const arr = (v: unknown): Obj[] => (Array.isArray(v) ? (v as Obj[]) : []);
@@ -544,8 +545,11 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
     materialsRepos: (Array.isArray(doc.materials_repos) ? doc.materials_repos : []).map(str).filter(Boolean),
     homeMarkdown: str(doc.home_markdown),
     announcements: arr(doc.announcements).map((a) => ({ when: str(a.when), title: str(a.title), details: str(a.details) })).sort((a, b) => instant(b.when) - instant(a.when)),
-    syllabus: syl && syllabusPath ? { name: syllabusPath.split('/').pop() ?? syllabusPath, repo: str(syl.repo), path: syllabusPath, url: `https://github.com/${org}/${str(syl.repo)}/blob/HEAD/${syllabusPath}` } : null,
+    syllabus: syl && syllabusPath ? { name: syllabusPath.split('/').pop() ?? syllabusPath, repo: str(syl.repo), path: syllabusPath, url: ghUrl(org, str(syl.repo), syllabusPath, 'HEAD') } : null,
     kinds,
+    ...(doc.semester_start ? { start: str(doc.semester_start) } : {}),
+    ...(doc.semester_end ? { end: str(doc.semester_end) } : {}),
+    ...(doc.generated_at ? { generatedAt: str(doc.generated_at) } : {}),
   };
 }
 
@@ -587,7 +591,7 @@ export class StatusFileSource implements StudentData {
     } catch {
       doc = null;
     }
-    if (!doc || doc.schema !== STUDENT_STATUS_SCHEMA) return this.site.facts(org);
+    if (!doc || !READ_SCHEMAS.includes(str(doc.schema))) return this.site.facts(org);
     return factsFromStatus(doc);
   }
 }

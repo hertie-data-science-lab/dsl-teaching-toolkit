@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { GhComment, GhIssue } from '../github/client';
+import { poll } from '../github/poll';
 import { invitationUrl } from '../model/discovery';
 import { fmtWhen } from '../model/format';
 import { readable, type Mine } from '../model/mine';
@@ -17,7 +18,8 @@ import { JOIN_MARKERS, JOIN_REPO } from '../model/names';
 import type { SemesterFacts } from '../model/student';
 import { DEFAULT_TIMEZONE, ORG_NAME_RE } from '../model/policy';
 import { closesWords, formingAt } from '../model/week';
-import { Crumbs, Md } from '../ui/bits';
+import { CheckLine, Crumbs, Md } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 
 export const WELCOME = JOIN_REPO;
@@ -65,21 +67,27 @@ interface Asked {
   reply: GhComment | null;
 }
 
-/** The person's Join course and Join team issues in the join repo, newest first, each with the automation's last reply. */
-async function readAsked(env: NonNullable<ReturnType<typeof useEnv>>, org: string): Promise<Asked[]> {
+/**
+ * The person's Join course and Join team issues in the join repo, newest first, each with the
+ * automation's last reply. An issue whose comment count has not moved since `before` keeps
+ * the reply read then, so a re-check lists the issues and reads comments only where new.
+ */
+async function readAsked(env: NonNullable<ReturnType<typeof useEnv>>, org: string, before: Asked[] = []): Promise<Asked[]> {
   const mine = (await env.client.listIssues(org, WELCOME, `creator=${encodeURIComponent(env.user.login)}&state=all`))
     .filter((i) => !i.pull_request && isJoinRequest(i))
     .slice(0, 5);
   return Promise.all(mine.map(async (issue) => {
+    const was = before.find((a) => a.issue.number === issue.number && a.issue.comments === issue.comments);
+    if (was) return { issue, reply: was.reply };
     const cs = issue.comments ? await env.client.listIssueComments(org, WELCOME, issue.number).catch(() => []) : [];
     return { issue, reply: cs[cs.length - 1] ?? null };
   }));
 }
 
 const POLL_MS = 15000;
-const POLLS = 20;
+const POLL_FOR_MS = 5 * 60 * 1000;
 
-/** Your requests, read now and every 15 s (up to 5 min) while one still waits for the automation. `sent` changes when the console has just opened one. */
+/** Your requests, read now and every 15 s (up to 5 min, not while the tab is hidden) while one still waits for the automation. `sent` changes when the console has just opened one. */
 export function JoinRequests({ org, sent = 0 }: { org: string; sent?: number }) {
   const env = useEnv();
   const [asked, setAsked] = useState<Asked[] | null>(null);
@@ -87,21 +95,17 @@ export function JoinRequests({ org, sent = 0 }: { org: string; sent?: number }) 
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!env) return;
-    let live = true;
-    let polls = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const read = () =>
-      Promise.all([readAsked(env, org), env.client.getMyMembership(org).catch(() => null)]).then(([a, ms]) => {
-        if (!live) return;
-        setAsked(a);
-        setPending(ms?.state === 'pending');
-        if (a.some((x) => !issueState(x.issue).settled) && ++polls < POLLS) timer = setTimeout(read, POLL_MS);
-      }, () => live && setAsked((x) => x ?? []));
-    void read();
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
+    const stop = new AbortController();
+    let last: Asked[] = [];
+    void poll(async () => {
+      const [a, ms] = await Promise.all([readAsked(env, org, last), env.client.getMyMembership(org).catch(() => null)]);
+      if (stop.signal.aborted) return true;
+      last = a;
+      setAsked(a);
+      setPending(ms?.state === 'pending');
+      return !a.some((x) => !issueState(x.issue).settled);
+    }, { every: POLL_MS, maxMs: POLL_FOR_MS, maxMisses: 1, signal: stop.signal, onMiss: () => setAsked((x) => x ?? []) });
+    return () => stop.abort();
   }, [org, tick, sent, !!env]);
   return (
     <section class="panel section" aria-labelledby="h-asked">
@@ -121,7 +125,7 @@ export function AskedList({ asked, org, invitePending = false }: { asked: Asked[
         const s = issueState(issue);
         return (
           <li>
-            <div class={`check-line ${s.tone}`}><span><b>{issue.title}</b>, {fmtWhen(issue.created_at)}: {s.word}. <a href={issue.html_url} target="_blank" rel="noopener">Open <Ext /></a>{org && invitePending && issue.labels.some((l) => l.name === 'onboarded') ? <> <a href={invitationUrl(org)} target="_blank" rel="noopener">Accept the invitation <Ext /></a></> : null}</span></div>
+            <CheckLine cls={s.tone}><b>{issue.title}</b>, {fmtWhen(issue.created_at)}: {s.word}. <a href={issue.html_url} target="_blank" rel="noopener">Open <Ext /></a>{org && invitePending && issue.labels.some((l) => l.name === 'onboarded') ? <> <a href={invitationUrl(org)} target="_blank" rel="noopener">Accept the invitation <Ext /></a></> : null}</CheckLine>
             {reply ? <Md class="reply" src={readable(reply.body)} /> : null}
           </li>
         );
@@ -257,13 +261,13 @@ export function JoinCourseForm({ org, onSent }: { org: string; onSent?: () => vo
   );
 }
 
-/** `?join=<org>`: joining a semester you are not a member of yet (its join repo is public). */
-export function JoinCourseScreen({ org }: { org: string }) {
+/** `?join=<org>`: joining a semester you are not a member of yet (its join repo is public). `root` names the landing page the crumb goes back to. */
+export function JoinCourseScreen({ org, root = 'Your semesters' }: { org: string; root?: string }) {
   const [sent, setSent] = useState(0);
   return (
     <>
-      <Crumbs items={[{ t: 'Your semesters', href: '#home' }, { t: `Join ${org}` }]} />
-      <div class="page-head"><div><h1>Join a semester</h1><p class="lede">{org}</p></div></div>
+      <Crumbs items={[{ t: root, href: '?#home' }, { t: `Join ${org}` }]} />
+      <div class="page-head"><div><h1>Join a semester <Hint>Send the enrolment code from your email. The automation then invites you to the semester on GitHub.</Hint></h1><p class="lede">{org}</p></div></div>
       <div class="stack">
         <section class="panel section"><JoinCourseForm org={org} onSent={() => setSent(sent + 1)} /></section>
         <JoinRequests org={org} sent={sent} />

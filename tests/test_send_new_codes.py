@@ -9,7 +9,7 @@ import re
 
 import pytest
 
-from dsl_course import enrol_codes, mailer, roster
+from dsl_course import discovery, enrol_codes, gh_contents, mailer, roster
 
 HEADER = "hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\n"
 ROSTER = (
@@ -35,13 +35,18 @@ def _drive(monkeypatch, *, dry_run: bool, transport: bool = True, sends=None):
         "get_file_with_sha",
         lambda org, repo, path: (written[-1] if written else ROSTER, "sha"),
     )
+    monkeypatch.setattr(
+        gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path: (written[-1] if written else ROSTER, "sha"),
+    )
 
     def put_file(org, repo, path, content, message, expected_sha=None):
         written.append(content.decode())
         return True
 
-    monkeypatch.setattr(enrol_codes, "put_file", put_file)
-    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "ML")
+    monkeypatch.setattr(gh_contents, "put_file", put_file)
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "ML")
     monkeypatch.setattr(enrol_codes, "join_issue_url", lambda org: "https://w")
 
     def send_bulk(messages, dry_run=False, sample=None):
@@ -135,14 +140,15 @@ def test_everyone_joining_mid_run_is_nothing_to_send(monkeypatch, capsys):
     ).replace("dee@uni.edu,Dee,auditor,,", "dee@uni.edu,Dee,auditor,deegh,")
     reads = iter([(ROSTER, "sha1"), (joined, "sha2"), (joined, "sha2")])
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", lambda *a: next(reads))
+    monkeypatch.setattr(gh_contents, "get_file_with_sha", lambda *a: next(reads))
     puts: list[str | None] = []
 
     def put_file(org, repo, path, content, message, expected_sha=None):
         puts.append(expected_sha)
         return expected_sha == "sha2"
 
-    monkeypatch.setattr(enrol_codes, "put_file", put_file)
-    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "ML")
+    monkeypatch.setattr(gh_contents, "put_file", put_file)
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "ML")
     monkeypatch.setattr(enrol_codes, "join_issue_url", lambda org: "https://w")
     monkeypatch.setattr(
         enrol_codes.mailer, "send_bulk", lambda *a, **k: pytest.fail("mailed")

@@ -1,10 +1,9 @@
 // Instructors (`instructors.yml` in the semester's config repo): design/inputs.md "Teaching team".
 
 import { EMAIL_RE } from '../edit/csv';
+import { blank } from '../edit/yamlText';
 import { HANDLE_RE } from '../model/policy';
 import type { Tiers } from './types';
-
-const blank = (x: unknown) => !String(x ?? '').trim();
 
 /**
  * A person with a name and no handle is display only: the engine gives them a card on the

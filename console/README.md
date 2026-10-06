@@ -5,7 +5,8 @@ semesters as the lifecycle model describes them, and a student their semesters, 
 with the person's own token.
 Deployed by `.github/workflows/console-pages.yml` to
 https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/ on every push to `main` that
-touches `console/` (and, until it merges, to `feature/instructor-console`).
+touches `console/` (and, until it merges, to `feature/instructor-console`); the build reads
+`orgs.yml` from the branch it was built from.
 
 ## Run it locally
 
@@ -23,9 +24,9 @@ Node 22 or newer (`.nvmrc` pins 26).
 Three paths, all behind the `Auth` interface in `src/auth/` (`ConsoleAuth` holds them).
 Whichever is used, the console can read or change exactly what that account can on GitHub,
 and the token stays in `sessionStorage`: it is gone when the tab closes. At reload a saved
-token or App session is dropped only when GitHub (or the relay) refuses it. With no answer
-an App session is kept for the next reload; a pasted token is kept and checked again, the
-screen saying it is retrying. Sign-out also
+token or App session is dropped only when GitHub (or the relay) refuses it (401 or 403). With
+no answer either is kept and checked again (`untilAnswered`, one policy for both), the screen
+saying it is retrying. Sign-out also
 ends any run the console is following and forgets this session's runs and previews.
 
 - **Sign in with GitHub** (`AppAuth`, decisions 0002 and 0011): the default where an
@@ -60,7 +61,7 @@ The deployed console gets them in `.github/workflows/console-pages.yml`, as an `
 
 The first step of New course and New semester lists the three things only a person can do on
 GitHub, each with a tick that appears by itself (the step re-checks every 10 seconds and when
-the window regains focus, until all pass): create the org, install the console app on it,
+the window regains focus, never while the tab is hidden, until all pass): create the org, install the console app on it,
 and invite `hertie-dsl-bot` as an Owner. The bot accepts the invitation itself, on the
 scheduler's next quarter-hourly run in any course org, once the maintainers have added the org
 to `orgs.yml` (`dsl_course/invitations.py`; maintainers.md, "The course org registry"). New
@@ -95,19 +96,85 @@ may hold both across organisations:
 - **instructor** of an org: push on its `.github` repo, or the org is a semester registered by a
   course the person can write to;
 - **student** of a semester org: an active member with no push on its `.github`;
-- anything else is not shown (a course the person can read but not change still shows read only).
+- anything else is not shown (a course the person can read but not change still shows read only,
+  unless they only study in it: then they reach it through their semesters, decision 0031). A
+  student cannot read a semester's pointer, so its course is the known course whose registry
+  lists it.
 
-Home shows **Your courses** (the instructor's course and semester cards) and **Your semesters**
-(one card per semester the person is a student of, archived ones greyed), with a **Show these
-semesters** choice kept in this browser (`localStorage`, per account). A student-only account
-lands on Your semesters, with This week across the semesters it shows.
+An instructor always lands on **All courses** (decision 0030): every course the lab runs, read
+from the toolkit's public `orgs.yml`, in three sections, **DSL courses**, **This semester**
+(running semesters) and **Past semesters** (archived or past their end, newest first, ten at a
+time with Show more; always shown, saying so when the person has none). A semester whose end
+cannot be read ends on a last day its key implies (a fall semester on 31 January, spring 31 July,
+summer 30 September, winter 31 March), over once the next day starts in its timezone. The person's own rows are in colour and ordered by what needs
+them, each card with the course code on a quiet line under its title and naming their role
+(course admin from `dsl-course.yml`, else instructor or teaching assistant from the newest
+running semester's `instructors.yml`, else "you teach on this course"); the others are greyed,
+not links, and say "Not one of your courses" ("You are a student" for a course the person
+studies in). Each section has its own **My courses** checkbox (the first one in the page head,
+left of New course), on by default and kept in this browser per account and section; while it is
+on, the head says how many rows it hides ("+2 others"). Then **Your semesters** (one card per
+semester the person is a student of, past ones greyed; such a semester shows only here, never
+also as a row above, decision 0031). For a student-only account it is its own page, laid out as
+the instructor's (decision 0029): **This semester** (the live ones, each card with its week and
+"Next: ...") and **Past semesters** (archived, or past their last day; with no dates read yet,
+by the date their key implies), which a **Current only** checkbox in the page head hides (kept
+in this browser, per account). A student-only account with exactly one live semester (neither
+archived nor ended, judged by its key) lands on its This week instead; the side nav and the
+banner call an ended semester ended by the same rule. The top bar's Guide explains the
+instructor console, so only a person with an instructor role sees it.
 
 The mode picks the shell. `?semester=<org>` opens that semester's student screens (This
 week, Schedule, Assignments, Marks, Materials, Join, Instructors). For a
-semester the person teaches, that is the **Student view** (the Student view link in the
-semester nav): the same screens with the instructor's own identity and a banner, never a
-student's repos or marks (rule 7). Anywhere else the console is in instructor mode for anyone
-who teaches somewhere, and in student mode otherwise.
+semester the person teaches, that is the **Student view** (the Student view pill in the
+course banner): the same screens with the instructor's own identity and a note, never a
+student's repos or marks (rule 7). Its top bar reads "Student view (preview)", a link back to
+the semester's Dashboard, as is "Back to instructor view" in its banner. Anywhere else the
+console is in instructor mode for anyone who teaches somewhere, and in student mode otherwise.
+
+The **side nav** is one tree in both consoles (decision 0031 rule 11), with the chevron before
+what it expands. An instructor's is anchored on the open course: "All courses" above it, the
+course name (a link to its overview), the course's pages (Overview first, where the name
+goes, as a semester's Dashboard is where its name goes; a read-only course shows only Overview),
+then its semesters as nodes: being set up
+first, every live one (a green dot), then past ones ("ended" or "archived") newest first to
+three rows, the rest under "Older semesters (n)". The open semester is expanded to its nine
+pages, else on a course page the newest live one; one at a time. Other courses are reached
+through All courses, and so are the person's own student semesters. A student's tree is
+inverted, since a student takes each course once: the open semester's term is the anchor, its
+courses the nodes (the open one expanded), another live term under them, and Past semesters
+below, each expanding to its courses as links. A Student view's tree is that one semester's.
+
+Every course and semester page, in either console, opens with the **course banner**: crumbs
+that follow the tree ("All courses › Course › Semester"; a student's "Your semesters ›
+Semester › Course", led by All courses for a person who also teaches), the course name as the page's one h1, and on a semester page the
+semester's line under it (its name, state, week and dates) with the Student view pill (or
+"Back to instructor view") and the semester on GitHub on the right. The overview's banner is
+its head, with New semester; the page's own title is an h2 under the banner, with its `?`. A
+student's banner takes the week and the dates from `student-status.json`, and This week says
+how old that file's facts are ("Updated 3 h ago"). The footer names the course and the
+semester. On a phone the preview's top-bar link reads "Preview".
+
+The **course overview** is a status board in two columns. Setup & To do heads the left: two
+folds, Initial setup (folded once every step not set aside is done) and To do (open while it
+has items), the same checklist with a `?` on each line. For a viewer with write access the circle
+before an open line is a button (decision 0032): an optional item (the engine's `stage_optional`
+or a to-do's `optional`) can be set aside, which writes its id into `dsl-course.yml`'s
+`set_aside:` through the Course details save path and moves it to a "Set aside (n)" fold at the
+end of its section, with Bring back; a required one says why it cannot be and where it is done. Problems heads the right (the
+course's, then each live semester's, tagged). The other panels, Semesters (each with its next
+automatic event), Course details (with the public website's indicator and Publish button),
+Recent activity (the last five operations across the course and its live semesters; who ran
+each comes from its outcome file) and Handout materials followed by Assignment templates as one
+block, go wherever the two columns come out closest in height (`splitColumns`, from each
+panel's estimated height, problems counted up to four). Until the course's and every semester's
+status has loaded the columns keep a fixed layout (`SETTLING_COLUMNS`), so panels do not move as
+each arrives. The Dashboard's line under its title
+says only what the banner does not: the exams and the archive date.
+
+The Dashboard's week strip is its only filter: This week on load, any set of weeks picked,
+none picked for all of them. The Problems heading names the selection ("Problems in weeks 3
+and 5") with a "Show all weeks" link while a filter is on.
 
 ## Student screens and their sources
 
@@ -116,12 +183,12 @@ Each screen reads with the student's own account:
 
 | Screen | Shared facts (`StudentData`) | The student's own (GitHub, directly) |
 |---|---|---|
-| This week (per semester, and on Home across the semesters shown, each line in its semester's timezone) | rows due, handed out, released or on in the next 7 days; releases and announcements of the last 7; open team formation; the About block: course name, syllabus pinned, the home text, announcements | gradebook's last change (marks returned); whether they have a team; a patch note on their Submission receipts newer than their last visit |
-| Schedule | rows by week, coloured by kind; TBC dates; row details; file chips that open each file; readings (files, reading list, "to come") | their state on hand-out and due rows; rows for their repos marked |
+| This week (in the semester's timezone; "Updated <age>" from the file's `generated_at`) | rows due, handed out, released or on in the next 7 days; releases and announcements of the last 7; open team formation; the About block: course name, syllabus pinned, the home text, announcements | gradebook's last change (marks returned); whether they have a team; a patch note on their Submission receipts newer than their last visit |
+| Schedule | rows by semester week (week 1 from `semester_start`, as the Dashboard counts; one group each for before and after the semester), coloured by kind; TBC dates; row details; file chips that open each file; readings (files, reading list, "to come") | their state on hand-out and due rows; rows for their repos marked |
 | Assignments | dates (TBC), late cutoff, late rule, points, how to hand in, solution shown, the shape note, the brief (a fold, rendered by GitHub), the course's late-work sentences | `<slug>-<handle>`, a team repo they can push to, the drop box; their team (from the repo, else from `GET /user/teams` by the `<slug>-` prefix, so a drop-box or external group finds it too) and its members; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos): its body, the newest receipt, a patch note as "pull before you continue", every comment in a fold; the CONTRIBUTIONS.md ask on a team repo; for a student-choice repo after the cutoff, the Settings link to make it public |
 | Marks | assignment titles | `grades-<handle>/grades.yml`: final grade, score (per question when given), penalty, feedback overall and per question, team and team feedback, a term total if present |
-| Materials | the materials repos; each session's readings | the repo's recursive tree; each file read when opened |
-| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`); clone commands, VS Code and github.dev links; their assignment repos to clone. The local folders are kept in this browser only |
+| Materials | the materials repos; each session's readings | the repo's recursive tree (supporting folders such as `data/` and `img/` last, folded, under "Supporting files"); each file read when opened |
+| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, every 30 s after the first minute, for up to 5 minutes of the tab being shown, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decision 0027) |
 | Join | assignments forming teams, and each one's teams so far (name, headcount, cap; never who) with a Pick that fills in the team | their own Join course / Join team issues in `join` and the automation's last reply; after "You joined", the invitation's accept link |
 | Instructors | the cards, with an email only where the instructor chose to show it | none (a picture hosted on the semester site is read through the API and shown as `data:`) |
 
@@ -137,14 +204,18 @@ read the list again when the tab regains focus. If the role cannot be read, the 
 promise no repo, team or marks; an auditor's nav omits Marks and Join.
 
 The visit time behind "new since your last visit" is stored only after that semester's
-receipts were read. Signing out forgets every visit time and remembered folder of that
-login in this browser, the rendered markdown, the team list and the semester facts.
+receipts were read. Signing out forgets every visit time of that login in this browser, the
+rendered markdown, the team list and the semester facts. It keeps Profile, one for both
+roles: the root folder, each course's own folder where one is set, the editor, and the folder
+picked for the folder check (in IndexedDB).
 
 The shared facts come through one interface, `StudentData` (`src/model/student.ts`), read by
 `StatusFileSource` from the engine's public `<semester>/.github/.system/student-status.json`
 (`dsl_course/student_status.py`, rewritten with every status refresh; its allow-list schema is
-`schemas/student-status.schema.json`). It carries the cutoff, the timezone and the policy's
-kinds, so the console derives none of them. A semester whose engine has not written the file
+`schemas/student-status.schema.json`). It carries the cutoff, the timezone, the policy's
+kinds and the semester's dates, so the console derives none of them, and `generated_at`, when
+its facts last changed. A file of the first schema (`dsl.student-status/1`) is still read, its
+dates and age unknown. A semester whose engine has not written the file
 yet is read from its site repo instead (`SiteSource`: the generated collections, `index.md`,
 `_data/*.yml`), which also serves site-hosted instructor pictures. In a Student view nothing
 of the student's own is read.
@@ -174,7 +245,8 @@ under a hidden first line (`names.json` `join_markers`). GitHub drops the form's
 issue an account without push creates that way, so the `join` workflows route on that line
 as well as on the label. When the API refuses, the console offers GitHub's own form,
 prefilled (text inputs by field id). The answer is polled from the student's issues every
-15 s for up to 5 minutes while one still waits. `?join=<org>`
+15 s for up to 5 minutes (not while the tab is hidden; comments are re-read only for an issue
+whose comment count moved) while one still waits. `?join=<org>`
 (and Home's "Have an enrolment code?") opens Join course for a semester the person is not a
 member of yet.
 
@@ -183,10 +255,11 @@ unchanged 304 costs nothing). Opening a semester reads its `student-status.json`
 semester without one: its site, 9 fixed reads plus one per generated file).
 Then the repo list, the gradebook and its last commit, the auditors membership, and one call
 per team; `/user/teams` is read once per session, not per semester. This week and Assignments
-add two calls per private repo (receipts issue, comments). A brief or the home text is
+add two calls per private repo (receipts issue, comments). These student reads are reused for
+a minute (`MINE_FRESH_MS`), so moving between screens does not repeat them. A brief or the home text is
 rendered once per page load (one `/markdown` call, a brief only when its fold opens); a
 site-hosted card picture is one call. Set up adds one call per materials repo. A file costs
-one call, a markdown file or notebook two, an HTML page one per bundle file it uses (at most
+one call, a markdown file or notebook two (its rendering is kept by blob sha for the session), an HTML page one per bundle file it uses (at most
 80); file bytes are kept by blob sha (up to 64 MB), so reopening costs nothing. **Home's This
 week costs all of that again for each semester shown**: its site read, the repo list,
 gradebook, role and teams, and the receipts reads (about 50 calls per semester on the demo on
@@ -215,14 +288,15 @@ a first visit, mostly free 304s after).
   case-insensitively.
 - Status: `semester-config/.system/status.json` (semester) and `.github/.system/status.json`
   (course), validated against `schemas/status.schema.json`. Staleness compares the file's
-  `inputs` with one recursive tree read, by full path (`.system/assignments.lock.yml`
+  `inputs` with one recursive tree read (made beside the status read, and only for the open
+  semester, the one place it shows), by full path (`.system/assignments.lock.yml`
   included); an input recorded `null` is unchanged while the file is still absent. An absent
   status file shows "Status not computed yet".
 - Automation's heartbeat: the course's Scheduled release run list.
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
   `students.csv`, `instructors.yml`, a template's `grading_config.yml`, the site's `index.md`.
-- Materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and last
-  changes; a materials repo's recursive tree, badged from its `.releaseignore`.
+- Handout materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and
+  last changes; a materials repo's recursive tree, badged from its `.releaseignore`.
 
 ## What it changes
 
@@ -231,16 +305,24 @@ a first visit, mostly free 304s after).
   `teams.csv`, `grading_sheets/<slug>.yml`, `.github/dsl-course.yml`, a template's
   `grading_config.yml` (on `solution`), a materials repo's `materials.yml` and `.releaseignore`,
   the course's `.github/opencourse.yml` (the public website),
-  the site's `index.md` and `_announcements/`. YAML is edited in place (`src/edit/yamlText.ts`):
+  the site's `index.md` and `_announcements/`. "Treat as handout materials" on an Other repos
+  row adds the `dsl-materials` topic to that repo (`PUT /repos/{o}/{r}/topics`). YAML is edited in place (`src/edit/yamlText.ts`):
   only the changed values' bytes move, so comments and their columns survive. After a write the
   console follows the commit's checks and says what they found.
 - Operations, through the course org's Console workflow (`.github/.github/workflows/console.yml`,
   ref `main`, one `request` input; contracts section 1). `src/ops/adapter.ts` dispatches with
-  `return_run_details`, polls the run, and reads the public `dsl-outcome` annotation and the
+  `return_run_details`, polls the run's job listing alone (`src/github/poll.ts`, the one poll loop: every 3 s, every
+  10 s after 30 s, nothing while the tab is hidden), and reads the public `dsl-outcome` annotation and the
   private outcome file. Hand out, return marks, archive, update every copy and send new codes
   unlock only after a preview in the same session; publishing the public website, which has no
-  engine preview, asks for a confirmation instead.
-- Wizards: New course, New semester, New assignment, New materials. Each step checks live state
+  engine preview, asks for a confirmation instead. Other previews are offered only where they
+  show something you act on (`PREVIEW_NOT_OFFERED` in `src/ops/registry.ts` lists the ones
+  that are not). The run popup lists each job step once (GitHub's "Post ..." steps are left
+  out), resizes by its bottom-left grip, and its Stop cancels the workflow run
+  (`POST .../actions/runs/{id}/cancel`), saying "Stopping…" until GitHub ends it and then
+  "Stopped". Once a run ends, "See on GitHub" opens the op's `target` (`src/ops/defs.ts`):
+  the repo, branch or folder it changed.
+- Wizards: New course, New semester, New assignment, New handout materials. Each step checks live state
   before it lets you continue (the org exists, `hertie-dsl-bot` is an owner, the set-up left
   its repos, the template has both branches and a settings file that parses), and unfinished
   answers stay in this browser so leaving loses nothing. Setting up a course is the one

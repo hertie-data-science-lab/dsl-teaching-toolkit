@@ -34,6 +34,7 @@ from .course import (
     LABELS,
     SOLUTION_BEFORE_CUTOFF,
     SOLUTION_WARNING,
+    STARTER_MODES,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
@@ -43,7 +44,6 @@ from .grades import TEMPLATE_KEYS
 from .log import CLIParser, log_ok
 from .ops.outcome import CONCLUSIONS
 from .ops.registry import (
-    HANDLE_PATTERN,
     OUTCOME_SCHEMA,
     REGISTRY,
     STATUS_SCHEMA,
@@ -177,10 +177,6 @@ def outcome_schema() -> dict:
         },
         ("code", "text"),
     )
-    person = _obj(
-        {"handle": {"type": "string", "pattern": HANDLE_PATTERN}, "text": _str()},
-        ("handle", "text"),
-    )
     return _doc(
         OUTCOME_SCHEMA,
         _obj(
@@ -199,7 +195,6 @@ def outcome_schema() -> dict:
                 "reasons": {"type": "array", "items": reason},
                 "details": {"type": "array", "items": _str()},
                 "block": _str(),
-                "people": {"type": "array", "items": person},
                 "started": _str(),
                 "finished": _str(),
             },
@@ -229,8 +224,9 @@ def status_schema() -> dict:
     stages = {"type": "object", "additionalProperties": _enum(STAGE_STATES)}
     # Why each stage that is not done is not: one sentence per stage id. Optional.
     stage_why = {"type": "object", "additionalProperties": _str()}
+    flags = {"type": "object", "additionalProperties": {"type": "boolean"}}
     nullable = {"type": ["string", "null"]}
-    unknown = {"type": ["boolean", "null"]}  # `app_installed` until decision 0002
+    unknown = {"type": ["boolean", "null"]}  # `staff.synced`: null when not known
     # A status problem's pointer: the line, screen and entry are what the fault knows,
     # and `ref` names the branch when it is not the default (a template's `solution`).
     # `url` is a fix that is a GitHub settings page rather than a file (its `path` is "").
@@ -246,21 +242,71 @@ def status_schema() -> dict:
         },
         ("repo", "path"),
     )
-    repo_state = _obj(
-        {"repo": _str(), "slug": _str(), "state": _str()}, ("repo", "state")
+    # A template's C5 state, plus how its starter is written (decision 0028).
+    template_state = _obj(
+        {
+            "repo": _str(),
+            "slug": _str(),
+            "state": _str(),
+            "starter": _enum(STARTER_MODES),
+        },
+        ("repo", "state"),
+    )
+    # A materials repo's checklist (decision 0022 rule 5); `why` is null once done.
+    # `detail` (on `kind_folder`, 0024 rule 8): the top folders per content kind.
+    kind_found = _obj(
+        {"kind": _str(), "folders": {"type": "array", "items": _str()}},
+        ("kind", "folders"),
+    )
+    check = _obj(
+        {
+            "id": _str(),
+            "label": _str(),
+            "done": {"type": "boolean"},
+            "why": nullable,
+            "blocks": {"type": "boolean"},
+            "detail": {"type": "array", "items": kind_found},
+        },
+        ("id", "label", "done", "blocks"),
+    )
+    materials_state = _obj(
+        {
+            "repo": _str(),
+            "state": _str(),
+            "checks": {"type": "array", "items": check},
+        },
+        ("repo", "state"),
+    )
+    # Work started and not finished (decision 0022 rule 3): never a problem. `optional`:
+    # it blocks nothing, so it may be set aside; `set_aside`: it is (decision 0032).
+    todo = _obj(
+        {
+            "id": _str(),
+            "kind": _enum(("materials", "template")),
+            "repo": _str(),
+            "text": _str(),
+            "screen": _str(),
+            "entry": _str(),
+            "optional": {"type": "boolean"},
+            "set_aside": {"type": "boolean"},
+        },
+        ("id", "kind", "repo", "text"),
     )
     course = _obj(
         {
             "org": _str(),
             "name": _str(),
             "code": _str(),
-            "app_installed": unknown,
             "stages": stages,
             "stage_why": stage_why,
+            # Decision 0032, per stage id: may it be set aside, and is it.
+            "stage_optional": flags,
+            "stage_set_aside": flags,
             "ready": {"type": "boolean"},
-            "materials": {"type": "array", "items": repo_state},
-            "templates": {"type": "array", "items": repo_state},
+            "materials": {"type": "array", "items": materials_state},
+            "templates": {"type": "array", "items": template_state},
             "semesters": {"type": "array", "items": _str()},
+            "todo": {"type": "array", "items": todo},
         },
         ("org", "stages"),
     )
@@ -278,7 +324,6 @@ def status_schema() -> dict:
             "live": {"type": "boolean"},
             # Past `semester_end` and not archived yet.
             "ended": {"type": "boolean"},
-            "app_installed": unknown,
             "stages": stages,
             "stage_why": stage_why,
             "archive_date": nullable,
@@ -319,13 +364,11 @@ def status_schema() -> dict:
             "id": _str(),
             "when": nullable,
             "kind": _str(),
-            "kind_inferred": {"type": "boolean"},
             "number": {"type": ["integer", "null"]},
             "title": _str(),
             "state": _enum(RELEASE_STATES),
             "source": place,
             "dest": place,
-            "copies": {"type": "integer"},
             "show_on_site": {"type": "boolean"},
             "tbc": {"type": "boolean"},
         },
@@ -345,7 +388,7 @@ def status_schema() -> dict:
             "grading_cutoff_datetime": nullable,
             "solution_shown": nullable,
             "solution_held_until": nullable,
-            "units": {"type": ["integer", "null"]},
+            "units": {"type": "integer"},
             "submissions": {"type": ["integer", "null"]},
             "teams": {"type": ["integer", "null"]},
             "marks": _obj(
@@ -406,13 +449,13 @@ def status_schema() -> dict:
                     "type": "array",
                     "items": _obj(
                         {
-                            "run_id": {"type": ["integer", "null"]},
+                            "run_id": {"type": "integer"},
                             "op": _str(),
                             "conclusion": _enum(CONCLUSIONS),
                             "summary": _str(),
                             "finished": _str(),
                         },
-                        ("op", "conclusion"),
+                        ("run_id", "op", "conclusion"),
                     ),
                 },
             },
@@ -538,6 +581,8 @@ _SPEC_TYPES = {
     "autograde": {"type": "boolean"},
     "completion_check": {"type": "boolean"},
     "grader_pdf": {"type": "boolean"},
+    # Decision 0028. No default here: a template without it reads by its markers.
+    "starter": _enum(STARTER_MODES),
 }
 
 
@@ -586,6 +631,8 @@ def dsl_course_schema() -> dict:
         },
     )
     top |= {
+        # Optional setup steps and to-dos set aside (decision 0032): ids, unknown ones ignored.
+        "set_aside": {"type": "array", "items": _str()},
         "people": people,
         ASSIGNMENT_DEFAULTS_KEY: defaults,
     }
@@ -693,7 +740,11 @@ def materials_json() -> dict:
         "file": materials.MATERIALS_FILE,
         "default_syllabus": materials.DEFAULT_SYLLABUS,
         "default_kind": materials.DEFAULT_KIND,
+        "assets_kind": materials.ASSETS_KIND,
+        "empty_entry_kind": materials.EMPTY_ENTRY_KIND,
+        "folder_kinds": list(materials.FOLDER_KINDS),
         "aliases": materials.BUILTIN_ALIASES,
+        "reviewed_mark": releaseignore.REVIEWED_MARK,
         "denylist": list(PUBLICATION_DENYLIST),
         "never_material": sorted(NEVER_MATERIAL),
         "cases": [

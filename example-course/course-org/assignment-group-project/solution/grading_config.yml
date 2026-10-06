@@ -5,6 +5,7 @@ submit_via: assignment_repo   # assignment_repo (push to their repo) | external 
 # submit_via: shared_dropbox_repo # one private <slug>-submissions repo for the whole semester,
                               # a folder per team inside it, everyone able to read everyone
 formats: [py]                 # ipynb | py | rmd | qmd | latex | none - the starter stubs; the first is the runnable one
+starter: handwritten          # derived (Derive builds main from the marked solution) | handwritten (you write main yourself)
 
 questions:                    # the score skeleton, and the maximum shown beside each blank
   Q1: 15

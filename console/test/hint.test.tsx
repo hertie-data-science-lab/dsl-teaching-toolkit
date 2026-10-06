@@ -42,7 +42,7 @@ describe('Hint', () => {
 
   it('opens on hover and closes on leave', async () => {
     const { pop } = await mount();
-    const wrap = root!.querySelector('.hint')!;
+    const wrap = root!.querySelector('.hint-wrap')!;
     await act(() => { wrap.dispatchEvent(new MouseEvent('mouseenter')); });
     expect(pop.hidden).toBe(false);
     await act(() => { wrap.dispatchEvent(new MouseEvent('mouseleave')); });
@@ -53,7 +53,7 @@ describe('Hint', () => {
     const { btn, pop } = await mount();
     expect(btn.getAttribute('aria-label')).toBe('About this page');
     expect(pop.getAttribute('role')).toBeNull();
-    const wrap = root!.querySelector('.hint')!;
+    const wrap = root!.querySelector('.hint-wrap')!;
     await act(() => btn.focus());
     await act(() => { wrap.dispatchEvent(new MouseEvent('mouseenter')); });
     await act(() => btn.blur());

@@ -5,7 +5,7 @@ repos it publishes are private, so linking into them would 404 for the public; i
 this HOSTS the chosen repo's files in the site repo (Jekyll serves any path not starting
 with `_`) and links to site-relative URLs. Session materials only - no assignments, no
 events, no semester repos. What it publishes is the course's `opencourse.yml`
-(`opencourse`): the Publish public website operation and the daily update both read it,
+(`opencourse`): the Publish website operation and the daily update both read it,
 and `enabled: false` stops both.
 
 Driven through `python3 -m dsl_course.site public-sync`, which delegates here.
@@ -20,6 +20,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
+import yaml
+
 from .course import (
     discover_local_sessions,
     discover_sections,
@@ -30,6 +32,8 @@ from .faults import Unusable
 from .fs import copy_tree, union_deny
 from .ghcli import clone
 from .log import Summary, log, log_err, log_step
+from .materials import ASSETS_KIND, MATERIALS_FILE, Declared, infer_kind
+from .materials import parse as parse_materials
 from .opencourse import OPENCOURSE_FILE, OpenCourse
 from .opencourse import read as read_opencourse
 from .readings import readings_block
@@ -52,6 +56,7 @@ from .site_repo import (
     links_block,
     nav_yaml,
     people_yaml,
+    retired_pages,
     row_file,
     site_readme,
     site_templates,
@@ -64,15 +69,33 @@ from .site_repo import (
 PUBLIC_MATERIALS_DIR = "public-materials"
 
 # The open site is still built from one repo's folders (its own design, `openware`, is
-# not written yet): `readings` is the section `opencourse.yml`'s `readings_mode` governs, and `labs` is the
-# one section that makes a lab row. The semester site reads kinds from the schedule.
+# not written yet): `readings` is the section `opencourse.yml`'s `readings_mode` governs,
+# and a lab-kind section makes a lab row (`row_kind`). The semester site reads kinds from
+# the schedule.
 READINGS_SECTION = "readings"
-LAB_SECTION = "labs"
 
 
-def row_kind(section: str) -> str:
-    """The open site's row for a section: 'lab' for `labs`, else 'lecture'."""
-    return "lab" if section == LAB_SECTION else "lecture"
+def _declared(src: Path) -> Declared:
+    """The clone's own `materials.yml`; none, or one that does not parse, is the defaults
+    (its problem is reported on the course page, not here)."""
+    try:
+        return parse_materials(
+            yaml.safe_load((src / MATERIALS_FILE).read_text(encoding="utf-8"))
+        )
+    except (OSError, yaml.YAMLError, Unusable):
+        return Declared()
+
+
+def shown_sections(sections: list[str], kinds: dict[str, str]) -> list[str]:
+    """The sections that get rows: a supporting-files one (`data/`, `img/`, and any
+    folder no alias names) never does (decisions 0026 rule 3, 0031 rule 10)."""
+    return [s for s in sections if infer_kind(s, kinds) != ASSETS_KIND]
+
+
+def row_kind(section: str, kinds: dict[str, str]) -> str:
+    """The open site's row for a section: 'lab' for a lab-kind one (`labs/`,
+    `tutorials/`, or so declared), else 'lecture' (the session row)."""
+    return "lab" if infer_kind(section, kinds) == "lab" else "lecture"
 
 
 def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
@@ -145,8 +168,6 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[Link]:
     ]
     if any("/" not in rel for rel in rels):
         rels = [rel for rel in rels if "/" not in rel]
-    # No `view_url`: this site already hosts every file it links, so the name IS the
-    # hosted copy and there is no second destination to name.
     return [Link(rel, f"{url_prefix}/{quote(rel)}") for rel in rels]
 
 
@@ -264,8 +285,14 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             # use), not a hardcoded lectures/readings pair - a course whose content lives
             # in `labs/` publishes labs. `readings` is the one section with special
             # semantics (`readings_mode`, below); `include_lectures` gates all the others.
+            # Supporting-files sections (any folder no alias names) are never rows here
+            # either.
+            kinds = dict(_declared(src).kinds)
             file_sections = (
-                [sec for sec in discover_sections(src) if sec != READINGS_SECTION]
+                shown_sections(
+                    [sec for sec in discover_sections(src) if sec != READINGS_SECTION],
+                    kinds,
+                )
                 if include_lectures
                 else []
             )
@@ -293,7 +320,9 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                     links = _public_links(dest, f"{url_base}/{section}")
                     if links:
                         rows = (
-                            lab_links if row_kind(section) == "lab" else section_links
+                            lab_links
+                            if row_kind(section, kinds) == "lab"
+                            else section_links
                         )
                         rows.append((section, links))
 
@@ -367,10 +396,14 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                 # writes its front matter before any site sees it.
                 **site_templates(),
             },
-            # Templates this toolkit no longer ships (a semester site's retired sections),
-            # and the settings file an older publish kept here: `opencourse.yml` holds
-            # them now.
-            retire=(*RETIRED_TEMPLATES, PUBLISH_CONFIG),
+            # The Assignments tab a public site no longer has, templates this toolkit no
+            # longer ships (a semester site's retired sections), and the settings file an
+            # older publish kept here: `opencourse.yml` holds them now.
+            retire=(
+                *retired_pages(site_wd, ("assignments.md",)),
+                *RETIRED_TEMPLATES,
+                PUBLISH_CONFIG,
+            ),
             commit=f"site: publish public course site from {source_repo}",
             label="public site",
             title="Public website",

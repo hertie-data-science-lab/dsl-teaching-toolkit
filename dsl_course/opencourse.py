@@ -10,7 +10,7 @@ Org (and by the migration, from a site's leftover `_publish-config.yml`):
     withhold:                         # kept off the site; `.releaseignore` syntax
       - "labs/**/solutions/"
 
-Both the Publish public website operation and the daily update read it; neither takes an
+Both the Publish website operation and the daily update read it; neither takes an
 input of its own. `withhold` patterns match the source repo's paths from its root and add
 to what the repo's own `.releaseignore` and the publication denylist already keep back.
 Licence, contact and description are course facts in `dsl-course.yml`, not here.
@@ -24,12 +24,31 @@ import yaml
 
 from .faults import Unusable
 from .gh_contents import load_yaml_config
+from .records import SYSTEM_DIR
 from .schema_check import validate
 
 OPENCOURSE_FILE = "opencourse.yml"
 OPENCOURSE_REPO = ".github"
 READINGS_MODES = ("reading-list", "actual-readings", "none")
 DEFAULT_READINGS_MODE = READINGS_MODES[0]
+# What a new `opencourse.yml` keeps off a website that is not on yet: the engine's own
+# folder, and anything whose name says answers, assessment or marks. Word-shaped, and each
+# case by a character class: a pattern matches inside a name, so a bare `*exam*` would hide
+# `examples/` and `*marks*` `remarks.md`. Broader than the publication denylist, which
+# names exact folders.
+DEFAULT_WITHHOLD = (
+    f"{SYSTEM_DIR}/",
+    "[Ss]olution*",
+    "*[-_.][Ss]olution*",
+    "*[Ee]xam",
+    "*[Ee]xams",
+    "*[Ee]xam[-_.]*",
+    "[Gg]rade*",
+    "*[-_.][Gg]rade*",
+    "[Mm]arks*",
+    "*[-_.][Mm]arks*",
+    "*[Pp]rivate*",
+)
 
 SCHEMA = {
     "type": "object",
@@ -88,10 +107,15 @@ def read(org: str) -> OpenCourse | None:
 
 def seed_text(oc: OpenCourse | None = None) -> str:
     """The seeded file, with `oc`'s values (default: off) live and every key explained
-    once."""
+    once. A seed for a website that is off, with nothing to withhold, gets
+    `DEFAULT_WITHHOLD`: it is a first write, so an empty list there was never anyone's
+    choice. A website already on (the migration, from an earlier publish) keeps its empty
+    list, or its next publish would take files off a live site."""
     oc = oc or OpenCourse()
     withhold = yaml.safe_dump(
-        {"withhold": list(oc.withhold)}, default_flow_style=False, allow_unicode=True
+        {"withhold": list(oc.withhold or (() if oc.enabled else DEFAULT_WITHHOLD))},
+        default_flow_style=False,
+        allow_unicode=True,
     )
     return (
         "# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.\n"
@@ -102,5 +126,7 @@ def seed_text(oc: OpenCourse | None = None) -> str:
         f"source_repo: {oc.source_repo}   # the materials repo it is built from\n"
         f"readings_mode: {oc.readings_mode}   # reading-list, actual-readings or none\n"
         f"include_lectures: {str(oc.include_lectures).lower()}   # publish the repo's files\n"
-        "# Paths kept off the website, as in .releaseignore:\n" + withhold
+        "# Paths kept off the website, as in .releaseignore. A course whose website is\n"
+        "# off starts with the system folder kept off, and anything whose name has the\n"
+        "# word solution, exam, grade, marks or private in it:\n" + withhold
     )

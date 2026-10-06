@@ -1,5 +1,5 @@
 // Words and dates, in the vocabulary of design/vocabulary.md. Engine identifiers (K4,
-// will_be_skipped, release.now) never reach the screen except through these maps.
+// will_be_skipped, release.entry) never reach the screen except through these maps.
 
 import { DEFAULT_TIMEZONE } from './policy';
 import type { Assignment, AssignmentState, Release, ReleaseState, StageState } from './types';
@@ -145,13 +145,13 @@ export const COHORT_STAGES: [string, string][] = [
   ['K1', 'Org'], ['K2', 'Setup'], ['K3', 'Instructors'], ['K4', 'Schedule'], ['K5', 'Students'], ['K6', 'Site'], ['K7', 'Archive'],
 ];
 export const COURSE_STAGES: [string, string][] = [
-  ['C1', 'Org'], ['C2', 'Setup'], ['C3', 'Details'], ['C4', 'Materials'], ['C5', 'Assignment templates'], ['C6', 'Website'],
+  ['C1', 'Org'], ['C2', 'Setup'], ['C3', 'Details'], ['C4', 'Handout materials'], ['C5', 'Assignment templates'], ['C6', 'Website'],
 ];
 
 /** Where a problem sits, as the problem card's bold first word. */
 export const PROBLEM_AREA: Record<string, string> = {
   K1: 'Org', K2: 'Setup', K3: 'Instructors', K4: 'Schedule', K5: 'Roster', K6: 'Site', K7: 'Archive',
-  C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Materials', C5: 'Template', C6: 'Public website',
+  C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Handout materials', C5: 'Template', C6: 'Public website',
 };
 
 export const ASSIGNMENT_WORD: Record<AssignmentState, string> = {
@@ -165,11 +165,9 @@ export const RELEASE_WORD: Record<ReleaseState, string> = {
 
 /** Registry op names as the operations list names them. */
 export const OP_LABEL: Record<string, string> = {
-  'semester.check': 'Check',
+  'semester.check': 'Refresh',
   'semester.preview_automation': 'Preview the next automatic run',
-  'release.now': 'Release',
-  'release.early': 'Release early',
-  'release.rerun': 'Release again',
+  'release.entry': 'Release',
   'release.adhoc': 'Release',
   'release.propagate_back': 'Keep for future semesters',
   'assignment.handout_now': 'Hand out',
@@ -182,8 +180,8 @@ export const OP_LABEL: Record<string, string> = {
   'semester.archive': 'Archive',
   'course.publish_website': 'Publish website',
   'assignment.derive_starter': 'Derive student version',
-  'assignment.generate_syllabus': 'Generate syllabus',
-  'materials.create': 'New materials',
+  'assignment.generate_syllabus': 'Generate the weekly plan',
+  'materials.create': 'New handout materials',
   'assignment.create': 'New assignment',
   'semester.bootstrap': 'New semester',
   'teams.open_window': 'Email students without a team',
@@ -247,7 +245,8 @@ export const TYPE_LABEL: Record<string, string> = {
 
 // ------------------------------------------------------------------ markdown (as the site renders `details`)
 
-function esc(s: string): string {
+/** HTML-escape text for an attribute or element body. */
+export function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 

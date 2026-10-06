@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import NameOID
 
-from dsl_course import enrol_codes, mailer, roster
+from dsl_course import discovery, enrol_codes, gh_contents, mailer, roster
 from dsl_course.gh_contents import read_csv
 from tests.conftest import ROSTER_HEADER
 
@@ -310,9 +310,12 @@ def test_a_refused_write_is_retried_against_the_fresh_roster(monkeypatch):
         written.append(content.decode())
         return expected_sha == "fresh"  # only the up-to-date sha is accepted
 
-    monkeypatch.setattr(enrol_codes, "put_file", fake_put_file)
+    monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
     monkeypatch.setattr(
         enrol_codes, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
+    )
+    monkeypatch.setattr(
+        gh_contents, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
     )
     assert (
         enrol_codes.write_column(
@@ -327,9 +330,12 @@ def test_a_refused_write_is_retried_against_the_fresh_roster(monkeypatch):
 
 
 def test_the_retry_gives_up_after_a_bounded_number_of_attempts(monkeypatch):
-    monkeypatch.setattr(enrol_codes, "put_file", lambda *a, **k: False)
+    monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: False)
     monkeypatch.setattr(
         enrol_codes, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
+    )
+    monkeypatch.setattr(
+        gh_contents, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
     )
     assert (
         enrol_codes.write_column(
@@ -350,9 +356,12 @@ def test_a_code_that_arrived_in_between_is_left_alone(monkeypatch):
         written.append(content.decode())
         return expected_sha == "fresh"
 
-    monkeypatch.setattr(enrol_codes, "put_file", fake_put_file)
+    monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
     monkeypatch.setattr(
         enrol_codes, "get_file_with_sha", lambda org, repo, path: (theirs, "fresh")
+    )
+    monkeypatch.setattr(
+        gh_contents, "get_file_with_sha", lambda org, repo, path: (theirs, "fresh")
     )
     assert enrol_codes.write_column(
         "SEMESTER", STALE, "stale", "enrol_code", _codes(), "roster: assign"
@@ -376,13 +385,18 @@ def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
         lambda org, repo, path: reads.pop(0) if len(reads) > 1 else reads[0],
     )
     monkeypatch.setattr(
-        enrol_codes,
+        gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path: reads.pop(0) if len(reads) > 1 else reads[0],
+    )
+    monkeypatch.setattr(
+        gh_contents,
         "put_file",
         lambda org, repo, path, content, msg, expected_sha=None: (
             expected_sha == "fresh"
         ),
     )
-    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "Test")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
     _transport(monkeypatch, True)
     sent: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
@@ -458,6 +472,11 @@ def _run_with(monkeypatch, roster_text, *, sends=None, writes_ok=True, transport
         "get_file_with_sha",
         lambda org, repo, path: (written[-1] if written else roster_text, "sha"),
     )
+    monkeypatch.setattr(
+        gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path: (written[-1] if written else roster_text, "sha"),
+    )
 
     def fake_put_file(org, repo, path, content, message, expected_sha=None):
         if not writes_ok:
@@ -465,8 +484,8 @@ def _run_with(monkeypatch, roster_text, *, sends=None, writes_ok=True, transport
         written.append(content.decode())
         return True
 
-    monkeypatch.setattr(enrol_codes, "put_file", fake_put_file)
-    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "Test")
+    monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
     monkeypatch.setattr(
         enrol_codes.mailer,
         "send_bulk",
@@ -570,13 +589,18 @@ def test_a_transport_that_raises_gives_the_claim_back_before_it_propagates(monke
         lambda org, repo, path: (written[-1] if written else text, "sha"),
     )
     monkeypatch.setattr(
-        enrol_codes,
+        gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path: (written[-1] if written else text, "sha"),
+    )
+    monkeypatch.setattr(
+        gh_contents,
         "put_file",
         lambda org, repo, path, content, message, expected_sha=None: (
             written.append(content.decode()) or True
         ),
     )
-    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "Test")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
     monkeypatch.setattr(
         enrol_codes.mailer,
         "send_bulk",
@@ -610,8 +634,13 @@ def test_a_claim_that_cannot_be_released_names_the_exact_stamp_to_clear(
         "get_file_with_sha",
         lambda org, repo, path: (written[-1] if written else text, "sha"),
     )
-    monkeypatch.setattr(enrol_codes, "put_file", fake_put_file)
-    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "Test")
+    monkeypatch.setattr(
+        gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path: (written[-1] if written else text, "sha"),
+    )
+    monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
     monkeypatch.setattr(enrol_codes.mailer, "send_bulk", lambda *a, **k: [])
     assert enrol_codes.run("SEMESTER") is enrol_codes.Outcome.FAILED
     err = capsys.readouterr().err
@@ -695,6 +724,7 @@ def test_a_roster_with_only_a_header_is_green(monkeypatch, capsys):
 
 def test_run_reds_when_the_roster_is_missing(monkeypatch, capsys):
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", lambda org, repo, path: None)
+    monkeypatch.setattr(gh_contents, "get_file_with_sha", lambda org, repo, path: None)
     outcome = enrol_codes.run("SEMESTER")
     assert outcome is enrol_codes.Outcome.NO_ROSTER
     assert enrol_codes.reds_the_run(outcome)  # nothing is outstanding only if it sent

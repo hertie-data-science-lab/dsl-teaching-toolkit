@@ -1,20 +1,39 @@
 // The mockup's shared pieces: crumbs, problem cards, the stage rail, footnotes.
 
 import type { ComponentChildren } from 'preact';
+import { encPath } from '../github/client';
 import { COHORT_STAGES, COURSE_STAGES, PROBLEM_AREA, STAGE_WORD, md, opLabel, ago } from '../model/format';
+import type { TaggedProblem } from '../model/status';
 import type { Operation, Outcome, Problem, StageState } from '../model/types';
 import { Alert, Check, Eye, Ext, Fail, Skip } from './icons';
 
 export const DOCS = 'https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/';
 export const SOON = 'Coming in this build';
 
-export function ghUrl(org: string, repo?: string, path?: string, branch = 'main'): string {
-  return `https://github.com/${org}${repo ? `/${repo}` : ''}${repo && path ? `/blob/${branch}/${path}` : ''}`;
+export { encPath };
+
+/**
+ * The GitHub page of an org, a repo, or a file (`blob`) or folder (`tree`) in it. The one rule
+ * for the branch: `main` for the repos the toolkit creates; `HEAD` (the default branch, whatever
+ * it is called) for a repo it did not.
+ */
+export function ghUrl(org: string, repo?: string, path?: string, branch = 'main', view: 'blob' | 'tree' = 'blob'): string {
+  return `https://github.com/${org}${repo ? `/${repo}` : ''}${repo && path ? `/${view}/${branch}/${encPath(path)}` : ''}`;
 }
 
 /** GitHub's in-browser editor for one file, optionally at a line. */
 export function editUrl(org: string, repo: string, path: string, branch = 'main', line?: number): string {
-  return `https://github.com/${org}/${repo}/edit/${branch}/${path}${line ? `#L${line}` : ''}`;
+  return `https://github.com/${org}/${repo}/edit/${branch}/${encPath(path)}${line ? `#L${line}` : ''}`;
+}
+
+/** GitHub's new-file page with the name filled in: where an edit link goes while the file does not exist yet. */
+export function newFileUrl(org: string, repo: string, path: string, branch = 'main'): string {
+  return `https://github.com/${org}/${repo}/new/${branch}?filename=${encodeURIComponent(path)}`;
+}
+
+/** GitHub's upload page for a repo's branch. */
+export function uploadUrl(org: string, repo: string, branch = 'main'): string {
+  return `https://github.com/${org}/${repo}/upload/${branch}`;
 }
 
 /** One workflow run of `repo` (`owner/name`). */
@@ -22,11 +41,12 @@ export function runUrl(repo: string, runId: number): string {
   return `https://github.com/${repo}/actions/runs/${runId}`;
 }
 
+/** The breadcrumbs: each a link to its home, plain for the open page; "›" between. */
 export function Crumbs({ items }: { items: { t: string; href?: string }[] }) {
   return (
     <div class="crumbs">
       {items.map((c, i) => [
-        i ? <span aria-hidden="true">/</span> : null,
+        i ? <span aria-hidden="true">›</span> : null,
         c.href ? <a href={c.href}>{c.t}</a> : <span>{c.t}</span>,
       ])}
     </div>
@@ -52,18 +72,24 @@ export function Soon({ label, cls = 'btn', title = SOON }: { label: ComponentChi
 
 export const Prop = () => <span class="prop" title="Not in the engine today">proposed</span>;
 
-export function EditFile({ org, repo, path, branch = 'main', line }: { org: string; repo: string; path: string; branch?: string; line?: number }) {
+/** "Edit the file directly"; while the file does not exist (`exists` false), GitHub's new-file page instead. */
+export function EditFile({ org, repo, path, branch = 'main', line, exists = true }: { org: string; repo: string; path: string; branch?: string; line?: number; exists?: boolean }) {
   return (
-    <a class="edit-file" href={editUrl(org, repo, path, branch, line)} target="_blank" rel="noopener">
-      Edit the file <Ext />
+    <a class="edit-file" href={exists ? editUrl(org, repo, path, branch, line) : newFileUrl(org, repo, path, branch)} target="_blank" rel="noopener">
+      {exists ? 'Edit the file directly' : 'Create the file on GitHub'} <Ext />
     </a>
   );
 }
 
-export function Lives({ org, repo, path, branch = 'main' }: { org: string; repo: string; path?: string; branch?: string }) {
+export function Lives({ org, repo, path, branch = 'main', exists = true }: { org: string; repo: string; path?: string; branch?: string; exists?: boolean }) {
+  const where = `${org}/${repo}${path ? `/${path}` : ''}`;
   return (
     <p class="lives">
-      <a href={ghUrl(org, repo, path, branch)} target="_blank" rel="noopener">Lives in {`${org}/${repo}${path ? `/${path}` : ''}`}</a>
+      {path && !exists ? (
+        <a href={newFileUrl(org, repo, path, branch)} target="_blank" rel="noopener">Create {where} on GitHub</a>
+      ) : (
+        <a href={ghUrl(org, repo, path, branch)} target="_blank" rel="noopener">Lives in {where}</a>
+      )}
     </p>
   );
 }
@@ -98,7 +124,12 @@ export function fixHref(p: Problem): string | null {
   return `#${f.screen}${f.entry ? `-${f.entry}` : ''}`;
 }
 
-export function ProblemCards({ list, cohort }: { list: Problem[]; cohort?: boolean }) {
+/**
+ * The problem cards. `cohort` marks the course's faults "(course)" on a semester's page. A
+ * card carrying `semester` (the course overview's roll-up) is tagged with it, the tag linking
+ * to that semester's Dashboard, and its Fix opens that semester's screen.
+ */
+export function ProblemCards({ list, cohort }: { list: TaggedProblem[]; cohort?: boolean }) {
   if (!list.length)
     return (
       <div class="no-problems"><Check /><span>No problems. Everything automatic will happen on time.</span></div>
@@ -106,20 +137,22 @@ export function ProblemCards({ list, cohort }: { list: Problem[]; cohort?: boole
   return (
     <ul class="problems">
       {list.map((p) => {
-        const href = fixHref(p);
+        const fix = fixHref(p);
+        const href = fix && p.semester ? `?cohort=${p.semester.org}${fix}` : fix;
         const [org, repo] = (p.fix?.repo ?? '').split('/');
         return (
-          <li class="problem" key={p.id}>
+          <li class="problem" key={p.semester ? `${p.semester.org}:${p.id}` : p.id}>
             <div class="p-where">
+              {p.semester ? <a class="chip p-tag" href={`?cohort=${p.semester.org}#dashboard`}>{p.semester.label}</a> : null}
               <b>{PROBLEM_AREA[p.stage] ?? p.stage}</b>
               <span>{whereOf(p)}</span>
-              {cohort && p.scope === 'course' ? <span>(course)</span> : null}
+              {(cohort || p.semester) && p.scope === 'course' ? <span>(course)</span> : null}
             </div>
             <p class="p-say">{p.text}</p>
             <p class="p-effect">{p.stops}</p>
             <div class="p-fix">
               {href ? <a class="btn small" href={href}>Fix</a> : null}
-              {p.fix && org && repo ? <EditFile org={org} repo={repo} path={p.fix.path} branch={p.fix.ref ?? (p.fix.screen === 'template' ? 'solution' : 'main')} line={p.fix.line} /> : null}
+              {p.fix && org && repo ? <EditFile org={org} repo={repo} path={p.fix.path} branch={p.fix.ref ?? (p.fix.screen === 'template' ? 'solution' : 'main')} line={p.fix.line ?? undefined} /> : null}
             </div>
           </li>
         );
@@ -173,6 +206,12 @@ export function Rail({
 
 const TONE: Record<string, string> = { done: 'ok', failed: 'fail', previewed: 'dry', skipped: 'skip', nothing_to_do: 'skip' };
 
+/** An operation's mark: done, failed, previewed, or skipped (nothing to do). */
+export function OpMark({ conclusion }: { conclusion: string }) {
+  const tone = TONE[conclusion] ?? 'skip';
+  return <span class={`mark ${tone}`}>{tone === 'ok' ? <Check /> : tone === 'fail' ? <Fail /> : tone === 'dry' ? <Eye /> : <Skip />}</span>;
+}
+
 export function OpsList({
   list,
   now,
@@ -190,12 +229,11 @@ export function OpsList({
   return (
     <ul class="ops">
       {list.map((o) => {
-        const tone = TONE[o.conclusion] ?? 'skip';
         const oc = outcomes[o.op];
         const detail = oc && oc.run_id === o.run_id ? oc : undefined;
         return (
           <li key={o.run_id}>
-            <span class={`mark ${tone}`}>{tone === 'ok' ? <Check /> : tone === 'fail' ? <Fail /> : tone === 'dry' ? <Eye /> : <Skip />}</span>
+            <OpMark conclusion={o.conclusion} />
             <div class="o-head">
               <span><b>{opLabel(o.op)}</b>{o.conclusion === 'failed' ? <span class="failed">FAILED</span> : null}</span>
               <span>{ago(o.finished, now)}</span>

@@ -10,7 +10,7 @@ import { Field, Invalid } from '../forms/Form';
 import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  assignmentKey, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, withNumber, writeDraft,
+  assignmentKey, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft,
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
@@ -19,13 +19,13 @@ import { keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, sched
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
 import { TIMEZONES } from '../tiers/course';
-import { Crumbs, EditFile, Lives, Md, ProblemCards, ghUrl } from '../ui/bits';
+import { EditFile, Lives, Md, ProblemCards, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { Check } from '../ui/icons';
 import { NOTHING_TO_RELEASE, releaseRef } from './Cohort';
 import { NotFound } from './Assignments';
-import { CheckNow, WithStatus, cohortCrumbs, cohortScope, gradingConfig, tzOf, yearOf } from './common';
+import { CheckNow, WithStatus, cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, type Layers } from '../model/cascade';
@@ -33,7 +33,7 @@ import { parse } from 'yaml';
 import { RunRows, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
-import { CONTENT_KINDS, DEFAULT_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
+import { CONTENT_KINDS, EMPTY_ENTRY_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
 import { otherRepos } from './CourseIndex';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
@@ -118,13 +118,19 @@ function FolderCheck({ p, dp, i, onSuggest }: { p: ReadyProps; dp: DeployDraft; 
   return <span class="valid-msg"><Check />Ready; {files.length} file{files.length === 1 ? '' : 's'}{withheld ? `, ${withheld} withheld` : ''}</span>;
 }
 
-/** The kind an entry that names none takes (`schedule_plan.entry_kind`): from where its first copy lands. */
-export function inferredKind(p: ReadyProps, d: ReleaseDraft): string {
+/** The kind an entry that names none takes (`schedule_plan.entry_kind`). A saved entry that names
+ * none and whose copies are as saved has the engine's answer in status; the local rule covers the
+ * rest (a draft): from where its first copy lands. */
+export function inferredKind(p: ReadyProps, d: ReleaseDraft, saved: Draft | null = null): string {
+  if (saved?.kind === 'releases' && !saved.type && deepEqual(saved.deploys, d.deploys)) {
+    const engine = (p.status.releases ?? []).find((r) => r.id === saved.id)?.kind;
+    if (engine) return engine;
+  }
   const first = d.deploys[0];
-  if (!first) return DEFAULT_KIND;
+  if (!first) return EMPTY_ENTRY_KIND;
   const mat = first.repo ? p.files.file(p.course.org, first.repo, MATERIALS_FILE) : null;
   const aliases = (mat?.kind === 'ready' ? readDeclared(mat.text) : null)?.kinds ?? {};
-  return inferKind(landingSection(first, DEFAULT_DEST_REPO), aliases).kind;
+  return inferKind(landingSection(first, DEFAULT_DEST_REPO, aliases), aliases).kind;
 }
 
 /** Every repo a copy may come from: the materials repos, then the course's Other repos. */
@@ -134,10 +140,9 @@ export function sourceRepos(p: ReadyProps, materials: string[]): { materials: st
   return { materials, others: listing.kind === 'ready' ? otherRepos(p.course.org, listing.repos, known).map((r) => r.name) : [] };
 }
 
-function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDraft; set: Setter<ReleaseDraft>; errors: Record<string, string>; repos: string[] }) {
+function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d: ReleaseDraft; set: Setter<ReleaseDraft>; errors: Record<string, string>; repos: string[]; inferred: string }) {
   const tz = tzOf(p.status);
   const setDeploy = (i: number, patch: Partial<DeployDraft>) => set({ deploys: d.deploys.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
-  const inferred = inferredKind(p, d);
   const kinds = [...CONTENT_KINDS, ...(d.type && !CONTENT_KINDS.includes(d.type) ? [d.type] : [])];
   const from = sourceRepos(p, repos);
   return (
@@ -165,7 +170,7 @@ function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDr
                 <div class="field">
                   <label for={`e-d${i}-repo`}>From repo</label>
                   <select id={`e-d${i}-repo`} onChange={(e) => setDeploy(i, { repo: (e.target as HTMLSelectElement).value })}>
-                    <optgroup label="Materials repos">{from.materials.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup>
+                    <optgroup label="Handout materials repos">{from.materials.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup>
                     {from.others.length ? <optgroup label="Other repos">{from.others.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup> : null}
                     {dp.repo && !from.materials.includes(dp.repo) && !from.others.includes(dp.repo) ? <option value={dp.repo} selected>{dp.repo}</option> : null}
                     {!dp.repo ? <option value="" selected>Choose a repo</option> : null}
@@ -393,6 +398,7 @@ function View(p: ReadyProps) {
   const [save, setSave] = useState<SaveState>({ kind: 'idle' });
   const file = useSchedFile(p);
   const sf = file && file !== 'loading' ? file : null;
+  const schedExists = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml').kind !== 'absent';
   const doc = sf?.doc ?? {};
   const sched = useMemo(() => (sf && !sf.error ? parseSchedule(sf.text) : null), [sf?.text]);
   const rows = scheduleRows(status, sched, now, tz);
@@ -407,7 +413,8 @@ function View(p: ReadyProps) {
   const statusKind = Object.fromEntries((status.releases ?? []).map((r) => [r.id, r.kind]));
   const kindOf: KindOf = (k, e) => statusKind[k] ?? (String((e as { kind?: unknown })?.kind ?? '') || 'lecture');
   // A release's kind as the engine will read it: its own, else the one its folder implies.
-  const kindFor = (d: Draft): string | undefined => (d.kind === 'releases' ? d.type || inferredKind(p, d) : undefined);
+  const inferredOf = (d: ReleaseDraft): string => inferredKind(p, d, d.id ? baseOf(d.id) : null);
+  const kindFor = (d: Draft): string | undefined => (d.kind === 'releases' ? d.type || inferredOf(d) : undefined);
   // A new entry shows the number it will get until one is typed (decision 0020).
   const prefill = (d: Draft): Draft => withNumber(d, doc, kindOf, kindFor(d));
   const draftOf = (k: string): Draft | null => (drafts[k] ? prefill(drafts[k]) : baseOf(k));
@@ -460,8 +467,9 @@ function View(p: ReadyProps) {
     for (const k of dirtyKeys) {
       const d = prefill(drafts[k]);
       if (k === 'new' && (d.kind === 'releases' || d.kind === 'assignments' || d.kind === 'events')) {
-        const stem = d.kind === 'releases' ? `${kindFor(d)}${d.number ? `-${d.number}` : ''}` : d.title || 'event';
-        newId = d.kind === 'assignments' ? assignmentKey(d.number) : freshId(doc, d.kind, stem);
+        newId = d.kind === 'assignments' ? assignmentKey(d.number)
+          : d.kind === 'releases' ? (d.number ? freshId(doc, 'releases', `${kindFor(d)}-${d.number}`) : unnumberedId(doc, kindFor(d) ?? 'lecture', d.title))
+          : freshId(doc, d.kind, d.title || 'event');
         writeDraft(y, { ...d, id: newId }, doc);
       } else writeDraft(y, d, doc);
     }
@@ -552,8 +560,9 @@ function View(p: ReadyProps) {
         let next = { ...(d as object), ...patch } as unknown as Draft;
         // A new release holds only a typed number: the proposed one follows its kind (chosen, or
         // inferred from the folder), so a kind or folder change takes that kind's next number.
-        // Readings get no proposal, so their number is always typed and stays.
-        if (key === 'new' && d.kind === 'releases' && next.kind === 'releases' && kindFor(d) !== 'readings' && d.number === nextNumber(doc, kindFor(d)!, kindOf)) next = { ...next, number: undefined };
+        // Typing in the Number field (clearing it included) is the instructor's own number.
+        // Readings get no proposal (`nextNumber` is null), so their number is always typed and stays.
+        if (key === 'new' && d.kind === 'releases' && next.kind === 'releases' && !('number' in patch) && d.number === nextNumber(doc, kindFor(d)!, kindOf)) next = { ...next, number: undefined };
         setDraft(key, next);
       };
       const rel = d.kind === 'releases' && key !== 'new' ? (status.releases ?? []).find((x) => x.id === key) : undefined;
@@ -583,7 +592,7 @@ function View(p: ReadyProps) {
             {probs.length ? <ProblemCards list={probs} /> : null}
             <div class="form">
               {d.kind !== 'semester' && d.kind !== 'archive' ? <div class="field"><span class="label">Identifier</span><div class="ident">{ident}<span>derived, as the student site does</span></div></div> : null}
-              {d.kind === 'releases' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} />
+              {d.kind === 'releases' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} inferred={inferredOf(d)} />
                 : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
                 : d.kind === 'events' ? <EventForm d={d} set={set} errors={errors} />
                 : d.kind === 'semester' ? <SemesterForm d={d} set={set} errors={errors} />
@@ -601,7 +610,7 @@ function View(p: ReadyProps) {
             <SaveLine state={save} />
             <div class="savebar">
               <button class="btn" type="button" disabled={save.kind === 'busy' || !dirty} onClick={() => void doSave()}>Save</button>
-              <EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" line={key !== 'new' && key !== 'semester' ? lineOf(sf.text, key, key === 'archive' ? 0 : 2) : undefined} />
+              <EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} line={key !== 'new' && key !== 'semester' ? lineOf(sf.text, key, key === 'archive' ? 0 : 2) : undefined} />
               {key !== 'new' && key !== 'semester' && key !== 'archive' && blockOf(doc, key) && !removed[key] ? (
                 <button class="btn small quiet" type="button" style="margin-left:auto" onClick={() => { setRemoved({ ...removed, [key]: blockOf(doc, key)! }); if (typeof location !== 'undefined') location.hash = '#schedule'; }}>Remove</button>
               ) : null}
@@ -616,10 +625,9 @@ function View(p: ReadyProps) {
 
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, 'Schedule')} />
       <div class="page-head">
         <div>
-          <h1>Schedule <Hint doc="07-schedule-releases.md">The schedule drives everything automatic: releases, hand outs, collection and the student site’s calendar. Dates are in the semester’s timezone.</Hint></h1>
+          <h2 class="h1">Schedule <Hint doc="07-schedule-releases.md">The schedule drives everything automatic: releases, hand outs, collection and the student site’s calendar. Dates are in the semester’s timezone.</Hint></h2>
           <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {skipped ? `${skipped === 1 ? 'One release' : `${skipped} releases`} will be skipped as it stands.` : 'Every release has its folder.'}</p>
         </div>
         <div class="actions"><CheckNow p={p} label="Check" /><a class="btn outline" href="#schedule-new">Add entry</a></div>
@@ -636,7 +644,7 @@ function View(p: ReadyProps) {
       </div>
       {file === 'loading' ? <p class="footnote" style="margin-bottom:12px">Reading schedule.yml…</p> : null}
       {file === null ? <p class="footnote" style="margin-bottom:12px">There is no schedule.yml to edit.</p> : null}
-      {sf?.error ? <p class="check-line bad" style="margin-bottom:12px"><span>schedule.yml does not parse ({sf.error}); fix it with Edit the file before editing here.</span></p> : null}
+      {sf?.error ? <p class="check-line bad" style="margin-bottom:12px"><span>schedule.yml does not parse ({sf.error}); fix it with Edit the file directly before editing here.</span></p> : null}
       <div class={`sched-layout${sheet ? '' : ' no-entry'}`}>
         <div>
           <div class="filters" role="group" aria-label="Show">
@@ -660,18 +668,18 @@ function View(p: ReadyProps) {
               <div class="savebar"><span class="footnote">See what automation’s next scheduled release run would do.</span><OpOpen def={scheduledPreview(scope)} cls="btn small outline" label="Preview scheduled releases" /></div>
             </div>
           </details>
-          <div style="margin-top:14px"><Lives org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" /></div>
+          <div style="margin-top:14px"><Lives org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} /></div>
         </div>
         {sheet}
       </div>
       {!key ? <SaveLine state={save} /> : null}
-      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved({}); setSave({ kind: 'idle' }); }} onSave={() => void doSave()} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
+      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved({}); setSave({ kind: 'idle' }); }} onSave={() => void doSave()} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
     </>
   );
 }
 
 export function ScheduleScreen(p: CohortProps) {
-  return <WithStatus props={p} title="Schedule" crumbs={cohortCrumbs(p, 'Schedule')}>{(r) => <View {...r} />}</WithStatus>;
+  return <WithStatus props={p} title="Schedule">{(r) => <View {...r} />}</WithStatus>;
 }
 
 // --------------------------------------------------------------------------- S11
@@ -686,10 +694,9 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   if (!ref) {
     return (
       <>
-        <Crumbs items={cohortCrumbs(p, ident, [{ t: 'Schedule', href: '#schedule' }])} />
         <div class="page-head">
           <div>
-            <h1><b>{ident}</b>: {rel.title}</h1>
+            <h2 class="h1"><b>{ident}</b>: {rel.title}</h2>
             <p class="lede">{NOTHING_TO_RELEASE}.</p>
           </div>
           <div class="actions"><a class="btn" href={`#schedule-${rel.id}`}>Edit entry</a></div>
@@ -702,14 +709,13 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const dest = rel.dest?.repo || DEFAULT_DEST_REPO, destPath = rel.dest?.path || ref.source.path;
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, ident, [{ t: 'Schedule', href: '#schedule' }])} />
       <div class="page-head">
         <div>
-          <h1><b>{ident}</b>: {rel.title} <Hint doc="08-release-materials-to-cohort.md">{st === 'released'
+          <h2 class="h1"><b>{ident}</b>: {rel.title} <Hint doc="08-release-materials-to-cohort.md">{st === 'released'
             ? 'Edits students should see: push to the semester copy, or release again after fixing the course copy. Edits future semesters should keep: keep for future semesters.'
             : st === 'will_be_skipped' ? (needsANumber(status, rel.id) ? 'Automation will skip this until it has a number.' : 'Automation will skip this until the folder exists.')
             : st === 'late' ? 'Reason codes tell you whether the source, the schedule or the scheduler was at fault.'
-            : 'Nothing to do; it goes out at the scheduled time. You can release it early.'}</Hint></h1>
+            : 'Nothing to do; it goes out at the scheduled time. You can release it early.'}</Hint></h2>
           <p class="lede"><span class={`chip ${st === 'will_be_skipped' ? 'bad' : st === 'released' ? 'ok' : ''}`}>{RELEASE_WORD[st]}</span>{fmtWhen(rel.when, tz, year)}</p>
         </div>
         <div class="actions"><a class="btn quiet" href={`#schedule-${rel.id}`}>Edit entry</a></div>
@@ -718,8 +724,8 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         <section class="panel section">
           <h2>From and to</h2>
           <dl class="kv">
-            <dt>From</dt><dd><a href={ghUrl(p.course.org, ref.source.repo, ref.source.path, 'main').replace('/blob/', '/tree/')} target="_blank" rel="noopener">{p.course.org}/{ref.source.repo}/{ref.source.path}</a></dd>
-            <dt>To</dt><dd><a href={ghUrl(p.cohort.org, dest, destPath, 'main').replace('/blob/', '/tree/')} target="_blank" rel="noopener">{p.cohort.org}/{dest}/{destPath}</a></dd>
+            <dt>From</dt><dd><a href={ghUrl(p.course.org, ref.source.repo, ref.source.path, 'main', 'tree')} target="_blank" rel="noopener">{p.course.org}/{ref.source.repo}/{ref.source.path}</a></dd>
+            <dt>To</dt><dd><a href={ghUrl(p.cohort.org, dest, destPath, 'main', 'tree')} target="_blank" rel="noopener">{p.cohort.org}/{dest}/{destPath}</a></dd>
             <dt>On the student site</dt><dd>{rel.show_on_site ? 'Shown' : 'Hidden'}{rel.tbc ? ', TBC' : ''}</dd>
           </dl>
         </section>
@@ -744,7 +750,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
 
 export function ReleaseScreen(p: CohortProps) {
   return (
-    <WithStatus props={p} title="Release" crumbs={cohortCrumbs(p, 'Release', [{ t: 'Schedule', href: '#schedule' }])}>
+    <WithStatus props={p} title="Release">
       {(r) => {
         const rel = (r.status.releases ?? []).find((x) => x.id === p.entry);
         return rel ? <ReleaseDetail {...r} rel={rel} /> : <NotFound what={`No release called ${p.entry} in the schedule.`} back="#schedule" />;

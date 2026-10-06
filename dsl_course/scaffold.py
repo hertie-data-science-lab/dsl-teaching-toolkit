@@ -44,6 +44,7 @@ from .course import (
     SOLUTION_BRANCH,
     SOLUTION_DIR,
     STARTER_FORMATS,
+    STARTER_MODES,
     SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
     UPSTREAM_BRANCH,
@@ -56,6 +57,7 @@ from .derive import (
     SOLUTION_CHUNK_OPT,
     TEX_BEGIN_SOLUTION,
     TEX_END_SOLUTION,
+    default_starter,
 )
 from .discovery import (
     TEMPLATE_TOPIC,
@@ -263,9 +265,16 @@ _HAND_MARKED = "hand-marked: a drop box is one repo for the whole semester"
 
 
 def _grading_config(
-    *, title: str, kind: str, submit_via: str, formats: list[str], autograde: bool
+    *,
+    title: str,
+    kind: str,
+    submit_via: str,
+    formats: list[str],
+    autograde: bool,
+    starter: str = "",
 ) -> str:
-    """`grading_config.yml` as New assignment writes it."""
+    """`grading_config.yml` as New assignment writes it. An empty `starter` takes decision
+    0028 rule 1's default, derived when tests are on."""
     # A drop box is hand-marked, and the parse says so: all three per-unit stages are
     # refused for `submit_via: shared_dropbox_repo` (`grades._cross_check`), because each
     # of fifty students would have the whole semester's work cloned, run and archived under
@@ -297,6 +306,7 @@ def _grading_config(
             "ipynb | py | rmd | qmd | latex | none - the starter stubs; the first is the "
             "runnable one",
         ),
+        starter_line(starter or default_starter(autograde and not marked_by_hand)),
         "",
         _QUESTIONS_STUB.rstrip(),
         "",
@@ -324,6 +334,16 @@ def _grading_config(
         ),
     ]
     return "\n".join(lines) + "\n"
+
+
+def starter_line(starter: str) -> str:
+    """The `starter:` line (decision 0028), as New assignment and the migration write it."""
+    return _setting(
+        "starter",
+        starter,
+        "derived (Derive builds main from the marked solution) | handwritten (you "
+        "write main yourself)",
+    )
 
 
 _HIDDEN_TEST_PY = """\
@@ -1203,6 +1223,7 @@ def scaffold_assignment(
     *,
     submit_via: str = "assignment_repo",
     autograde: bool = False,
+    starter: str = "",
 ) -> int:
     """Create `assignment-<name>` (`template_repo`) and write the assignment's own
     definition into it (decision 0014). No number and no semester: an assignment's
@@ -1218,7 +1239,10 @@ def scaffold_assignment(
     `formats` is the exception: it picks which starter stubs are seeded on `main`, one
     each with its model answer on `solution`, and nothing else. The grader reads whatever
     is in the repo, so a student who works in a notebook on a `py` assignment still
-    grades; an empty list seeds no starter at all."""
+    grades; an empty list seeds no starter at all.
+
+    `starter` is how `main` is written from then on (decision 0028): `derived` or
+    `handwritten`; empty takes rule 1's default, derived when tests are on."""
     title = " ".join(name.split())
     repo = template_repo(title)
     if not repo:
@@ -1337,6 +1361,7 @@ def scaffold_assignment(
                 submit_via=submit_via,
                 formats=formats,
                 autograde=autograde,
+                starter=starter,
             )
         )
         # Hidden tests ONLY when the assignment asked to be autograded. Seeded next to a
@@ -1604,6 +1629,13 @@ def main() -> int:
         help="true = seed a tests/ stub on the solution branch and run it at the late "
         "cutoff; the count is shown to graders and never to a student",
     )
+    pa.add_argument(
+        "--starter",
+        choices=["", *STARTER_MODES],
+        default="",
+        help="derived = Derive builds main from the marked solution; handwritten = you "
+        "write main yourself. Default: derived when --autograde is true, else handwritten",
+    )
     ps = sub.add_parser("site")
     ps.add_argument("--org", required=True)
     args = parser.parse_args()
@@ -1645,6 +1677,7 @@ def main() -> int:
             args.kind,
             submit_via=args.submit_via,
             autograde=args.autograde == "true",
+            starter=args.starter,
         )
     except RuntimeError as exc:
         log_err(str(exc))

@@ -1,6 +1,8 @@
 // S13 the operation panel: a non-modal drawer that minimises to a bar, and the buttons
 // that open it. Preview is the filled button; a gated op's verb unlocks only after this
-// session previewed it. The outcome sentence is the engine's summary, verbatim.
+// session previewed it. The outcome sentence is the engine's summary, verbatim. Stop
+// cancels the workflow run; the drawer is resized by its bottom-left grip; once a run
+// ends, "See on GitHub" opens the op's `target`.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
@@ -43,8 +45,17 @@ function runLink(def: OpDef, runId: number | null | undefined, url?: string) {
   return <p class="footnote">Ran in {def.courseOrg}/.github as run #{runId}. <a href={href} target="_blank" rel="noopener">Open run</a></p>;
 }
 
-export function OutcomeView({ result, def, url }: { result: Result; def: OpDef; url?: string }) {
+export function OutcomeView({ result, def, url, stopped = false }: { result: Result; def: OpDef; url?: string; stopped?: boolean }) {
   const o: Outcome | null = result.outcome;
+  if (!o && stopped)
+    return (
+      <div class="outcome">
+        <Mark tone="skip" />
+        <p class="outcome-sentence">Stopped.</p>
+        <p class="footnote">It stopped before it finished. Anything it had already done stays done; the run on GitHub shows how far it got.</p>
+        {url ? <p class="footnote"><a href={url} target="_blank" rel="noopener">Open run</a></p> : null}
+      </div>
+    );
   if (!o)
     return (
       <div class="outcome">
@@ -58,14 +69,12 @@ export function OutcomeView({ result, def, url }: { result: Result; def: OpDef; 
   const reasons = o.reasons ?? [], details = o.details ?? [], block = o.block ?? '';
   return (
     <div class="outcome">
+      {stopped ? <p class="op-confirm">Stopped, but too late: it had already finished.</p> : null}
       <Mark tone={tone} />
       <p class="outcome-sentence">{o.summary}</p>
       {counts.length ? <div class="outcome-counts">{counts.map(([k, v]) => <div><div class="n">{v}</div><div class="l">{k.replace(/_/g, ' ')}</div></div>)}</div> : null}
-      {result.leaked.length ? (
-        <p class="check-line bad"><span>The public record of this run names {result.leaked.length === 1 ? 'a person' : `${result.leaked.length} people`}. Tell the lab: the console reports it so it can be fixed.</span></p>
-      ) : null}
       {block ? <Block text={block} /> : null}
-      {reasons.length || details.length || result.people.length ? (
+      {reasons.length || details.length ? (
         <details class="fold reasons">
           <summary>Details</summary>
           <div class="fold-body">
@@ -75,12 +84,6 @@ export function OutcomeView({ result, def, url }: { result: Result; def: OpDef; 
               ))}</tbody></table>
             ) : null}
             {details.length ? <ul class="outcome-list">{details.map((d) => <li>{d}</li>)}</ul> : null}
-            {result.people.length ? (
-              <>
-                <p class="footnote">Per person (private; not in the public run log):</p>
-                <table><tbody>{result.people.map((p) => <tr><td class="mono">{p.handle}</td><td>{p.text}</td></tr>)}</tbody></table>
-              </>
-            ) : null}
           </div>
         </details>
       ) : null}
@@ -93,7 +96,8 @@ function Steps({ c }: { c: Current }) {
   const steps = c.progress?.steps ?? [];
   return (
     <>
-      <div class="op-mode">{c.running === 'preview' ? <><Eye /><span>Preview: nothing changes</span></> : <span>{c.def.running}</span>}</div>
+      <div class="op-mode">{c.stopping ? <span>Stopping…</span> : c.running === 'preview' ? <><Eye /><span>Preview: nothing changes</span></> : <span>{c.def.running}</span>}</div>
+      {c.error ? <p class="check-line bad"><span>{c.error}</span></p> : null}
       <ol class="steps">
         {!c.handle ? <li class="running"><span class="sm" /><span class="st-t">Asking GitHub to start it</span></li> : null}
         {c.handle && !steps.length ? <li class="running"><span class="sm" /><span class="st-t">Waiting for GitHub to start it</span><span class="st-d">Usually a few seconds</span></li> : null}
@@ -105,7 +109,7 @@ function Steps({ c }: { c: Current }) {
           </li>
         ))}
       </ol>
-      <p class="footnote">Closing this panel does not stop it; it carries on in the bar at the bottom.</p>
+      <p class="footnote">{c.stopping ? 'GitHub is stopping the run. Anything already done stays done.' : 'Closing this panel does not stop it; it carries on in the bar at the bottom.'}</p>
     </>
   );
 }
@@ -137,12 +141,70 @@ function Options({ c, ops }: { c: Current; ops: OpsSession }) {
   );
 }
 
+/** The drawer's size while its grip is dragged: null until the first drag (the CSS default). */
+type Size = { w: number; h: number } | null;
+const MIN_W = 320, MIN_H = 240;
+
+const STEP = 24; // px per arrow key press
+
+/** A size clamped between a usable minimum and the viewport (the drawer sits `top` px down). */
+function clamp(w: number, h: number, top: number): { w: number; h: number } {
+  return {
+    w: Math.round(Math.min(Math.max(w, MIN_W), window.innerWidth - 32)),
+    h: Math.round(Math.min(Math.max(h, MIN_H), window.innerHeight - top - 16)),
+  };
+}
+
+/**
+ * The bottom-left grip: the drawer is anchored top-right, so dragging left widens it and
+ * dragging down makes it taller. The pointer is captured for the drag; the arrow keys
+ * resize it too (left/right the width, up/down the height).
+ */
+function Grip({ box, set }: { box: { current: HTMLElement | null }; set: (s: Size) => void }) {
+  const down = (e: PointerEvent) => {
+    const el = box.current;
+    const grip = e.currentTarget as HTMLElement;
+    if (!el) return;
+    e.preventDefault();
+    const r = el.getBoundingClientRect();
+    const x0 = e.clientX, y0 = e.clientY;
+    grip.setPointerCapture?.(e.pointerId);
+    const move = (m: PointerEvent) => set(clamp(r.width + (x0 - m.clientX), r.height + (m.clientY - y0), r.top));
+    const end = (u: PointerEvent) => {
+      grip.releasePointerCapture?.(u.pointerId);
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', end);
+      grip.removeEventListener('pointercancel', end);
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', end);
+    grip.addEventListener('pointercancel', end);
+  };
+  const key = (e: KeyboardEvent) => {
+    const el = box.current;
+    const d = { ArrowLeft: [STEP, 0], ArrowRight: [-STEP, 0], ArrowDown: [0, STEP], ArrowUp: [0, -STEP] }[e.key];
+    if (!el || !d) return;
+    e.preventDefault();
+    const r = el.getBoundingClientRect();
+    set(clamp(r.width + d[0], r.height + d[1], r.top));
+  };
+  return <span class="drawer-grip" role="separator" tabindex={0} aria-label="Resize the panel: drag, or use the arrow keys" title="Drag to resize" onPointerDown={down} onKeyDown={key} />;
+}
+
+/** Where "See on GitHub" goes for this run, or null when the op names no place. */
+export function targetOf(def: OpDef, values: Record<string, unknown>): string | null {
+  if (!def.target) return null;
+  return typeof def.target === 'function' ? def.target(values) : def.target;
+}
+
 /** The panel and its minimised bar. Renders nothing when no operation is open. */
 export function OpPanel() {
   const env = useEnv();
   const ops = env?.ops;
   const c = ops?.current.value ?? null;
   const head = useRef<HTMLHeadingElement>(null);
+  const box = useRef<HTMLElement>(null);
+  const [size, setSize] = useState<Size>(null);
   useEffect(() => {
     if (c && !c.min) head.current?.focus();
   }, [c?.def.key, c?.def.op, c?.min]);
@@ -154,7 +216,7 @@ export function OpPanel() {
   if (!ops || !c) return null;
   const d = c.def;
   if (c.min) {
-    const text = c.phase === 'running' ? `${d.running}…` : c.result?.outcome?.summary ?? (c.dry ? `Preview ready: ${d.title}` : d.title);
+    const text = c.phase === 'running' ? (c.stopping ? 'Stopping…' : `${d.running}…`) : c.stopped ? 'Stopped' : c.result?.outcome?.summary ?? (c.dry ? `Preview ready: ${d.title}` : d.title);
     return (
       <div class="opbar" role="status">
         {c.phase === 'running' ? <span class="spin" aria-hidden="true" /> : null}
@@ -172,12 +234,13 @@ export function OpPanel() {
     foot = <div class="actions"><button class="btn quiet" type="button" onClick={() => ops.close()}>Close</button></div>;
   } else if (c.phase === 'running') {
     body = <Steps c={c} />;
-    foot = <div class="actions"><button class="btn small quiet" type="button" onClick={() => void ops.cancel()}>{d.cancel}</button></div>;
+    foot = <div class="actions"><button class="btn small quiet" type="button" disabled={c.stopping} onClick={() => void ops.cancel()}>{c.stopping ? 'Stopping…' : d.cancel}</button></div>;
   } else if (c.phase === 'done' && c.result) {
-    body = <><OutcomeView result={c.result} def={d} url={c.progress?.htmlUrl} /><p class="footnote">Written to <a href="#operations">All operations</a>.</p></>;
+    const target = targetOf(d, values);
+    body = <><OutcomeView result={c.result} def={d} url={c.progress?.htmlUrl} stopped={c.stopped} /><p class="footnote">Written to <a href="#operations">All operations</a>.</p></>;
     foot = (
       <div class="actions">
-        {(d.after ?? []).map((a) => <a class="btn outline" href={a.href}>{a.label}</a>)}
+        {target ? <a class="btn outline" href={target} target="_blank" rel="noopener">See on GitHub</a> : null}
         <button class="btn quiet" type="button" onClick={() => ops.close()}>Close</button>
       </div>
     );
@@ -190,7 +253,7 @@ export function OpPanel() {
         {d.confirm ? <p class="op-confirm">{d.confirm}</p> : null}
         <Options c={c} ops={ops} />
         {c.error ? <p class="check-line bad"><span>{c.error}</span></p> : null}
-        {c.dry ? <OutcomeView result={c.dry} def={d} url={c.progress?.htmlUrl} /> : null}
+        {c.dry ? <OutcomeView result={c.dry} def={d} url={c.progress?.htmlUrl} stopped={c.stopped} /> : null}
       </>
     );
     const verb = (
@@ -204,7 +267,7 @@ export function OpPanel() {
       ) : (
         <>
           <div class="actions">
-            <button class="btn" type="button" disabled={invalid} onClick={() => void ops.start('preview')}>{c.dry ? 'Preview again' : 'Preview'}</button>
+            <button class="btn" type="button" disabled={invalid} onClick={() => void ops.start('preview')}>{d.previewLabel ?? (c.dry ? 'Preview again' : 'Preview')}</button>
             {d.previewProposed ? <Prop /> : null}
             {verb}
           </div>
@@ -213,7 +276,7 @@ export function OpPanel() {
       );
   }
   return (
-    <aside class="drawer" aria-labelledby="drawer-title">
+    <aside class={`drawer${size ? ' sized' : ''}`} aria-labelledby="drawer-title" ref={box} style={size ? { width: `${size.w}px`, height: `${size.h}px` } : undefined}>
       <div class="drawer-head">
         <div>
           <div class="eyebrow">{d.name}, {d.where}{d.proposed ? <Prop /> : null}</div>
@@ -229,6 +292,7 @@ export function OpPanel() {
         {body}
       </div>
       <div class="drawer-foot">{foot}</div>
+      <Grip box={box} set={setSize} />
     </aside>
   );
 }
@@ -237,7 +301,7 @@ export function OpPanel() {
  * The buttons a screen shows for an operation: Preview (filled) and the verb, which a gated
  * op keeps disabled until this session has previewed it; a direct op shows only the verb.
  */
-export function OpButtons({ def, small, label, previewLabel = 'Preview', verbCls, hint = true }: { def: OpDef; small?: boolean; label?: string; previewLabel?: string; verbCls?: string; hint?: boolean }) {
+export function OpButtons({ def, small, label, previewLabel = def.previewLabel ?? 'Preview', verbCls, hint = true }: { def: OpDef; small?: boolean; label?: string; previewLabel?: string; verbCls?: string; hint?: boolean }) {
   const env = useEnv();
   const ops = env?.ops;
   const mode = modeOf(def.op);

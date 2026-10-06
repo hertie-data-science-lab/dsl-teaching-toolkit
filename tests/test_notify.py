@@ -20,7 +20,14 @@ import pytest
 import yaml
 from conftest import source_fault
 
-from dsl_course import config_digest, mailer, notify, source_digest, team_formation
+from dsl_course import (
+    config_digest,
+    discovery,
+    mailer,
+    notify,
+    source_digest,
+    team_formation,
+)
 from dsl_course.schedule import Severity, SourceFault
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -150,7 +157,7 @@ def wired(monkeypatch):
             ),
         )
         monkeypatch.setattr(notify.ghcli, "bot_login", lambda: "dsl-bot")
-        monkeypatch.setattr(notify, "course_name_of", lambda org: "Course Name")
+        monkeypatch.setattr(discovery, "course_name_of", lambda org: "Course Name")
         monkeypatch.setattr(notify.mailer, "maintainer_address", lambda: maintainer)
         monkeypatch.setattr(
             notify.mailer,
@@ -1224,7 +1231,7 @@ def test_a_dsl_course_yml_nobody_can_parse_still_sends_its_mail(
     def unparseable(org):
         raise yaml.YAMLError("bad")
 
-    monkeypatch.setattr(notify, "course_name_of", unparseable)
+    monkeypatch.setattr(discovery, "course_name_of", unparseable)
     routing = notify.route_course(COURSE, [_course_fault()], NOW)
     assert _mail_course([_course_fault()], routing).addressees == 0
     assert sent.one["subject"].startswith(f"[{COURSE}] dsl-course.yml has 1 entry")

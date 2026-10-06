@@ -10,8 +10,26 @@ import { POLICY } from './policy';
 export const MATERIALS_TOPIC = rules.topic;
 export const MATERIALS_FILE = rules.file;
 export const DEFAULT_SYLLABUS = rules.default_syllabus;
+/** The kind of a folder no alias names: supporting files (decision 0031 rule 10). */
 export const DEFAULT_KIND = rules.default_kind;
+/** Supporting files: released, never a row or a page. */
+export const ASSETS_KIND = rules.assets_kind;
+/** The kind of a release entry that names none and copies nothing yet (`schedule_plan.entry_kind`). */
+export const EMPTY_ENTRY_KIND = rules.empty_entry_kind;
+/** The kinds a folder may be set to (decision 0031 rule 10), in row order: the rest are schedule kinds. */
+export const FOLDER_KINDS: string[] = rules.folder_kinds;
 const ALIASES: Record<string, string> = rules.aliases;
+/** The line a `.releaseignore` carries when somebody looked and chose to withhold nothing. */
+export const REVIEWED_MARK: string = rules.reviewed_mark;
+
+/** A withhold list as it is saved: one that withholds nothing gets the reviewed mark, so the
+ * checklist counts it as reviewed (`status_json._reviewed`). */
+export function withMark(text: string): string {
+  const lines = text.split('\n').map((l) => l.trim());
+  if (lines.includes(REVIEWED_MARK) || lines.some((l) => l && !l.startsWith('#'))) return text;
+  const body = text.replace(/\n*$/, '');
+  return body ? `${body}\n${REVIEWED_MARK}\n` : `${REVIEWED_MARK}\n`;
+}
 
 /** The kinds a release entry or a folder may be: the policy's non-system kinds, in its order. */
 export const CONTENT_KINDS: string[] = POLICY.kinds.filter((k) => !k.system).map((k) => k.key);
@@ -53,8 +71,11 @@ export function inferKind(section: string, aliases: Record<string, string> = {})
   return kind ? { kind, named: true } : { kind: DEFAULT_KIND, named: false };
 }
 
-/** `schedule_plan.deploy_section`: the top folder a copy lands in, or its repo when it lands at the root. */
-export function landingSection(copy: { folder: string; path: string; dest: string }, defaultRepo: string): string {
+/** `schedule_plan.deploy_section`: the top folder a copy lands in. A copy into the repo's root is
+ * one name: that name is the section when it names a kind (the repo's `aliases`, else a built-in
+ * one), else the destination repo is. */
+export function landingSection(copy: { folder: string; path: string; dest: string }, defaultRepo: string, aliases: Record<string, string> = {}): string {
   const dest = (copy.path || copy.folder).replace(/^\/+|\/+$/g, '');
-  return dest.includes('/') ? dest.split('/')[0] : copy.dest || defaultRepo;
+  const head = dest.split('/')[0];
+  return dest.includes('/') || (head && aliasKind(head, aliases)) ? head : copy.dest || defaultRepo;
 }

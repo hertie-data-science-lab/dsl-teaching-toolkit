@@ -1,6 +1,7 @@
 // Showing a released file from a private materials repo inside the console, with no public
 // copy: pure functions over bytes and text, so they run (and are tested) without a browser.
-// Imports nothing, so a plain `node` can load this file for the CSP check in headless Chrome.
+// Imports only the base64 pair from github/client (itself import-free), so the CSP check can
+// still load it on its own in headless Chrome.
 //
 // HTML (decks included): the page's policy (script-src 'self', frame-src 'none', no
 // 'unsafe-eval') is inherited by every document the console makes, whether an about:srcdoc
@@ -11,6 +12,8 @@
 // scripts (reveal.js, Quarto) is inlined into ONE self-contained file, scripts included,
 // which the deck viewer (`deck.html`, its own policy; model/deckTab.ts) runs, or which
 // downloads and runs from disk.
+
+import { encodeBase64, toBase64 } from '../github/client';
 
 export type ViewKind = 'markdown' | 'notebook' | 'html' | 'pdf' | 'image' | 'text' | 'other';
 
@@ -33,12 +36,6 @@ export const mimeOf = (path: string) => MIME[extOf(path)] ?? 'application/octet-
 
 export function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-export function toBase64(bytes: Uint8Array): string {
-  let bin = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(bin);
 }
 
 export const utf8 = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
@@ -165,7 +162,7 @@ function outputHtml(o: Output): string {
   if (o.output_type === 'error') return `<pre class="nb-out err">${esc(noAnsi([`${o.ename}: ${o.evalue}`, ...(o.traceback ?? [])].join('\n')))}</pre>`;
   const d = o.data ?? {};
   for (const t of ['image/png', 'image/jpeg', 'image/gif']) if (d[t]) return `<img class="nb-img" alt="" src="data:${t};base64,${joined(d[t]).replace(/[^A-Za-z0-9+/=]/g, '')}">`;
-  if (d['image/svg+xml']) return `<img class="nb-img" alt="" src="data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(joined(d['image/svg+xml']))))}">`;
+  if (d['image/svg+xml']) return `<img class="nb-img" alt="" src="data:image/svg+xml;base64,${encodeBase64(joined(d['image/svg+xml']))}">`;
   if (d['text/plain']) return `<pre class="nb-out">${esc(noAnsi(joined(d['text/plain'])))}</pre>`;
   if (d['text/html']) return '<p class="footnote">(An HTML output, not shown here.)</p>';
   return '';

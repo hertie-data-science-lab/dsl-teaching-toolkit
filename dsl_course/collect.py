@@ -85,7 +85,7 @@ with `testthat` (see docs/10) without this module learning a word of R.
 Usage:
     python3 -m dsl_course.collect \\
         --course-org COURSE --course-source-repo assignment-linear-regression \\
-        --semester-org SEMESTER --deadline 2026-10-15 [--group] [--preview]
+        --semester-org SEMESTER [--assignment KEY] [--preview]
 """
 
 from __future__ import annotations
@@ -1809,6 +1809,7 @@ def sync_sheet(
     spec = sheet_spec(sched, key, slug, gspec, is_group)
     entry = sched.assignments.get(key)
     due = entry.due_datetime if entry else None
+    cutoff = schedule.grading_cutoff_datetime(sched, key)
 
     targets: list[Target] = []
     if units is None:
@@ -1843,7 +1844,7 @@ def sync_sheet(
         slug,
         old_text,
         now,
-        schedule.grading_cutoff_datetime(sched, key),
+        cutoff,
     )
     try:
         on_disk = grades.parse_sheet(old_text) if old_text else {}
@@ -1911,7 +1912,7 @@ def sync_sheet(
             semester_org,
             listing or {},
             targets,
-            (schedule.grading_cutoff_datetime(sched, key) or now).isoformat(),
+            (cutoff or now).isoformat(),
             previous,
             due,
         )
@@ -3342,12 +3343,11 @@ def collect(
     course_org: str,
     template: str,
     semester_org: str,
-    deadline: str | None = None,
     dry_run: bool = False,
     scheduled: bool = False,
     slug: str = "",
 ) -> int:
-    """Examine every submission for `template` as of `deadline` - the hidden tests where
+    """Examine every submission for `template` as of its grading cutoff - the hidden tests where
     the assignment asked to be autograded, the completion check where it asked for one -
     archiving what each run produced and recording the machine facts into the semester's
     grading sheet (`info.autograde`, `info.completion`). Idempotent.
@@ -3391,31 +3391,17 @@ def collect(
         return 1
     # SSOT: the grading pin is the assignment's late CUTOFF (due + `late_window_days`);
     # fall back to today - in the semester's own timezone, like every other date here -
-    # only if unscheduled.
+    # only if unscheduled. Pinned to an explicit instant in the SEMESTER's timezone, once,
+    # here, so every consumer below (the commits API `until=`, `git log --before`, the log
+    # lines) reads the same moment instead of each defaulting to the runner's UTC.
     at = schedule.grading_cutoff_datetime(sched, key)
-    deadline = (
-        deadline or (at.isoformat() if at else None) or _today_in_semester_tz(sched)
+    cutoff = local_deadline(
+        at.isoformat() if at else _today_in_semester_tz(sched), sched.timezone
     )
-    # Pin the deadline to an explicit instant in the SEMESTER's timezone, once, here: a bare
-    # `--deadline 2026-11-15` means the end of the 15th where the students are, and every
-    # consumer below (the commits API `until=`, `git log --before`, the log lines)
-    # then reads the same moment instead of each defaulting to the runner's UTC.
-    #
-    # It also validates (raises on a non-ISO string). `git log --before` would
-    # otherwise take an unparseable `--deadline` as an approxidate that silently matches
-    # NOTHING, zeroing every submission in the semester without a word.
-    try:
-        deadline = local_deadline(deadline, sched.timezone).isoformat()
-    except ValueError:
-        log_err(
-            f"--deadline '{deadline}' is not an ISO date/datetime - refusing to grade "
-            f"(git would silently match no commits and zero the whole semester)"
-        )
-        return 1
+    deadline = cutoff.isoformat()
 
     # group-vs-individual: the template's grading_config.yml `type:`, else individual.
     is_group = gspec.is_group
-    cutoff = local_deadline(deadline, sched.timezone)
 
     # The grader's reading copy, when the assignment asks for one - BEFORE every autograde
     # exit below, and deliberately so. The fences it filters on delimit the questions a

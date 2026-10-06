@@ -1,80 +1,228 @@
-// Your setup (`#setup`, beside Help): the folder a person keeps the course repos in and the
-// editor the Open button uses (decision 0017). Kept per login in this browser only
-// (`model/prefs.ts`), never sent anywhere. The login is known from sign-in, so there is no
-// handle field; instructors push to the course repos, so there is no fork step. Nothing is
-// stored until Save, and the line under each field says what is.
+// Profile (`#profile`, from the avatar; decisions 0017, 0021 rule 3, 0024 rule 6, 0027): the
+// root folder a person keeps the course repos in, each course's folder inside it (or one of
+// its own), and the editor the Open button uses. One Profile for instructors and students.
+// Kept per login in this browser only (`model/prefs.ts`), never sent anywhere, and kept
+// across sign-out. The login is known from sign-in, so there is no handle field. A saved
+// setup shows as text with a pencil; the form shows while editing or while no folder is
+// saved, and nothing is stored until Save. Where the browser allows it, the folder check
+// (decision 0023) shows in both; elsewhere a footnote says where it would.
 
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { courseFolder, folderExample, platformOf, schemeOk, type Editor, type Setup } from '../model/open';
+import { canCheckFolders, folderHandle, forgetFolder, pickFolder } from '../model/localFolder';
+import { courseFolder, folderExample, lastSegment, platformOf, schemeOk, withOverride, type Editor, type Setup } from '../model/open';
 import { saveYourSetup, yourSetup } from '../model/prefs';
 
-const EDITOR_WORD: Record<Editor, string> = { vscode: 'VS Code', desktop: 'GitHub Desktop', other: 'another editor' };
+const EDITOR_WORD: Record<Editor, string> = { vscode: 'VS Code', desktop: 'GitHub Desktop', other: 'Another editor' };
 
 type Draft = Pick<Setup, 'folder' | 'editor'> & { scheme: string };
 
 const draftOf = (s: Setup | null): Draft => ({ folder: s?.folder ?? '', editor: s?.editor ?? 'vscode', scheme: s?.scheme ?? '' });
 const same = (a: Draft, b: Draft) => a.folder.trim() === b.folder.trim() && a.editor === b.editor && (a.editor !== 'other' || a.scheme.trim() === b.scheme.trim());
 
-export function SetupScreen({ org }: { org?: string }) {
+/** The picked repos folder: pick it, see its name, forget it. Chrome and Edge only. */
+function FolderCheck({ login, typed, org, courses, saved }: { login: string; typed: string; org?: string; courses: ProfileCourse[]; saved: Setup | null }) {
+  const [name, setName] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void folderHandle(login).then((h) => live && setName(h?.name ?? null));
+    return () => {
+      live = false;
+    };
+  }, [login]);
+  const pick = async () => {
+    const h = await pickFolder(login);
+    if (h) setName(h.name);
+  };
+  const forget = async () => {
+    await forgetFolder(login);
+    setName(null);
+  };
+  const end = lastSegment(typed).toLowerCase();
+  const picked = name?.toLowerCase();
+  // Picking a course's own folder (under the typed one, or the one Profile names for it) is a
+  // setup the folder check supports.
+  const courseEnds = [...courses.map((c) => c.org), ...(org ? [org] : [])].map((o) => lastSegment(courseFolder(saved, o)).toLowerCase());
+  const differs = !!end && !!picked && end !== picked && !courseEnds.includes(picked);
+  return (
+    <div class="field folder-check">
+      {name ? (
+        <>
+          <p class="saved">Checking: <code>{name}</code> <button class="btn small quiet" type="button" onClick={forget}>Forget</button></p>
+          {differs ? <p class="invalid-msg">The folder you picked is <code>{name}</code>; the path above ends in <code>{lastSegment(typed)}</code>.</p> : null}
+        </>
+      ) : (
+        <>
+          <button class="btn outline" type="button" onClick={pick}>Let the console see which repos are cloned</button>
+          <p class="hint">Chrome and Edge only. The console only checks which folders exist; it reads nothing.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** A course in the person's list: its org and the name it shows under. */
+export interface ProfileCourse {
+  org: string;
+  name: string;
+}
+
+/** One course's folder, and "Use a different folder" to give it one of its own. */
+// While the root folder is being edited the row only shows: its own folder is saved against the saved root.
+function CourseRow({ course, setup, editable, onSave }: { course: ProfileCourse; setup: Setup | null; editable: boolean; onSave: (org: string, folder: string) => void }) {
+  const folder = courseFolder(setup, course.org);
+  const [draft, setDraft] = useState<string | null>(null);
+  const id = `ys-course-${course.org}`;
+  if (draft === null) {
+    return (
+      <li>
+        <b>{course.name}</b>
+        {folder ? <code>{folder}</code> : <span class="footnote">Set the folder above.</span>}
+        {editable ? <button class="textlink" type="button" onClick={() => setDraft(folder)}>Use a different folder</button> : null}
+      </li>
+    );
+  }
+  return (
+    <li>
+      <label for={id}><b>{course.name}</b></label>
+      <input type="text" id={id} value={draft} spellcheck={false} autocomplete="off" autocapitalize="off" onInput={(e) => setDraft((e.target as HTMLInputElement).value)} />
+      <span class="actions">
+        <button class="btn small" type="button" onClick={() => (onSave(course.org, draft), setDraft(null))}>Save</button>
+        <button class="textlink" type="button" onClick={() => setDraft(null)}>Cancel</button>
+      </span>
+      <p class="hint">Leave it empty to use the folder above.</p>
+    </li>
+  );
+}
+
+/** "Your courses": each course's folder, resolved from `root` (the saved folder, or the one being typed). */
+function CourseFolders({ courses, setup, root, editable, onSave }: { courses: ProfileCourse[]; setup: Setup | null; root: string; editable: boolean; onSave: (org: string, folder: string) => void }) {
+  if (!courses.length) return null;
+  const shown: Setup = { ...(setup ?? { editor: 'vscode' }), folder: root };
+  return (
+    <div class="field course-folders">
+      <h2 class="label">Your courses</h2>
+      <ul class="plain-list">{courses.map((c) => <CourseRow key={c.org} course={c} setup={shown} editable={editable} onSave={onSave} />)}</ul>
+    </div>
+  );
+}
+
+const Pencil = () => (
+  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5l2.5 2.5L5.5 13H3v-2.5z" /><path d="M9.5 4l2.5 2.5" /></svg>
+);
+
+/** `courses`: the person's courses and semesters, for their folders (the App passes them). */
+export function SetupScreen({ org, courses = [] }: { org?: string; courses?: ProfileCourse[] }) {
   const env = useEnv();
   const login = env?.user.login ?? '';
   const [saved, setSaved] = useState<Setup | null>(() => yourSetup(login));
   const [draft, setDraft] = useState<Draft>(() => draftOf(saved));
   const [done, setDone] = useState<'stored' | 'kept' | null>(null);
+  // A setup counts as saved once it names a folder: the Open button's remembered choice alone
+  // stores a setup without one.
+  const [editing, setEditing] = useState(() => !saved?.folder.trim());
+  const pencil = useRef<HTMLButtonElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const moved = useRef(false);
+  useEffect(() => {
+    if (!moved.current) return;
+    moved.current = false;
+    (editing ? folderInput : pencil).current?.focus();
+  }, [editing]);
   const example = folderExample(platformOf());
   const badScheme = draft.editor === 'other' && !schemeOk(draft.scheme);
   const change = (d: Partial<Draft>) => {
     setDraft({ ...draft, ...d });
     setDone(null);
   };
+  const switchTo = (edit: boolean) => {
+    moved.current = true;
+    setEditing(edit);
+  };
+  const edit = () => {
+    setDraft(draftOf(saved));
+    setDone(null);
+    switchTo(true);
+  };
+  const cancel = () => {
+    setDraft(draftOf(saved));
+    switchTo(false);
+  };
   const save = () => {
     // A new folder or editor makes the editor the Open button's default again.
     const keepLast = saved?.lastOpen && saved.folder === draft.folder.trim() && saved.editor === draft.editor;
     const next: Setup = { ...(keepLast ? { lastOpen: saved.lastOpen } : {}), folder: draft.folder.trim(), editor: draft.editor };
     if (draft.editor === 'other') next.scheme = draft.scheme.trim();
+    if (saved?.overrides) next.overrides = saved.overrides;
+    setDone(saveYourSetup(login, next) ? 'stored' : 'kept');
+    setSaved(next);
+    if (next.folder) switchTo(false);
+  };
+  const status = done === 'stored' ? <span class="valid-msg" role="status">Saved.</span> : done === 'kept' ? <span class="footnote" role="status">This browser does not keep it: it lasts until you reload.</span> : null;
+  const shown = editing ? draft.folder : saved?.folder ?? '';
+  const view = !editing && !!saved;
+  const check = shown.trim() && canCheckFolders() ? <FolderCheck login={login} typed={shown} org={org} courses={courses} saved={saved} /> : null;
+  // A course's own folder is stored at once, beside whatever else is saved.
+  const saveCourse = (course: string, folder: string) => {
+    const next = withOverride(saved ?? { folder: '', editor: 'vscode' }, course, folder);
     setDone(saveYourSetup(login, next) ? 'stored' : 'kept');
     setSaved(next);
   };
-  const where = courseFolder(draft.folder || example, org ?? '');
+  const folders = <CourseFolders courses={courses} setup={saved} root={shown} editable={!editing} onSave={saveCourse} />;
   return (
     <>
       <div class="page-head">
-        <div><h1>Your setup</h1><p class="lede">Where the Open button finds the course repos on your computer.</p></div>
+        <div><h1>Profile</h1></div>
       </div>
-      <section class="panel section">
-        <div class="setup-form">
-          <div class="field">
-            <label for="ys-folder">Folder for your course repos</label>
-            <input type="text" id="ys-folder" value={draft.folder} placeholder={example} spellcheck={false} autocomplete="off" autocapitalize="off"
-              onInput={(e) => change({ folder: (e.target as HTMLInputElement).value })} />
-            <p class="hint">{org ? <>Each course gets a folder inside it. This course’s repos go in <code>{where}</code>.</> : 'Each course gets a folder inside it, named after its organisation.'}</p>
-            <p class="saved">{saved?.folder ? <>Stored: <code>{saved.folder}</code></> : 'No folder stored: Open offers to clone instead.'}</p>
-          </div>
-          <fieldset class="field">
-            <legend class="label">Editor</legend>
-            <div class="choices" role="radiogroup" aria-label="Editor">
-              <label class="choice"><input type="radio" name="ys-editor" checked={draft.editor === 'vscode'} onChange={() => change({ editor: 'vscode' })} /><b>VS Code</b><span>Opens the repo’s folder, or clones the repo when there is no folder yet.</span></label>
-              <label class="choice"><input type="radio" name="ys-editor" checked={draft.editor === 'desktop'} onChange={() => change({ editor: 'desktop' })} /><b>GitHub Desktop</b><span>Opens the repo, and clones it the first time.</span></label>
-              <label class="choice"><input type="radio" name="ys-editor" checked={draft.editor === 'other'} onChange={() => change({ editor: 'other' })} /><b>Another editor</b><span>Its link, with <code>{'{path}'}</code> where the folder goes.</span></label>
+      {/* One section and one folder check for both views, so the check does not remount (and
+          flash its pick button) on Edit, Save or Cancel. */}
+      <section class={`panel section${view ? ' setup-view' : ''}`}>
+        {view && saved ? (
+          <>
+            <button ref={pencil} class="btn small quiet setup-edit" type="button" aria-label="Edit" title="Edit" onClick={edit}><Pencil /></button>
+            <dl class="kv">
+              <dt>Folder for your course repos</dt><dd><code>{saved.folder}</code></dd>
+              <dt>Editor</dt><dd>{EDITOR_WORD[saved.editor]}{saved.editor === 'other' && saved.scheme ? <>, <code>{saved.scheme}</code></> : null}</dd>
+            </dl>
+            {folders}
+          </>
+        ) : (
+          <div class="setup-form">
+            <div class="field">
+              <label for="ys-folder">Folder for your course repos</label>
+              <input ref={folderInput} type="text" id="ys-folder" value={draft.folder} placeholder={example} spellcheck={false} autocomplete="off" autocapitalize="off"
+                onInput={(e) => change({ folder: (e.target as HTMLInputElement).value })} />
+              <p class="hint">Each course gets a folder inside it, named after its organisation.</p>
             </div>
-            {draft.editor === 'other' ? (
-              <div class="scheme">
-                <label class="sr" for="ys-scheme">Your editor’s link</label>
-                <input type="text" id="ys-scheme" value={draft.scheme} placeholder="myeditor://open/{path}" spellcheck={false} autocomplete="off" autocapitalize="off"
-                  aria-invalid={draft.scheme.trim() && badScheme ? true : undefined} onInput={(e) => change({ scheme: (e.target as HTMLInputElement).value })} />
-                <p class={draft.scheme.trim() && badScheme ? 'invalid-msg' : 'hint'}>Put <code>{'{path}'}</code> after a slash or a colon, as in <code>{'vscode://file/{path}'}</code>.</p>
+            {folders}
+            <fieldset class="field">
+              <legend class="label">Editor</legend>
+              <div class="choices" role="radiogroup" aria-label="Editor">
+                <label class="choice"><input type="radio" name="ys-editor" checked={draft.editor === 'vscode'} onChange={() => change({ editor: 'vscode' })} /><b>VS Code</b><span>Opens the repo’s folder, or clones the repo when there is no folder yet.</span></label>
+                <label class="choice"><input type="radio" name="ys-editor" checked={draft.editor === 'desktop'} onChange={() => change({ editor: 'desktop' })} /><b>GitHub Desktop</b><span>Opens the repo, and clones it the first time.</span></label>
+                <label class="choice"><input type="radio" name="ys-editor" checked={draft.editor === 'other'} onChange={() => change({ editor: 'other' })} /><b>Another editor</b><span>Its link, with <code>{'{path}'}</code> where the folder goes.</span></label>
               </div>
-            ) : null}
-            <p class="saved">{saved ? <>Stored: {EDITOR_WORD[saved.editor]}{saved.editor === 'other' && saved.scheme ? <>, <code>{saved.scheme}</code></> : null}</> : 'Nothing stored: VS Code is used.'}</p>
-          </fieldset>
-          <div class="actions">
-            <button class="btn" type="button" disabled={badScheme || (!!saved && same(draft, draftOf(saved)))} onClick={save}>Save your setup</button>
-            {done === 'stored' ? <span class="valid-msg" role="status">Saved.</span> : done === 'kept' ? <span class="footnote" role="status">This browser does not keep it: it lasts until you reload.</span> : null}
+              {draft.editor === 'other' ? (
+                <div class="scheme">
+                  <label class="sr" for="ys-scheme">Your editor’s link</label>
+                  <input type="text" id="ys-scheme" value={draft.scheme} placeholder="myeditor://open/{path}" spellcheck={false} autocomplete="off" autocapitalize="off"
+                    aria-invalid={draft.scheme.trim() && badScheme ? true : undefined} onInput={(e) => change({ scheme: (e.target as HTMLInputElement).value })} />
+                  <p class={draft.scheme.trim() && badScheme ? 'invalid-msg' : 'hint'}>Put <code>{'{path}'}</code> after a slash or a colon, as in <code>{'vscode://file/{path}'}</code>.</p>
+                </div>
+              ) : null}
+            </fieldset>
+            <div class="actions">
+              <button class="btn" type="button" disabled={badScheme || (!!saved && same(draft, draftOf(saved)))} onClick={save}>Save</button>
+              {saved?.folder.trim() ? <button class="textlink" type="button" onClick={cancel}>Cancel</button> : null}
+              {status}
+            </div>
           </div>
-        </div>
+        )}
+        {check}
+        {view && status ? <p>{status}</p> : null}
       </section>
-      <p class="footnote">Kept in this browser only. Signing out forgets it.</p>
+      <p class="footnote">Kept in this browser, for your GitHub login.</p>
+      {canCheckFolders() ? null : <p class="footnote">In Chrome or Edge the console can see which repos you have cloned and offer only the step that applies.</p>}
     </>
   );
 }

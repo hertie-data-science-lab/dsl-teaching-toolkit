@@ -66,6 +66,7 @@ from datetime import datetime, timedelta
 from itertools import pairwise
 
 from .course import SCOPED_RUN_TITLE
+from .faults import parse_moment
 from .ghcli import BUDGET_STOP_BELOW, Budget, gh_json
 from .issues import close_issues_titled, find_issue, upsert_issue
 from .log import log, log_err, log_step, log_withheld
@@ -221,19 +222,6 @@ class LateItem:
     late: timedelta
 
 
-def _moment(raw: object) -> datetime | None:
-    """A GitHub API timestamp (`2026-09-04T09:12:00Z`) as a tz-aware datetime, or None.
-
-    Unparseable is None rather than an exception: one malformed row in a run listing must
-    not take the whole check out, and the fields it would have dated are all optional."""
-    if not raw:
-        return None
-    try:
-        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
 def read_state(body: str) -> dict:
     """The state a cadence issue's body carries, or `{}` for a body this module did not
     write. The marker is an HTML comment, so it is invisible in the rendered issue - the
@@ -268,11 +256,11 @@ def evaluate(now: datetime, runs: list[dict], own_run_id: str | None) -> Verdict
     own_started: datetime | None = None
     for run in runs:
         if str(run.get("id")) == str(own_run_id):
-            own_started = _moment(run.get("created_at")) or own_started
+            own_started = parse_moment(run.get("created_at")) or own_started
             continue
         if str(run.get("display_title") or "").startswith(SCOPED_RUN_TITLE):
             continue
-        at = _moment(run.get("created_at"))
+        at = parse_moment(run.get("created_at"))
         if at is None:
             continue
         event = str(run.get("event") or "")

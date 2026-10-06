@@ -13,6 +13,6 @@ include emits none of its own either.
 {%- for link in include.lecture.links -%}
 {%- assign title = link.name | prepend: "Download " -%}
 {%- unless forloop.first %}{{ " " }}{%- endunless -%}
-[{% include file_link.html name=link.name url=link.url view_url=link.view_url title=title inline=true %}]
+[{% include file_link.html name=link.name url=link.url title=title inline=true %}]
 {%- endfor -%}
 {%- endif -%}

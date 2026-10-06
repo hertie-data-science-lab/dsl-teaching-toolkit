@@ -512,8 +512,7 @@ def workflow_jobs(rendered: str) -> dict:
 
 def entry_link_rows(rendered: str) -> list[dict]:
     """Every link of a rendered session entry's `links:` block, whole - each a mapping of
-    whatever fields the emitter wrote (`url`, `name`, `section`, and `view_url` only where
-    the file has a hosted copy).
+    whatever fields the emitter wrote (`url`, `name`, `section`).
 
     Parsed rather than substring-matched: a link is four fields now, so an assertion
     written against the rendered bytes would be asserting the emitter's line order as much

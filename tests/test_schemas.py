@@ -38,6 +38,13 @@ def test_file_schema_enums_are_the_engine_constants():
     assert _enum(listed, "items") == list(course.FORMATS)
     # The template's keys: never a run setting, which is the semester's.
     assert set(spec["properties"]) == set(grades.TEMPLATE_KEYS)
+    # Decision 0028: an enum with no default - a template without it reads by its markers.
+    assert _enum(spec, "properties", "starter") == list(course.STARTER_MODES)
+    assert "default" not in spec["properties"]["starter"]
+    assert grades.parse_grading_spec("starter: handwritten\n").starter == "handwritten"
+    assert grades.parse_grading_spec("formats: [py]\n").starter is None
+    bad = grades.parse_grading_spec("starter: maybe\n")
+    assert bad.starter is None and any("starter" in d for d in bad.dropped)
     assert not set(spec["properties"]) & set(settings.RUN_KEYS)
     instance = schemas.assignments_schema()["properties"]
     assert set(instance["defaults"]["properties"]) == set(settings.RUN_KEYS)
@@ -97,7 +104,7 @@ def test_every_op_has_a_schema_and_a_doc(name):
 # contracts.md section 2 and 3, as written there.
 CONTRACT_OUTCOME = {
     "schema": "dsl.outcome/1",
-    "op": "release.now",
+    "op": "release.entry",
     "run_id": 4821,
     "actor": "prof",
     "preview": False,
@@ -117,7 +124,6 @@ CONTRACT_OUTCOME = {
             },
         }
     ],
-    "people": [{"handle": "octocat", "text": "No repo: not joined yet."}],
     "started": "2026-09-23T09:00:03Z",
     "finished": "2026-09-23T09:01:10Z",
 }
@@ -238,7 +244,7 @@ CONTRACT_STATUS = {
     "operations": [
         {
             "run_id": 4821,
-            "op": "release.now",
+            "op": "release.entry",
             "conclusion": "done",
             "summary": "Released Session 3.",
             "finished": "2026-09-23T09:01:10Z",

@@ -1,21 +1,27 @@
 // Where a course repo opens: on GitHub, on github.dev, in VS Code, in GitHub Desktop, in
-// another editor by its link scheme, or from a clone command. One set of rules for the
-// student Set up screen and the instructors' Open button (decision 0017). The local folder
-// and editor come from Your setup (`model/prefs.ts`); nothing here reads storage.
+// another editor by its link scheme. One Open button for both
+// roles (decisions 0017, 0027): instructors on their course screens, students on Set up. The
+// folder and editor come from Profile (`model/prefs.ts`); nothing here reads storage.
 
-export type OpenChoice = 'github' | 'githubdev' | 'vscode' | 'desktop' | 'editor' | 'clone';
-export const OPEN_CHOICES: OpenChoice[] = ['github', 'githubdev', 'vscode', 'desktop', 'editor', 'clone'];
+import { ghUrl } from '../ui/bits';
+
+// `vscode` opens the local folder (or, with no folder set up, clones); `vsclone` clones with a
+// folder set up, beside it (decision 0023).
+export type OpenChoice = 'github' | 'githubdev' | 'vscode' | 'desktop' | 'editor' | 'vsclone';
+export const OPEN_CHOICES: OpenChoice[] = ['github', 'githubdev', 'vscode', 'desktop', 'editor', 'vsclone'];
 
 export type Editor = 'vscode' | 'desktop' | 'other';
 export const EDITORS: Editor[] = ['vscode', 'desktop', 'other'];
 
-/** Your setup: the folder the course repos live under, the editor, and the Open button's last choice. */
+/** Profile: the root folder the course repos live under, the editor, and the Open button's last choice. */
 export interface Setup {
   folder: string;
   editor: Editor;
   /** Another editor's link, with `{path}` where the folder goes (`myeditor://open/{path}`). */
   scheme?: string;
   lastOpen?: OpenChoice;
+  /** A course's own folder instead of `<folder>/<org>`, by lower-case org (decision 0027 rule 1). */
+  overrides?: Record<string, string>;
 }
 
 /** A repo to open, and optionally a branch and a path inside it. */
@@ -24,6 +30,11 @@ export interface RepoRef {
   repo: string;
   branch?: string;
   path?: string;
+  /**
+   * The semester whose folder the clone goes in, set on the student screens: a student's fork
+   * sits with its semester's repos. Unset, the folder is `org`'s course folder.
+   */
+  home?: string;
 }
 
 /** `folder` + `name`, with the folder's own separator (a Windows folder keeps its backslashes). */
@@ -48,63 +59,125 @@ export const cloneCommand = (url: string, folder: string, name: string) => `git 
 export const schemeOk = (scheme: string) => /[/:]\{path\}/.test(scheme.trim());
 
 /**
- * The folder a course's repos go in: a folder of the course org's name inside Your setup's
- * folder, so two courses with a `materials` repo each do not share one clone. A folder that
- * already ends in the org's name is used as it is. Empty when no folder is set up.
+ * `<root>/<org>`: a folder of the course org's name inside the root folder, so two courses
+ * with a `materials` repo each do not share one clone. A root that already ends in the org's
+ * name is used as it is. Empty when no root is set.
  */
-export function courseFolder(folder: string, org: string): string {
-  const f = folder.trim().replace(/[\\/]+$/, '');
+export function orgFolder(root: string, org: string): string {
+  const f = root.trim().replace(/[\\/]+$/, '');
   if (!f) return '';
-  const last = f.split(/[\\/]/).pop() ?? '';
-  return last.toLowerCase() === org.toLowerCase() ? f : joinPath(f, org);
+  return lastSegment(f).toLowerCase() === org.toLowerCase() ? f : joinPath(f, org);
 }
+
+/** The course's own folder, if Profile names one. */
+export const overrideOf = (setup: Setup | null, org: string) => (setup?.overrides?.[org.toLowerCase()] ?? '').trim().replace(/[\\/]+$/, '');
+
+/** The folder a course's repos go in: its override, else `<root>/<org>`. Empty when neither is set. */
+export const courseFolder = (setup: Setup | null, org: string) => overrideOf(setup, org) || orgFolder(setup?.folder ?? '', org);
+
+/** `setup` with `org`'s override set to `folder`, or dropped when `folder` is empty or the default. */
+export function withOverride(setup: Setup, org: string, folder: string): Setup {
+  const overrides = { ...setup.overrides };
+  delete overrides[org.toLowerCase()];
+  const f = folder.trim().replace(/[\\/]+$/, '');
+  if (f && f !== orgFolder(setup.folder, org)) overrides[org.toLowerCase()] = f;
+  const next: Setup = { ...setup };
+  if (Object.keys(overrides).length) next.overrides = overrides;
+  else delete next.overrides;
+  return next;
+}
+
+/** The last segment of a typed folder (`orgFolder`'s test, and the picked folder's name to compare). */
+export const lastSegment = (folder: string) => folder.trim().replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
 
 /** `/tree/<branch>/<path>` inside a repo on github.com or github.dev; nothing for the repo's root on its default branch. */
 const inRepo = (r: RepoRef) => (r.path || r.branch ? `/tree/${r.branch ?? 'main'}${r.path ? `/${r.path.split('/').filter(Boolean).map(encodeURIComponent).join('/')}` : ''}` : '');
 
-export const repoUrl = (r: RepoRef) => `https://github.com/${r.org}/${r.repo}`;
+export const repoUrl = (r: RepoRef) => ghUrl(r.org, r.repo);
 
-/** One entry of the Open menu: a link, or a command to copy. */
+/** One entry of the Open menu. */
 export interface OpenItem {
   choice: OpenChoice;
   label: string;
-  href?: string;
-  /** The text to copy, for the clone command. */
-  copy?: string;
+  href: string;
   /** Where it sits in the menu. */
   group: 'online' | 'local';
+  /** Which `?` the menu gives it: VS Code's clone or its open (decision 0024 rule 7). */
+  hint?: 'clone' | 'open';
 }
 
-export const SETUP_HREF = '#setup';
+/**
+ * Profile, about the org the person came from, so its folder check knows it: `?course=` for
+ * a course, `?cohort=` for a semester (the student screens), which the App maps to its course.
+ */
+export const profileHref = (org: string, semester = false) => `?${semester ? 'cohort' : 'course'}=${encodeURIComponent(org)}#profile`;
 
-/** Every way to open `r` with this setup, in menu order. */
-export function openItems(r: RepoRef, setup: Setup | null): OpenItem[] {
+/**
+ * Every way to open `r` with this setup, in menu order. With a folder set up, VS Code both
+ * opens it and clones (decision 0023); `cloned` (from the folder check) keeps only the one
+ * that applies: Open when the repo is there, Clone when it is not. Undefined keeps both.
+ */
+export function openItems(r: RepoRef, setup: Setup | null, cloned?: boolean): OpenItem[] {
   const url = repoUrl(r);
-  const parent = courseFolder(setup?.folder ?? '', r.org);
+  const parent = courseFolder(setup, r.home ?? r.org);
   const local = parent ? joinPath(parent, r.repo) : '';
   const inside = local ? (r.path ?? '').split('/').filter(Boolean).reduce(joinPath, local) : '';
+  const vsClone = `vscode://vscode.git/clone?url=${encodeURIComponent(url)}${r.branch ? `&ref=${encodeURIComponent(r.branch)}` : ''}`;
+  const canOpen = !!local && cloned !== false;
+  const canClone = !local || cloned !== true;
   const items: OpenItem[] = [
     { choice: 'github', label: 'Open on GitHub', href: `${url}${inRepo(r)}`, group: 'online' },
     { choice: 'githubdev', label: 'Open on github.dev', href: `https://github.dev/${r.org}/${r.repo}${inRepo(r)}`, group: 'online' },
-    local
-      ? { choice: 'vscode', label: 'Open in VS Code', href: vscodeFolder(inside), group: 'local' }
-      : { choice: 'vscode', label: 'Clone in VS Code', href: `vscode://vscode.git/clone?url=${encodeURIComponent(url)}${r.branch ? `&ref=${encodeURIComponent(r.branch)}` : ''}`, group: 'local' },
-    { choice: 'desktop', label: 'Open in GitHub Desktop', href: `x-github-client://openRepo/${url}${r.branch ? `?branch=${encodeURIComponent(r.branch)}` : ''}`, group: 'local' },
   ];
+  // Clone before Open: the order the person goes through them (decision 0024 rule 7).
+  if (!local) items.push({ choice: 'vscode', label: 'Clone in VS Code', href: vsClone, group: 'local', hint: 'clone' });
+  if (local && canClone) items.push({ choice: 'vsclone', label: 'Clone in VS Code', href: vsClone, group: 'local', hint: 'clone' });
+  if (canOpen) items.push({ choice: 'vscode', label: 'Open in VS Code', href: vscodeFolder(inside), group: 'local', hint: 'open' });
+  items.push({ choice: 'desktop', label: 'Open in GitHub Desktop', href: `x-github-client://openRepo/${url}${r.branch ? `?branch=${encodeURIComponent(r.branch)}` : ''}`, group: 'local' });
   const scheme = setup?.editor === 'other' ? (setup.scheme ?? '').trim() : '';
   // Another editor opens a folder or nothing: with no folder set up, the menu's last line
   // ("Set up a local folder") is its way in.
-  if (local && schemeOk(scheme)) items.push({ choice: 'editor', label: 'Open in your editor', href: scheme.replace('{path}', urlPath(inside)), group: 'local' });
-  items.push({ choice: 'clone', label: 'Copy the clone command', copy: cloneCommand(url, parent, r.repo), group: 'local' });
+  if (canOpen && schemeOk(scheme)) items.push({ choice: 'editor', label: 'Open in your editor', href: scheme.replace('{path}', urlPath(inside)), group: 'local' });
   return items;
 }
 
+/** The clone command for `r` into its course folder, which Clone's `?` gives (decisions 0024 rule 7, 0027 rule 2). */
+export const repoCloneCommand = (r: RepoRef, setup: Setup | null) => cloneCommand(repoUrl(r), courseFolder(setup, r.home ?? r.org), r.repo);
+
 const EDITOR_CHOICE: Record<Editor, OpenChoice> = { vscode: 'vscode', desktop: 'desktop', other: 'editor' };
 
-/** The button's own action: the last choice, else the editor once a folder is set up, else GitHub. */
-export function defaultItem(items: OpenItem[], setup: Setup | null): OpenItem {
+const CLONES: OpenChoice[] = ['vsclone', 'desktop'];
+const OPENS: OpenChoice[] = ['vscode', 'desktop', 'editor'];
+
+/**
+ * The button's own action (decision 0027 rule 2). A remembered web choice (GitHub,
+ * github.dev) stays the action in every state. Where the folder check tells the repo is
+ * not there: a clone, the remembered one if it clones, else the same tool's (a VS Code open
+ * becomes a VS Code clone), else the editor's (GitHub Desktop clones on its own; anything
+ * else clones in VS Code). Where it is there: an open, likewise. Where it cannot tell: the
+ * last choice, else the editor once a folder is set up, else GitHub.
+ */
+export function defaultItem(items: OpenItem[], setup: Setup | null, cloned?: boolean): OpenItem {
   const find = (c: OpenChoice | undefined) => items.find((i) => i.choice === c);
-  return find(setup?.lastOpen) ?? (setup?.folder.trim() ? find(EDITOR_CHOICE[setup.editor]) : undefined) ?? items[0];
+  const opener = setup ? EDITOR_CHOICE[setup.editor] : 'vscode';
+  const last = setup?.lastOpen;
+  if (last === 'github' || last === 'githubdev') return find(last) ?? items[0];
+  const vs = last === 'vscode' || last === 'vsclone';
+  if (cloned === false) return find(last && CLONES.includes(last) ? last : vs ? 'vsclone' : opener === 'desktop' ? 'desktop' : 'vsclone') ?? find('vscode') ?? items[0];
+  if (cloned === true) return find(last && OPENS.includes(last) ? last : vs ? 'vscode' : opener) ?? find('vscode') ?? items[0];
+  // A folder is set up for this repo's course when VS Code can open it.
+  const folder = items.some((i) => i.hint === 'open');
+  const want = last ?? (folder ? opener : undefined);
+  return find(want) ?? (want === 'vsclone' ? find('vscode') : undefined) ?? (folder ? find(opener) : undefined) ?? items[0];
+}
+
+/**
+ * The words on the button: Clone or Open when the folder check tells, "Open or clone" when
+ * it cannot and the action is on this computer; a web page's own label.
+ */
+export function mainLabel(item: OpenItem, cloned?: boolean): string {
+  if (item.group === 'online') return item.label;
+  return cloned === false ? 'Clone' : cloned === true ? 'Open' : 'Open or clone';
 }
 
 /** Whether a link leaves for a web page (a new tab) rather than an app's own scheme (no empty tab left behind). */

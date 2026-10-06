@@ -6,7 +6,7 @@ import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { GitHubClient, encodeBase64, type TreeEntry } from '../src/github/client';
-import { ASSET_LIMIT, showFile } from '../src/model/materials';
+import { ASSET_LIMIT, forgetShown, showFile } from '../src/model/materials';
 import { CELL_BREAK, htmlRefs, inlineHtml, notebookCells, notebookHtml, resolve, splitRendered } from '../src/model/viewer';
 import { AskedList, JoinCourseForm, TeamForm, issueState, joinCourseUrl, joinTeamUrl } from '../src/screens/StudentJoin';
 import { MaterialsTree, ShownView, materialHref, splitEntry } from '../src/screens/StudentMaterials';
@@ -121,6 +121,18 @@ describe('opening a file', () => {
     const f = new FakeGitHub().on('GET', /\/contents\/big\.html$/, fileBody('big.html', html)).on('GET', /\/contents\/big_files\//, (r) => json(fileBody(r.url, 'png')));
     const s = await showFile(client(f), ORG, REPO, t[0], t);
     expect(s.kind === 'page' && s.missing).toBe(5);
+  });
+
+  it('renders a markdown file once per session: reopening it costs no call', async () => {
+    const f = fake();
+    const c = client(f);
+    const renders = () => f.seen.filter((x) => x.url.endsWith('/markdown')).length;
+    const first = await showFile(c, ORG, REPO, entry('readings/01/READINGS.md'), tree);
+    expect(await showFile(c, ORG, REPO, entry('readings/01/READINGS.md'), tree)).toEqual(first);
+    expect(renders()).toBe(1);
+    forgetShown(c); // sign-out
+    await showFile(c, ORG, REPO, entry('readings/01/READINGS.md'), tree);
+    expect(renders()).toBe(2);
   });
 
   it('renders markdown with GitHub’s renderer, and a notebook’s markdown cells in one call', async () => {

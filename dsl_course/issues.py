@@ -206,25 +206,6 @@ class Upserted(NamedTuple):
     url: str | None = None
 
 
-class Titled(NamedTuple):
-    """Both halves of one exact title: the issue that is open, and the newest one that is
-    closed.
-
-    For a caller whose state lives in the body it last wrote (see `source_digest`). When
-    somebody closes that issue by hand nothing has actually been fixed, and re-opening
-    from a blank slate reports every standing fault as new and notifies about all of it
-    again - so it wants the closed body too."""
-
-    open: Issue | None
-    last_closed: Issue | None
-
-
-def find_issues(repo: str, title: str) -> Titled:
-    """The open issue with this exact title, and the newest closed one - which costs a
-    search of its own, so a caller that may not need it asks `find_closed` when it does."""
-    return Titled(find_issue(repo, title), find_closed(repo, title))
-
-
 class _Unasked:
     """The `existing=` default: the caller has not looked.
 

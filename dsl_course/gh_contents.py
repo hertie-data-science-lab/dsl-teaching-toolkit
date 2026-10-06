@@ -384,6 +384,27 @@ def file_exists(org: str, repo: str, path: str) -> bool:
     return code == 0
 
 
+def top_level(org: str, repo: str, folder: str = "") -> dict[str, str]:
+    """`{name: type}` ("file", "dir", ...) for the entries at the root of `org/repo`'s
+    default branch (or of its `folder`) - ONE Contents read, not recursive, so no repo is
+    too large for it. `{}` for a repo or folder that is not there or has no commits yet;
+    any other failure raises, get_file_content's rule."""
+    code, out = _read(
+        org,
+        repo,
+        "api",
+        f"repos/{org}/{repo}/contents/{folder.strip('/')}",
+        "--jq",
+        ".[] | [.name, .type] | @tsv",
+    )
+    if code != 0:
+        if is_missing_resource(out) or "HTTP 409" in out:
+            return {}
+        raise RuntimeError(f"could not list the top of {org}/{repo}: {out[:200]}")
+    entries = (line.split("\t") for line in out.splitlines() if "\t" in line)
+    return {name: kind for name, kind in entries}
+
+
 def blob_sha(content: bytes) -> str:
     """Git's blob hash of `content` - what the Contents API reports as a file's `.sha`.
 
@@ -1042,7 +1063,9 @@ def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | Non
     None means the file is genuinely absent (a 404) - nothing else. Any other failure to
     read it (no permission, rate limit, network) raises, because callers treat None as
     "not configured yet" and would otherwise read a transient API failure as an empty
-    roster/schedule/registry and cheerfully do nothing. Same rule as repo_blob_shas."""
+    roster/schedule/registry and cheerfully do nothing. Same rule as repo_blob_shas.
+    A file over 1 MiB, which the Contents API sends no content for, is read by its blob
+    (`_whole`), so a blank answer is a genuinely empty file."""
     url = f"repos/{org}/{repo}/contents/{path}"
     if ref:
         url += f"?ref={ref}"
@@ -1053,7 +1076,13 @@ def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | Non
         if is_missing_resource(out):
             return None
         raise RuntimeError(f"could not read {org}/{repo}/{path}: {out[:200]}")
-    return _decoded(out)
+    if text := _decoded(out):
+        return text
+    # Blank: an empty file, or one over 1 MiB that the Contents API sent no content for.
+    code, sha = _read(org, repo, "api", url, "--jq", ".sha")
+    if code != 0:
+        raise RuntimeError(f"could not read {org}/{repo}/{path}: {sha[:200]}")
+    return _whole(org, repo, path, "", sha.strip())
 
 
 def _peek(org: str, repo: str, *args: str) -> tuple[str, str] | None:
@@ -1071,8 +1100,7 @@ def _peek(org: str, repo: str, *args: str) -> tuple[str, str] | None:
     else:
         sha, _, encoded = out.partition("\n")
     if not encoded.strip():
-        # A file over 1 MB comes back with no content: nothing here says what it holds.
-        return None
+        return None  # empty, or over 1 MiB: the caller's own read settles which
     return _decoded(encoded), sha or blob_sha(base64.b64decode(encoded))
 
 
@@ -1104,7 +1132,76 @@ def get_file_with_sha(
             return None
         raise RuntimeError(f"could not read {org}/{repo}/{path}: {out[:200]}")
     sha, _, encoded = out.partition("\n")
-    return _decoded(encoded), sha
+    return _whole(org, repo, path, _decoded(encoded), sha), sha
+
+
+# Bounded: each attempt costs a read and a write, and a file being edited faster than that
+# is a person at a keyboard, not a race worth grinding against.
+WRITE_ATTEMPTS = 3
+
+
+def put_file_as_read(
+    org: str,
+    repo: str,
+    path: str,
+    body: str,
+    sha: str | None,
+    rebuild: Callable[[str | None], str | None],
+    message: str | Callable[[], str],
+    attempts: int = WRITE_ATTEMPTS,
+) -> str | None:
+    """Write `body` over `path` at `sha`, the blob sha the text it was built from was READ
+    at, without clobbering a concurrent edit. Returns the text AS COMMITTED (or already
+    there), or None when no attempt was accepted.
+
+    `put_file`'s ordinary path re-reads the sha immediately before writing, so the write
+    succeeds however stale its content is: a Join binding committed while Send codes was
+    running was silently reverted. Sending the read sha makes GitHub refuse a write onto a
+    file that has moved on - and `""` (a file that was absent) refuses one that has been
+    created since. On a refusal the file is read again and `rebuild(fresh text, or None
+    when it is gone)` re-applies only THIS run's change: it returns the new text, the
+    fresh text unchanged when nothing is left to write (`put_file` then writes nothing),
+    or None to give up. `message` may be a callable, for a commit message that counts
+    what the latest `rebuild` decided."""
+    for attempt in range(1, attempts + 1):
+        said = message() if callable(message) else message
+        if put_file(org, repo, path, body.encode(), said, expected_sha=sha):
+            return body
+        if attempt == attempts:
+            break
+        log_err(
+            f"{path} in {org}/{repo} could not be written as read - re-reading and "
+            f"retrying ({attempt}/{attempts - 1})"
+        )
+        fresh = get_file_with_sha(org, repo, path)
+        text, sha = fresh if fresh is not None else (None, "")
+        rebuilt = rebuild(text)
+        if rebuilt is None:
+            break
+        body = rebuilt
+    return None
+
+
+_EMPTY_BLOB = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"  # blob_sha(b"")
+
+
+def _whole(org: str, repo: str, path: str, text: str, sha: str) -> str:
+    """`text`, or - when it is blank but the file's blob is not the empty one - the
+    file's text read through the blobs API.
+
+    The Contents API inlines nothing over 1 MiB: it answers `content: ""` on a 200, so a
+    plot-heavy notebook read as an EMPTY file, and a caller writing it back wrote nothing
+    over the original. Every reader here goes through this, so only a 404 reads as
+    nothing; a blob that cannot be read raises, and one that is not UTF-8 raises
+    `UnicodeDecodeError`, as any other non-text file does."""
+    if text or sha == _EMPTY_BLOB:
+        return text
+    blob = get_blob(org, repo, sha)
+    if blob is None:
+        raise RuntimeError(
+            f"could not read {org}/{repo}/{path}: its blob {sha} is gone"
+        )
+    return blob.decode("utf-8")
 
 
 def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ...]:

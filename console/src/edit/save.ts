@@ -73,12 +73,14 @@ export function problemsIn(problems: Problem[] | undefined, t: Target): Problem[
 }
 
 export const CONFLICT =
-  'This file changed on GitHub since you opened it, so nothing was saved. Reload it to see the change, then make yours again; or use Edit the file.';
+  'This file changed on GitHub since you opened it, so nothing was saved. Reload it to see the change, then make yours again; or use Edit the file directly.';
 
 export interface SaveOptions {
   message: string;
   /** Where the status that lists this file's problems lives: the semester's or the course's. */
   statusRepo?: [string, string];
+  /** Called once the commit lands, before the checks are followed: the file is saved. */
+  onCommit?: () => void;
 }
 
 /** Write `text` over `sha` (null for a new file), then report the checks. */
@@ -100,6 +102,7 @@ export async function saveText(env: Env, t: Target, text: string | null, sha: st
     else report({ kind: 'bad', text: `Not saved: ${e instanceof Error ? e.message : String(e)}` });
     return false;
   }
+  opts.onCommit?.();
   report({ kind: 'busy', text: 'Checking…' });
   const sr = opts.statusRepo;
   const before = sr ? statusProblems(env, sr, t).length : 0;
@@ -120,7 +123,7 @@ export async function saveText(env: Env, t: Target, text: string | null, sha: st
 }
 
 function statusProblems(env: Env, sr: [string, string], t: Target): Problem[] {
-  const l = env.statuses.get(sr[0], sr[1]).value;
+  const l = env.statuses.get(sr[0], sr[1], false).value;
   return l.kind === 'ready' ? problemsIn(l.status.problems, t) : [];
 }
 

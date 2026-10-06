@@ -256,10 +256,7 @@
             "type": "string"
           },
           "units": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           }
         },
         "required": [
@@ -277,12 +274,6 @@
     "course": {
       "additionalProperties": false,
       "properties": {
-        "app_installed": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "code": {
           "type": "string"
         },
@@ -290,10 +281,62 @@
           "items": {
             "additionalProperties": false,
             "properties": {
-              "repo": {
-                "type": "string"
+              "checks": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "blocks": {
+                      "type": "boolean"
+                    },
+                    "detail": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "folders": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "kind": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "folders"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "done": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "why": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "done",
+                    "blocks"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
               },
-              "slug": {
+              "repo": {
                 "type": "string"
               },
               "state": {
@@ -323,6 +366,18 @@
           },
           "type": "array"
         },
+        "stage_optional": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "type": "object"
+        },
+        "stage_set_aside": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "type": "object"
+        },
         "stage_why": {
           "additionalProperties": {
             "type": "string"
@@ -351,6 +406,13 @@
               "slug": {
                 "type": "string"
               },
+              "starter": {
+                "enum": [
+                  "derived",
+                  "handwritten"
+                ],
+                "type": "string"
+              },
               "state": {
                 "type": "string"
               }
@@ -358,6 +420,49 @@
             "required": [
               "repo",
               "state"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "todo": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "entry": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "materials",
+                  "template"
+                ],
+                "type": "string"
+              },
+              "optional": {
+                "type": "boolean"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "screen": {
+                "type": "string"
+              },
+              "set_aside": {
+                "type": "boolean"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "repo",
+              "text"
             ],
             "type": "object"
           },
@@ -400,16 +505,14 @@
             "type": "string"
           },
           "run_id": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "summary": {
             "type": "string"
           }
         },
         "required": [
+          "run_id",
           "op",
           "conclusion"
         ],
@@ -498,9 +601,6 @@
       "items": {
         "additionalProperties": false,
         "properties": {
-          "copies": {
-            "type": "integer"
-          },
           "dest": {
             "additionalProperties": false,
             "properties": {
@@ -524,9 +624,6 @@
           },
           "kind": {
             "type": "string"
-          },
-          "kind_inferred": {
-            "type": "boolean"
           },
           "number": {
             "type": [
@@ -595,12 +692,6 @@
     "semester": {
       "additionalProperties": false,
       "properties": {
-        "app_installed": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "archive_date": {
           "type": [
             "string",

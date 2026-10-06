@@ -1,43 +1,29 @@
 // S14 Site (home text and announcements, Update site) and S18 Operations list.
 
 import { useState } from 'preact/hooks';
-import { parse } from 'yaml';
 import { useEnv } from '../env';
 import { useSave } from '../edit/save';
 import { render } from '../edit/yamlText';
 import { Field } from '../forms/Form';
 import { ago, fmtWhen } from '../model/format';
 import { parseInstructors } from '../model/people';
+import { bodyOf, frontMatter } from '../model/student';
 import type { Outcome } from '../model/types';
 import { outcomePath } from '../ops/adapter';
 import { updateSite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { CheckLine, Crumbs, Lives, Loading, OpsList } from '../ui/bits';
+import { CheckLine, Lives, Loading, OpsList } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { Ext } from '../ui/icons';
-import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
+import { WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
 
-const FRONT = /^---\n([\s\S]*?)\n---\n?/;
-
-/** index.md without its Jekyll front matter. */
-export function stripFrontMatter(text: string): string {
-  return text.replace(FRONT, '');
-}
-
 /** A hand-written announcement's date and text, from its front matter (or its body). */
 export function readAnnouncement(text: string): { date: string; text: string } {
-  const m = FRONT.exec(text);
-  let fm: Record<string, unknown> = {};
-  try {
-    fm = (m ? parse(m[1]) : {}) ?? {};
-  } catch {
-    fm = {};
-  }
-  const body = stripFrontMatter(text).trim();
-  return { date: fm.date == null ? '' : String(fm.date).slice(0, 10), text: fm.details == null ? body : String(fm.details) };
+  const fm = frontMatter(text);
+  return { date: fm.date == null ? '' : String(fm.date).slice(0, 10), text: fm.details == null ? bodyOf(text).trim() : String(fm.details) };
 }
 
 export function announcementFile(date: string, text: string): { path: string; content: string } {
@@ -77,11 +63,11 @@ function Site(p: ReadyProps) {
   const [homeSave, runHome] = useSave(env);
   const [newAnn, setNewAnn] = useState<{ date: string; text: string }>({ date: todayOf(now, tz), text: '' });
   const [annSave, runAnn, setAnnSave] = useSave(env);
-  const homeText = home.kind === 'ready' ? stripFrontMatter(home.text) : '';
+  const homeText = home.kind === 'ready' ? bodyOf(home.text) : '';
   const shown = body ?? homeText;
   const saveHome = async () => {
     if (home.kind !== 'ready' || body === null) return;
-    const front = FRONT.exec(home.text)?.[0] ?? '';
+    const front = home.text.slice(0, home.text.length - bodyOf(home.text).length);
     if (await runHome({ owner: p.cohort.org, repo, path: 'index.md' }, `${front}${body.endsWith('\n') ? body : `${body}\n`}`, home.sha, { message: 'site: edit the home text, from the DSL Teaching Console' })) setBody(null);
   };
   const addAnn = async () => {
@@ -93,9 +79,8 @@ function Site(p: ReadyProps) {
   };
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, 'Site')} />
       <div class="page-head">
-        <div><h1>Student site <Hint doc="11-configure-cohort-site.md">The home text and announcements are yours. The schedule, lectures, assignments and instructors pages are rewritten on every update.</Hint></h1><p class="lede">Students’ single page for the semester. Almost everything on it comes from the schedule, instructors and materials.</p></div>
+        <div><h2 class="h1">Student site <Hint doc="11-configure-cohort-site.md">The home text and announcements are yours. The schedule, lectures, assignments and instructors pages are rewritten on every update.</Hint></h2><p class="lede">Students’ single page for the semester. Almost everything on it comes from the schedule, instructors and materials.</p></div>
         <div class="actions">
           <OpButtons def={updateSite(cohortScope(p))} verbCls="btn outline" />
           <a class="btn quiet" href={url} target="_blank" rel="noopener">Open the student site <Ext /></a>
@@ -115,8 +100,8 @@ function Site(p: ReadyProps) {
           {home.kind === 'loading' ? <Loading what="Reading the home page" /> : home.kind === 'ready' ? (
             <Field id="site-home" k="home" t={{ tier: 'ask', label: 'Home page', widget: 'markdown', reason: 'The first thing students read.' }} value={shown} values={{}} set={(_, v) => setBody(String(v ?? ''))} />
           ) : <p class="footnote">No home page yet: it appears when the site is set up.</p>}
-          <SaveBar state={homeSave} onSave={() => void saveHome()} small disabled={body === null || body === homeText} file={{ org: p.cohort.org, repo, path: 'index.md' }} />
-          <Lives org={p.cohort.org} repo={repo} path="index.md" />
+          <SaveBar state={homeSave} onSave={() => void saveHome()} small disabled={body === null || body === homeText} file={{ org: p.cohort.org, repo, path: 'index.md', exists: home.kind !== 'absent' }} />
+          <Lives org={p.cohort.org} repo={repo} path="index.md" exists={home.kind !== 'absent'} />
         </section>
         <section class="panel section">
           <div class="section-head"><h2>Announcements</h2><span class="meta">Shown in the Updates box with released sessions and hand outs</span></div>
@@ -131,8 +116,8 @@ function Site(p: ReadyProps) {
               <span />
             </div>
           </div>
-          <SaveBar state={annSave} onSave={() => void addAnn()} label="Add an announcement" small disabled={!newAnn.text.trim()} file={{ org: p.cohort.org, repo, path: '_announcements' }} />
-          <Lives org={p.cohort.org} repo={repo} path="_announcements" />
+          <SaveBar state={annSave} onSave={() => void addAnn()} label="Add an announcement" small disabled={!newAnn.text.trim()} file={{ org: p.cohort.org, repo, path: '_announcements/', exists: false }} />
+          <Lives org={p.cohort.org} repo={repo} path="_announcements/" exists={ann.kind !== 'absent'} />
         </section>
         <section class="panel section">
           <h2>Instructor photos</h2>
@@ -153,7 +138,7 @@ function Site(p: ReadyProps) {
             <dt>Semester</dt><dd>{p.cohort.termLabel} <span class="footnote">rewritten</span></dd>
             <dt>GitHub org</dt><dd>{p.cohort.org} <span class="footnote">rewritten</span></dd>
           </dl>
-          <Lives org={p.cohort.org} repo={repo} path="_config.yml" />
+          <Lives org={p.cohort.org} repo={repo} path="_config.yml" exists={p.files.file(p.cohort.org, repo, '_config.yml').kind !== 'absent'} />
         </section>
       </div>
     </>
@@ -161,7 +146,7 @@ function Site(p: ReadyProps) {
 }
 
 export function SiteScreen(p: CohortProps) {
-  return <WithStatus props={p} title="Student site" crumbs={cohortCrumbs(p, 'Site')}>{(r) => <Site {...r} />}</WithStatus>;
+  return <WithStatus props={p} title="Student site">{(r) => <Site {...r} />}</WithStatus>;
 }
 
 function Operations(p: ReadyProps) {
@@ -179,9 +164,8 @@ function Operations(p: ReadyProps) {
   }
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, 'All operations')} />
       <div class="page-head">
-        <div><h1>All operations <Hint doc="reference/actions-reference.md">Each line says what happened and how many. Open Details for the reasons behind a count and the run on GitHub.</Hint></h1><p class="lede">Everything automation and you have done in {p.cohort.termLabel}, newest first. Outcomes stay here after the panel closes.</p></div>
+        <div><h2 class="h1">All operations <Hint doc="reference/actions-reference.md">Each line says what happened and how many. Open Details for the reasons behind a count and the run on GitHub.</Hint></h2><p class="lede">Everything automation and you have done in this semester, newest first. Outcomes stay here after the panel closes.</p></div>
       </div>
       <section class="panel"><OpsList list={ops} now={p.now} full runRepo={`${p.course.org}/.github`} outcomes={outcomes} /></section>
     </>
@@ -189,5 +173,5 @@ function Operations(p: ReadyProps) {
 }
 
 export function OperationsScreen(p: CohortProps) {
-  return <WithStatus props={p} title="All operations" crumbs={cohortCrumbs(p, 'All operations')}>{(r) => <Operations {...r} />}</WithStatus>;
+  return <WithStatus props={p} title="All operations">{(r) => <Operations {...r} />}</WithStatus>;
 }

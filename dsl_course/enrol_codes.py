@@ -47,13 +47,13 @@ from . import mailer, roster, status
 from .course import course_phrase
 from .discovery import (
     SEMESTERS_PATH,
-    course_name_for_semester,
+    course_name_or,
     discover_semesters,
     join_issue_url,
     semester_is_live,
 )
 from .faults import Unusable
-from .gh_contents import get_file_with_sha, put_file, read_csv
+from .gh_contents import get_file_with_sha, put_file_as_read, read_csv
 from .log import (
     CLIParser,
     Summary,
@@ -143,11 +143,6 @@ def rows_for_values(text: str, items: list[tuple[int, str, str]]) -> dict[int, s
     return placed
 
 
-# Bounded: each attempt costs a read and a write, and a roster being edited faster than
-# that is a person at a keyboard, not a race worth grinding against.
-WRITE_ATTEMPTS = 3
-
-
 def write_column(
     semester_org: str,
     raw: str,
@@ -157,42 +152,28 @@ def write_column(
     message: str,
     replacing: str | None = "",
 ) -> str | None:
-    """Commit one column into students.csv without clobbering a concurrent edit.
-    Returns the roster text AS COMMITTED, or None if no attempt was accepted.
+    """Commit one column into students.csv without clobbering a concurrent edit
+    (`put_file_as_read`). Returns the roster text AS COMMITTED, or None if no attempt was
+    accepted.
 
-    `put_file`'s ordinary path re-reads the sha immediately before writing, so the write
-    succeeds however stale its content is: a Join binding committed while Send codes was
-    running was silently reverted, and the student's handle was simply gone. The sha the
-    roster was READ at is sent instead, so GitHub refuses a write onto a file that has
-    moved on. We then re-read, re-apply only the values THIS run produced onto the fresh
-    text - `fill_column_in_csv` fills blank cells only, so a value that arrived in
-    between is left exactly as it is - and try again.
+    A refused write re-applies only the values THIS run produced onto the fresh text -
+    `fill_column_in_csv` fills blank cells only, so a value that arrived in between is
+    left exactly as it is. Which is exactly why the committed TEXT is returned rather than
+    a bare success: after a retry the roster can hold a different code from the one this
+    run generated, and the caller must email what the roster holds."""
 
-    Which is exactly why the committed TEXT is returned rather than a bare success: after
-    a retry the roster can hold a different code from the one this run generated, and the
-    caller must email what the roster holds."""
-    for attempt in range(1, WRITE_ATTEMPTS + 1):
-        body = fill_column_in_csv(raw, column, rows_for_values(raw, items), replacing)
-        if put_file(
-            semester_org,
-            roster.CONFIG_REPO,
-            roster.ROSTER_PATH,
-            body.encode(),
-            message,
-            expected_sha=sha,
-        ):
-            return body
-        if attempt == WRITE_ATTEMPTS:
-            break
-        log_err(
-            f"{roster.ROSTER_PATH} in {semester_org} could not be written as read - "
-            f"re-reading and retrying ({attempt}/{WRITE_ATTEMPTS - 1})"
-        )
-        fresh = get_file_with_sha(semester_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
-        if fresh is None:
-            break
-        raw, sha = fresh
-    return None
+    def fill(text: str) -> str:
+        return fill_column_in_csv(text, column, rows_for_values(text, items), replacing)
+
+    return put_file_as_read(
+        semester_org,
+        roster.CONFIG_REPO,
+        roster.ROSTER_PATH,
+        fill(raw),
+        sha,
+        lambda fresh: None if fresh is None else fill(fresh),
+        message,
+    )
 
 
 def assign_codes(students: list[roster.Student], gen=make_code) -> int:
@@ -351,50 +332,19 @@ def run(semester_org: str) -> Outcome:
             f"no mail transport for {semester_org} - nothing claimed, nothing sent."
         )
         return Outcome.NO_TRANSPORT
-    # The codes are already committed to students.csv by this point, and
-    # load_yaml_config RAISES on a malformed dsl-course.yml or a non-404 read failure -
-    # while main() catches only RuntimeError. Unguarded, a bad course file meant a
-    # traceback with the codes persisted and not one email sent. Same guard as
-    # grades._email_updates, for the same reason.
-    try:
-        course_name = course_name_for_semester(semester_org)
-    except Exception as exc:  # a name is never worth losing the codes email over
-        log_err(f"could not read the course name ({exc}) - mailing without it")
-        course_name = ""
-    messages = [code_message(s, join_url, course_name) for s in targets]
-    recipients = [s.hertie_email for s in targets]
-    # CLAIM, then send. `write_column` reports a refused write by RETURNING - it never
-    # raises - so send-then-stamp left the one ordering an unattended caller cannot
-    # survive: a roster that cannot be written (an archived semester-config, a new branch
-    # ruleset, a token that lost write scope, a run of 5xx) meant the batch went out with
-    # `code_sent_at` still blank, so the next push to the roster - and the send fills its
-    # own blank cells, so it triggers one - mailed the very same students again. Stamping
-    # first makes a write failure mean NOTHING WAS MAILED, which the next push retries.
-    stamp = datetime.now(UTC).isoformat(timespec="seconds")
-    if not _claim_sent(semester_org, recipients, stamp):
-        log_err(
-            f"could not stamp code_sent_at in {roster.ROSTER_PATH} for {semester_org} - "
-            f"nothing emailed, so re-running is safe. Fix the roster write."
-        )
+    # The codes are already committed to students.csv by this point: a course file that
+    # cannot be read costs the name, never the email.
+    course_name = course_name_or(semester_org=semester_org)
+    out = _claimed_send(
+        semester_org,
+        [code_message(s, join_url, course_name) for s in targets],
+        [s.hertie_email for s in targets],
+        "",
+        "nothing emailed, so re-running is safe. Fix the roster write.",
+    )
+    if out is None or out[1]:
         return Outcome.FAILED
-    try:
-        sent = mailer.send_bulk(messages)
-    except Exception:
-        # A transport that RAISED (a credential Graph refused) sent nothing at all, and
-        # the claim above must not outlive it - unreleased, it is a whole semester silently
-        # marked as emailed. The release logs its own failure and never raises, so the
-        # original exception is what reaches the caller.
-        _release_unsent(semester_org, recipients, stamp)
-        raise
-    # A partly-delivered batch is ROUTINE, not exotic: `send_bulk` stops at its own time
-    # budget and says "re-run to continue". Releasing the claims it did not spend is what
-    # keeps that true - without it, the tail of every throttled batch would be stamped as
-    # emailed and never mailed at all.
-    went_out = set(sent)
-    unsent = [to for to in recipients if to not in went_out]
-    if unsent:
-        _release_unsent(semester_org, unsent, stamp)
-        return Outcome.FAILED
+    sent = out[0]
     log_ok(f"emailed {len(sent)} code(s), all of them recorded")
     return Outcome.SENT
 
@@ -490,36 +440,64 @@ def resend_unjoined(
         counts["students"] = 0
         log_ok(f"Done - {json.dumps(counts)}")
         return Outcome.NOTHING_TO_SEND, counts
-    try:
-        course_name = course_name_for_semester(semester_org)
-    except Exception as exc:  # a name is never worth losing the codes email over
-        log_err(f"could not read the course name ({exc}) - mailing without it")
-        course_name = ""
+    course_name = course_name_or(semester_org=semester_org)
     join_url = join_issue_url(semester_org)
-    recipients = [s.hertie_email for s in to_mail]
+    out = _claimed_send(
+        semester_org,
+        [code_message(s, join_url, course_name, replaces=True) for s in to_mail],
+        [s.hertie_email for s in to_mail],
+        None,
+        "the new codes are in the roster and nothing was emailed; the next roster "
+        "push will not send them either, so run this again.",
+    )
+    if out is None:
+        return Outcome.FAILED, counts
+    sent, unsent = out
+    counts["sent"] = len(sent)
+    log_ok(f"Done - {json.dumps(counts)}")
+    return (Outcome.FAILED if unsent else Outcome.SENT), counts
+
+
+def _claimed_send(
+    semester_org: str,
+    messages: list[mailer.Message],
+    recipients: list[str],
+    replacing: str | None,
+    unclaimed: str,
+) -> tuple[list[str], list[str]] | None:
+    """Claim `code_sent_at` for `recipients`, send `messages`, and give back every claim
+    the send did not spend. `(sent, unsent)` addresses, or None when the claim could not
+    be written (`unclaimed` says what that leaves, after the stamp line).
+
+    CLAIM, then send. `write_column` reports a refused write by RETURNING - it never
+    raises - so send-then-stamp left the one ordering an unattended caller cannot
+    survive: a roster that cannot be written (an archived semester-config, a new branch
+    ruleset, a token that lost write scope, a run of 5xx) meant the batch went out with
+    `code_sent_at` still blank, so the next push to the roster mailed the very same
+    students again. Stamping first makes a write failure mean NOTHING WAS MAILED.
+
+    A transport that RAISED (a credential Graph refused) sent nothing at all, and the
+    claim must not outlive it - unreleased, it is a whole semester silently marked as
+    emailed. The release logs its own failure and never raises, so the original exception
+    is what reaches the caller. A partly-delivered batch is ROUTINE: `send_bulk` stops at
+    its own time budget, and releasing the claims it did not spend is what keeps "re-run
+    to continue" true."""
     stamp = datetime.now(UTC).isoformat(timespec="seconds")
-    if not _claim_sent(semester_org, recipients, stamp, replacing=None):
+    if not _claim_sent(semester_org, recipients, stamp, replacing=replacing):
         log_err(
             f"could not stamp code_sent_at in {roster.ROSTER_PATH} for {semester_org} - "
-            f"the new codes are in the roster and nothing was emailed; the next roster "
-            f"push will not send them either, so run this again."
+            f"{unclaimed}"
         )
-        return Outcome.FAILED, counts
+        return None
     try:
-        sent = mailer.send_bulk(
-            [code_message(s, join_url, course_name, replaces=True) for s in to_mail]
-        )
+        sent = mailer.send_bulk(messages)
     except Exception:
         _release_unsent(semester_org, recipients, stamp)
         raise
     went_out = set(sent)
-    unsent = [to for to in recipients if to not in went_out]
-    counts["sent"] = len(sent)
-    log_ok(f"Done - {json.dumps(counts)}")
-    if unsent:
+    if unsent := [to for to in recipients if to not in went_out]:
         _release_unsent(semester_org, unsent, stamp)
-        return Outcome.FAILED, counts
-    return Outcome.SENT, counts
+    return sent, unsent
 
 
 def _claim_sent(

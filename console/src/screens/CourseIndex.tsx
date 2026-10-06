@@ -1,17 +1,20 @@
-// The course's Materials and Assignment templates index screens.
+// The course's Handout materials and Assignment templates index screens.
 
+import { useState } from 'preact/hooks';
+import { useEnv } from '../env';
 import { YamlText, obj } from '../edit/yamlText';
 import type { GhRepo } from '../github/client';
 import { TEMPLATE_TOPIC, termOf } from '../model/discovery';
 import type { Files } from '../model/files';
 import { ago, fmtDay, templateName } from '../model/format';
+import { MATERIALS_TOPIC } from '../model/materialsRules';
 import { DEFAULT_FORMATS } from '../model/policy';
 import { formatWord, formatsList } from '../tiers/grading';
-import { Crumbs, Loading, ghUrl } from '../ui/bits';
+import { CheckLine, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
-import { CourseHeaderActions, StateChip, courseView } from './Course';
+import { StateChip, Whys, courseView } from './Course';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
 
@@ -33,10 +36,8 @@ export function otherRepos(org: string, repos: GhRepo[], known: string[]): GhRep
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Why a materials repo is or is not ready: the engine calls one ready once its syllabus is written. */
-export function materialsSentence(state: string): string {
-  return state === 'ready' ? 'Syllabus written.' : 'Not ready yet: the syllabus is not written.';
-}
+/** The org's repo list on GitHub, filtered to one topic. */
+export const topicUrl = (org: string, topic: string) => `https://github.com/orgs/${org}/repositories?q=${encodeURIComponent(`topic:${topic}`)}`;
 
 function repoOf(files: Files, org: string, name: string): GhRepo | undefined {
   const r = files.repos(org);
@@ -44,6 +45,42 @@ function repoOf(files: Files, org: string, name: string): GhRepo | undefined {
 }
 
 // --------------------------------------------------------------------------- materials
+
+/** What "Treat as handout materials" says once it has run, or why it could not. */
+type TreatState = { kind: 'idle' | 'busy' | 'done' } | { kind: 'bad'; text: string };
+
+/**
+ * One Other repos row (decision 0026 rule 2): Open, and on a course the person can change,
+ * "Treat as handout materials", which adds the `dsl-materials` topic to the repo's topics as
+ * GitHub has them at the click.
+ */
+export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; write: boolean }) {
+  const env = useEnv();
+  const [st, setSt] = useState<TreatState>({ kind: 'idle' });
+  const treat = async () => {
+    if (!env) return;
+    setSt({ kind: 'busy' });
+    try {
+      // Read the topics just before the write: the repo list may be old, and a PUT replaces them all.
+      const topics = await env.client.getRepoTopics(org, repo.name);
+      await env.client.setTopics(org, repo.name, [...new Set([...topics, MATERIALS_TOPIC])]);
+      setSt({ kind: 'done' });
+    } catch (e) {
+      setSt({ kind: 'bad', text: `Could not add the topic: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  };
+  return (
+    <li>
+      <span class="r-title">{repo.name}</span>
+      <span class="r-sub">{st.kind === 'done' ? 'Added. It shows under Handout materials after the next Refresh.' : 'Not handout materials, so nothing to set up here. Can be released to a semester from the schedule.'}</span>
+      {st.kind === 'bad' ? <CheckLine cls="bad">{st.text}</CheckLine> : null}
+      <span class="r-side">
+        <OpenButton org={org} repo={repo.name} small quiet />
+        {write && st.kind !== 'done' ? <button class="btn small quiet" type="button" disabled={st.kind === 'busy' || !env} onClick={() => void treat()}>Treat as handout materials</button> : null}
+      </span>
+    </li>
+  );
+}
 
 export function MaterialsIndexScreen(p: CourseProps) {
   const { course, files } = p;
@@ -54,14 +91,13 @@ export function MaterialsIndexScreen(p: CourseProps) {
   const others = repos.kind === 'ready' ? otherRepos(course.org, repos.repos, known) : [];
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Materials' }]} />
       <div class="page-head">
-        <div><h1>Materials <Hint doc="02-add-materials-to-course.md">Materials live here privately until a scheduled release copies them to a semester. Files can be withheld from students.</Hint></h1><p class="lede">The course’s materials repos. A scheduled release copies their folders to a semester.</p></div>
-        <CourseHeaderActions course={course} ready={v.course?.ready ?? false} />
+        <div><h2 class="h1">Handout materials <Hint doc="02-add-materials-to-course.md">Handout materials live here privately until a scheduled release copies them to a semester. Files can be withheld from students.</Hint></h2><p class="lede">The course’s handout materials repos. A scheduled or manual release copies their folders to a semester. This page checks that the set-up files are in place, not their content; change content by pushing to the repo’s main branch.</p></div>
+        <div class="actions"><a class="btn quiet" href={topicUrl(course.org, MATERIALS_TOPIC)} target="_blank" rel="noopener">See on GitHub <Ext /></a></div>
       </div>
       <div class="stack">
         <section class="panel section">
-          <div class="section-head"><h2>Materials repos</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New materials</a></div>
+          <div class="section-head"><h2>Handout materials repos</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New handout materials</a></div>
           {materials.length ? (
             <ul class="rows">
               {materials.map((m) => {
@@ -70,29 +106,21 @@ export function MaterialsIndexScreen(p: CourseProps) {
                 return (
                   <li>
                     <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" />{term ? <span class="chip term">{term}</span> : null}</span>
-                    <span class="r-sub">
-                      {materialsSentence(m.state)}
-                      {gh?.pushed_at ? ` Last change ${fmtDay(gh.pushed_at)} (${ago(gh.pushed_at, p.now)}).` : ''}
-                    </span>
+                    <Whys m={m} />
+                    {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
                   </li>
                 );
               })}
             </ul>
-          ) : <p class="footnote">{v.computed ? 'No materials repos yet.' : 'Materials appear once the course has been checked.'}</p>}
+          ) : <p class="footnote">{v.computed ? 'No handout materials repos yet.' : 'Handout materials appear once the course has been checked.'}</p>}
         </section>
         <section class="panel section">
           <h2>Other repos</h2>
-          <p class="footnote">Repos in the course that are neither materials nor assignment templates. Can be released to a semester from the schedule.</p>
+          <p class="footnote">Repos in the course that are neither handout materials nor assignment templates. Can be released to a semester from the schedule.</p>
           {repos.kind === 'loading' ? <Loading what="Listing the course’s repos" /> : others.length ? (
             <ul class="rows">
-              {others.map((r) => (
-                <li>
-                  <span class="r-title">{r.name}</span>
-                  <span class="r-sub">Can be released to a semester from the schedule.</span>
-                  <span class="r-side"><a class="btn small quiet" href={r.html_url || ghUrl(course.org, r.name)} target="_blank" rel="noopener">Open on GitHub <Ext /></a></span>
-                </li>
-              ))}
+              {others.map((r) => <OtherRepoRow org={course.org} repo={r} write={course.write} />)}
             </ul>
           ) : <p class="footnote">{repos.kind === 'absent' ? 'Could not list the course’s repos.' : 'No other repos.'}</p>}
         </section>
@@ -121,10 +149,9 @@ export function TemplatesIndexScreen(p: CourseProps) {
   const templates = v.course?.templates ?? [];
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates' }]} />
       <div class="page-head">
-        <div><h1>Assignment templates <Hint label="About templates and semesters">{VERSIONS_HINT}</Hint></h1><p class="lede">One template per assignment. Students get a copy at hand out; marking reads its solution branch.</p></div>
-        <CourseHeaderActions course={course} ready={v.course?.ready ?? false} />
+        <div><h2 class="h1">Assignment templates <Hint label="About templates and semesters">{VERSIONS_HINT}</Hint></h2><p class="lede">The course’s assignment templates. A scheduled or manual hand out gives students a copy in a semester. This page checks how each assignment is worked and marked, not its content; change content by pushing to the repo.</p></div>
+        <div class="actions"><a class="btn quiet" href={topicUrl(course.org, TEMPLATE_TOPIC)} target="_blank" rel="noopener">See on GitHub <Ext /></a></div>
       </div>
       <section class="panel section">
         <div class="section-head"><h2>Templates</h2><a class="btn small outline" href={`?course=${course.org}#new-assignment-1`}>New assignment</a></div>

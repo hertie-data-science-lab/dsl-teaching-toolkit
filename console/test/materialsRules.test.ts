@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import rules from '../schemas/materials.json';
 import { badgeFiles } from '../src/edit/badges';
 import { compileAll, withheldBy } from '../src/edit/glob';
-import { aliasKind, inferKind, landingSection, readDeclared } from '../src/model/materialsRules';
+import { EMPTY_ENTRY_KIND, aliasKind, inferKind, landingSection, readDeclared } from '../src/model/materialsRules';
+import landingKinds from '../../tests/fixtures/landing_kinds.json';
+
+type Landing = { dest: string; repo: string; aliases: Record<string, string>; section: string; kind: string };
 
 describe('the withhold rule', () => {
   const withheldPaths = (files: string[], lines: string[]) => files.filter((f) => withheldBy(compileAll(lines), f) !== null);
@@ -29,14 +32,23 @@ describe('kinds', () => {
     expect(aliasKind('quiz')).toBeNull();
     expect(aliasKind('quiz', { quiz: 'exam' })).toBe('exam');
     expect(aliasKind('quiz', { quiz: 'nonsense' })).toBe('other');
-    expect(inferKind('datasets')).toEqual({ kind: 'lecture', named: false });
+    // Decision 0031 rule 10: a folder no name covers is supporting files.
+    expect(inferKind('datasets')).toEqual({ kind: 'assets', named: false });
+    expect(EMPTY_ENTRY_KIND).toBe('lecture');
   });
 
-  it('takes the section from where the copy lands', () => {
+  // `schedule_plan.deploy_section` + `infer_kind` (#391): dest, repo, aliases -> section, kind.
+  // Mirrors `tests/fixtures/landing_kinds.json` (W1) until that shared table is on this branch.
+  // One table for both rules: pytest runs it through `schedule_plan.entry_landing`.
+  for (const c of landingKinds.cases as Landing[])
+    it(`lands ${c.dest} in ${c.repo || 'the default repo'} as the engine does`, () => {
+      const section = landingSection({ folder: 'src/x', path: c.dest, dest: c.repo }, 'materials', c.aliases);
+      expect(section).toBe(c.section);
+      expect(inferKind(section, c.aliases).kind).toBe(c.kind);
+    });
+
+  it('falls back to the folder when no path is given', () => {
     expect(landingSection({ folder: 'labs/01', path: '', dest: '' }, 'materials')).toBe('labs');
-    expect(landingSection({ folder: 'labs/01', path: 'week-1/lab', dest: '' }, 'materials')).toBe('week-1');
-    expect(landingSection({ folder: 'labs', path: '', dest: 'labs-repo' }, 'materials')).toBe('labs-repo');
-    expect(landingSection({ folder: 'SYLLABUS.md', path: '', dest: '' }, 'materials')).toBe('materials');
   });
 
   it('reads materials.yml as the engine does', () => {

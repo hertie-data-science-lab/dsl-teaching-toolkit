@@ -17,6 +17,7 @@ import yaml
 
 from dsl_course import (
     course,
+    discovery,
     gh_contents,
     ghcli,
     grades,
@@ -391,7 +392,7 @@ def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
         "bob@uni.edu,Bob,enrolled,bob-b,43,dsl-def\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(grades, "course_name_for_semester", lambda org: "")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "")
     monkeypatch.setattr(
         grades.mailer,
         "send_bulk",
@@ -418,14 +419,16 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
         ),
     )
 
-    monkeypatch.setattr(grades, "course_name_for_semester", lambda org: "Deep Learning")
+    monkeypatch.setattr(
+        discovery, "course_name_for_semester", lambda org: "Deep Learning"
+    )
     grades._email_updates("SEMESTER", ["ada-l"])
     _to, subject, body = sent[-1][0]
     assert "Your grades for the Deep Learning course have been updated." in body
     # and in the SUBJECT - the inbox list is where a student tells two courses apart
     assert subject == "Your grades for Deep Learning have been updated"
 
-    monkeypatch.setattr(grades, "course_name_for_semester", lambda org: "")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "")
     grades._email_updates("SEMESTER", ["ada-l"])
     _to, subject, body = sent[-1][0]
     assert "Your grades for the course have been updated." in body
@@ -437,7 +440,9 @@ def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(grades, "course_name_for_semester", lambda org: "Deep Learning")
+    monkeypatch.setattr(
+        discovery, "course_name_for_semester", lambda org: "Deep Learning"
+    )
     seen: dict = {}
     monkeypatch.setattr(
         grades.mailer,
@@ -464,7 +469,7 @@ def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,Ada-L,42,dsl-abc\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(grades, "course_name_for_semester", lambda org: "")
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "")
     sent: list[list] = []
     monkeypatch.setattr(
         grades.mailer,
@@ -822,7 +827,7 @@ def _distribute(
         None if roster_rows is None else roster.parse(ROSTER_HEADER + roster_rows)
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(grades, "course_name_for_semester", course_name)
+    monkeypatch.setattr(discovery, "course_name_for_semester", course_name)
 
     def fake_send_bulk(msgs, dry_run=False, sample=None):
         if send_error is not None:
@@ -3296,3 +3301,31 @@ def test_a_held_mark_is_never_re_stamped_as_returned(tmp_path, monkeypatch):
     assert [repo for repo, _f, _d in again["gradebooks"]] == ["grades-ada-l"]
     ((_cfg, cfg_files, _d),) = again["config"]
     assert _book_row(cfg_files[grades.DISTRIBUTED_PATH], "ben-k")[1] == stale
+
+
+def test_one_penalty_reader_gives_the_rate_and_the_fault_together():
+    # The setting's parse, the grade arithmetic and the fault text read the key through
+    # one function, so `0` and `10%` mean the same thing to all three.
+    from decimal import Decimal
+
+    from dsl_course.setting_readers import read_penalty
+
+    assert read_penalty("10%") == (Decimal("0.1"), "")
+    assert read_penalty("0.1") == (Decimal("0.1"), "")
+    assert read_penalty(0) == (Decimal(0), "")
+    assert read_penalty(None) == read_penalty("  ") == (None, "")
+    for raw, fault in (("10", "bare"), ("-5%", "negative"), ("x", "unwritten")):
+        assert read_penalty(raw) == (None, fault)
+    assert read_penalty("150%") == (None, "over")
+
+
+def test_a_whole_number_of_days_is_read_by_one_rule():
+    # `late_window_days` and the schedule's day counts share the parse: a negative or a
+    # YAML `true` is not a number of days, and the late window warns rather than
+    # silently reading it as 0.
+    from dsl_course.setting_readers import _whole_days, whole_days
+
+    assert [whole_days(v) for v in (3, "7", 0)] == [3, 7, 0]
+    assert [whole_days(v) for v in (-1, True, "x", None)] == [None] * 4
+    dropped: list[str] = []
+    assert _whole_days(-1, "where", dropped) is None and len(dropped) == 1

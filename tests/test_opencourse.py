@@ -19,7 +19,68 @@ def test_absent_or_empty_is_off():
 def test_the_seeded_file_is_instructor_owned_off_and_parses():
     text = opencourse.seed_text()
     assert text.startswith("# INSTRUCTOR-OWNED")
-    assert opencourse.parse(yaml.safe_load(text)) == OpenCourse()
+    assert opencourse.parse(yaml.safe_load(text)) == OpenCourse(
+        withhold=opencourse.DEFAULT_WITHHOLD
+    )
+
+
+def test_the_seed_withholds_the_system_folder_and_answers_by_default():
+    text = opencourse.seed_text()
+    assert (
+        "# word solution, exam, grade, marks or private in it:\n"
+        "withhold:\n"
+        "- .system/\n"
+        "- '[Ss]olution*'\n"
+        "- '*[-_.][Ss]olution*'\n"
+        "- '*[Ee]xam'\n"
+        "- '*[Ee]xams'\n"
+        "- '*[Ee]xam[-_.]*'\n"
+        "- '[Gg]rade*'\n"
+        "- '*[-_.][Gg]rade*'\n"
+        "- '[Mm]arks*'\n"
+        "- '*[-_.][Mm]arks*'\n"
+        "- '*[Pp]rivate*'\n"
+    ) in text
+    # A website already on keeps its empty list: a default would take files off it.
+    live = opencourse.seed_text(OpenCourse(True, "m"))
+    assert opencourse.parse(yaml.safe_load(live)).withhold == ()
+    # A seed that names its own list keeps it: the defaults fill only an empty one.
+    mine = opencourse.seed_text(OpenCourse(withhold=("drafts/",)))
+    assert opencourse.parse(yaml.safe_load(mine)).withhold == ("drafts/",)
+
+
+def test_the_default_withhold_list_keeps_answers_off_at_any_depth(tmp_path):
+    kept = (
+        ".system/MAINTAINING.md",
+        "labs/01/lab1_solution.ipynb",
+        "labs/02/solutions/a.py",
+        "solutions/a.py",
+        "exams/2025/paper.pdf",
+        "lectures/03/midterm_exam.pdf",
+        "grades/marks.csv",
+        "notes/private/todo.md",
+        "labs/Solutions/a.py",
+        "Exams/paper.pdf",
+        "labs/lab1_Solution.ipynb",
+    )
+    public = (
+        "lectures/01/slides.pdf",
+        "labs/01/lab1.ipynb",
+        "examples/a.py",
+        "benchmarks/run.py",
+        "notes/remarks.md",
+        "lectures/03/example.py",
+        "lectures/04/image-resolution.ipynb",
+        "conflict-resolution/notes.md",
+    )
+    for rel in kept + public:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x")
+    lines = opencourse.parse(yaml.safe_load(opencourse.seed_text())).withhold
+    for rel in kept:
+        assert releaseignore.excludes(tmp_path, tmp_path / rel, lines), rel
+    for rel in public:
+        assert not releaseignore.excludes(tmp_path, tmp_path / rel, lines), rel
 
 
 def test_a_seed_round_trips_its_values():

@@ -744,7 +744,9 @@ def test_a_new_course_gets_its_public_website_settings_seeded_off(fake, monkeypa
     bc.create_profile_repo("My-Course-E1", "Deep Learning", "E1")
     seeded = fake.files[(".github", "opencourse.yml")]
     assert seeded.startswith("# INSTRUCTOR-OWNED")
-    assert opencourse.parse(yaml.safe_load(seeded)) == opencourse.OpenCourse()
+    assert opencourse.parse(yaml.safe_load(seeded)) == opencourse.OpenCourse(
+        withhold=opencourse.DEFAULT_WITHHOLD
+    )
 
 
 def test_rerun_retires_the_pre_rename_issue_forms(fake):

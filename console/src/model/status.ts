@@ -1,10 +1,17 @@
-// Reads `status.json` (contracts section 3), validates it against the exported schema and
-// decides whether it is stale by comparing its `inputs` with one recursive tree read of the repo.
+// Reads `status.json` (contracts section 3), validates it against the exported schema and,
+// where a screen shows it (a semester's own pages), decides whether it is stale by comparing
+// its `inputs` with one recursive tree read of the repo, read alongside it. Also
+// the course overview's readings of loaded statuses (decision 0025): the problems roll-up, a
+// semester's next automatic event and the recent-activity list.
 
 import { signal, type Signal } from '@preact/signals';
 import schema from '../../schemas/status.schema.json';
 import type { GitHubClient, Tree } from '../github/client';
-import type { Status } from './types';
+import { assignmentIdent, fmtDay, releaseIdent } from './format';
+import { DEFAULT_TIMEZONE } from './policy';
+import { sameHandle } from './people';
+import { instant } from './student';
+import type { Operation, Problem, Status } from './types';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from './names';
 import { validator } from './validate';
 
@@ -50,9 +57,10 @@ export function staleInputs(inputs: Record<string, string | null>, tree: Tree, c
   return stale;
 }
 
-export async function loadStatus(client: GitHubClient, owner: string, repo: string): Promise<Loaded> {
+/** The status file; with `withStale`, the repo's tree is read at the same time for `stale` (else `stale` is []). */
+export async function loadStatus(client: GitHubClient, owner: string, repo: string, withStale = true): Promise<Loaded> {
   try {
-    const file = await client.getContents(owner, repo, STATUS_PATH);
+    const [file, tree] = await Promise.all([client.getContents(owner, repo, STATUS_PATH), withStale ? client.listTree(owner, repo, 'HEAD', true) : null]);
     if (!file) return { kind: 'absent' };
     let data: unknown;
     try {
@@ -63,7 +71,6 @@ export async function loadStatus(client: GitHubClient, owner: string, repo: stri
     const errors = validateStatus(data);
     if (errors.length) return { kind: 'invalid', errors };
     const status = data as Status;
-    const tree = await client.listTree(owner, repo, 'HEAD', true);
     const stale = tree ? staleInputs(status.inputs, tree) : [];
     return { kind: 'ready', status, sha: file.sha, stale };
   } catch (e) {
@@ -71,43 +78,133 @@ export async function loadStatus(client: GitHubClient, owner: string, repo: stri
   }
 }
 
-/** One signal per status file, loaded on first ask and reloaded on demand. */
+/**
+ * One signal per status file, loaded on first ask and reloaded on demand. Staleness costs a
+ * tree read, so it is read only once a screen that shows it asks (`withStale`); a file first
+ * loaded without it is read again with it then, and its reloads keep it.
+ */
 export class StatusStore {
   private signals = new Map<string, Signal<Loaded>>();
+  private stale = new Set<string>();
   constructor(private readonly client: GitHubClient) {}
 
   private key(owner: string, repo: string) {
     return `${owner}/${repo}`;
   }
 
-  get(owner: string, repo: string): Signal<Loaded> {
+  get(owner: string, repo: string, withStale = true): Signal<Loaded> {
     const k = this.key(owner, repo);
     let s = this.signals.get(k);
+    const upgrade = withStale && !this.stale.has(k);
+    if (withStale) this.stale.add(k);
     if (!s) {
       s = signal<Loaded>({ kind: 'loading' });
       this.signals.set(k, s);
       void this.reload(owner, repo);
-    }
+    } else if (upgrade) void this.reload(owner, repo);
     return s;
   }
 
-  /** The semester's private status, in its config repo. */
-  cohort(org: string): Signal<Loaded> {
-    return this.get(org, CONFIG_REPO);
+  /** The semester's private status, in its config repo; `withStale` false for a screen that does not show staleness (Home, the course pages). */
+  cohort(org: string, withStale = true): Signal<Loaded> {
+    return this.get(org, CONFIG_REPO, withStale);
   }
 
-  /** The course's public status, in `.github` (counts only). */
+  /** The course's public status, in `.github` (counts only); no screen shows its staleness. */
   course(org: string): Signal<Loaded> {
-    return this.get(org, COURSE_REPO);
+    return this.get(org, COURSE_REPO, false);
   }
 
   forget(): void {
     this.signals.clear();
+    this.stale.clear();
   }
 
   async reload(owner: string, repo: string): Promise<void> {
-    const s = this.signals.get(this.key(owner, repo)) ?? signal<Loaded>({ kind: 'loading' });
-    this.signals.set(this.key(owner, repo), s);
-    s.value = await loadStatus(this.client, owner, repo);
+    const k = this.key(owner, repo);
+    const s = this.signals.get(k) ?? signal<Loaded>({ kind: 'loading' });
+    this.signals.set(k, s);
+    s.value = await loadStatus(this.client, owner, repo, this.stale.has(k));
   }
+}
+
+// --------------------------------------------------------------------------- course overview
+
+/** A problem on the course overview; a semester's carries that semester, for its tag and links. */
+export type TaggedProblem = Problem & { semester?: { org: string; label: string } };
+
+/**
+ * The overview's Problems: the course's first, then each live semester's, tagged. A semester
+ * repeats the course faults it will pay for (`scope: course`); one already listed is left out.
+ */
+export function rollUpProblems(course: Problem[], semesters: { org: string; label: string; problems: Problem[] }[]): TaggedProblem[] {
+  const seen = new Set(course.map((p) => p.id));
+  const own = semesters.flatMap((s) =>
+    s.problems.filter((p) => !(p.scope === 'course' && seen.has(p.id))).map((p) => ({ ...p, semester: { org: s.org, label: s.label } })),
+  );
+  return [...course, ...own];
+}
+
+/** One automatic event: what ("Assignment 2"), the event word ("hand out") and when. */
+export interface NextEvent {
+  title: string;
+  word: string;
+  when: string;
+}
+
+/**
+ * The semester's next automatic event after `now`: a planned release, the hand out of an
+ * assignment not handed out yet, a solution shown (when the engine holds it, the held date),
+ * or the archive. Null when none is scheduled. A release automation will skip is not
+ * one; marks expected is not in the status, so it is not one either.
+ */
+export function nextEvent(s: Status, now: number): NextEvent | null {
+  const tz = s.semester?.timezone ?? DEFAULT_TIMEZONE;
+  const all: NextEvent[] = [];
+  for (const r of s.releases ?? []) if (r.state === 'planned' && r.when) all.push({ title: releaseIdent(r), word: 'release', when: r.when });
+  for (const a of s.assignments ?? []) {
+    const title = assignmentIdent(a.slug, a.title, a.number);
+    if (a.handout && (a.state === 'declared' || a.state === 'teams_forming')) all.push({ title, word: 'hand out', when: a.handout });
+    // Before the late cutoff the engine holds the solution until then.
+    const shown = a.solution_held_until ?? a.solution_shown;
+    if (shown) all.push({ title, word: 'solution shown', when: shown });
+  }
+  if (s.semester?.archive_date) all.push({ title: '', word: 'archive', when: s.semester.archive_date });
+  const ahead = all.map((e) => ({ e, at: instant(e.when, tz) })).filter((x) => x.at > now).sort((a, b) => a.at - b.at);
+  return ahead[0]?.e ?? null;
+}
+
+/** "Next: Assignment 2 hand out, Mon 6 Oct", or "Nothing scheduled". */
+export function nextEventWords(e: NextEvent | null, tz?: string, refYear?: number): string {
+  if (!e) return 'Nothing scheduled';
+  return `Next: ${[e.title, e.word].filter(Boolean).join(' ')}, ${fmtDay(e.when, tz, refYear)}`;
+}
+
+/** One line of the overview's Recent activity: an operation, where it ran, and who ran it. */
+export interface Activity extends Operation {
+  /** The semester org it ran on; absent for a course operation. */
+  org?: string;
+  /** The semester's name, or "course". */
+  where: string;
+  /** The login that started it; '' for a scheduled run; undefined when not known. */
+  actor?: string;
+}
+
+/** The newest `n` operations of every list, each run once (the first list naming it wins). */
+export function recentActivity(lists: Activity[][], n = 5): Activity[] {
+  const seen = new Set<number>();
+  const out: Activity[] = [];
+  for (const a of lists.flat()) {
+    if (seen.has(a.run_id)) continue;
+    seen.add(a.run_id);
+    out.push(a);
+  }
+  return out.sort((a, b) => (b.finished ?? '').localeCompare(a.finished ?? '')).slice(0, n);
+}
+
+/** Who ran an operation: "you", "automation" for a scheduled run, else the login; null when not known. */
+export function whoWord(actor: string | undefined, login: string): string | null {
+  if (actor === undefined) return null;
+  if (!actor) return 'automation';
+  return sameHandle(actor, login) ? 'you' : actor;
 }

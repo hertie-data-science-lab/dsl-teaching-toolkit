@@ -162,26 +162,16 @@ def _create(args: dict) -> str:
     )
 
 
-def test_new_assignment_takes_a_name_and_ignores_the_old_number_and_semester():
-    # The deployed console still sends `number` and `semester` (decision 0014 takes both
-    # away): accepted, and never passed on.
-    request = parse_request(
-        _create({"name": "Trees", "number": "3", "semester": "f2026"})
-    )
+def test_new_assignment_takes_a_name_and_nothing_a_template_does_not_have():
+    # Decision 0014: a template has no number and no semester, and is never copied by
+    # the engine. The args schema refuses each like any unknown arg.
+    request = parse_request(_create({"name": "Trees"}))
     argv = REGISTRY["assignment.create"].argv(request)
     assert argv[:5] == ["assignment", "--org", "Course", "--name", "Trees"]
-    assert "--number" not in argv and "--semester" not in argv
-    with pytest.raises(RequestError) as exc:
-        parse_request(_create({"number": "3", "semester": "f2026"}))
-    assert exc.value.code == "BAD_ARGS"
-
-
-def test_a_copy_is_refused_with_a_sentence_not_ignored():
-    # Ignoring it would make a fresh template where a copy was asked for.
-    with pytest.raises(RequestError) as exc:
-        parse_request(_create({"name": "Trees", "copy_from": "assignment-1-f2025"}))
-    assert exc.value.code == "BAD_ARGS"
-    assert "Create it fresh" in exc.value.text
+    for stray in ({"number": "3"}, {"semester": "f2026"}, {"copy_from": "a-f2025"}):
+        with pytest.raises(RequestError) as exc:
+            parse_request(_create({"name": "Trees", **stray}))
+        assert exc.value.code == "BAD_ARGS"
 
 
 def test_an_answer_on_the_form_beats_the_course_default(monkeypatch):
@@ -232,3 +222,31 @@ def test_the_course_template_offers_the_course_layer_and_nothing_retired():
     assert block[settings.ASSIGNMENT_DEFAULTS_KEY] is None
     for key in ("formats", "submit_via", "team_formation", "visibility"):
         assert key in text
+
+
+def test_the_console_s_starter_choice_reaches_the_scaffold():
+    argv = REGISTRY["assignment.create"].argv(
+        parse_request(_create({"name": "Trees", "starter": "handwritten"}))
+    )
+    assert argv[argv.index("--starter") + 1] == "handwritten"
+    left_out = REGISTRY["assignment.create"].argv(parse_request(_create({"name": "T"})))
+    assert "--starter" not in left_out
+    with pytest.raises(RequestError):
+        parse_request(_create({"name": "Trees", "starter": "copied"}))
+
+
+def test_the_scaffolded_grading_config_says_how_the_starter_is_written():
+    def starter(**k):
+        text = scaffold._grading_config(
+            title="T",
+            kind="individual",
+            submit_via="assignment_repo",
+            formats=["py"],
+            **k,
+        )
+        return yaml.safe_load(text)["starter"]
+
+    # Rule 1: tests on, derived; tests off, hand-written; an explicit answer wins.
+    assert starter(autograde=True) == "derived"
+    assert starter(autograde=False) == "handwritten"
+    assert starter(autograde=False, starter="derived") == "derived"

@@ -39,3 +39,20 @@ export type Tiers = Record<string, FieldTier>;
 
 /** One option of a select or radio field. */
 export const opt = (value: string, label: string, sub?: string) => ({ value, label, sub });
+
+/** The fields of `t` named in `keys`, in that order; a name `t` lacks is left out. */
+export const pick = (t: Tiers, keys: string[]): Tiers => Object.fromEntries(keys.filter((k) => t[k]).map((k) => [k, t[k]]));
+
+type Option = { value: string; label: string; sub?: string };
+
+/**
+ * A select's options with the inherited value first, as "X (default)" with value `''`, and X
+ * not listed again: choosing it means the same as leaving the field empty. A file that already
+ * holds X explicitly (`saved`) is a pin, so X stays as "X (set here)" and shows selected.
+ */
+export function defaultFirst(fallback: unknown, word: string, options: Option[], saved?: unknown): Option[] {
+  const w = word.charAt(0).toUpperCase() + word.slice(1);
+  const fb = String(fallback ?? '');
+  const pinned = saved !== undefined && saved !== null && saved !== '' && String(saved) === fb && options.some((o) => o.value === fb);
+  return [opt('', `${w} (default)`), ...(pinned ? [opt(fb, `${w} (set here)`)] : []), ...options.filter((o) => o.value !== fb)];
+}
