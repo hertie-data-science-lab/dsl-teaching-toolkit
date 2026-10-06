@@ -43,6 +43,7 @@ from typing import NamedTuple
 
 import yaml
 
+from . import schedule
 from .access import grant_team_repo_access, holds, team_repo_access
 from .central import MissingCentralRef, resolve_central_ref
 from .course import (
@@ -411,22 +412,19 @@ def _semester_roles_only(faculty: dict[str, list[dict]]) -> dict[str, list[dict]
     }
 
 
-def _matches_tag(repo: str, tag: str) -> bool:
-    """Whether `repo` belongs to this year's tag (e.g. `course-materials-f2026`,
-    `assignment-1-f2026` both match `f2026`)."""
-    return repo.endswith(f"-{tag}")
-
-
-def _tag_repos(content_repos: list[str], assignments: list[str], tag: str) -> list[str]:
-    """Repos matching `tag` from the course org's already-discovered content/
-    assignment repos, plus the central `.github` repo - what `instructors-<tag>`
-    needs push access to so its members can use both the run-from-repo and central
-    dispatch workflows (`.github` is cross-semester infrastructure, not itself
-    tag-scoped)."""
-    matching = [r for r in content_repos if _matches_tag(r, tag)] + [
-        r for r in assignments if _matches_tag(r, tag)
+def _cited_repos(
+    content_repos: list[str], assignments: list[str], cited: set[str]
+) -> list[str]:
+    """The course org's already-discovered content and assignment repos that this
+    semester's schedule cites (`schedule.cited_repos`: its templates and the sources of its
+    releases), plus the central `.github` repo - what `instructors-<tag>` needs push on to
+    use both the run-from-repo and the central dispatch workflows (decision 0014 rule 4).
+    Not by name: a template is reused every semester, so a repo two semesters cite is
+    granted to both. Only repos that exist in the course org, whatever the plan names."""
+    wanted = {repo.casefold() for repo in cited}
+    return [".github"] + [
+        repo for repo in [*content_repos, *assignments] if repo.casefold() in wanted
     ]
-    return [".github"] + matching
 
 
 # ---------------------------------------------------------------------- gh/git wiring
@@ -730,8 +728,9 @@ def sync_semester_instructors(
     dry_run: bool = False,
 ) -> int:
     """instructors/TAs: declared in this semester's own semester-config/instructors.yml,
-    reconciled into that semester's own `instructors` team AND a parallel, tag-scoped
-    `instructors-<tag>` team on the course org - no merge with any other semester.
+    reconciled into that semester's own `instructors` team AND a parallel
+    `instructors-<tag>` team on the course org, with push on the course repos this
+    semester's schedule cites - no merge with any other semester.
     `content_repos`/`assignments` are the course org's discovered repos, passed in
     (rather than re-discovered here) so a multi-semester `sync()` fetches them once,
     not once per semester."""
@@ -798,7 +797,11 @@ def sync_semester_instructors(
             errors += 1
         else:
             held = {name.casefold(): perm for name, perm in (held or {}).items()}
-            for repo in _tag_repos(content_repos, assignments, tag):
+            # A floor, as every faculty grant is: a repo the schedule stops citing keeps
+            # what the team holds on it. An unreadable schedule reads as empty and grants
+            # `.github`.
+            cited = schedule.cited_repos(schedule.load(semester_org))
+            for repo in _cited_repos(content_repos, assignments, cited):
                 if holds({team.casefold(): held.get(repo.casefold())}, team, "push"):
                     continue
                 if not grant_team_repo_access(course_org, team, repo, "push"):

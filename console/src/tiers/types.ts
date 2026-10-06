@@ -2,6 +2,8 @@
 // fields of one form in the order the instructor thinks (rule 2); a field missing from the
 // map is not shown, and a `hidden` or `derived` one never becomes a field.
 
+import type { ComponentChildren } from 'preact';
+
 export type Tier = 'derived' | 'ask' | 'default' | 'conditional' | 'advanced' | 'hidden';
 
 export type Widget = 'text' | 'number' | 'date' | 'time' | 'url' | 'email' | 'select' | 'radio' | 'checkbox' | 'textarea' | 'markdown';
@@ -18,7 +20,8 @@ export interface FieldTier {
   /** How the default is written beside the label: "institution default: <value>". */
   defaultLabel?: string;
   widget?: Widget;
-  options?: { value: string; label: string; sub?: string; off?: string; href?: string }[];
+  /** `hint`: a `?` beside the option's label. */
+  options?: { value: string; label: string; sub?: string; off?: string; href?: string; hint?: ComponentChildren }[];
   placeholder?: string;
   /** Conditional: the field it sits under. */
   under?: string;

@@ -23,12 +23,6 @@ export const neverMaterial = (path: string) => parts(path).some((x) => NEVER_MAT
 /** Never published whatever a list says: solutions, tests, grading files, `.env`. */
 export const denylisted = (path: string) => parts(path).some((x) => DENYLIST.some((re) => re.test(x)));
 
-/** The paths a pattern list withholds, by the engine's rule (the tests hold it to the engine's cases). */
-export function withheldPaths(files: string[], lines: string[]): string[] {
-  const rs = compileAll(lines);
-  return files.filter((f) => withheldBy(rs, f) !== null);
-}
-
 export interface Badged {
   badges: Record<string, Badge>;
   /** Pattern lines that match no file or folder, as written. */

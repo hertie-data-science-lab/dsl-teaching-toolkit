@@ -276,8 +276,8 @@ describe('the marks grid: teams > students > questions', () => {
 
 describe('the wizards', () => {
   it('New assignment sends template keys only', () => {
-    const args = assignmentArgs({ ...initialValues(null, 'f2026'), name: 'Trees', number: 4, type: 'group' });
-    for (const k of ['team_formation', 'max_team_size', 'visibility', 'submit_url', 'late_window_days', 'late_penalty_per_day']) expect(args).not.toHaveProperty(k);
+    const args = assignmentArgs({ ...initialValues(null), name: 'Trees', number: 4, type: 'group' });
+    for (const k of ['number', 'semester', 'copy_from', 'team_formation', 'max_team_size', 'visibility', 'submit_url', 'late_window_days', 'late_penalty_per_day']) expect(args).not.toHaveProperty(k);
   });
 
   it('adding it to a semester’s schedule asks the run settings, with defaults from the cascade', () => {

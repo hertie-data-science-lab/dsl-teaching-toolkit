@@ -23,6 +23,7 @@ from dsl_course import (
     course,
     deploy,
     ghcli,
+    materials,
     notify,
     repos,
     roster,
@@ -5024,6 +5025,146 @@ def test_invitations_that_cannot_be_read_never_red_the_release(monkeypatch, caps
     _all_semesters_argv(monkeypatch)
     assert scheduler.main() == 0
     assert "could not accept the bot's org invitations" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------ explicit numbers (0020)
+
+
+def _numbers_phase(monkeypatch, dry_run: bool, sched: Schedule | None = None):
+    """`_release_phase` over one unnumbered lecture, one numbered lecture and one
+    unnumbered hand-out (or `sched`), all due, every other pass stubbed: what was fired,
+    what the schedule digest was synced with, and what the phase returned."""
+    seen: dict = {}
+    for name in (
+        "_snapshot_passed_deadlines",
+        "_refresh_sheets",
+        "_reprivatise_student_repos",
+        "_preflight_configs",
+    ):
+        monkeypatch.setattr(scheduler, name, lambda *a, **k: 0)
+    monkeypatch.setattr(
+        scheduler,
+        "_run_releases",
+        lambda c, s, due, *a: seen.update(fired=[r.label for r in due]) or (0, False),
+    )
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda *a, **k: "a-tpl")
+    monkeypatch.setattr(scheduler, "_solution_due", lambda *a, **k: False)
+    monkeypatch.setattr(scheduler, "dry_run_decisions", lambda *a, **k: [])
+    monkeypatch.setattr(scheduler.notify, "route", lambda *a, **k: notify.Routing())
+    monkeypatch.setattr(
+        scheduler.notify, "notify_source_transitions", lambda *a, **k: notify.Unsent()
+    )
+    monkeypatch.setattr(
+        scheduler.notify, "notify_config_faults", lambda *a, **k: notify.Unsent()
+    )
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "sync",
+        lambda *a, **k: seen.update(faults=a[2]) or source_digest.DigestResult(),
+    )
+    monkeypatch.setattr(scheduler.team_formation, "open_windows", lambda *a, **k: [])
+    monkeypatch.setattr(scheduler, "_team_formation_phase", lambda *a, **k: (0, False))
+    monkeypatch.setattr(scheduler, "marks_due", lambda *a, **k: ([], []))
+    earlier = WHEN - timedelta(hours=1)
+    sched = sched or Schedule(
+        releases=[
+            _r("guest", earlier, kind="lecture", deploy=[Deploy("cm", "lectures/g")]),
+            _r(
+                "lecture-2",
+                earlier,
+                kind="lecture",
+                deploy=[Deploy("cm", "lectures/2")],
+            ),
+        ],
+        assignments={
+            "project": AssignmentEntry(
+                course_source_repo="a-tpl",
+                due_datetime=WHEN + timedelta(days=9),
+                handout_datetime=earlier,
+            )
+        },
+    )
+    out = scheduler._release_phase(
+        "Course-Org", "Semester-Org", sched, WHEN, dry_run, None, {}
+    )
+    return out, seen
+
+
+def test_a_due_entry_with_no_number_is_skipped_on_the_skipped_release_ladder(
+    monkeypatch, capsys
+):
+    rc, seen = _numbers_phase(monkeypatch, dry_run=False)
+    assert rc == 0
+    # The numbered lecture goes; the unnumbered lecture and hand-out do not.
+    assert seen["fired"] == ["lecture-2"]
+    log = capsys.readouterr().out
+    assert "[skip] guest - Give guest a number first." in log
+    assert "[skip] project - Give project a number first." in log
+    # Both ride into the schedule.yml digest on the clock of what they stop.
+    faults = {f.where: f for f in seen["faults"] if f.field == "number"}
+    assert set(faults) == {"releases.guest", "assignments.project"}
+    assert faults["releases.guest"].fires == WHEN - timedelta(hours=1)
+    assert faults["releases.guest"].severity(WHEN) is faults_mod.Severity.MISSED
+    assert faults["assignments.project"].plain == "Give project a number."
+
+
+def test_a_materials_yml_that_does_not_parse_holds_no_inferred_entry(
+    monkeypatch, capsys
+):
+    # `week` would be aliased to readings; the file does not parse, so the kind is a
+    # guess (lecture) and no number is required on its strength. An explicit kind counts.
+    def broken(org, repo, path):
+        raise yaml.YAMLError("bad")
+
+    monkeypatch.setattr(materials, "load_yaml_config", broken)
+    materials.read.cache_clear()
+    earlier = WHEN - timedelta(hours=1)
+    sched = Schedule(
+        releases=[
+            _r("week-reading", earlier, deploy=[Deploy("cm", "week/1")]),
+            _r("guest", earlier, kind="lecture", deploy=[Deploy("cm", "week/2")]),
+        ]
+    )
+    try:
+        _rc, seen = _numbers_phase(monkeypatch, dry_run=False, sched=sched)
+    finally:
+        materials.read.cache_clear()
+    assert seen["fired"] == ["week-reading"]
+    assert [f.where for f in seen["faults"] if f.field == "number"] == [
+        "releases.guest"
+    ]
+    log = capsys.readouterr().out
+    assert "Give week-reading a number" not in log
+    assert log.count("[numbers] cm: materials.yml does not parse") == 1
+
+
+def test_a_numbers_check_that_fails_leaves_the_digest_as_it_is(monkeypatch, capsys):
+    # Syncing without the number faults would clear them for a tick and file them again
+    # as New on the next: the digest is skipped instead, and nothing is held.
+    def fails(org):
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setattr(scheduler, "kinds_reader", fails)
+    rc, seen = _numbers_phase(monkeypatch, dry_run=False)
+    assert rc == 0
+    assert "faults" not in seen
+    assert {"guest", "lecture-2"} <= set(seen["fired"])
+    log = capsys.readouterr()
+    assert "could not check the schedule's numbers (RuntimeError)" in log.err + log.out
+    assert "digest - part of it could not be worked out this tick" in log.out
+
+
+def test_the_preview_names_an_entry_with_no_number(monkeypatch):
+    summary, _seen = _numbers_phase(monkeypatch, dry_run=True)
+    assert {
+        "code": "NOT_NUMBERED",
+        "text": "guest not released: Give guest a number first.",
+    } in summary.reasons
+    assert {
+        "code": "NOT_NUMBERED",
+        "text": "project not released: Give project a number first.",
+    } in summary.reasons
+    assert summary.counts["held"] == 2
 
 
 def test_an_unparseable_assignments_yml_holds_the_schedule_digest(monkeypatch):

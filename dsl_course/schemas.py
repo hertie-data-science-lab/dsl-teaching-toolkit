@@ -335,6 +335,8 @@ def status_schema() -> dict:
     assignment = _obj(
         {
             "slug": _str(),
+            # The entry's own number (decision 0020); null: it has none.
+            "number": {"type": ["integer", "null"]},
             "title": _str(),
             "template": _str(),
             "state": _enum(ASSIGNMENT_STATES),
@@ -433,7 +435,7 @@ def schedule_schema() -> dict:
             KNOWN_RELEASE,
             {
                 "kind": _enum(KNOWN_ROW_KINDS),
-                "number": {"type": "integer"},
+                "number": {"type": "integer", "minimum": 1},
                 "deploy": {"type": "array", "items": deploy},
                 "event_datetime": _str(),
             },
@@ -443,7 +445,10 @@ def schedule_schema() -> dict:
     assignment = _obj(
         _keys(
             KNOWN_ASSIGNMENT,
-            {"marks_return_datetime": {"oneOf": [_str(), marks_row]}},
+            {
+                "number": {"type": "integer", "minimum": 1},
+                "marks_return_datetime": {"oneOf": [_str(), marks_row]},
+            },
         ),
         ("due_datetime", "course_source_repo"),
     )

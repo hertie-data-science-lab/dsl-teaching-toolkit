@@ -57,6 +57,29 @@ ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 # submission repos and the frozen semester-side assignment templates (assign.py), and the
 # private per-student gradebooks (grades.py).
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
+# The topic that makes a COURSE-org repo an assignment template (decision 0014), as
+# `dsl-materials` makes a materials repo. The `assignment-` name is only the scaffold's
+# default; `scaffold` stamps the topic and the migration stamps it on older templates.
+TEMPLATE_TOPIC = "dsl-assignment"
+# What an assignment template was told by before the topic: the name, on a GitHub template.
+OLD_TEMPLATE_PREFIX = "assignment-"
+
+
+def is_assignment_template(row: dict) -> bool:
+    """Whether a course-org listing row is an assignment template: it carries the topic."""
+    return TEMPLATE_TOPIC in (row.get("topics") or [])
+
+
+def is_untopicked_template(row: dict) -> bool:
+    """An assignment template by its old mark only - an `assignment-*` GitHub template
+    without the topic: NOT_MIGRATED until the migration's topic step stamps it."""
+    return (
+        row["name"].startswith(OLD_TEMPLATE_PREFIX)
+        and bool(row.get("isTemplate"))
+        and not is_assignment_template(row)
+    )
+
+
 # The repos only a semester org has - the fallback tier signal for an org bootstrapped
 # before the topics existed, or whose topic stamp never landed.
 SEMESTER_ONLY_REPOS = {JOIN_REPO, CONFIG_REPO}
@@ -704,23 +727,20 @@ def discover_release_sources(
 
 
 def discover_assignment_repos(course_org: str) -> list[dict]:
-    """The listing ROW of every assignment template in the course org, in name order.
+    """The listing ROW of every assignment template (topic `dsl-assignment`) in the course
+    org, in name order.
 
     Two different questions are asked of these repos - which of them a dropdown offers,
     and which of them a refresh may WRITE to - and the row carries what tells the two
     apart (`archived`). One listing answers both."""
     return sorted(
-        (
-            r
-            for r in list_org_repos(course_org)
-            if r["name"].startswith("assignment-") and r.get("isTemplate")
-        ),
+        (r for r in list_org_repos(course_org) if is_assignment_template(r)),
         key=lambda r: r["name"],
     )
 
 
 def discover_assignments(course_org: str) -> list[str]:
-    """Assignment template repos in the course org (named assignment-*) - the dropdown.
+    """Assignment template repos in the course org (topic `dsl-assignment`) - the dropdown.
 
     ALL of them, archived included: a finished assignment is a legitimate source to copy
     next year's forward from, and a dropdown only ever offers a repo to READ."""
@@ -765,7 +785,8 @@ def discover_content_repos(course_org: str) -> list[str]:
     """Repos a materials release can come OUT of: the materials repo(s), not the infra
     repos (_is_infra_repo - notably NOT the public `<org>.github.io` site repo, which
     would otherwise be handed the org-admin token as a repo secret) and not the
-    assignment-* template repos, which hold a brief and a starter rather than the session
+    assignment templates (the topic, or an older one the migration has not stamped yet,
+    which is not taken for content either), which hold a brief and a starter rather than the session
     folders a release copies - and which every student repo is GENERATED FROM, so what one
     of them hosts has to be stripped off the semester copy first
     (`assign.withhold_from_template`) rather than placed and forgotten.
@@ -776,5 +797,7 @@ def discover_content_repos(course_org: str) -> list[str]:
     return sorted(
         r["name"]
         for r in list_org_repos(course_org)
-        if not _is_infra_repo(r) and not r["name"].startswith("assignment-")
+        if not _is_infra_repo(r)
+        and not is_assignment_template(r)
+        and not is_untopicked_template(r)
     )

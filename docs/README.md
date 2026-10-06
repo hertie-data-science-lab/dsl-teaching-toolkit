@@ -89,9 +89,9 @@ get a toolkit change out to live orgs, see
 ## Three things that look cosmetic and are not
 
 - **The semester org's `fYYYY`/`sYYYY` suffix** is parsed: it picks the year's `instructors-<semester>`
-  team and `*-<semester>` content repos. The course org's name is not validated.
+  team. The course org's name is not validated.
 - **Repo topics** (`dsl-course-hub`, `dsl-cohort`, `submission`, `gradebook`,
-  `assignment-template`) are how discovery tells orgs and repos apart. Remove one by hand and
+  `assignment-template`, `dsl-assignment`) are how discovery tells orgs and repos apart. Remove one by hand and
   the repo drops out of every sweep.
 - **`.github/.system/last-refresh`** is a heartbeat: GitHub disables crons after 60 quiet days, so the
   nightly refresh commits a date. If it has stopped, run any workflow by hand to restart them.
@@ -106,7 +106,7 @@ from:
 |---------|----------------|
 | [01](01-new-course-org.md) course identity, `course_admins`, instructor cards | [`course-org/dsl-course.yml`](../example-course/course-org/dsl-course.yml) |
 | [02](02-add-materials-to-course.md) materials tree | [`course-materials-f2026/`](../example-course/course-org/course-materials-f2026/) - `lectures/`, `readings/`, `labs/`, `SYLLABUS.md` |
-| [03](03-add-assignment-to-course.md) assignment `main/` + `solution/` | [`assignment-1`](../example-course/course-org/assignment-1-f2026/) (`.py`), [`assignment-2`](../example-course/course-org/assignment-2-f2026/) (notebook), [`assignment-4-project`](../example-course/course-org/assignment-4-project-f2026/) (**group**) - each with `grading_config.yml` + hidden `tests/` |
+| [03](03-add-assignment-to-course.md) assignment `main/` + `solution/` | [`assignment-linear-regression`](../example-course/course-org/assignment-linear-regression/) (`.py`), [`assignment-gradient-descent`](../example-course/course-org/assignment-gradient-descent/) (notebook), [`assignment-group-project`](../example-course/course-org/assignment-group-project/) (**group**) - each with `grading_config.yml` + hidden `tests/` |
 | [05](05-manage-teaching-team.md) the instructors, time-boxed | [`instructors.yml`](../example-course/semester-org/instructors.yml) - two TAs with `start`/`end` dates |
 | [06](06-enrol-students-to-cohort.md) roster + project teams | [`students.csv`](../example-course/semester-org/students.csv) (incl. an auditor), [`teams.csv`](../example-course/semester-org/teams.csv) |
 | [07](07-schedule-releases.md) the whole semester's plan | [`schedule.yml`](../example-course/semester-org/schedule.yml) - `releases` with `event_datetime`s + `deploy_datetime`s, `assignments`, `events` (exams, a clinic); [`assignments.yml`](../example-course/semester-org/assignments.yml) - each assignment's run settings |

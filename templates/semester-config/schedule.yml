@@ -48,7 +48,7 @@
 #
 #   lecture-1:                      
 #     event_datetime:               # REQUIRED - what the site's schedule shows (no valid date = the whole entry is dropped)
-#     number:                       # OPTIONAL - the row's number ("Lecture 3"). Default: the number in the label (lecture_03, lab-9), else its position among its kind
+#     number:                       # REQUIRED unless the label carries one - the row's number ("Lecture 3"). Default: the number in the label (lecture_03, lab-9). Never counted: a shown entry with neither is a problem (readings aside), and its release is skipped until it has one
 #     kind:                         # OPTIONAL - the row's kind: lecture | lab | readings | exam | drop-in | other. Default: from the folder the first deploy lands in (labs/ -> lab, readings/ -> readings, anything else -> lecture). Each kind gets its own tab
 #     title:                        # OPTIONAL - the session's name, shown beside the row's name ("Lecture 1 / Probability Theory") on the Schedule and its kind's tab. NO default: without it the row reads just "Lecture 1"
 #     details:                      # OPTIONAL - a sentence about it. Shows in the Details column of the Schedule tab AND under the session heading on the Lectures tab
@@ -92,6 +92,7 @@
 #                                   
 # assignments:                      
 #   assignment-1:                   # the key names this semester's repos (assignment-1-<handle>); its name on the site is the template's `title:`
+#     number:                       # REQUIRED unless the key carries one (assignment-1) - "Assignment 1" on the site. Never counted from the dates: with neither, it is not handed out until it has one
 #     details:                      # OPTIONAL - a sentence about it, in the Details column of BOTH its schedule rows (out and due), above the links they already carry
 #     show_on_site: true            # OPTIONAL - default: true. false = it hands out, grades and returns exactly as written, and the site says nothing about it at all
 #     tbc: false                    # OPTIONAL - default: false. true = site marks both rows "(TBC)". DISPLAY ONLY: the deadline, the late window and the grading snapshot still fire on the dates below

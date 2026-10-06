@@ -1139,26 +1139,6 @@ def test_semester_dest_repo_comes_from_assignments_yml_and_defaults_to_the_slug(
     assert semester_name("blank", sched.assignments["blank"]) == "blank"
 
 
-def test_entry_for_repo_matches_on_course_source_repo_not_the_slug():
-    from dsl_course.schedule import entry_for_repo
-
-    sched = parse(
-        {
-            "assignments": {
-                "regression": {
-                    "course_source_repo": "wk3-regression-f2026",
-                    "due_datetime": "2026-11-10",
-                }
-            }
-        }
-    )
-    # the slug is a free label, so consumers that start from a REPO name must match on
-    # course_source_repo - deriving a slug from the repo would miss this entry entirely
-    found = entry_for_repo(sched, "wk3-regression-f2026")
-    assert found is not None and found[0] == "regression"
-    assert entry_for_repo(sched, "regression-f2026") is None
-
-
 def test_an_unknown_timezone_is_reported_rather_than_silently_swapped():
     sched = parse(
         {"timezone": "Europe/Berlyn", "events": {"e": {"event_datetime": "2026-11-03"}}}
@@ -2487,11 +2467,11 @@ def test_resolve_target_refuses_to_choose_between_two_entries_on_one_template():
     )
     # A slug that names no entry on this template is a refusal too, not a silent fallback
     assert isinstance(schedule.resolve_target(sched, "a2-f2026", "nope"), str)
-    # A template the plan does not name at all still resolves - the manual buttons work on
-    # an unscheduled template - and the fallback is spelt HERE, not at three call sites.
-    assert schedule.resolve_target(sched, "wk3-regression-f2026") == (
-        "wk3-regression",
-        "wk3-regression",
+    # A template the plan does not cite at all is refused (decision 0014), in the one
+    # sentence every caller prints.
+    assert schedule.resolve_target(sched, "wk3-regression") == (
+        "wk3-regression is not in this semester's schedule. "
+        "Add it to the schedule first."
     )
 
 
@@ -3075,51 +3055,65 @@ def test_an_archive_block_with_no_title_carries_the_default_one():
     assert parse({}).archive is None
 
 
-def test_assignment_pages_are_numbered_as_the_site_numbers_them():
-    # The ONE numbering the site names its pages by and every link to one is built from:
-    # this term's templates plus the plan's entries, sorted by semester-side name, hidden
-    # ones keeping their ordinal so hiding one moves nobody else's URL.
+def _entry(repo: str, day: int, **kw) -> schedule.AssignmentEntry:
+    return schedule.AssignmentEntry(
+        course_source_repo=repo,
+        due_datetime=datetime(2026, 10, day, 23, 59),
+        **kw,
+    )
+
+
+def test_assignment_pages_are_numbered_by_the_plan():
+    # Decision 0020: `number:`, else the key's own number, else none - never a position.
+    # Hidden ones are numbered too.
     sched = schedule.Schedule(
         assignments={
-            "assignment-2": schedule.AssignmentEntry(
-                course_source_repo="assignment-2-f2026",
-                due_datetime=None,
-                show_on_site=False,
-            ),
-            "project": schedule.AssignmentEntry(
-                course_source_repo="assignment-4-f2026",
-                due_datetime=None,
-                semester_dest_repo="team-project",
-            ),
+            "assignment-10": _entry("assignment-trees", 20),
+            "assignment-2": _entry("assignment-regression", 6, show_on_site=False),
+            "project": _entry("assignment-nets", 27, semester_dest_repo="team-project"),
+            "capstone": _entry("assignment-capstone", 28, number=7),
         }
     )
-    templates = ["assignment-1-f2026", "assignment-2-f2026", "assignment-9-s2025"]
-    pages = schedule.assignment_pages("Semester-F2026", sched, templates)
+    pages = schedule.assignment_pages(sched)
     assert [(p.number, p.name, p.key) for p in pages] == [
-        (1, "assignment-1", ""),  # off-plan template: a page, and no schedule key
-        (2, "assignment-2", "assignment-2"),  # hidden, and still numbered
-        (3, "team-project", "project"),  # the plan's own, before its template exists
+        (2, "assignment-2", "assignment-2"),
+        (10, "assignment-10", "assignment-10"),  # after 2, never before it
+        (None, "team-project", "project"),  # no number, never its position
+        (7, "capstone", "capstone"),  # its own `number:`
     ]
-    assert pages[2].stem == "03-team-project"
+    # Without a number the page is its name alone, which no re-dating can move.
+    assert pages[2].stem == "team-project"
+    assert pages[3].stem == "07-capstone"
+    assert pages[2].repo == "assignment-nets"
     # Every page's link is the semester's Join screen in the student console.
     assert pages[2].url("Semester-F2026") == policy.console_link(
         "Semester-F2026", "join"
     )
+    assert set(schedule.assignment_pages_by_key(sched)) == set(sched.assignments)
 
 
-def test_pages_by_key_that_could_not_be_listed_are_none_rather_than_wrong(monkeypatch):
-    def refuse(org):
-        raise RuntimeError("API rate limit exceeded")
-
-    monkeypatch.setattr(schedule, "discover_assignments", refuse)
-    sched = schedule.Schedule(
-        assignments={
-            "a": schedule.AssignmentEntry(
-                course_source_repo="a-f2026", due_datetime=None
-            )
+def test_an_assignment_entry_takes_a_number():
+    sched = parse(
+        {
+            "assignments": {
+                "trees": {
+                    "course_source_repo": "assignment-trees",
+                    "due_datetime": "2026-10-13",
+                    "number": 3,
+                },
+                "nets": {
+                    "course_source_repo": "assignment-nets",
+                    "due_datetime": "2026-10-20",
+                    "number": "three",
+                },
+            }
         }
     )
-    assert schedule.assignment_pages_by_key("Course", "Semester-f2026", sched) == {}
+    assert sched.assignments["trees"].number == 3
+    # A number that is not one is dropped with a line, and the entry still runs.
+    assert sched.assignments["nets"].number is None
+    assert any("nets" in d and "number" in d for d in sched.dropped)
+    assert [p.number for p in schedule.assignment_pages(sched)] == [3, None]
 
 
 # ------------------------------------------------ the solution notice (--previous)

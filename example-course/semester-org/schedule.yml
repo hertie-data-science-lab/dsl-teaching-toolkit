@@ -129,18 +129,19 @@ releases:
 assignments:                    
   assignment-1:
     details: Closed form first, then by gradient descent.   # NB optional: the Details column of both its rows
-    course_source_repo: assignment-1-f2026
+    course_source_repo: assignment-linear-regression
     handout_datetime: 2026-09-15T14:00  
     due_datetime: 2026-10-13
     solution_datetime: 2026-10-16T09:00
   assignment-2:
-    course_source_repo: assignment-2-f2026
+    course_source_repo: assignment-gradient-descent
     details: Classification on a dataset you have not seen, scored on held-out data.
     handout_datetime: 2026-09-29T14:00
     due_datetime: 2026-10-27T23:59
   assignment-4-project:
+    number: 4                   # a number in the middle of a key is not read
     details: Four weeks, one question of your own choosing, one write-up between you.
-    course_source_repo: assignment-4-project-f2026
+    course_source_repo: assignment-group-project
     handout_datetime: 2026-10-13T14:00
     due_datetime: 2026-11-15T23:59
     # NB this file is timing only. What the assignment IS (`type: group`, its title) is

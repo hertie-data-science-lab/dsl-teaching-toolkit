@@ -45,9 +45,8 @@ def scaffold_grants(monkeypatch):
         "grant_team_repo_access",
         lambda org, team, repo, perm, **k: granted.append((team, repo, perm)) or True,
     )
-    monkeypatch.setattr(access, "create_team", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "create_repo", lambda *a, **k: True)
-    monkeypatch.setattr(scaffold, "set_repo_topics", lambda *a, **k: None)
+    monkeypatch.setattr(scaffold, "set_repo_topics", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "put_files", lambda *a, **k: True)
     monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(gh_contents, "put_files", lambda *a, **k: True)
@@ -75,16 +74,16 @@ def test_a_scaffolded_materials_repo_is_granted_to_the_faculty_teams(scaffold_gr
     repo = "course-materials-f2026"
     for team, perm in access.COURSE_TEAM_ACCESS.items():
         assert (team, repo, perm) in scaffold_grants
-    # ...and the semester-declared instructors team for that tag, scoped to its own content.
-    assert ("instructors-f2026", repo, "push") in scaffold_grants
+    # A semester's own instructors get it once a schedule cites it (sync_faculty).
+    assert not [g for g in scaffold_grants if g[0].startswith("instructors-")]
 
 
 def test_a_scaffolded_assignment_repo_is_granted_to_the_faculty_teams(scaffold_grants):
-    scaffold.scaffold_assignment("Org", "1", "f2026", ["py"])
-    repo = "assignment-1-f2026"
+    scaffold.scaffold_assignment("Org", "Trees", ["py"])
+    repo = "assignment-trees"
     for team, perm in access.COURSE_TEAM_ACCESS.items():
         assert (team, repo, perm) in scaffold_grants
-    assert ("instructors-f2026", repo, "push") in scaffold_grants
+    assert not [g for g in scaffold_grants if g[0].startswith("instructors-")]
 
 
 def test_faculty_teams_are_only_instructors_and_admin():

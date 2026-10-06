@@ -331,16 +331,14 @@ def _new_materials(request: Request) -> list[str]:
 def _new_assignment(request: Request) -> list[str]:
     # A box left out is the course's default, else the institution's - as the workflow's
     # own dropdowns send it (`scaffold.resolve_answers`, `scaffold._grading_config`).
+    # `number` and `semester` are accepted and ignored until the console stops sending
+    # them (decision 0014: a template has neither).
     argv = [
         "assignment",
         "--org",
         request.course_org,
-        "--number",
-        str(_a(request, "number")),
-        "--semester",
-        _a(request, "semester"),
         "--name",
-        _a(request, "name", ""),
+        _a(request, "name"),
         "--formats",
         _a(request, "formats", COURSE_DEFAULT_CHOICE),
         "--type",
@@ -350,8 +348,6 @@ def _new_assignment(request: Request) -> list[str]:
         "--autograde",
         "true" if _a(request, "autograde") else "false",
     ]
-    if _a(request, "copy_from"):
-        argv += ["--copy-from", _a(request, "copy_from")]
     return argv
 
 
@@ -695,10 +691,10 @@ _OPS = (
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {
-                "name": _string(r"^(?!-)[^\x00-\x1f]{1,200}$", "The assignment's name"),
-                "number": _string(r"^[0-9]{1,3}$", "Assignment number"),
-                "semester": _string(SEMESTER_PATTERN, "Semester, e.g. f2026"),
-                "copy_from": _string(REPO_PATTERN, "Template to copy forward"),
+                "name": _string(
+                    r"^(?!-)(?=.*[A-Za-z0-9])[^\x00-\x1f]{1,200}$",
+                    "The assignment's name; the repo is assignment-<name>",
+                ),
                 "formats": _string(
                     FORMATS_PATTERN,
                     "Starter file(s), comma-separated; the first is the runnable one",
@@ -706,8 +702,14 @@ _OPS = (
                 "type": _enum(ASSIGNMENT_TYPES),
                 "submit_via": _enum(SUBMIT_VIA),
                 "autograde": _boolean("Seed tests and run them at the late cutoff"),
+                # Ignored, until the console stops sending them.
+                "number": _string(r"^[0-9]{1,3}$", "Ignored"),
+                "semester": _string(SEMESTER_PATTERN, "Ignored"),
+                # Refused with a sentence (`request.RETIRED_OP_ARGS`), until the console
+                # stops sending it.
+                "copy_from": _string(REPO_PATTERN, "Refused: copying is the console's"),
             },
-            required=("number", "semester"),
+            required=("name",),
         ),
         help="Create an assignment template.",
         done_text="Assignment template created.",

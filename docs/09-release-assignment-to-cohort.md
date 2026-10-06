@@ -20,11 +20,13 @@ A `handout_datetime:` datetime under `assignments.<slug>` in the semester's `sch
 
 The `release assignment` workflow can be found in the course org's: 
   1. `.github` → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/release-assignment.yml) 
-  2. within any bootstrapped assignment repo (i.e. any repo created using the **New assignment** workflow) → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/actions)
+  2. within any assignment template (any repo created using the **New assignment** workflow) → **Actions** tab → **Release assignment** - e.g. [the demo's templates](https://github.com/orgs/hertie-dsl-demo-course-e1234/repositories?q=topic%3Adsl-assignment)
 
 
 Pick the `course_source_repo` - the same field a scheduled handout names in `schedule.yml`.
-- It freezes a semester-level copy `<name>` of the chosen template (`semester_dest_repo` from the schedule entry when one names this repo, else the repo minus its semester)
+The template must be in the semester's schedule; one that is not is refused: add it to the
+schedule first.
+- It freezes a semester-level copy `<name>` of the chosen template (the schedule entry's `semester_dest_repo`, else its key)
 - then it creates one **private** `<name>-<handle>` repo per onboarded student/group, with that student as
 collaborator.
 
@@ -152,14 +154,19 @@ Full flow:
 
 ## Deadlines
 
-Set in the **semester's** `semester-config/schedule.yml`, keyed by an assignment **slug** you choose - `course_source_repo` names the actual course-org repo (semester included):
+Set in the **semester's** `semester-config/schedule.yml`, keyed by an assignment **slug** you choose - `course_source_repo` names the course-org template:
 
 ```yaml
 assignments:
   assignment-1: # this is the name students will see
-    course_source_repo: assignment-1-f2026  # required: the course-org repo it hands out from
+    course_source_repo: assignment-linear-regression  # required: the template it hands out from
     due_datetime: 2026-10-13          # the due date students see
+    number: 1                         # the number students see; without it, the key's own
 ```
+
+- **The number** ("Assignment 1") is `number:`, else the number in the key (`assignment-1`). It is
+  never counted from the dates. An entry with neither is a problem, and it is not handed out
+  until you give it one. The console fills in the next number when you add an entry.
 
 - **The date students see** (semester site + the brief's "due" event) is `assignments[slug].due_datetime`
   (23:59 that day). Edit → commit to `main` - **Sync site** fires automatically on the push.

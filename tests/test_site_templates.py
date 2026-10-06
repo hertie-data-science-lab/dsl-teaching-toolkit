@@ -496,7 +496,6 @@ def semester_plan(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
     monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
-    monkeypatch.setattr(site, "discover_assignments", lambda org: [])
     monkeypatch.setattr(site, "yaml_file", lambda *a: {})
     monkeypatch.setattr(site.schedule, "load", lambda org: site.schedule.Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")

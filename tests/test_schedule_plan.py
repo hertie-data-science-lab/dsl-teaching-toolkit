@@ -185,7 +185,8 @@ def _shown(rows):
     return [(sr.row.key, sr.number, [r.key for r in sr.readings]) for sr in rows]
 
 
-def test_numbers_come_from_the_entry_then_the_label_then_the_position():
+def test_numbers_come_from_the_entry_then_the_label_and_never_the_position():
+    # Decision 0020: an entry with neither has no number - never its position.
     rows = _rows(
         [
             Release("intro", _at(1), [Deploy("cm", "lectures/a")]),
@@ -195,23 +196,42 @@ def test_numbers_come_from_the_entry_then_the_label_then_the_position():
         ]
     )
     assert _shown(schedule_plan.site_rows(rows)) == [
-        ("intro", 1, []),
+        ("intro", None, []),
         ("lecture-09", 9, []),
         ("guest", 20, []),
-        ("wrap-up", 4, []),
+        ("wrap-up", None, []),
     ]
+
+
+def test_re_dating_an_entry_moves_nobody():
+    before = [
+        Release("lecture-1", _at(1), [Deploy("cm", "lectures/a")]),
+        Release("b", _at(2), [Deploy("cm", "lectures/b")], number=2),
+        Release("c", _at(3), [Deploy("cm", "lectures/c")], number=3),
+    ]
+    after = [
+        Release("lecture-1", _at(5), [Deploy("cm", "lectures/a")]),
+        *before[1:],
+    ]
+    numbers = lambda rel: {
+        sr.row.key: sr.number for sr in schedule_plan.site_rows(_rows(rel))
+    }
+    assert numbers(before) == numbers(after) == {"lecture-1": 1, "b": 2, "c": 3}
 
 
 def test_a_silent_entry_is_no_row_and_renumbers_nothing():
     # Maths: a silent setup copy and a silent quiz between the lectures.
     rows = _rows(
         [
-            Release("a", _at(1), [Deploy("cm", "lectures/a")]),
+            Release("lecture-1", _at(1), [Deploy("cm", "lectures/a")]),
             Release("setup", _at(2), [Deploy("cm", "m4ds")], show_on_site=False),
-            Release("b", _at(3), [Deploy("cm", "lectures/b")]),
+            Release("lecture-2", _at(3), [Deploy("cm", "lectures/b")]),
         ]
     )
-    assert _shown(schedule_plan.site_rows(rows)) == [("a", 1, []), ("b", 2, [])]
+    assert _shown(schedule_plan.site_rows(rows)) == [
+        ("lecture-1", 1, []),
+        ("lecture-2", 2, []),
+    ]
 
 
 def test_numbered_readings_join_the_lecture_with_that_number_whatever_the_date():
@@ -245,9 +265,9 @@ def test_unnumbered_untitled_readings_are_their_own_row():
             Release("extra", _at(4), [Deploy("cm", "readings/b")], show_on_site=False),
         ]
     )
-    # Shown: a numbered row of the Readings kind; silent: unnumbered, off the Schedule.
+    # Shown or silent, a readings row with no number of its own is unnumbered.
     assert _shown(schedule_plan.site_rows(rows)) == [
-        ("week-reading", 1, []),
+        ("week-reading", None, []),
         ("lecture-1", 1, []),
         ("extra", None, []),
     ]
@@ -267,7 +287,7 @@ def test_titled_readings_are_their_own_row():
     )
     assert _shown(schedule_plan.site_rows(rows)) == [
         ("lecture-1", 1, []),
-        ("further", 1, []),
+        ("further", None, []),
     ]
 
 

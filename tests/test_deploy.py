@@ -11,6 +11,14 @@ from __future__ import annotations
 import pytest
 
 from dsl_course import access, course, deploy, ghcli, records, repos
+from dsl_course.schedule import Deploy, Release, Schedule
+
+
+@pytest.fixture(autouse=True)
+def _no_plan(monkeypatch):
+    """The release button reads the semester's plan for the entry a copy belongs to;
+    these runs release copies the plan does not name."""
+    monkeypatch.setattr(deploy.schedule, "load", lambda org: Schedule())
 
 
 def test_a_single_path_with_no_comma_still_works():
@@ -730,3 +738,73 @@ def test_a_dest_that_cannot_reach_upstream_is_dropped_like_a_failed_clone(
     err = capsys.readouterr().err
     assert "SEMESTER/materials" in err
     assert deploy.UPSTREAM_BRANCH in err
+
+
+def test_release_now_says_in_one_line_when_the_schedule_cannot_be_read(
+    monkeypatch, capsys
+):
+    def unreachable(org):
+        raise RuntimeError("gh api failed: HTTP 502")
+
+    monkeypatch.setattr(deploy.schedule, "load", unreachable)
+    monkeypatch.setattr(deploy, "deploy_many", lambda *a, **k: pytest.fail("no copy"))
+    monkeypatch.setattr(
+        "sys.argv",
+        ["deploy", "--course-org", "C", "--course-source-repo", "cm",
+         "--semester-org", "S", "--course-source-path", "x", "--no-preview"],
+    )  # fmt: skip
+    assert deploy.main() == 1
+    captured = capsys.readouterr()
+    assert "gh api failed: HTTP 502" in captured.out + captured.err
+
+
+def _plan_with_guest(monkeypatch):
+    when = None
+    monkeypatch.setattr(
+        deploy.schedule,
+        "load",
+        lambda org: Schedule(
+            releases=[
+                Release(
+                    "guest", when, [Deploy("cm", "lectures/guest")], kind="lecture"
+                ),
+                Release(
+                    "lecture-2", when, [Deploy("cm", "lectures/02")], kind="lecture"
+                ),
+            ]
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "refused"),
+    [
+        ("lectures/guest", True),
+        ("lectures/02", False),
+        ("x", False),
+        # A requested folder holding a planned unnumbered copy releases it too.
+        ("lectures", True),
+        ("lectures/", True),
+        ("lecture", False),
+    ],
+)
+def test_release_now_refuses_a_copy_of_an_entry_with_no_number(
+    monkeypatch, path, refused
+):
+    # Decision 0020 rule 3: the copy of an unnumbered entry is refused as the scheduled
+    # release skips it; a numbered entry's, or one off the plan, goes.
+    _plan_with_guest(monkeypatch)
+    monkeypatch.setattr(deploy, "deploy_many", lambda *a, **k: (0, True))
+    monkeypatch.setattr(
+        "sys.argv",
+        ["deploy", "--course-org", "C", "--course-source-repo", "cm",
+         "--semester-org", "S", "--course-source-path", path, "--no-preview"],
+    )  # fmt: skip
+    out = deploy.main()
+    if refused:
+        assert out == 1
+        assert out.reasons == [
+            {"code": "NOT_NUMBERED", "text": "Give guest a number first."}
+        ]
+    else:
+        assert out == 0

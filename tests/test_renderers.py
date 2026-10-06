@@ -78,7 +78,7 @@ ALL_RENDERED = {
         ["course-materials-f2026"], ["Semester-f2026"]
     ),
     "new_materials": workflows_render.render_new_materials(["course-materials-f2026"]),
-    "new_assignment": workflows_render.render_new_assignment(["assignment-1-f2026"]),
+    "new_assignment": workflows_render.render_new_assignment(),
     "derive_student_version": workflows_render.render_derive_student_version(
         ["assignment-1-f2026"]
     ),
@@ -765,24 +765,22 @@ def test_scaffold_buttons_route_inputs_through_env_not_the_shell():
     for rendered in (materials, assignment):
         step = workflow_jobs(rendered)["scaffold"]["steps"][-1]
         assert "${{" not in step["run"]
-        assert '--semester "$SEMESTER"' in rendered
-        # `copy_from` is a repo name off a form like any other input, and it reaches the
-        # CLI as an argument only when someone picked a repo: the placeholder first option
-        # is emptied first, so scaffold is handed no --copy-from at all.
-        assert step["env"]["COPY_FROM"] == "${{ inputs.copy_from }}"
-        assert (
-            f'[ "$COPY_FROM" = "{workflows_render._FRESH_STARTER}" ] && COPY_FROM=""'
-        ) in rendered
-        assert '[ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")' in rendered
-    assert workflow_jobs(materials)["scaffold"]["steps"][-1]["env"]["SEMESTER"] == (
-        "${{ inputs.semester }}"
-    )
-    assert workflow_jobs(assignment)["scaffold"]["steps"][-1]["env"]["SEMESTER"] == (
-        "${{ inputs.semester }}"
-    )
-    assert '--number "$NUMBER"' in assignment
+    assert '--semester "$SEMESTER"' in materials
+    # `copy_from` is a repo name off a form like any other input, and it reaches the
+    # CLI as an argument only when someone picked a repo: the placeholder first option
+    # is emptied first, so scaffold is handed no --copy-from at all.
+    step = workflow_jobs(materials)["scaffold"]["steps"][-1]
+    assert step["env"]["COPY_FROM"] == "${{ inputs.copy_from }}"
+    assert (
+        f'[ "$COPY_FROM" = "{workflows_render._FRESH_STARTER}" ] && COPY_FROM=""'
+    ) in materials
+    assert '[ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")' in materials
+    assert step["env"]["SEMESTER"] == "${{ inputs.semester }}"
     # The free-text ones are the ones that matter here: a name is prose a person types.
     assert '--name "$NAME"' in assignment
+    # A template has no number, no semester and no copy (decision 0014).
+    for gone in ("--number", "--semester", "--copy-from"):
+        assert gone not in assignment
 
 
 def test_bootstrap_org_workflow_routes_inputs_through_env_not_the_shell():
@@ -944,9 +942,6 @@ def test_semester_config_roster_dispatcher_fires_send_codes_on_students_csv():
 # replacement for one of these is a decision, not a diff nobody noticed.
 NEW_ASSIGNMENT_INPUTS = [
     "assignment_name",
-    "assignment_number",
-    "semester",
-    "copy_from",
     "formats",
     "type",
     "submit_via",
@@ -954,18 +949,14 @@ NEW_ASSIGNMENT_INPUTS = [
 ]
 
 
-def test_the_boxes_a_copy_ignores_are_not_marked_required():
-    # GitHub renders an asterisk beside every `required: true` label, so boxes 5-10 were
-    # demanding an answer on the same form where box 4 says it ignores them. They all
-    # carry a `default:`, and a choice/string with a default and a boolean are submitted
-    # whether or not anyone touches the form - so the run step still gets all six.
-    inputs = workflow_inputs(
-        workflows_render.render_new_assignment(["assignment-1-f2025"])
-    )
-    for name in NEW_ASSIGNMENT_INPUTS[:3]:
-        assert inputs[name]["required"] is True  # the three that name the repo
-    assert inputs["copy_from"]["required"] is False
-    for name in NEW_ASSIGNMENT_INPUTS[4:]:
+def test_only_the_name_is_marked_required():
+    # GitHub renders an asterisk beside every `required: true` label. The name is the one
+    # answer with no default: it names the repo. The rest carry a `default:`, and a
+    # choice/string with a default and a boolean are submitted whether or not anyone
+    # touches the form - so the run step still gets them all.
+    inputs = workflow_inputs(workflows_render.render_new_assignment())
+    assert inputs["assignment_name"]["required"] is True
+    for name in NEW_ASSIGNMENT_INPUTS[1:]:
         assert "required" not in inputs[name], name
         assert "default" in inputs[name], name
 
@@ -980,12 +971,10 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     assert list(inputs) == NEW_ASSIGNMENT_INPUTS
     assert len(inputs) <= GITHUB_MAX_DISPATCH_INPUTS
     # GitHub renders the boxes in this order and numbers nothing itself, so the numbering
-    # in the descriptions is the only thing that can be wrong about it. `copy_from` is
-    # box 4 and says so: it voids boxes 5-10, and a form is filled in top to bottom.
+    # in the descriptions is the only thing that can be wrong about it.
     for n, name in enumerate(NEW_ASSIGNMENT_INPUTS, start=1):
         assert inputs[name]["description"].startswith(f"{n}. ")
-    assert "Boxes 5-8 are then ignored" in inputs["copy_from"]["description"]
-    # Box 5 takes a LIST, so it is free text rather than a dropdown - and every format the
+    # Box 2 takes a LIST, so it is free text rather than a dropdown - and every format the
     # scaffold accepts has to be named in the description, because that is the only place
     # a faculty member can read the vocabulary off. Asserted as the WHOLE joined list
     # rather than one member at a time: `py` is a substring of `ipynb`, so a per-member
@@ -1011,9 +1000,6 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     assert "${{" not in step["run"]
     for env_name, field in (
         ("NAME", "assignment_name"),
-        ("NUMBER", "assignment_number"),
-        ("SEMESTER", "semester"),
-        ("COPY_FROM", "copy_from"),
         ("FORMATS", "formats"),
         ("TYPE", "type"),
         ("SUBMIT_VIA", "submit_via"),
@@ -1023,21 +1009,13 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
         assert f'"${env_name}"' in rendered
 
 
-@pytest.mark.parametrize(
-    "rendered",
-    [
-        workflows_render.render_new_materials(REPOS_2),
-        workflows_render.render_new_assignment(ASSIGNMENTS_2),
-    ],
-    ids=["new_materials", "new_assignment"],
-)
-def test_the_copy_forward_dropdown_starts_on_the_fresh_starter(rendered):
+def test_the_copy_forward_dropdown_starts_on_the_fresh_starter():
     # GitHub selects the first option, and every other repo dropdown carries a `default:`
     # naming this year's - so a `copy_from` built the same way would copy a whole repo
     # forward for anyone who typed a tag and pressed the button. The fresh starter is
     # first and there is no default; it is a named option, never an empty string, because
-    # an option GitHub rejects would take both scaffold buttons down with it.
-    spec = workflow_inputs(rendered)["copy_from"]
+    # an option GitHub rejects would take the scaffold button down with it.
+    spec = workflow_inputs(workflows_render.render_new_materials(REPOS_2))["copy_from"]
     assert spec["options"][0] == workflows_render._FRESH_STARTER
     assert "" not in spec["options"]
     assert "default" not in spec

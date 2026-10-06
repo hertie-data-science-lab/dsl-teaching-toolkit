@@ -372,7 +372,7 @@ _(automatically bootstrapped from the central
 | [**Bootstrap semester**](https://github.com/{org}/.github/actions/workflows/bootstrap-semester.yml) | Configures a freshly-created semester org (sets up scaffold repos, registers it with the course org, seeds workflow functionality). | Run by instructor |
 | [**Send enrolment codes**](https://github.com/{org}/.github/actions/workflows/send-codes.yml) | Generates enrolment codes for each student and emails each their code (to their Hertie email address). Students paste the code into the Join course issue. This keeps personal data out of the public repo. There is no button: a push to a semester's `students.csv` is what fires it, and it sends for real - so a re-send means clearing that row's `code_sent_at` and pushing again. | Automatic |
 | [**New materials repo**](https://github.com/{org}/.github/actions/workflows/new-materials.yml) | Scaffolds a correctly-structured `course-materials-<year>` repo (session folders + the Release workflows). Ready for material to be added. | Run by instructor |
-| [**New assignment**](https://github.com/{org}/.github/actions/workflows/new-assignment.yml) | Scaffolds an `assignment-N-<year>` template repo from ten answers: brief + starter(s) on `main`; the `solution` branch carries the model solution and `grading_config.yml`, which defines the assignment from there on (hidden tests only when you asked for autograding). | Run by instructor |
+| [**New assignment**](https://github.com/{org}/.github/actions/workflows/new-assignment.yml) | Scaffolds an `assignment-<name>` template repo from five answers: brief + starter(s) on `main`; the `solution` branch carries the model solution and `grading_config.yml`, which defines the assignment from there on (hidden tests only when you asked for autograding). | Run by instructor |
 | [**Derive student version**](https://github.com/{org}/.github/actions/workflows/derive-student-version.yml) | Writes an assignment's student starter onto `main` from the ONE notebook you keep on its `solution` branch, with the fenced answers (`### BEGIN SOLUTION`, a `solution` cell tag, an Rmd `solution=TRUE` chunk) replaced by placeholders. So you maintain one file, not two. It never writes to `solution`, and it refuses to write a file that had nothing fenced in it. Preview first. | Run by instructor |
 | [**Generate syllabus**](https://github.com/{org}/.github/actions/workflows/generate-syllabus.yml) | Writes the "Course sessions and readings" section of a syllabus - one block per session, with its title, learning objectives and reading list - from a semester's `semester-config/schedule.yml` and this repo's `readings/` folders. It lands in `SYLLABUS.sessions.md` beside your syllabus (never released to students) and never edits `SYLLABUS.md` itself. | Run by instructor |
 | [**Check semester setup**](https://github.com/{org}/.github/actions/workflows/check-semester-setup.yml) | A per-semester checklist of everything configured (identity, people, schedule + release plan, roster, teams, grades) with direct edit links for anything missing. Read-only. | Run by instructor |
@@ -409,7 +409,7 @@ The following are runnable by explicit ad hoc manual dispatch; course instructor
 {org}/                            <- this COURSE org (persistent)
 |-- .github/                      profile + faculty & instructor workflows (see Actions tab) + semester registry
 |-- course-materials-<year>/      lectures/01_.../   readings/01_.../   (+ syllabus, README)
-`-- assignment-<n>-<year>/        is_template repo:
+`-- assignment-<name>/            is_template repo (topic dsl-assignment):
                                     main      -> starter + autograder   (students get this)
                                     solution  -> solution/   (pushed to students on demand)
 
@@ -438,7 +438,7 @@ Add more sections freely (e.g. `labs/01_.../`, `datasets/01_.../`).
 
 ### Assignment repo
 
-`assignment-N-<year>` (an `is_template` repo) - the source for Release assignment:
+`assignment-<name>` (an `is_template` repo) - the source for Release assignment, once a semester's schedule names it:
 - **`main` branch** - the starter code only (no tests, no autograder). This is exactly what students receive (native template-generate copies `main` only).
 - **`solution` branch** - the model solution (`solution/`), plus **`grading_config.yml`** and the **hidden tests** the autograder runs faculty-side at the cutoff. **All of this MUST live on this branch, never on `main`** - that is what guarantees it is never copied into student repos on generate. Only the `solution/` folder reaches students, and only when you run Release assignment with **solution_datetime** `now` (a separate, later commit); the hidden tests and `grading_config.yml` never do.
 

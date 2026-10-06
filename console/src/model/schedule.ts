@@ -90,6 +90,11 @@ export interface Row {
   fault: boolean;
 }
 
+/** Whether `status` names `entry` as needing a number (decision 0020: a `number:*` problem). */
+export function needsANumber(status: Status, entry: string): boolean {
+  return (status.problems ?? []).some((x) => x.id.startsWith('number:') && x.fix?.entry === entry);
+}
+
 /** Every row of the semester, in date order, the way the schedule screen and the semester strip read it. */
 export function scheduleRows(status: Status, sched: Schedule | null, now: number, tz: string): Row[] {
   const rows: Row[] = [];
@@ -99,13 +104,13 @@ export function scheduleRows(status: Status, sched: Schedule | null, now: number
   for (const r of releases) {
     const e = sched?.releases[r.id];
     rows.push({
-      entry: r.id, block: 'releases', type: r.kind ?? 'release', when: r.when, ident: releaseIdent(r, releases), name: r.title,
+      entry: r.id, block: 'releases', type: r.kind ?? 'release', when: r.when, ident: releaseIdent(r), name: r.title,
       state: RELEASE_WORD[r.state] ?? r.state, details: e?.details ?? '', tbc: r.tbc, show: r.show_on_site, fault: r.state === 'will_be_skipped',
     });
   }
   for (const a of status.assignments ?? []) {
     const e = sched?.assignments[a.slug];
-    const base = { entry: a.slug, block: 'assignments' as Block, ident: assignmentIdent(a.slug), name: a.title, state: ASSIGNMENT_WORD[a.state] ?? a.state, details: e?.details ?? '', tbc: e?.tbc ?? false, show: e?.show ?? true, fault: a.problem };
+    const base = { entry: a.slug, block: 'assignments' as Block, ident: assignmentIdent(a.slug, 'Assignment', a.number), name: a.title, state: ASSIGNMENT_WORD[a.state] ?? a.state, details: e?.details ?? '', tbc: e?.tbc ?? false, show: e?.show ?? true, fault: a.problem };
     if (a.handout) rows.push({ ...base, type: 'handout', when: a.handout });
     if (a.due) rows.push({ ...base, type: 'due', when: a.due });
   }

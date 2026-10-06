@@ -12,6 +12,19 @@ import yaml
 from dsl_course import faults as faults_mod
 from dsl_course import gh_contents, gh_teams, sync_faculty
 from dsl_course.course import people_by_role
+from dsl_course.schedule import Deploy, Release, Schedule
+from tests.plans import citing
+
+
+@pytest.fixture(autouse=True)
+def _plan(monkeypatch):
+    """The semester's schedule, which says what its instructors get push on: none cited
+    unless a test says otherwise."""
+    monkeypatch.setattr(sync_faculty.schedule, "load", lambda org: Schedule())
+
+
+def _cites(monkeypatch, plans: dict[str, Schedule]) -> None:
+    monkeypatch.setattr(sync_faculty.schedule, "load", lambda org: plans[org])
 
 
 def _parse(raw: str) -> dict:
@@ -103,10 +116,11 @@ def test_sync_semester_instructors_counts_failed_grants(monkeypatch):
         sync_faculty, "grant_team_repo_access", lambda *a, **k: False
     )  # every grant fails
     monkeypatch.setattr(sync_faculty, "team_repo_access", lambda org, team: None)
+    _cites(monkeypatch, {"Course-f2026": _releasing("course-materials-f2026")})
     errors = sync_faculty.sync_semester_instructors(
         "Course", "Course-f2026", ["course-materials-f2026"], []
     )
-    # _tag_repos always includes .github + the one matching content repo -> 2 failed grants
+    # .github, and the one content repo the schedule cites -> 2 failed grants
     assert errors == 2
 
 
@@ -131,6 +145,7 @@ def test_a_tag_grant_the_team_already_holds_is_not_made_again(monkeypatch):
         "grant_team_repo_access",
         lambda org, team, repo, perm: granted.append(repo) or True,
     )
+    _cites(monkeypatch, {"Course-f2026": _releasing("course-materials-f2026")})
     sync_faculty.sync_semester_instructors(
         "Course", "Course-f2026", ["course-materials-f2026"], []
     )
@@ -280,24 +295,93 @@ people:
     assert desired == {"instructors": set(), "course-admin": set()}
 
 
-def test_matches_tag_requires_exact_suffix_with_hyphen():
-    assert sync_faculty._matches_tag("course-materials-f2026", "f2026") is True
-    assert sync_faculty._matches_tag("assignment-1-s2026", "s2026") is True
-    assert sync_faculty._matches_tag("course-materials-f2025", "f2026") is False
-    # no hyphen before the tag-like substring - must not false-positive
-    assert sync_faculty._matches_tag("course-materials-sf2026", "f2026") is False
-    assert sync_faculty._matches_tag("join", "f2026") is False
+def _releasing(*sources: str, templates: tuple[str, ...] = ()) -> Schedule:
+    """A plan whose releases copy out of `sources` and whose assignments hand out
+    `templates`."""
+    plan = citing(*templates)
+    plan.releases = [
+        Release(
+            label=f"s{i}",
+            when=None,
+            deploy=[Deploy(course_source_repo=s, course_source_path="lectures")],
+        )
+        for i, s in enumerate(sources, start=1)
+    ]
+    return plan
 
 
-def test_tag_repos_filters_and_always_includes_dotgithub():
-    content_repos = ["course-materials-f2026", "course-materials-f2025", "join"]
-    assignments = ["assignment-1-f2026", "assignment-2-s2026"]
-    repos = sync_faculty._tag_repos(content_repos, assignments, "f2026")
-    assert repos == [".github", "course-materials-f2026", "assignment-1-f2026"]
+def test_cited_repos_are_the_schedules_templates_and_sources_whatever_their_names():
+    # Decision 0014 rule 4: by citation, not by a `-<tag>` suffix. A repo the plan names
+    # but the course org does not have is no grant.
+    plan = _releasing("slides", templates=("assignment-trees", "assignment-gone"))
+    repos = sync_faculty._cited_repos(
+        ["slides", "course-materials-f2026", "Lecture-Code"],
+        ["assignment-trees", "assignment-1-f2026"],
+        sync_faculty.schedule.cited_repos(plan),
+    )
+    assert repos == [".github", "slides", "assignment-trees"]
 
 
-def test_tag_repos_empty_lists_still_includes_dotgithub():
-    assert sync_faculty._tag_repos([], [], "f2026") == [".github"]
+def test_an_empty_plan_still_grants_dotgithub():
+    assert sync_faculty._cited_repos(["slides"], ["assignment-trees"], set()) == [
+        ".github"
+    ]
+
+
+def _grants(monkeypatch, held: dict[str, dict[str, str]]) -> list[tuple[str, str, str]]:
+    """Wire `sync_semester_instructors` to record its grants; `held` is what each
+    `instructors-<tag>` team already holds."""
+    monkeypatch.setattr(sync_faculty, "_semester_faculty", lambda org: ({}, False))
+    monkeypatch.setattr(sync_faculty, "reconcile_team_members", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        sync_faculty, "create_team_outcome", lambda *a, **k: gh_teams.EXISTED
+    )
+    monkeypatch.setattr(
+        sync_faculty, "team_repo_access", lambda org, team: held.get(team, {})
+    )
+    granted: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        sync_faculty,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm: granted.append((team, repo, perm)) or True,
+    )
+    return granted
+
+
+def test_a_template_two_semesters_cite_is_granted_to_both(monkeypatch):
+    granted = _grants(monkeypatch, {})
+    _cites(
+        monkeypatch,
+        {
+            "Course-f2026": _releasing("slides", templates=("assignment-trees",)),
+            "Course-s2027": _releasing(templates=("assignment-trees",)),
+        },
+    )
+    for semester in ("Course-f2026", "Course-s2027"):
+        sync_faculty.sync_semester_instructors(
+            "Course", semester, ["slides"], ["assignment-trees", "assignment-nets"]
+        )
+    assert granted == [
+        ("instructors-f2026", ".github", "push"),
+        ("instructors-f2026", "slides", "push"),
+        ("instructors-f2026", "assignment-trees", "push"),
+        ("instructors-s2027", ".github", "push"),
+        ("instructors-s2027", "assignment-trees", "push"),
+    ]
+
+
+def test_the_citation_grant_is_a_floor_and_never_demotes(monkeypatch):
+    # Held above push stays as it is (no PUT that could lower it), and a repo the plan
+    # no longer cites keeps what the team has on it: the sweep only ever grants.
+    granted = _grants(
+        monkeypatch,
+        {"instructors-f2026": {".github": "admin", "assignment-old": "push"}},
+    )
+    _cites(monkeypatch, {"Course-f2026": _releasing(templates=("assignment-trees",))})
+    sync_faculty.sync_semester_instructors(
+        "Course", "Course-f2026", [], ["assignment-trees", "assignment-old"]
+    )
+    assert granted == [("instructors-f2026", "assignment-trees", "push")]
 
 
 def test_desired_for_filters_to_one_team():

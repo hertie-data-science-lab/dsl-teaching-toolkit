@@ -7,6 +7,7 @@ import importlib
 import json
 import re
 import sys
+from datetime import UTC, datetime
 
 import pytest
 from conftest import workflow_inputs, workflow_jobs
@@ -24,7 +25,7 @@ from dsl_course.ops.registry import (
     workflow_inputs as op_inputs,
 )
 from dsl_course.ops.request import RequestError, parse_request
-from dsl_course.schedule import Deploy, Release, Schedule
+from dsl_course.schedule import AssignmentEntry, Deploy, Release, Schedule
 
 COURSE = "hertie-dsl-demo-course-e1234"
 SEMESTER = "hertie-dsl-demo-f2026"
@@ -379,6 +380,53 @@ def test_redaction_keeps_templates_and_the_shared_drop_box():
     assert outcome_mod.redact(text) == text
 
 
+def test_a_free_assignment_key_is_redacted_off_the_runs_schedule():
+    # A key is free (decision 0014): `trees-ada-l` names a student as surely as
+    # `assignment-3-ada-l`, and only the schedule knows `trees` is an assignment.
+    text = "created trees-ada-l, team-project-reds; kept trees-submissions, trees"
+    names = {"trees", "project", "team-project"}
+    assert outcome_mod.redact(text, names=names) == (
+        "created trees-<handle>, team-project-<handle>; kept trees-submissions, trees"
+    )
+    # Without the schedule the old pattern still stands, and nothing else moves.
+    assert outcome_mod.redact(text) == text
+    assert outcome_mod.redact("assignment-3-ada-l") == "assignment-3-<handle>"
+
+
+def test_the_annotation_redacts_by_the_semesters_assignment_names(monkeypatch):
+    sched = Schedule(
+        assignments={
+            "trees": AssignmentEntry(
+                course_source_repo="assignment-trees",
+                due_datetime=datetime(2026, 10, 13, tzinfo=UTC),
+                semester_dest_repo="forests",
+            )
+        }
+    )
+    monkeypatch.setattr(console.schedule, "load", lambda org: sched)
+    req = parse_request(
+        json.dumps(
+            _request(
+                op="assignment.collect_now",
+                args={"course_source_repo": "assignment-trees"},
+                semester_org="S",
+            )
+        )
+    )
+    assert console.assignment_names(req) == {"trees", "forests"}
+    out = Outcome(
+        op="assignment.collect_now",
+        actor="prof",
+        preview=True,
+        conclusion="previewed",
+        summary="would read forests-ada-l and trees-bo",
+    )
+    body = _body(annotation(out, console.assignment_names(req)))
+    assert body["summary"] == "would read forests-<handle> and trees-<handle>"
+    # A course-wide op has no schedule, so no names.
+    assert console.assignment_names(None) == set()
+
+
 # ------------------------------------------------------------------ console.main end to end
 
 
@@ -392,6 +440,8 @@ def engine(monkeypatch):
         request_mod, "get_team_members", _teams({(COURSE, "course-admin"): {"prof"}})
     )
     monkeypatch.setattr(status, "write_after_op", lambda request: None)
+    # The schedule the annotation takes its assignment names from (its own tests below).
+    monkeypatch.setattr(console, "assignment_names", lambda request: set())
     writes = []
     monkeypatch.setattr(
         outcome_mod, "put_file", lambda *a, **k: writes.append((a, k)) or True
@@ -636,9 +686,7 @@ def test_a_failed_refresh_after_a_new_template_is_a_reason_not_a_failure(
 
     monkeypatch.setattr(scaffold, "main", lambda: 0)
     monkeypatch.setattr(seed, "main", lambda: 1)
-    raw = _request(
-        op="assignment.create", args={"number": "2", "semester": "f2026"}, preview=False
-    )
+    raw = _request(op="assignment.create", args={"name": "Trees"}, preview=False)
     del raw["semester_org"]
     rc, body, _ = _main(monkeypatch, capsys, raw)
     assert rc == 0 and body["conclusion"] == "done"

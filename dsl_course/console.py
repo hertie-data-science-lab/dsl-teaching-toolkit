@@ -254,11 +254,29 @@ def _sealed(outcome: Outcome, request: Request) -> bool:
     )
 
 
+def assignment_names(request: Request | None) -> set[str]:
+    """Every name a submission repo of this semester is called after - each assignment's
+    key and semester-side name - for the public annotation to redact `<name>-<handle>`
+    by. Empty for a course-wide op, and when the schedule cannot be read (the pattern for
+    `assignment-N-` still applies)."""
+    if request is None or not request.semester_org:
+        return set()
+    try:
+        sched = schedule.load(request.semester_org)
+    except RuntimeError:
+        return set()
+    return {
+        name
+        for key, entry in sched.assignments.items()
+        for name in (key, schedule.semester_name(key, entry))
+    }
+
+
 def _finish(outcome: Outcome, request: Request | None) -> None:
     """Emit the annotation, then - for a request that got past its identity check - the
     private record and the status refresh. A record that cannot be written is a broken
     run; the status refresh is best-effort."""
-    print(annotation(outcome), flush=True)
+    print(annotation(outcome, assignment_names(request)), flush=True)
     if request is None:
         return
     if _sealed(outcome, request):

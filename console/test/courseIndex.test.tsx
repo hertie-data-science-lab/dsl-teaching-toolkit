@@ -39,7 +39,7 @@ const files = new StaticFiles(
   { [`${COURSE_ORG}/${MAT}`]: ['SYLLABUS.md', 'lectures/05_trees/slides.html', 'lectures/05_trees/notes.pdf', 'solutions/05.ipynb'] },
   {
     [COURSE_ORG]: [
-      { name: '.github' }, { name: MAT, pushed_at: '2026-09-22T14:38:46Z' }, { name: 'assignment-3-f2026' }, { name: 'assignment-9-draft' },
+      { name: '.github' }, { name: MAT, pushed_at: '2026-09-22T14:38:46Z' }, { name: 'assignment-3-f2026', topics: ['dsl-assignment'] }, { name: 'assignment-9-draft', topics: ['dsl-assignment'] },
       { name: 'lecture-code-f2026', html_url: 'https://github.com/x/lecture-code-f2026' }, { name: `${COURSE_ORG}.github.io` }, { name: 'old-thing', archived: true },
     ],
   },
@@ -71,11 +71,15 @@ describe('file badges', () => {
 
 describe('other repos', () => {
   it('drops infra, the listed materials repos, templates and archived repos', () => {
-    // Materials repos are the ones the course status lists (by topic, decision 0013), not
-    // a name prefix: an unlisted `course-materials-*` is just another repo.
-    const r = [{ name: '.github' }, { name: 'course-materials-x' }, { name: 'assignment-1-f2026' }, { name: 'org.github.io' }, { name: 'lecture-code' }, { name: 'x', archived: true }, { name: 'listed' }] as GhRepo[];
-    expect(otherRepos('org', r, ['listed']).map((x) => x.name)).toEqual(['course-materials-x', 'lecture-code']);
-    expect(otherRepos('org', r, ['listed', 'course-materials-x']).map((x) => x.name)).toEqual(['lecture-code']);
+    // Materials repos are the ones the course status lists (by topic, decision 0013), and
+    // templates carry the dsl-assignment topic (decision 0014), not a name prefix: an
+    // unlisted `course-materials-*` or an `assignment-*` without the topic is just another repo.
+    const r = [
+      { name: '.github' }, { name: 'course-materials-x' }, { name: 'assignment-1-f2026', topics: ['dsl-assignment'] }, { name: 'regression', topics: ['dsl-assignment'] },
+      { name: 'assignment-notes' }, { name: 'org.github.io' }, { name: 'lecture-code' }, { name: 'x', archived: true }, { name: 'listed' },
+    ] as GhRepo[];
+    expect(otherRepos('org', r, ['listed']).map((x) => x.name)).toEqual(['assignment-notes', 'course-materials-x', 'lecture-code']);
+    expect(otherRepos('org', r, ['listed', 'course-materials-x']).map((x) => x.name)).toEqual(['assignment-notes', 'lecture-code']);
   });
 });
 
@@ -99,12 +103,12 @@ describe('index screens', () => {
     expect(materialsSentence('ready')).toBe('Syllabus written.');
   });
   it('shows a template still being written neutrally, not as a problem', () => {
-    const st: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...STATUS.course!, templates: [{ repo: 'assignment-4-f2026', slug: 'assignment-4', state: 'todo' }] } }, sha: 's', stale: [] };
+    const st: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...STATUS.course!, templates: [{ repo: 'assignment-regression', slug: 'assignment-regression', state: 'todo' }] } }, sha: 's', stale: [] };
     for (const v of [<TemplatesIndexScreen {...cp({ loaded: st })} />, <CourseScreen {...cp({ loaded: st })} />]) {
       const out = render(v);
       expect(out).toContain('<span class="chip">Not written yet</span>');
-      expect(out).toContain('href="#template-assignment-4">Settings');
-      expect(out).not.toContain('href="#template-assignment-4">Fix');
+      expect(out).toContain('href="#template-assignment-regression">Settings');
+      expect(out).not.toContain('href="#template-assignment-regression">Fix');
     }
   });
   it('says so when there are no other repos', () => {
@@ -114,12 +118,16 @@ describe('index screens', () => {
   it('lists templates with title, teams, format, verdict and the cohorts that schedule them', () => {
     const out = render(<TemplatesIndexScreen {...cp({ cohortStates: { [COHORT_ORG]: withTemplate } })} />);
     const t = text(<TemplatesIndexScreen {...cp({ cohortStates: { [COHORT_ORG]: withTemplate } })} />);
-    expect(t).toContain('Assignment 3: Group project');
+    expect(t).toContain('Group project');
+    expect(t).not.toContain('Assignment 3: Group project');
     expect(t).toContain('Has a problem');
     expect(t).toContain('In teams, Python files.');
-    expect(t).toContain('Scheduled in Fall 2026.');
+    expect(t).toContain('Used in Fall 2026');
     expect(t).toContain('New assignment');
-    expect(out).toContain('href="#template-assignment-3"');
+    expect(out).toContain('href="#template-assignment-3-f2026"');
+    // No semester chip: a template is reused every semester (decision 0014).
+    expect(out).not.toContain('chip term');
+    expect(t).toContain('Each hand-out freezes a copy in that semester');
   });
 });
 
