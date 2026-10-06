@@ -31,6 +31,10 @@ Live example: [`example-course/course-org/assignment-linear-regression/`](../exa
       - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
         fill, and each submission's pass count appears on the grading sheet as a first
         pass for graders - never shown to students)
+   - The console's New assignment also asks how students get the starter: `derived`
+     from your marked solution, or `handwritten` on `main`. The workflow writes
+     `derived` when `autograde` is on, else `handwritten`; change `starter:` in
+     `grading_config.yml` later. See [derived or by hand](assignment-starter.md).
    - How each semester RUNS it - how teams form, the max team size, the late window and
      penalty, who may read the repos, an external submit link - is not asked here and
      never written into `grading_config.yml` (a run setting there is `NOT_MIGRATED`). It
@@ -47,8 +51,9 @@ Live example: [`example-course/course-org/assignment-linear-regression/`](../exa
    | `solution` | `solution/` (model answer) + `grading_config.yml` + hidden `tests/` (only when `autograde` is on) | **faculty & instructors only** |
 
 2. **Push your content** 
-   - Brief + starter → `main`
-   - Model solution and `grading_config.yml` → `solution`
+   - Brief → `main`; the starter too when it is written by hand
+   - Model solution and `grading_config.yml` → `solution`; a derived starter is then
+     written onto `main` by **Derive student version**
    - Student repos are generated from **`main` only**, unless you set `solution_datetime` to `now` at release time. 
    - A purely hand-marked assignment needs nothing further: `autograde` defaults to **false**,
      and a template with no `solution` branch at all is hand-marked too. The cutoff still
@@ -117,46 +122,11 @@ archives it (its compiled `.pdf` when one is committed). One total across all qu
 
 ### One notebook, not two: derive the starter
 
-Keeping the starter on `main` and the answer on `solution` by hand means writing the same
-notebook twice and keeping the two in step for the rest of the semester.
-
-Write **one** notebook - the one you teach from - on the `solution` branch, in
-`solution/`, and fence the answers off in the vocabulary nbgrader and Otter already use:
-
-```python
-def fit(x, y):
-    ### BEGIN SOLUTION
-    return x @ y
-    ### END SOLUTION
-```
-
-Three ways to say it, and you can mix them in one file:
-
-| Fence | Where | What the student gets |
-|---|---|---|
-| `### BEGIN SOLUTION` … `### END SOLUTION` | anywhere in a code cell, script or Rmd | `pass  # YOUR CODE HERE`, at the same indent (`# YOUR CODE HERE` outside Python) |
-| a cell tagged `solution` | a whole notebook cell | the cell's heading, then `_YOUR ANSWER HERE_` - so `### Question 2 (3 points)` survives |
-| `solution=TRUE` | an Rmd/qmd chunk option | the chunk, its name and its other options, with `# YOUR CODE HERE` for a body |
-| `% BEGIN SOLUTION` … `% END SOLUTION` | a `.tex` file | `% YOUR ANSWER HERE` |
-
-Then run **Derive student version** (course org → `.github` → Actions), pick the template,
-and untick `preview`. It reads `solution/` on the `solution` branch, strips the fences, and
-writes the result onto `main` - `solution/starter.ipynb` becomes `starter.ipynb`, which is
-what template-generate hands each student. It never writes to `solution`.
-
-Three things it refuses to do, because each one publishes the answer:
-
-- **a file with nothing fenced in it is not written at all** - the "starter" derived from it
-  would be your model answer, so the run names the file and goes red;
-- **an unbalanced fence is refused** - a `BEGIN` with no `END` is a typo the run will not
-  guess its way past;
-- **a stripped code cell loses its stored outputs** - a solution notebook is a *run*
-  notebook, and its outputs are the answers in print. Cells it did not change keep theirs,
-  so a worked example in the brief still shows its output.
-
-`preview` is on by default and prints the file list and the counts, never a line of the
-content. Only `.ipynb`, `.Rmd`, `.qmd`, `.py`, `.R` and `.tex` are derived; anything else
-under `solution/` stays where it is.
+A template's starter on `main` is either **derived** from the marked answers on `solution`
+by **Derive student version**, or **written by hand**. `starter:` in `grading_config.yml`
+says which; New assignment asks, and suggests `derived` when tests are on. The markers, the
+two modes and what readiness asks of each:
+[Writing an assignment: derived or by hand](assignment-starter.md).
 
 ### A value `grading_config.yml` cannot be read for
 

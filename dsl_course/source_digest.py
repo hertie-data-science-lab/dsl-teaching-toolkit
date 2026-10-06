@@ -145,7 +145,7 @@ def main() -> int:
 
     A CLI for one constant, because the alternative is a copy of it in the semester's
     validate-schedule template - and every lookup of this issue matches the title
-    EXACTLY (see `issues.find_issues`), so a copy stops finding the issue the day the
+    EXACTLY (see `issues.find_issue`), so a copy stops finding the issue the day the
     wording changes, silently, on the one line that was meant to point at it."""
     parser = CLIParser(description=__doc__)
     parser.add_argument(

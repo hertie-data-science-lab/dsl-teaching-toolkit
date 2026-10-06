@@ -1,0 +1,19 @@
+{
+  "about": "Where an undeclared releases: entry's first copy lands, and the kind that gives it. `dest` is the destination path in `repo`; `aliases` are the source repo's materials.yml folder aliases. Run by tests/test_schedule_plan.py (schedule_plan.entry_landing) and console/test/materialsRules.test.ts (materialsRules.landingSection): one table, both rules.",
+  "cases": [
+    {"dest": "lectures/01_intro", "repo": "materials", "aliases": {}, "section": "lectures", "kind": "lecture"},
+    {"dest": "lectures", "repo": "materials", "aliases": {}, "section": "lectures", "kind": "lecture"},
+    {"dest": "readings/01_intro", "repo": "materials", "aliases": {}, "section": "readings", "kind": "readings"},
+    {"dest": "tutorials/02_sql", "repo": "materials", "aliases": {}, "section": "tutorials", "kind": "lab"},
+    {"dest": "misc/handout.pdf", "repo": "materials", "aliases": {}, "section": "misc", "kind": "assets"},
+    {"dest": "misc", "repo": "materials", "aliases": {}, "section": "materials", "kind": "assets"},
+    {"dest": "SYLLABUS.md", "repo": "materials", "aliases": {}, "section": "materials", "kind": "assets"},
+    {"dest": "01_x", "repo": "labs", "aliases": {}, "section": "labs", "kind": "lab"},
+    {"dest": "labs", "repo": "labs-repo", "aliases": {}, "section": "labs", "kind": "lab"},
+    {"dest": "week-1/lab", "repo": "materials", "aliases": {}, "section": "week-1", "kind": "assets"},
+    {"dest": "Slides", "repo": "materials", "aliases": {"slides": "lecture"}, "section": "Slides", "kind": "lecture"},
+    {"dest": "Slides", "repo": "materials", "aliases": {}, "section": "materials", "kind": "assets"},
+    {"dest": "slides/03_trees", "repo": "materials", "aliases": {"slides": "lecture"}, "section": "slides", "kind": "lecture"},
+    {"dest": "slides/03_trees", "repo": "materials", "aliases": {}, "section": "slides", "kind": "assets"}
+  ]
+}

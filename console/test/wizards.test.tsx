@@ -2,17 +2,18 @@
 // pairs, the request args against the registry's schemas, the live checks and the central
 // set-up run against a fake GitHub, and one render per wizard.
 
+import { newestRepo } from '../src/screens/CourseEdit';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it, vi } from 'vitest';
 import { layout } from '../src/forms/Form';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { validateArgs } from '../src/ops/adapter';
 import { FormatPicker } from '../src/forms/FormatPicker';
-import { NewAssignmentScreen, withStart, copySentences, extrasOf, initialValues, linesFor, naDone, ordinalUnconfirmed, sourceOf, S1, S2, S3, S4, withExtras } from '../src/screens/NewAssignment';
+import { NewAssignmentScreen, withAutograde, withStart, copySentences, extrasOf, initialValues, linesFor, naDone, ordinalUnconfirmed, sourceOf, S1, S2, S3, S4, S5, withExtras } from '../src/screens/NewAssignment';
 import { NewCohortScreen, cardsDone, nkDone } from '../src/screens/NewCohort';
 import { NewCourseScreen, ncDone, ncOrg } from '../src/screens/NewCourse';
 import { NewMaterialsScreen } from '../src/screens/NewMaterials';
@@ -22,7 +23,7 @@ import { assignmentMarking, assignmentWork, newMaterials } from '../src/tiers/wi
 import { CENTRAL, bootstrapInputs, runBootstrap } from '../src/wizards/central';
 import {
   assignmentArgs, autogradeBlock, cohortOrgName, cohortTerms, contentTerms, courseOrgName, courseSlugOf, formatBlock, formatError, materialsArgs,
-  IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, importFixed, liveSemesters, nextTerm, openAt, ordinalInName, parseSource, signature, sourceFixed, templateRepo, tickedEntries, toggleFormat,
+  IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, importFixed, liveSemesters, nextTerm, openAt, termLabel, ordinalInName, parseSource, signature, sourceFixed, templateRepo, tickedEntries, toggleFormat,
 } from '../src/wizards/model';
 import { allOk, checkOrg, checkTemplate, readSource } from '../src/wizards/verify';
 import { saveDraft } from '../src/wizards/drafts';
@@ -79,6 +80,10 @@ describe('derived names', () => {
   it('offers the terms after the newest cohort', () => {
     expect(nextTerm('f2026')).toBe('s2027');
     expect(nextTerm('s2027')).toBe('f2027');
+    expect(nextTerm('w2026')).toBe('w2026');
+    expect(termLabel('s2027')).toBe('Spring 2027');
+    expect(newestRepo(['course-materials', 'course-materials-f2025', 'course-materials-s2026', 'course-materials-f2026'])).toBe('course-materials-f2026');
+    expect(newestRepo(['course-materials', 'lecture-code'])).toBe('course-materials');
     expect(cohortTerms(['f2026'], NOW)).toEqual(['s2027', 'f2027']);
     expect(cohortTerms([], Date.parse('2026-03-01'))).toEqual(['f2026', 's2027']);
     expect(contentTerms(['f2026'], NOW)).toEqual(['f2026', 's2027']);
@@ -103,18 +108,18 @@ describe('which step a wizard opens at', () => {
   it('keeps a New assignment step done only while its answers are the ones verified', () => {
     const v = { ...initialValues(null), name: 'Trees' };
     const d = { v, verified: { 1: signature(v, S1), 2: signature(v, S2) } };
-    expect(naDone(d, v, false)).toEqual([true, true, false, false, false]);
-    expect(naDone(d, { ...v, type: 'group' }, false)).toEqual([true, false, false, false, false]);
-    expect(naDone(d, { ...v, name: 'Forests' }, false)).toEqual([false, false, false, false, false]);
-    expect(naDone(d, { ...v, start: 'repo', source_repo: 'a/b' }, false)).toEqual([false, false, false, false, false]);
+    expect(naDone(d, v, false)).toEqual([true, true, false, false, false, false]);
+    expect(naDone(d, { ...v, type: 'group' }, false)).toEqual([true, false, false, false, false, false]);
+    expect(naDone(d, { ...v, name: 'Forests' }, false)).toEqual([false, false, false, false, false, false]);
+    expect(naDone(d, { ...v, start: 'repo', source_repo: 'a/b' }, false)).toEqual([false, false, false, false, false, false]);
   });
 
   it('asks every question when importing too (settings are not read from the source), and none once the template exists', () => {
     const v = { ...initialValues(null), name: 'Trees', start: 'template', source_template: 'assignment-2-f2026' };
-    expect(naDone({ v, verified: { 1: signature(v, S1) } }, v, false)).toEqual([true, false, false, false, false]);
-    const all = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4) };
-    expect(naDone({ v, verified: all }, v, false)).toEqual([true, true, true, true, false]);
-    expect(openAt(naDone({ v, verified: {} }, v, true))).toBe(5);
+    expect(naDone({ v, verified: { 1: signature(v, S1) } }, v, false)).toEqual([true, false, false, false, false, false]);
+    const all = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4), 5: signature(v, S5) };
+    expect(naDone({ v, verified: all }, v, false)).toEqual([true, true, true, true, true, false]);
+    expect(openAt(naDone({ v, verified: {} }, v, true))).toBe(6);
   });
 
   it('trusts live checks over what the draft remembers', () => {
@@ -192,10 +197,13 @@ describe('what the wizards send', () => {
   it('builds assignment.create args the registry accepts: the name and the template keys, never a number, a semester or copy_from', () => {
     const v = { ...initialValues(null), name: ' Trees ', start: 'template', source_template: 'assignment-2-f2026' };
     const solo = assignmentArgs(v);
-    expect(solo).toEqual({ name: 'Trees', type: 'individual', submit_via: 'assignment_repo', formats: 'ipynb', autograde: false });
+    expect(solo).toEqual({ name: 'Trees', type: 'individual', submit_via: 'assignment_repo', formats: 'ipynb', autograde: false, starter: 'handwritten' });
     expect(validateArgs('assignment.create', JSON.parse(JSON.stringify(solo)))).toEqual([]);
     const team = assignmentArgs({ ...v, type: 'group', team_formation: 'assigned', submit_via: 'shared_dropbox_repo', visibility: 'public', autograde: 'true', formats: ['py', 'rmd'] });
-    expect(team).toMatchObject({ type: 'group', autograde: false, formats: 'py,rmd' });
+    // Tests cannot run in a drop box, so the starter defaults to hand-written (decision 0028 rule 1).
+    expect(team).toMatchObject({ type: 'group', autograde: false, formats: 'py,rmd', starter: 'handwritten' });
+    expect(assignmentArgs({ ...v, autograde: 'true', formats: ['py'] }).starter).toBe('derived');
+    expect(assignmentArgs({ ...v, autograde: 'true', formats: ['py'], starter: 'handwritten' }).starter).toBe('handwritten');
     // How a semester runs it is its assignments.yml: never sent (decision 0009).
     expect(team).not.toHaveProperty('team_formation');
     expect(team).not.toHaveProperty('visibility');
@@ -309,7 +317,7 @@ describe('live checks against GitHub', () => {
   it('renders the three links, the name and the bot handle to copy, and no Check button', () => {
     const org = 'hertie-deep-learning-e2345';
     const check = { id: 42, checks: [{ text: 'a', ok: true }, { text: 'b', ok: false }, { text: 'c', ok: false, hint: 'Invited. The DSL team registers new courses; the bot then joins by itself.' }] };
-    const html = render(<OrgSteps org={org} check={check} busy={false} run={() => {}} back="#new-course-1" slug="dsl-teaching-toolkit" />);
+    const html = render(<OrgSteps org={org} check={check} busy={false} run={() => {}} back="#new-course-1" doc="01-new-course-org.md" slug="dsl-teaching-toolkit" />);
     expect(html).toContain('href="https://github.com/account/organizations/new?plan=free"');
     expect(html).toContain('href="https://github.com/apps/dsl-teaching-toolkit/installations/new/permissions?target_id=42"');
     expect(html).toContain(`href="https://github.com/orgs/${org}/people"`);
@@ -319,9 +327,18 @@ describe('live checks against GitHub', () => {
     expect(html).toContain('Check again');
     expect(html).not.toContain('proposed');
     // Before the org exists there is nothing to install on or invite to.
-    const before = render(<OrgSteps org={org} check={{ id: null, checks: [{ text: 'a', ok: false }, { text: 'b', ok: false }, { text: 'c', ok: false }] }} busy={false} run={() => {}} back="#new-course-1" slug="dsl-teaching-toolkit" />);
+    const before = render(<OrgSteps org={org} check={{ id: null, checks: [{ text: 'a', ok: false }, { text: 'b', ok: false }, { text: 'c', ok: false }] }} busy={false} run={() => {}} back="#new-course-1" doc="01-new-course-org.md" slug="dsl-teaching-toolkit" />);
     expect(before).not.toContain('/installations/new');
     expect(before).not.toContain('/people"');
+  });
+
+  it('puts the org-creation steps in a ? with a Learn more link, not in a line under the row', () => {
+    const org = 'hertie-deep-learning-e2345';
+    const html = render(<OrgSteps org={org} check={null} busy={false} run={() => {}} back="#new-course-1" doc="01-new-course-org.md" slug="" />);
+    expect(html).toContain('aria-label="How to create the org"');
+    expect(html).toContain(`Choose the Free plan.<br/>Enter ${org} as its name.<br/>Choose a business or institution and enter hertie-data-science-lab.`);
+    expect(html).toContain('href="https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/01-new-course-org.md"');
+    expect(html).not.toContain('class="footnote"');
   });
 
   it('verifies a new template: both branches and a settings file that parses', async () => {
@@ -363,8 +380,8 @@ describe('the wizard screens', () => {
 
   it('New assignment asks the name and what it starts from first: no number, no semester', () => {
     const out = render(<NewAssignmentScreen {...cp()} step={5} />);
-    expect(out).toContain('Question 1 of 4');
-    expect(out).toContain('Four questions, then a check');
+    expect(out).toContain('Question 1 of 5');
+    expect(out).toContain('Five questions, then a check');
     expect(out).toContain("The assignment's title.");
     expect(out).toContain('Start from');
     expect(out).toContain('A template of this course');
@@ -398,12 +415,40 @@ describe('the wizard screens', () => {
     vi.stubGlobal('localStorage', { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => kept.set(k, v), removeItem: (k: string) => kept.delete(k) });
     try {
       const v = { ...initialValues(null), name: 'Regression' };
-      saveDraft(`new-assignment:${COURSE_ORG}`, { v, verified: { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3) } });
-      const out = render(<NewAssignmentScreen {...cp()} step={4} />);
-      expect(out).toContain('Question 4 of 4');
+      saveDraft(`new-assignment:${COURSE_ORG}`, { v, verified: { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4) } });
+      const out = render(<NewAssignmentScreen {...cp()} step={5} />);
+      expect(out).toContain('Question 5 of 5');
       expect(out).toContain('Skip it if the assignment is not written yet. You can fill it in later');
       expect(out).toContain('The marks page then shows no total.');
       expect(out).toContain('>Skip</button>');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps the starter choice only until the tests answer changes, so the default follows it', () => {
+    const v = { ...initialValues(null), autograde: 'false', starter: 'derived' };
+    expect(withAutograde(v, { ...v, grader_pdf: true }).starter).toBe('derived');
+    expect(withAutograde(v, { ...v, autograde: 'true' }).starter).toBeUndefined();
+  });
+
+  it('New assignment asks how students get the starter, defaulting from the tests answer', () => {
+    const kept = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => kept.set(k, v), removeItem: (k: string) => kept.delete(k) });
+    try {
+      const at4 = (v: Record<string, unknown>) => {
+        saveDraft(`new-assignment:${COURSE_ORG}`, { v, verified: { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3) } });
+        return render(<NewAssignmentScreen {...cp()} step={4} />);
+      };
+      const tests = at4({ ...initialValues(null), name: 'Regression', autograde: 'true' });
+      expect(tests).toContain('Question 4 of 5');
+      expect(tests).toContain('How do students get the starter?');
+      expect(tests).toContain('Derived from your solution (recommended when tests mark it)');
+      expect(tests).toContain('Write only the solution branch and mark each answer with ### BEGIN SOLUTION / ### END SOLUTION');
+      expect(tests).toContain('You write main yourself: a skeleton, a brief, a different shape from the solution.');
+      expect(tests).toMatch(/value="derived" checked/);
+      expect(at4({ ...initialValues(null), name: 'Regression' })).toMatch(/value="handwritten" checked/);
+      expect(at4({ ...initialValues(null), name: 'Regression', autograde: 'true', starter: 'handwritten' })).toMatch(/value="handwritten" checked/);
     } finally {
       vi.unstubAllGlobals();
     }

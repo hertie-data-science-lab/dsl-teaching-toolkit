@@ -20,6 +20,7 @@ from .course import (
     FORMATS,
     NO_STARTER,
     SETTING_PLACEHOLDER,
+    STARTER_MODES,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
@@ -63,30 +64,36 @@ _PENALTY_FAULTS = {
 }
 
 
-def penalty_fault(text: object) -> str:
-    """Why `late_penalty_per_day` cannot be used, as a `_PENALTY_FAULTS` key, or "".
+def read_penalty(text: object) -> tuple[Decimal | None, str]:
+    """`late_penalty_per_day` as `(fraction, fault)`: `10%` and `0.1` both give 0.10 and
+    no fault. The ONE reader of the key - the setting's parse, the grade arithmetic and
+    the fault text all go through it, so an edge case is fixed once.
 
-    Blank and absent are not faults - plenty of assignments accept no late work at all, or
-    accept it without a deduction."""
-    if text is None:
-        return ""
-    raw = str(text).strip()
+    The fault is a `_PENALTY_FAULTS` key, with the rate None. Blank and absent are
+    `(None, "")`, not faults - plenty of assignments accept no late work at all, or accept
+    it without a deduction. A bare `0` is a rate somebody wrote (no deduction)."""
+    raw = "" if text is None else str(text).strip()
     if not raw:
-        return ""
+        return None, ""
     percent = raw.endswith("%")
     rate = as_decimal(raw[:-1] if percent else raw)
     if rate is None:
-        return "unwritten"
+        return None, "unwritten"
     if percent:
         rate /= 100
     elif rate >= 1:
         # A BARE `10` is read neither as 1000% nor, silently, as 10%. The two spellings a
         # course actually writes are the percentage and the fraction; guessing between
         # them on a number that multiplies every late mark is not a guess worth making.
-        return "bare"
+        return None, "bare"
     if rate < 0:
-        return "negative"
-    return "over" if rate > 1 else ""
+        return None, "negative"
+    return (None, "over") if rate > 1 else (rate, "")
+
+
+def penalty_fault(text: object) -> str:
+    """Why `late_penalty_per_day` cannot be used, as a `_PENALTY_FAULTS` key, or ""."""
+    return read_penalty(text)[1]
 
 
 class Dropped(str):
@@ -298,11 +305,22 @@ def question_files(value: object, where: str, dropped: list[str]) -> dict[str, s
     return out
 
 
-def _whole_days(value: object, where: str, dropped: list[str]) -> int | None:
-    """`late_window_days` as a whole number of days, or None with a warning."""
+def whole_days(value: object) -> int | None:
+    """A non-negative whole number of days, or None when `value` cannot be one. A YAML
+    `true` is not a number of days, though Python would count it as 1."""
+    if isinstance(value, bool):
+        return None
     try:
-        return max(0, int(str(value).strip()))
+        days = int(str(value).strip())
     except (TypeError, ValueError):
+        return None
+    return days if days >= 0 else None
+
+
+def _whole_days(value: object, where: str, dropped: list[str]) -> int | None:
+    """`late_window_days` as a whole number of days (`whole_days`), or None with a
+    warning."""
+    if (days := whole_days(value)) is None:
         dropped.append(
             Dropped(
                 where,
@@ -310,7 +328,7 @@ def _whole_days(value: object, where: str, dropped: list[str]) -> int | None:
                 f"`late_window_days: {value}` is not a whole number of days - ignored",
             )
         )
-        return None
+    return days
 
 
 def _team_cap(value: object, where: str, dropped: list[str]) -> int | None:
@@ -347,8 +365,7 @@ def _penalty(value: object, where: str, dropped: list[str]) -> str | None:
     raw = "" if value is None else str(value).strip()
     if not raw:
         return None
-    fault = penalty_fault(raw)
-    if fault:
+    if fault := penalty_fault(raw):
         dropped.append(
             Dropped(
                 where,
@@ -415,6 +432,9 @@ READERS = {
     "completion_check": lambda v, w, d: _boolean(v, "completion_check", w, d),
     "tests": lambda v, w, d: str(v or "tests").strip() or "tests",
     "grader_pdf": lambda v, w, d: _boolean(v, "grader_pdf", w, d),
+    # None for a refused value: the template then reads by its markers, as one written
+    # before the key (`derive.starter_mode`).
+    "starter": lambda v, w, d: _one_of(v, STARTER_MODES, "starter", None, w, d),
 }
 SPEC_KEYS = tuple(READERS)
 

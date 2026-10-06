@@ -6,11 +6,9 @@
 
 import type { ComponentChildren } from 'preact';
 import { settingsTiers } from './grading';
-import { opt, type FieldTier, type Tiers } from './types';
+import { opt, pick, type FieldTier, type Tiers } from './types';
 import { ORG_NAME_RE } from '../model/policy';
 import { autogradeBlock, parseSource, templateRepo, termLabel } from '../wizards/model';
-
-const pick = (t: Tiers, keys: string[]): Tiers => Object.fromEntries(keys.map((k) => [k, t[k]]));
 
 export function orgField(why: string): FieldTier {
   return {
@@ -97,10 +95,10 @@ export function newMaterials(terms: string[], repos: string[]): Tiers {
   return {
     term: {
       tier: 'default', label: 'Semester', widget: 'select', defaultLabel: 'default: the newest semester',
-      reason: 'Materials are usually per semester. Seeds the repo name and the syllabus header.', options: terms.map((t) => opt(t, termLabel(t))),
+      reason: 'Handout materials are usually per semester. Seeds the repo name and the syllabus header.', options: terms.map((t) => opt(t, termLabel(t))),
     },
     copy_from: {
-      tier: 'advanced', label: 'Copy an existing materials repo', widget: 'select', default: '', defaultLabel: 'default: fresh starter',
+      tier: 'advanced', label: 'Copy an existing handout materials repo', widget: 'select', default: '', defaultLabel: 'default: fresh starter',
       reason: 'Starts from an existing repo: every branch and its history.', options: [opt('', 'No, a fresh starter'), ...repos.map((r) => opt(r, r))],
     },
   };

@@ -1,8 +1,10 @@
 {
-  "schema": "dsl.student-status/1",
+  "schema": "dsl.student-status/2",
   "semester": "hertie-dsl-demo-f2026",
   "course_name": "Deep Learning",
-  "term_label": "Fall 2026",
+  "semester_start": "2026-09-07",
+  "semester_end": "2026-12-18",
+  "generated_at": "2026-09-23T09:00:00+00:00",
   "timezone": "Europe/Berlin",
   "archive_datetime": "2027-01-31",
   "home_markdown": "# Deep Learning\n\nWelcome.",
@@ -51,6 +53,11 @@
       "colour": "#8f4a1c",
       "background": "#fbe3d6"
     },
+    "assets": {
+      "label": "Supporting files",
+      "colour": "#4a5560",
+      "background": "#eceff1"
+    },
     "other": {
       "label": "Event",
       "colour": "#7d6230",
@@ -94,19 +101,19 @@
           "name": "slides.pdf",
           "repo": "materials",
           "path": "lectures/01_intro/slides.pdf",
-          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/HEAD/lectures/01_intro/slides.pdf"
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/main/lectures/01_intro/slides.pdf"
         },
         {
           "name": "code/ (2 files)",
           "repo": "materials",
           "path": "lectures/01_intro/code",
-          "url": "https://github.com/hertie-dsl-demo-f2026/materials/tree/HEAD/lectures/01_intro/code"
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/tree/main/lectures/01_intro/code"
         },
         {
           "name": "paper.pdf",
           "repo": "materials",
           "path": "readings/01_intro/paper.pdf",
-          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/HEAD/readings/01_intro/paper.pdf"
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/main/readings/01_intro/paper.pdf"
         }
       ],
       "readings": [
@@ -114,7 +121,7 @@
           "name": "paper.pdf",
           "repo": "materials",
           "path": "readings/01_intro/paper.pdf",
-          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/HEAD/readings/01_intro/paper.pdf"
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/main/readings/01_intro/paper.pdf"
         }
       ],
       "reading_list": "### Read\n\nChapter 1.",
@@ -386,19 +393,6 @@
   ],
   "materials_repos": [
     "materials"
-  ],
-  "materials_index": [
-    {
-      "repo": "materials",
-      "paths": [
-        "SYLLABUS.md",
-        "lectures/01_intro/code/a.py",
-        "lectures/01_intro/code/b.py",
-        "lectures/01_intro/slides.pdf",
-        "readings/01_intro/READINGS.md",
-        "readings/01_intro/paper.pdf"
-      ]
-    }
   ],
   "announcements": [
     {

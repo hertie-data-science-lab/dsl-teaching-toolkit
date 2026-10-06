@@ -1,5 +1,11 @@
-// S1 Home (Your courses: every course and semester, ordered by what needs you; Your
-// semesters: the semesters the person is a student of), S0 Sign in, and the read-only view.
+// S1 Home (All courses: the institution's catalogue in three sections, DSL courses, This
+// semester and Past semesters, the person's own rows in colour and ordered by what needs them,
+// each section with its own My courses checkbox (the first in the page head), decisions 0021
+// rule 5 and 0030; Your semesters: the semesters the person is a student of, This semester then
+// Past semesters as the instructor's page has them, decision 0029 rule 3). A semester the
+// person studies in shows once, under Your semesters, never also as a row of another section;
+// each card carries its course code on a quiet line under its title (decision 0031 rule 1).
+// S0 Sign in, and the read-only view.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ConsoleAuth } from '../auth/console';
@@ -7,22 +13,29 @@ import { FINE_GRAINED_SETTINGS_URL, NEW_FINE_GRAINED_URL, NEW_TOKEN_URL } from '
 import type { GhUser } from '../github/client';
 import { useEnv } from '../env';
 import { cohortName, invitationUrl, semesterName, type Course, type CohortRef, type Invitation, type Semester, type TokenKind } from '../model/discovery';
+import { endedNow, loadCatalogue, runningNow, semesterOver, termRank, type CatalogueCourse } from '../model/catalogue';
+import type { Files } from '../model/files';
 import { fmtWhen } from '../model/format';
-import { sameHandle } from '../model/people';
-import { hiddenSemesters, saveHiddenSemesters } from '../model/prefs';
+import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
+import { parseInstructors, sameHandle } from '../model/people';
+import { currentOnly, myCoursesOnly, saveCurrentOnly, saveMyCoursesOnly, type CatalogueSection } from '../model/prefs';
 import type { Loaded } from '../model/status';
-import { weekWords } from '../model/week';
+import type { SemesterFacts } from '../model/student';
+import { nextLine, semesterLine, weekWords } from '../model/week';
 import { studentHref } from '../router';
 import { Crumbs, Probs, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
-import { StudentWeekHome } from './Student';
+import { useLoad } from '../ui/load';
+import { studentData } from './Student';
 import { JoinStart } from './StudentJoin';
 import type { HomeProps } from './types';
 
 interface Card {
   key: string;
   name: string;
+  /** The course code, on its own quiet line under the name; '' for none. */
+  code: string;
   sub: string;
   week: string;
   status: preact.ComponentChildren;
@@ -33,26 +46,65 @@ interface Card {
   urgency: number;
 }
 
-function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, user: GhUser): Card {
+/**
+ * Whether one of the person's semesters is over (decision 0030): archived, or past its end by
+ * its status; with no status (not read yet, or no write access), by its key's approximate end.
+ */
+function isPast(c: CohortRef, l: Loaded | undefined, now: number): boolean {
+  const s = l?.kind === 'ready' ? l.status.semester : undefined;
+  if (s?.live === false) return true;
+  return s?.ended ?? endedNow({ org: c.org, termLabel: c.termLabel }, now);
+}
+
+const ROLE_SUB: Record<string, string> = { instructor: 'you are an instructor', teaching_assistant: 'you are a teaching assistant' };
+
+/**
+ * The person's role on `course`: course admin from `dsl-course.yml`; else their entry in the
+ * newest running semester's `instructors.yml` (the status carries no roles); else, while that
+ * is unread or names no role, that they teach on it.
+ */
+function roleSub(course: Course, user: GhUser, live: CohortRef | undefined, files: Files | undefined): string {
+  if (course.admins.some((h) => sameHandle(h, user.login))) return 'you are a course admin';
+  // Read only: the card says so, and instructors.yml is not read.
+  if (!course.write) return '';
+  const f = live && files ? files.file(live.org, CONFIG_REPO, INSTRUCTORS_FILE) : undefined;
+  const me = f?.kind === 'ready' ? parseInstructors(f.text).find((p) => sameHandle(p.handle, user.login)) : undefined;
+  return ROLE_SUB[me?.role ?? ''] ?? 'you teach on this course';
+}
+
+/** "you are a course admin"; the code has its own line (decision 0031 rule 1). */
+const courseSub = (course: Course, role: string) => (course.write ? role : 'read only');
+
+/** A card's name: the title, the course code under it (small and quiet), then the sub line. */
+const CardName = ({ name, code, sub }: { name: string; code?: string; sub: string }) => (
+  <span class="cc-name">{name}{code ? <span class="cc-code">{code}</span> : null}{sub ? <span class="cc-sub">{sub}</span> : null}</span>
+);
+
+function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, sub: string, now: number): Card {
   const name = cohortName({ course, cohort: c });
-  const base = { key: c.org, name, href: `?cohort=${c.org}#dashboard` };
-  const who = course.admins.some((h) => sameHandle(h, user.login)) ? 'you are a course admin' : 'you are an instructor';
-  const sub = `${course.code ? `${course.code}; ` : ''}${course.write ? who : 'read only'}`;
+  const base = { key: c.org, name, code: course.code, href: `?cohort=${c.org}#dashboard`, sub, past: isPast(c, l, now) };
   if (!course.write)
-    return { ...base, sub, week: '', status: <span class="chip">read only</span>, next: [['', 'Problems and dates need write access']], ro: true, past: false, urgency: -1 };
-  if (!l || l.kind === 'loading') return { ...base, sub, week: '…', status: <span class="chip">Reading</span>, next: [], ro: false, past: false, urgency: 0 };
+    return { ...base, week: '', status: <span class="chip">read only</span>, next: [['', 'Problems and dates need write access']], ro: true, urgency: -1 };
+  if (!l || l.kind === 'loading') return { ...base, week: '…', status: <span class="chip">Reading</span>, next: [], ro: false, urgency: 0 };
   if (l.kind !== 'ready')
-    return { ...base, sub, week: '', status: <span class="chip">{l.kind === 'absent' ? 'Not computed yet' : 'Unreadable'}</span>, next: [['', l.kind === 'absent' ? 'Open it and press Re-check.' : 'The status file could not be read.']], ro: false, past: false, urgency: 0 };
+    return { ...base, week: '', status: <span class="chip">{l.kind === 'absent' ? 'Not computed yet' : 'Unreadable'}</span>, next: [['', l.kind === 'absent' ? 'Open it and press Refresh.' : 'The status file could not be read.']], ro: false, urgency: 0 };
   const s = l.status, tz = s.semester?.timezone, n = (s.problems ?? []).length;
-  const past = s.semester?.live === false;
+  if (s.semester?.live === false)
+    return {
+      ...base,
+      sub: s.semester.archive_date ? `Archived ${fmtWhen(s.semester.archive_date, tz)}` : sub,
+      week: 'Finished',
+      status: <span class="probs none">Archived</span>,
+      next: [['', 'Students keep access. Nothing was deleted.']],
+      ro: false,
+      urgency: n,
+    };
   return {
     ...base,
-    sub: past && s.semester?.archive_date ? `Archived ${fmtWhen(s.semester.archive_date, tz)}` : sub,
-    week: past ? 'Finished' : s.semester ? weekWords(s.semester) : '',
-    status: past ? <span class="probs none">Archived</span> : <Probs n={n} />,
-    next: past ? [['', 'Students keep access. Nothing was deleted.']] : (s.this_week ?? []).slice(0, 2).map((w) => [fmtWhen(w.when, tz), w.title] as [string, string]),
+    week: base.past ? 'Ended, not archived' : s.semester ? weekWords(s.semester) : '',
+    status: <Probs n={n} />,
+    next: base.past ? [] : (s.this_week ?? []).slice(0, 2).map((w) => [fmtWhen(w.when, tz), w.title] as [string, string]),
     ro: false,
-    past,
     urgency: n,
   };
 }
@@ -61,7 +113,7 @@ function CardRow({ c }: { c: Card }) {
   return (
     <li>
       <a class={`cohort-card${c.ro ? ' ro' : ''}${c.past ? ' past' : ''}`} href={c.href}>
-        <span class="cc-name">{c.name}<span>{c.sub}</span></span>
+        <CardName name={c.name} code={c.code} sub={c.sub} />
         <span class="cc-week">{c.week}</span>
         {c.status}
         <span class="cc-next">{c.next.map(([b, t]) => <span>{b ? <b>{b}</b> : null}{b ? ' ' : ''}{t}</span>)}</span>
@@ -70,17 +122,96 @@ function CardRow({ c }: { c: Card }) {
   );
 }
 
-function semesterCard(s: Semester): Card {
+const NOT_MINE = 'Not one of your courses';
+const STUDENT = 'You are a student';
+
+/** A catalogue row the person teaches nothing in: greyed, and not a link; `studies` when they are a student of one of its semesters. */
+function OffRow({ name, code, studies = false }: { name: string; code: string; studies?: boolean }) {
+  return (
+    <li>
+      <div class="cohort-card ro off" aria-disabled="true">
+        <CardName name={name} code={code} sub={studies ? STUDENT : NOT_MINE} />
+        <span class="cc-week" />
+        <span />
+        <span class="cc-next" />
+      </div>
+    </li>
+  );
+}
+
+/** Past semesters shown at once, and added by each Show more. */
+const PAGE = 10;
+
+/** The My courses checkbox of one section. */
+const MyOnly = ({ only, onFlip }: { only: boolean; onFlip?: () => void }) => <label class="check my-only"><input type="checkbox" checked={only} onChange={onFlip} /><span>My courses</span></label>;
+
+/**
+ * A section's head: its title, how many rows My courses hides, and the checkbox (only when the
+ * section has rows that are not the person's); `inHead` when the page head carries it instead.
+ */
+function SectionHead({ id, title, others = 0, only = true, onFlip, inHead = false }: { id: string; title: string; others?: number; only?: boolean; onFlip?: () => void; inHead?: boolean }) {
+  return (
+    <div class="section-head">
+      <h2 id={id}>{title}{only && others ? <span class="meta"> (+{others} {others === 1 ? 'other' : 'others'})</span> : null}</h2>
+      {others && !inHead ? <MyOnly only={only} onFlip={onFlip} /> : null}
+    </div>
+  );
+}
+
+/** One row of This semester or Past semesters: the person's card, or a greyed catalogue semester. */
+interface SemRow {
+  key: string;
+  course: string;
+  rank: number;
+  mine: boolean;
+  el: preact.JSX.Element;
+}
+
+type CatalogueState = { list: CatalogueCourse[]; state: 'off' | 'loading' | 'ready' | 'failed' };
+
+/** The catalogue, read after the estate for a person with a course; 'off' otherwise, and with no one signed in (a render test). */
+function useCatalogue(courses: Course[]): CatalogueState {
+  const env = useEnv();
+  const client = courses.length ? env?.client : undefined;
+  const [st, setSt] = useState<CatalogueState>({ list: [], state: client ? 'loading' : 'off' });
+  const key = courses.map((c) => c.org).join(' ');
+  useEffect(() => {
+    if (!client) {
+      setSt({ list: [], state: 'off' });
+      return;
+    }
+    let live = true;
+    setSt({ list: [], state: 'loading' });
+    loadCatalogue(client, courses, (list) => live && setSt({ list, state: 'loading' }))
+      .then((list) => live && setSt({ list, state: 'ready' }))
+      .catch(() => live && setSt({ list: [], state: 'failed' }));
+    return () => {
+      live = false;
+    };
+  }, [client, key]);
+  return st;
+}
+
+/** Whether a semester the person studies in is over, by its facts' last day once read (`semesterOver`). */
+export const studentPast = (s: Semester, facts: SemesterFacts | null | undefined, now: number) => semesterOver(s, now, facts?.end, facts?.timezone || undefined);
+
+const weekOrStart = (l: { week?: string; starts?: string }) => l.week ?? l.starts ?? '';
+
+/** A semester the person studies in, as the instructor's cards show theirs: its week and what comes next, once its facts are read. */
+function semesterCard(s: Semester, facts: SemesterFacts | null | undefined, now: number): Card {
+  const past = studentPast(s, facts, now);
+  const live = !past && facts;
   return {
     key: s.org,
-    name: semesterName(s),
-    sub: s.archived ? 'Archived; your work stays yours to read' : 'You are a student',
-    week: '',
-    status: <span class="chip">{s.archived ? 'Archived' : 'Current'}</span>,
-    next: [['', 'Open the semester']],
+    name: semesterName({ ...s, courseName: s.courseName || facts?.courseName || '' }),
+    code: s.courseCode ?? '',
+    sub: s.archived ? 'Archived; your work stays yours to read' : STUDENT,
+    week: live ? weekOrStart(semesterLine(facts, now)) : '',
+    status: <span class="chip">{s.archived ? 'Archived' : past ? 'Ended' : 'Current'}</span>,
+    next: live ? [['', nextLine(facts, now)]] : [],
     href: studentHref(s.org),
     ro: false,
-    past: s.archived,
+    past,
     urgency: 0,
   };
 }
@@ -143,27 +274,36 @@ export function Invitations({ invited, kind }: { invited: Invitation[]; kind?: T
   );
 }
 
-/** Your semesters, and the per-viewer choice of which of them show. */
-function SemestersGroup({ semesters, login, lead, hidden, setHidden }: { semesters: Semester[]; login: string; lead: boolean; hidden: Set<string>; setHidden: (h: Set<string>) => void }) {
-  const flip = (org: string) => {
-    const next = new Set(hidden);
-    if (!next.delete(org)) next.add(org);
-    saveHiddenSemesters(login, next);
-    setHidden(next);
-  };
-  const shown = semesters.filter((s) => !hidden.has(s.org));
+/** The shared facts of each live semester in `semesters`, for their cards; {} until read. */
+function useSemesterFacts(semesters: Semester[]): Record<string, SemesterFacts | null> {
+  const env = useEnv();
+  const live = semesters.filter((s) => !s.archived);
+  const load = useLoad(
+    env && live.length ? async () => Object.fromEntries(await Promise.all(live.map(async (s) => [s.org, await studentData(env.client).facts(s.org).catch(() => null)] as const))) : null,
+    [live.map((s) => s.org).join(',')],
+  );
+  return load.kind === 'ready' ? load.value : {};
+}
+
+/** Your semesters as cards: the current ones first, then (unless `currentOnly`) the past ones; under their own headings when `sections`. */
+function SemesterCards({ semesters, facts, now, sections, current = false }: { semesters: Semester[]; facts: Record<string, SemesterFacts | null>; now: number; sections: boolean; current?: boolean }) {
+  const card = (s: Semester) => <CardRow c={semesterCard(s, facts[s.org], now)} />;
+  const live = semesters.filter((s) => !studentPast(s, facts[s.org], now));
+  const past = current ? [] : semesters.filter((s) => studentPast(s, facts[s.org], now));
+  if (!sections) return <ul class="cohort-list">{[...live, ...past].map(card)}</ul>;
   return (
-    <section class="section" aria-labelledby="h-semesters">
-      {lead ? null : <h2 id="h-semesters">Your semesters</h2>}
-      {shown.length ? <ul class="cohort-list">{shown.map((s) => <CardRow c={semesterCard(s)} />)}</ul> : <p class="footnote">Every semester is hidden; choose which to show below.</p>}
-      <details class="fold" style="margin-top:12px">
-        <summary>Show these semesters</summary>
-        {semesters.map((s) => (
-          <label class="check"><input type="checkbox" checked={!hidden.has(s.org)} onChange={() => flip(s.org)} /><span>{semesterName(s)}</span></label>
-        ))}
-        <p class="footnote">Kept in this browser only.</p>
-      </details>
-    </section>
+    <>
+      <section class="section" aria-labelledby="h-live">
+        <SectionHead id="h-live" title="This semester" />
+        {live.length ? <ul class="cohort-list">{live.map(card)}</ul> : <p class="footnote">None of your semesters is running.</p>}
+      </section>
+      {past.length ? (
+        <section class="section" aria-labelledby="h-past">
+          <SectionHead id="h-past" title="Past semesters" />
+          <ul class="cohort-list">{past.map(card)}</ul>
+        </section>
+      ) : null}
+    </>
   );
 }
 
@@ -188,59 +328,120 @@ function NothingFound({ kind }: { kind?: TokenKind }) {
 }
 
 export function HomeScreen({ courses, semesters = [], invited = [], kind, cohortStates, user, now }: HomeProps) {
-  const [hidden, setHidden] = useState(() => hiddenSemesters(user.login));
+  const [only, setOnly] = useState<Record<CatalogueSection, boolean>>(() => ({ courses: myCoursesOnly(user.login, 'courses'), now: myCoursesOnly(user.login, 'now'), past: myCoursesOnly(user.login, 'past') }));
+  const [pastShown, setPastShown] = useState(PAGE);
+  const [current, setCurrent] = useState(() => currentOnly(user.login));
+  const env = useEnv();
+  const catalogue = useCatalogue(courses);
+  const facts = useSemesterFacts(semesters);
   // An invitation whose role cannot be told is most likely a student's.
   if (!courses.length && (semesters.length || (invited.length && invited.every((i) => i.role === null)))) {
+    const flipCurrent = () => {
+      saveCurrentOnly(user.login, !current);
+      setCurrent(!current);
+    };
     return (
       <>
         <Crumbs items={[{ t: 'Your semesters' }]} />
-        <div class="page-head"><div><h1>Your semesters</h1><p class="lede">Every semester you are a student of; archived ones stay here as history</p></div></div>
+        <div class="page-head">
+          <div><h1>Your semesters <Hint>Every semester you are a student of. Past ones stay as history.</Hint></h1></div>
+          {semesters.some((x) => studentPast(x, facts[x.org], now)) ? <div class="actions"><label class="check my-only"><input type="checkbox" checked={current} onChange={flipCurrent} /><span>Current only</span></label></div> : null}
+        </div>
         <div class="stack">
           <Invitations invited={invited} kind={kind} />
-          <StudentWeekHome semesters={semesters.filter((x) => !hidden.has(x.org))} now={now} />
-          {semesters.length ? <SemestersGroup semesters={semesters} login={user.login} lead hidden={hidden} setHidden={setHidden} /> : null}
+          {semesters.length ? <SemesterCards semesters={semesters} facts={facts} now={now} sections current={current} /> : null}
           <JoinStart />
         </div>
       </>
     );
   }
-  const cards = courses.flatMap((course) => course.cohorts.map((c) => cardOf(course, c, cohortStates[c.org], user)));
+  // Each course's newest running semester, whose instructors.yml tells the person's role.
+  const files = env?.files;
+  const subs = new Map(courses.map((course) => {
+    const live = course.cohorts.filter((c) => !isPast(c, cohortStates[c.org], now)).sort((a, b) => termRank(b.org) - termRank(a.org))[0];
+    return [course.org, courseSub(course, roleSub(course, user, live, files))];
+  }));
+  // A semester the person studies in shows only under Your semesters: never also as a row here (decision 0031 rule 1).
+  const studying = new Set(semesters.map((s) => s.org.toLowerCase()));
+  const studiedCourses = new Set(semesters.map((s) => s.courseOrg.toLowerCase()).filter(Boolean));
+  const cards = courses.flatMap((course) => course.cohorts.filter((c) => !studying.has(c.org.toLowerCase())).map((c) => cardOf(course, c, cohortStates[c.org], subs.get(course.org)!, now)));
   const live = cards.filter((c) => !c.past).sort((a, b) => b.urgency - a.urgency);
   const past = cards.filter((c) => c.past);
   const courseOnly = courses.filter((c) => !c.cohorts.length);
+  // The person's courses by what needs them (their running semesters' problems), then the rest by name.
+  const need = (c: Course) => cards.filter((k) => !k.past && c.cohorts.some((h) => h.org === k.key)).reduce((n, k) => n + Math.max(k.urgency, 0), 0);
+  const mine = [...courses].sort((a, b) => need(b) - need(a) || a.name.localeCompare(b.name));
+  const foreign = catalogue.list.filter((c) => !c.mine).sort((a, b) => a.name.localeCompare(b.name));
+  const offSemesters = (pick: (s: CatalogueCourse['semesters'][number]) => boolean): SemRow[] =>
+    foreign.flatMap((c) => c.semesters.filter((s) => !studying.has(s.org.toLowerCase()) && pick(s)).map((s) => ({ key: s.org, course: c.name, rank: termRank(s.org), mine: false, el: <OffRow name={`${c.name}, ${s.termLabel}`} code={c.code} /> })));
+  // By course, newest first within each.
+  const othersNow = offSemesters((s) => runningNow(s, now)).sort((a, b) => a.course.localeCompare(b.course) || b.rank - a.rank || a.key.localeCompare(b.key));
+  // Newest first; within one semester the person's own first.
+  const pastRows = [...past.map((c): SemRow => ({ key: c.key, course: '', rank: termRank(c.key), mine: true, el: <CardRow c={c} /> })), ...offSemesters((s) => endedNow(s, now))]
+    .sort((a, b) => b.rank - a.rank || Number(b.mine) - Number(a.mine) || a.key.localeCompare(b.key));
+  const pastOthers = pastRows.filter((r) => !r.mine).length;
+  const pastShownRows = (only.past ? pastRows.filter((r) => r.mine) : pastRows);
+  const flip = (section: CatalogueSection) => () => {
+    saveMyCoursesOnly(user.login, section, !only[section]);
+    setOnly({ ...only, [section]: !only[section] });
+    if (section === 'past') setPastShown(PAGE);
+  };
   return (
     <>
       <Crumbs items={[{ t: 'All courses' }]} />
-      <div class="page-head">
-        <div><h1>Your courses <Hint doc="01-new-course-org.md">A course holds your materials and assignment templates for every semester; each semester runs in its own org, which students join. The console offers only what your GitHub account can do.</Hint></h1><p class="lede">All courses past &amp; present; ordered by what needs your attention</p></div>
-        <div class="actions"><a class="btn" href="#new-course-1">New course</a></div>
+      <div class="page-head all-courses-head">
+        <div><h1>All courses <Hint doc="01-new-course-org.md">A course org acts as a persistent staging area to hold your in-development materials and assignment templates for every semester. Each semester runs in its own org, which students join and to which materials are released, assignments handed out and marks returned.</Hint></h1><p class="lede">Every course the lab runs, ordered by what needs your attention.</p></div>
+        {/* The first section's My courses sits here, on New course's baseline. */}
+        <div class="actions">{courses.length && foreign.length ? <MyOnly only={only.courses} onFlip={flip('courses')} /> : null}<a class="btn" href="#new-course-1">New course</a></div>
       </div>
       <Invitations invited={invited} kind={kind} />
       {!courses.length ? (
         <NothingFound kind={kind} />
       ) : (
-        <div class="stack">
-          <section class="section" aria-labelledby="h-live">
-            <h2 id="h-live">This semester</h2>
-            {live.length ? <ul class="cohort-list">{live.map((c) => <CardRow c={c} />)}</ul> : <p class="footnote">No semester is running.</p>}
+        <div class="stack all-courses">
+          <section class="section" aria-labelledby="h-courses">
+            <SectionHead id="h-courses" title="DSL courses" others={foreign.length} only={only.courses} inHead />
+            <ul class="cohort-list">
+              {mine.map((c) => (
+                <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><CardName name={c.name} code={c.code} sub={subs.get(c.org)!} /><span class="cc-week" /><span /><span class="cc-next" /></a></li>
+              ))}
+              {only.courses ? null : foreign.map((c) => <OffRow name={c.name} code={c.code} studies={studiedCourses.has(c.org.toLowerCase())} />)}
+            </ul>
+            {catalogue.state === 'loading' && !only.courses ? <p class="footnote">Reading the catalogue…</p> : catalogue.state === 'failed' ? <p class="footnote">The catalogue could not be read.</p> : null}
           </section>
-          {past.length ? (
-            <section class="section" aria-labelledby="h-past">
-              <h2 id="h-past">Past semesters</h2>
-              <ul class="cohort-list">{past.map((c) => <CardRow c={c} />)}</ul>
-            </section>
-          ) : null}
+          <section class="section" aria-labelledby="h-live">
+            <SectionHead id="h-live" title="This semester" others={othersNow.length} only={only.now} onFlip={flip('now')} />
+            {live.length || (othersNow.length && !only.now) ? (
+              <ul class="cohort-list">
+                {live.map((c) => <CardRow c={c} />)}
+                {only.now ? null : othersNow.map((r) => r.el)}
+              </ul>
+            ) : (
+              <p class="footnote">{othersNow.length ? 'None of your semesters is running.' : 'No semester is running.'}</p>
+            )}
+          </section>
+          <section class="section" aria-labelledby="h-past">
+            <SectionHead id="h-past" title="Past semesters" others={pastOthers} only={only.past} onFlip={flip('past')} />
+            {past.length ? null : <p class="footnote">You have no past semesters yet.</p>}
+            {pastShownRows.length ? <ul class="cohort-list">{pastShownRows.slice(0, pastShown).map((r) => r.el)}</ul> : null}
+            {pastShownRows.length > pastShown ? <div class="actions"><button class="btn outline small" type="button" onClick={() => setPastShown(pastShown + PAGE)}>Show more</button></div> : null}
+          </section>
           {courseOnly.length ? (
             <section class="section">
               <h2>Courses with no semester yet</h2>
               <ul class="cohort-list">
                 {courseOnly.map((c) => (
-                  <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{c.code}</span></span><span class="cc-week" /><span /><span class="cc-next">Open the course</span></a></li>
+                  <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><CardName name={c.name} code={c.code} sub={subs.get(c.org)!} /><span class="cc-week" /><span /><span class="cc-next" /></a></li>
                 ))}
               </ul>
             </section>
           ) : null}
-          {semesters.length ? <SemestersGroup semesters={semesters} login={user.login} lead={false} hidden={hidden} setHidden={setHidden} /> : null}
+          {semesters.length ? (
+            <section class="section" aria-labelledby="h-semesters">
+              <h2 id="h-semesters">Your semesters</h2>
+              <SemesterCards semesters={semesters} facts={facts} now={now} sections={false} />
+            </section>
+          ) : null}
         </div>
       )}
     </>
@@ -248,6 +449,9 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
 }
 
 // --------------------------------------------------------------------------- S0
+
+/** The line under the sign-in button (decision 0021 rule 2). */
+const REACH_LINE = 'The console can see and change only what your GitHub account can.';
 
 export function SignInScreen({ auth, onSignedIn }: { auth: ConsoleAuth; onSignedIn: (u: GhUser) => void }) {
   const [token, setToken] = useState('');
@@ -290,7 +494,7 @@ export function SignInScreen({ auth, onSignedIn }: { auth: ConsoleAuth; onSigned
   const problem = error ? <div class="invalid-msg"><span /><span>{error}</span></div> : null;
   return (
     <div class="signin">
-      <div class="page-head" style="margin-bottom:0"><div><h1>Sign in to the DSL Teaching Console</h1><p class="lede">Sign in with GitHub. The console can see and change only what your GitHub account can.</p></div></div>
+      <div class="page-head" style="margin-bottom:0"><div><h1>Sign in to the DSL Teaching Console</h1><p class="lede">A single central console for both instructors and students to manage their GitHub-based DSL courses.</p></div></div>
       {who ? (
         <section class="panel section">
           <div class="who-card"><img src={who.avatar_url} alt="" /><div><b>{who.name || who.login}</b><div class="footnote">Signed in as {who.login}</div></div></div>
@@ -301,16 +505,17 @@ export function SignInScreen({ auth, onSignedIn }: { auth: ConsoleAuth; onSigned
         <section class="panel section">
           {problem}
           <div class="actions"><button class="btn" type="button" onClick={withGitHub} disabled={busy !== null}>{busy === 'app' ? 'Going to GitHub…' : 'Sign in with GitHub'}</button></div>
-          <p class="footnote">You approve the lab’s GitHub App on github.com once; the sign-in lasts until you close this tab.</p>
+          <p class="footnote">{REACH_LINE}</p>
           <details class="fold">
             <summary>Use a token instead</summary>
-            {tokenForm}
+            <div class="fold-body">{tokenForm}</div>
           </details>
         </section>
       ) : (
         <section class="panel section">
           {problem}
           {tokenForm}
+          <p class="footnote">{REACH_LINE}</p>
         </section>
       )}
     </div>
@@ -334,14 +539,10 @@ function Reach({ reach }: { reach: { seen: string[]; unseen: string[] } | null }
 // --------------------------------------------------------------------------- read-only and placeholders
 
 export function ReadonlyScreen({ course, cohort }: { course: Course; cohort?: CohortRef }) {
-  const title = cohort ? cohortName({ course, cohort }) : course.name;
+  // The course banner above heads the page (decision 0031 rule 11).
   return (
     <>
-      <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: title }]} />
-      <div class="page-head">
-        <div><h1>{title}</h1></div>
-        {cohort ? <div class="actions"><a class="btn outline" href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Open the student site <Ext /></a></div> : null}
-      </div>
+      {cohort ? <div class="actions" style="margin-bottom:18px"><a class="btn outline" href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Open the student site <Ext /></a></div> : null}
       <div class="ro-banner">
         <b>Read only.</b>
         <span>You are not an instructor on this course, so this shows only what your GitHub account can see: the course’s public details and its student site. No roster, no marks, no buttons.</span>

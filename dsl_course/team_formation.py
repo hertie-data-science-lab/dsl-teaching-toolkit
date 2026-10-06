@@ -66,9 +66,9 @@ from typing import NamedTuple
 
 from . import config_digest, grades, mailer, records, roster, schedule, teams
 from .course import CONFIG_REPO, course_phrase
-from .discovery import course_name_of, join_issue_url, semester_is_live
+from .discovery import course_name_or, join_issue_url, semester_is_live
 from .faults import ConfigFault, Unusable
-from .gh_contents import dump_csv, get_file_with_sha, put_file, read_csv
+from .gh_contents import dump_csv, get_file_with_sha, put_file_as_read, read_csv
 from .grades import self_select_keys
 from .log import (
     CLIParser,
@@ -382,10 +382,6 @@ PHASE_REMINDER = "reminder"
 # team with somebody is still possible, and short enough that it reads as a deadline.
 REMINDER_LEAD = timedelta(hours=48)
 
-# Bounded, for the reason `enrol_codes.WRITE_ATTEMPTS` gives: each attempt costs a read and
-# a write, and the only other writer of this file is another tick.
-WRITE_ATTEMPTS = 3
-
 # `(assignment key, casefolded address, phase)` - one row of MAILED_PATH.
 Claim = tuple[str, str, str]
 
@@ -695,34 +691,38 @@ def _claim(
     already taken responsibility for that message, and sending it as well is the duplicate
     the whole protocol exists to avoid.
 
-    Retried like `enrol_codes.write_column`, against the sha the record was READ at, so a
-    write lands on top of nobody else's rows - and against the EMPTY sha where there was no
+    Written with `put_file_as_read`, against the sha the record was READ at, so a write
+    lands on top of nobody else's rows - and against the EMPTY sha where there was no
     record to read at all, which GitHub refuses if another writer has created it since
     (`_read_mailed`). Either way a refusal means re-read, re-decide and retry."""
-    for attempt in range(1, WRITE_ATTEMPTS + 1):
-        mine = {c for c in claims if c not in rows}
-        if not mine:
-            return set()
-        if put_file(
+    mine = {c for c in claims if c not in rows}
+    if not mine:
+        return set()
+
+    def reclaim(text: str | None) -> str | None:
+        nonlocal mine
+        try:
+            fresh = {} if text is None else parse_mailed(text)
+        except Unusable as exc:
+            log_err(f"{exc} Nothing mailed about team formation.")
+            return None
+        mine = {c for c in claims if c not in fresh}
+        return dump_mailed(fresh | dict.fromkeys(mine, stamp)) if mine else text
+
+    try:
+        written = put_file_as_read(
             semester_org,
             CONFIG_REPO,
             MAILED_PATH,
-            dump_mailed(rows | dict.fromkeys(mine, stamp)).encode(),
-            f"team formation: claim {len(mine)} message(s)",
-            expected_sha=sha,
-        ):
-            return mine
-        if attempt == WRITE_ATTEMPTS:
-            break
-        log_err(
-            f"{MAILED_PATH} in {semester_org} could not be written as read - re-reading "
-            f"and retrying ({attempt}/{WRITE_ATTEMPTS - 1})"
+            dump_mailed(rows | dict.fromkeys(mine, stamp)),
+            sha,
+            reclaim,
+            lambda: f"team formation: claim {len(mine)} message(s)",
         )
-        fresh = _read_mailed(semester_org)
-        if fresh is None:
-            break
-        rows, sha = fresh
-    return None
+    except RuntimeError as exc:
+        log_err(f"could not read {MAILED_PATH} in {semester_org} ({exc})")
+        return None
+    return None if written is None else mine
 
 
 def _release(semester_org: str, unsent: set[Claim], stamp: str) -> None:
@@ -733,30 +733,45 @@ def _release(semester_org: str, unsent: set[Claim], stamp: str) -> None:
 
     Never raises: it runs on the failure path, including from an `except` block where a
     raise of its own would replace the exception the caller has to see."""
+    dropped = 0
+
+    def give_back(text: str | None) -> str | None:
+        # A record that is gone holds no claim of ours: nothing is left to give back.
+        nonlocal dropped
+        try:
+            rows = {} if text is None else parse_mailed(text)
+        except Unusable as exc:
+            log_err(str(exc))
+            return None
+        keep = {k: v for k, v in rows.items() if not (k in unsent and v == stamp)}
+        dropped = len(rows) - len(keep)
+        # Nothing of ours is left - somebody else's write already took the rows - so there
+        # is no claim outstanding: the text goes back unchanged, which writes nothing.
+        return dump_mailed(keep) if dropped else text
+
     try:
-        for attempt in range(1, WRITE_ATTEMPTS + 1):
-            read = _read_mailed(semester_org)
-            if read is None:
-                break
+        read = _read_mailed(semester_org)
+        if read is not None:
             rows, sha = read
-            keep = {k: v for k, v in rows.items() if not (k in unsent and v == stamp)}
-            # Nothing of ours is left to give back - somebody else's write already took
-            # the rows - so there is no claim outstanding and nothing to report.
-            if len(keep) == len(rows) or put_file(
-                semester_org,
-                CONFIG_REPO,
-                MAILED_PATH,
-                dump_mailed(keep).encode(),
-                f"team formation: release {len(rows) - len(keep)} unsent claim(s)",
-                expected_sha=sha,
+            body = give_back(dump_mailed(rows))
+            if body is not None and (
+                not dropped
+                or put_file_as_read(
+                    semester_org,
+                    CONFIG_REPO,
+                    MAILED_PATH,
+                    body,
+                    sha,
+                    give_back,
+                    lambda: f"team formation: release {dropped} unsent claim(s)",
+                )
+                is not None
             ):
                 log_err(
                     f"{len(unsent)} team-formation message(s) in {semester_org} were not "
                     f"sent - their claim was released, so the next tick retries them."
                 )
                 return
-            if attempt == WRITE_ATTEMPTS:
-                break
     except Exception as exc:  # a failed release must still be REPORTED, not raised
         log_err(f"releasing the unsent team-formation claims failed: {exc}")
     # The one failure that must never be swallowed: the record says these students were
@@ -768,20 +783,6 @@ def _release(semester_org: str, unsent: set[Claim], stamp: str) -> None:
         f"mailed_at={stamp} but were never sent, and the stamp could not be cleared - "
         f"delete those rows by hand, or those students never hear about team formation."
     )
-
-
-def _course_name(course_org: str) -> str:
-    """The course's name for the subject line, or "" if it cannot be read.
-
-    Never fatal: `course_name_of` raises on a dsl-course.yml that is malformed or that the
-    API would not hand over, and a name is not worth losing a semester's only notice of team
-    formation over. A course carrying no name keeps the generic wording (`course_phrase`)
-    rather than mailing a blank."""
-    try:
-        return course_name_of(course_org)
-    except Exception as exc:
-        log_err(f"could not read the course name ({exc}) - mailing without it")
-        return ""
 
 
 def _messages(
@@ -830,7 +831,7 @@ def _preview(
     subjects, and puts the masked recipients on `log_person`. The sample is
     `sample_message`'s placeholders and never one of the bodies about to go out, which is
     the rule `grades._email_updates` follows."""
-    course_name = _course_name(course_org)
+    course_name = course_name_or(course_org)
     for window in windows:
         owed = [n for n in nudges if n.window.key == window.key]
         phases = ", ".join(sorted({n.phase for n in owed})) or "nothing"
@@ -968,7 +969,7 @@ def notify_windows(
     messages = _messages(
         mine,
         semester_org,
-        _course_name(course_org),
+        course_name_or(course_org),
         sched.timezone,
         schedule.assignment_pages_by_key(sched),
     )

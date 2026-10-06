@@ -13,7 +13,6 @@
       "name": "semester.check",
       "preview": false,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -30,7 +29,6 @@
       "name": "semester.preview_automation",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -71,101 +69,10 @@
       },
       "counts_doc": "Copied paths per destination, as deploy reports them.",
       "doc": "docs/08-release-materials-to-cohort.md",
-      "help": "Release a scheduled entry now.",
-      "name": "release.now",
+      "help": "Release a schedule entry now: early, late, or again to carry a fixed file.",
+      "name": "release.entry",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
-      "scope": "semester",
-      "via": "inline"
-    },
-    {
-      "args_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "course_source_path": {
-            "description": "Path(s), comma-separated",
-            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
-            "type": "string"
-          },
-          "course_source_repo": {
-            "description": "Course-org repo to release from",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
-            "type": "string"
-          },
-          "entry": {
-            "description": "The schedule.yml releases key",
-            "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
-            "type": "string"
-          },
-          "semester_dest_path": {
-            "description": "Destination path(s), comma-separated",
-            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
-            "type": "string"
-          },
-          "semester_dest_repo": {
-            "description": "Semester repo to release into",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "entry"
-        ],
-        "type": "object"
-      },
-      "counts_doc": "Copied paths per destination, as deploy reports them.",
-      "doc": "docs/08-release-materials-to-cohort.md",
-      "help": "Release a planned entry before its scheduled time.",
-      "name": "release.early",
-      "preview": true,
-      "required_team": "instructors",
-      "runs_as": "dispatch",
-      "scope": "semester",
-      "via": "inline"
-    },
-    {
-      "args_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "course_source_path": {
-            "description": "Path(s), comma-separated",
-            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
-            "type": "string"
-          },
-          "course_source_repo": {
-            "description": "Course-org repo to release from",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
-            "type": "string"
-          },
-          "entry": {
-            "description": "The schedule.yml releases key",
-            "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
-            "type": "string"
-          },
-          "semester_dest_path": {
-            "description": "Destination path(s), comma-separated",
-            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
-            "type": "string"
-          },
-          "semester_dest_repo": {
-            "description": "Semester repo to release into",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "entry"
-        ],
-        "type": "object"
-      },
-      "counts_doc": "Copied paths per destination, as deploy reports them.",
-      "doc": "docs/08-release-materials-to-cohort.md",
-      "help": "Release an entry again, to carry a fixed file.",
-      "name": "release.rerun",
-      "preview": true,
-      "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -206,7 +113,6 @@
       "name": "release.adhoc",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -223,7 +129,6 @@
       "name": "release.propagate_back",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -255,7 +160,6 @@
       "name": "assignment.handout_now",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -295,7 +199,6 @@
       "name": "assignment.update_copies",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -325,7 +228,6 @@
       "name": "assignment.collect_now",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "workflow:collect-submissions.yml"
     },
@@ -360,7 +262,6 @@
       "name": "grades.return",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -377,7 +278,6 @@
       "name": "roster.send_codes",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -394,7 +294,6 @@
       "name": "site.update",
       "preview": false,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -419,7 +318,6 @@
       "name": "teams.open_window",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -436,7 +334,6 @@
       "name": "access.check",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -458,7 +355,6 @@
       "name": "semester.archive",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -475,7 +371,6 @@
       "name": "course.publish_website",
       "preview": false,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "course",
       "via": "inline"
     },
@@ -500,7 +395,6 @@
       "name": "assignment.derive_starter",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "course",
       "via": "inline"
     },
@@ -512,6 +406,11 @@
             "description": "Repo holding the syllabus",
             "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
             "type": "string"
+          },
+          "syllabus": {
+            "description": "The syllabus file to write into",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
           }
         },
         "required": [
@@ -521,11 +420,10 @@
       },
       "counts_doc": "",
       "doc": "docs/07-schedule-releases.md",
-      "help": "Write the syllabus's session list from the semester's schedule.",
+      "help": "Write the weekly plan into the syllabus, from the semester's schedule.",
       "name": "assignment.generate_syllabus",
       "preview": true,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     },
@@ -555,7 +453,6 @@
       "name": "materials.create",
       "preview": false,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "course",
       "via": "inline"
     },
@@ -567,11 +464,6 @@
             "description": "Seed tests and run them at the late cutoff",
             "type": "boolean"
           },
-          "copy_from": {
-            "description": "Refused: copying is the console's",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
-            "type": "string"
-          },
           "formats": {
             "description": "Starter file(s), comma-separated; the first is the runnable one",
             "pattern": "^(?:none|(?:ipynb|py|rmd|qmd|latex)(?:,(?:ipynb|py|rmd|qmd|latex))*)$",
@@ -582,14 +474,12 @@
             "pattern": "^(?!-)(?=.*[A-Za-z0-9])[^\\x00-\\x1f]{1,200}$",
             "type": "string"
           },
-          "number": {
-            "description": "Ignored",
-            "pattern": "^[0-9]{1,3}$",
-            "type": "string"
-          },
-          "semester": {
-            "description": "Ignored",
-            "pattern": "^[fs][0-9]{4}$",
+          "starter": {
+            "description": "How main's starter is written",
+            "enum": [
+              "derived",
+              "handwritten"
+            ],
             "type": "string"
           },
           "submit_via": {
@@ -619,7 +509,6 @@
       "name": "assignment.create",
       "preview": false,
       "required_team": "instructors",
-      "runs_as": "dispatch",
       "scope": "course",
       "via": "inline"
     },
@@ -636,7 +525,6 @@
       "name": "semester.bootstrap",
       "preview": false,
       "required_team": "course-admin",
-      "runs_as": "dispatch",
       "scope": "semester",
       "via": "inline"
     }

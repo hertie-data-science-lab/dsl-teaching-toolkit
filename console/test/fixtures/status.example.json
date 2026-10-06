@@ -21,11 +21,87 @@
       "C5": "problem",
       "C6": "todo"
     },
+    "stage_optional": {
+      "C1": false,
+      "C2": false,
+      "C3": false,
+      "C4": true,
+      "C5": true,
+      "C6": true
+    },
+    "stage_set_aside": {
+      "C1": false,
+      "C2": false,
+      "C3": false,
+      "C4": false,
+      "C5": false,
+      "C6": false
+    },
     "ready": false,
     "materials": [
       {
         "repo": "course-materials-f2026",
-        "state": "ready"
+        "state": "ready",
+        "checks": [
+          {
+            "id": "kind_folder",
+            "label": "At least one folder of a content kind",
+            "done": true,
+            "why": null,
+            "blocks": true,
+            "detail": [
+              {
+                "kind": "lecture",
+                "folders": [
+                  "lectures"
+                ]
+              },
+              {
+                "kind": "lab",
+                "folders": [
+                  "labs"
+                ]
+              },
+              {
+                "kind": "readings",
+                "folders": []
+              },
+              {
+                "kind": "exam",
+                "folders": []
+              },
+              {
+                "kind": "drop-in",
+                "folders": []
+              },
+              {
+                "kind": "other",
+                "folders": []
+              }
+            ]
+          },
+          {
+            "id": "syllabus",
+            "label": "Syllabus written",
+            "done": true,
+            "why": null,
+            "blocks": true
+          },
+          {
+            "id": "sessions",
+            "label": "Weekly plan in the syllabus",
+            "done": false,
+            "why": "The weekly plan is not in SYLLABUS.md yet.",
+            "blocks": false
+          },
+          {
+            "id": "withheld",
+            "label": "Withheld patterns reviewed",
+            "done": true,
+            "why": null,
+            "blocks": false
+          }
+        ]
       }
     ],
     "templates": [
@@ -37,6 +113,18 @@
     ],
     "semesters": [
       "hertie-dsl-demo-f2026"
+    ],
+    "todo": [
+      {
+        "id": "materials:course-materials-f2026:sessions",
+        "kind": "materials",
+        "repo": "course-materials-f2026",
+        "text": "The weekly plan is not in SYLLABUS.md yet.",
+        "screen": "materials",
+        "entry": "course-materials-f2026",
+        "optional": true,
+        "set_aside": false
+      }
     ]
   },
   "semester": {
@@ -144,7 +232,13 @@
         "total": 48
       },
       "returned": false,
-      "problem": false
+      "problem": false,
+      "settings": {
+        "late_penalty_per_day": {
+          "value": "10%",
+          "source": "institution"
+        }
+      }
     }
   ],
   "students": {
@@ -165,7 +259,7 @@
   "operations": [
     {
       "run_id": 4821,
-      "op": "release.now",
+      "op": "release.entry",
       "conclusion": "done",
       "summary": "Released Session 3: 7 files to materials.",
       "finished": "2026-09-23T09:01:10Z"

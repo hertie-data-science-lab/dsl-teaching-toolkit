@@ -4,11 +4,12 @@
 // its run, and then re-reads the org to verify. That workflow reports no dsl-outcome, so
 // the run's conclusion is the verdict and the org's live state is the proof.
 
-import { wait, type GitHubClient } from '../github/client';
+import type { GitHubClient } from '../github/client';
+import { poll } from '../github/poll';
+import { CENTRAL, CENTRAL_ACTIONS } from '../model/central';
 import { HANDLE_RE, ORG_NAME_RE } from '../model/policy';
 
-export const CENTRAL = { owner: 'hertie-data-science-lab', repo: 'dsl-teaching-toolkit', workflow: 'bootstrap-org.yml', ref: 'main' } as const;
-export const CENTRAL_ACTIONS = `https://github.com/${CENTRAL.owner}/${CENTRAL.repo}/actions/workflows/${CENTRAL.workflow}`;
+export { CENTRAL, CENTRAL_ACTIONS };
 
 export interface BootstrapCourse {
   org: string;
@@ -39,26 +40,29 @@ export interface CentralRun {
   conclusion: string | null;
 }
 
-/** Dispatch Bootstrap Course Org and follow it to the end, reporting each poll. */
+/** How many unreadable polls in a row end the watch, as on the operation panel. */
+export const BOOTSTRAP_MISSES = 20;
+
+/**
+ * Dispatch Bootstrap Course Org and follow it, reporting each poll. The last state read: not
+ * `completed` when `signal` stopped the watch (the screen went) or BOOTSTRAP_MISSES polls in a
+ * row could not read the run.
+ */
 export async function runBootstrap(
   client: GitHubClient,
   b: BootstrapCourse,
   report: (r: CentralRun) => void,
-  { pollMs = 5000, sleep = wait }: { pollMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+  { pollMs = 5000, sleep, signal }: { pollMs?: number; sleep?: (ms: number) => Promise<void>; signal?: AbortSignal } = {},
 ): Promise<CentralRun> {
   const d = await client.dispatchWorkflow({ owner: CENTRAL.owner, repo: CENTRAL.repo, workflow: CENTRAL.workflow, ref: CENTRAL.ref, inputs: bootstrapInputs(b) });
   if (!d?.workflow_run_id) throw new Error('GitHub started the set-up but did not say which run it is.');
   let r: CentralRun = { runId: d.workflow_run_id, htmlUrl: d.html_url, state: 'queued', conclusion: null };
   report(r);
-  for (;;) {
-    try {
-      const run = await client.getRun(CENTRAL.owner, CENTRAL.repo, r.runId);
-      r = { ...r, htmlUrl: run.html_url || r.htmlUrl, state: run.status === 'completed' ? 'completed' : run.status === 'in_progress' ? 'running' : 'queued', conclusion: run.conclusion };
-      report(r);
-    } catch {
-      /* a missed poll is retried */
-    }
-    if (r.state === 'completed') return r;
-    await sleep(pollMs);
-  }
+  await poll(async () => {
+    const run = await client.getRun(CENTRAL.owner, CENTRAL.repo, r.runId);
+    r = { ...r, htmlUrl: run.html_url || r.htmlUrl, state: run.status === 'completed' ? 'completed' : run.status === 'in_progress' ? 'running' : 'queued', conclusion: run.conclusion };
+    report(r);
+    return r.state === 'completed';
+  }, { every: pollMs, later: true, maxMisses: BOOTSTRAP_MISSES, signal, sleep });
+  return r;
 }

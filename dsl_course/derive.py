@@ -25,7 +25,8 @@ by accident:
 
 1. **A file with nothing fenced is never written.** No markers and no `solution` tag means
    the derived file WOULD BE the model answer, byte for byte, published as the starter.
-   That is reported per file and reds the run rather than being written.
+   That is reported per file and reds the run rather than being written. A blank file
+   (an empty `__init__.py`) has no answer in it and is copied as it is.
 2. **An unbalanced fence is refused**, not guessed at. A `BEGIN` with no `END` could as
    easily mean "the rest of this cell is the answer" as "the marker is a typo", and one of
    those two readings publishes it.
@@ -37,6 +38,14 @@ by accident:
 Nothing here ever writes to `solution`. `main` is the only destination, through the same
 `put_files` every other seeded write uses - so an unchanged starter is no commit at all.
 
+Not every template is derived (decision 0028). `grading_config.yml`'s `starter:` says
+`derived` or `handwritten`; a hand-written starter is the instructor's own `main`, and
+Derive refuses it (`STARTER_HANDWRITTEN`) rather than overwrite it. A template that
+predates the key reads as `derived` when any source on `solution` carries a marker
+(`starter_mode`). Every real run also writes `.system/starter.json` on `main`
+(`STARTER_RECORD`), which is how the status tells a hand edit on `main` and a solution
+changed since from a starter that is current. Docs: docs/assignment-starter.md.
+
 Usage:
     python3 -m dsl_course.derive --course-org hertie-dsl-demo-course-e1234 \\
         --course-source-repo assignment-linear-regression [--no-preview]
@@ -47,11 +56,26 @@ from __future__ import annotations
 import json
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import NamedTuple
 
-from .course import SOLUTION_BRANCH, SOLUTION_DIR
-from .gh_contents import get_file_content, put_files, repo_tree
+import yaml
+
+from .course import (
+    SOLUTION_BRANCH,
+    SOLUTION_DIR,
+    STARTER_DERIVED,
+    STARTER_HANDWRITTEN,
+    STARTER_MODES,
+)
+from .gh_contents import (
+    blob_sha,
+    get_file_content,
+    put_files,
+    repo_path_shas,
+)
+from .grades import GRADING_FILE
 from .log import (
     CLIParser,
     Summary,
@@ -62,6 +86,7 @@ from .log import (
     log_step,
     plural,
 )
+from .setting_readers import READERS
 
 # ------------------------------------------------------------------ the fence vocabulary
 
@@ -109,6 +134,21 @@ TEX_PLACEHOLDER = "% YOUR ANSWER HERE"
 DERIVABLE = (".ipynb", ".rmd", ".qmd", ".py", ".r", ".tex")
 
 COMMIT_MESSAGE = "chore: derive the student starter from the solution branch"
+# SYSTEM-OWNED, written on `main` beside the starter by every real Derive (decision 0028):
+# `solution_tree`, the sha of the `solution/` folder on the solution branch it derived
+# from ("" after a run that refused a file), and `files`, `{main path: blob sha written}`.
+# `status_json` compares it with the two trees it already reads: a recorded file whose
+# blob differs is a hand edit on `main`, a different `solution_tree` asks for a new Derive.
+STARTER_RECORD = ".system/starter.json"
+
+
+def starter_record(solution_tree: str, files: Mapping[str, bytes]) -> bytes:
+    """The record's bytes. Sorted and stable, so an unchanged starter is no commit."""
+    record = {
+        "solution_tree": solution_tree,
+        "files": {path: blob_sha(files[path]) for path in sorted(files)},
+    }
+    return (json.dumps(record, indent=2) + "\n").encode()
 
 
 class DeriveError(ValueError):
@@ -462,21 +502,94 @@ def derivable_sources(tree: tuple[str, ...] | list[str]) -> list[str]:
     )
 
 
+# ------------------------------------------------------- derived or hand-written (0028)
+
+HANDWRITTEN_TEXT = "This template's starter is written by hand, so nothing is derived."
+
+
+def declared_starter(text: str | None) -> str | None:
+    """`grading_config.yml`'s `starter:`, through the engine's reader; None when the file
+    is absent, does not parse, predates the key or says something else."""
+    try:
+        data = yaml.safe_load(text or "")
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict) or "starter" not in data:
+        return None
+    return READERS["starter"](data["starter"], GRADING_FILE, [])
+
+
+def is_marked(path: str, text: str) -> bool:
+    """Whether a source carries any answer marker. A broken fence counts: whoever wrote
+    it meant to mark an answer, and Derive names the fault."""
+    try:
+        return strip_source(path, text).replaced > 0
+    except DeriveError:
+        return True
+
+
+def starter_mode(declared: str | None, sources: Mapping[str, str]) -> str:
+    """Decision 0028: the key when the file has it (rule 1); else rule 6 - `derived` when
+    any derivable source on `solution` carries a marker, `handwritten` otherwise."""
+    if declared in STARTER_MODES:
+        return declared
+    marked = any(is_marked(p, t) for p, t in sources.items())
+    return STARTER_DERIVED if marked else STARTER_HANDWRITTEN
+
+
+def default_starter(autograde: bool) -> str:
+    """Decision 0028 rule 1: what a new template starts as - tests on, derived."""
+    return STARTER_DERIVED if autograde else STARTER_HANDWRITTEN
+
+
 # -------------------------------------------------------------------------- the button
 
 
 def _missing_fences(path: str, tick: str) -> str:
-    """The fences a file with none could have used, in its own vocabulary."""
-    if PurePosixPath(path).suffix.lower() == ".tex":
+    """The fences a file with none could have used, in its own vocabulary: a `.py` file
+    cannot carry a cell tag or a chunk option, so naming them only misleads."""
+    suffix = PurePosixPath(path).suffix.lower()
+    if suffix == ".tex":
         return f"{tick}{TEX_BEGIN_SOLUTION}{tick} region"
-    return (
-        f"{tick}BEGIN SOLUTION{tick} region, no {tick}{SOLUTION_TAG}{tick} cell tag "
-        f"and no {tick}solution=TRUE{tick} chunk"
-    )
+    region = f"{tick}BEGIN SOLUTION{tick} region"
+    if suffix == ".ipynb":
+        return f"{region} and no {tick}{SOLUTION_TAG}{tick} cell tag"
+    if suffix in (".rmd", ".qmd"):
+        return f"{region} and no {tick}{SOLUTION_CHUNK_OPT}{tick} chunk"
+    return region
+
+
+def _how_to_fence(path: str) -> str:
+    """What a faculty member does about a file with nothing fenced, in its vocabulary."""
+    suffix = PurePosixPath(path).suffix.lower()
+    if suffix == ".tex":
+        lines = f"{TEX_BEGIN_SOLUTION} and {TEX_END_SOLUTION}"
+    else:
+        lines = f"{BEGIN_SOLUTION} and {END_SOLUTION}"
+    extra = {
+        ".ipynb": f", or give each answer cell the {SOLUTION_TAG} tag",
+        ".rmd": f", or add {SOLUTION_CHUNK_OPT} to each answer chunk",
+        ".qmd": f", or add {SOLUTION_CHUNK_OPT} to each answer chunk",
+    }.get(suffix, "")
+    return f"Put {lines} lines around each answer{extra}, then derive again."
 
 
 def _refused(code: str, text: str) -> dict:
     return {"code": code, "text": text}
+
+
+def _handwritten(course_org: str, template: str) -> Summary:
+    """The refusal for a hand-written starter (decision 0028 rule 3): nothing is read
+    further and nothing is written."""
+    log_err(
+        f"{course_org}/{template}: the starter is written by hand on main "
+        f"(`starter: {STARTER_HANDWRITTEN}`, or no answer marked anywhere) - nothing derived"
+    )
+    return Summary(
+        HANDWRITTEN_TEXT,
+        reasons=[_refused("STARTER_HANDWRITTEN", HANDWRITTEN_TEXT)],
+        code=1,
+    )
 
 
 def derive_student_version(
@@ -497,13 +610,23 @@ def derive_student_version(
         f"Deriving the student version of {course_org}/{template} from "
         f"`{SOLUTION_BRANCH}`{' (preview)' if dry_run else ''}"
     )
+    # A config GitHub would not serve reads as one without the key: the markers decide.
     try:
-        tree = repo_tree(course_org, template, SOLUTION_BRANCH, "blob")
+        config = get_file_content(
+            course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH
+        )
+    except RuntimeError:
+        config = None
+    declared = declared_starter(config)
+    if declared == STARTER_HANDWRITTEN:
+        return _handwritten(course_org, template)
+    try:
+        tree = repo_path_shas(course_org, template, SOLUTION_BRANCH)
     except RuntimeError as exc:
         log_err(f"could not read {template}'s `{SOLUTION_BRANCH}` branch: {exc}")
         text = f"The {SOLUTION_BRANCH} branch of {template} could not be read."
         return Summary(text, reasons=[_refused("BRANCH_UNREADABLE", text)], code=1)
-    sources = derivable_sources(tree)
+    sources = derivable_sources(list(tree))
     if not sources:
         log_err(
             f"{course_org}/{template} has no {'/'.join(DERIVABLE)} file under "
@@ -520,12 +643,14 @@ def derive_student_version(
     reasons: list[dict] = []
     details: list[str] = []
     regions = cells = 0
+    texts: dict[str, str] = {}
     for path in sources:
         try:
             text = get_file_content(course_org, template, path, ref=SOLUTION_BRANCH)
-        except RuntimeError as exc:
-            # GitHub refused the read (permission, rate limit, network). Its answer names
-            # the file and says why; it is the course's own template, so it may be shown.
+        except (RuntimeError, UnicodeDecodeError) as exc:
+            # GitHub refused the read (permission, rate limit, network), or the file is
+            # not text. The answer names the file and says why; it is the course's own
+            # template, so it may be shown.
             log_err(f"  ! {exc}")
             reasons.append(_refused("READ_FAILED", f"{path} could not be read: {exc}."))
             continue
@@ -535,13 +660,21 @@ def derive_student_version(
             log_err(f"  ! {path} could not be read - not derived")
             reasons.append(_refused("SOURCE_UNREADABLE", f"{path} could not be read."))
             continue
+        texts[path] = text
+    # A template that predates the key and marks nothing is hand-written (0028 rule 6).
+    # Only on a full read: an unread file may be the one that carries the marker.
+    if not reasons and starter_mode(declared, texts) == STARTER_HANDWRITTEN:
+        return _handwritten(course_org, template)
+    for path, text in texts.items():
         try:
             stripped = strip_source(path, text)
         except DeriveError as exc:
             log_err(f"  ! {exc}")
             reasons.append(_refused("SOLUTION_REGION_BROKEN", f"{exc}."))
             continue
-        if not stripped.replaced:
+        # A blank file (a package's empty `__init__.py`) has no answer to hide, so
+        # refusing it left a template that could never derive.
+        if not stripped.replaced and text.strip():
             log_err(
                 f"  ! {path} has no {_missing_fences(path, '`')} - NOT written, because "
                 f"the starter derived from it would be the model answer itself"
@@ -550,7 +683,7 @@ def derive_student_version(
                 _refused(
                     "NO_SOLUTION_REGION",
                     f"{path} has no {_missing_fences(path, '')}, so the starter would be "
-                    f"the model answer.",
+                    f"the model answer. {_how_to_fence(path)}",
                 )
             )
             continue
@@ -579,7 +712,11 @@ def derive_student_version(
         # org's public `.github` Actions tab, and the content is the model answer.
         log_ok(f"preview: would write {summary_line} onto main")
         return summary(f"Would derive {derived} onto main{refused}.")
-    if files and not put_files(course_org, template, files, COMMIT_MESSAGE):
+    # A run that refused a file records no solution tree, so the status asks to derive again.
+    record = starter_record("" if failures else tree.get(SOLUTION_DIR, ""), files)
+    if files and not put_files(
+        course_org, template, {**files, STARTER_RECORD: record}, COMMIT_MESSAGE
+    ):
         log_err(
             f"the derived starter was NOT written to {course_org}/{template} - main still "
             f"holds whatever it held before; re-run once the cause is fixed"

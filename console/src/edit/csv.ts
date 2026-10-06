@@ -3,7 +3,38 @@
 // untouched, and the engine's `require_csv_header` + `strip_bom` reading rules hold: a
 // leading BOM is dropped and the named columns must be present.
 
-import { csvRecords } from '../model/people';
+/** One CSV record and the file line it ends on (header = 1), as Python's `csv` reader's `line_num` counts. */
+export interface CsvRecord {
+  cells: string[];
+  line: number;
+}
+
+/**
+ * RFC 4180 records with their line numbers; a leading BOM is dropped, as the engine's
+ * strip_bom does, and blank records are skipped. The line counts every physical line read,
+ * blank ones and quoted newlines included, so it is the line the engine's faults name.
+ */
+export function csvRecords(text: string): CsvRecord[] {
+  const src = text.replace(/^﻿/, '');
+  const out: CsvRecord[] = [];
+  let row: string[] = [], field = '', q = false, line = 1;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    const nl = c === '\n' || c === '\r';
+    if (nl && c === '\r' && src[i + 1] === '\n') i++;
+    if (q) {
+      if (c === '"' && src[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') q = false;
+      else { field += nl && c === '\r' && src[i] === '\n' ? '\r\n' : c; if (nl) line++; }
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (nl) {
+      row.push(field); out.push({ cells: row, line }); row = []; field = ''; line++;
+    } else field += c;
+  }
+  if (field !== '' || row.length) { row.push(field); out.push({ cells: row, line }); }
+  return out.filter((r) => r.cells.some((f) => f.trim() !== ''));
+}
 
 export interface Table {
   header: string[];

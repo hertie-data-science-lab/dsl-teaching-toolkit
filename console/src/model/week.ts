@@ -2,12 +2,15 @@
 // today to seven days on (the engine's own window, status_json.this_week), and what came
 // back in the last seven days (materials released, marks returned, announcements), plus every
 // team formation still open and every file the instructors updated in the student's repo
-// since their last visit. One line each; Home merges the lines of every semester shown, each
-// line in its own semester's timezone. An auditor gets no marks or team lines.
+// since their last visit. One line each, in the semester's timezone. An auditor gets no marks
+// or team lines. Also the semester's weeks from its dates (the banner's "Week N of M", the
+// Schedule's week headings) and a semester card's "Next: ..." line.
 
 import { DEFAULT_TIMEZONE } from './policy';
-import { fmtDay, fmtWhen } from './format';
+import { TYPE_CLASS, TYPE_LABEL, daysBetween, fmtDay, fmtWhen } from './format';
 import { isMarked, type Mine } from './mine';
+import { weekOf, type Term } from './schedule';
+import { nextEventWords } from './status';
 import { instant, startOfDay, type SemesterFacts } from './student';
 import type { SemesterStatus } from './types';
 
@@ -19,7 +22,7 @@ export interface PatchLine {
   when: string;
 }
 
-export interface WeekItem {
+export interface WeekLine {
   at: number;
   /** The row's own time, as the schedule writes it (for the date shown). */
   when: string;
@@ -37,6 +40,17 @@ export interface WeekItem {
 }
 
 const DAY = 864e5;
+
+/** The kinds a site row has that the status types share (the schedule's palette and words). */
+const SHARED_ROW_KINDS = ['lecture', 'lab', 'due', 'exam', 'special_event'];
+const shared = (map: Record<string, string>) => Object.fromEntries(SHARED_ROW_KINDS.map((k) => [k, map[k]]));
+/**
+ * A site row's colour class and word: the status types' (`format.TYPE_CLASS`/`TYPE_LABEL`), with
+ * the site's own names for a hand out (`assignment`) and a semester date (`term_date`). A policy
+ * kind with neither (readings, drop-in) takes its policy colours.
+ */
+export const ROW_CLASS: Record<string, string> = { ...shared(TYPE_CLASS), assignment: TYPE_CLASS.handout, term_date: TYPE_CLASS.term };
+export const ROW_WORD: Record<string, string> = { ...shared(TYPE_LABEL), assignment: TYPE_LABEL.handout, term_date: 'semester date' };
 
 type Formation = SemesterFacts['assignments'][number]['teamFormation'];
 
@@ -65,13 +79,13 @@ const name = (title: string, subtitle: string) => (subtitle ? `${title}: ${subti
  * `patches` are the student's patch notes; one shows when it is newer than `lastVisit` (the
  * start of the previous visit), or from the last seven days when there was none.
  */
-export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, patches: PatchLine[] = [], lastVisit: number | null = null): WeekItem[] {
+export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, patches: PatchLine[] = [], lastVisit: number | null = null): WeekLine[] {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const start = startOfDay(now, tz);
   const end = start + 7 * DAY;
   const recent = start - 7 * DAY;
-  const out: WeekItem[] = [];
-  const add = (i: Omit<WeekItem, 'label' | 'cls'> & Partial<Pick<WeekItem, 'label' | 'cls'>>) =>
+  const out: WeekLine[] = [];
+  const add = (i: Omit<WeekLine, 'label' | 'cls'> & Partial<Pick<WeekLine, 'label' | 'cls'>>) =>
     out.push({ label: WORD[i.kind], cls: CLASS[i.kind], tz, ...i });
   const auditor = mine?.auditor === true;
   for (const r of facts.rows) {
@@ -86,7 +100,7 @@ export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, 
     else if (session && ahead) add({ at, when: r.when, kind: 'release', ...look, text: shipped ? `${what}: materials released` : what, screen: shipped ? 'materials' : 'schedule' });
     else if (session && shipped && at >= recent && at < start) add({ at, when: r.when, kind: 'release', ...look, text: `${what}: materials released`, screen: 'materials' });
     else if (r.kind === 'exam' && ahead) add({ at, when: r.when, kind: 'exam', text: what, screen: 'schedule' });
-    else if ((r.kind === 'special_event' || r.kind === 'term_date') && ahead) add({ at, when: r.when, kind: 'event', text: what, screen: 'schedule', ...(r.kind === 'term_date' ? { cls: 'term', label: 'term date' } : {}) });
+    else if ((r.kind === 'special_event' || r.kind === 'term_date') && ahead) add({ at, when: r.when, kind: 'event', text: what, screen: 'schedule', ...(r.kind === 'term_date' ? { cls: ROW_CLASS.term_date, label: ROW_WORD.term_date } : {}) });
   }
   for (const n of facts.announcements) {
     const at = instant(n.when, tz);
@@ -128,13 +142,56 @@ const CLASS: Record<WeekKind, string> = {
   due: 'asg', hand_out: 'asg', release: 'lec', exam: 'exam', event: 'evt', marks: 'asg', teams: 'term', news: 'evt', patch: 'asg',
 };
 
+/** The semester's weeks from its dates, as the Dashboard counts them; null while either is unknown. */
+export function termOfFacts(facts: Pick<SemesterFacts, 'start' | 'end'>): Term | null {
+  if (!facts.start || !facts.end || facts.end < facts.start) return null;
+  return { start: facts.start, end: facts.end, weeks: Math.floor(daysBetween(facts.start, facts.end) / 7) + 1 };
+}
+
 /**
- * An instructor's semester card's week, from the status (`semester_weeks`: both null while a
- * date is unset, 0 before the start): "Week 3 of 15", "Starts Mon 7 Sep" before the start
- * ("Before week 1" when the start is not in the status), else nothing.
+ * The semester's week in words, for instructor and student cards alike (`week`/`weeks` as the
+ * engine's `semester_weeks` counts them: both null while a date is unset, 0 before the start):
+ * "Week 3 of 15", "Starts Mon 7 Sep" before the start ("Before week 1" when the start is not
+ * known), else nothing.
  */
+export function weekPhrase(week: number | null | undefined, weeks: number | null | undefined, start: string | null | undefined, tz: string): string {
+  if (week && weeks) return `Week ${week} of ${weeks}`;
+  if (week !== 0) return '';
+  return start ? `Starts ${fmtDay(start, tz, Number(start.slice(0, 4)))}` : 'Before week 1';
+}
+
+/**
+ * The course banner's semester line for a student, as the instructor's: "Week N of M" from
+ * week 1 (clamped to the last week), `starts` before it, and the dates. The week is worked out
+ * from the facts' dates (the site carries no week), and each part is left out when the facts
+ * do not carry the dates (an older file, or the site).
+ */
+export function semesterLine(facts: Pick<SemesterFacts, 'start' | 'end' | 'timezone'>, now: number): { week?: string; starts?: string; dates?: string } {
+  const term = termOfFacts(facts);
+  if (!term) return {};
+  const tz = facts.timezone || DEFAULT_TIMEZONE;
+  const w = weekOf(new Date(now).toISOString(), term, tz);
+  const week = w === 'before' ? 0 : w === 'after' ? term.weeks : w;
+  const phrase = weekPhrase(week, term.weeks, term.start, tz);
+  const year = Number(term.start.slice(0, 4));
+  return {
+    week: week ? phrase : undefined,
+    starts: week ? undefined : phrase,
+    dates: `${fmtDay(term.start, tz, year)} to ${fmtDay(term.end, tz, year)}`,
+  };
+}
+
+/** An instructor's semester card's week, from the status (`weekPhrase`). */
 export function weekWords(sem: Pick<SemesterStatus, 'week' | 'weeks' | 'start' | 'timezone'>): string {
-  if (sem.week && sem.weeks) return `Week ${sem.week} of ${sem.weeks}`;
-  if (sem.week !== 0) return '';
-  return sem.start ? `Starts ${fmtDay(sem.start, sem.timezone || DEFAULT_TIMEZONE, Number(sem.start.slice(0, 4)))}` : 'Before week 1';
+  return weekPhrase(sem.week, sem.weeks, sem.start, sem.timezone || DEFAULT_TIMEZONE);
+}
+
+/** The event word a row's title lacks: a hand-out and a due row are titled by their assignment alone. */
+const NEXT_WORD: Record<string, string> = { assignment: 'hand out', due: 'due' };
+
+/** A semester card's "Next: Assignment 2 hand out, Mon 6 Oct", worded as the instructor's cards (`nextEventWords`): the next dated row, or "Nothing scheduled". */
+export function nextLine(facts: Pick<SemesterFacts, 'rows' | 'timezone'>, now: number): string {
+  const tz = facts.timezone || DEFAULT_TIMEZONE;
+  const next = facts.rows.map((r) => ({ r, at: instant(r.when, tz) })).filter((x) => x.at > now).sort((a, b) => a.at - b.at)[0]?.r;
+  return nextEventWords(next ? { title: next.title, word: NEXT_WORD[next.kind] ?? '', when: next.when } : null, tz, new Date(now).getFullYear());
 }

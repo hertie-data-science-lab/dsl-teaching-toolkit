@@ -7,6 +7,7 @@
 // student of a semester org.
 
 import { parse } from 'yaml';
+import { isObj } from '../edit/yamlText';
 import type { Author, GhRepo, GitHubClient } from '../github/client';
 import { str } from './format';
 import { SEMESTER_TOPIC } from './migration';
@@ -42,9 +43,9 @@ export const cohortName = (p: { course: Pick<Course, 'name'>; cohort: Pick<Cohor
 
 const SEASON: Record<string, string> = { f: 'Fall', s: 'Spring', w: 'Winter', u: 'Summer' };
 
-/** "hertie-dsl-demo-f2026" -> { term: "f2026", label: "Fall 2026" }. */
+/** "hertie-dsl-demo-f2026" (or the bare key "f2026") -> { term: "f2026", label: "Fall 2026" }. */
 export function termOf(org: string): { term: string; label: string } {
-  const m = /-([fswu])(\d{4})$/.exec(org);
+  const m = /(?:^|-)([fswu])(\d{4})$/.exec(org);
   if (!m) return { term: org.split('-').pop() ?? org, label: org };
   return { term: `${m[1]}${m[2]}`, label: `${SEASON[m[1]]} ${m[2]}` };
 }
@@ -58,7 +59,7 @@ export function parseRegistry(text: string | null | undefined): string[] {
   } catch {
     return [];
   }
-  const list = data && typeof data === 'object' && !Array.isArray(data) ? (data as { semesters?: unknown }).semesters : data;
+  const list = isObj(data) ? data.semesters : data;
   return Array.isArray(list) ? list.filter((c): c is string => typeof c === 'string' && c.length > 0) : [];
 }
 
@@ -90,7 +91,7 @@ export function registryList(text: string): string[] | null {
     return null;
   }
   if (data === null) return [];
-  const list = data && typeof data === 'object' && !Array.isArray(data) ? (data as { semesters?: unknown }).semesters ?? [] : data;
+  const list = isObj(data) ? data.semesters ?? [] : data;
   return Array.isArray(list) && list.every((c) => typeof c === 'string') ? list.filter((c) => c.length > 0) : null;
 }
 
@@ -160,20 +161,26 @@ export interface Semester extends CohortRef {
   /** The course org its pointer (`.system/dsl-course.yml` in the config repo) names; '' when it names none or cannot be read. */
   courseOrg: string;
   courseName: string;
+  /** The course's code (`course_code`), when its `dsl-course.yml` was read. */
+  courseCode?: string;
   /** Archiving a semester archives its `.github` last but one, so an archived `.github` means an archived semester. */
   archived: boolean;
   role: Role;
 }
 
 export interface Estate {
-  /** Course orgs, writable ones first (today's instructor list, read-only ones included). */
+  /**
+   * Course orgs, writable ones first (today's instructor list, read-only ones included). A
+   * read-only course in which the person only studies is left out: they reach it through
+   * their semesters, which show once, under Your semesters (decision 0031 rule 1).
+   */
   courses: Course[];
   /** Semester orgs the person is a member of, newest first. */
   semesters: Semester[];
   /**
    * The person's role per org, keyed by the lower-cased login (read it with roleOf). Instructor
    * wins over student. An org absent here carries no role: a course the person can read but not
-   * change is still in `courses`, shown read only.
+   * change is still in `courses`, shown read only, unless they only study in it (decision 0031).
    */
   roles: Map<string, Role>;
   kind: TokenKind;
@@ -286,29 +293,42 @@ export async function discoverEstate(client: GitHubClient, who: { kind: TokenKin
     // A semester's `.github` is public, so an invited person can already read what it is.
     Promise.all(pending.slice(0, PROBE_LIMIT).map((p) => classify(client, p.org).catch(() => null))),
   ]);
-  const courses = found
+  const known = found
     .flatMap((f) => (f && 'course' in f ? [f.course] : []))
     .sort((a, b) => Number(b.write) - Number(a.write) || a.name.localeCompare(b.name));
-  const byOrg = new Map(courses.map((c) => [c.org.toLowerCase(), c]));
-  const bare = found.flatMap((f) => (f && 'semester' in f ? [f.semester] : []));
+  const byOrg = new Map(known.map((c) => [c.org.toLowerCase(), c]));
+  // A student cannot read a semester's pointer (the config repo is private): its course is
+  // then the known course whose registry lists it.
+  const listing = (org: string) => known.find((c) => c.cohorts.some((k) => k.org.toLowerCase() === org.toLowerCase()))?.org ?? '';
+  const bare = found.flatMap((f) => (f && 'semester' in f ? [{ ...f.semester, courseOrg: f.semester.courseOrg || listing(f.semester.org) }] : []));
   const invitedBare = asked.flatMap((f, i) => (f && 'semester' in f && !f.semester.archived ? [{ ...f.semester, admin: pending[i].admin }] : []));
-  // A semester whose course is not among the person's orgs: its name is on the course's public `.github`.
-  const names = new Map<string, string>();
+  // A semester whose course is not among the person's orgs: its name and code are on the course's public `.github`.
+  const names = new Map<string, { name: string; code: string }>();
   await Promise.all(
     [...new Set([...bare, ...invitedBare].map((s) => s.courseOrg).filter((c) => c && !byOrg.has(c.toLowerCase())))].map(async (c) => {
       const meta = await readMeta(client, c).catch(() => null);
-      names.set(c, str(meta?.course_name));
+      names.set(c, { name: str(meta?.course_name), code: str(meta?.course_code) });
     }),
   );
+  const courseOf = (org: string) => {
+    const c = byOrg.get(org.toLowerCase());
+    return c ? { name: c.name, code: c.code } : names.get(org) ?? { name: '', code: '' };
+  };
   const roles = new Map<string, Role>();
   // A writable course makes the person an instructor of every semester it registers.
-  for (const c of courses) if (c.write) for (const o of [c.org, ...c.cohorts.map((k) => k.org)]) roles.set(o.toLowerCase(), 'instructor');
+  for (const c of known) if (c.write) for (const o of [c.org, ...c.cohorts.map((k) => k.org)]) roles.set(o.toLowerCase(), 'instructor');
   const semesters: Semester[] = bare.map((s) => {
     const role: Role = roles.get(s.org.toLowerCase()) ?? s.role;
     roles.set(s.org.toLowerCase(), role);
-    return { ...s, role, courseName: byOrg.get(s.courseOrg.toLowerCase())?.name ?? names.get(s.courseOrg) ?? '' };
+    const { name, code } = courseOf(s.courseOrg);
+    return { ...s, role, courseName: name, ...(code ? { courseCode: code } : {}) };
   });
   semesters.sort((a, b) => Number(a.archived) - Number(b.archived) || b.term.slice(1).localeCompare(a.term.slice(1)) || a.org.localeCompare(b.org));
+  const studiesOnly = (c: Course) => {
+    const mine = semesters.filter((s) => s.courseOrg.toLowerCase() === c.org.toLowerCase());
+    return mine.length > 0 && mine.every((s) => s.role === 'student');
+  };
+  const courses = known.filter((c) => c.write || !studiesOnly(c));
   const me = who.login.toLowerCase();
   const invited: Invitation[] = [
     ...asked.flatMap((f, i) => {
@@ -318,7 +338,7 @@ export async function discoverEstate(client: GitHubClient, who: { kind: TokenKin
     }),
     ...invitedBare.map((s) => ({
       org: s.org,
-      name: semesterName({ ...s, courseName: byOrg.get(s.courseOrg.toLowerCase())?.name ?? names.get(s.courseOrg) ?? '' }),
+      name: semesterName({ ...s, courseName: courseOf(s.courseOrg).name }),
       // An instructor of the semester's course, or an owner-to-be, teaches it; anyone else could be a student or a new instructor.
       role: roles.get(s.org.toLowerCase()) === 'instructor' || s.admin ? ('instructor' as const) : null,
     })),

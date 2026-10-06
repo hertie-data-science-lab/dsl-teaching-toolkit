@@ -2,6 +2,7 @@
 // named, and `!path` is added only where git allows re-inclusion. Plus `select` mode (the import
 // picker).
 
+import { readFileSync } from 'node:fs';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import { exactLine, toggle } from '../src/edit/badges';
@@ -76,5 +77,20 @@ describe('the pattern tree', () => {
     expect(some).toMatch(/<input type="checkbox" class="ft-tick" aria-label="Include lectures\/02\/"/);
     expect(some).toMatch(/<input type="checkbox" class="ft-tick" checked aria-label="Include lectures\/01\/"/);
     expect(some).toContain('class="file-tree select"');
+  });
+});
+
+describe('the withheld tree’s rows (decision 0024 rule 10)', () => {
+  const html = (patterns: string[]) => render(<PatternTree files={FILES} patterns={patterns} onChange={() => {}} />);
+
+  it('puts the toggle last in every row, right-aligned, and links no row to GitHub', () => {
+    const out = html([]);
+    // Every file and folder row ends on its toggle; nothing follows it but the row's end.
+    expect(out.match(/ft-toggle"[^>]*>(Withhold|Include)<\/button>(<\/summary>|<\/li>)/g)?.length).toBe(10);
+    expect(out).not.toContain('Edit on GitHub');
+    expect(out).not.toContain('github.com');
+    const css = readFileSync(new URL('../src/styles/console.css', import.meta.url), 'utf8');
+    expect(css).toContain('.file-tree .ft-file .ft-toggle { margin-left: auto; }');
+    expect(css).toContain('.file-tree:not(.select) summary .ft-toggle { margin-left: auto; }');
   });
 });

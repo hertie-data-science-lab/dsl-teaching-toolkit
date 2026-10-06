@@ -3,7 +3,7 @@
 // dsl-course.yml, then check. Revision brief v3 section 2, design/inputs.md "Set up a course".
 
 import type { ComponentChildren } from 'preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { useSave } from '../edit/save';
 import { YamlText, deepEqual, obj } from '../edit/yamlText';
@@ -20,7 +20,7 @@ import { useDraft } from '../wizards/drafts';
 import { courseOrgName, openAt } from '../wizards/model';
 import { allOk, checkCourseSetUp, checkOrg, useLive, usePoll, type Check } from '../wizards/verify';
 import { Checks, OrgSteps, OrgWhy, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
-import { AdminRows, courseFileAfter, detailsOf, missingAdmin, type Admin, type Details } from './CourseEdit';
+import { AdminRows, LinkKindsField, courseFileAfter, detailsOf, missingAdmin, type Admin, type Details } from './CourseEdit';
 import { COURSE_REPO } from '../model/names';
 
 const STEPS = [
@@ -68,6 +68,9 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
   const step = openAt(done, asked);
   usePoll(orgLive, !!env && !!org && step === 1 && !allOk(orgChecks));
   const [run, setRun] = useState<CentralRun | null>(null);
+  // Leaving the screen (sign-out included) stops following the set-up run.
+  const leaving = useRef(new AbortController());
+  useEffect(() => () => leaving.current.abort(), []);
   const [err, setErr] = useState<string | null>(null);
   const [save, runSave, setSave] = useSave(env);
   const file = step >= 2 && setUp && allOk(setUp) ? files.file(org, COURSE_REPO, 'dsl-course.yml') : null;
@@ -98,8 +101,10 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     if (!env) return;
     setErr(null);
     try {
-      const r = await runBootstrap(env.client, { org, courseName: d.course_name || org, code: d.course_code ?? '', admins: d.admins.map((a) => a.github_handle) }, setRun);
-      if (r.conclusion !== 'success') setErr('The set-up run did not finish cleanly. Open it on GitHub to see why; running it again is safe.');
+      const r = await runBootstrap(env.client, { org, courseName: d.course_name || org, code: d.course_code ?? '', admins: d.admins.map((a) => a.github_handle) }, setRun, { signal: leaving.current.signal });
+      if (leaving.current.signal.aborted) return;
+      if (r.state !== 'completed') setErr('Could not read the set-up run on GitHub, so the console stopped following it. Open it on GitHub to see how it ended.');
+      else if (r.conclusion !== 'success') setErr('The set-up run did not finish cleanly. Open it on GitHub to see why; running it again is safe.');
       files.refresh(org, COURSE_REPO, 'dsl-course.yml');
       setupLive.run();
       void env.rediscover?.();
@@ -120,7 +125,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
           const edited = v.org !== org ? String(v.org ?? '') : d.org;
           set({ course_name: v.course_name as string | undefined, course_code: v.course_code as string | undefined, org: edited && edited !== derived ? edited : undefined });
         }} />
-        <OrgSteps org={org} check={orgLive.value?.org === org ? orgLive.value : null} busy={orgLive.busy} run={orgLive.run} back="#new-course-1" />
+        <OrgSteps org={org} check={orgLive.value?.org === org ? orgLive.value : null} busy={orgLive.busy} run={orgLive.run} back="#new-course-1" doc="01-new-course-org.md" />
       </>
     );
     foot = <button class="btn" type="button" disabled={!done[0] || Object.keys(errs).length > 0} onClick={() => { set({ orgVerified: org }); go(2); }}>Continue</button>;
@@ -167,17 +172,13 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     title = 'Defaults';
     const defaults = d.defaults ?? before?.defaults ?? {};
     const links = d.links ?? before?.links ?? '';
-    const errs = fieldErrors(null, courseDefaultTiers(), defaults);
+    const errs = fieldErrors(null, courseDefaultTiers(before?.defaults), defaults);
     body = (
       <>
-        <div class="form-section"><h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3><SchemaForm id="ncx" schema={null} tiers={courseDefaultTiers()} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
+        <div class="form-section"><h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3><SchemaForm id="ncx" schema={null} tiers={courseDefaultTiers(before?.defaults)} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
         <div class="form-section">
           <h3>Site links</h3>
-          <div class="field">
-            <label for="nck">File types the student site links to</label>
-            <input type="text" id="nck" value={links} placeholder="pdf, html" onInput={(e) => set({ links: (e.target as HTMLInputElement).value })} />
-            <p class="why">Released files of these types get a direct link on every semester’s student site. Separate them with commas.</p>
-          </div>
+          <LinkKindsField id="nck" value={links} onInput={(v) => set({ links: v })} />
         </div>
         <SaveLine state={save} />
       </>
@@ -202,10 +203,10 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     body = (
       <>
         <Checks list={[...(orgChecks ?? []), ...(setUp ?? []), ...summary]} busy={orgLive.busy || setupLive.busy} />
-        <ul class="checks"><li><span class="ck todo" /><span>No materials yet</span></li><li><span class="ck todo" /><span>No assignment templates yet</span></li></ul>
-        <p>The course is set up. It is ready for a semester once it has materials and at least one assignment template.</p>
+        <ul class="checks"><li><span class="ck todo" /><span>No handout materials yet</span></li><li><span class="ck todo" /><span>No assignment templates yet</span></li></ul>
+        <p>The course is set up. It is ready for a semester once it has handout materials and at least one assignment template.</p>
         <div class="actions">
-          <a class="btn" href={`?course=${org}#new-materials`}>Add materials</a>
+          <a class="btn" href={`?course=${org}#new-materials`}>Add handout materials</a>
           <a class="btn outline" href={`?course=${org}#new-assignment-1`}>New assignment</a>
         </div>
       </>

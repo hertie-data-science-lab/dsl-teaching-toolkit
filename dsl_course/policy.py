@@ -228,6 +228,11 @@ def kinds() -> list[dict]:
     return load()["kinds"]
 
 
+def kind_label(kind: str) -> str:
+    """The label of a kind ("Lecture", "Drop-in"); the key itself when unknown."""
+    return next((k["label"] for k in kinds() if k["key"] == kind), kind)
+
+
 def console_link(semester_org: str, screen: str = "week") -> str:
     """One semester's screen in the student console (`institution.console_url`), or "" when
     the institution runs no console."""

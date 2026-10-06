@@ -1,19 +1,25 @@
-// Set up: working on the materials and the assignments on the student's own machine. The
-// console checks, with the student's token, whether they have forked each materials repo
-// (`GET /repos/{login}/{repo}`, which the public site never could), then gives the clone
-// command, the "open in" links and the command that keeps a fork up to date. The local
-// folders it writes the commands for are remembered in this browser only.
+// Set up: working on the materials and the assignments on the student's own machine
+// (decision 0027 rule 4). The console checks, with the student's token, whether they have
+// forked each materials repo (`GET /repos/{login}/{repo}`, which the public site never
+// could); each fork and each of the student's assignment repos then gets the same Open
+// button the instructors have. The folder and editor come from Profile, one for both roles:
+// a fork goes in its semester's folder, beside the assignment repos. While a read says a repo
+// is not forked yet, the check runs again by itself (`poll`): on coming back to the tab, every
+// 10 s and every 30 s after the first minute, for up to 5 minutes of the tab being shown;
+// "Check again" checks now and starts that again. A repo of the name that is not the fork, or
+// a read that failed, waits for "Check again".
 
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { GitHubClient } from '../github/client';
+import { poll } from '../github/poll';
 import type { Mine } from '../model/mine';
-import { cloneCommand, joinPath, vscodeFolder } from '../model/open';
-import { localPaths, saveLocalPaths, type LocalPaths } from '../model/prefs';
+import { yourSetup } from '../model/prefs';
 import type { SemesterFacts } from '../model/student';
-import { Loading } from '../ui/bits';
+import { CheckLine, Loading, ghUrl } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
-import { useLoad } from '../ui/load';
+import { OpenButton } from '../ui/OpenButton';
 
 export type ForkState = { kind: 'forked'; url: string } | { kind: 'none' } | { kind: 'other'; url: string };
 
@@ -24,81 +30,74 @@ export async function forkOf(client: GitHubClient, login: string, org: string, r
   return r.fork && r.parent?.full_name.toLowerCase() === `${org}/${repo}`.toLowerCase() ? { kind: 'forked', url: r.html_url } : { kind: 'other', url: r.html_url };
 }
 
-function Cmd({ text }: { text: string }) {
-  return <pre class="file-text cmd">{text}</pre>;
-}
+/** How often the fork check runs again while a repo is not forked, slower after a minute, and for how long. */
+export const RECHECK_MS = 10000;
+const RECHECK_LATER = { after: 60 * 1000, every: 30 * 1000 };
+export const RECHECK_FOR_MS = 5 * 60 * 1000;
 
 export function SetupView({ org, facts, mine, studentView }: { org: string; facts: SemesterFacts; mine: Mine | null; studentView: boolean }) {
   const env = useEnv();
   const login = env?.user.login ?? '';
-  const [paths, setPaths] = useState<LocalPaths>(() => localPaths(login));
-  const [draft, setDraft] = useState<LocalPaths>(paths);
-  const [tick, setTick] = useState(0);
+  // Each press of Check again checks now and starts a new 5-minute round of re-checks.
+  const [round, setRound] = useState(0);
   const repos = facts.materialsRepos;
-  const forks = useLoad(env && !studentView ? () => Promise.all(repos.map((r) => forkOf(env.client, login, org, r))) : null, [org, repos.join(','), tick]);
-  if (studentView) return <p class="footnote">A student sets up their fork and local copy here: whether they have forked the materials, the clone command, and links to open it in an editor.</p>;
-  const save = () => {
-    saveLocalPaths(login, draft);
-    setPaths(draft);
-  };
+  // The last answer stays shown while the check runs again, so a re-check does not flash.
+  const [forks, setForks] = useState<ForkState[] | null>(null);
+  useEffect(() => {
+    if (!env || studentView) return;
+    const stop = new AbortController();
+    void poll(async () => {
+      const v = await Promise.all(repos.map((r) => forkOf(env.client, login, org, r)));
+      if (stop.signal.aborted) return true;
+      setForks(v);
+      return !v.some((f) => f.kind === 'none');
+    }, {
+      every: RECHECK_MS, backoff: RECHECK_LATER, maxMs: RECHECK_FOR_MS, maxMisses: 1, signal: stop.signal,
+      onMiss: () => setForks((v) => v ?? repos.map(() => ({ kind: 'none' as const }))),
+    });
+    return () => stop.abort();
+  }, [org, repos.join(','), round, !!env]);
+  const checkAgain = () => setRound((r) => r + 1);
+  if (studentView) return <p class="footnote">A student checks here that they have forked each materials repo. Each fork and assignment repo then gets an Open button, using the folder and editor from their Profile.</p>;
   const own = mine ? Object.values(mine.units).filter((u) => u.repo) : [];
   return (
     <div class="stack">
-      <section class="panel section" aria-labelledby="h-folders">
-        <h2 id="h-folders">Your local folders</h2>
-        <div class="field">
-          <label for="s-mat">Materials folder</label>
-          <input type="text" id="s-mat" value={draft.materials} spellcheck={false} autocomplete="off" placeholder={`/Users/you/${org}`} onInput={(e) => setDraft({ ...draft, materials: (e.target as HTMLInputElement).value })} />
-        </div>
-        <div class="field">
-          <label for="s-asg">Assignments folder</label>
-          <input type="text" id="s-asg" value={draft.assignments} spellcheck={false} autocomplete="off" placeholder="the materials folder" onInput={(e) => setDraft({ ...draft, assignments: (e.target as HTMLInputElement).value })} />
-          <p class="hint">Where your clones go; the commands below use them. Kept in this browser only.</p>
-        </div>
-        <div class="actions"><button class="btn outline small" type="button" onClick={save} disabled={draft.materials === paths.materials && draft.assignments === paths.assignments}>Save the folders</button></div>
-      </section>
+      {yourSetup(login)?.folder.trim() ? null : <p><a href="?#profile">Set your folder and editor in Profile</a></p>}
       {repos.map((repo, i) => {
-        const f = forks.kind === 'ready' ? forks.value[i] : null;
-        const upstream = `https://github.com/${org}/${repo}`;
-        const mineUrl = `https://github.com/${login}/${repo}`;
-        const local = paths.materials.trim() ? joinPath(paths.materials, repo) : '';
+        const f = forks?.[i] ?? null;
+        const upstream = ghUrl(org, repo);
         return (
           <section class="panel section" aria-label={repo}>
             <h2>{repo}</h2>
-            <h3>1. Fork it</h3>
-            {forks.kind === 'loading' ? <Loading what="Checking your fork" />
-              : f?.kind === 'forked' ? <p class="check-line ok"><span>You have forked it: <a href={f.url} target="_blank" rel="noopener">{login}/{repo} <Ext /></a></span></p>
-              : (
+            {!forks ? <Loading what="Checking your fork" />
+              : f?.kind === 'forked' ? (
                 <>
-                  {f?.kind === 'other' ? <p class="check-line warn"><span>You have a repo named <a href={f.url} target="_blank" rel="noopener">{login}/{repo} <Ext /></a> that is not a fork of this semester’s; fork under another name, or rename that one.</span></p> : null}
+                  <CheckLine cls="ok">
+                    You have forked it: <a href={f.url} target="_blank" rel="noopener">{login}/{repo} <Ext /></a>
+                    <Hint small label="About new materials">Each week, press Sync fork on your fork’s GitHub page, then pull in your clone.</Hint>
+                  </CheckLine>
+                  <p class="actions"><OpenButton org={login} repo={repo} home={org} /></p>
+                </>
+              ) : (
+                <>
+                  {f?.kind === 'other' ? <CheckLine cls="warn">You have a repo named <a href={f.url} target="_blank" rel="noopener">{login}/{repo} <Ext /></a> that is not a fork of this semester’s; fork under another name, or rename that one.</CheckLine> : null}
                   <p class="actions">
                     <a class="btn small" href={`${upstream}/fork`} target="_blank" rel="noopener">Fork {repo} <Ext /></a>
-                    <button class="textlink" type="button" onClick={() => setTick(tick + 1)}>Check again</button>
+                    <button class="textlink" type="button" onClick={checkAgain}>Check again</button>
                   </p>
                 </>
               )}
-            <h3>2. Clone your fork</h3>
-            <Cmd text={cloneCommand(mineUrl, paths.materials, repo)} />
-            <p class="actions"><a class="btn outline small" href={`vscode://vscode.git/clone?url=${encodeURIComponent(mineUrl)}`}>Clone in VS Code</a></p>
-            <h3>3. Open it</h3>
-            <p class="actions">
-              <a class="btn outline small" href={`https://github.dev/${login}/${repo}`} target="_blank" rel="noopener">Open on github.dev <Ext /></a>
-              {local ? <a class="btn outline small" href={vscodeFolder(local)}>Open {local} in VS Code</a> : <span class="footnote">Save a materials folder above to open your clone locally.</span>}
-            </p>
-            <h3>New materials each week</h3>
-            <Cmd text={`git remote add upstream ${upstream}.git   # once\ngit pull upstream main`} />
           </section>
         );
       })}
       {own.length ? (
         <section class="panel section" aria-labelledby="h-own">
           <h2 id="h-own">Your assignment repos</h2>
-          <ul class="plain-list">
+          <ul class="rows">
             {own.map((u) => (
               <li>
-                <b>{u.repo}</b>{u.shared ? <span class="footnote"> (shared: your work goes in your {u.team ? 'team’s' : 'own'} folder)</span> : null}
-                <Cmd text={cloneCommand(`https://github.com/${org}/${u.repo}`, paths.assignments || paths.materials, u.repo!)} />
-                <p class="actions"><a class="btn outline small" href={`https://github.dev/${org}/${u.repo}`} target="_blank" rel="noopener">Open on github.dev <Ext /></a></p>
+                <span><b>{u.repo}</b>{u.shared ? <span class="footnote"> (shared: your work goes in your {u.team ? 'team’s' : 'own'} folder)</span> : null}</span>
+                <OpenButton org={org} repo={u.repo!} home={org} small />
               </li>
             ))}
           </ul>

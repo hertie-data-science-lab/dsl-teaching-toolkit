@@ -30,8 +30,10 @@ migration under a hold neither pauses nor unpauses.
 
 Semester org, in order: preflight, pause, rename repos, layout, keys, proposed releases,
 topic, re-render, status, unpause. Course org: preflight, pause, registry, .system/,
-dsl-course.yml keys, template keys, seeded text, materials topic, materials files,
-public website, re-render, status, unpause.
+dsl-course.yml keys, template keys, seeded text, template starter (decision 0028:
+`starter:` written into each live template's grading_config.yml, read from its answer
+markers), materials topic, materials files, public website, assignment topic, re-render,
+status, unpause.
 """
 
 from __future__ import annotations
@@ -47,7 +49,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import sleep
 from time import time as clock
-from urllib.parse import quote
 
 import yaml
 
@@ -77,6 +78,7 @@ from .course import (
     SYLLABUS_SESSIONS_FILE,
     pages_repo,
 )
+from .derive import derivable_sources, starter_mode
 from .discovery import (
     OLD_SEMESTERS_PATH,
     SEMESTERS_PATH,
@@ -89,6 +91,7 @@ from .discovery import (
     list_org_repos,
 )
 from .faults import NOT_MIGRATED, NotMigrated
+from .gh_commits import first_landed
 from .gh_contents import (
     LINES,
     blob_sha,
@@ -97,6 +100,7 @@ from .gh_contents import (
     move_files,
     refuse_clashes,
     repo_blob_shas,
+    top_level,
 )
 from .ghcli import forget_all, gh, git
 from .grades import (
@@ -114,17 +118,17 @@ from .profile_readme import profile_files, update_profile_readme
 from .repos import (
     current_description,
     default_branch,
+    rename_repo,
     repo_missing,
     set_repo_topics,
 )
-from .scaffold import materials_system_files
+from .scaffold import materials_system_files, starter_line
+from .schedule import label_number, own_number
 from .schedule_plan import (
     Aliases,
     entry_kind,
-    label_number,
     needs_number,
     offplan_folders,
-    own_number,
     planned_rows,
 )
 from .setting_readers import RENAMED_SETTINGS, read_settings
@@ -198,6 +202,7 @@ TEXT_COMMIT = "migrate: seeded text"
 PROFILE_README = "profile/README.md"
 JOIN_README = "README.md"
 KEYS_COMMIT = "migrate: keys"
+STARTER_COMMIT = "migrate: starter"
 
 
 def fold(live: set[str], table: dict[str, str]) -> dict[str, str]:
@@ -1095,22 +1100,6 @@ PROPOSAL_HEADER = f"""\
 """
 
 
-def first_landed(org: str, repo: str, folder: str) -> datetime | None:
-    """When the first commit touching `folder` landed in `org/repo` (its oldest commit
-    date), or None when no commit touches it. Raises when GitHub cannot say."""
-    code, out = gh(
-        "api",
-        "--paginate",
-        f"repos/{org}/{repo}/commits?path={quote(folder)}&per_page=100",
-        "--jq",
-        ".[-1].commit.committer.date",
-    )
-    if code != 0:
-        raise RuntimeError(f"could not read the history of {org}/{repo}: {out[:200]}")
-    dates = [line.strip() for line in out.splitlines() if line.strip()]
-    return datetime.fromisoformat(dates[-1].replace("Z", "+00:00")) if dates else None
-
-
 def _folder_slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "folder"
 
@@ -1265,10 +1254,10 @@ def _topics(listing: dict[str, dict]) -> set[str]:
 def _files(org: str, repo: str, branch: str = "") -> dict[str, str]:
     """`{path: blob sha}` of `repo`, or `{}` when the repo is not there. An absent repo
     (a 404) is "not migrated yet", never an error; any other failure raises."""
-    if repo not in _listing(org):
+    if (row := _listing(org).get(repo)) is None:
         return {}
     try:
-        branch = branch or default_branch(org, repo)
+        branch = branch or row.get("default_branch") or default_branch(org, repo)
     except RuntimeError:
         if repo_missing(org, repo):
             return {}
@@ -1332,36 +1321,34 @@ LIVE_RUN_STATES = ("queued", "in_progress", "waiting", "requested", "pending")
 CENTRAL_REFRESHERS = ("deploy-main.yml", "deploy-preview.yml", "promote.yml")
 
 
+def _live_runs(org: str, repo: str) -> list[str]:
+    """The workflow file (`.github/workflows/x.yml`) of every run of `org/repo` not yet
+    finished, off ONE listing of its latest runs filtered here - a run that is queued or
+    going is among the newest. Raises when GitHub cannot say."""
+    code, out = gh(
+        "api",
+        f"repos/{org}/{repo}/actions/runs?per_page=50",
+        "--jq",
+        '.workflow_runs[] | select(.status != "completed") | .path',
+    )
+    if code != 0:
+        raise RuntimeError(f"could not list the runs of {org}/{repo}: {out[:200]}")
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
 def _alive(targets: list[tuple[str, str]]) -> list[str]:
     """The target repos with a run not yet finished, and each central deploy not yet
-    finished."""
-    out = [
-        f"{org}/{repo}"
-        for org, repo in targets
-        if any(_run_count(org, repo, f"status={s}") for s in LIVE_RUN_STATES)
-    ]
-    central_org, central_repo = CENTRAL.split("/", 1)
+    finished: one runs listing per repo and one for the toolkit, where asking per state
+    cost five calls per repo and fifteen for the toolkit on every poll."""
+    out = [f"{org}/{repo}" for org, repo in targets if _live_runs(org, repo)]
+    going = _live_runs(*CENTRAL.split("/", 1))
     out += [
         f"{CENTRAL} ({workflow})"
         for workflow in CENTRAL_REFRESHERS
-        if any(
-            _run_count(central_org, central_repo, f"status={s}", workflow)
-            for s in LIVE_RUN_STATES
-        )
+        # `path` can carry the ref it ran from (`...yml@refs/heads/main`).
+        if any(path.split("@")[0].endswith(f"/{workflow}") for path in going)
     ]
     return out
-
-
-def _rename(org: str, old: str, new: str, description: str | None = None) -> bool:
-    """Rename `org/old` to `new`, and - in the same PATCH - bring its description to the
-    current wording when it still carries a superseded one."""
-    fields = ["-f", f"name={new}"]
-    if description:
-        fields += ["-f", f"description={description}"]
-    code, out = gh("api", "--method", "PATCH", f"repos/{org}/{old}", *fields)
-    if code != 0:
-        log_err(f"could not rename {org}/{old} to {new}: {out[:200]}")
-    return code == 0
 
 
 def _redirects(org: str, old: str, new: str) -> bool:
@@ -1381,14 +1368,15 @@ def _yaml(text: str | None) -> dict:
 
 
 def _with_workflows(org: str, candidates: list[str]) -> list[tuple[str, str]]:
-    """`(org, repo)` for each live candidate repo that carries a workflow."""
+    """`(org, repo)` for each live candidate repo that carries a workflow - one Contents
+    read of its workflows folder, not a recursive tree of the whole repo."""
     listing = _listing(org)
     return [
         (org, repo)
         for repo in candidates
         if repo in listing
         and not listing[repo].get("archived")
-        and any(p.startswith(WORKFLOWS_DIR) for p in _files(org, repo))
+        and top_level(org, repo, WORKFLOWS_DIR)
     ]
 
 
@@ -1637,6 +1625,9 @@ def settle(
 
 
 def _settle(targets: Callable[[], list[tuple[str, str]]], before_switch: bool) -> bool:
+    # Worked out ONCE: nothing writes while this waits, so the repo set cannot change, and
+    # each poll used to re-read every repo's tree to find it again.
+    waited_on = targets()
     deadline = clock() + QUIET_WAIT
     while True:
         left = next_tick(clock())
@@ -1645,7 +1636,7 @@ def _settle(targets: Callable[[], list[tuple[str, str]]], before_switch: bool) -
             sleep(left + QUIET_POLL)
             deadline = clock() + QUIET_WAIT
             continue
-        alive = _alive(targets())
+        alive = _alive(waited_on)
         if not alive:
             return True
         if clock() >= deadline:
@@ -2147,7 +2138,9 @@ class Semester:
             if new in names:
                 log_err(f"{self.org} has both {old} and {new} - resolve by hand")
                 return False
-            if not _rename(self.org, old, new, self.description(old)):
+            if not rename_repo(
+                self.org, old, new, description=self.description(old) or None
+            ):
                 return False
             self.renamed_now[old] = new
         return True
@@ -2802,6 +2795,11 @@ class Course:
     def __init__(self, org: str) -> None:
         self.org = org
         self.pause = Pause(org, self.targets)
+        # `{template: its starter mode}`, read off every derivable source on its solution
+        # branch - notebooks, often hundreds of KB - so read once per run, not by every
+        # done/plan/do/verify of the starter step. Nothing else in a run writes those
+        # sources; `write_starters` clears it all the same.
+        self._starter_modes: dict[str, str] = {}
 
     def targets(self) -> list[tuple[str, str]]:
         """`.github` and every content repo and template that carries a workflow."""
@@ -2982,6 +2980,52 @@ class Course:
         for repo in bad:
             log_err(f"{repo}@{SOLUTION_BRANCH}/{GRADING_FILE} is still NOT_MIGRATED")
         return not self.templates_left() and not bad
+
+    # starter (decision 0028) --------------------------------------------------
+    def starters_left(self) -> dict[str, tuple[str, str]]:
+        """`{template: (its mode, its grading_config.yml with the key)}` for each live
+        template whose file parses and has no `starter:` yet. The mode is rule 6's
+        reading (`derive.starter_mode`), written down so it never has to be guessed again."""
+        out = {}
+        for repo in self.templates():
+            text = self.grading_text(repo)
+            try:
+                data = yaml.safe_load(text) if text else None
+            except yaml.YAMLError:
+                continue
+            if not isinstance(data, dict) or "starter" in data:
+                continue
+            if repo not in self._starter_modes:
+                self._starter_modes[repo] = starter_mode(
+                    None, self.solution_sources(repo)
+                )
+            mode = self._starter_modes[repo]
+            out[repo] = (mode, f"{text.rstrip()}\n{starter_line(mode)}\n")
+        return out
+
+    def solution_sources(self, repo: str) -> dict[str, str]:
+        """`{path: text}` for the derivable sources on `repo`'s solution branch."""
+        paths = _files(self.org, repo, SOLUTION_BRANCH)
+        texts = {
+            p: get_file_content(self.org, repo, p, ref=SOLUTION_BRANCH)
+            for p in derivable_sources(list(paths))
+        }
+        return {p: t for p, t in texts.items() if t is not None}
+
+    def write_starters(self) -> bool:
+        left = self.starters_left()
+        self._starter_modes.clear()
+        return all(
+            move_files(
+                self.org,
+                repo,
+                {},
+                STARTER_COMMIT,
+                files={GRADING_FILE: text.encode()},
+                branch=SOLUTION_BRANCH,
+            )
+            for repo, (_, text) in left.items()
+        )
 
     # seeded text -----------------------------------------------------------
     def texts(self) -> dict[tuple[str, str, str], tuple[str, str]]:
@@ -3260,6 +3304,21 @@ class Course:
                 rollback=(
                     f"git revert the '{TEXT_COMMIT}' commit in {dotgithub} and on each "
                     f"template's {SOLUTION_BRANCH} branch"
+                ),
+            ),
+            Step(
+                "template starter",
+                done=lambda: not self.starters_left(),
+                plan=lambda: [
+                    f"{r}@{SOLUTION_BRANCH}/{GRADING_FILE}: starter: {mode} "
+                    f"(read from its answer markers)"
+                    for r, (mode, _) in self.starters_left().items()
+                ],
+                do=self.write_starters,
+                verify=lambda: not self.starters_left(),
+                rollback=(
+                    f"git revert the '{STARTER_COMMIT}' commit on each template's "
+                    f"{SOLUTION_BRANCH} branch"
                 ),
             ),
             Step(

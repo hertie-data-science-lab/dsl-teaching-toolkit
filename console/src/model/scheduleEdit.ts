@@ -251,18 +251,37 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
   y.assign([d.kind, d.id], entryValue(d, obj(doc[d.kind])[d.id]));
 }
 
-/** A fresh id in `block`: `lecture-6`, `lab-4`, `assignment-2`, `midterm-exam`. */
+/**
+ * A fresh id in `block` from `stem` (`lecture-6`, `midterm-exam`). A taken one gets a letter
+ * (`lecture-3-b`), never a digit: a digit at the end of a key is its number (decision 0020).
+ */
 export function freshId(doc: Raw, block: Block, stem: string): string {
+  return unique(doc, kebab(stem) || block.slice(0, -1));
+}
+
+/**
+ * A fresh key for a release with no number (decision 0013 rule 3, 0020): `readings`,
+ * `readings-week-pack`. A digit at the end of a key is a number, and a readings number joins
+ * that lecture, so none is ever added: trailing digits of the title go, a taken key gets a
+ * letter (`readings-b`).
+ */
+export function unnumberedId(doc: Raw, kind: string, title: string): string {
+  return unique(doc, kebab(`${kind} ${title}`).replace(/[-\d]+$/, '') || kebab(kind) || 'entry');
+}
+
+/** `base`, or `base-b`, `base-c`... when taken: a letter, since a trailing digit is a number. */
+function unique(doc: Raw, base: string): string {
   const taken = takenKeys(doc);
-  const base = kebab(stem) || block.slice(0, -1);
-  if (/-\d+$/.test(base) || block !== 'releases') {
-    let id = base, n = 2;
-    while (taken.has(id)) id = `${base}-${n++}`;
-    return id;
-  }
-  let n = 1;
-  while (taken.has(`${base}-${n}`)) n++;
-  return `${base}-${n}`;
+  let id = base, n = 1;
+  while (taken.has(id)) id = `${base}-${letters(++n)}`;
+  return id;
+}
+
+/** 1 -> a, 2 -> b, 27 -> aa: a suffix with no digit in it. */
+function letters(n: number): string {
+  let s = '';
+  for (; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(97 + ((n - 1) % 26)) + s;
+  return s;
 }
 
 /** Every key the file uses, in any block: keys are unique across blocks. */
@@ -284,19 +303,25 @@ export type KindOf = (key: string, entry: unknown) => string;
 const spelledKind: KindOf = (_key, entry) => s(obj(entry).kind) || 'lecture';
 
 /**
- * Whether an entry must carry a number (decision 0020): every assignment, and every release
- * row the site shows except readings, where a number joins that lecture.
+ * The release kinds that carry no number of their own (`schedule_plan.needs_number`): readings,
+ * where a number joins that lecture (decision 0013 rule 3), and supporting files, which are no
+ * row (decision 0026). Nothing is proposed for them.
  */
+const UNNUMBERED_KINDS = ['readings', 'assets'];
+
+/** Whether an entry must carry a number (decision 0020): every assignment, and every release row the site shows of a numbered kind. */
 export function needsNumber(d: ReleaseDraft | AssignmentDraft, kind: string): boolean {
-  return d.kind === 'assignments' || (d.show && kind !== 'readings');
+  return d.kind === 'assignments' || (d.show && !UNNUMBERED_KINDS.includes(kind));
 }
 
 /**
  * The number to propose for a new entry of `kind`: one more than the highest number an entry
  * of that kind carries (its `number:`, else its key's own number; one without adds nothing).
  * For an assignment, stepped past a key already taken, since its key is `assignment-<n>`.
+ * Null for a kind with no number of its own (readings, supporting files).
  */
-export function nextNumber(doc: Raw, kind: string, kindOf: KindOf = spelledKind): number {
+export function nextNumber(doc: Raw, kind: string, kindOf: KindOf = spelledKind): number | null {
+  if (UNNUMBERED_KINDS.includes(kind)) return null;
   if (kind !== 'assignment') {
     const nums = Object.entries(obj(doc.releases)).filter(([k, e]) => kindOf(k, e) === kind).map(([k, e]) => entryNumber(k, e) ?? 0);
     return 1 + Math.max(0, ...nums);
@@ -308,16 +333,17 @@ export function nextNumber(doc: Raw, kind: string, kindOf: KindOf = spelledKind)
 }
 
 /**
- * A new entry's draft with its number proposed, when it needs one and has none yet; any other
+ * A new entry's draft with its number proposed (`nextNumber`), when it has none yet; any other
  * draft as it is. `kind` is a release's kind as the engine will read it (its own, else the one
- * inferred from its folder). Nothing is proposed for readings: a number joins that lecture
- * (decision 0013 rule 3), so only one typed in is kept.
+ * inferred from its folder). Readings get no proposal, so only a number typed in is kept. A
+ * supporting-files entry carries none: it is no row.
  */
 export function withNumber<T extends Draft>(d: T, doc: Raw, kindOf: KindOf = spelledKind, kind?: string): T {
   if ((d.kind !== 'assignments' && d.kind !== 'releases') || d.id) return d;
   const k = d.kind === 'assignments' ? 'assignment' : kind || d.type || 'lecture';
-  if (k === 'readings') return d;
-  return d.number !== undefined ? d : { ...d, number: nextNumber(doc, k, kindOf) };
+  if (k === 'assets') return d.number === undefined ? d : { ...d, number: undefined };
+  const n = d.number === undefined ? nextNumber(doc, k, kindOf) : null;
+  return n === null ? d : { ...d, number: n };
 }
 
 export function blankDraft(type: string, defaults: { repo: string }): ReleaseDraft | AssignmentDraft | EventDraft {

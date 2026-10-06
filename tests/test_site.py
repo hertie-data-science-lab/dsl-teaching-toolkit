@@ -2048,21 +2048,30 @@ def _reaches(linked: set[str], org: str, repo: str, path: str) -> bool:
 LAYOUTS = Path(__file__).parent / "fixtures" / "layouts"
 
 
-def _layout(monkeypatch, name: str) -> tuple[dict[str, dict], tuple[str, ...]]:
-    """`{row file: front matter}` the sync writes for a real layout, and its tree."""
-    sched = schedule_mod.parse(
+def _layout_schedule(name: str) -> schedule_mod.Schedule:
+    return schedule_mod.parse(
         yaml.safe_load((LAYOUTS / f"{name}-schedule.yml").read_text()),
         settings.Instance(),
     )
+
+
+def _layout(
+    monkeypatch, name: str, aliases: dict[str, dict[str, str]] | None = None
+) -> tuple[dict[str, dict], tuple[str, ...]]:
+    """`{row file: front matter}` the sync writes for a real layout, and its tree.
+    `aliases` is each source repo's `materials.yml` `kinds:`."""
+    sched = _layout_schedule(name)
     tree = tuple((LAYOUTS / f"{name}-tree.txt").read_text().split("\n")[:-1])
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", tree))
     monkeypatch.setattr(site, "read_materials", lambda o, r: materials.Declared())
     monkeypatch.setattr(site, "get_file_content", lambda o, r, p: f"- from {p}")
+    kinds = lambda repo: (aliases or {}).get(repo, {})
     out, _tabs = site._site_rows(
         "S",
-        schedule_plan.planned_rows(sched),
+        schedule_plan.planned_rows(sched, kinds),
         frozenset(),
         frozenset({"materials"}),
+        kinds,
     )
     return {name: _front(text) for name, text in out.items()}, tree
 
@@ -2085,8 +2094,23 @@ def _live(name: str) -> set[str]:
     return set((LAYOUTS / f"{name}-live-rows.txt").read_text().split())
 
 
+def test_the_demo_loses_the_lectures_that_land_in_a_kindless_folder(monkeypatch):
+    # Decision 0031 rule 10: lectures 9-11 land in `code/dldemo/...` and name no kind.
+    # `code/` is no kind's name, so they are supporting files now, no row, and the
+    # readings that joined them stand alone (`status_json.kindless_entry_problems` names
+    # each entry).
+    rows, _tree = _layout(monkeypatch, "demo")
+    lost = {"session-09.md", "session-10.md", "session-11.md"}
+    assert not lost & set(rows)
+    assert {"readings-readings-09.md", "readings-readings-11.md"} <= set(rows)
+
+
 def test_the_demo_keeps_its_rows_numbers_and_reading_lists(monkeypatch):
-    rows, tree = _layout(monkeypatch, "demo")
+    # With `code/` given the lecture kind, as the demo must before 0031 ships (or a
+    # `kind: lecture` on each of the three entries).
+    rows, tree = _layout(
+        monkeypatch, "demo", {"lecture-code-f2026": {"code": "lecture"}}
+    )
     assert set(rows) == _live("demo")
     # Numbered by the label, so lab-09 is still Lab 9 (decision 0013).
     assert (rows["lab-09.md"]["title"], rows["lab-11.md"]["title"]) == (
@@ -2226,3 +2250,24 @@ def test_a_declared_title_that_repeats_the_rows_name_is_not_said_twice(
     )
     (row,) = _rows(_plan(monkeypatch, tmp_path, sched)).values()
     assert row["title"] == "Lab 1" and "subtitle" not in row
+
+
+def test_supporting_files_get_no_row_and_no_tab(monkeypatch, tmp_path):
+    # Decision 0026 rule 3: a data/ folder is released (planned or by hand), never shown.
+    trees = {
+        "materials": (
+            "lectures/01_intro/slides.pdf",
+            "data/01_intro/rows.csv",
+            "img/02_trees/tree.png",
+        )
+    }
+    sched = Schedule(
+        releases=[
+            Release("lecture-1", _at(9, 1), [_copy("lectures/01_intro")]),
+            Release("data-1", _at(9, 1), [_copy("data/01_intro")]),
+        ]
+    )
+    plan = _plan(monkeypatch, tmp_path, sched, trees=trees)
+    assert [r["kind"] for r in _rows(plan).values()] == ["lecture"]
+    nav = plan.files["_data/nav.yml"]
+    assert "/lectures/" in nav and "Supporting files" not in nav

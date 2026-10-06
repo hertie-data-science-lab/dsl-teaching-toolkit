@@ -173,6 +173,32 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
     assert seen["sync"] is True
 
 
+def test_an_entry_is_released_in_one_batch_with_one_sync(monkeypatch):
+    # A schedule entry drawing on two source repos was two deploy runs, two clones of
+    # the shared dest and two site syncs. Now it is one deploy_many over every copy.
+    copies = [
+        Deploy("course-materials-f2026", "lectures/05"),
+        Deploy("course-datasets-f2026", "data/05", semester_dest_path="data"),
+    ]
+    sched = Schedule(releases=[Release(label="s5", when=None, deploy=copies)])
+    monkeypatch.setattr(deploy.schedule, "load", lambda org: sched)
+    monkeypatch.setattr(deploy, "unnumbered_release", lambda *a: None)
+    calls = []
+    monkeypatch.setattr(
+        deploy,
+        "deploy_many",
+        lambda org, sem, deploys, sync=True: calls.append((deploys, sync)) or (0, True),
+    )
+    argv = ["deploy", "--course-org", "Course", "--semester-org", "Semester-f2026"]
+    monkeypatch.setattr("sys.argv", [*argv, "--entry", "s5", "--no-preview"])
+    out = deploy.main()
+    assert out == 0 and calls == [(copies, True)]
+    assert "2 source repos" in out.text
+    # An entry the plan does not have is refused, and nothing is copied.
+    monkeypatch.setattr("sys.argv", [*argv, "--entry", "s9", "--no-preview"])
+    assert deploy.main() == 1 and len(calls) == 1
+
+
 def test_semester_dest_repo_defaults_to_materials(monkeypatch):
     captured = []
     monkeypatch.setattr(

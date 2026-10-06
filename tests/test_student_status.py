@@ -230,7 +230,6 @@ ALLOWED = (
     | {f"instructors[].{k}" for k in student_status.INSTRUCTOR_KEYS}
     | {f"announcements[].{k}" for k in student_status.ANNOUNCEMENT_KEYS}
     | {f"syllabus.{k}" for k in student_status.SYLLABUS_KEYS}
-    | {f"materials_index[].{k}" for k in student_status.INDEX_KEYS}
     | {f"kinds.*.{k}" for k in student_status.KIND_KEYS}
     | {f"kinds.{k['key']}" for k in student_status.policy.kinds()}
 )
@@ -242,6 +241,25 @@ ALLOWED = (
 def test_every_key_at_every_level_is_on_the_allow_list():
     doc = _render()
     assert _keys(doc) - ALLOWED == set()
+
+
+def _schema_keys(schema: dict, where: str = "") -> set[str]:
+    """Every key path the schema allows, as `_keys` spells them."""
+    out: set[str] = set()
+    for k, sub in schema.get("properties", {}).items():
+        path = f"{where}.{k}" if where else k
+        out.add(path)
+        out |= _schema_keys(sub, path)
+    if "items" in schema:
+        out |= _schema_keys(schema["items"], f"{where}[]")
+    if isinstance(schema.get("additionalProperties"), dict):
+        out |= _schema_keys(schema["additionalProperties"], f"{where}.*")
+    return out
+
+
+def test_the_schema_allows_nothing_the_allow_list_does_not():
+    # The schema is built from the same `*_KEYS` tuples, so the two cannot drift apart.
+    assert _schema_keys(student_status.json_schema()) - ALLOWED == set()
 
 
 def test_the_exported_schema_is_closed_at_every_level_and_the_render_fits_it():
@@ -327,6 +345,25 @@ def test_the_archive_date_is_there_whatever_show_on_site_says():
     assert "semester-archived" not in {r["id"] for r in doc["rows"]}
 
 
+def test_the_semester_dates_and_the_moment_it_was_written():
+    doc = _render()
+    assert (doc["semester_start"], doc["semester_end"]) == ("2026-09-07", "2026-12-18")
+    assert doc["generated_at"] == NOW.isoformat(timespec="seconds")
+
+
+def test_an_unchanged_render_keeps_the_old_moment_so_it_makes_no_commit():
+    old = _render()
+    later = _render(NOW + timedelta(minutes=15))
+    settled = student_status.settle(later, student_status.dumps(old).decode())
+    assert student_status.dumps(settled) == student_status.dumps(old)
+    # Something else changed: the new moment stands.
+    changed = {**later, "home_markdown": "Moved to B2."}
+    assert student_status.settle(changed, student_status.dumps(old).decode()) == changed
+    # Nothing to compare with: the render as it is.
+    for text in (None, "", "not json", '{"schema": "dsl.student-status/1"}'):
+        assert student_status.settle(later, text) == later
+
+
 # ---------------------------------------------------------------- rows
 
 
@@ -347,8 +384,34 @@ def test_a_released_row_links_its_files_and_carries_its_readings():
     assert lec["reading_list"] == "### Read\n\nChapter 1."
     assert lec["released"] and not lec["readings_pending"]
     assert lec["links"][0]["url"] == (
-        f"https://github.com/{SEMESTER}/materials/blob/HEAD/lectures/01_intro/slides.pdf"
+        f"https://github.com/{SEMESTER}/materials/blob/main/lectures/01_intro/slides.pdf"
     )
+
+
+def test_a_row_lists_its_files_as_the_semester_site_does():
+    # One listing rule (`site_repo.landed_links`): the tree's folders are not files, the
+    # course's `site_link_extensions` narrows the list, and URLs carry the branch.
+    facts = _facts()
+    facts.dest_paths["materials"] |= {
+        "lectures",
+        "lectures/01_intro",
+        "lectures/01_intro/code",
+    }
+    facts.dest_branches["materials"] = "trunk"
+    extra = _extra(facts)
+    plain = student_status.render(_course(), facts, extra, NOW)
+    lec = next(r for r in plain["rows"] if r["id"] == "lecture_01")
+    assert [k["name"] for k in lec["links"]] == [
+        "slides.pdf",
+        "code/ (2 files)",
+        "paper.pdf",
+    ]
+    assert lec["links"][1]["path"] == "lectures/01_intro/code"
+    assert "/tree/trunk/lectures/01_intro/code" in lec["links"][1]["url"]
+    extra.link_extensions = frozenset({"pdf"})
+    narrowed = student_status.render(_course(), facts, extra, NOW)
+    lec = next(r for r in narrowed["rows"] if r["id"] == "lecture_01")
+    assert [k["name"] for k in lec["links"]][:2] == ["slides.pdf", "browse the folder"]
 
 
 def test_an_unreleased_row_is_on_the_calendar_with_nothing_to_open():
@@ -386,12 +449,9 @@ def test_home_text_fills_the_course_keys_and_drops_other_liquid():
     )
 
 
-def test_materials_index_and_syllabus():
+def test_materials_repos_and_syllabus():
     doc = _render()
     assert doc["materials_repos"] == ["materials"]
-    (index,) = doc["materials_index"]
-    assert "lectures/01_intro/solution/answers.py" not in index["paths"]
-    assert "SYLLABUS.md" in index["paths"]
     assert doc["syllabus"] == {"repo": "materials", "path": "SYLLABUS.md"}
 
 

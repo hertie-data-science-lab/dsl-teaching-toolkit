@@ -444,16 +444,22 @@ _NOTE = "__CRON_NOTE__"
 # each on its own runner, and a shared path would let one semester's mail carry another's log.
 _RUN_LOG = '"$RUNNER_TEMP/run.log"'
 
-# Appended to the main `run:` command of every cron step the mail below reports on, so the
-# step writes the log the mail sends. `tee` and not a redirect, because the log has to stay
-# in the run's own output as well - that is what the failure issue links to.
-#
-# The command is `exec`'d (each call site writes `exec python3 ...`), so Python IS the
-# step's process: a cancel (Stop in the Console, a timeout) signals that process, and a
-# shell waiting on a pipeline would hold the signal until GitHub force-killed the step
-# about 10 s later. `exec` also hands the step Python's own exit status, which keeps a
-# failure red. It is the last line of the block for the same reason.
 _TEE_RUN_LOG = f" > >(tee {_RUN_LOG}) 2>&1"
+
+
+def _logged(cmd: str) -> str:
+    """The main `run:` command of every cron step the mail below reports on, as the whole
+    line: `exec <cmd>`, teed to `_RUN_LOG` so the step writes the log the mail sends.
+    `tee` and not a redirect, because the log has to stay in the run's own output as well
+    - that is what the failure issue links to.
+
+    `exec`, so Python IS the step's process: a cancel (Stop in the Console, a timeout)
+    signals that process, and a shell waiting on a pipeline would hold the signal until
+    GitHub force-killed the step about 10 s later. `exec` also hands the step Python's own
+    exit status, which keeps a failure red, and nothing after it in the block runs. One
+    helper, so a new workflow cannot write the tee and forget the `exec`."""
+    return f"exec {cmd}{_TEE_RUN_LOG}"
+
 
 # The mail that reaches the maintainer, gated on the notice step having actually reported.
 # The step's OWN log, teed to `_RUN_LOG` by the step itself, rather than fetched back from
@@ -1080,6 +1086,27 @@ def render_sync_membership(semester_orgs: list[str]) -> str:
       trigger types skip that gate, same as the existing scheduler workflow already
       does for cron)
     """
+    auto = _sync_auto_job(
+        "Sync membership",
+        f"""          # The JSON boolean `true` and nothing else - a string "true" or a 1 is absent.
+          DISPATCH_ALL: ${{{{ {_PAYLOAD_ALL_SEMESTERS} }}}}
+{_OLD_PAYLOAD_ENV}{_DEPRECATED_ALL_ENV}# A fault in the course org's own config is emailed to its admins from this step (see
+# dsl_course.notify.route_course), so the automatic job carries the transport and the
+# address list alongside the token. The manual button does not: somebody is standing at
+# that run and reads its log.
+{_MAIL_ENV}
+{_COURSE_ADMIN_ENV}
+""",
+        f"""{_OLD_PAYLOAD_CHECK}{_DEPRECATED_ALL_NOTE}          # First, and never fatal: a push to either of the course's own config files is
+          # what this job is here for, and the reconcile below is what SKIPS the course
+          # when one of them cannot be read. Its own digest issue and mail are the report.
+          python3 -m dsl_course.scheduler --course-org "$COURSE" --check-course-config --no-preview
+          args=(--course-org "$COURSE" --no-preview)
+""",
+        'python3 -m dsl_course.sync_membership "${args[@]}"',
+        on_push=False,
+        all_from_payload=True,
+    )
     return f"""name: Sync membership
 
 on:
@@ -1112,39 +1139,60 @@ on:
           [ "$SEMESTER_ORG" != "{_FACULTY_ONLY}" ] && args+=(--semester-org "$SEMESTER_ORG")
           python3 -m dsl_course.sync_membership "${{args[@]}}"
 {_CRON_CLOSE}
-  sync-auto:
+{auto}"""
+
+
+def _sync_auto_job(
+    step: str,
+    env: str,
+    before: str,
+    cmd: str,
+    *,
+    on_push: bool,
+    all_from_payload: bool,
+) -> str:
+    """The `sync-auto` job a scheduled, pushed or dispatched sync runs: one step, `env`
+    after the shared payload lines, `before` (which sets `args`) ahead of the routing, and
+    `cmd` teed at the end.
+
+    The routing differs on purpose between its two users. `on_push` routes a push of the
+    workflow's own repo to every semester (the site; a push to membership's
+    reconciles the course alone).
+    `all_from_payload` reads every semester from the payload's `all_semesters` flag
+    (membership: a bare dispatch is the course alone); without it a dispatch naming no
+    semester means all of them (the site)."""
+    every = "push|schedule" if on_push else "schedule"
+    unnamed = (
+        """              elif [ "$DISPATCH_ALL" = "true" ]; then
+                args+=(--all-semesters)
+"""
+        if all_from_payload
+        else """              else
+                args+=(--all-semesters)
+"""
+    )
+    wins = (
+        "              # A named semester wins over all_semesters.\n"
+        if all_from_payload
+        else ""
+    )
+    return f"""  sync-auto:
     if: github.event_name != 'workflow_dispatch'
-{_ungated_preamble()}      - name: Sync membership
+{_ungated_preamble()}      - name: {step}
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           EVENT: ${{{{ github.event_name }}}}
           DISPATCH_SEMESTER: ${{{{ {_PAYLOAD_SEMESTER} }}}}
-          # The JSON boolean `true` and nothing else - a string "true" or a 1 is absent.
-          DISPATCH_ALL: ${{{{ {_PAYLOAD_ALL_SEMESTERS} }}}}
-{_OLD_PAYLOAD_ENV}{_DEPRECATED_ALL_ENV}# A fault in the course org's own config is emailed to its admins from this step (see
-# dsl_course.notify.route_course), so the automatic job carries the transport and the
-# address list alongside the token. The manual button does not: somebody is standing at
-# that run and reads its log.
-{_MAIL_ENV}
-{_COURSE_ADMIN_ENV}
-        run: |
-{_OLD_PAYLOAD_CHECK}{_DEPRECATED_ALL_NOTE}          # First, and never fatal: a push to either of the course's own config files is
-          # what this job is here for, and the reconcile below is what SKIPS the course
-          # when one of them cannot be read. Its own digest issue and mail are the report.
-          python3 -m dsl_course.scheduler --course-org "$COURSE" --check-course-config --no-preview
-          args=(--course-org "$COURSE" --no-preview)
-          case "$EVENT" in
-            schedule) args+=(--all-semesters) ;;
+{env}        run: |
+{before}          case "$EVENT" in
+            {every}) args+=(--all-semesters) ;;
             repository_dispatch)
-              # A named semester wins over all_semesters.
-              if [ -n "$DISPATCH_SEMESTER" ]; then
+{wins}              if [ -n "$DISPATCH_SEMESTER" ]; then
                 args+=(--semester-org "$DISPATCH_SEMESTER")
-              elif [ "$DISPATCH_ALL" = "true" ]; then
-                args+=(--all-semesters)
-              fi ;;
+{unnamed}              fi ;;
           esac
-          exec python3 -m dsl_course.sync_membership "${{args[@]}}"{_TEE_RUN_LOG}
+          {_logged(cmd)}
 {_CRON_NOTICE}"""
 
 
@@ -1403,6 +1451,13 @@ on:
 _SEND_CODES_SEMESTER = "${{ " + _PAYLOAD_SEMESTER + " }}"
 
 
+# Two lines, so it is named rather than written inline: `_logged` puts the tee on the end.
+_SEND_CODES_CMD = (
+    'python3 -m dsl_course.enrol_codes --semester-org "$DISPATCH_SEMESTER" \\\n'
+    '            --dispatched-by "$COURSE" --no-preview'
+)
+
+
 def render_send_codes() -> str:
     """Generate a non-PII enrolment code per student and email each their code.
 
@@ -1459,8 +1514,7 @@ on:
           # --dispatched-by names the course org whose registry authorises this semester:
           # the payload comes from a semester's bot token, so the semester it names is
           # untrusted input.
-          exec python3 -m dsl_course.enrol_codes --semester-org "$DISPATCH_SEMESTER" \\
-            --dispatched-by "$COURSE" --no-preview{_TEE_RUN_LOG}
+          {_logged(_SEND_CODES_CMD)}
 {_CRON_NOTICE}"""
 
 
@@ -1618,7 +1672,7 @@ on:
             args=(--course-org "$COURSE" --all-semesters --skip-autograde)
           fi
 {_SCHEDULED_PREVIEW_GATE}
-          exec python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
+          {_logged('python3 -m dsl_course.scheduler "${args[@]}"')}
 {_RELEASE_NOTICE}  autograde:
     # Named, because `autograde-report` below looks its legs up by name through the jobs
     # API - a string this file declares rather than one GitHub composes from the matrix.
@@ -1762,7 +1816,7 @@ on:
 {_MAIL_ENV}
         run: |
           gh auth setup-git
-          exec python -m dsl_course.console --request "$REQUEST"{_TEE_RUN_LOG}
+          {_logged('python -m dsl_course.console --request "$REQUEST"')}
 {_CONSOLE_REPORT}"""
 
 
@@ -1796,7 +1850,7 @@ on:
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
         run: |
-          exec python3 -m dsl_course.seed refresh --course-org "$COURSE"{_TEE_RUN_LOG}
+          {_logged('python3 -m dsl_course.seed refresh --course-org "$COURSE"')}
 {_CRON_NOTICE}"""
 
 
@@ -1808,17 +1862,19 @@ def render_generate_syllabus(
     """Build the syllabus's session-by-session section from a semester's schedule.yml.
 
     A workflow rather than a CLI habit, because the people who write syllabi are the people
-    who use the Actions tab. It writes a companion file for them to paste from and never
-    touches SYLLABUS.md itself - see dsl_course/syllabus.py for why."""
+    who use the Actions tab. It writes only the marked weekly-plan block of the declared
+    syllabus - see dsl_course/syllabus.py."""
     return f"""name: Generate syllabus
 
-# Writes the "Course sessions and readings" section of a syllabus - one block per session,
-# with its title, its learning objectives and its reading list - from the semester's
-# semester-config/schedule.yml and this repo's readings/ folders.
+# Writes the weekly plan of a syllabus - one block per session, with its title, its
+# learning objectives and its reading list - from the semester's
+# semester-config/schedule.yml and its readings entries.
 #
-# It lands in .system/SYLLABUS.sessions.md, and is NEVER released to students.
-# Paste what you want into SYLLABUS.md; a re-run overwrites the companion file, never your
-# syllabus. Dropdowns are refreshed by the 'Refresh actions' workflow.
+# It goes into your syllabus file (SYLLABUS.md, or the one materials.yml declares),
+# between <!-- dsl:weekly-plan --> and <!-- /dsl:weekly-plan -->; without those lines it
+# adds them under "## Weekly plan" at the end. Move the marked block anywhere in the file
+# and a re-run updates it there; nothing else in the file changes.
+# Dropdowns are refreshed by the 'Refresh actions' workflow.
 
 on:
   workflow_dispatch:
@@ -1826,7 +1882,7 @@ on:
 {_choice_input("course_source_repo", "Repo holding your syllabus and readings", source_repos, _newest_materials(source_repos, materials))}
 {_choice_input("semester_org", "Semester whose schedule.yml supplies the sessions", semester_orgs)}
       preview:
-        description: "Preview - print the block, commit nothing to .system/SYLLABUS.sessions.md"
+        description: "Preview - print the block, write nothing to your syllabus"
         type: boolean
         default: true
 
@@ -2068,6 +2124,16 @@ def render_sync_site(semester_orgs: list[str]) -> str:
 
     Releases also call site.sync_site directly (immediate). The push/dispatch/cron paths
     skip the check-team gate (no actor), same as Sync membership and the scheduler."""
+    auto = _sync_auto_job(
+        "Sync site",
+        _OLD_PAYLOAD_ENV,
+        f"""{_OLD_PAYLOAD_CHECK}          gh auth setup-git
+          args=(--course-org "$COURSE")
+""",
+        'python3 -m dsl_course.site sync "${args[@]}"',
+        on_push=True,
+        all_from_payload=False,
+    )
     return f"""name: Sync site
 
 on:
@@ -2095,28 +2161,7 @@ on:
           gh auth setup-git
           python3 -m dsl_course.site sync --course-org "$COURSE" --semester-org "$SEMESTER_ORG"
 {_CRON_CLOSE}
-  sync-auto:
-    if: github.event_name != 'workflow_dispatch'
-{_ungated_preamble()}      - name: Sync site
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COURSE: ${{{{ github.repository_owner }}}}
-          EVENT: ${{{{ github.event_name }}}}
-          DISPATCH_SEMESTER: ${{{{ {_PAYLOAD_SEMESTER} }}}}
-{_OLD_PAYLOAD_ENV}        run: |
-{_OLD_PAYLOAD_CHECK}          gh auth setup-git
-          args=(--course-org "$COURSE")
-          case "$EVENT" in
-            push|schedule) args+=(--all-semesters) ;;
-            repository_dispatch)
-              if [ -n "$DISPATCH_SEMESTER" ]; then
-                args+=(--semester-org "$DISPATCH_SEMESTER")
-              else
-                args+=(--all-semesters)
-              fi ;;
-          esac
-          exec python3 -m dsl_course.site sync "${{args[@]}}"{_TEE_RUN_LOG}
-{_CRON_NOTICE}"""
+{auto}"""
 
 
 def render_publish_site() -> str:
@@ -2160,5 +2205,5 @@ on:
           COURSE_ORG: ${{{{ github.repository_owner }}}}
         run: |
           gh auth setup-git
-          exec python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG" --daily{_TEE_RUN_LOG}
+          {_logged('python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG" --daily')}
 {_CRON_NOTICE}"""

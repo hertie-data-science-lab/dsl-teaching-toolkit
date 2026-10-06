@@ -30,3 +30,13 @@ export const Bldg = () => (
 export const Pin = () => (
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M8 15s5-4.6 5-8.5A5 5 0 003 6.5C3 10.4 8 15 8 15z" /><circle cx="8" cy="6.5" r="1.8" /></svg>
 );
+/** A folder in the file tree, drawn open while it is expanded. */
+export const Folder = ({ open = false }: { open?: boolean }) => (
+  <svg class="ft-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true">
+    {open ? <path d="M1.5 12.5v-9h4l1.5 1.5h6v2M1.5 12.5l2-5.5h11l-2 5.5z" /> : <path d="M1.5 3.5h4l1.5 1.5h7.5v7.5h-13z" />}
+  </svg>
+);
+/** A file in the file tree. */
+export const File = () => (
+  <svg class="ft-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3" /></svg>
+);

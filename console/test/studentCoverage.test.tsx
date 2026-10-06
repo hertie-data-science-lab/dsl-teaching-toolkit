@@ -8,8 +8,9 @@ import { describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, type GhTeam } from '../src/github/client';
 import { discoverEstate, invitationUrl, pendingOrgs, type Semester } from '../src/model/discovery';
-import { forgetMyTeams, knownAuditor, parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
-import { forgetStudentPrefs, lastVisit, localPaths, markVisit, resetVisits, saveLocalPaths, type PrefStore } from '../src/model/prefs';
+import { forgetMine, forgetMyTeams, knownAuditor, parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
+import { forgetStudentPrefs, lastVisit, markVisit } from '../src/model/prefs';
+import type { KeyStore } from '../src/auth/types';
 import { SiteSource, homeText, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
 import { ArchivedSemester, AboutView, AssignmentsView, AuditorNote, InstructorsView, MarksView, ScheduleView, WeekList } from '../src/screens/Student';
@@ -68,11 +69,11 @@ function receiptsFake(): FakeGitHub {
     ]);
 }
 
-function memStore(): PrefStore & { data: Map<string, string> } {
-  const data = new Map<string, string>();
+/** A store over `data`: a new one over the same data is the next page load. */
+function memStore(data = new Map<string, string>()): KeyStore & { data: Map<string, string> } {
   return { data, getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
 }
-const refusing: PrefStore = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
+const refusing: KeyStore = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
 
 describe('1. the assignment brief', () => {
   it('is the page body out of its raw guard, only once handed out', async () => {
@@ -161,35 +162,29 @@ describe('3. the whole receipts thread', () => {
   });
 
   it('stores the visit only when marked, keeps this load’s answer, and survives blocked storage', () => {
-    resetVisits();
-    const store = memStore();
-    expect(lastVisit(LOGIN, ORG, store)).toBeNull();
-    resetVisits();
+    const data = new Map<string, string>();
+    expect(lastVisit(LOGIN, ORG, memStore(data))).toBeNull();
+    const store = memStore(data); // the next page load
     expect(lastVisit(LOGIN, ORG, store)).toBeNull(); // never marked: a failed read stores nothing
     markVisit(LOGIN, ORG, 1000, store);
     expect(lastVisit(LOGIN, ORG, store)).toBeNull(); // same load, same answer
-    resetVisits();
-    expect(lastVisit(LOGIN, ORG, store)).toBe(1000);
-    resetVisits();
+    expect(lastVisit(LOGIN, ORG, memStore(data))).toBe(1000);
     expect(lastVisit(LOGIN, 'other-f2026', refusing)).toBeNull();
     expect(() => markVisit(LOGIN, 'other-f2026', 1, refusing)).not.toThrow();
-    resetVisits();
   });
 
-  it('forgets every visit time and folder of the signed-out person, and no one else’s', () => {
+  it('forgets every visit time of the signed-out person, and no one else’s', () => {
     const data = new Map<string, string>([
-      [`dsl-console-visit:${LOGIN}:${ORG}`, '1'], [`dsl-console-visit:${LOGIN}:other-f2026`, '2'], [`dsl-console-paths:${LOGIN}`, '{}'],
-      ['dsl-console-visit:someone:x', '3'], ['dsl-console-paths:someone', '{}'], ['console-theme', 'dark'],
+      [`dsl-console-visit:${LOGIN}:${ORG}`, '1'], [`dsl-console-visit:${LOGIN}:other-f2026`, '2'],
+      ['dsl-console-visit:someone:x', '3'], ['console-theme', 'dark'],
     ]);
-    const store: PrefStore = { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v), removeItem: (k) => void data.delete(k), get length() { return data.size; }, key: (i) => [...data.keys()][i] ?? null };
-    resetVisits();
+    const store: KeyStore = { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v), removeItem: (k) => void data.delete(k), get length() { return data.size; }, key: (i) => [...data.keys()][i] ?? null };
     lastVisit(LOGIN, ORG, store);
     forgetStudentPrefs(LOGIN, store);
-    expect([...data.keys()].sort()).toEqual(['console-theme', 'dsl-console-paths:someone', 'dsl-console-visit:someone:x']);
+    expect([...data.keys()].sort()).toEqual(['console-theme', 'dsl-console-visit:someone:x']);
     data.set(`dsl-console-visit:${LOGIN}:${ORG}`, '5');
     expect(lastVisit(LOGIN, ORG, store)).toBe(5); // the in-memory answers went too
     expect(() => forgetStudentPrefs(LOGIN, refusing)).not.toThrow();
-    resetVisits();
   });
 });
 
@@ -224,13 +219,13 @@ describe('4. the auditor', () => {
     await readMine(client(fake), ORG, LOGIN, []);
     expect(knownAuditor(ORG.toUpperCase())).toBe(true);
     const sem: Semester = { org: ORG, term: 'f2026', termLabel: 'Fall 2026', courseOrg: 'c', courseName: 'Deep Learning', archived: false, role: 'student' };
-    const nav = render(<StudentNav courses={[]} cohortStates={{}} semesters={[sem]} semester={sem} current="week" />);
+    const nav = render(<StudentNav root="Your semesters" semesters={[sem]} semester={sem} current="week" />);
     expect(nav).not.toContain('#marks');
     expect(nav).not.toContain('#join');
     expect(nav).toContain('#materials');
     await readMine(client(new FakeGitHub().on('GET', new RegExp(`^/orgs/${ORG}/repos`), [])), ORG, LOGIN, []);
     expect(knownAuditor(ORG)).toBe(false);
-    expect(render(<StudentNav courses={[]} cohortStates={{}} semesters={[sem]} semester={sem} current="week" />)).toContain('#marks');
+    expect(render(<StudentNav root="Your semesters" semesters={[sem]} semester={sem} current="week" />)).toContain('#marks');
   });
 
   it('promises no repo, team or marks: "As an auditor you ..."', async () => {
@@ -288,6 +283,18 @@ describe('6. the team of a drop-box or external group', () => {
     expect(m.units['assignment-7'].team).toBeNull();
   });
 
+  it('reuses a semester’s own reads for a minute, per session', async () => {
+    const fake = new FakeGitHub().on('GET', /^\/orgs\/[^/]+\/repos/, []);
+    const c = client(fake);
+    const lists = () => fake.seen.filter((x) => x.url.includes('/repos?')).length;
+    await readMine(c, ORG, LOGIN, [box]);
+    await readMine(c, ORG, LOGIN, [box]);
+    expect(lists()).toBe(1);
+    forgetMine(c); // sign-out
+    await readMine(c, ORG, LOGIN, [box]);
+    expect(lists()).toBe(2);
+  });
+
   it('reads /user/teams once per session, not once per semester', async () => {
     const fake = new FakeGitHub()
       .on('GET', /^\/orgs\/[^/]+\/repos/, [])
@@ -297,6 +304,7 @@ describe('6. the team of a drop-box or external group', () => {
     await readMine(c, 'hertie-other-f2026', LOGIN, [box]);
     expect(fake.seen.filter((s) => s.url.includes('/user/teams'))).toHaveLength(1);
     forgetMyTeams(c);
+    forgetMine(c);
     await readMine(c, ORG, LOGIN, [box]);
     expect(fake.seen.filter((s) => s.url.includes('/user/teams'))).toHaveLength(2);
   });
@@ -436,7 +444,7 @@ describe('12. Set up', () => {
     expect(await forkOf(client(fake), LOGIN, ORG, 'absent')).toEqual({ kind: 'none' });
   });
 
-  it('writes the clone command and the editor link for the saved folder, Windows included', () => {
+  it('writes the clone command (the Clone ?) and the editor link for a folder, Windows included', () => {
     expect(joinPath('/Users/jane/hertie/', 'materials')).toBe('/Users/jane/hertie/materials');
     expect(joinPath('C:\\Users\\jane\\hertie', 'materials')).toBe('C:\\Users\\jane\\hertie\\materials');
     expect(vscodeFolder('/Users/jane/hertie/materials')).toBe('vscode://file/Users/jane/hertie/materials');
@@ -445,22 +453,15 @@ describe('12. Set up', () => {
     expect(cloneCommand('https://github.com/jane/materials', '', 'materials')).toBe('git clone https://github.com/jane/materials.git');
   });
 
-  it('remembers the folders in this browser only, and survives blocked storage', () => {
-    const store = memStore();
-    saveLocalPaths(LOGIN, { materials: '/m', assignments: '/a' }, store);
-    expect(localPaths(LOGIN, store)).toEqual({ materials: '/m', assignments: '/a' });
-    expect(localPaths('someone-else', store)).toEqual({ materials: '', assignments: '' });
-    expect(() => saveLocalPaths(LOGIN, { materials: '/m', assignments: '' }, refusing)).not.toThrow();
-    expect(localPaths(LOGIN, refusing)).toEqual({ materials: '', assignments: '' });
-  });
-
-  it('lists the student’s own assignment repos to clone, and nothing personal in the Student view', async () => {
+  it('lists the student’s own assignment repos with an Open button each, and nothing personal in the Student view', async () => {
     const f = await facts();
-    const t = text(<SetupView org={ORG} facts={f} mine={mine()} studentView={false} />);
-    expect(t).toContain(`git clone https://github.com/${ORG}/assignment-2-octo-student.git`);
-    expect(t).toContain('Your local folders');
+    const html = render(<SetupView org={ORG} facts={f} mine={mine()} studentView={false} />);
+    expect(text(<SetupView org={ORG} facts={f} mine={mine()} studentView={false} />)).toContain('assignment-2-octo-student');
+    // The clone command lives only in the Open menu's Clone ?, not in a block on the page.
+    expect(html).not.toContain('<pre');
+    expect(html).toContain('class="split small"');
     const sv = text(<SetupView org={ORG} facts={f} mine={null} studentView />);
-    expect(sv).toContain('A student sets up their fork');
+    expect(sv).toContain('A student checks here that they have forked each materials repo');
     expect(sv).not.toContain('git clone');
   });
 });

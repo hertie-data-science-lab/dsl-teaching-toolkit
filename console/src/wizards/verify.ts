@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { YamlText } from '../edit/yamlText';
 import { GitHubError, type GitHubClient, type TreeEntry } from '../github/client';
+import { poll } from '../github/poll';
 import { COURSE_HUB_TOPIC, REGISTRY_PATH, parseRegistry, type TokenKind } from '../model/discovery';
 import { APP_SLUG, BOT } from './model';
 import { CONFIG_REPO, COURSE_REPO, JOIN_REPO } from '../model/names';
@@ -243,24 +244,20 @@ export const POLL_MS = 10_000;
 
 /**
  * While `on`, run `live` again every `ms` and when the window regains focus or becomes
- * visible, skipping a tick while a check is still in flight or the page is hidden. Stops
- * when `on` turns false (all checks passed, or the step was left) or the component goes.
+ * visible (`poll`), skipping a tick while a check is still in flight; nothing runs while the
+ * page is hidden. Stops when `on` turns false (all checks passed, or the step was left) or
+ * the component goes.
  */
 export function usePoll(live: Live<unknown>, on: boolean, ms = POLL_MS): void {
   const cur = useRef(live);
   cur.current = live;
   useEffect(() => {
     if (!on) return;
-    const again = () => {
-      if (!cur.current.busy && !document.hidden) cur.current.run();
-    };
-    const id = setInterval(again, ms);
-    window.addEventListener('focus', again);
-    document.addEventListener('visibilitychange', again);
-    return () => {
-      clearInterval(id);
-      window.removeEventListener('focus', again);
-      document.removeEventListener('visibilitychange', again);
-    };
+    const stop = new AbortController();
+    void poll(async () => {
+      if (!cur.current.busy) cur.current.run();
+      return false;
+    }, { every: ms, later: true, signal: stop.signal });
+    return () => stop.abort();
   }, [on, ms]);
 }

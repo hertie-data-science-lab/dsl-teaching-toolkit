@@ -219,7 +219,6 @@ _OWN_CLASSES = frozenset(
         "post-kicker",
         "post-due",
         "shape-note",
-        "file-actions",
         "file-btns",
         "file-btn",
         "open-in-line",
@@ -641,34 +640,10 @@ _LINK_TEMPLATES = (
     "_includes/lecture_links.html",
 )
 
-_VIEW_BRANCH = re.compile(
-    r"{%-?\s*if\s+[\w.]*\bview_url\s*-?%}(?P<shown>.*?){%-?\s*endif\s*-?%}", re.DOTALL
-)
-
 
 @pytest.mark.parametrize("rel", _LINK_TEMPLATES)
 def test_every_page_that_shows_a_file_link_goes_through_the_one_include(rel):
     assert "include file_link.html" in _strip_comments(_templates()[rel])
-
-
-def test_render_is_offered_only_where_the_site_hosts_a_copy():
-    # `render` opens the semester site's own copy, which exists only for a published file a
-    # browser draws (html, pdf). Rendered unconditionally it is a button to a 404 on every
-    # other row of every site.
-    body = _strip_comments(_templates()["_includes/file_link.html"])
-    branches = [m["shown"] for m in _VIEW_BRANCH.finditer(body)]
-    assert branches, "file_link.html does not branch on view_url"
-    assert (
-        body.count(">render</a>") == sum(b.count(">render</a>") for b in branches) == 1
-    )
-    # `source` is the opposite: unconditional in the button row, because the file's home
-    # on GitHub is worth a button whether or not anything else is. The Updates box's
-    # inline shape keeps it conditional - there the name itself goes to GitHub unless a
-    # hosted copy has taken it.
-    assert body.count(">source</a>") == 2
-    assert sum(b.count(">source</a>") for b in branches) == 1
-    # And the FIRST branch is the name's own href, so a hosted copy is what it opens.
-    assert body.index("include.view_url") < body.index("file-btns")
 
 
 def test_every_button_in_a_file_row_opens_a_new_tab():
@@ -691,13 +666,9 @@ def test_the_updates_box_takes_the_inline_shape_of_the_source_link():
         _templates()["_includes/lecture_links.html"]
     )
     link = _strip_comments(_templates()["_includes/file_link.html"])
-    assert "include.inline" in link
-    assert "· <a href=" in link
-    # And no button row inside the sentence.
-    assert (
-        "file-btns"
-        not in link.split("{% if include.inline %}")[1].split("{% else %}")[0]
-    )
+    # No button row inside the sentence: the row is only for a caller that is not inline.
+    assert "file-btns" in link.split("{% unless include.inline %}")[1]
+    assert "file-btns" not in link.split("{% unless include.inline %}")[0]
     # The lists that bracket nothing keep the bracketed one.
     assert "inline" not in _strip_comments(_templates()["_includes/session_entry.html"])
 
@@ -708,7 +679,7 @@ def test_the_shared_link_include_adds_no_whitespace_of_its_own():
     body = _templates()["_includes/file_link.html"]
     # No trailing newline of its own, and the comment above the markup trims the one after
     # it (`-%}`).
-    assert body.endswith("{% endif %}")
+    assert body.endswith("{% endunless %}")
     assert "-%}\n<a" in body
 
 

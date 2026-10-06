@@ -7,7 +7,7 @@ import { act } from 'preact/test-utils';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import type { Loaded } from '../src/model/status';
 import type { Assignment, Status } from '../src/model/types';
 import * as defs from '../src/ops/defs';
@@ -26,7 +26,8 @@ const STATUS = example as unknown as Status;
 const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
 
-const solo = STATUS.assignments![0];
+// The semester sets a 5% late penalty; status states each assignment's effective settings.
+const solo: Assignment = { ...STATUS.assignments![0], settings: { late_penalty_per_day: { value: '5%', source: 'semester' } } };
 const team: Assignment = { ...solo, slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'marking', units: 1, submissions: 1, teams: 1, marks: { filled: 0, total: 1 } };
 const status: Status = { ...STATUS, assignments: [solo, team] };
 const ready: Loaded = { kind: 'ready', status, sha: 's', stale: [] };
@@ -242,7 +243,7 @@ describe('the marks grid: teams > students > questions', () => {
     expect(out).toContain('aria-label="Private notes for carla-c"');
     expect(out).toContain('aria-expanded="false" aria-label="Show feedback per question for carla-c"');
     expect(out).not.toContain('Feedback on Q1 for carla-c');
-    // The penalty is the semester's, not a literal.
+    // The penalty is the one status states (the semester's), not a literal.
     expect(out).toContain('late penalties (5% of the total per late day)');
   });
 

@@ -155,6 +155,12 @@ def canonical_submit_via(value: object) -> str:
 # when the handout can CREATE it, so `internal` joins if the plan ever buys an Enterprise.
 VISIBILITIES = ("private", "public", "student_choice")
 ASSIGNMENT_TYPES = ("individual", "group")
+# How a template's starter on `main` is written (decision 0028): `derived` from the
+# marked solution by Derive, or `handwritten` on `main` by the instructor. A template
+# without the key reads as `derived` when its solution carries a marker (`derive.starter_mode`).
+STARTER_DERIVED = "derived"
+STARTER_HANDWRITTEN = "handwritten"
+STARTER_MODES = (STARTER_DERIVED, STARTER_HANDWRITTEN)
 # How a group assignment's teams come about. `none` is NOT one of them: it is the answer
 # an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
 # outright, and it is not a value an instructor ever writes.

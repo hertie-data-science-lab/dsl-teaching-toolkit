@@ -900,3 +900,18 @@ def test_an_unknown_role_is_reported_and_holds_every_removal(monkeypatch, capsys
     calls.clear()
     sync_faculty.sync_semester_instructors("Course", "Course-f2026", [], [])
     assert calls == [("instructors", {"prof-a", "prof-b"}, True)]
+
+
+def test_any_entry_the_parse_cannot_place_is_reported_as_skipped():
+    # One rule for every kind of bad entry: the sweep holds its removals on any of them.
+    meta = {
+        "instructors": [
+            {"github_handle": "prof-a", "role": "instructor", "email": "a@x.org"},
+            {"github_handle": "-not-a-login-", "role": "instructor", "email": "b@x"},
+            {"role": "instructor", "email": "c@x.org"},
+            {"github_handle": "prof-d", "role": "lecturer"},
+        ]
+    }
+    skipped: list[str] = []
+    sync_faculty.parse_faculty_from_meta(meta, skipped=skipped)
+    assert sorted(skipped) == ["instructors[1]", "instructors[2]", "instructors[3]"]

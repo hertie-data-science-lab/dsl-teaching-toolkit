@@ -71,7 +71,7 @@ from .course import (
 )
 from .discovery import (
     assignment_rows,
-    course_name_for_semester,
+    course_name_or,
     course_org_for_semester,
     discover_semesters,
     exists_in,
@@ -115,8 +115,8 @@ from .setting_readers import (
     SPEC_KEYS,
     Dropped,
     as_decimal,
-    penalty_fault,
     question_files,
+    read_penalty,
     read_settings,
     refuse_renamed,
 )
@@ -921,14 +921,9 @@ def score_total(
 def penalty_rate(text: object) -> Decimal | None:
     """`late_penalty_per_day` as a fraction: `10%` and `0.1` both give 0.10.
 
-    None for anything `penalty_fault` refuses - which `parse_grading_spec` has already
+    None for anything `read_penalty` refuses - which `parse_grading_spec` has already
     said out loud, once, when the assignment's definition was read."""
-    if penalty_fault(text):
-        return None
-    raw = "" if text is None else str(text).strip()
-    if not raw:
-        return None
-    return as_decimal(raw[:-1]) / 100 if raw.endswith("%") else as_decimal(raw)
+    return read_penalty(text)[0]
 
 
 def final_grade(
@@ -1015,6 +1010,9 @@ class GradingSpec(_Shape):
     # the autograde detail. Off unless the assignment asks for it: it clones the whole
     # semester a second time at the cutoff, and most assignments are read in the browser.
     grader_pdf: bool = False
+    # How `main`'s starter is written (decision 0028): `derived` | `handwritten`, or None
+    # when the file predates the key - `derive.starter_mode` then reads the markers.
+    starter: str | None = None
     # The file still carries an old key (decisions 0009, 0012): refused whole, and nothing
     # hands out or grades from it until it is migrated.
     not_migrated: bool = False
@@ -4708,10 +4706,6 @@ _HOLD_PREVIEW = {
 }
 
 
-def _counted(n: int, one: str, many: str) -> str:
-    return f"{n} {one if n == 1 else many}"
-
-
 def _preview_body(
     semester_org: str,
     specs: dict[str, SheetSpec],
@@ -4753,7 +4747,7 @@ def _preview_body(
         for blank, whose in sorted(by_blank.items(), key=lambda kv: (bool(kv[0]), kv)):
             what = f"{', '.join(blank)} blank" if blank else "no mark yet"
             unmarked.append(
-                f"- **{slug}** · {_counted(len(whose), *noun)}: "
+                f"- **{slug}** · {plural(len(whose), *noun)}: "
                 f"{', '.join(f'`{u}`' for u in whose)} ({what})"
             )
 
@@ -4829,7 +4823,9 @@ def _preview_body(
         # Rendered exactly as the send renders it, course name and all: a preview that
         # showed the generic wording while the real mail named the course was reviewing
         # text nobody would ever receive.
-        subject, body = sample_message(semester_org, _course_name(semester_org))
+        subject, body = sample_message(
+            semester_org, course_name_or(semester_org=semester_org)
+        )
         tail = [
             "",
             "<details><summary>The email they would get</summary>",
@@ -4923,22 +4919,6 @@ def sample_body(
     return sample_message(semester_org, course_name, feedback)[1]
 
 
-def _course_name(semester_org: str) -> str:
-    """The course's name for the subject and the body of an email, or "" if it cannot be
-    read.
-
-    Never fatal, and never skipped by the preview: the grades are already pushed by the
-    time the send runs, so a transient read failure or a malformed dsl-course.yml must not
-    turn a successful distribution into a traceback with zero notifications sent
-    (`load_yaml_config` deliberately RAISES on both). A course that carries no name yet
-    keeps the generic wording rather than emailing a blank."""
-    try:
-        return course_name_for_semester(semester_org)
-    except Exception as exc:  # a name is never worth losing the notifications over
-        log_err(f"could not read the course name ({exc}) - the email goes without it")
-        return ""
-
-
 def _email_updates(
     semester_org: str,
     handles: list[str],
@@ -4971,7 +4951,7 @@ def _email_updates(
     # "your grades have been updated" from another. Read live from the course org's
     # dsl-course.yml; a course that carries no name yet keeps the generic wording rather
     # than emailing a blank.
-    course_name = _course_name(semester_org)
+    course_name = course_name_or(semester_org=semester_org)
     messages = []
     # Keyed on the ADDRESS, holding every handle that maps to it: two roster rows sharing
     # an address (one student, two accounts) would otherwise record only the last, leaving

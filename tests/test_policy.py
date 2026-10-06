@@ -42,6 +42,7 @@ def test_the_shipped_policy_carries_hertie_values():
         "term",
         "archive",
         "drop-in",
+        "assets",
         "other",
     ]
     assert shipped["licences"][0]["name"] == "CC BY-NC-SA 4.0"

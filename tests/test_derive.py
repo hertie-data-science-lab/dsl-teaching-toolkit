@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from dsl_course import derive
+from dsl_course import derive, gh_contents
 
 # A solution notebook in the shape nbformat writes: a markdown question, a fenced code
 # answer, an untouched helper cell, and a `solution`-tagged prose answer with outputs on
@@ -276,7 +276,12 @@ class _Repo:
 
     def install(self, monkeypatch):
         monkeypatch.setattr(
-            derive, "repo_tree", lambda o, r, b, k: tuple(sorted(self.files))
+            derive,
+            "repo_path_shas",
+            lambda o, r, b: {
+                "solution": "tree1",
+                **{p: gh_contents.blob_sha(t.encode()) for p, t in self.files.items()},
+            },
         )
         monkeypatch.setattr(
             derive,
@@ -293,6 +298,8 @@ class _Repo:
         return self
 
 
+# A template that says it is derived, so an unmarked source is refused by name.
+DERIVED = {"grading_config.yml": "starter: derived\n"}
 FENCED_PY = "def fit():\n    ### BEGIN SOLUTION\n    return 1\n    ### END SOLUTION\n"
 
 
@@ -307,8 +314,8 @@ def test_the_run_writes_main_and_never_reads_or_writes_anything_but_solution(
         lambda o, r, path, ref="": refs.append(ref) or repo.files.get(path),
     )
     assert derive.derive_student_version("Course", "assignment-1-f2026", False) == 0
-    assert refs == [derive.SOLUTION_BRANCH]
-    assert list(repo.written) == ["starter.py"]
+    assert set(refs) == {derive.SOLUTION_BRANCH}
+    assert list(repo.written) == ["starter.py", derive.STARTER_RECORD]
     assert derive.PY_PLACEHOLDER in repo.written["starter.py"].decode()
 
 
@@ -321,9 +328,12 @@ def test_a_dry_run_writes_nothing(monkeypatch):
 def test_a_file_with_nothing_fenced_is_refused_rather_than_published(
     monkeypatch, capsys
 ):
-    repo = _Repo({"solution/starter.py": "def fit():\n    return 1\n"}).install(
-        monkeypatch
-    )
+    repo = _Repo(
+        {
+            "grading_config.yml": "starter: derived\n",
+            "solution/starter.py": "def fit():\n    return 1\n",
+        }
+    ).install(monkeypatch)
     assert derive.derive_student_version("Course", "assignment-1-f2026", False) == 1
     assert repo.written == {}
     assert "NOT written" in capsys.readouterr().err
@@ -337,7 +347,10 @@ def test_one_broken_file_reds_the_run_even_though_the_others_landed(monkeypatch)
         }
     ).install(monkeypatch)
     assert derive.derive_student_version("Course", "assignment-1-f2026", False) == 1
-    assert list(repo.written) == ["starter.py"]
+    assert list(repo.written) == ["starter.py", derive.STARTER_RECORD]
+    # A run that refused a file records no solution tree: the status asks to derive again.
+    record = json.loads(repo.written[derive.STARTER_RECORD])
+    assert record["solution_tree"] == ""
 
 
 def test_a_template_with_no_derivable_source_says_so(monkeypatch, capsys):
@@ -551,11 +564,133 @@ def test_a_latex_write_up_derives_with_percent_fences():
 
 
 def test_an_unfenced_write_up_is_refused_naming_the_latex_fence(monkeypatch, capsys):
-    _Repo({"solution/report.tex": "\\section{A}\nThe answer.\n"}).install(monkeypatch)
+    _Repo({**DERIVED, "solution/report.tex": "\\section{A}\nThe answer.\n"}).install(
+        monkeypatch
+    )
     out = derive.derive_student_version("Course", "assignment-1-f2026", True)
     assert out == 1
     assert out.reasons[0]["text"] == (
         "solution/report.tex has no % BEGIN SOLUTION region, so the starter would be "
-        "the model answer."
+        "the model answer. Put % BEGIN SOLUTION and % END SOLUTION lines around each "
+        "answer, then derive again."
     )
     assert "no `% BEGIN SOLUTION` region - NOT written" in capsys.readouterr().err
+
+
+def test_an_unfenced_python_file_names_only_the_fence_python_can_carry(monkeypatch):
+    # The demo's assignment 1 (1 Oct): `solution/solution.py` is an unfenced model
+    # answer. The refusal named a cell tag and an Rmd chunk option, neither of which a
+    # `.py` file can hold, and said nothing about what to do.
+    _Repo({**DERIVED, "solution/solution.py": "def fit():\n    return 1\n"}).install(
+        monkeypatch
+    )
+    out = derive.derive_student_version("Course", "assignment-1-f2026", True)
+    assert out.reasons[0]["text"] == (
+        "solution/solution.py has no BEGIN SOLUTION region, so the starter would be "
+        "the model answer. Put ### BEGIN SOLUTION and ### END SOLUTION lines around "
+        "each answer, then derive again."
+    )
+    _Repo({**DERIVED, "solution/a.ipynb": json.dumps({"cells": []})}).install(
+        monkeypatch
+    )
+    text = derive.derive_student_version("Course", "t", True).reasons[0]["text"]
+    assert (
+        "no solution cell tag" in text
+        and "give each answer cell the solution tag" in text
+    )
+    assert "chunk" not in text
+
+
+def test_a_blank_file_is_copied_rather_than_blocking_the_derive(monkeypatch):
+    # The demo's project templates: `solution/src/__init__.py` is empty. No fence can go
+    # in it and it holds no answer, yet it was refused, so the template could never
+    # derive however well the other files were fenced.
+    repo = _Repo(
+        {"solution/src/__init__.py": "", "solution/src/pipeline.py": FENCED_PY}
+    ).install(monkeypatch)
+    out = derive.derive_student_version("Course", "assignment-3-f2026", False)
+    assert out == 0 and out.reasons == []
+    assert repo.written["src/__init__.py"] == b""
+    assert derive.PY_PLACEHOLDER in repo.written["src/pipeline.py"].decode()
+
+
+def test_a_source_that_cannot_be_read_as_text_is_refused_and_main_is_left(monkeypatch):
+    # A file over 1 MiB is read by its blob inside `get_file_content`; one that still
+    # cannot be read (a gone blob, bytes that are not text) is refused by name, never
+    # derived as an empty starter.
+    for failure in (
+        RuntimeError("could not read big.py"),
+        UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+    ):
+        repo = _Repo({"solution/big.py": FENCED_PY}).install(monkeypatch)
+
+        def unreadable(o, r, path, ref="", exc=failure):
+            if path == "solution/big.py":
+                raise exc
+
+        monkeypatch.setattr(derive, "get_file_content", unreadable)
+        out = derive.derive_student_version("Course", "assignment-3-f2026", False)
+        assert out == 1 and [r["code"] for r in out.reasons] == ["READ_FAILED"]
+        assert repo.written == {} and repo.commits == 0
+
+
+# ------------------------------------------------- the starter: derived or by hand (0028)
+
+
+def test_the_starter_key_is_read_and_a_template_without_it_reads_by_its_markers():
+    assert derive.declared_starter("starter: handwritten\n") == "handwritten"
+    assert derive.declared_starter("starter: Derived\n") == "derived"
+    for text in (None, "", "type: individual\n", "starter: maybe\n", "a: [\n"):
+        assert derive.declared_starter(text) is None
+    marked = {"solution/a.py": FENCED_PY, "solution/b.py": "x = 1\n"}
+    plain = {"solution/b.py": "x = 1\n"}
+    broken = {"solution/c.py": "### BEGIN SOLUTION\nx = 1\n"}
+    assert derive.starter_mode(None, marked) == "derived"
+    assert derive.starter_mode(None, broken) == "derived"
+    assert derive.starter_mode(None, plain) == "handwritten"
+    assert derive.starter_mode(None, {}) == "handwritten"
+    assert derive.starter_mode("derived", plain) == "derived"
+    assert derive.starter_mode("handwritten", marked) == "handwritten"
+    assert (derive.default_starter(True), derive.default_starter(False)) == (
+        "derived",
+        "handwritten",
+    )
+
+
+def test_a_hand_written_template_is_refused_and_main_is_left_alone(monkeypatch):
+    repo = _Repo(
+        {"grading_config.yml": "starter: handwritten\n", "solution/a.py": FENCED_PY}
+    ).install(monkeypatch)
+    for dry_run in (True, False):
+        out = derive.derive_student_version("Course", "assignment-3", dry_run)
+        assert out == 1
+        assert out.reasons == [
+            {
+                "code": "STARTER_HANDWRITTEN",
+                "text": "This template's starter is written by hand, so nothing is derived.",
+            }
+        ]
+    assert repo.written == {} and repo.commits == 0
+
+
+def test_a_template_without_the_key_that_marks_nothing_is_hand_written(monkeypatch):
+    repo = _Repo({"solution/a.py": "x = 1\n", "solution/b.py": "y = 2\n"}).install(
+        monkeypatch
+    )
+    out = derive.derive_student_version("Course", "assignment-3", False)
+    assert [r["code"] for r in out.reasons] == ["STARTER_HANDWRITTEN"]
+    assert repo.written == {}
+
+
+def test_every_real_derive_records_the_solution_tree_and_each_blob_it_wrote(
+    monkeypatch,
+):
+    repo = _Repo({"solution/starter.py": FENCED_PY}).install(monkeypatch)
+    assert derive.derive_student_version("Course", "assignment-1", True) == 0
+    assert repo.written == {}  # a preview writes no record either
+    assert derive.derive_student_version("Course", "assignment-1", False) == 0
+    record = json.loads(repo.written[derive.STARTER_RECORD])
+    assert record == {
+        "solution_tree": "tree1",
+        "files": {"starter.py": gh_contents.blob_sha(repo.written["starter.py"])},
+    }

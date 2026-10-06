@@ -24,11 +24,47 @@ export function formatsList(v: unknown): string[] {
   return all.map((x) => x.trim()).filter(Boolean);
 }
 
+// ------------------------------------------------------------------ the starter (decision 0028)
+
+/** How a template's `main` is written: derived from the marked solution, or by hand. */
+export type Starter = 'derived' | 'handwritten';
+export const STARTERS: Starter[] = ['derived', 'handwritten'];
+const isStarter = (v: unknown): v is Starter => v === 'derived' || v === 'handwritten';
+
+/** Rule 1: what a new template starts as. Tests on, derived; tests off, by hand. */
+export const defaultStarter = (autograde: unknown): Starter => (autograde === 'true' || autograde === true ? 'derived' : 'handwritten');
+
+/** The starter in force: the file's key, else the engine's reading (status.json, rule 6), else rule 1. */
+export function starterOf(cfg: Record<string, unknown>, read?: string): Starter {
+  if (isStarter(cfg.starter)) return cfg.starter;
+  return isStarter(read) ? read : defaultStarter(cfg.autograde);
+}
+
+/** Decision 0028 rule 4's copy: the radio's short label and the `?` beside it. */
+export const STARTER_COPY: Record<Starter, { label: string; hint: string }> = {
+  derived: {
+    label: 'Derived from your solution',
+    hint: 'Write only the solution branch and mark each answer with ### BEGIN SOLUTION / ### END SOLUTION, or tag the notebook cell solution. Derive builds the main branch students receive by blanking them. Your tests always match the starter. Do not edit main by hand.',
+  },
+  handwritten: {
+    label: 'Written by hand',
+    hint: 'You write main yourself: a skeleton, a brief, a different shape from the solution. The solution branch keeps the model answer for marking and for showing students after the cutoff. Nothing is derived.',
+  },
+};
+
+/** The starter radio, for the wizard step and Template settings. */
+export function starterTier(): Tiers[string] {
+  return {
+    tier: 'default', label: 'How students get the starter', widget: 'radio',
+    options: STARTERS.map((k) => ({ value: k, label: STARTER_COPY[k].label, hint: STARTER_COPY[k].hint })),
+  };
+}
+
 const bool = (v: unknown) => (v === true ? 'true' : v === false ? 'false' : v == null ? undefined : String(v));
 const isDrop = (v: Values) => v.submit_via === 'shared_dropbox_repo';
 
-/** grading_config.yml -> the form's values. */
-export function fromConfig(cfg: Record<string, unknown>): Values {
+/** grading_config.yml -> the form's values. `read` is the engine's reading of the starter (status.json). */
+export function fromConfig(cfg: Record<string, unknown>, read?: string): Values {
   const s = (k: string) => (cfg[k] == null ? undefined : String(cfg[k]));
   return {
     title: s('title'),
@@ -39,6 +75,7 @@ export function fromConfig(cfg: Record<string, unknown>): Values {
     tests: s('tests'),
     completion_check: cfg.completion_check === true ? 'on' : cfg.completion_check === false ? 'off' : 'auto',
     grader_pdf: cfg.grader_pdf === true,
+    starter: starterOf(cfg, read),
   };
 }
 
@@ -55,6 +92,7 @@ export function toConfig(v: Values): Record<string, unknown> {
     tests: auto === true && v.tests && v.tests !== 'tests' ? v.tests : undefined,
     completion_check: isDrop(v) ? undefined : v.completion_check === 'on' ? true : v.completion_check === 'off' ? false : undefined,
     grader_pdf: isDrop(v) ? undefined : v.grader_pdf ? true : undefined,
+    starter: isStarter(v.starter) ? v.starter : undefined,
   };
 }
 
@@ -86,6 +124,7 @@ export function settingsTiers(): Tiers {
       options: [opt('auto', 'Auto'), opt('on', 'On'), opt('off', 'Off')],
       forced: (v) => (isDrop(v) ? { value: 'auto', reason: 'Off: not available for a shared drop box.' } : null),
     },
+    starter: { ...starterTier(), label: 'Starter' },
     grader_pdf: {
       tier: 'advanced', label: 'Marker PDF', widget: 'checkbox', default: false, defaultLabel: 'a PDF of each submission for markers; default off',
       forced: (v) => (isDrop(v) ? { value: false, reason: 'Off: not available for a shared drop box.' } : null),

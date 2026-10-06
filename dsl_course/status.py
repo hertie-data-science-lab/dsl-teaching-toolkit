@@ -47,7 +47,7 @@ from . import (
 from .central import CENTRAL_REF, MissingCentralRef, resolve_central_ref
 from .discovery import org_meta
 from .faults import Unusable
-from .gh_contents import put_file
+from .gh_contents import get_file_content, put_file
 from .issues import open_titles
 from .log import CLIParser, Summary, add_preview_flag, log_err, log_ok, log_step, plural
 from .repos import default_branch
@@ -533,10 +533,17 @@ def write(course_org: str, semester_org: str | None = None) -> int:
 
 
 def _write_student(org: str, doc: dict) -> bool:
-    """`student-status.json` into the semester's `.github`, tried twice like status.json."""
-    content = student_status.dumps(doc)
-    message = "ci: refresh student-status.json"
+    """`student-status.json` into the semester's `.github`, tried twice like status.json.
+    Its `generated_at` moves only when something else in it did (`student_status.settle`).
+    A read of the published file that fails is no reason to stop: the render is written as
+    it is, its moment perhaps newer than it had to be."""
     repo, path = student_status.REPO, student_status.PATH
+    try:
+        old = get_file_content(org, repo, path)
+    except RuntimeError:
+        old = None
+    content = student_status.dumps(student_status.settle(doc, old))
+    message = "ci: refresh student-status.json"
     if put_file(org, repo, path, content, message) or put_file(
         org, repo, path, content, message
     ):
@@ -576,18 +583,34 @@ def refresh(course_org: str, semester_org: str | None = None) -> int:
         return 1
 
 
+# The semester operations that change what the COURSE status says: the semesters it
+# lists (set up, archive), the course materials (the syllabus), or a fresh read of all of
+# it (Refresh). Every other semester operation leaves the course file as it was.
+COURSE_TOUCHING_OPS = frozenset(
+    {
+        "semester.check",
+        "semester.bootstrap",
+        "semester.archive",
+        "assignment.generate_syllabus",
+    }
+)
+
+
 def write_after_op(request: dict) -> int:
     """The hook the Console run calls at the end of every operation, with its
-    `dsl.request/1` request. Rewrites the semester's status when the request names one, and
-    the course's always - a course operation (a new template, a fixed dsl-course.yml)
-    changes what every semester's file says about the course too. Never raises; returns the
-    error count, which the caller may ignore: the operation's outcome is its own."""
+    `dsl.request/1` request. Rewrites the semester's status when the request names one,
+    and the course's after a course operation (a new template, a fixed dsl-course.yml) or
+    a semester one that changes the course's facts (`COURSE_TOUCHING_OPS`). Never raises;
+    returns the error count, which the caller may ignore: the operation's outcome is its
+    own."""
     course_org = str(request.get("course_org") or "")
     if not course_org:
         log_err("status.json not refreshed: the request names no course_org")
         return 1
     semester_org = str(request.get("semester_org") or "") or None
     errors = refresh(course_org, semester_org) if semester_org else 0
+    if semester_org and request.get("op") not in COURSE_TOUCHING_OPS:
+        return errors
     return errors + refresh(course_org)
 
 

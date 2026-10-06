@@ -11,7 +11,7 @@
 // nothing, and the next layer answers. The late pair is one rule: a layer stating either
 // half states both, the other half absent meaning none.
 
-import { YamlText, deepEqual, obj, type Path } from '../edit/yamlText';
+import { YamlText, deepEqual, isObj, obj, type Path } from '../edit/yamlText';
 import type { FileState, Files } from './files';
 import { ASSIGNMENTS_FILE, CONFIG_REPO, COURSE_REPO } from './names';
 import assignmentsSchema from '../../schemas/assignments.schema.json';
@@ -53,7 +53,8 @@ function pyInt(v: unknown): number | null {
   return /^[+-]?\d+$/.test(t) ? Number(t) : null;
 }
 
-function hostOf(url: string): string {
+/** A URL's host name; '' for text that is not a URL. */
+export function hostOf(url: string): string {
   try {
     return new URL(url).hostname;
   } catch {
@@ -251,7 +252,7 @@ export function writeBlock(y: YamlText, path: Path, before: Block, after: Block,
   if (changed)
     for (let i = path.length; i > 0; i--) {
       const v = y.get(path.slice(0, i));
-      const empty = v === null || (!!v && typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length);
+      const empty = v === null || (isObj(v) && !Object.keys(v).length);
       if (!empty) break;
       y.delete(path.slice(0, i));
     }

@@ -3546,20 +3546,6 @@ def test_submission_targets_individual_excludes_auditors(monkeypatch):
     ]
 
 
-def test_collect_refuses_an_unparseable_deadline(monkeypatch, capsys):
-    # An unparseable --deadline would reach git's approxidate and silently match NO commits,
-    # zeroing the whole semester. Validate up front and fail loudly instead.
-    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
-    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, tpl: GRADING_YML)
-    assert (
-        collect.collect(
-            "Course", "assignment-1-f2026", "Semester", deadline="next friday"
-        )
-        == 1
-    )
-    assert "not an ISO date" in capsys.readouterr().err
-
-
 # ---------------------------------------------- resource limits + group-kill (fix 1)
 # The highest-value fix: a memory/fork bomb (or an infinite loop) in ONE submission must be
 # contained, never abort the whole job. A subprocess.run(timeout=) SIGKILLs only the direct

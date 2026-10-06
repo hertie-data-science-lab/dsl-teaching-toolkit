@@ -1,5 +1,7 @@
 // The `dsl.status/1` shape (build/contracts.md section 3). The JSON Schema in
-// console/schemas/status.schema.json is the validator; these types are its reading.
+// console/schemas/status.schema.json is the validator; these types are its reading. Null
+// is typed wherever the schema allows it. A key the schema leaves optional only so an
+// older file still validates is typed required when today's engine always writes it.
 
 export type StageState = 'done' | 'todo' | 'blocked' | 'problem';
 export type AssignmentState = 'declared' | 'teams_forming' | 'blocked' | 'open' | 'late_window' | 'marking' | 'returned';
@@ -9,10 +11,11 @@ export type Conclusion = 'done' | 'nothing_to_do' | 'skipped' | 'previewed' | 'f
 export interface Fix {
   repo: string;
   path: string;
-  line?: number;
-  screen?: string;
-  entry?: string;
+  line?: number | null;
+  screen?: string | null;
+  entry?: string | null;
   ref?: string; // branch, when not the default
+  url?: string; // a GitHub settings page rather than a file (its `path` is "")
 }
 
 export interface Problem {
@@ -33,17 +36,53 @@ export interface CourseStatus {
   stages: Record<string, StageState>;
   /** One sentence per stage that is not done, saying why. */
   stage_why?: Record<string, string>;
+  /** Decision 0032, per stage: may it be set aside (C4-C6), and is it. Absent on an older status. */
+  stage_optional?: Record<string, boolean>;
+  stage_set_aside?: Record<string, boolean>;
   /** C1-C3 done and no course problem: a new semester can start (decision 0019). */
   ready: boolean;
-  materials: { repo: string; state: string }[];
-  templates: { repo: string; slug: string; state: string }[];
+  materials: MaterialsState[];
+  /** `starter`: how main is written (decision 0028), the key or the engine's reading of the markers. */
+  templates: { repo: string; slug: string; state: string; starter?: 'derived' | 'handwritten' }[];
   semesters: string[];
+  /** Work started and not finished (decision 0022): never a problem. */
+  todo?: Todo[];
+}
+
+/** One line of a materials repo's checklist; `blocks` lines are what `ready` needs. */
+export interface MaterialsCheck {
+  id: string;
+  label: string;
+  done: boolean;
+  /** What is missing, one sentence; null once done. */
+  why?: string | null;
+  blocks: boolean;
+  /** On `kind_folder`: every content kind, with the top folders of that kind. */
+  detail?: { kind: string; folders: string[] }[];
+}
+
+export interface MaterialsState {
+  repo: string;
+  state: string;
+  checks?: MaterialsCheck[];
+}
+
+export interface Todo {
+  id: string;
+  kind: 'materials' | 'template';
+  repo: string;
+  text: string;
+  screen?: string;
+  entry?: string;
+  /** Decision 0032: it blocks nothing, so it may be set aside; and it is. Absent on an older status. */
+  optional?: boolean;
+  set_aside?: boolean;
 }
 
 export interface SemesterStatus {
   org: string;
-  key: string; // f2026
-  label: string; // Fall 2026
+  key: string | null; // f2026; null for an org name with no term tag
+  label: string | null; // Fall 2026
   timezone: string;
   /** `semester_start` / `semester_end` (yyyy-mm-dd); null while unset, absent on an older status. */
   start?: string | null;
@@ -69,9 +108,8 @@ export interface WeekItem {
 
 export interface Release {
   id: string;
-  when: string;
-  kind: string | null; // a policy kind (lecture, lab, readings, ...); the engine infers one when undeclared
-  kind_inferred?: boolean;
+  when: string | null; // null while TBC
+  kind: string; // a policy kind (lecture, lab, readings, ...); the engine infers one when undeclared
   number?: number | null; // the site row's number; null when the site does not number it
   title: string;
   state: ReleaseState;
@@ -79,7 +117,6 @@ export interface Release {
   dest: { repo: string; path: string } | null;
   show_on_site: boolean;
   tbc: boolean;
-  copies?: unknown;
 }
 
 export interface Assignment {
@@ -96,11 +133,13 @@ export interface Assignment {
   /** Set before the late cutoff: the engine holds the solution until then (the cutoff). */
   solution_held_until?: string | null;
   units: number;
-  submissions: number;
+  submissions: number | null; // null when the gradebook does not say
   teams: number | null;
   marks: { filled: number; total: number };
   returned: boolean;
   problem: boolean;
+  /** Each run setting's effective value and where it came from (`status_json.run_settings`). */
+  settings?: Record<string, { value: string | number | null; source: 'assignment' | 'semester' | 'course' | 'institution' }>;
 }
 
 export interface Operation {
@@ -121,9 +160,8 @@ export interface Status {
   releases?: Release[];
   assignments?: Assignment[];
   students?: { rows: number; codes_sent: number; joined: number };
-  staff?: { instructors: number; tas: number; synced: boolean };
+  staff?: { instructors: number; tas: number; synced: boolean | null };
   site?: { url: string; last_update: string | null; stale: boolean };
-  app_installed?: boolean | null;
   operations?: Operation[];
 }
 
@@ -137,10 +175,9 @@ export interface Outcome {
   conclusion: Conclusion;
   summary: string;
   counts?: Record<string, number>;
-  reasons?: { code: string; text: string; fix?: Fix }[];
+  reasons?: { code: string; text: string; fix?: { repo?: string; path?: string; line?: number; screen?: string; entry?: string } }[];
   details?: string[]; // what the op did or would do, one line each (e.g. the files derive wrote)
-  block?: string; // a generated text to paste (e.g. the syllabus session list)
-  people?: { handle: string; text: string }[]; // private file only
+  block?: string; // a generated text to paste (e.g. the syllabus weekly plan)
   started?: string;
   finished?: string;
 }

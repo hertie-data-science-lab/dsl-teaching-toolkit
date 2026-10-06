@@ -3,14 +3,14 @@
 //
 // DispatchAdapter (contracts sections 1, 2 and 5): builds a `dsl.request/1`, validates it
 // against request.schema.json and the op's args schema, dispatches the course org's
-// Console workflow with `return_run_details`, polls the run and its job (the client
+// Console workflow with `return_run_details`, polls the run's job (the client
 // revalidates with ETags, so an unchanged poll is a 304), then reads the public
 // `dsl-outcome` annotation off the job's check run and the private outcome file.
 
 import type { ValidateFunction } from 'ajv/dist/2020';
 import outcomeSchema from '../../schemas/outcome.schema.json';
 import requestSchema from '../../schemas/request.schema.json';
-import type { GitHubClient, Job } from '../github/client';
+import { GitHubError, type GitHubClient, type Job } from '../github/client';
 import type { Outcome } from '../model/types';
 import { validator } from '../model/validate';
 import { opSpec } from './registry';
@@ -70,10 +70,6 @@ export interface Progress {
 export interface Result {
   /** The public outcome, or the private record when the annotation could not be read. */
   outcome: Outcome | null;
-  /** Per-person lines, from the private file only. */
-  people: { handle: string; text: string }[];
-  /** Handles from the private file that the PUBLIC outcome names: an engine redaction bug. */
-  leaked: string[];
 }
 
 export interface Adapter {
@@ -139,14 +135,6 @@ export function parseOutcome(message: string): Outcome | null {
   return outcomeValidator(data) ? (data as unknown as Outcome) : null;
 }
 
-/** Every handle in `people` that appears anywhere in the public outcome. */
-export function leakedHandles(pub: Outcome, people: { handle: string }[]): string[] {
-  const text = JSON.stringify({ ...pub, actor: '' });
-  return people
-    .map((p) => p.handle)
-    .filter((h) => /^[A-Za-z0-9-]+$/.test(h) && new RegExp(`(?<![A-Za-z0-9-])${h}(?![A-Za-z0-9-])`, 'i').test(text));
-}
-
 const STEP_WORDS: [RegExp, string][] = [
   [/^Verify the user/, 'Checking you may do this'],
   [/checkout/i, 'Getting the engine'],
@@ -154,10 +142,16 @@ const STEP_WORDS: [RegExp, string][] = [
   [/^Run the request$/, ''], // named by the caller: the op's own running sentence
 ];
 
-/** The job's steps an instructor reads, in their words. Setup, teardown and reporting steps are left out. */
+/**
+ * The job's steps an instructor reads, in their words. Setup, teardown and reporting steps
+ * are left out, and so are the post steps GitHub adds for each action ("Post Run
+ * actions/checkout@..."): their names match the action's own, so they read as a second
+ * "Preparing" and "Getting the engine" that only ever tick at the end.
+ */
 export function stepsOf(job: Job | undefined, running: string): Step[] {
   const out: Step[] = [];
   for (const s of job?.steps ?? []) {
+    if (/^Post /.test(s.name)) continue;
     const m = STEP_WORDS.find(([re]) => re.test(s.name));
     if (!m) continue;
     const state: StepState =
@@ -187,11 +181,12 @@ export class DispatchAdapter implements Adapter {
     return { op: input.op, runId: r.workflow_run_id, htmlUrl: r.html_url, preview: input.preview, courseOrg: input.courseOrg, cohortOrg: req.semester_org };
   }
 
+  /** The run's one job carries its status and conclusion; no job yet means it is queued. */
   async watch(h: Handle): Promise<Progress> {
-    const run = await this.client.getRun(h.courseOrg, CONSOLE_REPO, h.runId);
-    const jobs = run.status === 'queued' ? [] : await this.client.listJobs(h.courseOrg, CONSOLE_REPO, h.runId);
-    const state = run.status === 'completed' ? 'completed' : run.status === 'in_progress' ? 'running' : 'queued';
-    return { state, conclusion: run.conclusion, steps: stepsOf(jobs[0], this.running(h.op)), htmlUrl: run.html_url || h.htmlUrl };
+    const jobs = await this.client.listJobs(h.courseOrg, CONSOLE_REPO, h.runId);
+    const job = jobs[0];
+    const state = !job ? 'queued' : job.status === 'completed' ? 'completed' : job.status === 'in_progress' ? 'running' : 'queued';
+    return { state, conclusion: job?.conclusion ?? null, steps: stepsOf(job, this.running(h.op)), htmlUrl: h.htmlUrl };
   }
 
   async outcome(h: Handle): Promise<Result> {
@@ -213,12 +208,15 @@ export class DispatchAdapter implements Adapter {
     } catch {
       priv = null;
     }
-    const people = priv?.people ?? [];
-    const outcome: Outcome | null = pub ?? (priv ? { ...priv, people: undefined } : null);
-    return { outcome, people, leaked: pub ? leakedHandles(pub, people) : [] };
+    return { outcome: pub ?? priv };
   }
 
+  /** Cancel the run (Actions cancel API). A run that has already ended answers 409: nothing left to stop. */
   async cancel(h: Handle): Promise<void> {
-    await this.client.cancelRun(h.courseOrg, CONSOLE_REPO, h.runId);
+    try {
+      await this.client.cancelRun(h.courseOrg, CONSOLE_REPO, h.runId);
+    } catch (e) {
+      if (!(e instanceof GitHubError && e.status === 409)) throw e;
+    }
   }
 }

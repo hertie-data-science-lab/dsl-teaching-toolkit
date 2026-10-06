@@ -678,7 +678,10 @@ def test_repo_teams_answers_which_teams_already_see_one_repo(monkeypatch):
 
     def fake_gh(*args, **k):
         asked.append(args)
-        return 0, "Assignment-3-Alpha\ninstructors\n"
+        return 0, (
+            '{"slug": "Assignment-3-Alpha", "permissions": {"push": true}}\n'
+            '{"slug": "instructors", "permissions": {"pull": true}}\n'
+        )
 
     monkeypatch.setattr(access, "gh", fake_gh)
     assert access.repo_teams("Semester", "assignment-3-submissions") == frozenset(

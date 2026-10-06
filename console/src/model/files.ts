@@ -69,8 +69,10 @@ export class LiveFiles implements Files {
 
   refresh(owner: string, repo: string, path: string, ref?: string): void {
     this.files.delete(this.fileKey(owner, repo, path, ref));
-    this.changes.delete(`${owner}/${repo}/${path}`);
     this.dirs.delete(`${owner}/${repo}/${path}`);
+    // The date is read again into the same signal, keeping the old one until it answers: no flicker.
+    const c = this.changes.get(`${owner}/${repo}/${path}`);
+    if (c) this.client.lastCommitDate(owner, repo, path).then((v) => (c.value = v), () => {});
   }
 
   tree(owner: string, repo: string, ref = 'HEAD'): TreeState {
@@ -173,48 +175,5 @@ export class LiveFiles implements Files {
     this.members.clear();
     this.trees.clear();
     this.orgRepos.clear();
-  }
-}
-
-/** A fixed set of files, for render tests. Keys are `owner/repo/path`. */
-export class StaticFiles implements Files {
-  constructor(
-    private readonly map: Record<string, string> = {},
-    /** A listing, or an Error for one that could not be read. */
-    private readonly dirMap: Record<string, string[] | Error> = {},
-    private readonly treeMap: Record<string, string[]> = {},
-    private readonly repoMap: Record<string, Partial<GhRepo>[]> = {},
-    private readonly changeMap: Record<string, string> = {},
-  ) {}
-  lastChange(owner: string, repo: string, path: string): string | null {
-    return this.changeMap[`${owner}/${repo}/${path}`] ?? null;
-  }
-  repos(org: string): ReposState {
-    const r = this.repoMap[org];
-    return r ? { kind: 'ready', repos: r.map((x) => ({ full_name: `${org}/${x.name}`, private: true, default_branch: 'main', html_url: `https://github.com/${org}/${x.name}`, name: '', ...x })) } : { kind: 'absent' };
-  }
-  tree(owner: string, repo: string): TreeState {
-    const t = this.treeMap[`${owner}/${repo}`];
-    if (!t) return { kind: 'absent' };
-    const dirs = new Set<string>();
-    for (const p of t) p.split('/').slice(0, -1).forEach((_, i, a) => dirs.add(a.slice(0, i + 1).join('/')));
-    return { kind: 'ready', paths: [...[...dirs].map((path) => ({ path, dir: true })), ...t.map((path) => ({ path, dir: false }))], truncated: false };
-  }
-  put(owner: string, repo: string, path: string, _ref: string | undefined, text: string | null): void {
-    if (text === null) delete this.map[`${owner}/${repo}/${path}`];
-    else this.map[`${owner}/${repo}/${path}`] = text;
-  }
-  refresh(): void {}
-  file(owner: string, repo: string, path: string): FileState {
-    const t = this.map[`${owner}/${repo}/${path}`];
-    return t === undefined ? { kind: 'absent' } : { kind: 'ready', text: t, sha: 'static' };
-  }
-  dir(owner: string, repo: string, path: string): DirState {
-    const d = this.dirMap[`${owner}/${repo}/${path}`];
-    if (d instanceof Error) return { kind: 'error', message: d.message };
-    return d ? { kind: 'ready', entries: d.map((name) => ({ name, path: `${path}/${name}`, sha: 'static', type: 'file' })) } : { kind: 'absent' };
-  }
-  member(): boolean | null {
-    return true;
   }
 }

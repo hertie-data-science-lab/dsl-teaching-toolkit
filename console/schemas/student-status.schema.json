@@ -186,6 +186,9 @@
     "course_name": {
       "type": "string"
     },
+    "generated_at": {
+      "type": "string"
+    },
     "home_markdown": {
       "type": "string"
     },
@@ -253,28 +256,6 @@
     "late_policy": {
       "items": {
         "type": "string"
-      },
-      "type": "array"
-    },
-    "materials_index": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "paths": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "repo": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "repo",
-          "paths"
-        ],
-        "type": "object"
       },
       "type": "array"
     },
@@ -418,11 +399,23 @@
     },
     "schema": {
       "enum": [
-        "dsl.student-status/1"
+        "dsl.student-status/2"
       ]
     },
     "semester": {
       "type": "string"
+    },
+    "semester_end": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "semester_start": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "syllabus": {
       "additionalProperties": false,
@@ -443,9 +436,6 @@
         "null"
       ]
     },
-    "term_label": {
-      "type": "string"
-    },
     "timezone": {
       "type": "string"
     }
@@ -454,7 +444,9 @@
     "schema",
     "semester",
     "course_name",
-    "term_label",
+    "semester_start",
+    "semester_end",
+    "generated_at",
     "timezone",
     "archive_datetime",
     "home_markdown",
@@ -465,7 +457,6 @@
     "instructors",
     "late_policy",
     "materials_repos",
-    "materials_index",
     "announcements"
   ],
   "title": "student-status.json",

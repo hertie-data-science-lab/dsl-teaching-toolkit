@@ -6,10 +6,14 @@ from where its first copy lands. Nothing is read off a folder name beyond that s
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from dsl_course import schedule_plan
+import pytest
+
+from dsl_course import schedule, schedule_plan
 from dsl_course.schedule import Deploy, Release, Schedule
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -108,7 +112,8 @@ def test_a_declared_kind_wins_over_any_folder():
     assert _kind(Deploy("cm", "labs/01"), kind="drop-in") == ("drop-in", False)
 
 
-def test_the_built_in_aliases_and_the_lecture_default():
+def test_the_built_in_aliases_and_the_supporting_files_default():
+    # Decision 0031 rule 10: a folder no alias names is supporting files (was lecture).
     for section, kind in {
         "labs": "lab",
         "lab": "lab",
@@ -118,8 +123,10 @@ def test_the_built_in_aliases_and_the_lecture_default():
         "literature": "readings",
         "Readings": "readings",
         "lectures": "lecture",
-        "quiz": "lecture",
-        "code": "lecture",
+        "Lecture": "lecture",
+        "quiz": "assets",
+        "code": "assets",
+        "data": "assets",
     }.items():
         assert _kind(Deploy("cm", f"{section}/01")) == (kind, True), section
 
@@ -136,7 +143,7 @@ def test_a_repo_alias_wins_over_the_built_in_one():
     )
     # Another repo's aliases are not this one's.
     assert _kind(Deploy("x", "quiz/q1.pdf"), aliases=lambda r: aliases(r, {})) == (
-        "lecture",
+        "assets",
         True,
     )
 
@@ -150,7 +157,7 @@ def test_a_repo_per_kind_destination_is_its_own_section():
 def test_a_whole_folder_copied_to_the_root_is_that_folder():
     # `lectures` copied whole lands at `materials/lectures`: the folder, not the repo.
     lectures = Deploy("cm", "lectures")
-    assert schedule_plan.deploy_section(lectures) == "lectures"
+    assert schedule_plan.deploy_section(lectures, None) == "lectures"
     assert _kind(lectures) == ("lecture", True)
     (row,) = _rows([Release("lecture-1", _at(1), [lectures])])
     assert [sr.row.key for sr in schedule_plan.site_rows([row])] == ["lecture-1"]
@@ -158,6 +165,20 @@ def test_a_whole_folder_copied_to_the_root_is_that_folder():
     slides = Deploy("cm", "Slides")
     assert _kind(slides, aliases=lambda r: {"slides": "lecture"}) == ("lecture", True)
     assert schedule_plan.deploy_section(slides, {"slides": "lecture"}) == "Slides"
+
+
+def test_a_whole_folder_no_kind_names_is_supporting_files():
+    misc = Deploy("cm", "misc")
+    assert _kind(misc) == ("assets", True)
+    (row,) = _rows([Release("misc", _at(1), [misc])])
+    assert schedule_plan.site_rows([row]) == []
+
+
+def test_a_single_file_at_the_root_takes_the_repo_as_its_section():
+    syllabus = Deploy("cm", "SYLLABUS.md")
+    assert schedule_plan.deploy_section(syllabus, None) == "materials"
+    assert _kind(syllabus) == ("assets", True)
+    assert _kind(Deploy("cm", "SYLLABUS.md", "labs")) == ("lab", True)
 
 
 def test_the_first_copy_decides_a_mixed_entry():
@@ -178,7 +199,7 @@ def test_a_label_carries_its_number_at_either_end():
         "course-intro": None,
         "week3": 3,
     }.items():
-        assert schedule_plan.label_number(label) == n, label
+        assert schedule.label_number(label) == n, label
 
 
 def _shown(rows):
@@ -339,3 +360,67 @@ def test_offplan_folders_are_the_kind_sections_no_copy_covers():
         ("materials", "lectures/03_off", "lecture"),
         ("materials", "readings/01_week", "readings"),
     ]
+
+
+def test_the_console_s_key_for_a_new_readings_pack_joins_no_lecture():
+    # The console keys a new unnumbered readings entry `readings`, `readings-<title>`,
+    # then `readings-b`: no digit, so no number, so it joins no lecture (0013 rule 3).
+    rows = _rows(
+        [
+            Release("lecture-1", _at(3), [Deploy("cm", "lectures/01")]),
+            Release("lecture-2", _at(4), [Deploy("cm", "lectures/02")]),
+            Release("readings", _at(5), [Deploy("cm", "readings/a")]),
+            Release("readings-week", _at(6), [Deploy("cm", "readings/b")]),
+            Release("readings-b", _at(7), [Deploy("cm", "readings/c")]),
+        ]
+    )
+    assert _shown(schedule_plan.site_rows(rows)) == [
+        ("lecture-1", 1, []),
+        ("lecture-2", 2, []),
+        ("readings", None, []),
+        ("readings-week", None, []),
+        ("readings-b", None, []),
+    ]
+
+
+def test_a_supporting_files_entry_is_no_row():
+    # Decision 0026 rule 3: released with the rest, never a row (nor a weekly-plan line).
+    rows = _rows(
+        [
+            Release("lecture-1", _at(1), [Deploy("cm", "lectures/a")]),
+            Release("data", _at(1), [Deploy("cm", "data/week1")]),
+            Release("figs", _at(2), [Deploy("cm", "lectures/a")], kind="assets"),
+        ]
+    )
+    assert [r.kind for r in rows] == ["lecture", "assets", "assets"]
+    assert _shown(schedule_plan.site_rows(rows)) == [("lecture-1", 1, [])]
+
+
+def test_a_supporting_files_entry_needs_no_number():
+    # Decision 0026 rule 3: no row, so no number - neither the check nor a whole-repo
+    # manual release refuses it; an unnumbered lecture still is.
+    sched = Schedule(
+        releases=[
+            Release("data", _at(1), [Deploy("cm", "data/week1")]),
+            Release("figs", _at(2), [Deploy("cm", "lectures/a")], kind="assets"),
+        ]
+    )
+    assert schedule_plan.unnumbered(sched) == []
+    assert schedule_plan.unnumbered_release(sched, "cm", [""]) is None
+    sched.releases.append(Release("intro", _at(3), [Deploy("cm", "lectures/b")]))
+    assert [m.key for m in schedule_plan.unnumbered(sched)] == ["intro"]
+    assert schedule_plan.unnumbered_release(sched, "cm", [""]) is not None
+
+
+LANDING_KINDS = Path(__file__).parent / "fixtures" / "landing_kinds.json"
+
+
+@pytest.mark.parametrize(
+    "case", json.loads(LANDING_KINDS.read_text())["cases"], ids=lambda c: str(c)
+)
+def test_the_shared_landing_table(case):
+    # The console runs the same table (`materialsRules.landingSection`).
+    deploy = Deploy("cm", case["dest"], case["repo"], case["dest"])
+    release = Release("x", _at(1), [deploy])
+    landing = schedule_plan.entry_landing(release, lambda repo: case["aliases"])
+    assert (landing.section, landing.kind) == (case["section"], case["kind"])

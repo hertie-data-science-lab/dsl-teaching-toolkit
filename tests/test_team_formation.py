@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import ROSTER_HEADER
 
-from dsl_course import discovery, settings, team_formation
+from dsl_course import discovery, gh_contents, settings, team_formation
 from dsl_course.faults import Severity
 from dsl_course.grades import GradingSpec
 from dsl_course.mailer import send_bulk as _SEND_BULK
@@ -653,16 +653,15 @@ def post(monkeypatch):
         rec = record if record is not None else Record()
         sender = Post(**kw)
         monkeypatch.setattr(team_formation, "get_file_with_sha", rec.get)
-        monkeypatch.setattr(team_formation, "put_file", rec.put)
+        monkeypatch.setattr(gh_contents, "get_file_with_sha", rec.get)
+        monkeypatch.setattr(gh_contents, "put_file", rec.put)
         monkeypatch.setattr(
             team_formation.mailer, "graph_config_from_env", sender.config
         )
         monkeypatch.setattr(team_formation.mailer, "send_bulk", sender.send_bulk)
         monkeypatch.setattr(team_formation.mailer, "send_indexed", sender.send_indexed)
         monkeypatch.setattr(team_formation.mailer, "preflight", sender.preflight)
-        monkeypatch.setattr(
-            team_formation, "course_name_of", lambda org: "Deep Learning"
-        )
+        monkeypatch.setattr(discovery, "course_name_of", lambda org: "Deep Learning")
         return rec, sender
 
     return _wire
@@ -770,6 +769,7 @@ def test_a_window_everybody_has_teamed_up_for_does_not_even_read_the_record(
         raise AssertionError("the record was read for a window nobody is waiting on")
 
     monkeypatch.setattr(team_formation, "get_file_with_sha", refuse)
+    monkeypatch.setattr(gh_contents, "get_file_with_sha", refuse)
     assert _tick() == 0
     assert sender.batches == []
 
@@ -784,6 +784,7 @@ def test_a_window_that_has_shut_is_never_mailed_about(semester, post, monkeypatc
         raise AssertionError("the record was read for a window that has already shut")
 
     monkeypatch.setattr(team_formation, "get_file_with_sha", refuse)
+    monkeypatch.setattr(gh_contents, "get_file_with_sha", refuse)
     _rec, sender = post()
     assert _tick(now=SHUTS + timedelta(days=1)) == 0
     assert sender.batches == [] and sender.previews == []
@@ -929,10 +930,10 @@ def test_a_record_that_cannot_be_written_mails_nobody(semester, post):
     # Claim-then-send means a write GitHub refuses costs a tick, not a duplicate semester
     # mail. The next tick retries the lot.
     semester()
-    rec, sender = post(record=Record(refuse=team_formation.WRITE_ATTEMPTS))
+    rec, sender = post(record=Record(refuse=gh_contents.WRITE_ATTEMPTS))
     assert _tick() == 1
     assert sender.batches == []
-    assert len(rec.attempts) == team_formation.WRITE_ATTEMPTS
+    assert len(rec.attempts) == gh_contents.WRITE_ATTEMPTS
 
 
 def test_a_record_nobody_can_parse_mails_nobody(semester, post):

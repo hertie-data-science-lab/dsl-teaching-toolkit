@@ -17,12 +17,12 @@ import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { studentHref, tabHref } from '../router';
-import { CheckLine, Crumbs, Lives, Loading } from '../ui/bits';
+import { CheckLine, Lives, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { Check, Lock } from '../ui/icons';
 import type { TabProps } from './Assignments';
-import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
+import { WithStatus, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO, LEDGER_PATH } from '../model/names';
 
@@ -40,12 +40,9 @@ function outOf(m: unknown): string {
   return pts == null || pts === '' ? '' : ` (out of ${String(pts)})`;
 }
 
-/** The late penalty the marks grid applies: the assignment's effective `late_penalty_per_day`, null while it is read. */
-function penaltyOf(p: ReadyProps, slug: string): { rate: number | null; known: boolean } {
-  const layers = assignmentSettings(p, slug);
-  if (!layers) return { rate: null, known: false };
-  const e = resolve('late_penalty_per_day', layers);
-  return { rate: penaltyRate(e.value), known: true };
+/** The late penalty the marks grid applies: the assignment's effective `late_penalty_per_day` as status states it (`status_json.run_settings`). */
+function penaltyOf(a: Assignment): number | null {
+  return penaltyRate(a.settings?.late_penalty_per_day?.value);
 }
 
 export function MarksTab(p: TabProps) {
@@ -67,13 +64,13 @@ export function MarksTab(p: TabProps) {
   const cfg = useGradingConfig(p, a.template);
   const questions = cfg.questions && typeof cfg.questions === 'object' ? (cfg.questions as Record<string, unknown>) : null;
   const qs = questions ? Object.entries(questions) : [];
-  const { rate } = penaltyOf(p, a.slug);
+  const rate = penaltyOf(a);
   const max = qs.reduce((n, [, m]) => n + (Number(questionPoints(m)) || 0), 0);
   const group = a.teams !== null && a.teams !== undefined;
   const scope = cohortScope(p);
   const head = (
     <div class="page-head">
-      <div><h1>{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. {group ? 'A team’s marks and feedback reach every member once you return marks.' : 'Nothing reaches a student until you return marks.'}</Hint></h1><p class="lede">{a.marks.filled} of {a.marks.total} marked. {rate !== null ? `Totals and late penalties (${round(rate * 100)}% of the total per late day) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p></div>
+      <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. {group ? 'A team’s marks and feedback reach every member once you return marks.' : 'Nothing reaches a student until you return marks.'}</Hint></h2><p class="lede">{a.marks.filled} of {a.marks.total} marked. {rate !== null ? `Totals and late penalties (${round(rate * 100)}% of the total per late day) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p></div>
       <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name)} /></div>
     </div>
   );
@@ -82,7 +79,7 @@ export function MarksTab(p: TabProps) {
   if (file.kind !== 'ready')
     return <>{top}<section class="panel section stub"><h2>No mark sheet yet</h2><p>The mark sheet appears at hand out, with a row for every student or team.</p></section></>;
   if (!parsed?.sheet)
-    return <>{top}<CheckLine cls="bad">The mark sheet does not parse ({parsed?.error}). Fix it with Edit the file.</CheckLine></>;
+    return <>{top}<CheckLine cls="bad">The mark sheet does not parse ({parsed?.error}). Fix it with Edit the file directly.</CheckLine></>;
   const { sheet } = parsed;
   const v = (pth: Path, orig: unknown) => (key(pth) in edits ? edits[key(pth)] : orig);
   const set = (pth: Path, raw: string, typed = false) => {
@@ -294,7 +291,7 @@ export function TeamsTab(p: TabProps) {
     <>
       <div class="page-head">
         <div>
-          <h1>{assignmentTitle(a)} <Hint doc="09-release-assignment-to-cohort.md">Students form their own teams on the Join screen until the window closes; you can assign the rest here. Students without a team get no repo at hand out.</Hint></h1>
+          <h2 class="h1">{assignmentTitle(a)} <Hint doc="09-release-assignment-to-cohort.md">Students form their own teams on the Join screen until the window closes; you can assign the rest here. Students without a team get no repo at hand out.</Hint></h2>
           <p class="lede">{joined.length - free.length} of {joined.length} joined students in {cur.teams.length} teams; {free.length} without a team.{notJoined ? ` ${notJoined} students have not joined yet and cannot be placed.` : ''}</p>
         </div>
         <div class="actions"><a class="btn outline" href={studentHref(p.cohort.org, 'join')}>Join screen, as students see it</a></div>
@@ -367,8 +364,8 @@ export function TeamsTab(p: TabProps) {
           {empty.length && dirty ? <p class="footnote">{empty.length} empty team{empty.length > 1 ? 's are' : ' is'} kept only until you leave this page.</p> : null}
         </section>
         <div class="panel" style="display:grid;gap:10px">
-          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv' }} note={dirty ? 'Unsaved changes' : undefined} />
-          <Lives org={p.cohort.org} repo={CONFIG_REPO} path="teams.csv" />
+          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv', exists: file.kind !== 'absent' }} note={dirty ? 'Unsaved changes' : undefined} />
+          <Lives org={p.cohort.org} repo={CONFIG_REPO} path="teams.csv" exists={file.kind !== 'absent'} />
         </div>
       </div>
     </>
@@ -387,8 +384,12 @@ function OverviewRow(p: ReadyProps & { a: Assignment; hasSheet: boolean; writes:
   const changed = p.hasSheet ? p.files.lastChange(p.cohort.org, CONFIG_REPO, path) : null;
   const sheet = a.returned && p.hasSheet ? p.files.file(p.cohort.org, CONFIG_REPO, path) : null;
   const text = sheet?.kind === 'ready' ? sheet.text : null;
-  const doc = text !== null ? new YamlText(text) : null;
-  const on = text !== null && doc && !doc.errors.length && p.writes ? returnedOn(readSheet(text, doc.toJS()), p.writes) : null;
+  const writes = p.writes;
+  const on = useMemo(() => {
+    if (text === null || !writes) return null;
+    const doc = new YamlText(text);
+    return doc.errors.length ? null : returnedOn(readSheet(text, doc.toJS()), writes);
+  }, [text, writes]);
   return (
     <tr>
       <td><a class="rowlink" href={tabHref(a.slug, 'marks')}>{assignmentTitle(a)}</a></td>
@@ -406,15 +407,15 @@ function MarksOverview(p: ReadyProps) {
   const dir = p.files.dir(p.cohort.org, CONFIG_REPO, SHEETS);
   const sheets = new Set(dir.kind === 'ready' ? dir.entries.map((e) => e.name) : []);
   const ledger = p.files.file(p.cohort.org, CONFIG_REPO, LEDGER);
-  const writes = ledger.kind === 'ready' ? gradebookWrites(ledger.text) : ledger.kind === 'loading' ? null : new Map<string, string>();
+  const ledgerText = ledger.kind === 'ready' ? ledger.text : null;
+  const writes = useMemo(() => (ledgerText !== null ? gradebookWrites(ledgerText) : ledger.kind === 'loading' ? null : new Map<string, string>()), [ledgerText, ledger.kind]);
   const returned = list.filter((a) => a.returned).length;
   const toMark = list.reduce((n, a) => n + (sheets.has(`${sheetName(p, a.slug)}.yml`) ? a.marks.total - a.marks.filled : 0), 0);
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, 'Marks')} />
       <div class="page-head">
         <div>
-          <h1>Marks <Hint doc="10-grade-and-return-assignments.md">This page only reads. Open an assignment to enter and return its marks.</Hint></h1>
+          <h2 class="h1">Marks <Hint doc="10-grade-and-return-assignments.md">This page only reads. Open an assignment to enter and return its marks.</Hint></h2>
           <p class="lede">{sheets.size ? `${returned} of ${list.length} assignment${list.length === 1 ? '' : 's'} returned; ${toMark} mark${toMark === 1 ? '' : 's'} still to enter.` : 'Where marking stands this semester, one row per assignment.'}</p>
         </div>
       </div>
@@ -441,5 +442,5 @@ function MarksOverview(p: ReadyProps) {
 }
 
 export function MarksOverviewScreen(p: CohortProps) {
-  return <WithStatus props={p} title="Marks" crumbs={cohortCrumbs(p, 'Marks')}>{(r) => <MarksOverview {...r} />}</WithStatus>;
+  return <WithStatus props={p} title="Marks">{(r) => <MarksOverview {...r} />}</WithStatus>;
 }

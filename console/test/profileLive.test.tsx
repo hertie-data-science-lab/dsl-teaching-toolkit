@@ -1,0 +1,61 @@
+// @vitest-environment happy-dom
+// Profile mounted through the App on `?course=<org>#profile`: the saved setup shows as text,
+// and no clone block appears once the course's status is read (decision 0024 rule 6).
+
+import { render } from 'preact';
+import { act } from 'preact/test-utils';
+import { afterEach, expect, it } from 'vitest';
+import { App, createState } from '../src/app';
+import { ConsoleAuth } from '../src/auth/console';
+import { PatAuth } from '../src/auth/pat';
+import { GitHubClient } from '../src/github/client';
+import type { Course } from '../src/model/discovery';
+import { saveYourSetup } from '../src/model/prefs';
+import { FakeGitHub, fileBody, json } from './fake';
+import example from './fixtures/status.example.json';
+
+const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
+const ORG = example.course.org;
+const course: Course = { org: ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [{ org: 'hertie-dsl-demo-f2026', term: 'f2026', termLabel: 'Fall 2026' }], meta: null };
+
+let root: HTMLElement | null = null;
+afterEach(() => {
+  if (root) render(null, root);
+  root?.remove();
+  root = null;
+  history.replaceState(null, '', '/');
+  localStorage.clear();
+});
+
+const OTHER = 'hertie-dsl-other-course-e9999';
+const other: Course = { ...course, org: OTHER, name: 'Other', code: 'E9999' };
+const otherStatus = { ...example, course: { ...example.course, org: OTHER, materials: [{ ...example.course.materials[0], repo: 'other-materials' }], templates: [] } };
+
+async function mount(url: string) {
+  history.replaceState(null, '', url);
+  const gh = new FakeGitHub()
+    .on('GET', `/repos/${ORG}/.github/contents/.system/status.json`, () => json(fileBody('.system/status.json', JSON.stringify(example))))
+    .on('GET', `/repos/${OTHER}/.github/contents/.system/status.json`, () => json(fileBody('.system/status.json', JSON.stringify(otherStatus))))
+    .on('GET', /git\/trees\/HEAD/, { sha: 't', tree: [], truncated: false });
+  const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: new GitHubClient({ token: () => 't', fetch: gh.fetch }) });
+  s.user.value = user;
+  s.estate.value = { courses: [course, other], semesters: [], roles: new Map(), kind: 'classic' };
+  root = document.createElement('div');
+  document.body.appendChild(root);
+  await act(async () => render(<App state={s} />, root!));
+  for (let i = 0; i < 5; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  return root;
+}
+
+it('shows the saved setup as text and no clone block, with the course status read', async () => {
+  saveYourSetup(user.login, { folder: '/Users/o/repos', editor: 'vscode' });
+  for (const url of ['/?#profile', `/?course=${OTHER}#profile`]) {
+    const root = await mount(url);
+    expect(root.querySelector('#view h1')?.textContent).toBe('Profile');
+    expect(root.querySelector('.setup-view dd code')?.textContent).toBe('/Users/o/repos');
+    expect(root.textContent).not.toContain('Clone every repo');
+    expect(root.querySelector('.clone-all')).toBeNull();
+    render(null, root);
+    root.remove();
+  }
+});

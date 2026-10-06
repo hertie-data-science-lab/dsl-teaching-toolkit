@@ -4,7 +4,8 @@ import { render } from 'preact-render-to-string';
 import { describe, expect, it, vi } from 'vitest';
 import type { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { LiveFiles, StaticFiles } from '../src/model/files';
+import { LiveFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import type { Loaded } from '../src/model/status';
 import type { Assignment, AssignmentState, Status } from '../src/model/types';
 import { hashOf, movedHash, parseHash, replaceHash } from '../src/router';
@@ -168,7 +169,7 @@ describe('the Marks overview', () => {
 
 describe('the cohort nav', () => {
   it('lists the cohort pages in order, with Marks and without Teams', () => {
-    const nav = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="marks" problems={0} />);
+    const nav = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="marks" />);
     const first = nav.slice(nav.indexOf('href="#dashboard"') - 9, nav.indexOf('</ul>', nav.indexOf('href="#dashboard"')));
     const names = [...first.matchAll(/<a href="#[a-z]+"[^>]*>([A-Za-z ]+)/g)].map((m) => m[1]);
     expect(names).toEqual(['Dashboard', 'Schedule', 'Assignments', 'Marks', 'Students', 'Instructors', 'Site', 'Archive', 'Operations']);

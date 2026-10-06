@@ -49,6 +49,7 @@ breaks a live link that faculty click:
 |---|---|
 | `docs/01-new-course-org.md` | `config_digest.COURSE` |
 | `docs/03-add-assignment-to-course.md` | `config_digest.GRADING_CONFIG` |
+| `docs/assignment-starter.md` | the console's Template settings and New assignment `?` (`Course.tsx` `STARTER_DOC`) |
 | `docs/05-manage-teaching-team.md` | `templates/semester-config/instructors.yml`, `config_digest.PEOPLE` |
 | `docs/06-enrol-students-to-cohort.md` | `config_digest.ROSTER` |
 | `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/semester-config/schedule.yml`, `templates/semester-config/validate-schedule.yml` |
@@ -118,6 +119,20 @@ Things whose *literal spelling* is depended on from outside Python:
   spelling is still recognised. The hidden
   `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what makes the quarter-hourly
   refresh post once rather than four times an hour.
+- **A template's starter (decision 0028).** `grading_config.yml` `starter: derived |
+  handwritten` (`course.STARTER_MODES`). Derive reads a missing key from the markers
+  (`derive.starter_mode`); the status, which reads no source file, reads it as `derived`
+  when `solution/` holds a derivable file; the migration's *template starter* step writes
+  it. Derive refuses a hand-written one with the reason code `STARTER_HANDWRITTEN`,
+  appended to its codes. Every real Derive writes `derive.STARTER_RECORD`
+  (`.system/starter.json` on `main`: `solution_tree`, the sha of the `solution/` folder it
+  derived from, `""` after a run that refused a file; `files`, `{main path: blob sha}`).
+  `status_json.starter_check` compares it with the solution and `main` trees the gather
+  already reads, plus that one file: a recorded blob that differs on `main` is the problem
+  `template:<_slugify(repo)>:MAIN_EDITED`; no record is the to-do "Derive has not been run
+  yet"; another `solution_tree` is "The solution changed since the last Derive". Its two
+  keys are read by the status: add a key, never rename one. Faculty page:
+  `docs/assignment-starter.md`.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-semester`, `submission`, `gradebook`,
   `assignment-template`, `dsl-materials` (a course materials repo; `materials.MATERIALS_TOPIC`),
   `dsl-assignment` (a course assignment template; `discovery.TEMPLATE_TOPIC`).
@@ -151,7 +166,7 @@ Things whose *literal spelling* is depended on from outside Python:
 - **`opencourse.OPENCOURSE_FILE`** (`opencourse.yml`, in the course `.github`) is the
   public website's one declaration (decision 0016): `enabled`, `source_repo`,
   `readings_mode`, `include_lectures`, `withhold` (`.releaseignore` syntax,
-  `releaseignore.deny_lines`). The Publish public website operation and the daily cron read
+  `releaseignore.deny_lines`). The Publish website operation and the daily cron read
   it and nothing else; `enabled: false` stops both. Seeded CREATE-ONLY and INSTRUCTOR-OWNED
   by Bootstrap Course Org (off), schema in `console/schemas/opencourse.schema.json`. A
   materials repo's `publish.yml` and the site repo's `_publish-config.yml` are retired: the
@@ -343,7 +358,10 @@ never propagated:
 Seeded files carry their owner on the first line, and the write site enforces it:
 
 - **SYSTEM-OWNED** - written unconditionally on every bootstrap and refresh, so fixes reach
-  running courses. Workflows, generated docs, everything under `.system/`.
+  running courses. Workflows, generated docs, everything under `.system/`. One is written by
+  an op rather than a refresh: `.system/starter.json` on a derived template's `main`, by
+  every real Derive (JSON, so it carries no stamp; it reaches students with the rest of
+  `main`, and says only which blobs Derive wrote).
 - **INSTRUCTOR-OWNED** - `gh_contents.seed_if_absent` only. Rewriting one destroys live state (roster
   rows, enrol codes, the semester's schedule). The code comments call this "USER-owned"; the shipped
   stamp says INSTRUCTOR-OWNED. Same thing.
@@ -385,16 +403,31 @@ same kind of file, twice: in each semester's private `semester-config`, and in t
 public `.github` (counts only, never a handle or an email). `seed.refresh` rewrites every live
 semester's and the course's; the single-semester run of each of the four semester-config dispatch
 targets (scheduler, Sync membership, Send enrolment codes, Sync site) rewrites that semester's;
-every Console run rewrites its semester's and the course's (`status.write_after_op`). It records
-the git shas of its inputs, never a timestamp, so an unchanged render makes no commit.
+every Console run rewrites its semester's, and the course's after a course op or one of
+`status.COURSE_TOUCHING_OPS` (`status.write_after_op`). It records
+the git shas of its inputs, never a timestamp, so an unchanged render makes no commit. Its
+problems are the teaching team's to fix: students still without a team at an OPEN formation
+window are left out (`status_json.faculty_window_faults`; the schedule digest still lists them),
+and a shut window's are kept.
 
-`.system/student-status.json` (`dsl.student-status/1`, `student_status`) is written by the same
+Decision 0032: the course block carries `stage_optional` and `stage_set_aside` (per stage id), and
+each `todo[]` entry `optional` and `set_aside`. Optional is the engine's rule alone (C4-C6; a
+to-do that blocks nothing, i.e. a materials check with `blocks: false`), so the console holds no
+copy. `set_aside` comes from `dsl-course.yml`'s `set_aside:` list (`status_json.set_aside_ids`),
+read at the edge: any other shape or an unknown id sets nothing aside and is never a fault; a
+required or done item's id is ignored. Setting aside changes no stage, no `ready`, no problem.
+Forward-only: no migration, an absent key means nothing is set aside.
+
+`.system/student-status.json` (`dsl.student-status/2`, `student_status`) is written by the same
 `status.write`, for a live semester, into the SEMESTER org's public `.github`: what the student
 console reads instead of the site. It is public, so its shape is an allow-list, closed at every
 level (`console/schemas/student-status.schema.json`, `tests/test_student_status.py`): no roster,
 marks, handles, enrol codes or team membership (a team is its name, headcount and cap), an
 email only where `show_email: true`, a brief and shape note only once handed out, and no
 assignment with `show_on_site: false`. A key added to it is added to the allow-list first.
+Unlike `status.json` it carries one moment, `generated_at`, for the student's "Updated <age>":
+`student_status.settle` keeps the published file's moment when nothing else changed, so an
+unchanged semester still makes no commit. The console reads `/1` files too (no dates, no age).
 
 The join workflows route a Join issue on its form's label OR on a hidden first line
 (`course.JOIN_COURSE_MARKER`, `JOIN_TEAM_MARKER`, exported in `names.json`): the console opens
@@ -488,7 +521,10 @@ Blocks: `defaults` (late pair, team cap, visibility, team formation, formats, ti
 archive grace, release destination repo), `kinds` (ordered row kinds with label, label
 colour and row colour; `assignment`, `term`, `archive` are `system: true` and `other` is
 required; the non-system kinds are what a release entry's `kind:` may say, and each one a
-semester has rows of gets a tab on its site), `institution` (the site block), `contact` (the last fault address, after
+semester has rows of gets a tab on its site; `assets`, "Supporting files", is released but
+never a row or a tab on either site, and is the kind of any folder no alias names
+(`materials.DEFAULT_KIND`, decision 0031; an entry with no copies stays `lecture`), `schedule_plan.site_rows` and `public_site.shown_sections`
+drop it; the public website neither hosts nor links its files, since it hosts by section), `institution` (the site block), `contact` (the last fault address, after
 `DSL_MAINTAINER_EMAIL` and `GRAPH_SENDER`), `licences` (the open site's choices, default
 first).
 
@@ -888,7 +924,7 @@ Promote.
 | semester `.github/dsl-course.yml` (the course pointer) | `semester-config/.system/dsl-course.yml` | semester org; the four dispatchers read it there |
 | `semester-config/*.sample`, `grading_sheets/*.yml.sample` | none - the scaffolds and docs link `example-course/semester-org/` | deleted by the tool |
 | course `.github/.github/.last-refresh`, `.github/.github/.missing-cohorts` | `.github/.system/last-refresh`, `.github/.system/missing-semesters` | course org |
-| materials `MAINTAINING.md`, `SYLLABUS.md.sample`, `SYLLABUS.sessions.md` | `.system/MAINTAINING.md`, `.system/SYLLABUS.md.sample`, `.system/SYLLABUS.sessions.md`; a whole-repo release skips `.system/` | every `course-materials-*` repo |
+| materials `MAINTAINING.md`, `SYLLABUS.md.sample`, `SYLLABUS.sessions.md` | `.system/MAINTAINING.md`, `.system/SYLLABUS.md.sample`, `.system/SYLLABUS.sessions.md` (no longer written: the weekly plan now goes between markers in the syllabus itself, decision 0031); a whole-repo release skips `.system/` | every `course-materials-*` repo |
 | a `course-materials-*` name as the mark of a materials repo | the `dsl-materials` topic (the name stays the scaffold's default) | course org; the course step "materials topic" adds it |
 | an `assignment-*` name on a GitHub template as the mark of an assignment template; `assignment-<n>-<semester>`, CLI `scaffold assignment --number`, `--semester`, `--copy-from` | the `dsl-assignment` topic; `assignment-<name>`, `--name` (decision 0014: the number is the schedule entry's, access follows the schedule's citations) | course org; the course step "assignment topic" adds the topic (live templates keep their names); an untopicked one is NOT_MIGRATED in status.json |
 | a materials repo's `publish.yml`; the public site repo's `_publish-config.yml` | the course's `.github/opencourse.yml` (decision 0016) | every materials repo; the course step "public website" deletes each `publish.yml` and seeds `opencourse.yml` from `_publish-config.yml` (else off); the next publish deletes `_publish-config.yml` |
@@ -924,7 +960,7 @@ every real course is held:
 4. `--release <course>` - preview first: no "NOT migrated inside the hold" - then
    `--no-preview` (semesters first, then one catch-up for every semester). Refused while an
    org is not migrated; `--abandon` releases anyway, naming them.
-5. Check now per semester, one preview of the next automatic run, the catch-up runs green.
+5. Refresh per semester, one preview of the next automatic run, the catch-up runs green.
 
 One course at a time instead: pin its `central_ref` to the new ref rather than Promote.
 Under a hold a migration never pauses and never unpauses: its bracket steps only mark the
@@ -987,7 +1023,8 @@ still keyed `cohorts:`), `.system/` in `.github`, `dsl-course.yml` keys, templat
 (`grading_config.yml` `format:` -> `formats:` on each template's `solution` branch,
 and the run settings out, recorded first in `.github/.system/migration-run-keys.json` for
 the semesters, re-read with `parse_grading_spec` - course-owned, so here rather than per
-semester),
+semester), template starter (`starter:` written into each live template's
+`grading_config.yml` from its answer markers, decision 0028),
 materials files, public website (every materials repo's `publish.yml` deleted; `.github/opencourse.yml`
 seeded, create-only, from the site repo's `_publish-config.yml` when there is one - on, with its
 settings - else off), re-render (Refresh

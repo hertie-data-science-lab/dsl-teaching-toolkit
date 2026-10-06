@@ -56,7 +56,7 @@ from typing import NamedTuple
 from . import faults, ghcli, mailer, sync_faculty
 from .config_digest import Digest, DigestResult
 from .course import CONFIG_REPO, semester_of
-from .discovery import course_name_of
+from .discovery import course_name_or
 from .faults import (
     NOTIFY_FROM,
     SOURCE_CRITICAL_WINDOW,
@@ -525,24 +525,11 @@ def _block(
     return _rows(rows)
 
 
-def _course_name(course_org: str) -> str:
-    """The course's display name, or its org slug when nothing names it.
-
-    Guarded, because `course_name_of` reads the course org's `dsl-course.yml` - which is
-    one of the files this module mails ABOUT. A malformed one raises out of the YAML
-    loader, and letting that through would mean the single fault that most needs an email
-    is the one fault that sends none."""
-    try:
-        return course_name_of(course_org) or course_org
-    except Exception:
-        return course_org
-
-
 def _course_label(course_org: str, semester_org: str) -> str:
     """`Deep Learning (Demo) f2026`: the course's display name and the semester's term tag,
     which is how a reader tells two semesters of one course apart in a subject line. The
     org slug stands in for a course that declares no name."""
-    name = _course_name(course_org)
+    name = course_name_or(course_org, fallback=course_org)
     # A COURSE-level fault is the course org's own, so there is no semester and no term to
     # name - and a course org whose slug happens to carry one would otherwise put a
     # semester's tag on a subject line that is not about that semester.
@@ -586,7 +573,7 @@ def _mail(
     that ends on the issue holding the history."""
     label = _course_label(course_org, semester_org)
     org_url = f"https://github.com/{course_org}"
-    sender = html.escape(_course_name(course_org))
+    sender = html.escape(course_name_or(course_org, fallback=course_org))
     parts = [
         f"<p>This is an automated email sent on behalf of {sender}.</p>",
         f"<p>{_linked(_INTRO[loudest], 'course org', org_url)}</p>",
@@ -873,7 +860,7 @@ def notify_config_faults(
         # Both read the course org's identity file, so they are taken ONCE and not once
         # per recipient group - `message` is called per group by `_deliver`.
         label = _course_label(course_org, semester_org)
-        sender = html.escape(_course_name(course_org))
+        sender = html.escape(course_name_or(course_org, fallback=course_org))
 
         def message(_routed: Routed, keys: list[str]) -> tuple[str, str]:
             keys.sort()
@@ -1031,7 +1018,7 @@ def notify_overwritten_edits(
         # Inside the guard with the delivery: both of these read the course org's identity
         # file, and a rate limit on it must cost the mail rather than the sync's report.
         label = _course_label(course_org, site_org)
-        sender = html.escape(_course_name(course_org))
+        sender = html.escape(course_name_or(course_org, fallback=course_org))
     except Exception as exc:
         log_err(
             f"could not mail {site_org}'s overwritten edits "
@@ -1102,7 +1089,7 @@ def _archive_message(semester_org: str, course_org: str, when: date) -> tuple[st
     )
     body = (
         f"<p>This is an automated email sent on behalf of "
-        f"{html.escape(_course_name(course_org))}.</p>\n"
+        f"{html.escape(course_name_or(course_org, fallback=course_org))}.</p>\n"
         f"<p>On <b>{when}</b> all the repositories in {_anchor(org_at, semester_org)} will "
         f"be archived. Nothing is deleted and all read access permissions remain as they "
         f"are, write accesses are revoked and every repository is read-only from then on.</p>\n"

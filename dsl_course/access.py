@@ -244,18 +244,12 @@ def repo_teams(org: str, repo: str) -> frozenset[str] | None:
     None rather than the empty set on a failure, including a 404: the caller's answer to
     "we could not look" is to grant every team again, which is idempotent - where reading
     a failed listing as "nobody is granted" would be the same thing said with a promise
-    attached."""
-    code, out = gh(
-        "api",
-        "--paginate",
-        f"repos/{org}/{repo}/teams?per_page=100",
-        "--jq",
-        ".[].slug",
-    )
-    if code != 0:
-        log_err(f"  ! could not read which teams can see {org}/{repo}: {out[:160]}")
+    attached. Off `repo_team_permissions`' listing: the slugs are its keys."""
+    held = repo_team_permissions(org, repo)
+    if held is None:
+        log_err(f"  ! could not read which teams can see {org}/{repo}")
         return None
-    return frozenset(ln.strip().casefold() for ln in out.splitlines() if ln.strip())
+    return frozenset(held)
 
 
 def converge_faculty_access(

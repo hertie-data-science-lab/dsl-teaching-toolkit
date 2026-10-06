@@ -33,7 +33,7 @@ SEMESTER = "hertie-dsl-demo-f2026"
 # contracts.md section 1, verbatim but for the actor placeholder.
 CONTRACT_REQUEST = {
     "schema": "dsl.request/1",
-    "op": "release.now",
+    "op": "release.entry",
     "actor": "prof",
     "course_org": COURSE,
     "semester_org": SEMESTER,
@@ -45,9 +45,7 @@ CONTRACT_REQUEST = {
 CONTRACT_OPS = {
     "semester.check",
     "semester.preview_automation",
-    "release.now",
-    "release.early",
-    "release.rerun",
+    "release.entry",
     "release.adhoc",
     "release.propagate_back",
     "assignment.handout_now",
@@ -83,7 +81,6 @@ def test_the_registry_is_every_dispatch_op_the_contract_lists():
 @pytest.mark.parametrize("name", sorted(CONTRACT_OPS))
 def test_every_op_targets_a_cli_with_a_main(name):
     op = REGISTRY[name]
-    assert op.runs_as == "dispatch"
     assert op.scope in ("course", "semester")
     assert callable(importlib.import_module(f"dsl_course.{op.module}").main)
 
@@ -180,7 +177,7 @@ def test_a_real_run_of_a_default_on_dry_run_cli_says_no_dry_run():
 def test_the_contract_example_parses():
     req = parse_request(json.dumps(CONTRACT_REQUEST))
     assert (req.op, req.semester_org, req.args, req.preview) == (
-        "release.now",
+        "release.entry",
         SEMESTER,
         {"entry": "s5"},
         True,
@@ -303,7 +300,7 @@ def test_the_annotation_names_nobody():
         actor="prof",
         preview=False,
         conclusion="done",
-        summary="Patched assignment-3-octocat and grades-octocat; octocat pulled. 10% late.",
+        summary="Patched assignment-3-octocat and grades-octocat. 10% late.",
         reasons=[
             {
                 "code": "SKIPPED",
@@ -311,14 +308,12 @@ def test_the_annotation_names_nobody():
                 "fix": {"repo": f"{SEMESTER}/assignment-3-octocat"},
             }
         ],
-        people=[{"handle": "octocat", "text": "No repo: not joined yet."}],
     )
     line = annotation(out)
     assert line.startswith("::notice title=dsl-outcome::")
     assert "octocat" not in line.lower()
     assert "10%25 late" in line
     body = json.loads(line.split("::", 2)[2].replace("%25", "%"))
-    assert "people" not in body
     assert body["actor"] == "prof"
     assert (
         "assignment-3-<handle>" in body["summary"]
@@ -339,7 +334,7 @@ def test_a_huge_block_is_cut_to_fit_the_annotation_and_still_parses():
         actor="prof",
         preview=True,
         conclusion="previewed",
-        summary="Built the session list: 12 sessions; nothing was written.",
+        summary="Built the weekly plan: 12 sessions; nothing was written.",
         details=["solution/a.py -> a.py"],
         block="### Session 1: 100% theory\n" * 8000,  # ~200 KB, % and newlines escape
     )
@@ -563,6 +558,7 @@ def test_a_named_entry_is_released_from_its_schedule_row(monkeypatch, capsys, en
                     Deploy(
                         "course-materials-f2026", "labs/05", semester_dest_path="labs/5"
                     ),
+                    Deploy("course-datasets-f2026", "data/05"),
                 ],
             )
         ]
@@ -577,9 +573,11 @@ def test_a_named_entry_is_released_from_its_schedule_row(monkeypatch, capsys, en
     monkeypatch.setattr(deploy, "main", fake_main)
     rc, body, _ = _main(monkeypatch, capsys, CONTRACT_REQUEST)
     assert rc == 0 and body["conclusion"] == "previewed"
-    argv = seen[0]
-    assert argv[argv.index("--course-source-path") + 1] == "lectures/05,labs/05"
-    assert argv[argv.index("--semester-dest-path") + 1] == "lectures/05,labs/5"
+    # ONE deploy run for the whole entry, two source repos and all: it reads the copies
+    # off the plan and syncs the site once.
+    (argv,) = seen
+    assert argv[argv.index("--entry") + 1] == "s5"
+    assert "--course-source-path" not in argv
     assert argv[-1] == "--preview"
 
 

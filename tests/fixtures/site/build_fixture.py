@@ -297,6 +297,7 @@ def _lectures() -> tuple[dict[str, str], list[str]]:
         schedule_plan.planned_rows(SCHEDULE),
         frozenset(),
         frozenset({MATERIALS}),
+        schedule_plan._no_aliases,
     )
 
 

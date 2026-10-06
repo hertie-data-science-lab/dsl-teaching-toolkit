@@ -16,6 +16,7 @@ import yaml
 
 from dsl_course import (
     discovery,
+    gh_commits,
     migrate,
     opencourse,
     records,
@@ -203,6 +204,14 @@ class FakeGitHub:
             return {}
         return {p: blob_sha(b) for p, b in found["branches"].get(branch, {}).items()}
 
+    def top_level(self, org, repo, folder=""):
+        found = self._repo(org, repo)
+        prefix = folder.strip("/") + "/"
+        tree = found["branches"]["main"] if found else {}
+        return {
+            p[len(prefix) :].split("/")[0]: "file" for p in tree if p.startswith(prefix)
+        }
+
     def get_file_content(self, org, repo, path, ref=""):
         found = self._repo(org, repo)
         if found is None:
@@ -258,12 +267,13 @@ class FakeGitHub:
         if parts[0] != "repos":
             raise AssertionError(f"unexpected gh call {args}")
         org, name = parts[1], parts[2]
-        if f"{org}/{name}" == migrate.CENTRAL and parts[3:5] == [
-            "actions",
-            "workflows",
-        ]:
-            state = query.split("=", 1)[1]
-            return 0, str(self.central_runs.get(parts[5], []).count(state))
+        if f"{org}/{name}" == migrate.CENTRAL and parts[3:] == ["actions", "runs"]:
+            return 0, "\n".join(
+                f".github/workflows/{workflow}"
+                for workflow, states in self.central_runs.items()
+                for state in states
+                if state != "completed"
+            )
         if self._repo(org, name) is None:
             return 1, "gh: Not Found (HTTP 404)"
         key = (org, self._name(org, name))
@@ -306,6 +316,12 @@ class FakeGitHub:
             self.calls.append(f"runs {key[0]}/{key[1]}")
             self.clock.at += self.run_query_seconds
             params = dict(p.split("=", 1) for p in query.split("&"))
+            if "select(" in args[-1]:  # the latest runs, the unfinished ones' files
+                return 0, "\n".join(
+                    ".github/workflows/x.yml"
+                    for _at, state in self.runs.get(key, [])
+                    if state != "completed"
+                )
             since = params.get("created", "%3E%3D").split("%3E%3D", 1)[1]
             state = params.get("status")
             return 0, str(
@@ -325,7 +341,7 @@ class FakeGitHub:
                 self.redirects[key] = fields["name"]
             if key in self.actions:  # a repo keeps its settings across a rename
                 self.actions[new] = self.actions.pop(key)
-            return 0, ""
+            return 0, fields["name"]  # the `--jq .name` of GitHub's answer
         if len(parts) == 3:
             return 0, json.dumps({"default_branch": "main", "name": key[1]})
         raise AssertionError(f"unexpected gh call {args}")
@@ -338,6 +354,7 @@ def fake(monkeypatch):
         "list_org_repos",
         "repo_blob_shas",
         "get_file_content",
+        "top_level",
         "move_files",
         "set_repo_topics",
         "gh",
@@ -345,6 +362,7 @@ def fake(monkeypatch):
         monkeypatch.setattr(migrate, name, getattr(f, name))
     # The REAL default_branch / repo_missing, over the same stub: a 404 is a 404.
     monkeypatch.setattr(repos, "gh", f.gh)
+    monkeypatch.setattr(gh_commits, "gh", f.gh)
     monkeypatch.setattr(migrate, "central_ref_for", lambda org: "main")
     # The checkout is the pinned ref, unless a test says otherwise.
     monkeypatch.setattr(migrate, "git", lambda *a, **k: (0, ""))
@@ -1264,7 +1282,13 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         assert key not in yaml.safe_load(meta)
     assert "  formats: [ipynb]  # the runnable one" in meta
     grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
-    assert grading == b"formats: [ipynb]\nautograde: true\n"
+    # The template starter step writes rule 6's reading: no source marks an answer.
+    assert (
+        grading
+        == (
+            f"formats: [ipynb]\nautograde: true\n{scaffold.starter_line('handwritten')}\n"
+        ).encode()
+    )
     materials = fake.tree(COURSE, "course-materials-f2026")
     assert set(materials) == {  # publish.yml deleted
         ".system/MAINTAINING.md",
@@ -1302,7 +1326,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     course.clear()
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    assert capsys.readouterr().out.count("already migrated") == 26
+    assert capsys.readouterr().out.count("already migrated") == 28
     assert course == [] and fake.commits == commits and fake.puts == puts
 
 
@@ -1943,7 +1967,7 @@ def test_the_course_records_each_templates_run_settings_before_stripping_them(
     )
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
-    assert grading == b"formats: [ipynb]\n"
+    assert grading.startswith(b"formats: [ipynb]\nstarter: handwritten")
     record = json.loads(fake.tree(COURSE, ".github")[migrate.RUN_KEYS_RECORD])
     assert record == {"assignment-1-f2026": {"max_team_size": 3, "late_window_days": 4}}
 
@@ -2331,7 +2355,7 @@ def test_the_switch_waits_past_a_tick_the_slow_poll_ran_into(
     # Clear of the tick when the poll starts, inside the margin by the time it ends: the
     # switch is re-checked immediately before it lands.
     fake.clock.at = 1_790_337_780.0 + 12 * 60 - 90  # 90 s before the quarter hour
-    fake.run_query_seconds = 2  # 25 listings: 50 s, into the margin
+    fake.run_query_seconds = 10  # slow listings: the poll ends inside the margin
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     quarter = 1_790_337_780.0 + 12 * 60
     assert fake.off_at and min(fake.off_at) > quarter
@@ -2591,7 +2615,22 @@ def test_the_public_website_step_seeds_off_without_earlier_settings(
     assert ".github/opencourse.yml: seeded off" in capsys.readouterr().out
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     tree = fake.tree(COURSE, ".github")
-    assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse()
+    assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse(
+        withhold=opencourse.DEFAULT_WITHHOLD
+    )
+
+
+def test_a_website_already_on_is_seeded_with_nothing_extra_withheld(
+    fake, course, monkeypatch
+):
+    # Its earlier publish withheld nothing extra: a default list would take files off a
+    # live site at the next publish.
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    seeded = opencourse.parse(
+        yaml.safe_load(fake.tree(COURSE, ".github")["opencourse.yml"])
+    )
+    assert seeded.enabled
+    assert seeded.withhold == ()
 
 
 def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
@@ -2765,3 +2804,34 @@ def test_the_old_pointer_at_publish_yml_names_opencourse_yml():
             "#   # WHICH files the public website shows, and how, is `opencourse.yml` "
             "beside this\n#   # file - not here.\n"
         )
+
+
+def test_the_course_writes_each_templates_starter_from_its_markers_once(
+    fake, course, monkeypatch, capsys
+):
+    # Decision 0028 rule 6: a template that predates the key reads by its markers, and
+    # the migration writes that reading down. Run twice: the second finds it done.
+    solution = fake.tree(COURSE, "assignment-1-f2026", "solution")
+    solution["solution/starter.py"] = b"### BEGIN SOLUTION\nx = 1\n### END SOLUTION\n"
+    assert _main(monkeypatch, COURSE) == 0
+    assert "starter: derived (read from its answer markers)" in capsys.readouterr().out
+    # The sources are read once per run, however often the step asks for its work.
+    reads = []
+    real = migrate.Course.solution_sources
+    monkeypatch.setattr(
+        migrate.Course,
+        "solution_sources",
+        lambda self, repo: reads.append(repo) or real(self, repo),
+    )
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    assert reads.count("assignment-1-f2026") == 1
+    grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
+    assert yaml.safe_load(grading)["starter"] == "derived"
+    assert grading.decode().endswith(f"{scaffold.starter_line('derived')}\n")
+    capsys.readouterr()
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    assert "[skip] template starter: already migrated" in capsys.readouterr().out
+    assert (
+        fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
+        == grading
+    )

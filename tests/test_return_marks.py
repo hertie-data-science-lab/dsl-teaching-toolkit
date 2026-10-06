@@ -127,7 +127,9 @@ def _students():
 def _sent(monkeypatch) -> list:
     sent: list = []
     monkeypatch.setattr(grades.roster, "load", lambda org: _students())
-    monkeypatch.setattr(grades, "_course_name", lambda org: "ML")
+    monkeypatch.setattr(
+        "dsl_course.discovery.course_name_for_semester", lambda org: "ML"
+    )
 
     def send(messages, dry_run=False, sample=None, **_kw):
         sent.extend(messages)

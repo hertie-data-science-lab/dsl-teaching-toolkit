@@ -1,7 +1,8 @@
 // Materials for a student: the released `materials` repo as a tree (one recursive tree read),
 // a file opened in the console from the private copy with the student's own token, and the
 // readings of each session. Nothing is published anywhere; see model/materials.ts for how
-// each kind is shown.
+// each kind is shown. Top folders that only support the rest (data, images, code a notebook
+// loads) come last, folded, as "Supporting files" (decision 0029 rule 6).
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import { useEffect, useState } from 'preact/hooks';
@@ -10,10 +11,12 @@ import type { TreeEntry } from '../github/client';
 import { buildTree, type TreeNode } from '../edit/badges';
 import { openDeck } from '../model/deckTab';
 import { fmtDay } from '../model/format';
+import { ASSETS_KIND, aliasKind } from '../model/materialsRules';
 import { showFile, type Shown } from '../model/materials';
 import { sortedRows, type SemesterFacts } from '../model/student';
 import { studentHref } from '../router';
-import { CheckLine, Loading, Md } from '../ui/bits';
+import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
+import { FileHead, FolderHead } from '../ui/FileTree';
 import { Ext } from '../ui/icons';
 import { useLoad } from '../ui/load';
 
@@ -27,8 +30,6 @@ export function splitEntry(entry: string, repos: string[]): { repo: string; path
   const repo = entry.slice(0, i);
   return repos.includes(repo) ? { repo, path: entry.slice(i + 1) } : null;
 }
-
-const ghBlob = (org: string, repo: string, path: string) => `https://github.com/${org}/${repo}/blob/HEAD/${path.split('/').map(encodeURIComponent).join('/')}`;
 
 export function MaterialsView({ org, repos, entry }: { org: string; repos: string[]; entry?: string }) {
   const env = useEnv();
@@ -52,6 +53,14 @@ export function MaterialsView({ org, repos, entry }: { org: string; repos: strin
   return <MaterialsTree org={org} trees={trees.value} />;
 }
 
+/**
+ * A top-level tree node is supporting files (decision 0026): a folder the engine's built-in
+ * names make so (data/, img/, ...). Only those: a folder no name covers is supporting files
+ * by default (decision 0031), but the status file carries no repo's own kinds, so one the
+ * instructor set to a lecture or lab would be folded away by mistake.
+ */
+export const isSupport = (n: TreeNode) => !!n.children && aliasKind(n.name) === ASSETS_KIND;
+
 export function MaterialsTree({ org, trees }: { org: string; trees: (readonly [string, TreeEntry[] | null])[] }) {
   const shown = trees.filter(([, t]) => t !== null);
   if (!shown.length) return <p class="footnote">Nothing has been released yet, or you cannot read the materials: that needs the semester’s student team, which joining gives you.</p>;
@@ -61,14 +70,23 @@ export function MaterialsTree({ org, trees }: { org: string; trees: (readonly [s
         const files = tree!.filter((t) => t.type === 'blob').map((t) => t.path);
         const node = (n: TreeNode, depth: number): preact.JSX.Element =>
           n.children ? (
-            <li class="ft-dir"><details open={depth === 0 && !n.name.endsWith('_files')}><summary><span class="ft-name">{n.name}/</span></summary><ul>{n.children.map((c) => node(c, depth + 1))}</ul></details></li>
+            <li class="ft-dir"><details open={depth === 0 && !n.name.endsWith('_files')}><summary><FolderHead name={n.name} /></summary><ul>{n.children.map((c) => node(c, depth + 1))}</ul></details></li>
           ) : (
-            <li class="ft-file"><a class="ft-name" href={materialHref(org, repo, n.path)}>{n.name}</a></li>
+            <li class="ft-file"><FileHead name={n.name}><a class="ft-name" href={materialHref(org, repo, n.path)}>{n.name}</a></FileHead></li>
           );
+        const top = buildTree(files);
+        const support = top.filter(isSupport);
+        const main = top.filter((n) => !isSupport(n));
         return (
           <section class="panel section" aria-label={repo}>
             <h2>{repo}</h2>
-            {files.length ? <ul class="file-tree">{buildTree(files).map((n) => node(n, 0))}</ul> : <p class="footnote">Nothing released yet.</p>}
+            {main.length ? <ul class="file-tree">{main.map((n) => node(n, 0))}</ul> : files.length ? null : <p class="footnote">Nothing released yet.</p>}
+            {support.length ? (
+              <details class="fold supporting">
+                <summary>Supporting files</summary>
+                <ul class="file-tree">{support.map((n) => node(n, 1))}</ul>
+              </details>
+            ) : null}
           </section>
         );
       })}
@@ -95,7 +113,7 @@ function FileView({ org, repo, entry, tree }: { org: string; repo: string; entry
   const name = entry.path.split('/').pop() ?? entry.path;
   return (
     <section class="panel section" aria-label={name}>
-      <div class="a-head"><h2 class="mono">{entry.path}</h2><a class="textlink" href={ghBlob(org, repo, entry.path)} target="_blank" rel="noopener">On GitHub <Ext /></a></div>
+      <div class="a-head"><h2 class="mono">{entry.path}</h2><a class="textlink" href={ghUrl(org, repo, entry.path, 'HEAD')} target="_blank" rel="noopener">On GitHub <Ext /></a></div>
       {shown.kind === 'loading' ? <Loading what={`Reading ${name}`} /> : shown.kind === 'failed' ? <CheckLine cls="bad">{name} could not be read: {shown.error}</CheckLine> : <ShownView shown={shown.value} name={name} />}
     </section>
   );

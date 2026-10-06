@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GitHubClient, type Tree } from '../src/github/client';
-import { STATUS_PATH, loadStatus, staleInputs, validateStatus } from '../src/model/status';
+import { STATUS_PATH, StatusStore, loadStatus, staleInputs, validateStatus } from '../src/model/status';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, fileBody } from './fake';
 
@@ -76,6 +76,23 @@ describe('status', () => {
       expect(l.status.semester?.label).toBe('Fall 2026');
     }
     expect(gh.seen.filter((s) => s.url.includes('/git/trees/')).map((s) => s.url)).toEqual(['https://api.github.com/repos/o/semester-config/git/trees/HEAD?recursive=1']);
+  });
+
+  it('reads the tree only once a screen that shows staleness asks', async () => {
+    const gh = new FakeGitHub()
+      .on('GET', `/repos/o/semester-config/contents/${STATUS_PATH}`, fileBody(STATUS_PATH, JSON.stringify(example), 'st'))
+      .on('GET', '/repos/o/semester-config/git/trees/HEAD?recursive=1', matching());
+    const store = new StatusStore(new GitHubClient({ token: () => 't', fetch: gh.fetch }));
+    const trees = () => gh.seen.filter((x) => x.url.includes('/git/trees/')).length;
+    const settle = () => new Promise((r) => setTimeout(r, 0));
+    store.cohort('o', false);
+    await settle();
+    expect([store.cohort('o', false).value.kind, trees()]).toEqual(['ready', 0]);
+    store.cohort('o');
+    await settle();
+    expect(trees()).toBe(1);
+    await store.reload('o', 'semester-config');
+    expect(trees()).toBe(2); // reloads keep it
   });
 
   it('reports a file that is not JSON, or not the shape, as invalid', async () => {

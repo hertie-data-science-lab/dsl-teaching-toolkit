@@ -4,13 +4,13 @@
 // Every run setting shows its effective value and where it comes from; a save writes only
 // the keys the instructor set.
 
-import type { ComponentChildren } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import scheduleSchema from '../../schemas/schedule.schema.json';
 import { useEnv } from '../env';
 import { invalidText, saveSteps, useSave, type SaveState, type Step } from '../edit/save';
 import { YamlText, compact, deepEqual, obj, type Path } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
+import { Modal } from '../ui/Modal';
 import {
   REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
   validAssignments, valueWord, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
@@ -89,47 +89,14 @@ export function SemesterDefaults({ p }: { p: ReadyProps }) {
   );
 }
 
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-/** A modal dialog: Escape and a click on the scrim close it; focus moves in and Tab stays inside. */
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
-  const box = useRef<HTMLDivElement>(null);
-  const downOnScrim = useRef(false);
-  useEffect(() => {
-    box.current?.focus();
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') return onClose();
-      if (e.key !== 'Tab' || !box.current) return;
-      const all = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
-      if (!all.length) return;
-      const first = all[0], last = all[all.length - 1], at = document.activeElement;
-      if (e.shiftKey && (at === first || at === box.current)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && (at === last || !box.current.contains(at))) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', key);
-    return () => document.removeEventListener('keydown', key);
-  }, []);
-  return (
-    <div class="modal-scrim" onMouseDown={(e) => (downOnScrim.current = e.target === e.currentTarget)} onClick={(e) => downOnScrim.current && e.target === e.currentTarget && onClose()}>
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex={-1} ref={box}>
-        <div class="entry-head"><h2 id="modal-title">{title}</h2><button class="x" type="button" aria-label="Close" onClick={onClose}>&times;</button></div>
-        <div class="entry-body">{children}</div>
-      </div>
-    </div>
-  );
-}
-
 function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; draft: Values | null; setDraft: (v: Values | null) => void }) {
+  // Absent, the form edits the stub, and the edit link goes to GitHub's new-file page.
+  const exists = p.files.file(p.cohort.org, CONFIG_REPO, ASSIGNMENTS_FILE).kind !== 'absent';
   const env = useEnv();
   const [save, runSave, setSave] = useSave(env);
   const layers = semesterLayers(p, f.doc);
-  const tiers = runTiers((k) => resolve(k, layers, 'course'));
   const before = toValues(rawBlock(f.doc, ['defaults']));
+  const tiers = runTiers((k) => resolve(k, layers, 'course'), RUN_KEYS, before);
   const cur = draft ?? before;
   const errors = fieldErrors(null, tiers, cur);
   const dirty = draft !== null && !deepEqual(compact(draft), compact(before));
@@ -144,13 +111,13 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
   return (
     <>
       <p class="footnote">Every assignment this semester runs on these unless its own page says otherwise. Left empty, the value in grey applies: the course’s default, else the institution’s. <a class="textlink" href={`?course=${p.course.org}#details`}>Change the course’s defaults</a></p>
-      {f.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({f.error}); fix it with Edit the file.</CheckLine> : (
+      {f.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({f.error}); fix it with Edit the file directly.</CheckLine> : (
         <>
           <SchemaForm id="sd" schema={null} tiers={tiers} values={cur} onChange={(v) => { setDraft(v); setSave({ kind: 'idle' }); }} />
-          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }} />
+          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE, exists }} />
         </>
       )}
-      <Lives org={p.cohort.org} repo={CONFIG_REPO} path={ASSIGNMENTS_FILE} />
+      <Lives org={p.cohort.org} repo={CONFIG_REPO} path={ASSIGNMENTS_FILE} exists={exists} />
     </>
   );
 }
@@ -209,7 +176,7 @@ export function RunRows({ id, keys, layers, draft, setDraft, errors, defaultsHre
             {open ? (
               <div class="cond">
                 {r.keys.map((k) => (
-                  <Field id={`${id}-${k}`} k={k} t={runTier(k, resolve(k, layers, below('assignment'))) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
+                  <Field id={`${id}-${k}`} k={k} t={runTier(k, resolve(k, layers, below('assignment')), { override: true }) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
                     set={(key, v) => setDraft({ ...draft, [key]: v })} />
                 ))}
                 <button class="textlink" type="button" onClick={() => { setOpened(opened.filter((x) => x !== r.name)); setDraft(Object.fromEntries(Object.entries(draft).filter(([k]) => !r.keys.includes(k as RunKey)))); }}>Use the default</button>
@@ -319,7 +286,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   const sf = scheduleFile(p.files, p.cohort.org);
   const af = assignmentsFile(p.files, p.cohort.org);
   if (sf === 'loading' || af === 'loading') return <section class="panel section"><h2>How this semester runs it</h2><Loading what="Reading the schedule and assignments.yml" /></section>;
-  if (!sf || sf.error) return <section class="panel section"><h2>How this semester runs it</h2><CheckLine cls="bad">The schedule could not be read{sf?.error ? ` (${sf.error})` : ''}; fix it with Edit the file.</CheckLine></section>;
+  if (!sf || sf.error) return <section class="panel section"><h2>How this semester runs it</h2><CheckLine cls="bad">The schedule could not be read{sf?.error ? ` (${sf.error})` : ''}; fix it with Edit the file directly.</CheckLine></section>;
   const baseT = readDraft(sf.doc, a.slug);
   if (!baseT || baseT.kind !== 'assignments') return <section class="panel section"><h2>How this semester runs it</h2><p class="footnote">{a.slug} is not in the schedule.</p></section>;
   const afOk = af !== null && !af.error;
@@ -371,7 +338,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
         </div>
         <div class="form-section">
           <h3>Run settings</h3>
-          {af === null ? <CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}; the defaults below may not be this semester’s.</CheckLine> : af.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({af.error}); fix it with Edit the file.</CheckLine> : null}
+          {af === null ? <CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}; the defaults below may not be this semester’s.</CheckLine> : af.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({af.error}); fix it with Edit the file directly.</CheckLine> : null}
           <RunRows id="ov" keys={keys} layers={layers} draft={r} setDraft={(v) => { setRun(v); setSave({ kind: 'idle' }); }} errors={rErr}
             defaultsHref="#assignments" teamsHref={group ? `#assignment-${a.slug}/teams` : undefined} forced={forcedVisibility(cfg)} />
           <details class="fold" open={!!repoName}>
@@ -384,7 +351,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
           </details>
         </div>
         <div class="form-section">
-          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirtyT && !dirtyR} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: dirtyR && !dirtyT ? ASSIGNMENTS_FILE : 'schedule.yml' }} />
+          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirtyT && !dirtyR} file={dirtyR && !dirtyT ? { org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE, exists: p.files.file(p.cohort.org, CONFIG_REPO, ASSIGNMENTS_FILE).kind !== 'absent' } : { org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
           <p class="lives">Dates live in <code>{CONFIG_REPO}/schedule.yml</code>; run settings in <code>{CONFIG_REPO}/{ASSIGNMENTS_FILE}</code>.</p>
         </div>
       </div>

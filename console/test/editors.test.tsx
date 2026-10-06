@@ -12,10 +12,10 @@ import { fieldErrors } from '../src/forms/Form';
 import { COURSE_FACTS } from '../src/tiers/course';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
 import { POLICY, penaltyRate } from '../src/model/policy';
 import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { assignmentKey, blankDraft, draftErrors, freshId, nextNumber, readDraft, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { assignmentKey, blankDraft, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
@@ -115,6 +115,11 @@ describe('the schedule entry sheet model', () => {
     expect(withNumber({ ...d, number: 7 }, doc).number).toBe(7);
     expect(withNumber({ ...d, number: '' }, doc).number).toBe('');
     expect(withNumber({ ...d, id: 'assignment-1' }, doc).number).toBeUndefined();
+    // Supporting files are no row: a new one gets no number, and none is asked of it.
+    const data = { ...blankDraft('lecture', { repo: 'cm' }), number: 3 } as ReleaseDraft;
+    expect(withNumber(data, { releases: {} }, undefined, 'assets').number).toBeUndefined();
+    expect(needsNumber(data, 'assets')).toBe(false);
+    expect(needsNumber(data, 'lecture')).toBe(true);
     const ok = { ...d, dueDate: '2026-10-01', handoutDate: '2026-09-01' };
     expect(draftErrors({ ...ok, number: 2 }, { doc })).toEqual({});
     expect(draftErrors({ ...ok, number: 1 }, { doc }).number).toBe('assignment-1 is already in this schedule.');
@@ -132,12 +137,23 @@ describe('the schedule entry sheet model', () => {
     const d = withNumber(blank, doc);
     expect(d.number).toBe(1);
     expect(draftErrors(d, { templateUsers: () => 0 })).toEqual({});
-    const id = freshId(doc, 'releases', 'lecture');
+    const id = freshId(doc, 'releases', 'lecture-1');
     expect(id).toBe('lecture-1');
     writeDraft(y, { ...d, id }, doc);
     const out = parse(y.text);
     expect(out.releases['lecture-1']).toEqual({ event_datetime: '2026-09-10T10:00', kind: 'lecture', number: 1, title: 'Intro', deploy: [{ course_source_repo: 'course-materials-f2026', course_source_path: 'lectures/01_intro' }] });
     expect(y.text.split('\n').filter((l) => l.trim().startsWith('#'))).toEqual(SEEDED.split('\n').filter((l) => l.trim().startsWith('#')));
+  });
+
+  it('keys an unnumbered release with no digit, so a readings pack joins no lecture', () => {
+    const doc = { releases: { readings: {}, 'readings-week': {}, 'lecture-1': {} }, events: { 'readings-week-b': {} } };
+    expect(unnumberedId({}, 'readings', '')).toBe('readings');
+    expect(unnumberedId(doc, 'readings', '')).toBe('readings-b');
+    expect(unnumberedId(doc, 'readings', 'Week 3')).toBe('readings-week-c');
+    expect(unnumberedId(doc, 'readings', 'Week 3, part A')).toBe('readings-week-3-part-a');
+    expect(unnumberedId({}, 'lecture', '')).toBe('lecture');
+    expect(freshId({ releases: { 'lecture-3': {} } }, 'releases', 'lecture-3')).toBe('lecture-3-b');
+    expect(freshId({ events: { 'midterm-exam': {} } }, 'events', 'Midterm exam')).toBe('midterm-exam-b');
   });
 
   it('edits an entry in place, keeping the keys the sheet does not show', () => {
@@ -273,6 +289,15 @@ describe('the operation panel', () => {
     expect(render(<EnvCtx.Provider value={env}><OpPanel /></EnvCtx.Provider>)).toContain('class="opbar"');
   });
 
+  it('names the weekly plan’s preview Copy in the panel too, never Preview', () => {
+    const env = saveEnv(new FakeGitHub());
+    env.ops.open(defs.generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026', 'SYLLABUS.md'));
+    const out = render(<EnvCtx.Provider value={env}><OpPanel /></EnvCtx.Provider>);
+    expect(out).toContain('<button class="btn" type="button">Copy</button>');
+    expect(out).not.toContain('>Preview</button>');
+    expect(out).toContain('>Write the weekly plan</button>');
+  });
+
   it('shows the return-marks channels, the always-on ones locked', () => {
     const env = saveEnv(new FakeGitHub());
     env.ops.open(defs.returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'assignment-2', title: 'Assignment 2: Regression', template: 'assignment-2-f2026', units: 48, group: false, when: 'Marking' }, 40, 'assignment-2'));
@@ -330,9 +355,18 @@ describe('editing screens', () => {
     expect(out).toContain('Check instructor access');
     expect(out).toContain('>Edit<');
   });
+  it('points every link to a file that does not exist yet at GitHub’s new-file page, never a 404', () => {
+    const none = new StaticFiles();
+    for (const [screen, path] of [[<StudentsScreen {...props({ files: none })} />, 'students.csv'], [<InstructorsScreen {...props({ files: none })} />, 'instructors.yml']] as const) {
+      const out = html(screen);
+      expect(out).toContain(`/new/main?filename=${path}`);
+      expect(out).not.toContain(`/edit/main/${path}`);
+      expect(out).not.toContain(`/blob/main/${path}`);
+    }
+  });
   it('teams shows the window, the team size from assignments.yml and who has no team', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams' })} />);
-    expect(out).toContain('<h1>Assignment 3: Group project <span class="hint">');
+    expect(out).toContain('<h2 class="h1">Assignment 3: Group project <span class="hint-wrap">');
     expect(out).toContain('2 of 3 joined students in 1 teams; 1 without a team.');
     expect(out).toContain('team-alpha<span>2 of 3</span>');
     expect(out).toContain('Carla Cohen');
@@ -340,7 +374,7 @@ describe('editing screens', () => {
   });
   it('marks computes the total with the penalty and adjustment', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks' })} />);
-    expect(out).toContain('<h1>Assignment 2: Regression <span class="hint">');
+    expect(out).toContain('<h2 class="h1">Assignment 2: Regression <span class="hint-wrap">');
     expect(out).toContain('Total / 40');
     expect(out).toContain('−20%');
     expect(out).toContain('<td class="calc">28.2</td>');
@@ -365,6 +399,11 @@ describe('editing screens', () => {
   const cp = { course, loaded: { kind: 'absent' } as Loaded, cohortStates: { [COHORT_ORG]: ready }, files, now: NOW };
   it('course details edits admins with emails and the defaults', () => {
     const out = html(<DetailsScreen {...cp} />);
+    expect(out).toContain(`<div class="actions"><a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/dsl-course.yml" target="_blank" rel="noopener">Edit on GitHub`);
+    expect(out).not.toContain('New semester');
+    // On .github's own default branch; GitHub's new-file page while dsl-course.yml does not exist.
+    const trunk = new StaticFiles({}, {}, {}, { [COURSE_ORG]: [{ name: '.github', default_branch: 'trunk' }] });
+    expect(html(<DetailsScreen {...cp} files={trunk} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/trunk?filename=dsl-course.yml"`);
     expect(out).toContain('value="Machine Learning"');
     expect(out).toContain('value="a@staff.example.org"');
     expect(out).toContain('Defaults for this course’s assignments');
@@ -375,22 +414,14 @@ describe('editing screens', () => {
     expect(out).toContain(`placeholder="${POLICY.contact}"`);
     expect(out).toContain(`institution default: ${POLICY.licences[0].name}`);
     expect(out).toContain(`<option value="${POLICY.licences[1].name}"`);
-    // The website's switch lives on its own tab: shown here, read only.
-    expect(out).toMatch(/<dt>Public website<\/dt><dd>On\. <a class="textlink" href="#website">Manage<\/a>/);
+    // The website's on/off is a switch here, beside the link to its own tab.
+    expect(out).toMatch(/<input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked\/><span>Public website<\/span><\/label><span class="footnote" id="cd-web-state" aria-live="polite">On: updates daily<\/span> <a class="textlink" href="#website">Manage<\/a>/);
     const off = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: false\n' }, {}, TREES);
-    expect(html(<DetailsScreen {...cp} files={off} />)).toContain('<dd>Off. <a');
+    expect(html(<DetailsScreen {...cp} files={off} />)).toContain('aria-describedby="cd-web-state"/><span>Public website</span></label><span class="footnote" id="cd-web-state" aria-live="polite">Off</span>');
     const none = Object.fromEntries(Object.entries(FILES).filter(([k]) => !k.endsWith('opencourse.yml')));
-    expect(html(<DetailsScreen {...cp} files={new StaticFiles(none, {}, TREES)} />)).toContain('<dd>Off. <a');
-  });
-  it('writes a contact and a licence into dsl-course.yml and a file without them still saves', () => {
-    const src = 'course_name: ML\ncourse_code: E1\n';
-    const meta = obj(new YamlText(src).toJS());
-    const before = detailsOf(meta);
-    const out = courseFileAfter(src, before, { ...before, about: { ...before.about, contact: 'ml@x.edu', licence: 'CC BY 4.0' } }, meta);
-    expect('text' in out && out.text).toContain('contact: ml@x.edu\nlicence: CC BY 4.0');
-    const same = courseFileAfter(src, before, { ...before, about: { ...before.about, course_code: 'E2' } }, meta);
-    expect('text' in same && same.text).toBe('course_name: ML\ncourse_code: E2\n');
-    expect(fieldErrors(null, COURSE_FACTS, { contact: 'not-an-email' }).contact).toBe('Write an email address.');
+    expect(html(<DetailsScreen {...cp} files={new StaticFiles(none, {}, TREES)} />)).toContain('aria-live="polite">Off</span>');
+    const broken = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: [\n' }, {}, TREES);
+    expect(html(<DetailsScreen {...cp} files={broken} />)).toMatch(/id="cd-web" aria-describedby="cd-web-state" disabled\/>.*opencourse.yml does not parse; fix it in Manage\./);
   });
   it('skips the account check when only a course admin handle’s case changes', async () => {
     const src = 'course_name: ML\npeople:\n  course_admins:\n    - github_handle: octo\n      email: o@x.edu\n';
@@ -404,12 +435,40 @@ describe('editing screens', () => {
     expect(await missingAdmin(env, before.admins, after.admins)).toBeNull();
     expect(looked).toEqual([]);
   });
+  it('writes a contact and a licence into dsl-course.yml and a file without them still saves', () => {
+    const src = 'course_name: ML\ncourse_code: E1\n';
+    const meta = obj(new YamlText(src).toJS());
+    const before = detailsOf(meta);
+    const out = courseFileAfter(src, before, { ...before, about: { ...before.about, contact: 'ml@x.edu', licence: 'CC BY 4.0' } }, meta);
+    expect('text' in out && out.text).toContain('contact: ml@x.edu\nlicence: CC BY 4.0');
+    const same = courseFileAfter(src, before, { ...before, about: { ...before.about, course_code: 'E2' } }, meta);
+    expect('text' in same && same.text).toBe('course_name: ML\ncourse_code: E2\n');
+    expect(fieldErrors(null, COURSE_FACTS, { contact: 'not-an-email' }).contact).toBe('Write an email address.');
+  });
   it('materials settings previews what is withheld, and nothing about the public website', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
     expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">withheld<\/span><span class="footnote">withheld by <code>solutions\/<\/code><\/span>/);
-    expect(out).toContain('Write the session list');
-    expect(out).not.toContain('public website');
+    expect(out).toContain('Weekly plan for the syllabus');
+    // Copy opens the plan to copy; Write puts it into the syllabus (decision 0031 rule 9).
+    expect(out).toContain('>Copy</button>');
+    expect(out).toContain('>Write</button>');
+    expect(out).not.toContain('>Preview</button>');
+    expect(out).toContain('aria-label="About Write"');
+    // A syllabus that is not Markdown cannot be written into: Copy alone, and why.
+    const pdf = new StaticFiles({ ...FILES, [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'syllabus: E1282.pdf\n' }, {}, TREES);
+    const onlyCopy = html(<MaterialsScreen {...cp} files={pdf} entry="course-materials-f2026" />);
+    expect(onlyCopy).toContain('>Copy</button>');
+    expect(onlyCopy).not.toContain('>Write</button>');
+    expect(onlyCopy).toContain('E1282.pdf is not Markdown, so the plan cannot be written into it: copy it and paste it in.');
+    // A Markdown syllabus that is not there yet: nothing to write into either.
+    const absent = new StaticFiles({ ...FILES, [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'syllabus: E1282.md\n' }, {}, TREES);
+    const noFile = html(<MaterialsScreen {...cp} files={absent} entry="course-materials-f2026" />);
+    expect(noFile).not.toContain('>Write</button>');
+    expect(noFile).toContain('There is no E1282.md yet: write the syllabus first, or copy the plan.');
+    // No public-website setting here: that list is the Public website tab's.
+    expect(out).not.toContain('kept off');
+    expect(out).not.toContain('opencourse.yml');
   });
   it('materials settings releases every file when nothing is withheld', () => {
     const none = new StaticFiles({}, {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html'] });
@@ -420,7 +479,11 @@ describe('editing screens', () => {
   });
   it('the public website edits opencourse.yml and asks for the confirmation the engine’s missing preview needs', () => {
     const out = html(<WebsiteScreen {...cp} />);
-    expect(out).toContain('Publish public website');
+    expect(out).toContain('<button class="btn" type="button">Publish website</button>');
+    expect(out).toContain(`<a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/opencourse.yml" target="_blank" rel="noopener">Edit on GitHub`);
+    expect(out).not.toContain('New semester');
+    // No opencourse.yml yet: Edit on GitHub opens GitHub's new-file page with the name filled in.
+    expect(html(<WebsiteScreen {...cp} files={new StaticFiles({}, {}, {})} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/main?filename=opencourse.yml"`);
     expect(out).toContain('Source materials');
     expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">kept off<\/span>/);
     expect(out).toContain('Keep the website updated');
@@ -446,6 +509,9 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
     expect(nextNumber(doc, 'lecture', kindOf)).toBe(8);
     expect(nextNumber(doc, 'lab', kindOf)).toBe(4);
     expect(nextNumber(doc, 'drop-in', kindOf)).toBe(1);
+    // Readings and supporting files carry no number of their own: nothing is proposed.
+    expect(nextNumber(doc, 'readings', kindOf)).toBeNull();
+    expect(nextNumber(doc, 'assets', kindOf)).toBeNull();
     expect(nextNumber(doc, 'assignment')).toBe(3);
     const lab = blankDraft('lab', { repo: 'm' }) as ReleaseDraft;
     expect(withNumber(lab, doc, kindOf).number).toBe(4);

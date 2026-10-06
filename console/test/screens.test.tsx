@@ -7,16 +7,18 @@ import { AppAuth } from '../src/auth/app';
 import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles } from './staticFiles';
+import { signal } from '@preact/signals';
+import { EnvCtx, type Env } from '../src/env';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { CohortScreen } from '../src/screens/Cohort';
-import { CourseScreen, SetupList, TemplateScreen, readyWords, semesterChip, stepLink } from '../src/screens/Course';
+import { CourseHeaderActions, CourseScreen, SETTLING_COLUMNS, SetupList, TemplateScreen, overviewHeights, readyWords, semesterChip, setupComplete, splitColumns, stepLink } from '../src/screens/Course';
 import { HomeScreen, ReadonlyScreen, SignInScreen } from '../src/screens/Home';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
-import { OperationsScreen, SiteScreen } from '../src/screens/Site';
+import { OperationsScreen, SiteScreen, announcementFile, readAnnouncement } from '../src/screens/Site';
 import type { CohortProps } from '../src/screens/types';
 import { generateSyllabus } from '../src/ops/defs';
 import { OutcomeView } from '../src/ops/Panel';
@@ -65,7 +67,7 @@ events:
 const STUDENTS = '﻿hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@students.example.org,Anna Adams,enrolled,anna-a,101,SECRETCODE1,2026-09-02T09:30:00Z\nben@example,Ben Baker,enrolled,,,,\ncarla@students.example.org,Carla Cohen,auditor,,,SECRETCODE3,2026-09-02T09:30:00Z\n';
 const PEOPLE = 'instructors:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n    photo: images/a.jpg\n  - github_handle: b-sample\n    role: teaching_assistant\n    email: b@staff.example.org\n    name: B. Sample\n    start: "2026-09-01"\n    end: "2026-12-31"\n';
 const GRADING = 'title: Group project\ntype: group\nteam_formation: self_select\nmax_team_size: 4\nsubmit_via: assignment_repo\nvisibility: private\nformats: [ipynb]\nautograde: sometimes\ncompletion_check: true\ngrader_pdf: false\nquestions:\n  proposal: 20\n  analysis: 30\n';
-const OUTCOME = JSON.stringify({ schema: 'dsl.outcome/1', op: 'release.now', run_id: 4821, actor: 'a', preview: false, conclusion: 'done', summary: 'x', counts: { files: 7 }, reasons: [{ code: 'RELEASED', text: 'lectures/03 copied' }] });
+const OUTCOME = JSON.stringify({ schema: 'dsl.outcome/1', op: 'release.entry', run_id: 4821, actor: 'a', preview: false, conclusion: 'done', summary: 'x', counts: { files: 7 }, reasons: [{ code: 'RELEASED', text: 'lectures/03 copied' }] });
 
 const TREE = { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/05_trees_and_ensembles/slides.html', 'lectures/05_trees_and_ensembles/notes.pdf', 'lectures/03_regularisation/slides.html'] };
 
@@ -74,7 +76,7 @@ const files = new StaticFiles(
     [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE,
     [`${COHORT_ORG}/semester-config/students.csv`]: STUDENTS,
     [`${COHORT_ORG}/semester-config/instructors.yml`]: PEOPLE,
-    [`${COHORT_ORG}/semester-config/.system/outcomes/release.now.json`]: OUTCOME,
+    [`${COHORT_ORG}/semester-config/.system/outcomes/release.entry.json`]: OUTCOME,
     [`${COHORT_ORG}/${COHORT_ORG}.github.io/index.md`]: '---\nlayout: home\n---\nWelcome to **Machine Learning**.\n',
     [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: GRADING,
   },
@@ -91,7 +93,7 @@ describe('S0 sign in', () => {
     const auth = new ConsoleAuth(new PatAuth({ store: null }), null);
     const t = text(<SignInScreen auth={auth} onSignedIn={() => {}} />);
     expect(t).toContain('GitHub token');
-    expect(t).toContain('Sign in with GitHub. The console can see and change only what your GitHub account can.');
+    expect(t).toContain('The console can see and change only what your GitHub account can.');
     expect(html(<SignInScreen auth={auth} onSignedIn={() => {}} />)).not.toContain('>Sign in with GitHub</button>');
     expect(t).toMatch(/repo .*workflow/);
     expect(t).toContain('fine-grained token');
@@ -133,8 +135,10 @@ describe('S4 cohort overview', () => {
   const out = html(<CohortScreen {...props()} />);
   const t = text(<CohortScreen {...props()} />);
   it('leads with the header, term strip, problems, this week and assignments', () => {
-    expect(t).toContain('Machine Learning, Fall 2026');
-    expect(t).toContain('Fall 2026, 7 Sep to 18 Dec. Week 3 of 15. Exam 22 Oct. Archive 31 Jan 2027.');
+    expect(html(<CohortScreen {...props()} />)).not.toContain('class="crumbs"'); // the semester banner replaces them
+    expect(t).toContain('Dashboard ? What this semester has planned');
+    expect(t).toContain('Exam 22 Oct. Archive 31 Jan 2027.');
+    expect(t).not.toContain('Week 3 of 15');
     expect(t).toContain('Setup done, but 2 stages have a problem');
     expect(out).toContain('class="term-strip"');
     expect((out.match(/class="wk[ "]/g) ?? []).length).toBe(15);
@@ -152,8 +156,8 @@ describe('S4 cohort overview', () => {
     expect(t).toMatch(/Checked \d+ min ago/);
     expect(t).toContain('Released Session 3: 7 files to materials.');
   });
-  it('has Re-check and More in the header, with the More items live', () => {
-    expect(out).toMatch(/<button class="btn" type="button">Re-check<\/button>/);
+  it('has Refresh and More in the header, with the More items live', () => {
+    expect(out).toMatch(/<button class="btn" type="button">Refresh<\/button>/);
     expect(t).toContain('Preview the next automatic run');
     expect(t).toContain('Keep for future semesters');
     expect(out).not.toMatch(/role="menuitem" disabled/);
@@ -165,7 +169,7 @@ describe('S4 cohort overview', () => {
   it('shows Status not computed yet when the file is absent', () => {
     const a = html(<CohortScreen {...props({ loaded: { kind: 'absent' } })} />);
     expect(a).toContain('Status not computed yet');
-    expect(a).toMatch(/<button class="btn" type="button">Re-check/);
+    expect(a).toMatch(/<button class="btn" type="button">Refresh/);
   });
 });
 
@@ -213,16 +217,18 @@ describe('S6 schedule and S11 release', () => {
     expect(out).toContain('lectures/05_trees_and_ensembles');
     expect(out).toContain('schedule.yml#L5');
   });
-  it('pre-selects the inferred kind, from the folder the copy lands in and the repo’s own aliases', () => {
+  it('pre-selects the inferred kind: the engine’s for a saved entry, else from where the copy lands and the repo’s own aliases', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
     expect(out).toContain('<option value selected>Lecture (inferred)</option>');
+    const withKind = (kind: string | null): Loaded => ({ kind: 'ready', sha: 's', stale: [], status: { ...STATUS, releases: (STATUS.releases ?? []).flatMap((r) => (r.id !== 's5' ? [r] : kind === null ? [] : [{ ...r, kind }])) } });
+    expect(html(<ScheduleScreen {...props({ entry: 's5', loaded: withKind('lab') })} />)).toContain('<option value selected>Lab (inferred)</option>');
     const aliased = new StaticFiles({ ...Object.fromEntries(['schedule.yml'].map((f) => [`${COHORT_ORG}/semester-config/${f}`, SCHEDULE])), [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'kinds:\n  lectures: lab\n' }, {}, TREE);
-    expect(html(<ScheduleScreen {...props({ entry: 's5', files: aliased })} />)).toContain('<option value selected>Lab (inferred)</option>');
+    expect(html(<ScheduleScreen {...props({ entry: 's5', files: aliased, loaded: withKind(null) })} />)).toContain('<option value selected>Lab (inferred)</option>');
   });
   it('lists the materials repos and the Other repos to release from', () => {
     const listed = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE }, {}, TREE, { [COURSE_ORG]: [{ name: '.github' }, { name: 'course-materials-f2026' }, { name: 'lecture-code-f2026' }, { name: 'assignment-3-f2026' }] });
     const out = html(<ScheduleScreen {...props({ entry: 's5', files: listed })} />);
-    expect(out).toMatch(/<optgroup label="Materials repos"><option value="course-materials-f2026" selected>/);
+    expect(out).toMatch(/<optgroup label="Handout materials repos"><option value="course-materials-f2026" selected>/);
     expect(out).toContain('<optgroup label="Other repos"><option value="lecture-code-f2026">lecture-code-f2026</option></optgroup>');
   });
   it('renders a release with its source, destination and problem', () => {
@@ -235,12 +241,12 @@ describe('S6 schedule and S11 release', () => {
   });
   const unstaged: Loaded = {
     kind: 'ready', sha: 's', stale: [],
-    status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', kind: null, title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
+    status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', kind: 'lecture', title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
   };
   it('renders a release with no deploy block as nothing to release, with no Release early', () => {
     const out = html(<ScheduleScreen {...props({ loaded: unstaged })} />);
     expect(out).toContain('<b>Lecture 12</b>: Review');
-    expect(out).toMatch(/<li class="trow term" data-entry="lecture-12"><span class="k">release<\/span>/);
+    expect(out).toMatch(/<li class="trow lec" data-entry="lecture-12"><span class="k">lecture<\/span>/);
     expect(out).toContain('Nothing to release yet: this entry has no deploy block');
     expect(out).toContain('href="#schedule-lecture-12"');
     expect(out).not.toContain('Release early');
@@ -255,14 +261,14 @@ describe('S6 schedule and S11 release', () => {
 
 describe('operation outcome', () => {
   it('shows the generated text directly, and what the op touched in the details fold', () => {
-    const def = generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026');
-    const outcome = { schema: 'dsl.outcome/1' as const, op: def.op, run_id: 7, actor: 'a', preview: true, conclusion: 'previewed' as const, summary: 'Preview: the session list.', reasons: [{ code: 'NO_SOLUTION_REGION', text: 'solution.py\nhas no region' }], details: ['main/solution.py', 'main/README.md'], block: '## Course sessions and readings\n- Session 1: Intro' };
-    const out = html(<OutcomeView result={{ outcome, people: [], leaked: [] }} def={def} />);
+    const def = generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026', 'SYLLABUS.md');
+    const outcome = { schema: 'dsl.outcome/1' as const, op: def.op, run_id: 7, actor: 'a', preview: true, conclusion: 'previewed' as const, summary: 'Preview: the weekly plan.', reasons: [{ code: 'NO_SOLUTION_REGION', text: 'solution.py\nhas no region' }], details: ['main/solution.py', 'main/README.md'], block: '## Course sessions and readings\n- Session 1: Intro' };
+    const out = html(<OutcomeView result={{ outcome }} def={def} />);
     expect(out).toContain('<summary>Details</summary>');
     expect(out).toContain('<ul class="outcome-list"><li>main/solution.py</li><li>main/README.md</li></ul>');
     expect(out).toContain('<pre class="outcome-details">## Course sessions and readings\n- Session 1: Intro</pre>');
     expect(out).toContain('>Copy</button>');
-    // The session list is what a preview is for (finding 31): above the fold, not in it.
+    // The weekly plan is what a preview is for (finding 31): above the fold, not in it.
     expect(out.indexOf('outcome-details')).toBeLessThan(out.indexOf('<summary>Details</summary>'));
     expect(out).toContain('<td class="pre">solution.py\nhas no region');
   });
@@ -361,7 +367,8 @@ describe('S2 course and S17 template', () => {
     // C1-C3 are done; the template's problem is what holds the course back.
     expect(t).toContain('Not ready: a problem below needs fixing.');
     expect(t).not.toMatch(/\b0 (setup steps|problems)/);
-    expect(t).toContain('Setup steps are things still to do. Problems are things that broke.');
+    expect(t).toContain('Setup steps are the one-time things a course needs; to-dos are work started but not finished. Problems, on the right, are things that broke. Optional items can be set aside: click the circle before them.');
+    expect(t).toContain('Unfinished work is a to-do on the left, not a problem.');
     expect(t).toContain('Students get only what a semester releases or hands out');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).toContain('assignment-3-f2026');
@@ -385,6 +392,171 @@ describe('S2 course and S17 template', () => {
     templates: [],
     ready: false,
   } as typeof base;
+  it('puts the verdict under the page note with a tick or a red cross, not in the page head', () => {
+    const out = html(<CourseScreen {...cp} />);
+    expect(out).toContain('<p class="verdict bad"><svg');
+    expect(out).toContain('<span>Not ready: a problem below needs fixing.</span></p>');
+    expect(out).not.toContain('class="lede"');
+    expect(out.indexOf('class="page-note"')).toBeLessThan(out.indexOf('class="verdict'));
+    // Above the read-only banner too: the verdict sits directly under the note.
+    const ro = html(<CourseScreen {...cp} course={{ ...course, write: false }} />);
+    expect(ro.indexOf('class="verdict')).toBeLessThan(ro.indexOf('class="ro-banner"'));
+    const fine: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, ready: true } }, sha: 's', stale: [] };
+    const ok = html(<CourseScreen {...cp} loaded={fine} />);
+    expect(ok).toContain('<p class="verdict ok"><svg');
+    expect(ok).toContain('<span>Ready for a new semester.</span>');
+  });
+  it('lists the to-dos under Setup & To do as a checklist like Initial setup, each with where it is done', () => {
+    const out = html(<CourseScreen {...cp} />);
+    expect(out).toContain('Setup &amp; To do');
+    expect(out).toContain('<summary><span class="fold-title">Initial setup</span>');
+    expect(out).toContain('<summary><span class="fold-title">To do</span><span class="cnt">1 open</span></summary>');
+    const todo = out.slice(out.indexOf('>To do</span>'), out.indexOf('</details>', out.indexOf('>To do</span>')));
+    // The same markup as the setup list: an open line, its check's label and ?, why and the link.
+    // With write access the circle is a button that asks whether the line can be set aside (decision 0032).
+    expect(todo).toContain('<ul class="setup"><li class="open"><button class="s-mark s-circle" type="button" title="Set aside…" aria-label="Set aside Weekly plan in the syllabus…" aria-haspopup="dialog"></button>');
+    expect(todo).toContain('Weekly plan in the syllabus<span class="s-need slug">course-materials-f2026</span><span class="sr">: To do</span>');
+    expect(todo).toContain('Every session with its date and readings, built from the semester schedule');
+    expect(todo).toContain('<span class="s-why">The weekly plan is not in SYLLABUS.md yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a></span>');
+    const none: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [] } }, sha: 's', stale: [] };
+    expect(text(<CourseScreen {...cp} loaded={none} />)).toContain('Nothing to do.');
+    const tpl: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.' }] } }, sha: 's', stale: [] };
+    const t = html(<CourseScreen {...cp} loaded={tpl} />);
+    expect(t).toContain('Brief written<span class="s-need slug">a</span>');
+    expect(t).toContain('href="#template-a" aria-label="Open a settings">Open settings</a>');
+  });
+  it('folds Initial setup once complete and keeps To do open while it has items', () => {
+    // The fixture's C5 has a problem: setup is open, and so is To do with its one item.
+    expect(setupComplete(base)).toBe(false);
+    expect((html(<CourseScreen {...cp} />).match(/<details class="fold setup-fold" open>/g) ?? []).length).toBe(2);
+    // Every step done but the website, still open: not complete (decision 0032 rule 5).
+    const done = { ...base, stages: { ...base.stages, C5: 'done' }, todo: [] } as typeof base;
+    expect(setupComplete(done)).toBe(false);
+    // Set aside, it no longer counts: complete, folded, and To do with nothing folds too.
+    const aside = { ...done, stage_set_aside: { ...done.stage_set_aside, C6: true } } as typeof base;
+    expect(setupComplete(aside)).toBe(true);
+    const f = new StaticFiles({ [`${COURSE_ORG}/.github/dsl-course.yml`]: 'course_name: Machine Learning\nset_aside: [C6]\n' });
+    const out = html(<CourseScreen {...cp} files={f} loaded={{ kind: 'ready', status: { ...STATUS, course: aside }, sha: 's', stale: [] }} />);
+    expect(out).not.toContain('<details class="fold setup-fold" open>');
+    expect(out).toContain('<summary><span class="fold-title">Initial setup</span><span class="cnt">Complete</span></summary>');
+    expect(out).toContain('<summary><span class="fold-title">To do</span><span class="cnt">Nothing to do</span></summary>');
+  });
+  it('shows every course fact in Course details, the institution’s in grey', () => {
+    const t = text(<CourseScreen {...cp} />);
+    expect(t).toContain('Description ? One paragraph about the course, shown on the public website. In dsl-course.yml. Not set');
+    expect(t).toMatch(/Contact \? Who students and the lab write to about the course\. In dsl-course\.yml; the institution’s contact when unset\. \S+@\S+, from the institution/);
+    expect(t).toContain(', from the institution');
+    expect(t).toContain('In dsl-course.yml. a-example');
+    // Every fact carries the small ?.
+    expect((html(<CourseScreen {...cp} />).match(/<dt>[^<]*<span class="hint-wrap small">/g) ?? []).length).toBe(8);
+    expect(t).toContain('The course’s code in the catalogue, as students know it.');
+    expect(t).toContain('A semester’s instructors and TAs are set on that semester’s Instructors page.');
+    expect(t).toContain('This course’s default. Each assignment can set its own.');
+    const own = { ...course, meta: { ...course.meta, course_description: 'Learning from data.', contact: 'ml@example.org', licence: 'CC BY 4.0' } };
+    const mine = text(<CourseScreen {...cp} course={own} />);
+    expect(mine).toContain('In dsl-course.yml. Learning from data.');
+    expect(mine).toContain('when unset. ml@example.org');
+    expect(mine).toContain('when unset. CC BY 4.0');
+    expect(mine).not.toContain(', from the institution');
+  });
+  it('links the live public website once it is published', () => {
+    expect(html(<CourseScreen {...cp} />)).not.toContain(`href="https://${COURSE_ORG}.github.io"`);
+    const pub: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, stages: { ...base.stages, C6: 'done' } } }, sha: 's', stale: [] };
+    const out = html(<CourseScreen {...cp} loaded={pub} />);
+    expect(out).toContain(`href="https://${COURSE_ORG}.github.io"`);
+    const t = text(<CourseScreen {...cp} loaded={pub} />);
+    expect(t).toContain('Optional: an open course version of your materials accessible to anyone on the internet, updated daily.');
+    expect(t).toContain('Edit website details');
+    expect(t).not.toContain('Public website settings');
+    expect(out).toContain('<button class="btn small outline" type="button">Republish website</button>');
+    expect(html(<CourseScreen {...cp} />)).toContain('<button class="btn small outline" type="button">Publish website</button>');
+  });
+  it('keeps only New semester in the head; the status line, Refresh and the course on GitHub sit under it', () => {
+    const out = html(<CourseScreen {...cp} />);
+    // The head is the course banner's right side (decision 0031 rule 11); the screen starts under it.
+    expect(out).not.toContain('class="page-head"');
+    expect(out).not.toContain('<h1');
+    const head = html(<CourseHeaderActions course={course} />);
+    // Always the black primary button, ready or not.
+    expect(head).toContain(`<a class="btn" href="?course=${COURSE_ORG}#new-semester-1">New semester</a>`);
+    expect(head).not.toContain('Publish');
+    expect(head).not.toContain('Refresh');
+    expect(head).not.toContain('on GitHub');
+    const sub = out.slice(out.indexOf('class="actions sub-actions"'), out.indexOf('class="page-note"'));
+    // The course's own status is absent here (a semester's copy fills the page), so no age.
+    expect(text(<CourseScreen {...cp} />)).toContain('Refresh ? Reads the course and its semesters from GitHub again');
+    expect(sub).toContain('<button class="textlink" type="button">Refresh</button>');
+    expect(sub).toContain(`href="https://github.com/${COURSE_ORG}"`);
+    const none = text(<CourseScreen {...cp} cohortStates={{}} />);
+    expect(none).toContain('Not computed yet · Refresh');
+    const dated = new StaticFiles({}, {}, {});
+    dated.lastChange = () => new Date(NOW - 3 * 3600000).toISOString();
+    const fine: Loaded = { kind: 'ready', status: STATUS, sha: 's', stale: [] };
+    expect(text(<CourseScreen {...cp} loaded={fine} files={dated} />)).toContain('Updated 3 h ago · Refresh');
+    // A Refresh this session that changed nothing still reads just now.
+    const runs = signal([{ run_id: 1, op: 'semester.check', conclusion: 'ok', summary: '', finished: new Date(NOW).toISOString(), course: COURSE_ORG }]);
+    const env = { ops: { runs, current: signal(null) }, user: { login: 'a-example' } } as unknown as Env;
+    expect(text(<EnvCtx.Provider value={env}><CourseScreen {...cp} loaded={fine} files={dated} /></EnvCtx.Provider>)).toContain('Updated just now · Refresh');
+    // Read only: the GitHub link stays; no age, no Refresh.
+    const ro = html(<CourseScreen {...cp} course={{ ...course, write: false }} />);
+    const roSub = ro.slice(ro.indexOf('class="actions sub-actions"'), ro.indexOf('class="page-note"'));
+    expect(roSub).toContain('Course on GitHub');
+    expect(roSub).not.toContain('Refresh');
+  });
+  it('lays the overview out as two columns: Setup heads the left, Problems the right, materials then templates together', () => {
+    const out = html(<CourseScreen {...cp} />);
+    expect((out.match(/class="grid-2/g) ?? []).length).toBe(1);
+    expect(out).not.toContain('<h2>Public website');
+    const cols = out.slice(out.indexOf('class="grid-2 cols"'));
+    const second = cols.indexOf('<div class="stack">', 1 + cols.indexOf('<div class="stack">'));
+    const [left, right] = [cols.slice(0, second), cols.slice(second)];
+    expect(left.indexOf('<section class="panel section"><h2>Setup')).toBe(left.indexOf('<section'));
+    expect(right.indexOf('<section class="panel section" id="course-problems">')).toBe(right.indexOf('<section'));
+    for (const h of ['<h2>Semesters</h2>', '<h2>Course details</h2>', '<h2>Recent activity</h2>', '<h2>Handout materials</h2>']) expect(cols).toContain(h);
+    // Handout materials and Assignment templates sit one after the other in one column.
+    const half = left.includes('id="sec-materials"') ? left : right;
+    expect(half.indexOf('id="sec-templates"')).toBeGreaterThan(half.indexOf('id="sec-materials"'));
+    expect(half.slice(half.indexOf('id="sec-materials"'), half.indexOf('id="sec-templates"')).match(/<section/g)).toHaveLength(1);
+  });
+  it('keeps the placement fixed while statuses load, and splits once every one has arrived', () => {
+    const columns = (out: string) => {
+      const cols = out.slice(out.indexOf('class="grid-2 cols"'));
+      const second = cols.indexOf('<div class="stack">', 1 + cols.indexOf('<div class="stack">'));
+      const ids = (h: string) => ['<h2>Setup', 'id="course-problems"', '<h2>Semesters</h2>', '<h2>Course details</h2>', '<h2>Recent activity</h2>', 'id="sec-materials"'].filter((x) => h.includes(x));
+      return [ids(cols.slice(0, second)), ids(cols.slice(second))];
+    };
+    const settling = ['<h2>Setup', '<h2>Semesters</h2>', 'id="sec-materials"'];
+    // The course's own status and a semester's still loading: the fixed layout, whatever arrived.
+    const loading = { ...cp, loaded: { kind: 'loading' } as Loaded };
+    expect(columns(html(<CourseScreen {...loading} />))[0]).toEqual(settling);
+    expect(columns(html(<CourseScreen {...cp} cohortStates={{ [COHORT_ORG]: { kind: 'loading' } }} />))[0]).toEqual(settling);
+    // A semester not yet asked for counts as loading too.
+    expect(columns(html(<CourseScreen {...cp} cohortStates={{}} />))[0]).toEqual(settling);
+    expect(SETTLING_COLUMNS[0]).toEqual(['setup', 'semesters', 'handouts']);
+    // Once all have arrived the split is the estimate's, and the same however late each came.
+    const settled = columns(html(<CourseScreen {...cp} />));
+    expect(columns(html(<CourseScreen {...cp} cohortStates={{ ...cp.cohortStates }} />))).toEqual(settled);
+  });
+  it('splits the panels so the two columns come out about even, materials and templates as one block', () => {
+    const b = (key: string, h: number) => ({ key, h });
+    // Heights whose sums are all distinct: the one even split is 18 against 18.
+    expect(splitColumns([b('setup', 11), b('problems', 10), b('semesters', 1), b('details', 2), b('activity', 4), b('handouts', 8)])).toEqual([
+      ['setup', 'semesters', 'details', 'activity'],
+      ['problems', 'handouts'],
+    ]);
+    // A long Problems panel pulls everything else left; order within a column is kept.
+    expect(splitColumns([b('setup', 5), b('problems', 40), b('semesters', 6), b('details', 10), b('activity', 6), b('handouts', 12)])).toEqual([
+      ['setup', 'semesters', 'details', 'activity', 'handouts'],
+      ['problems'],
+    ]);
+    const hs = overviewHeights({ course: base, problems: 2, semesters: 2, description: '', activity: 1 });
+    expect(hs.map((x) => x.key)).toEqual(['setup', 'problems', 'semesters', 'details', 'activity', 'handouts']);
+    // Past four, more problems weigh nothing: a day's new fault does not reshuffle the page.
+    const weigh = (n: number) => overviewHeights({ course: base, problems: n, semesters: 2, description: '', activity: 1 })[1].h;
+    expect(weigh(9)).toBe(weigh(4));
+    // More to-dos make Setup & To do taller.
+    expect(overviewHeights({ course: { ...base, todo: [...base.todo!, ...base.todo!] }, problems: 2, semesters: 2, description: '', activity: 1 })[0].h).toBeGreaterThan(hs[0].h);
+  });
   it('renders the setup checklist from stage_why: ticks, the why and one link each', () => {
     const out = html(<SetupList course={withWhy} />);
     expect((out.match(/class="done"/g) ?? []).length).toBe(2);
@@ -409,7 +581,7 @@ describe('S2 course and S17 template', () => {
     expect(stepLink('C5', waiting).label).toBe('Open .github');
     expect(stepLink('C6', waiting).label).toBe('Open .github');
     expect(stepLink('C6', withWhy)).toEqual({ href: '#website', label: 'Set up the public website' });
-    expect(stepLink('C4', { ...withWhy, materials: [{ repo: 'm', state: 'todo' }] }).label).toBe('Open materials');
+    expect(stepLink('C4', { ...withWhy, materials: [{ repo: 'm', state: 'todo' }] }).label).toBe('Open handout materials');
     expect(stepLink('C5', { ...withWhy, stages: { ...withWhy.stages, C5: 'todo' }, templates: [{ repo: 't', slug: 't', state: 'todo' }] }).label).toBe('Open templates');
     expect(html(<SetupList course={base} />)).toContain('href="#course-problems">See the problem</a>');
   });
@@ -427,8 +599,9 @@ describe('S2 course and S17 template', () => {
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
-    expect(out).toContain('<h1>Group project <span class="hint">');
-    expect(out).toContain('<span>Group project</span></div>');
+    expect(out).toContain('<h2 class="h1">Group project <span class="hint-wrap">');
+    // The crumbs are the course banner's (decision 0031 rule 11), not the screen's.
+    expect(out).not.toContain('class="crumbs"');
     expect(out).toContain('value="Group project"');
     expect(out).toMatch(/value="group" checked/);
     expect(out).toContain('The file says “sometimes”. Choose on or off.');
@@ -436,7 +609,31 @@ describe('S2 course and S17 template', () => {
     expect(out).toContain('<td>50</td>');
     expect(out).toContain('Advanced <span class="cnt changed">(1 changed)</span>');
     expect(out).toContain('/edit/solution/grading_config.yml');
+    // No `starter:` and no tests: written by hand, so there is nothing to derive.
+    expect(out).toMatch(/value="handwritten" checked/);
+    // No Student version panel for a hand-written starter (decision 0028 rule 4).
+    expect(out).not.toContain('<h3>Student version');
+    expect(out).not.toContain('Derive student version');
+  });
+  const derivedFiles = () => new StaticFiles({ [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: `${GRADING}starter: derived\n` }, {}, TREE);
+  it('offers Derive only for a derived starter, and the engine’s reading stands in for a missing key', () => {
+    const out = html(<TemplateScreen {...cp} files={derivedFiles()} entry="assignment-3-f2026" />);
+    expect(out).toMatch(/value="derived" checked/);
     expect(out).toContain('Derive student version');
+    expect(out).toContain('<h3>Student version');
+    const st = { ...STATUS, course: { ...STATUS.course!, templates: [{ repo: 'assignment-3-f2026', slug: 'assignment-3-f2026', state: 'ready', starter: 'derived' as const }] } };
+    const read = html(<TemplateScreen {...cp} loaded={{ ...ready, status: st } as Loaded} entry="assignment-3-f2026" />);
+    expect(read).toMatch(/value="derived" checked/);
+  });
+  it('explains marking, points per question and the student version with a ?', () => {
+    const out = html(<TemplateScreen {...cp} files={derivedFiles()} entry="assignment-3-f2026" />);
+    expect(out).toMatch(/<h3>How it is marked <span class="hint-wrap"><button[^>]*aria-label="About marking"/);
+    expect(out).toMatch(/Points per question <span class="hint-wrap"><button[^>]*aria-label="About points per question"/);
+    expect(out).toMatch(/<h3>Student version <span class="hint-wrap"><button[^>]*aria-label="About the student version"/);
+    expect(out).toContain('Write the solution once and mark the answers; Derive builds the starter students get by blanking them. Run it after every change to the solution.');
+    expect(out).toContain('assignment-starter.md');
+    // One place for the student-version sentence: the ?, not a paragraph under it too.
+    expect(out).not.toContain('Builds the student starter on main');
   });
   it('shows a question marked from another file by its points', () => {
     const tagged = new StaticFiles(
@@ -457,19 +654,21 @@ describe('read only and the shell', () => {
     expect(t).toContain('Read only.');
     expect(t).toContain('No roster, no marks, no buttons.');
   });
-  it('puts the switcher, nav with the problem count and header links in the frame', () => {
-    const nav = html(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" problems={2} />);
-    expect(nav).toContain('Machine Learning, Fall 2026');
-    expect(nav).toContain('New semester of Machine Learning');
+  it('puts the course tree, nav with the problem count and the on-GitHub links in the side nav, none in the bar', () => {
+    const nav = html(<Sidenav courses={[course]} course={course} cohort={cohort} site={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" />);
+    expect(nav).toContain(`<a class="nav-anchor" href="?course=${COURSE_ORG}#course">Machine Learning</a>`);
+    expect(nav).toContain('Fall 2026');
     expect(nav).toContain('class="n-count"');
     expect(nav).toContain('aria-current="page"');
     expect(nav).toContain('2 problems');
-    const top = html(<Topbar user={{ login: 'a', id: 1, name: 'A', email: null, avatar_url: '' }} course={{ ...course, write: false }} cohort={cohort} navOpen={false} onMenu={() => {}} />);
-    expect(top).toContain('read only');
-    expect(top).toContain(`https://${COHORT_ORG}.github.io`);
-    expect(top).toContain('Semester on GitHub');
-    expect(top).toContain('Course on GitHub');
-    const foot = text(<Footer course={course} cohort={cohort} />);
+    expect(nav).toContain(`https://${COHORT_ORG}.github.io`);
+    expect(nav).toContain('Course on GitHub');
+    const top = html(<Topbar user={{ login: 'a', id: 1, name: 'A', email: null, avatar_url: '' }} navOpen={false} onMenu={() => {}} />);
+    expect(top).not.toContain('github.io');
+    expect(top).not.toContain('on GitHub');
+    const foot = text(<Footer title={course.name} sub={cohort.termLabel} />);
+    expect(foot).toContain('Machine Learning Fall 2026');
+    expect(text(<Footer sub="Your semesters" />)).toContain('DSL Teaching Console Your semesters');
     expect(foot).toContain('Friedrichstraße 180');
     expect(foot).toContain('Part of the Hertie Data Science Lab.');
   });
@@ -502,5 +701,13 @@ describe('explicit numbers (decision 0020)', () => {
     expect(out).toMatch(/<input id="e-num" type="number" min="1" max="999" value="5"/);
     const t = text(<ReleaseScreen {...props({ loaded: numbered, files: guestFiles, entry: 'guest' })} />);
     expect(t).toContain('Automation will skip this until it has a number.');
+  });
+});
+
+describe('an announcement file', () => {
+  it('reads back what it writes, and reads a CRLF file the same way', () => {
+    const f = announcementFile('2026-10-05', 'Room change: B2.01');
+    expect(readAnnouncement(f.content)).toEqual({ date: '2026-10-05', text: 'Room change: B2.01' });
+    expect(readAnnouncement('---\r\ndate: 2026-10-05\r\n---\r\nNo class today.\r\n')).toEqual({ date: '2026-10-05', text: 'No class today.' });
   });
 });

@@ -4,7 +4,7 @@
 // `total x (1 - rate x days_late) + adjustment`, floored at 0. Never stored in the sheet.
 
 import { readTable } from '../edit/csv';
-import { obj, type Path } from '../edit/yamlText';
+import { blank, isObj, obj, type Path } from '../edit/yamlText';
 
 export const NOTES_KEY = 'notes_not_shared_with_students';
 /** Feedback on each question: the student's on a solo sheet, the team's on a group sheet (grades.QUESTION_FEEDBACK_KEY). */
@@ -72,18 +72,14 @@ export function num(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-const blank = (v: unknown) => v === null || v === undefined || String(v).trim() === '';
-
-const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-
 /** One `questions:` entry's maximum: `Q1: 15`, or `Q1: {points: 15, file: report.tex}`. */
 export function questionPoints(entry: unknown): unknown {
-  return isMap(entry) ? (entry.points ?? null) : entry;
+  return isObj(entry) ? (entry.points ?? null) : entry;
 }
 
 /** The submission file a question is marked from, when it names one. */
 export function questionFile(entry: unknown): string | null {
-  return isMap(entry) && typeof entry.file === 'string' && entry.file.trim() ? entry.file : null;
+  return isObj(entry) && typeof entry.file === 'string' && entry.file.trim() ? entry.file : null;
 }
 
 /** The `questions:` value the template form writes from its rows: each name with its points,
@@ -91,14 +87,14 @@ export function questionFile(entry: unknown): string | null {
  *  A row's third cell, when given, is the file it is marked from: named, the question becomes
  *  `{points, file}`; emptied, `file:` goes and a bare maximum is written. */
 export function questionsFromRows(rows: ([string, string] | [string, string, string])[], was: unknown): Record<string, unknown> | undefined {
-  const old = isMap(was) ? was : {};
+  const old = isObj(was) ? was : {};
   const kept = rows.filter(([name]) => name.trim());
   if (!kept.length) return undefined;
   return Object.fromEntries(
     kept.map(([name, n, file]) => {
       const points = n === '' ? null : Number.isFinite(Number(n)) ? Number(n) : n;
       const before = old[name.trim()];
-      const rest = isMap(before) ? { ...before } : {};
+      const rest = isObj(before) ? { ...before } : {};
       if (file !== undefined) {
         delete rest.file;
         if (file.trim()) rest.file = file.trim();

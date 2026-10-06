@@ -126,7 +126,7 @@ from .gh_contents import (
     get_file_with_sha,
     line_of,
     load_yaml_lines,
-    put_file,
+    put_file_as_read,
     repo_tree,
     take_lines,
     yaml_mark_line,
@@ -326,7 +326,7 @@ class Release:
     # section its first copy lands in (`schedule_plan.entry_kind`).
     kind: str = ""
     # The row's number ("Lecture 3"), when the entry writes one; else the label's own
-    # number, else none (decision 0020: never a position, `schedule_plan.own_number`).
+    # number, else none (decision 0020: never a position, `own_number`).
     number: int | None = None
     # `tbc: true` next to a REAL date = a provisional sketch: everything fires at that
     # date as normal, but the site marks it "(TBC)" to signal it may still move.
@@ -828,6 +828,19 @@ def _flag_bad_value(
     drops.note(where, str(key), f"unusable value {value!r} - ignored, so {cost}", lines)
 
 
+def _parse_number(
+    entry: dict, where: str, drops: Drops, lines: dict[str, int] | None, falls_back: str
+) -> int | None:
+    """An entry's `number:` (decision 0020), or None. A value that is not a positive
+    whole number is flagged; `falls_back` says what numbers the entry instead."""
+    if "number" not in entry:
+        return None
+    number = _whole_days(entry["number"]) or None
+    if number is None:
+        _flag_bad_value(drops, where, "number", entry["number"], falls_back, lines)
+    return number
+
+
 def _flagged_datetime(
     entry: dict,
     key: str,
@@ -1089,18 +1102,9 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
                 lines,
             )
             kind = policy.FALLBACK_KIND
-        number = None
-        if "number" in entry:
-            number = _whole_days(entry["number"]) or None
-            if number is None:
-                _flag_bad_value(
-                    drops,
-                    where,
-                    "number",
-                    entry["number"],
-                    "the row is numbered from its label instead",
-                    lines,
-                )
+        number = _parse_number(
+            entry, where, drops, lines, "the row is numbered from its label instead"
+        )
         out.append(
             Release(
                 label=str(label),
@@ -1364,18 +1368,13 @@ def _parse_assignments(
                 lines,
             )
             marks = None
-        number = None
-        if "number" in entry:
-            number = _whole_days(entry["number"]) or None
-            if number is None:
-                _flag_bad_value(
-                    drops,
-                    where,
-                    "number",
-                    entry["number"],
-                    "the assignment is numbered from its key or its due date instead",
-                    lines,
-                )
+        number = _parse_number(
+            entry,
+            where,
+            drops,
+            lines,
+            "the assignment is numbered from its key instead",
+        )
         out[str(slug)] = AssignmentEntry(
             due_datetime=due,
             course_source_repo=source_repo,
@@ -1826,6 +1825,12 @@ def label_number(label: str) -> int | None:
     return int(m.group(1) or m.group(2)) if m else None
 
 
+def own_number(number: int | None, key: str) -> int | None:
+    """An entry's number (decision 0020): its `number:`, else the number its label or key
+    carries (`lecture_03`, `assignment-3`: the instructor typed it). Never a position."""
+    return number or label_number(key)
+
+
 def assignment_pages(sched: Schedule) -> list[AssignmentPage]:
     """Every assignment of the plan, numbered - the ONE place that numbering is decided,
     because the team-formation mail, the lock and the Join-team form all link a page, and
@@ -1840,7 +1845,7 @@ def assignment_pages(sched: Schedule) -> list[AssignmentPage]:
     by_due = sorted(sched.assignments.items(), key=lambda kv: kv[1].due_datetime)
     return [
         AssignmentPage(
-            entry.number or label_number(key),
+            own_number(entry.number, key),
             semester_name(key, entry),
             entry.course_source_repo,
             (key, entry),
@@ -2595,37 +2600,32 @@ def _insert_handout(text: str, slug: str, stamp: str) -> str | _Declined | None:
 def _put_handout(
     semester_org: str, slug: str, stamp: str, body: str, sha: str | None
 ) -> bool:
-    """Write the recorded handout over schedule.yml at the sha its text was READ at, so a
-    faculty edit committed during the run is refused rather than reverted; on a refusal,
-    re-read, re-apply the handout to the fresh text and try once more."""
-    message = f"schedule: record {slug} handout ({stamp})"
+    """Write the recorded handout over schedule.yml at the sha its text was READ at
+    (`put_file_as_read`), so a faculty edit committed during the run is refused rather
+    than reverted; on a refusal, re-read, re-apply the handout to the fresh text and try
+    once more."""
 
-    def write(text: str, at: str | None) -> bool:
-        return put_file(
+    def reapply(fresh: str | None) -> str | None:
+        if fresh is None:
+            return None
+        rebuilt = _insert_handout(fresh, slug, stamp)
+        if rebuilt is None:
+            return fresh  # the edit that beat us recorded the same handout
+        return None if isinstance(rebuilt, _Declined) else rebuilt
+
+    return (
+        put_file_as_read(
             semester_org,
             CONFIG_REPO,
             SCHEDULE_PATH,
-            text.encode(),
-            message,
-            expected_sha=at,
+            body,
+            sha,
+            reapply,
+            f"schedule: record {slug} handout ({stamp})",
+            attempts=2,
         )
-
-    if write(body, sha):
-        return True
-    log_err(
-        f"{SCHEDULE_PATH} in {semester_org} was edited while {slug} was being handed out - "
-        f"re-reading and retrying once"
+        is not None
     )
-    read = get_file_with_sha(semester_org, CONFIG_REPO, SCHEDULE_PATH)
-    if read is None:
-        return False
-    fresh, fresh_sha = read
-    rebuilt = _insert_handout(fresh, slug, stamp)
-    if rebuilt is None:
-        return True  # the edit that beat us recorded the same handout
-    if isinstance(rebuilt, _Declined):
-        return False
-    return write(rebuilt, fresh_sha)
 
 
 def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> None:

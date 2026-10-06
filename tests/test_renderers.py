@@ -2639,12 +2639,12 @@ def test_a_green_grading_matrix_never_asks_the_jobs_api(tmp_path):
 @pytest.mark.parametrize(
     ("rows", "outputs", "calls"),
     [
-        # A lagging API is asked again rather than reported as this cohort's failure.
+        # A lagging API is asked again rather than reported as this semester's failure.
         (["null 7", "null 7", "success 7"], {"result": "success", "job_id": "7"}, 3),
         (["failure 7"], {"result": "failure", "job_id": "7"}, 1),
         # A null that never settles is reported, not swallowed: the leg did finish.
         (["null 7"] * 9, {"result": "null", "job_id": "7"}, 5),
-        # No leg for this cohort is still "nothing to report", and is not retried.
+        # No leg for this semester is still "nothing to report", and is not retried.
         ([], {"result": "skipped"}, 1),
     ],
     ids=["lagging", "red", "stuck", "absent"],

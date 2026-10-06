@@ -4,26 +4,20 @@ import { useState } from 'preact/hooks';
 import {
   ASSIGNMENT_WORD, TYPE_CLASS, TYPE_LABEL, addDays, ago, assignmentTitle, daysBetween, fmtDate, fmtDay, fmtDays, fmtShort, fmtTime, fmtWhen, releaseIdent,
 } from '../model/format';
-import { inWeeks, needsANumber, parseSchedule, scheduleRows, weekOf, type Row, type Schedule, type Term, type WeekKey, termOf } from '../model/schedule';
+import { inWeeks, needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekRank, weekStart, type Row, type Schedule, type Term, type WeekKey, termOf } from '../model/schedule';
 import type { Assignment, Problem, Status } from '../model/types';
-import { checkAccess, releaseEarly, type ReleaseRef } from '../ops/defs';
+import { checkAccess, checkNow, releaseEarly, type ReleaseRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { Release } from '../model/types';
-import { Crumbs, Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
+import { Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
 import { Hint } from '../ui/Hint';
-import { CheckNow, MoreMenu, WithStatus, cohortName, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
+import { MoreMenu, WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
 
 export function readSchedule(p: CohortProps): Schedule | null {
   const f = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml');
   return f.kind === 'ready' ? parseSchedule(f.text) : null;
-}
-
-/** "Session 3: Trees" -> <b>Session 3</b>: Trees */
-export function IdentTitle({ text }: { text: string }) {
-  const i = text.indexOf(': ');
-  return i < 0 ? <b>{text}</b> : <><b>{text.slice(0, i)}</b>: {text.slice(i + 2)}</>;
 }
 
 export function asgSummary(a: Assignment, tz: string, year: number): string {
@@ -62,20 +56,15 @@ export function AsgRows({ status, now }: { status: Status; now: number }) {
 }
 
 /**
- * "Fall 2026, 14 Sep to 18 Dec. Week 3 of 15. Exams 8 and 15 Dec. Archive 12 Jan 2027."
- * Each sentence only when its facts are known; before week 1, "Starts 14 Sep." when the
- * range is not already shown. Years are said when they are not the start's (`thisYear`
- * without a start).
+ * The Dashboard's line under its title: what the course banner does not say (its name, dates
+ * and week are there). The start while the semester has no end date yet, the exams, the archive.
  */
 export function headerLine(status: Status, sched: Schedule | null, rows: Row[], tz: string, thisYear: number): string {
   const sem = status.semester;
   const start = sem?.start ?? sched?.start ?? null, end = sem?.end ?? sched?.end ?? null;
   const year = start ? Number(start.slice(0, 4)) : thisYear;
   const out: string[] = [];
-  const dates = start && end ? `${fmtDate(start, tz, year)} to ${fmtDate(end, tz, year)}` : '';
-  if (sem?.label || dates) out.push(`${[sem?.label, dates].filter(Boolean).join(', ')}.`);
-  if (sem?.week === 0) { if (start && !dates) out.push(`Starts ${fmtDate(start, tz, year)}.`); }
-  else if (sem?.week && sem.weeks) out.push(`Week ${sem.week} of ${sem.weeks}.`);
+  if (sem?.week === 0 && start && !end) out.push(`Starts ${fmtDate(start, tz, year)}.`);
   const exams = rows.filter((r) => r.type === 'exam' && r.when).map((r) => r.when!);
   if (exams.length) out.push(`${exams.length > 1 ? 'Exams' : 'Exam'} ${fmtDays(exams, tz, year)}.`);
   if (sem?.archive_date) out.push(`Archive ${fmtDate(sem.archive_date, tz, year)}.`);
@@ -83,9 +72,7 @@ export function headerLine(status: Status, sched: Schedule | null, rows: Row[], 
 }
 
 const KIND_ORDER = ['lec', 'lab', 'asg', 'exam', 'evt', 'term'];
-const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', term: 'term date' };
-
-const weekStart = (term: Term, w: number) => addDays(term.start, (w - 1) * 7);
+const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', term: 'semester date' };
 
 /** Problems dated in each term week, for the strip's red counts. */
 export function problemCounts(problems: Problem[], term: Term, tz: string): Map<WeekKey, number> {
@@ -131,40 +118,12 @@ export function TermStrip({ rows, term, tz, today, counts, selected, onToggle }:
   );
 }
 
-/** A group of rows under one heading: a term week, the before or after bucket, or no date yet. */
-export interface WeekGroup {
-  key: WeekKey | 'none';
-  label: string;
-  rows: Row[];
-}
-
-/**
- * Rows grouped by term week, in order. `all` adds every week of the term, empty ones too,
- * and the before and after buckets; otherwise only the weeks in `keys` that have rows.
- */
-export function weekGroups(rows: Row[], term: Term, tz: string, keys: WeekKey[] | 'all'): WeekGroup[] {
-  const by = new Map<WeekKey | 'none', Row[]>();
-  for (const r of rows) {
-    const k = r.when ? weekOf(r.when, term, tz) : 'none';
-    by.set(k, [...(by.get(k) ?? []), r]);
-  }
-  const label = (k: WeekKey | 'none') => (k === 'before' ? 'Before the semester' : k === 'after' ? 'After the semester' : k === 'none' ? 'No date yet' : `Week ${k}`);
-  const order: (WeekKey | 'none')[] = keys === 'all'
-    ? ['before', ...Array.from({ length: term.weeks }, (_, i) => i + 1), 'after', 'none']
-    : [...keys].sort((a, b) => rank(a, term) - rank(b, term));
-  return order
-    .filter((k) => (keys === 'all' && typeof k === 'number') || by.has(k))
-    .map((k) => ({ key: k, label: label(k), rows: by.get(k) ?? [] }));
-}
-
-const rank = (k: WeekKey, term: Term) => (k === 'before' ? 0 : k === 'after' ? term.weeks + 1 : k);
-
 /** The expanded strip: every week of the term, read-only; each entry opens the Schedule editor. */
 function Timeline({ rows, term, tz, year }: { rows: Row[]; term: Term; tz: string; year: number }) {
   return (
     <div class="wk-timeline">
-      {weekGroups(rows, term, tz, 'all').map((g) => {
-        const from = typeof g.key === 'number' ? <span> from {fmtDay(weekStart(term, g.key), tz, year)}</span> : null;
+      {weekGroups(rows, (r) => r.when, term, tz, 'all').map((g) => {
+        const from = g.from ? <span> from {fmtDay(g.from, tz, year)}</span> : null;
         if (!g.rows.length) return <p class="wk-empty">{g.label}{from}: nothing scheduled</p>;
         return (
           <section aria-label={g.label}>
@@ -188,7 +147,7 @@ function Timeline({ rows, term, tz, year }: { rows: Row[]; term: Term; tz: strin
 
 /** A release as an operation names it; null while there is nothing to release (no deploy block, so no source). */
 export function releaseRef(r: Release, tz: string, year: number): ReleaseRef | null {
-  return r.source ? { id: r.id, ident: releaseIdent(r), title: r.title, when: fmtWhen(r.when, tz, year), source: r.source } : null;
+  return r.source ? { id: r.id, ident: releaseIdent(r), title: r.title, when: fmtWhen(r.when, tz, year), source: r.source, dest: r.dest } : null;
 }
 
 /** The line a release with no deploy block shows instead of its actions. */
@@ -232,14 +191,14 @@ function RowItem({ r, status, p }: { r: Row; status: Status; p: CohortProps }) {
 /** What the selected weeks hold, grouped by week when more than one is shown. */
 function WeekRows({ status, p, rows, term, selected, name }: { status: Status; p: CohortProps; rows: Row[]; term: Term; selected: number[]; name: string }) {
   const tz = tzOf(status), year = yearOf(p.now, tz);
-  const groups = weekGroups(rows, term, tz, selected.length ? selected : 'all').filter((g) => g.rows.length);
+  const groups = weekGroups(rows, (r) => r.when, term, tz, selected.length ? selected : 'all').filter((g) => g.rows.length);
   if (!groups.length) return <p class="footnote">Nothing scheduled {inPhrase(name)}.</p>;
   if (groups.length === 1 && selected.length === 1) return <ul class="week">{groups[0].rows.map((r) => <RowItem r={r} status={status} p={p} />)}</ul>;
   return (
     <>
       {groups.map((g) => (
         <div class="wk-group">
-          <h3 class="week-h">{g.label}{typeof g.key === 'number' ? <span> from {fmtDay(weekStart(term, g.key), tz, year)}</span> : null}</h3>
+          <h3 class="week-h">{g.label}{g.from ? <span> from {fmtDay(g.from, tz, year)}</span> : null}</h3>
           <ul class="week">{g.rows.map((r) => <RowItem r={r} status={status} p={p} />)}</ul>
         </div>
       ))}
@@ -272,7 +231,7 @@ const inPhrase = (name: string) => (name === 'This week' ? 'this week' : name ==
  */
 export function problemGroups(problems: Problem[], selected: number[], isThisWeek: boolean, term: Term, tz: string): { overdue: Problem[]; dated: Problem[]; undated: Problem[]; elsewhere: number } {
   const { dated, undated } = inWeeks(problems, (x) => x.when, selected, term, tz);
-  const overdue = isThisWeek ? problems.filter((x) => x.when && rank(weekOf(x.when, term, tz), term) < selected[0]) : [];
+  const overdue = isThisWeek ? problems.filter((x) => x.when && weekRank(weekOf(x.when, term, tz), term) < selected[0]) : [];
   const elsewhere = problems.filter((x) => x.when).length - dated.length - overdue.length;
   return { overdue, dated, undated, elsewhere };
 }
@@ -318,7 +277,7 @@ function Overview(p: ReadyProps) {
   const [showSetup, setShowSetup] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const thisWeek = thisWeekOf(current);
-  // The weeks the page is filtered to; empty is All weeks. This week on load.
+  // The weeks the page is filtered to, picked in the strip; empty is all weeks. This week on load.
   const [selected, setSelected] = useState<number[]>(thisWeek);
   const problems = status.problems ?? [];
   const stages = status.semester?.stages ?? {};
@@ -337,17 +296,16 @@ function Overview(p: ReadyProps) {
   const shown = problemGroups(problems, selected, isThisWeek, term, tz);
   return (
     <>
-      <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: cohortName(p) }]} />
       <div class="page-head">
         <div>
-          <h1>Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h1>
+          <h2 class="h1">Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h2>
           <p class="lede">
             <span>{headerLine(status, sched, rows, tz, year)}</span>
             {amber ? <span class="amber">Setup done, but {amber} {amber > 1 ? 'stages have a problem' : 'stage has a problem'}.</span> : <span>Setup complete.</span>}
             <button class="textlink" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>{showSetup ? 'Hide setup' : 'Show setup'}</button>
           </p>
         </div>
-        <div class="actions"><Probs n={problems.length} /><CheckNow p={p} /><MoreMenu p={p} /></div>
+        <div class="actions"><Probs n={problems.length} /><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
       </div>
       <div class="stack">
         {showSetup ? (
@@ -361,19 +319,24 @@ function Overview(p: ReadyProps) {
         ) : null}
         <section class="panel section">
           <div class="section-head">
-            <h2>Semester <Hint label="About the weeks">Pick one or more weeks to show only what falls in them. A red number counts that week's problems.</Hint></h2>
-            <span class="wk-filters" role="group" aria-label="Show weeks">
-              <button type="button" class="toggle" aria-pressed={isThisWeek} onClick={() => setSelected(thisWeek)}>This week</button>
-              <button type="button" class="toggle" aria-pressed={!selected.length} onClick={() => setSelected([])}>All weeks</button>
-              <button type="button" class="btn small quiet wk-expand" aria-expanded={expanded} aria-label="Show every week" onClick={() => setExpanded(!expanded)}>{expanded ? '<' : '>'}</button>
+            {/* The chevron before the heading (decision 0031 rule 11), as in the side nav. */}
+            <span class="lead">
+              <button type="button" class="chev" aria-expanded={expanded} aria-controls="dash-weeks" aria-label={expanded ? 'Show the week strip' : 'Show every week as a list'} onClick={() => setExpanded(!expanded)}><span class="arrow" aria-hidden="true" /></button>
+              <h2>Semester <Hint label="About the weeks">Pick one or more weeks to show only what falls in them; unpick them all to show every week. A red number counts that week's problems.</Hint></h2>
             </span>
           </div>
-          {expanded
-            ? <Timeline rows={rows} term={term} tz={tz} year={year} />
-            : <TermStrip rows={rows} term={term} tz={tz} today={today} counts={problemCounts(problems, term, tz)} selected={selected} onToggle={toggle} />}
+          <div id="dash-weeks">
+            {expanded
+              ? <Timeline rows={rows} term={term} tz={tz} year={year} />
+              : <TermStrip rows={rows} term={term} tz={tz} today={today} counts={problemCounts(problems, term, tz)} selected={selected} onToggle={toggle} />}
+          </div>
         </section>
         <section class="section">
-          <div class="problems-head"><h2>Problems</h2><span class="footnote">What will not happen until you fix it.</span></div>
+          <div class="problems-head">
+            <h2>{selected.length ? `Problems ${inPhrase(name)}` : 'Problems'}</h2>
+            {selected.length ? <button class="textlink" type="button" onClick={() => setSelected([])}>Show all weeks</button> : null}
+            <span class="footnote">What will not happen until you fix it.</span>
+          </div>
           {!problems.length ? <ProblemCards list={[]} cohort /> : null}
           {shown.overdue.length ? (
             <div class="p-overdue">
@@ -383,10 +346,7 @@ function Overview(p: ReadyProps) {
           ) : null}
           {shown.dated.length ? <ProblemCards list={shown.dated} cohort /> : null}
           {!shown.overdue.length && !shown.dated.length && shown.elsewhere ? (
-            <p class="footnote">
-              No problems {inPhrase(name)}. {shown.elsewhere} in other weeks.{' '}
-              <button class="textlink" type="button" onClick={() => setSelected([])}>Show all weeks</button>
-            </p>
+            <p class="footnote">No problems {inPhrase(name)}. {shown.elsewhere} in other weeks.</p>
           ) : null}
           {shown.undated.length ? (
             <div class="p-anytime">
@@ -413,7 +373,7 @@ function Overview(p: ReadyProps) {
             {s ? (
               <p class="footnote">
                 {s.codes_sent - s.joined} students have a code but have not joined.
-                {s.rows > s.codes_sent ? ` ${s.rows - s.codes_sent} ${s.rows - s.codes_sent > 1 ? 'have' : 'has'} no code (see Problems).` : ''}
+                {s.rows > s.codes_sent ? ` ${s.rows - s.codes_sent} ${s.rows - s.codes_sent > 1 ? 'have' : 'has'} no code.` : ''}
               </p>
             ) : null}
           </section>
@@ -433,7 +393,7 @@ function Overview(p: ReadyProps) {
 
 export function CohortScreen(p: CohortProps) {
   return (
-    <WithStatus props={p} title="Dashboard" crumbs={[{ t: 'All courses', href: '#home' }, { t: cohortName(p) }]}>
+    <WithStatus props={p} title="Dashboard">
       {(r) => <Overview {...r} />}
     </WithStatus>
   );

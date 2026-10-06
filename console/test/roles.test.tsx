@@ -6,11 +6,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import type { Course, Estate, Role, Semester } from '../src/model/discovery';
-import { hiddenSemesters, saveHiddenSemesters, type PrefStore } from '../src/model/prefs';
-import { modeOf, parseSearch, studentContext } from '../src/router';
-import { HomeScreen } from '../src/screens/Home';
+import { currentOnly, saveCurrentOnly } from '../src/model/prefs';
+import type { KeyStore } from '../src/auth/types';
+import { modeOf, parseSearch, studentContext, studentLanding } from '../src/router';
+import { HomeScreen, studentPast } from '../src/screens/Home';
+import type { SemesterFacts } from '../src/model/student';
 import { StudentScreen, studentScreen } from '../src/screens/Student';
-import { Sidenav, StudentNav } from '../src/ui/shell';
+import { CourseBanner, Sidenav, StudentNav, Topbar } from '../src/ui/shell';
 import { FakeGitHub, json } from './fake';
 
 const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
@@ -30,7 +32,13 @@ afterEach(() => vi.unstubAllGlobals());
 describe('Home groups', () => {
   it('a student-only account lands on Your semesters, archived ones greyed, with no instructor actions', () => {
     const out = render(<HomeScreen courses={[]} semesters={[NLP, NLP_OLD]} cohortStates={{}} now={0} user={user} />);
-    expect(out).toContain('<h1>Your semesters');
+    expect(out).toContain('<h1>Your semesters <span class="hint-wrap">');
+    // This semester first, then Past semesters, as the instructor's page has them (decision 0029 rule 3).
+    expect(out.indexOf('This semester')).toBeLessThan(out.indexOf('hertie-nlp-f2026#week'));
+    expect(out.indexOf('hertie-nlp-f2026#week')).toBeLessThan(out.indexOf('Past semesters'));
+    expect(out.indexOf('Past semesters')).toBeLessThan(out.indexOf('hertie-nlp-f2025#week'));
+    expect(out).not.toContain('Open the semester');
+    expect(out).not.toContain('Show these semesters');
     expect(out).not.toContain('New course');
     expect(out).not.toContain('Your courses');
     expect(out).toContain('Natural Language Processing, Fall 2026');
@@ -39,9 +47,38 @@ describe('Home groups', () => {
     expect(text(<HomeScreen courses={[]} semesters={[NLP_OLD]} cohortStates={{}} now={0} user={user} />)).toContain('Archived');
   });
 
-  it('a person with both roles sees Your courses, then Your semesters', () => {
+  it('a student in two semesters sees each once: the running one under This semester, the ended one under Past semesters (decision 0031)', () => {
+    // The demo's test student: Fall 2025 ended but is not archived; no catalogue sections.
+    const now = Date.parse('2026-10-01T12:00:00Z');
+    const f2025 = sem('hertie-dsl-demo-f2025', { term: 'f2025', termLabel: 'Fall 2025', courseOrg: COURSE_ORG, courseName: 'Deep Learning', courseCode: 'E1234' });
+    const f2026 = sem('hertie-dsl-demo-f2026', { courseOrg: COURSE_ORG, courseName: 'Deep Learning', courseCode: 'E1234' });
+    const out = render(<HomeScreen courses={[]} semesters={[f2026, f2025]} cohortStates={{}} now={now} user={user} />);
+    for (const org of [f2025.org, f2026.org]) expect(out.split(`href="?semester=${org}#week"`)).toHaveLength(2);
+    expect(out.indexOf('This semester')).toBeLessThan(out.indexOf(`${f2026.org}#week`));
+    expect(out.indexOf(`${f2026.org}#week`)).toBeLessThan(out.indexOf('Past semesters'));
+    expect(out.indexOf('Past semesters')).toBeLessThan(out.indexOf(`${f2025.org}#week`));
+    expect(out).toContain(`cohort-card past" href="?semester=${f2025.org}#week"`);
+    expect(out).not.toContain('DSL courses');
+    expect(out).not.toContain('read only');
+    expect(out).toContain('<span class="cc-code">E1234</span>');
+    expect(text(<HomeScreen courses={[]} semesters={[f2026, f2025]} cohortStates={{}} now={now} user={user} />)).toContain('Ended');
+    // Its past semester offers Current only, though nothing is archived.
+    expect(out).toContain('Current only');
+  });
+
+  it('judges a student’s semester past by archive, then its last day, then its key', () => {
+    const end = { end: '2026-12-19' } as SemesterFacts;
+    expect(studentPast(NLP, end, Date.parse('2026-12-19T22:00:00Z'))).toBe(false);
+    expect(studentPast(NLP, end, Date.parse('2026-12-20T01:00:00Z'))).toBe(true);
+    expect(studentPast(NLP_OLD, null, 0)).toBe(true);
+    // No facts: Fall 2026's key ends it on 1 February 2027.
+    expect(studentPast(NLP, undefined, Date.parse('2027-01-31T00:00:00Z'))).toBe(false);
+    expect(studentPast(NLP, undefined, Date.parse('2027-02-02T00:00:00Z'))).toBe(true);
+  });
+
+  it('a person with both roles sees All courses, then Your semesters', () => {
     const out = render(<HomeScreen courses={[course]} semesters={[NLP]} cohortStates={{}} now={0} user={user} />);
-    expect(out).toContain('<h1>Your courses <span class="hint">');
+    expect(out).toContain('<h1>All courses <span class="hint-wrap">');
     expect(out.indexOf('Machine Learning, Fall 2026')).toBeLessThan(out.indexOf('Your semesters'));
     expect(out.indexOf('Your semesters')).toBeLessThan(out.indexOf('Natural Language Processing, Fall 2026'));
   });
@@ -53,27 +90,34 @@ describe('Home groups', () => {
     expect(text(<HomeScreen courses={[]} semesters={[]} kind="classic" cohortStates={{}} now={0} user={user} />)).toContain('No courses found');
   });
 
-  it('Show these semesters hides what the viewer chose, per viewer, and still lists it to bring back', () => {
+  it('Current only hides the past semesters, per viewer, and is offered only when there are some', () => {
     const map = new Map<string, string>();
     vi.stubGlobal('localStorage', { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => void map.set(k, v) });
-    saveHiddenSemesters('octo', new Set([NLP_OLD.org]));
+    expect(render(<HomeScreen courses={[]} semesters={[NLP]} cohortStates={{}} now={0} user={user} />)).not.toContain('Current only');
+    saveCurrentOnly('octo', true);
     const out = render(<HomeScreen courses={[]} semesters={[NLP, NLP_OLD]} cohortStates={{}} now={0} user={user} />);
+    expect(out).toMatch(/<label class="check my-only"><input type="checkbox" checked[^>]*\/?><span>Current only<\/span>/);
     expect(out).not.toContain('href="?semester=hertie-nlp-f2025#week"');
+    expect(out).not.toContain('Past semesters');
     expect(out).toContain('href="?semester=hertie-nlp-f2026#week"');
-    expect(out).toContain('Show these semesters');
-    expect(text(<HomeScreen courses={[]} semesters={[NLP, NLP_OLD]} cohortStates={{}} now={0} user={user} />)).toContain('Natural Language Processing, Fall 2025');
     const other = render(<HomeScreen courses={[]} semesters={[NLP, NLP_OLD]} cohortStates={{}} now={0} user={{ ...user, login: 'someone-else' }} />);
     expect(other).toContain('href="?semester=hertie-nlp-f2025#week"');
   });
 
   it('the toggle survives storage that is missing or refuses', () => {
-    const refusing: PrefStore = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
-    expect(hiddenSemesters('octo', refusing)).toEqual(new Set());
-    expect(() => saveHiddenSemesters('octo', new Set(['x']), refusing)).not.toThrow();
-    expect(hiddenSemesters('octo', { getItem: () => '{not json', setItem: () => {} })).toEqual(new Set());
-    expect(hiddenSemesters('octo', null)).toEqual(new Set());
+    const refusing: KeyStore = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
+    expect(currentOnly('octo', refusing)).toBe(false);
+    expect(() => saveCurrentOnly('octo', true, refusing)).not.toThrow();
+    expect(currentOnly('octo', null)).toBe(false);
     vi.stubGlobal('localStorage', undefined);
     expect(render(<HomeScreen courses={[]} semesters={[NLP]} cohortStates={{}} now={0} user={user} />)).toContain('?semester=hertie-nlp-f2026#week');
+  });
+
+  it('a student with exactly one live semester and no instructor role lands on it', () => {
+    expect(studentLanding(estate([], [NLP, NLP_OLD], [[NLP.org, 'student'], [NLP_OLD.org, 'student']]))).toBe(NLP.org);
+    expect(studentLanding(estate([], [NLP, sem('hertie-maths-f2026')], [[NLP.org, 'student']]))).toBeNull();
+    expect(studentLanding(estate([], [NLP_OLD], [[NLP_OLD.org, 'student']]))).toBeNull();
+    expect(studentLanding(estate([course], [NLP], [[COURSE_ORG, 'instructor'], [NLP.org, 'student']]))).toBeNull();
   });
 });
 
@@ -108,8 +152,22 @@ describe('mode and the student shell', () => {
     expect(modeOf(estate([], [NLP], [[NLP.org, 'student']]), parseSearch(''))).toBe('student');
   });
 
+  it('a student whose older semester ended unarchived lands on the running one’s This week (decision 0031)', () => {
+    const now = Date.parse('2026-10-01T12:00:00Z');
+    const f2025 = sem('hertie-dsl-demo-f2025', { term: 'f2025', termLabel: 'Fall 2025' });
+    const f2026 = sem('hertie-dsl-demo-f2026');
+    expect(studentLanding(estate([], [f2026, f2025], [[f2026.org, 'student'], [f2025.org, 'student']]), now)).toBe(f2026.org);
+  });
+
+  it('the student nav marks a semester that ended unarchived as ended', () => {
+    const old = sem('hertie-nlp-f2024', { term: 'f2024', termLabel: 'Fall 2024' });
+    const nav = render(<StudentNav root="Your semesters" semesters={[old]} semester={old} current="week" />);
+    expect(nav).toContain('<span class="nav-anchor">Fall 2024<span class="n-soon"> ended</span></span>');
+    expect(nav).not.toContain('nav-dot');
+  });
+
   it('the student nav lists the eight screens', () => {
-    const nav = render(<StudentNav courses={[]} cohortStates={{}} semesters={[NLP]} semester={NLP} current="marks" />);
+    const nav = render(<StudentNav root="Your semesters" semesters={[NLP]} semester={NLP} current="marks" />);
     const labels = [...nav.matchAll(/<li><a href="\?semester=hertie-nlp-f2026#(\w+)"[^>]*>([^<]+)</g)].map((m) => [m[1], m[2]]);
     expect(labels).toEqual([['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['materials', 'Materials'], ['setup', 'Set up'], ['join', 'Join'], ['instructors', 'Instructors']]);
     expect(nav).toMatch(/#marks" aria-current="page"/);
@@ -123,17 +181,32 @@ describe('mode and the student shell', () => {
 
   it('Student view shows a banner, the instructor’s own identity only, and a way back', () => {
     const s = studentContext(both, parseSearch(`?semester=${cohort.org}`))!.semester;
-    const out = render(<StudentScreen semester={s} screen="week" studentView />);
-    expect(text(<StudentScreen semester={s} screen="week" studentView />)).toContain('Student view. What a student of Machine Learning, Fall 2026 sees, shown with your own account: no student’s repos or marks.');
-    expect(out).toContain(`href="?cohort=${cohort.org}#dashboard"`);
+    expect(text(<StudentScreen semester={s} screen="week" studentView />)).toContain('Student view. What a student of this semester sees, shown with your own account: no student’s repos or marks.');
+    const banner = render(<CourseBanner crumbs={[]} name={s.courseName} semester={{ org: s.org, termLabel: s.termLabel, view: 'back' }} />);
+    expect(banner).toContain(`<a class="textlink" href="?cohort=${cohort.org}#dashboard">Back to instructor view</a>`);
+    expect(banner).not.toContain('Student view');
   });
 
-  it('the instructor nav offers Student view on a semester they teach', () => {
-    const nav = render(<Sidenav courses={[course]} semesters={[NLP]} course={course} cohort={cohort} cohortStates={{}} current="dashboard" problems={0} />);
-    expect(nav).toContain(`href="?semester=${cohort.org}#week">Student view`);
-    expect(nav).toContain(`href="?semester=${NLP.org}#week"`);
-    const ro = render(<Sidenav courses={[{ ...course, write: false }]} course={{ ...course, write: false }} cohort={cohort} cohortStates={{}} current="dashboard" problems={0} />);
-    expect(ro).not.toContain('Student view');
+  it('the Student view is entered from the semester banner’s pill, not the side nav', () => {
+    const nav = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{}} current="dashboard" />);
+    expect(nav).not.toContain('Student view');
+    expect(nav).not.toContain('Semester on GitHub');
+    // The person's student semesters are on All courses, not in the course's tree.
+    expect(nav).not.toContain(`?semester=${NLP.org}`);
+    const banner = render(<CourseBanner crumbs={[]} name="Machine Learning" semester={{ org: cohort.org, termLabel: 'Fall 2026', view: 'student' }} />);
+    expect(banner).toContain(`<a class="btn small quiet" href="?semester=${cohort.org}#week">Student view</a>`);
+    expect(banner).toContain('<h1>Machine Learning</h1>');
+    expect(banner).toContain('<span class="sem-title">Fall 2026</span>');
+    expect(banner).toContain(`href="https://github.com/${cohort.org}"`);
+  });
+
+  it('the top bar’s view is a link back only in an instructor’s preview', () => {
+    const user = { login: 'a', id: 1, name: 'A', email: null, avatar_url: '' };
+    const preview = render(<Topbar user={user} title="Student view (preview)" titleHref={`?cohort=${cohort.org}#dashboard`} />);
+    expect(preview).toContain(`<a class="app-view" href="?cohort=${cohort.org}#dashboard"><span class="long">Student view (preview)</span><span class="short">Preview</span></a>`);
+    const real = render(<Topbar user={user} title="Student view" />);
+    expect(real).toContain('DSL Teaching Console<small>Student view</small></a>');
+    expect(real).not.toContain('app-view');
   });
 });
 
