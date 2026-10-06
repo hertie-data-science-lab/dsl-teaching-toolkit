@@ -16,7 +16,7 @@ from .log import log_err
 CENTRAL = "hertie-data-science-lab/dsl-teaching-toolkit"
 
 # The deployment tiers, in promotion order. `main` is the trunk - PRs squash-merge here,
-# and it is what the demo course org and its cohorts run; `release` is every real org.
+# and it is what the demo course org and its semesters run; `release` is every real org.
 # `release` carries no commits of its own: it is always a fast-forward of `main` - see
 # .github/workflows/promote.yml and docs-admin-arch/central-admin.md.
 #

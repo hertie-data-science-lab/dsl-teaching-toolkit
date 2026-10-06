@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assignment_defaults": {
+      "additionalProperties": false,
+      "properties": {
+        "formats": {
+          "oneOf": [
+            {
+              "items": {
+                "enum": [
+                  "ipynb",
+                  "py",
+                  "rmd",
+                  "qmd",
+                  "latex",
+                  "none"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "late_penalty_per_day": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "late_window_days": {
+          "type": "integer"
+        },
+        "max_team_size": {
+          "type": "integer"
+        },
+        "submit_via": {
+          "enum": [
+            "assignment_repo",
+            "shared_dropbox_repo",
+            "external"
+          ],
+          "type": "string"
+        },
+        "team_formation": {
+          "enum": [
+            "self_select",
+            "assigned"
+          ],
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "private",
+            "public",
+            "student_choice"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "central_ref": {
+      "pattern": "^(?:main|release|preview|[0-9a-f]{40})$",
+      "type": "string"
+    },
+    "course_code": {
+      "type": "string"
+    },
+    "course_description": {
+      "type": "string"
+    },
+    "course_name": {
+      "type": "string"
+    },
+    "people": {
+      "additionalProperties": false,
+      "properties": {
+        "course_admins": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "github_handle": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "github_handle"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "instructors": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "end": {
+                "type": "string"
+              },
+              "github_handle": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "photo": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "teaching_assistants": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "end": {
+                "type": "string"
+              },
+              "github_handle": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "photo": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "site_link_extensions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "title": ".github/dsl-course.yml",
+  "type": "object"
+}

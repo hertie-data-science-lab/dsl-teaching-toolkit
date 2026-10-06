@@ -26,10 +26,12 @@ from dsl_course import (
     ghcli,
     grades,
     issues,
+    log,
     pulls,
     repos,
     roster,
     schedule,
+    settings,
     site,
     sync_faculty,
     teams,
@@ -75,13 +77,21 @@ def _team_lag_waits_cost_nothing(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_start_of_run_hooks(monkeypatch):
+    """Mark the start-of-run hooks as already run, so a test that parses a CLI's command
+    line does not read the API budget (a live `GET /user`). The budget line's own tests
+    drive `ghcli.budget_at_start` directly."""
+    monkeypatch.setattr(log, "_cli_started", True)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_gh(monkeypatch):
     """Refuse any live `gh` call from a test.
 
     Nothing here is meant to reach GitHub (see the module docstring), but a tokenless CI
     box and an authenticated dev box disagree about what happens when something does: CI
     errors and the developer's machine quietly succeeds against real orgs. That is how a
-    test that stubbed `site._session_files` but not `site._repo_tree` passed locally for a
+    test that stubbed the file listing but not `site._repo_tree` passed locally for a
     whole branch and failed only on the PR.
 
     Guards the `gh` BINARY rather than `ghcli.gh`, so the retry ladder and return-pair
@@ -118,14 +128,29 @@ def _the_central_ref_is_present(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_cohort_is_closed_out(monkeypatch):
-    """Answer `discovery.cohort_is_live`'s probe with "still running" by default.
+def _no_semester_is_closed_out(monkeypatch):
+    """Answer `discovery.semester_is_live`'s probe with "still running" by default.
 
-    Every course-side sweep now asks whether a cohort's `classroom-config` is archived
-    before writing into it, which is a live `gh api repos/<org>/classroom-config`. A
-    running cohort is the uninteresting answer for every test but the ones about the skip
-    itself, which set their own after this fixture and win."""
+    Every course-side sweep now asks whether a semester's `semester-config` is archived
+    before writing into it, which is a live `gh api repos/<org>/semester-config`. A
+    running semester is the uninteresting answer for every test but the ones about the skip
+    itself, which set their own after this fixture and win. A semester with no
+    `semester-config` at all is asked about its topic too (not migrated); "it is there"
+    is the default answer to that as well."""
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, name: False)
+    monkeypatch.setattr(discovery, "repo_missing", lambda org, name: False)
+
+
+@pytest.fixture(autouse=True)
+def _no_course_or_semester_defaults(monkeypatch):
+    """Answer the cascade's live reads (`settings`) with "nothing declared" by default:
+    the course's `dsl-course.yml`, the semester's `assignments.yml` and the semester's
+    pointer to its course. Every spec read and every late cutoff resolves through them,
+    and the institution's policy is the uninteresting answer for every test but the ones
+    about a layer, which set their own after this fixture and win."""
+    monkeypatch.setattr(settings, "org_meta", lambda org: {})
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
 
 
 @pytest.fixture(autouse=True)
@@ -136,7 +161,7 @@ def _not_on_a_runner(monkeypatch):
     is, whether the `dsl-sandbox` account is there to drop student code to. CI *is* a
     runner and has no such account, so without this the whole suite inherited the
     fail-closed answer - graded nothing, and a dozen tests about what `collect` does with a
-    cohort failed on Linux while passing on a laptop. The memos go with the variable: they
+    semester failed on Linux while passing on a laptop. The memos go with the variable: they
     are answered once per process, so a test that sets `GITHUB_ACTIONS` itself must not
     leave its answer behind for the next one."""
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
@@ -146,27 +171,42 @@ def _not_on_a_runner(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _clear_process_memos():
+    clear_process_memos()
+
+
+def clear_process_memos() -> None:
     """The per-process memos a single CLI run is entitled to keep: a repo's tree and its
     paths, a repo's metadata and its last committer, whether a central ref exists, the
-    classroom-config files a run re-reads (students.csv, teams.csv, schedule.yml,
-    people.yml), an assignment's definition, its course's defaults and its handed-out
+    semester-config files a run re-reads (students.csv, teams.csv, schedule.yml,
+    instructors.yml), an assignment's definition, its course's defaults and its handed-out
     starters, and the login the token belongs to. Tests reuse the same org/repo names
-    with different fakes, so clear them between tests."""
+    with different fakes, so clear them between tests - and the CLI's read-once memos
+    (`gh_contents`, `issues`) go back to off, as a CLI start turns them on."""
     site._repo_tree.cache_clear()
     central.central_ref_exists.cache_clear()
-    repos._repo.cache_clear()
+    repos._repos.clear()
+    gh_teams.get_org_owners.cache_clear()
+    gh_teams.acting_login.cache_clear()
+    ghcli.bot_login.cache_clear()
+    discovery.hold_listings(False)
     roster._roster_text.cache_clear()
     teams._teams_text.cache_clear()
     schedule._schedule_text.cache_clear()
     schedule._repo_paths.cache_clear()
     grades._grading_text.cache_clear()
-    grades.course_assignment_defaults.cache_clear()
+    grades.readme_heading.cache_clear()
+    settings.course_defaults.cache_clear()
+    settings._assignments_text.cache_clear()
+    settings.semester_blocks.cache_clear()
     collect._starter_notebook_shas.cache_clear()
     gh_contents.last_committer.cache_clear()
     gh_contents.blame_logins.cache_clear()
     gh_contents.path_committers.cache_clear()
-    sync_faculty.load_cohort_faculty.cache_clear()
+    sync_faculty.load_semester_faculty.cache_clear()
     ghcli.bot_login.cache_clear()
+    gh_contents.read_once(False)
+    issues.list_once(False)
+    ghcli._start_budget = None
 
 
 def stub_bootstrap(monkeypatch) -> None:
@@ -181,7 +221,7 @@ def stub_bootstrap(monkeypatch) -> None:
         "converge_org_settings",
         "create_default_teams",
         "grant_button_access",
-        "setup_cohort_extras",
+        "setup_semester_extras",
         "seed_workflows",
         "create_profile_repo",
     ):
@@ -190,16 +230,16 @@ def stub_bootstrap(monkeypatch) -> None:
     monkeypatch.setattr(bc, "add_course_admins", lambda org, handles: 0)
     monkeypatch.setattr(bc, "validate_secret_presence", lambda org, secret: True)
     monkeypatch.setattr(bc, "put_file", lambda *a, **k: True)
-    monkeypatch.setattr(bc, "register_cohort", lambda course, cohort: True)
+    monkeypatch.setattr(bc, "register_semester", lambda course, semester: True)
     monkeypatch.setattr(bc, "update_profile_readme", lambda *a, **k: 0)
-    monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, cohorts=None: 0)
+    monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, semesters=None: 0)
     # The org's tier is read off its (not yet written) dsl-course.yml; a bootstrap test is
     # about what the run does, not which ref it seeds at.
     monkeypatch.setattr(bc, "central_ref_for", lambda org: "release")
 
 
 # What the `gh issue create` in `GhFake` prints.
-CREATED_ISSUE_URL = "https://github.com/Cohort/classroom-config/issues/12"
+CREATED_ISSUE_URL = "https://github.com/Semester/semester-config/issues/12"
 
 
 class GhFake:
@@ -279,7 +319,7 @@ def issue_row(number: int, title: str, body: str = "") -> dict:
 # --------------------------------------------------------------- against real git
 
 # Two suites run against real repositories rather than a stubbed `git` - the release's
-# merge onto `upstream` (`test_release_merge`) and the propagate back out of a cohort
+# merge onto `upstream` (`test_release_merge`) and the propagate back out of a semester
 # (`test_propagate`). Both are about what ends up on a BRANCH and in a COMMIT HISTORY,
 # which a stubbed `git` can only assert back at itself, and both need the same three
 # things: bare origins on disk, a way to put a commit in one, and a `gh repo clone` that
@@ -345,7 +385,7 @@ class BareOrigins:
         to write into a repo with no working tree. A `None` value DELETES that path.
 
         `branch` is what students read unless a test needs the release branch a held merge
-        leaves ahead of it (`deploy.UPSTREAM_BRANCH`), which is a real state a cohort repo
+        leaves ahead of it (`deploy.UPSTREAM_BRANCH`), which is a real state a semester repo
         sits in whenever a release conflicted.
 
         The commit borrows the engine's identity and its disabled hooks, so a developer's

@@ -11,7 +11,13 @@ import time
 from collections.abc import Iterable
 from functools import cache, lru_cache
 
-from .ghcli import gh, is_already_exists, is_missing_resource
+from .ghcli import (
+    UNKNOWN_LOGIN,
+    gh,
+    is_already_exists,
+    is_missing_resource,
+    start_budget,
+)
 from .log import log, log_err, log_err_person, log_ok, log_person, log_skip
 
 # GitHub usernames: 1-39 chars, ASCII alphanumerics or single hyphens, no leading/
@@ -79,7 +85,7 @@ def _converge_team_privacy(org: str, name: str, privacy: str | None) -> None:
     """Correct an existing team's privacy, but only when it is actually wrong.
 
     A team keeps the privacy it was made with, and nothing else revisits it - `students`,
-    `auditors` and every project team are `secret` (course.COHORT_TEAMS,
+    `auditors` and every project team are `secret` (course.SEMESTER_TEAMS,
     sync_teams.PROJECT_TEAM_PRIVACY), and every one made before those decisions is still
     `closed`. Converged here, at the one place a duplicate is seen. The read comes first
     because create_team runs once per team per sync, every hour: an unconditional PATCH
@@ -154,7 +160,7 @@ def _is_refusal(out: str) -> bool:
 
 # The two org settings the toolkit READS and never writes. Both are web-only: they are
 # reported by `GET /orgs/{org}` and absent from `PATCH /orgs/{org}`, so the maintainer sets
-# them once per cohort org by hand (docs/DEPLOYMENT-CHECKLIST.md) and the digest says so
+# them once per semester org by hand (docs/DEPLOYMENT-CHECKLIST.md) and the digest says so
 # while either is wrong. Named here, beside the settings this module DOES converge, so it
 # is one list of "what an org has to be" rather than two.
 MEMBERS_CAN_DELETE = "members_can_delete_repositories"
@@ -190,8 +196,8 @@ def converge_org_settings(org: str, *, private_forks: bool = False) -> int:
     solutions and the `solution` branches.
 
     `private_forks` is the third setting, and the odd one out: it LOOSENS - so it is
-    asked for, not assumed, sent in a PATCH of its own (see below), and only a COHORT
-    asks. A cohort's materials repo is
+    asked for, not assumed, sent in a PATCH of its own (see below), and only a SEMESTER
+    asks. A semester's materials repo is
     private, and GitHub refuses a fork of a private repo unless its org allows it, so
     the Fork button students are told to press was simply absent; there it grants
     nothing, because a fork carries the reader's own access and a student who can fork
@@ -201,7 +207,7 @@ def converge_org_settings(org: str, *, private_forks: bool = False) -> int:
     uncontrolled copy of the solutions in somebody's personal account, gaining nobody
     anything.
 
-    Base permissions matter in BOTH org kinds. A cohort holds students; a COURSE org holds
+    Base permissions matter in BOTH org kinds. A semester holds students; a COURSE org holds
     the materials students must not see, and at GitHub's default of `read` every member of
     it (every TA, every visiting instructor, anyone ever added for one semester) could read
     all of it. Faculty access comes from the team grants (access.converge_faculty_access),
@@ -291,6 +297,19 @@ def org_membership_state(org: str, login: str) -> str | None:
         "api", f"orgs/{org}/memberships/{login}", "--jq", '"\\(.state) (\\(.role))"'
     )
     return out if code == 0 and out else None
+
+
+def org_member_logins(org: str) -> frozenset[str] | None:
+    """Every ACTIVE member of `org`, casefolded, off one listing (a page per hundred) - or
+    None when it could not be read. A pending invitee is not in it."""
+    code, out = gh(
+        "api", f"orgs/{org}/members?per_page=100", "--paginate", "--jq", ".[].login"
+    )
+    if code != 0:
+        return None
+    return frozenset(
+        line.strip().casefold() for line in out.splitlines() if line.strip()
+    )
 
 
 def set_org_membership(org: str, login: str, role: str = "member") -> bool:
@@ -440,7 +459,11 @@ def remove_team_member(org: str, team_slug: str, login: str) -> bool:
 
 @lru_cache(maxsize=1)
 def acting_login() -> str | None:
-    """Login of the token `gh` is currently authenticated as (the bot, in CI)."""
+    """Login of the token `gh` is currently authenticated as (the bot, in CI) - off the
+    budget line's `GET /user` when this is a CLI run, which has already asked."""
+    start = start_budget()
+    if start is not None and start.login != UNKNOWN_LOGIN:
+        return start.login
     code, out = gh("api", "user", "--jq", ".login")
     return out.strip() if code == 0 and out.strip() else None
 
@@ -497,6 +520,22 @@ def get_org_owners(org: str) -> frozenset[str] | None:
     except (json.JSONDecodeError, KeyError, TypeError):
         log_err(f"unparseable owner listing for {org}: {out[:200]}")
         return None
+
+
+# Every membership change `reconcile_team_members` has made in this process - or, on a
+# dry run, would have made. A tally rather than a return value because every caller sums
+# the function's ERROR count, and changes are what Check instructor access reports: the
+# console reads it off `membership_changes()` around one run (`sync_membership.main`).
+_CHANGES = {"added": 0, "removed": 0}
+
+
+def membership_changes() -> dict[str, int]:
+    """`{"added": n, "removed": m}` since the last `reset_membership_changes()`."""
+    return dict(_CHANGES)
+
+
+def reset_membership_changes() -> None:
+    _CHANGES.update(added=0, removed=0)
 
 
 def _fold_diff(a: dict[str, str], b: dict[str, str]) -> list[str]:
@@ -564,9 +603,11 @@ def reconcile_team_members(
     current_by_fold = {h.casefold(): h for h in current}
     for handle in sorted(_fold_diff(wanted_by_fold, current_by_fold)):
         if dry_run:
-            log_person(f"    DRY-RUN add {handle} -> {org}/{team}")
+            log_person(f"    PREVIEW add {handle} -> {org}/{team}")
+            _CHANGES["added"] += 1
         elif add_team_member(org, team, handle):
             log_person(f"  [ok] {handle} -> {org}/{team}")
+            _CHANGES["added"] += 1
         else:
             errors += 1
     if prune:
@@ -595,15 +636,17 @@ def reconcile_team_members(
             if handle.casefold() in protected:
                 # Same person, new login: the config still names the old one. Leave them
                 # in; the roster's handle cell is re-linked when they next open a Join
-                # issue (templates/welcome/onboard.yml matches on the id too).
+                # issue (templates/join/onboard.yml matches on the id too).
                 log_person(
                     f"  [keep] {handle} in {org}/{team} - renamed, same GitHub id"
                 )
                 continue
             if dry_run:
-                log_person(f"    DRY-RUN remove {handle} <- {org}/{team}")
+                log_person(f"    PREVIEW remove {handle} <- {org}/{team}")
+                _CHANGES["removed"] += 1
             elif remove_team_member(org, team, handle):
                 log_person(f"  [ok] removed {handle} from {org}/{team}")
+                _CHANGES["removed"] += 1
             else:
                 errors += 1
     return errors

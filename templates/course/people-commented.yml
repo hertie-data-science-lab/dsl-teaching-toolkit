@@ -1,9 +1,10 @@
 # Uncomment and fill in at least one course admin (if you passed --admins at
-# bootstrap, this is already filled in for you). No `email:` here: this file is
-# public, so the admins' addresses live in the org secret DSL_COURSE_ADMIN_EMAILS
-# instead - that is where a fault in this file is emailed.
+# bootstrap, this is already filled in for you). `email:` is optional and is where a
+# fault in this file is emailed; this file is PUBLIC, so leave it out to keep an address
+# private - the course then mails the org secret DSL_COURSE_ADMIN_EMAILS instead.
 # people:
 #   course_admins:
 #     - github_handle: "adminhandle"    # required - grants the `course-admin` team
+#       email: "admin@example.edu"      # optional - PUBLIC; see above
 #       start: "2026-09-01"             # optional - no start = active immediately
 #       end: "2027-06-30"               # optional - no end = indefinite

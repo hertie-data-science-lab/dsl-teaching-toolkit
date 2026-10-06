@@ -26,10 +26,15 @@ SHA = "0" * 40
 
 
 def _configs(monkeypatch, files: dict[str, dict]) -> None:
-    """Stand in for every org's `.github/dsl-course.yml`, keyed by org."""
-    monkeypatch.setattr(
-        discovery, "load_yaml_config", lambda org, repo, path: files.get(org)
-    )
+    """Stand in for every org's `dsl-course.yml`, keyed by org: a course org's in its
+    `.github`, a semester's pointer (a mapping with `course:`) in its config repo."""
+
+    def load(org, repo, path):
+        found = files.get(org)
+        is_pointer = bool(found and "course" in found)
+        return found if is_pointer == (repo == discovery.CONFIG_REPO) else None
+
+    monkeypatch.setattr(discovery, "load_yaml_config", load)
 
 
 # ------------------------------------------------------ what a declaration resolves to
@@ -55,18 +60,18 @@ def test_a_course_org_runs_the_tier_it_declares(monkeypatch):
     assert discovery.central_ref_for("Course") == "main"
 
 
-def test_a_cohort_inherits_the_tier_of_the_course_org_it_points_at(monkeypatch):
-    # A cohort's own file is a pointer, so the tier has to come from the far end of it -
-    # a cohort running a different engine from the course org releasing into it is not a
+def test_a_semester_inherits_the_tier_of_the_course_org_it_points_at(monkeypatch):
+    # A semester's own file is a pointer, so the tier has to come from the far end of it -
+    # a semester running a different engine from the course org releasing into it is not a
     # state worth being able to reach.
     _configs(
         monkeypatch,
         {
-            "Cohort-f2026": {"course": "Course", "central_ref": "release"},
+            "Semester-f2026": {"course": "Course", "central_ref": "release"},
             "Course": {"central_ref": "main"},
         },
     )
-    assert discovery.central_ref_for("Cohort-f2026") == "main"
+    assert discovery.central_ref_for("Semester-f2026") == "main"
 
 
 def test_an_org_that_declares_nothing_runs_the_default(monkeypatch):
@@ -128,9 +133,12 @@ def _central_checkout_refs(rendered: str) -> list[str]:
 
 
 def test_every_org_level_workflow_is_pinned_to_the_orgs_ref(monkeypatch):
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(seed, "discover_semesters", lambda org: ["Semester-f2026"])
     monkeypatch.setattr(
         seed, "discover_content_repos", lambda org: ["course-materials"]
+    )
+    monkeypatch.setattr(
+        seed, "discover_materials_repos", lambda org: ["course-materials"]
     )
     monkeypatch.setattr(
         seed, "discover_assignments", lambda org: ["assignment-1-f2026"]
@@ -165,7 +173,7 @@ def test_the_run_from_repo_buttons_are_pinned_too(monkeypatch):
         workflows_place.push_content_workflows(
             "Course",
             "course-materials-f2026",
-            ["Cohort-f2026"],
+            ["Semester-f2026"],
             [],
             "main",
             workflows=workflows_place.RELEASE_WORKFLOWS,
@@ -178,7 +186,7 @@ def test_the_run_from_repo_buttons_are_pinned_too(monkeypatch):
         assert refs and set(refs) == {"main"}, path
 
 
-def test_a_cohorts_schedule_validator_is_pinned_to_the_inherited_ref(monkeypatch):
+def test_a_semesters_schedule_validator_is_pinned_to_the_inherited_ref(monkeypatch):
     written: dict[str, bytes] = {}
     monkeypatch.setattr(
         welcome,
@@ -186,7 +194,7 @@ def test_a_cohorts_schedule_validator_is_pinned_to_the_inherited_ref(monkeypatch
         lambda org, repo, files, message, **k: written.update(files) or True,
     )
 
-    assert welcome.refresh_classroom_system_files("Cohort-f2026", "main") == 0
+    assert welcome.refresh_config_system_files("Semester-f2026", "main") == 0
     raw = written[".github/workflows/validate-schedule.yml"].decode()
     assert CENTRAL_REF_PLACEHOLDER not in raw
     assert _central_checkout_refs(raw) == ["main"]
@@ -196,7 +204,7 @@ def test_the_faculty_landing_page_links_the_docs_at_the_orgs_ref():
     # The runbooks describe the engine the org is actually running; an org on the trunk
     # sent to the release docs reads instructions for code it does not have.
     page = profile_readme.render_profile_readme(
-        "Course", "Course", "Deep Learning", [], False, [], central_ref="main"
+        "Course", "Deep Learning", [], False, [], central_ref="main"
     )
     assert f"https://github.com/{CENTRAL}/blob/main/docs/README.md" in page
     assert "/blob/release/" not in page
@@ -275,8 +283,11 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
         "gh",
         lambda *a, **k: (0, "") if ref_exists else (1, "gh: Not Found (HTTP 404)"),
     )
-    monkeypatch.setattr(seed, "_live_cohorts", lambda org: (["Cohort-f2026"], 0))
+    monkeypatch.setattr(seed, "_live_semesters", lambda org: (["Semester-f2026"], 0))
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["materials-f2026"])
+    monkeypatch.setattr(
+        seed, "discover_materials_repos", lambda org: ["materials-f2026"]
+    )
     monkeypatch.setattr(seed, "discover_assignment_repos", lambda org: [])
     monkeypatch.setattr(seed, "push_content_workflows", renders("content-workflows"))
     monkeypatch.setattr(
@@ -290,15 +301,15 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     monkeypatch.setattr(seed, "seed_github_workflows", renders("org-workflows"))
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: 0)
     monkeypatch.setattr(seed, "update_profile_readme", lambda org, **k: 0)
-    monkeypatch.setattr(seed, "refresh_welcome_workflows", lambda org: 0)
+    monkeypatch.setattr(seed, "refresh_join_workflows", lambda org: 0)
     monkeypatch.setattr(
-        seed, "refresh_classroom_system_files", renders("classroom-system-files")
+        seed, "refresh_config_system_files", renders("config-system-files")
     )
-    monkeypatch.setattr(seed, "refresh_classroom_samples", lambda org: 0)
-    monkeypatch.setattr(seed, "refresh_cohort_pointer", lambda org, course: 0)
+    monkeypatch.setattr(seed, "refresh_semester_pointer", lambda org, course: 0)
     monkeypatch.setattr(
-        seed, "sync_team_lock", lambda course, cohort: LockWrite(True, False)
+        seed, "sync_team_lock", lambda course, semester: LockWrite(True, False)
     )
+    monkeypatch.setattr(seed, "refresh_status", lambda course, semester=None: 0)
     return seed.refresh("Course-Org"), rendered
 
 
@@ -308,7 +319,7 @@ def test_refresh_renders_the_workflows_when_the_ref_is_there(monkeypatch):
     assert rendered == [
         "content-workflows",
         "org-workflows",
-        "classroom-system-files",
+        "config-system-files",
     ]
 
 

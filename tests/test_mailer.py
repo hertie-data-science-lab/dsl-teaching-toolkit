@@ -1,4 +1,4 @@
-"""mailer -- the transport's failure handling, which is where a whole cohort's mail is
+"""mailer -- the transport's failure handling, which is where a whole semester's mail is
 lost quietly. The HTTP POST itself is stubbed (`_post`), so nothing here reaches Graph or
 Graph; everything asserted is what the module does with the answer it gets.
 """
@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from dsl_course import mailer
+from dsl_course import mailer, policy
 
 CFG = mailer.GraphConfig("tenant", "client", "secret", "bot@x.edu")
 ONE = mailer.Message("ada@x.edu", "Subj", "Body")
@@ -222,19 +222,18 @@ def test_without_it_fault_mail_falls_back_to_the_send_mailbox(monkeypatch, value
     assert mailer.maintainer_address() == "bot@x.edu"
 
 
-def test_no_address_anywhere_is_none_rather_than_an_empty_string(monkeypatch):
-    # The caller says "mail not configured" once and carries on; "" would be handed to
-    # Graph as a recipient and fail per message instead.
+def test_with_no_address_set_the_institution_contact_is_the_maintainer(monkeypatch):
+    # Never "" or None: a fault always has somewhere to go - the policy's contact.
     for key in (*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV):
         monkeypatch.delenv(key, raising=False)
-    assert mailer.maintainer_address() is None
+    assert mailer.maintainer_address() == policy.load()["contact"]
 
 
 # ------------------------------------------------------------------- pacing and the budget
 
 
 def test_the_batch_is_paced_below_the_graph_rate_limit(monkeypatch, _no_sleeping):
-    # ~30/min per mailbox. Sent back-to-back, a full cohort starts 429-ing around message
+    # ~30/min per mailbox. Sent back-to-back, a full semester starts 429-ing around message
     # 30 and then pays the retry ladder per recipient, serially, against a 30-minute job.
     _replies(monkeypatch, [(202, {})] * 3)
     monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
@@ -388,7 +387,7 @@ def test_a_plain_three_tuple_is_still_a_message(monkeypatch):
 
 def test_a_group_is_counted_not_named_in_the_run_log(monkeypatch, capsys):
     # Every workflow runs in a PUBLIC repo, so its log is world-readable - and a mask is
-    # not anonymity: `a***@x.edu` beside a cohort's people.yml is a name.
+    # not anonymity: `a***@x.edu` beside a semester's instructors.yml is a name.
     _payloads(monkeypatch)
     mailer.send_bulk([mailer.Message(("ada@x.edu", "bo@x.edu"), "Subj", "Body")])
     out = capsys.readouterr().out
@@ -427,3 +426,17 @@ def test_a_course_org_without_the_secret_has_no_admin_addresses(monkeypatch):
         else:
             monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, value)
         assert mailer.course_admin_addresses() == ()
+
+
+def test_an_admin_email_declared_in_the_course_file_beats_the_secret(monkeypatch):
+    monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, "secret@x.edu")
+    assert mailer.course_admin_addresses(["a@x.edu", "b@x.edu"]) == (
+        "a@x.edu",
+        "b@x.edu",
+    )
+
+
+def test_the_secret_is_the_fallback_when_no_admin_declares_an_address(monkeypatch):
+    monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, "secret@x.edu")
+    for declared in ([], ["", "  "], ["nothing-like-an-address"]):
+        assert mailer.course_admin_addresses(declared) == ("secret@x.edu",)

@@ -1,6 +1,6 @@
 name: Refresh Course Orgs Inventory
 
-# The live estate - every course org, the toolkit tier it runs, and the cohort orgs under
+# The live estate - every course org, the toolkit tier it runs, and the semester orgs under
 # it - rendered into this run's job summary. It is a REPORT, not a committed page: the
 # self-merging PR it used to open needed write on `main` and left the page stale for weeks
 # whenever the merge was refused.

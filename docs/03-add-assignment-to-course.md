@@ -23,33 +23,28 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
         is this assignment's definition, and the run says so with a link to it. The name
         and the number are still used: they name the repo and describe it. A source with
         no `solution` branch is refused.
-      - `format` = which starter file(s) to seed, comma-separated: `ipynb`, `py`, `rmd`,
+      - `formats` = which starter file(s) to seed, comma-separated (the first is the
+        runnable one): `ipynb`, `py`, `rmd`,
         `qmd`, `latex` - or `none` on its own for the brief and nothing else. Picks the
         starters, and nothing else. Two that would land on one graded filename are
         refused (see [Formats](#formats-and-what-students-hand-in)).
       - `type` (`individual` or `group` - one repo per student vs per team)
-      - `team_formation` (group only: `self_select` = students use the welcome repo's
-        **Join team** form; `assigned` = you write `classroom-config/teams.csv`)
       - `submit_via` = where students hand in. `assignment_repo` = they push to their
         repo, and the cutoff, the receipts and the late window apply; `external` = handed
         in elsewhere (Moodle, Kaggle, in class), so **no repo is created**: the brief and
         a submit link appear on the site;
-        `shared_dropbox_repo` = one private repo for the whole cohort, each student
+        `shared_dropbox_repo` = one private repo for the whole semester, each student
         pushing into their own folder and able to read everyone else's
       - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
         fill, and each submission's pass count appears on the grading sheet as a first
         pass for graders - never shown to students)
-      - `visibility` = who may read each student's repo: `private` (default), `public`, or
-        `student_choice` (private, and the student is its admin: theirs to publish once the
-        grading cutoff has passed). Read when the repo is created, so editing it afterwards
-        moves nothing
-   - Everything else - the team cap, the late window, the penalty - comes from
-     `assignment_defaults:` in the course org's `.github/dsl-course.yml` and is written
-     into the assignment's own `grading_config.yml`, where you can revise it per assignment.
-   - With neither file stating one, late work follows the Hertie standard:
-     `late_penalty_per_day: 10%` of the grade per day started, `late_window_days: 10`, the
-     day the penalty reaches the whole grade. Write `late_window_days: 0` to accept nothing
-     after the deadline.
+   - How each semester RUNS it - how teams form, the max team size, the late window and
+     penalty, who may read the repos, an external submit link - is not asked here and
+     never written into `grading_config.yml` (a run setting there is `NOT_MIGRATED`). It
+     is that semester's `semester-config/assignments.yml`, else the course's
+     `assignment_defaults:` in `.github/dsl-course.yml`, else the institution's (Hertie:
+     teams of 5, `late_penalty_per_day: 10%` per day started, `late_window_days: 10`).
+     See [07](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment).
    - this creates **`assignment-1-f2026`** with two branches of stubs for you to replace:
 
    | Branch | Holds | Who sees it |
@@ -60,7 +55,7 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
 2. **Push your content** 
    - Brief + starter → `main`
    - Model solution and `grading_config.yml` → `solution`
-   - Student repos are generated from **`main` only**, unless you tick `include_solution` at release time. 
+   - Student repos are generated from **`main` only**, unless you set `solution_datetime` to `now` at release time. 
    - A purely hand-marked assignment needs nothing further: `autograde` defaults to **false**,
      and a template with no `solution` branch at all is hand-marked too. The cutoff still
      freezes the sheet and records the decision not to machine-mark it, and the grading sheet,
@@ -84,7 +79,7 @@ Each format seeds one starter on `main`, and each one already builds: an `.Rmd` 
 knits, a `.qmd` that renders, a `.tex` that compiles, a notebook that runs. Name several -
 `ipynb,py` - and each gets its own starter and its own model-answer stub on `solution`.
 
-| `format` | Starter on `main` | What the student commits |
+| `formats` | Starter on `main` | What the student commits |
 |---|---|---|
 | `ipynb` | `starter.ipynb` | the notebook, outputs saved, after **Restart kernel and run all** |
 | `py` | `starter.py` | the `.py` files, runnable from the repository root |
@@ -110,10 +105,24 @@ Grading reads whatever is actually in the repo, so a student who works in a note
 `py` assignment still grades, and `none` - which stands alone in the box - is the raw-repo
 option.
 
+**Several formats, one sheet.** The first format is the runnable one: the autograder and
+the completion check run it and nothing else. A question marked from another file names it
+in `grading_config.yml`; the rest are marked from the runnable one:
+
+```yaml
+formats: [ipynb, latex]
+questions:
+  Q1: 10
+  Q2: {points: 5, file: starter.tex}   # the write-up, hand-marked
+```
+
+The sheet shows the file beside that question's maximum, and the grader's reading copy
+archives it (its compiled `.pdf` when one is committed). One total across all questions.
+
 ### One notebook, not two: derive the starter
 
 Keeping the starter on `main` and the answer on `solution` by hand means writing the same
-notebook twice and keeping the two in step for the rest of the term.
+notebook twice and keeping the two in step for the rest of the semester.
 
 Write **one** notebook - the one you teach from - on the `solution` branch, in
 `solution/`, and fence the answers off in the vocabulary nbgrader and Otter already use:
@@ -132,9 +141,10 @@ Three ways to say it, and you can mix them in one file:
 | `### BEGIN SOLUTION` … `### END SOLUTION` | anywhere in a code cell, script or Rmd | `pass  # YOUR CODE HERE`, at the same indent (`# YOUR CODE HERE` outside Python) |
 | a cell tagged `solution` | a whole notebook cell | the cell's heading, then `_YOUR ANSWER HERE_` - so `### Question 2 (3 points)` survives |
 | `solution=TRUE` | an Rmd/qmd chunk option | the chunk, its name and its other options, with `# YOUR CODE HERE` for a body |
+| `% BEGIN SOLUTION` … `% END SOLUTION` | a `.tex` file | `% YOUR ANSWER HERE` |
 
 Then run **Derive student version** (course org → `.github` → Actions), pick the template,
-and untick `dry_run`. It reads `solution/` on the `solution` branch, strips the fences, and
+and untick `preview`. It reads `solution/` on the `solution` branch, strips the fences, and
 writes the result onto `main` - `solution/starter.ipynb` becomes `starter.ipynb`, which is
 what template-generate hands each student. It never writes to `solution`.
 
@@ -148,16 +158,15 @@ Three things it refuses to do, because each one publishes the answer:
   notebook, and its outputs are the answers in print. Cells it did not change keep theirs,
   so a worked example in the brief still shows its output.
 
-`dry_run` is on by default and prints the file list and the counts, never a line of the
-content. Only `.ipynb`, `.Rmd`, `.qmd`, `.py` and `.R` are derived; anything else under
-`solution/` stays where it is.
+`preview` is on by default and prints the file list and the counts, never a line of the
+content. Only `.ipynb`, `.Rmd`, `.qmd`, `.py`, `.R` and `.tex` are derived; anything else
+under `solution/` stays where it is.
 
 ### A value `grading_config.yml` cannot be read for
 
 A value the toolkit cannot use costs that field and nothing else - grading falls back to
-the default, silently, which is how `submit_via: emial` turned a cohort's late arithmetic
-off for a term. From 24 hours before the assignment's `grading_datetime` (its due date
-where it declares none) each such value opens the cohort's *assignment grading_config.yml
+the default, silently, which is how `submit_via: emial` turned a semester's late arithmetic
+off for a semester. From 24 hours before the assignment's late cutoff each such value opens the semester's *assignment grading_config.yml
 has values that will not grade as written* issue and emails whoever wrote the line, louder
 as the moment approaches. Earlier than that nothing is said.
 
@@ -166,15 +175,16 @@ reads that file, so the assignment grades as if it declared nothing at all.
 
 ### Where the work goes, and who sees it
 
-Two settings in `grading_config.yml`, and everything else follows from them.
+`submit_via` in `grading_config.yml`, and `submit_url` and `visibility` in each semester's
+`assignments.yml`; everything else follows from them.
 
 | Setting | Values | What it does |
 |---|---|---|
 | `submit_via` | `assignment_repo` (default) | One private repo per student or team. The cutoff, the receipts and the late window apply. |
 | | `external` | Handed in off GitHub. **No repo is created.** Nothing is collected, nothing is timed, and the grading sheet has no `info:` block. |
-| | `shared_dropbox_repo` | **One private repo for the whole cohort**, `<slug>-submissions`, with a folder per student or team inside it. The cutoff and the late window apply per folder; there is no receipts issue. |
-| `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** button on the assignment's page and its due row. Without one the page says to read the brief. |
-| `visibility` | `private` (default) | Only the student and the teaching team can read their repo. |
+| | `shared_dropbox_repo` | **One private repo for the whole semester**, `<slug>-submissions`, with a folder per student or team inside it. The cutoff and the late window apply per folder; there is no Submission receipts issue. |
+| `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** link in the student console and on its due row. Without one the console says to read the brief. |
+| `visibility` | `private` (default) | Only the student and the instructors can read their repo. |
 | | `public` | Every student's repo is world-readable from hand-out - portfolio work such as a hackathon. |
 | | `student_choice` | Created **private**, with the student (or every member of a team) as its **admin**. After the grading cutoff they may publish it themselves from the repo's Settings; before it, the scheduler puts any published repo back to private. |
 
@@ -192,21 +202,22 @@ its `schedule.yml` entry asks for a solution release anyway). Students who want 
 a `private` assignment publish a copy under their own account (the gradebook README tells
 them how); the org's copy stays private.
 
-`visibility` is read when each repo is **created**. Editing it after the assignment has
-gone out changes nothing on GitHub, so the cohort's *grading_config.yml* digest reports the
-disagreement until the line and the repos say the same thing again. `student_choice` is
+`visibility` is read when each repo is **created**: change it before the first hand out.
+Editing it afterwards changes nothing on GitHub, so the semester's *grading_config.yml*
+digest reports the disagreement until `assignments.yml` and the repos say the same thing
+again. `student_choice` is
 exempt from that check - a mixture is what it is for - and is checked against the ORG
 instead: it needs **Allow members to change repository visibilities** ON and **Allow
-members to delete or transfer repositories** OFF (cohort org → Settings → Member
+members to delete or transfer repositories** OFF (semester org → Settings → Member
 privileges, set by hand once - see the
-[deployment checklist](DEPLOYMENT-CHECKLIST.md#cohort-setup-per-year)). The same digest
+[deployment checklist](DEPLOYMENT-CHECKLIST.md#semester-setup-per-year)). The same digest
 faults while either is wrong.
 
 #### A shared drop box
 
 `submit_via: shared_dropbox_repo` hands out ONE private repo for the assignment, `<slug>-submissions`,
 and gives every onboarded student (or every team) `push` on it. Each unit works in its own
-`<handle>/` or `<team>/` folder; the whole cohort can read the whole repo, which is the
+`<handle>/` or `<team>/` folder; the whole semester can read the whole repo, which is the
 point - peer-visible presentations, referee reports, a gallery of submissions.
 
 The folder name is the student's GitHub handle (or the team name) spelt **exactly** as
@@ -224,11 +235,11 @@ What to know before you pick it:
   repo carries a ruleset against force-pushes and deletion - though that needs GitHub Team,
   and every Hertie org is on Free until the Education upgrade lands, so until then the drop
   box is left unprotected and the release run log says so.
-- **One drop box per assignment.** Two schedule entries resolving to one cohort-side name
+- **One drop box per assignment.** Two schedule entries resolving to one semester-side name
   are refused, as they are for every other shape.
-- **Private only.** One repo holds the whole cohort's work and no student can opt out of
+- **Private only.** One repo holds the whole semester's work and no student can opt out of
   being in it, so a `visibility:` line on a shared assignment is dropped at the parse.
-- **No receipts issue, no model solution.** Both would be written where the whole cohort
+- **No Submission receipts issue, no model solution.** Both would be written where the whole semester
   can read them.
 - **Hand-marked.** `autograde:`, `completion_check:` and `grader_pdf:` are dropped at the
   parse if you set them (and the notebook completion check is off here whether or not the
@@ -242,9 +253,6 @@ in - exists only where there is a private repo of the student's own to put it in
 feedback go to the private `grades-<handle>` gradebook for every shape alike, which is
 [Grade and return assignments](10-grade-and-return-assignments.md).
 
-`submit_url` is not a form box: **New assignment** seeds a commented line for it in
-`grading_config.yml`, and you fill it in there. `visibility` is box 10 on that form, which
-is GitHub's cap of ten inputs - every further setting lives in `grading_config.yml` only.
 
 ### Group vs individual assignments
 
@@ -253,31 +261,29 @@ is GitHub's cap of ten inputs - every further setting lives in `grading_config.y
 
 > The shape is set in ONE place: `type: individual | group` in the assignment's own
 > `grading_config.yml`, on the template's `solution` branch. **New assignment** writes it
-> from the button, and you edit it there afterwards. The cohort's `schedule.yml` used to be
-> able to override it and no longer can - `type:` and `max_team_size:` there are now
-> unrecognised keys that **Validate schedule** flags.
+> from the button, and you edit it there afterwards. How teams form and how big they may
+> be are each semester's, in its `assignments.yml`:
 >
 >```yaml
-># in the template's solution branch: grading_config.yml
->type: group
->team_formation: self_select   # or `assigned`, and you write teams.csv
->max_team_size: 4
+># semester-config/assignments.yml
+>assignments:
+>  assignment-4-project:
+>    team_formation: self_select   # or `assigned`, and you write teams.csv
+>    max_team_size: 4
 >```
 >
-> `team_formation` and `max_team_size` are also what the **Join team** form in each
-> cohort's `welcome` repo answers on. The form runs in a public repo and cannot read this
-> file, so the toolkit mirrors those two values into each cohort's
-> `classroom-config/assignments.lock.yml` and the form reads that. Editing them here is
-> enough: the mirror catches up on the next **Sync membership**, **Release assignment** or
-> nightly **Refresh actions**. Until this template exists, its schedule entry is locked to
-> "no teams", so nobody can form one for it.
+> Those two are what the **Join team** form in each semester's `join` repo answers on. The
+> form runs in a public repo and cannot read either file, so the toolkit mirrors them into
+> `semester-config/.system/assignments.lock.yml` and the form reads that. The mirror
+> catches up on the next **Sync membership**, **Release assignment** or nightly **Refresh
+> actions**. Until this template exists, its schedule entry is locked to "no teams".
 
-> **Deadlines aren't set here.** The due date students see is *per cohort*, in that cohort's `schedule.yml` - see [Release assignment → Deadlines](09-release-assignment-to-cohort.md#deadlines).
+> **Deadlines aren't set here.** The due date students see is *per semester*, in that semester's `schedule.yml` - see [Release assignment → Deadlines](09-release-assignment-to-cohort.md#deadlines).
 
 ## Next
 
 - [Schedule the hand-out](07-schedule-releases.md) - the normal way to get it to students.
-- [Release to a cohort](09-release-assignment-to-cohort.md) - freeze + hand out per-student repos by hand.
+- [Release to a semester](09-release-assignment-to-cohort.md) - freeze + hand out per-student repos by hand.
 
 ---
 **Demo:** [`hertie-dsl-demo-course-e1234`](https://github.com/hertie-dsl-demo-course-e1234) → New assignment.

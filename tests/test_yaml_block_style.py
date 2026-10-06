@@ -2,10 +2,10 @@
 used as a list item (`- {a: 1, b: 2}`).
 
 Flow and block parse identically, so this is a teaching/readability standard rather than a
-correctness one: `schedule.yml`, `people.yml`, `dsl-course.yml`, `grading_config.yml` and the docs
+correctness one: `schedule.yml`, `instructors.yml`, `dsl-course.yml`, `grading_config.yml` and the docs
 that mirror them are read and hand-edited by course teams, and one shape everywhere is what
 makes them copyable. The guard matters most for the SEEDED templates - a flow item left in
-`templates/classroom-config/schedule.yml` is `.format()`ed into every new cohort org, so the
+`templates/semester-config/schedule.yml` is `.format()`ed into every new semester org, so the
 style regression ships to real courses.
 
 Deliberately NOT covered: GitHub Actions workflows and Issue Forms (see EXCLUDED). Those are
@@ -38,20 +38,20 @@ from dsl_course.scaffold import _grading_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# `#` allowed: the seeded schedule.yml/people.yml scaffolds are commented-out YAML, which
+# `#` allowed: the seeded schedule.yml/instructors.yml scaffolds are commented-out YAML, which
 # is exactly where the last flow item hid.
 FLOW_ITEM = re.compile(r"^\s*(?:#\s*)?-\s*\{")
 
 # Machine infrastructure - audited by hand, deliberately left in GitHub's idiom.
 EXCLUDED = {
-    "templates/welcome/onboard.yml",
-    "templates/welcome/team-formation.yml",
-    "templates/welcome/ISSUE_TEMPLATE/01-join-course.yml",
-    "templates/welcome/ISSUE_TEMPLATE/02-join-team.yml",
-    "templates/classroom-config/dispatch-sync.yml",
-    "templates/classroom-config/dispatch-sync-site.yml",
-    "templates/classroom-config/dispatch-scheduled-release.yml",
-    "templates/classroom-config/dispatch-send-codes.yml",
+    "templates/join/onboard.yml",
+    "templates/join/team-formation.yml",
+    "templates/join/ISSUE_TEMPLATE/01-join-course.yml",
+    "templates/join/ISSUE_TEMPLATE/02-join-team.yml",
+    "templates/semester-config/dispatch-sync.yml",
+    "templates/semester-config/dispatch-sync-site.yml",
+    "templates/semester-config/dispatch-scheduled-release.yml",
+    "templates/semester-config/dispatch-send-codes.yml",
 }
 
 FIX = (
@@ -140,19 +140,19 @@ def _grading_sheet_dump() -> str:
 
 
 def _inventory_dump() -> str:
-    """`list_orgs --yaml`: dict of course/cohort lists, the shape flow style would show up in."""
+    """`list_orgs --yaml`: dict of course/semester lists, the shape flow style would show up in."""
     return yaml.safe_dump(
         {
             "course_orgs": [{"org": "A", "url": "https://a", "course_code": "E1"}],
-            "cohort_orgs": [{"org": "A-f2026", "course": "A", "url": "https://af"}],
+            "semester_orgs": [{"org": "A-f2026", "course": "A", "url": "https://af"}],
         },
         sort_keys=False,
     )
 
 
-def _cohort_registry_dump() -> str:
-    """`discovery.register_cohort`'s cohort-courses-pages.yml body."""
-    return yaml.safe_dump({"cohorts": ["Demo-f2025", "Demo-f2026"]}, sort_keys=False)
+def _semester_registry_dump() -> str:
+    """`discovery.register_semester`'s semesters.yml body."""
+    return yaml.safe_dump({"semesters": ["Demo-f2025", "Demo-f2026"]}, sort_keys=False)
 
 
 # PyYAML 6 defaults `default_flow_style` to False, so these are block today and none of
@@ -161,7 +161,7 @@ def _cohort_registry_dump() -> str:
 DUMPED = {
     "grades-<handle>/grades.yml (grades.render_yaml)": _gradebook,
     "list_orgs --yaml inventory": _inventory_dump,
-    "cohort-courses-pages.yml (discovery)": _cohort_registry_dump,
+    "semesters.yml (discovery)": _semester_registry_dump,
     "grading_sheets/<slug>.yml (grades.dump_sheet)": _grading_sheet_dump,
 }
 
@@ -170,47 +170,35 @@ DUMPED = {
 # flow item until bootstrap renders them) and the grading_config.yml written to each
 # solution branch.
 SEEDED = {
-    "classroom-config/schedule.yml (seeded)": lambda: welcome.template(
-        "classroom-config/schedule.yml"
-    ).format(tag="f2026", year=2026),
-    "classroom-config/people.yml (seeded)": lambda: welcome.template(
-        "classroom-config/people.yml"
+    "semester-config/schedule.yml (seeded)": lambda: welcome.template(
+        "semester-config/schedule.yml"
+    ).format(tag="f2026", year=2026, timezone="Europe/Berlin", grace_days=60),
+    "semester-config/instructors.yml (seeded)": lambda: welcome.template(
+        "semester-config/instructors.yml"
     ).format(year=2026, year_next=2027),
     "course/dsl-course.yml (seeded, commented)": lambda: (
-        bootstrap_course._course_metadata("Org", "Org Name", "Course", "CODE")
+        bootstrap_course._course_metadata("Course", "CODE")
     ),
     "course/dsl-course.yml (seeded, --admins)": lambda: (
-        bootstrap_course._course_metadata(
-            "Org", "Org Name", "Course", "CODE", admins=["adminhandle"]
-        )
+        bootstrap_course._course_metadata("Course", "CODE", admins=["adminhandle"])
     ),
-    "cohort/dsl-course.yml (seeded)": lambda: bootstrap_course._cohort_metadata(
-        "Org", "Course"
+    "semester/dsl-course.yml (seeded)": lambda: bootstrap_course._semester_metadata(
+        "Course"
     ),
     "grading_config.yml (scaffolded, group)": lambda: _grading_config(
         title="Neural networks from scratch",
         kind="group",
-        team_formation="assigned",
         submit_via="assignment_repo",
-        visibility="public",
         formats=["ipynb"],
         autograde=True,
-        defaults={
-            "max_team_size": 3,
-            "late_window_days": 7,
-            "late_penalty_per_day": "10%",
-        },
     ),
-    "grading_config.yml (scaffolded, individual, no course defaults)": (
+    "grading_config.yml (scaffolded, individual, external)": (
         lambda: _grading_config(
             title="Introduce Yourself",
             kind="individual",
-            team_formation="self_select",
             submit_via="external",
-            visibility="private",
             formats=[],
             autograde=False,
-            defaults={},
         )
     ),
 }

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "kinds": {
+      "additionalProperties": {
+        "enum": [
+          "lecture",
+          "lab",
+          "readings",
+          "exam",
+          "drop-in",
+          "other"
+        ],
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "syllabus": {
+      "type": "string"
+    }
+  },
+  "title": "materials.yml",
+  "type": "object"
+}

@@ -5,18 +5,24 @@ fault or a connection that never got the request there), and the shared 404 test
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
 import subprocess
+import sys
 import time
 from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import cache
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
-from .log import log_err
+from .log import CLIParser, log_err, on_cli_start, plural
 
 RATE_LIMIT_MARKERS = (
     "secondary rate limit",
@@ -73,9 +79,31 @@ def _run_gh(
 
     Retries on GitHub secondary rate limits, on a subprocess timeout, and - for a
     NON-mutating call only - on a transient GitHub fault (see TRANSIENT_MARKERS), with
-    exponential backoff."""
+    exponential backoff.
+
+    A write tells the `on_write` listeners what it may have changed, whatever its outcome:
+    a failed write can still have landed, and a refused one is re-read before a retry."""
     _check_gh_allowlist(args)
     _pace_writes(args)
+    if not _is_mutating(args):
+        return _run_gh_ladder(args, stdin, retries)
+    result = None
+    try:
+        result = _run_gh_ladder(args, stdin, retries)
+        return result
+    finally:
+        kind, targets = written(args)
+        if kind and result is not None and result[0] != 0:
+            # A create refused for a name already taken made nothing: only what this
+            # process held about that one name can be wrong (an absence, say).
+            targets = _refused_create(args, result[1] + result[2]) or targets
+        if kind:
+            _wrote(kind, targets)
+
+
+def _run_gh_ladder(
+    args: tuple[str, ...], stdin: str | None, retries: int
+) -> tuple[int, str, str]:
     delay = 30
     for attempt in range(retries + 1):
         try:
@@ -128,7 +156,7 @@ def _run_gh(
 # GitHub caps CONTENT-CREATING requests at roughly 80 a minute per token, separately from
 # the 5,000/hour budget. A first handout tick issues several writes per student in one
 # process, so past ~60 students the burst trips the secondary limit and the retry ladder
-# (30 + 60 + 120 s) is spent before it clears - and the rest of the cohort fails in turn.
+# (30 + 60 + 120 s) is spent before it clears - and the rest of the semester fails in turn.
 # Pacing the writes to stay under the cap is cheaper than retrying through it.
 WRITES_PER_MINUTE = 70
 _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -229,6 +257,162 @@ def _pace_writes(args: tuple[str, ...]) -> None:
         _sleep(60 - (at - _write_times[0]))
 
 
+# ------------------------------------------------------ what a write makes stale
+
+# A process reads each file, tree and issue listing once (`gh_contents`, `issues`) and must
+# then hear about every write that could change what it holds. Every write goes through
+# `_run_gh` or `git push`, so the news is sent from there rather than from each writer.
+#
+# Four kinds, so a write clears only what it can change: FILES (a tree, a branch, a push,
+# a repo made, renamed or deleted), FILE (the one path a contents write names), META (one
+# repo's settings - archived, visibility, forking - which change no file) and ISSUES (an
+# issue opened, edited, commented on or closed). Every other write - teams, collaborators,
+# invitations, topics, secrets, Actions settings, dispatches - changes none of them, and a
+# tick makes dozens.
+FILES = "files"
+FILE = "file"  # target `org/repo/path`: owner and repo casefolded, the path as written
+META = "meta"
+ISSUES = "issues"
+ALL = "all"  # both kinds: `forget_all`, and a write this module cannot read
+EVERYTHING = "*"  # the target of a write that names no repo it could be pinned to
+WriteListener = Callable[[str, frozenset[str]], None]
+_write_listeners: list[WriteListener] = []
+_API_REPO = re.compile(r"^repos/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)(/.*)?$")
+_REMOTE_REPO = re.compile(
+    r"github\.com[:/]([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$"
+)
+_REPO_VERBS = frozenset({"create", "edit", "delete", "rename", "fork", "archive"})
+
+
+def on_write(listener: WriteListener) -> None:
+    """Call `listener(kind, targets)` after every write this process makes that can change
+    files or issues (`written`)."""
+    _write_listeners.append(listener)
+
+
+def _wrote(kind: str, targets: frozenset[str]) -> None:
+    for listener in _write_listeners:
+        listener(kind, targets)
+
+
+def forget_all() -> None:
+    """Tell every listener to drop everything it holds: for a caller that has WAITED on
+    other runs (`migrate.settle`), whose writes this process never saw."""
+    _wrote(ALL, frozenset({EVERYTHING}))
+
+
+def _target(org: str, repo: str = "") -> frozenset[str]:
+    return frozenset({f"{org}/{repo}".casefold() if repo else org.casefold()})
+
+
+def written(args: tuple[str, ...]) -> tuple[str | None, frozenset[str]]:
+    """What a `gh` write may have changed: `(kind, targets)`, or `(None, ...)` for a write
+    that changes no file and no issue. A target is `org/repo` (casefolded: GitHub's names
+    are not case-sensitive) where the write can only touch that repo, the bare `org` where
+    it makes, renames or deletes a repo there, and EVERYTHING where it cannot be told."""
+    flat = _split_flags(args)
+    words = [a for a in flat if not a.startswith("-")]
+    value = {f: v for f, v in pairwise(flat) if f in ("-R", "--repo")}
+    named = value.get("-R") or value.get("--repo") or ""
+    named = named or next((w for w in words[2:] if _NAME_WITH_OWNER.match(w)), "")
+    command = words[0] if words else ""
+    verb = words[1] if len(words) > 1 else ""
+    if command == "api":
+        if verb == "graphql":
+            return ALL, frozenset({EVERYTHING})
+        path = next((w for w in words[1:] if w.startswith(("repos/", "orgs/"))), "")
+        if match := _API_REPO.match(path.split("?")[0]):
+            org, repo, rest = match.group(1), match.group(2), match.group(3) or ""
+            if rest.startswith("/contents/"):
+                # A contents write commits ONE path: that file, the directories above it
+                # and the branch move; every other file of the repo is what it was.
+                where = rest.removeprefix("/contents/").strip("/")
+                return FILE, frozenset({f"{org}/{repo}".casefold() + f"/{where}"})
+            if rest.startswith("/git/") or rest.endswith("/merge"):
+                return FILES, _target(org, repo)
+            if rest == "/generate":
+                owner = next(
+                    (m.group(1) for w in flat if (m := _OWNER_FIELD.match(w))), org
+                )
+                return FILES, _target(owner)
+            if rest == "":
+                # The repo object itself. A delete, or a PATCH carrying a new `name`, can
+                # make or unmake a name in the org; any other PATCH (archived,
+                # visibility, forking, description) changes that repo's settings only.
+                method = next(
+                    (v.upper() for f, v in pairwise(flat) if f in ("--method", "-X")),
+                    "",
+                )
+                if method == "DELETE" or any(w.startswith("name=") for w in flat):
+                    return FILES, _target(org)
+                if any(w.startswith("default_branch=") for w in flat):
+                    # Every read that names no ref now answers from another branch.
+                    return FILES, _target(org, repo)
+                return META, _target(org, repo)
+            if rest.startswith("/issues"):
+                return ISSUES, _target(org, repo)
+            if rest == "/topics":
+                # The repo object and the org's listing carry them; no file does.
+                return META, _target(org, repo)
+            return None, frozenset()
+        if match := re.match(r"^orgs/([A-Za-z0-9._-]+)/repos$", path.split("?")[0]):
+            return FILES, _target(match.group(1))
+        return None, frozenset()
+    if command == "issue":
+        org, _, repo = named.partition("/")
+        return ISSUES, _target(org, repo) if repo else frozenset({EVERYTHING})
+    if (command == "repo" and verb in _REPO_VERBS) or (command, verb) == (
+        "pr",
+        "merge",
+    ):
+        org, _, repo = named.partition("/")
+        if not org:
+            return FILES, frozenset({EVERYTHING})
+        if command == "repo" and verb in ("edit", "archive") and repo:
+            return META, _target(org, repo)
+        return FILES, _target(org, repo) if command == "pr" else _target(org)
+    return None, frozenset()
+
+
+def _refused_create(args: tuple[str, ...], out: str) -> frozenset[str] | None:
+    """The one repo a create names, when GitHub refused it because that name is already
+    taken: nothing was made, so the org's other repos are exactly as they were. None for
+    any other write or outcome."""
+    if not is_already_exists(out):
+        return None
+    flat = _split_flags(args)
+    words = [a for a in flat if not a.startswith("-")]
+    path = next((w for w in words[1:] if w.startswith(("repos/", "orgs/"))), "")
+    path = path.split("?")[0]
+    name = next((w.removeprefix("name=") for w in flat if w.startswith("name=")), "")
+    if re.match(r"^orgs/[A-Za-z0-9._-]+/repos$", path) and name:
+        return _target(path.split("/")[1], name)
+    if path.endswith("/generate") and name:
+        owner = next((m.group(1) for w in flat if (m := _OWNER_FIELD.match(w))), "")
+        return _target(owner, name) if owner else None
+    return None
+
+
+def forget_written(held: dict[str, Any], targets: frozenset[str]) -> None:
+    """Drop from `held` (keyed by casefolded `org/repo`) every entry a write to `targets`
+    may have changed."""
+    for key in list(held):
+        if forgets(key, targets):
+            del held[key]
+
+
+def forgets(key: str, targets: frozenset[str]) -> bool:
+    """Whether a write to `targets` may have changed what is held under `key` (a
+    casefolded `org/repo`)."""
+    return EVERYTHING in targets or key in targets or key.split("/", 1)[0] in targets
+
+
+def file_target(target: str) -> tuple[str, str]:
+    """A FILE target as `(casefolded org/repo, path)`."""
+    org, repo, path = (target.split("/", 2) + ["", ""])[:3]
+    return f"{org}/{repo}", unquote(path)
+
+
 # --------------------------------------------------------- the opt-in org allowlist
 
 # An OPT-IN blast-radius fence for the live end-to-end run (tests/e2e), which drives real
@@ -323,8 +507,8 @@ def _git_subcommand(args: tuple[str, ...]) -> str:
     return ""
 
 
-def _push_owner(args: tuple[str, ...], cwd: str | None) -> str:
-    """The org a `git push` would land in, or "" if it cannot be told.
+def _push_remote(args: tuple[str, ...], cwd: str | None) -> str:
+    """The URL a `git push` would land at, or "" if it cannot be told.
 
     The remote is nearly always the name `origin`, so the URL has to be resolved out of the
     working copy - through `git` itself, which recurses no further because `remote get-url`
@@ -339,8 +523,19 @@ def _push_owner(args: tuple[str, ...], cwd: str | None) -> str:
         code, remote = git("remote", "get-url", remote, cwd=where)
         if code != 0:
             return ""
-    match = _REMOTE_OWNER.search(remote)
+    return remote
+
+
+def _push_owner(args: tuple[str, ...], cwd: str | None) -> str:
+    """The org a `git push` would land in, or "" if it cannot be told."""
+    match = _REMOTE_OWNER.search(_push_remote(args, cwd))
     return match.group(1) if match else ""
+
+
+def _pushed(args: tuple[str, ...], cwd: str | None) -> frozenset[str]:
+    """The repo a `git push` landed in, or EVERYTHING when its remote cannot be read."""
+    match = _REMOTE_REPO.search(_push_remote(args, cwd))
+    return _target(match.group(1), match.group(2)) if match else frozenset({EVERYTHING})
 
 
 def _check_push_allowlist(args: tuple[str, ...], cwd: str | None) -> None:
@@ -429,6 +624,8 @@ def git(*args: str, cwd: str | None = None) -> tuple[int, str]:
 
     A `push` raises when `DSL_ORG_ALLOWLIST` is set and the remote is outside it."""
     _check_push_allowlist(args, cwd)
+    # A push names its repo only through the working copy's remote, read before it runs.
+    pushed = _pushed(args, cwd) if _git_subcommand(args) == "push" else None
     try:
         result = subprocess.run(
             ["git"] + list(args),
@@ -440,6 +637,9 @@ def git(*args: str, cwd: str | None = None) -> tuple[int, str]:
         )
     except subprocess.TimeoutExpired:
         return 1, f"git: timed out after {GIT_TIMEOUT_SECONDS}s"
+    finally:
+        if pushed is not None:
+            _wrote(FILES, pushed)
     return result.returncode, (result.stdout + result.stderr).strip()
 
 
@@ -469,7 +669,10 @@ def bot_login() -> str:
     call per process, cached, because the question is asked once per submission repo.
 
     "" when it cannot be read, which every caller must treat as "cannot tell" - never as
-    "not the bot", or a transient here would turn a handout commit into a submission."""
+    "not the bot", or a transient here would turn a handout commit into a submission.
+    A CLI run has already asked, for its budget line."""
+    if _start_budget is not None and _start_budget.login != UNKNOWN_LOGIN:
+        return _start_budget.login
     code, out = gh("api", "user", "--jq", ".login")
     return out.strip() if code == 0 else ""
 
@@ -527,3 +730,142 @@ def bot_token(what: str) -> str | None:
     else:
         log_err(f"DSL_BOT_TOKEN not set - cannot set {what}.")
     return None
+
+
+# ------------------------------------------------------------ the API budget line
+
+# One user account (`DSL_BOT_TOKEN`) runs every workflow in every course org, against ONE
+# budget of 5,000 REST calls an hour - and nobody can read its counters from outside,
+# because the token is an org secret. So every engine CLI run says, at its start and its
+# end, what the account had left and what the run cost: the numbers the next run's
+# failure would otherwise leave nobody able to explain.
+#
+# The source is the `X-RateLimit-*` HEADERS of `GET /user`, not `GET /rate_limit`: on
+# 2026-09-26 `/rate_limit` answered `used=0, remaining=5000` with a reset that moved to
+# an hour from now on every call, while `/user`'s headers counted up (4, 5, 6) against a
+# fixed reset - the real window.
+BUDGET_WARN_BELOW = 1000
+BUDGET_STOP_BELOW = 100
+
+_RATE_HEADER = re.compile(
+    r"^x-ratelimit-(limit|remaining|used|reset):\s*(\d+)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_LOGIN = re.compile(r'"login"\s*:\s*"([^"]+)"')
+
+# Named at module level so a test can hold the end line rather than register a real one.
+_at_exit = atexit.register
+
+
+# What the budget line calls a token whose `GET /user` named no login.
+UNKNOWN_LOGIN = "this token"
+
+
+@dataclass(frozen=True)
+class Budget:
+    """The account's REST budget as one response's headers told it."""
+
+    login: str
+    limit: int
+    remaining: int
+    used: int
+    reset: int  # epoch seconds
+
+    @property
+    def resets(self) -> str:
+        return datetime.fromtimestamp(self.reset, UTC).strftime("%H:%M")
+
+
+def parse_budget(out: str) -> Budget | None:
+    """The budget out of `gh api --include` output, or None when a header is missing.
+
+    Read whatever the exit code: a 403 for an exhausted budget still carries the headers,
+    and that is the answer that matters most. `\r` is tolerated at a line's end."""
+    found = {k.lower(): int(v) for k, v in _RATE_HEADER.findall(out)}
+    if set(found) != {"limit", "remaining", "used", "reset"}:
+        return None
+    login = _LOGIN.search(out)
+    return Budget(
+        login.group(1) if login else UNKNOWN_LOGIN,
+        found["limit"],
+        found["remaining"],
+        found["used"],
+        found["reset"],
+    )
+
+
+def read_budget() -> Budget | None:
+    """One `GET /user`, for its headers. None when there is no token (or no `gh`).
+
+    No retries: on an exhausted budget the rate-limit ladder would spend three and a half
+    minutes waiting for an answer that is already in hand."""
+    try:
+        _, out = gh("api", "--include", "--method", "GET", "user", retries=0)
+    except OSError:
+        return None
+    return parse_budget(out)
+
+
+def budget_start_line(start: Budget) -> str:
+    tag = "  [warn]" if start.remaining < BUDGET_WARN_BELOW else "  [budget]"
+    return (
+        f"{tag} GitHub API as {start.login}: {start.remaining} of {start.limit} left "
+        f"this hour, resets {start.resets}Z"
+    )
+
+
+def budget_end_line(start: Budget, end: Budget) -> str:
+    """What the run cost: the account's `used` between the two reads, less the end
+    read itself. Other runs on the same account in the meantime count too.
+
+    Across a reset the old window's share is lost, so the count is a floor."""
+    if end.reset == start.reset:
+        cost = plural(max(end.used - start.used - 1, 0), "call")
+    else:
+        cost = f"at least {plural(max(end.used - 1, 0), 'call')} (the hour reset during the run)"
+    return (
+        f"  [budget] this run used {cost}; {end.remaining} left, resets {end.resets}Z"
+    )
+
+
+def _budget_at_end(start: Budget) -> None:
+    end = read_budget()
+    if end is not None:
+        print(budget_end_line(start, end), file=sys.stderr, flush=True)
+
+
+# What this run's start line said, for the scheduler's budget alarm (`cadence.report_budget`).
+_start_budget: Budget | None = None
+
+
+def start_budget() -> Budget | None:
+    """The budget this process read at its start, or None (no token, or not a CLI run)."""
+    return _start_budget
+
+
+def budget_at_start(stop: bool = True) -> None:
+    """The start line, and the end line registered for exit - or, below
+    BUDGET_STOP_BELOW and with `stop`, the run stopped before it spends the last of the
+    budget and fails half-way for a cause it could have named. Nothing at all without a
+    token.
+
+    stderr, because some CLIs' stdout is read by the workflow (`list_orgs`, `scheduler`)."""
+    global _start_budget
+    start = _start_budget = read_budget()
+    if start is None:
+        return
+    if stop and start.remaining < BUDGET_STOP_BELOW:
+        log_err(
+            f"GitHub API budget exhausted: {start.remaining} of {start.limit} left, "
+            f"resets {start.resets}Z - this run stops before it starts"
+        )
+        sys.exit(1)
+    print(budget_start_line(start), file=sys.stderr, flush=True)
+    _at_exit(_budget_at_end, start)
+
+
+def _budget_hook(parser: CLIParser) -> None:
+    budget_at_start(stop=parser.budget_stop)
+
+
+on_cli_start(_budget_hook)

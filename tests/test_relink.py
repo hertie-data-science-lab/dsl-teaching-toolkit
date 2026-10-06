@@ -16,7 +16,7 @@ from dsl_course import enrol_codes, grades, relink, roster, teams
 from dsl_course.gh_contents import blob_sha, read_csv
 from tests.conftest import ROSTER_HEADER, repo_row
 
-ORG = "Cohort"
+ORG = "Semester"
 OLD, NEW = "oldacct", "newacct"
 OLD_ID, NEW_ID = "101", "202"
 SHEET = "grading_sheets/assignment-1.yml"
@@ -61,7 +61,7 @@ def distributed_text() -> str:
 
 
 class World:
-    """One cohort as `relink` sees it: its roster, classroom-config, repos and people."""
+    """One semester as `relink` sees it: its roster, semester-config, repos and people."""
 
     def __init__(self):
         self.roster = roster_text()
@@ -73,8 +73,8 @@ class World:
             SHEET: sheet_text().encode(),
             GROUP_SHEET: group_sheet_text().encode(),
             grades.DISTRIBUTED_PATH: distributed_text().encode(),
-            f"autograde/assignment-1/{OLD}.json": b'{"score": 4}\n',
-            "autograde/assignment-1/bob.json": b'{"score": 5}\n',
+            f".system/autograde/assignment-1/{OLD}.json": b'{"score": 4}\n',
+            ".system/autograde/assignment-1/bob.json": b'{"score": 5}\n',
         }
         bot = [("dsl-bot", "")]
         self.repos: dict[str, dict] = {
@@ -256,7 +256,7 @@ def world(monkeypatch) -> World:
 
     monkeypatch.setattr(relink, "close_by_creator", close)
     monkeypatch.setattr(relink, "bot_login", lambda: "dsl-bot")
-    monkeypatch.setattr(relink, "course_org_for_cohort", lambda org: "Course")
+    monkeypatch.setattr(relink, "course_org_for_semester", lambda org: "Course")
     monkeypatch.setattr(relink.schedule, "load", lambda org: None)
     monkeypatch.setattr(relink, "sheet_specs", lambda course, sched: w.specs)
 
@@ -292,7 +292,7 @@ def test_a_switched_account_is_moved_completely(world):
     assert world.repos[f"assignment-1-{NEW}"]["collab"] == {NEW: "maintain"}
     assert world.repos[f"grades-{NEW}"]["collab"] == {NEW: "pull"}
     assert world.repos["assignment-1-bob"]["collab"] == {"bob": "maintain"}
-    # classroom-config
+    # semester-config
     assert "assignment-2,team-x,newacct" in world.config[teams.TEAMS_PATH].decode()
     assert OLD not in world.config[teams.TEAMS_PATH].decode()
     marks = sheet_of(world)["submissions"]
@@ -307,15 +307,15 @@ def test_a_switched_account_is_moved_completely(world):
     )
     assert (NEW, "", "email") in distributed and (OLD, "", "email") not in distributed
     assert (OLD, "assignment-1", "gradebook") in distributed  # redistributed later
-    assert f"autograde/assignment-1/{NEW}.json" in world.config
-    assert f"autograde/assignment-1/{OLD}.json" not in world.config
+    assert f".system/autograde/assignment-1/{NEW}.json" in world.config
+    assert f".system/autograde/assignment-1/{OLD}.json" not in world.config
     # The throttle issues, the private record, and the id - last.
     assert world.closed == [
-        (f"{ORG}/welcome", 11),
-        (f"{ORG}/welcome", 12),
-        (f"{ORG}/welcome", 13),
+        (f"{ORG}/join", 11),
+        (f"{ORG}/join", 12),
+        (f"{ORG}/join", 13),
     ]
-    record = json.loads(world.config[f"enrolment/relinks/{OLD_ID}.json"])
+    record = json.loads(world.config[f".system/enrolment/relinks/{OLD_ID}.json"])
     assert (record["old_login"], record["new_login"]) == (OLD, NEW)
     assert (record["old_id"], record["new_id"]) == (OLD_ID, NEW_ID)
     assert world.stored_id() == NEW_ID
@@ -368,7 +368,7 @@ def test_a_failure_at_any_step_leaves_the_id_and_the_next_run_finishes(world, st
     assert set(world.repos) >= {f"assignment-1-{NEW}", f"grades-{NEW}"}
     assert world.repos[f"assignment-1-{NEW}"]["collab"] == {NEW: "maintain"}
     assert NEW in sheet_of(world)["submissions"]
-    assert f"autograde/assignment-1/{NEW}.json" in world.config
+    assert f".system/autograde/assignment-1/{NEW}.json" in world.config
     assert len(world.closed) == 3
 
 
@@ -504,10 +504,10 @@ def test_marks_on_both_sheet_entries_refuse(world):
 
 
 def test_autograde_results_for_both_accounts_refuse(world):
-    world.config[f"autograde/assignment-1/{NEW}.json"] = b"{}"
+    world.config[f".system/autograde/assignment-1/{NEW}.json"] = b"{}"
     run(world)
     assert world.stored_id() == OLD_ID
-    assert f"autograde/assignment-1/{OLD}.json" in world.config
+    assert f".system/autograde/assignment-1/{OLD}.json" in world.config
 
 
 def test_an_unreadable_sheet_holds_the_relink(world):
@@ -519,7 +519,7 @@ def test_an_unreadable_sheet_holds_the_relink(world):
 def test_the_squat_guard_matches_the_message_onboard_commits():
     # The guard recognises a pair the toolkit linked by onboard's own commit message, so
     # the two spellings are one contract across two languages.
-    onboard = (Path(__file__).parents[1] / "templates/welcome/onboard.yml").read_text()
+    onboard = (Path(__file__).parents[1] / "templates/join/onboard.yml").read_text()
     js = relink.LINK_MESSAGE.format(handle="${handle}", user_id="${userId}")
     assert f"message: `{js}`" in onboard
 
@@ -528,7 +528,7 @@ def test_the_squat_guard_matches_the_message_onboard_commits():
 
 
 def test_a_config_edit_that_lands_mid_relink_is_never_overwritten(world, capsys):
-    # The classroom-config commit is built on the commit its files were READ at, so a
+    # The semester-config commit is built on the commit its files were READ at, so a
     # write that landed in between makes it fail rather than be silently reverted.
     def faculty_edit():
         world.config[teams.TEAMS_PATH] += b"assignment-2,team-x,cy\n"
@@ -538,7 +538,7 @@ def test_a_config_edit_that_lands_mid_relink_is_never_overwritten(world, capsys)
     assert run(world)[0] == 0, "a lost race is transient, not a red run"
     assert world.stored_id() == OLD_ID
     assert OLD in world.config[teams.TEAMS_PATH].decode()
-    assert "met a concurrent classroom-config edit" in capsys.readouterr().out
+    assert "met a concurrent semester-config edit" in capsys.readouterr().out
     assert run(world)[0] == 0
     text = world.config[teams.TEAMS_PATH].decode()
     assert "cy" in text and "newacct" in text and OLD not in text

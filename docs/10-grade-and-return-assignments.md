@@ -16,11 +16,11 @@ sheet created  sheet        sheet refreshed   sheet         gradebook + CSV
 Marking can start the moment anything is in. The sheet exists from handout; only the
 machine facts move during the late window.
 
-## `classroom-config/grading_sheets/<slug>.yml`
+## `semester-config/grading_sheets/<slug>.yml`
 
 The one place a grader types. It arrives with every row present and a header saying which
 fields the toolkit fills and when. Two shapes - individual and group - and worked examples
-of both ship as `grading_sheets/*.yml.sample` in your `classroom-config`.
+of both are in the [worked example semester](../example-course/semester-org/grading_sheets).
 
 ```yaml
 teams:
@@ -30,9 +30,6 @@ teams:
       days_late: 0
       contributions: |
         Anna: model architecture. Ben: training loop.
-    score_group:                # yours
-      Q1: 14                    # /15
-      Q2: 13                    # /15
     feedback_group: |
       Excellent model design; the evaluation section is thin.
     members:
@@ -40,6 +37,12 @@ teams:
         adjustment_individual: +4
         feedback_individual:
         notes_not_shared_with_students:
+    score_group:                # yours
+      Q1: 14                    # /15
+      Q2: 13                    # /15 · report.tex
+    feedback_per_question:
+      Q1:
+      Q2: One baseline is not a comparison.
 ```
 
 | Field | Owner | Student sees |
@@ -47,6 +50,7 @@ teams:
 | `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde`, `info.completion`, `info.submitted_note` | toolkit, refreshed until frozen | `submitted`, `days_late` |
 | `score_individual` (per question, or one value) | you | the total, and the breakdown behind it |
 | `feedback_group`, `feedback_individual` | you | yes (own + team) |
+| `feedback_per_question` (where questions are declared; the team's on a group sheet) | you, optional | yes: a list after the overall feedback, inside the team's quote on a group sheet; a blank cell is not sent |
 | `score_group` | you | never shown as-is; each member's gradebook shows only the final grade it derives - the score itself too, but only for a team with no repo of its own (`shared_dropbox_repo`, `external`) |
 | `adjustment_individual` | you - the ONLY override, in both shapes | **no** - only the final grade it produced |
 | `notes_not_shared_with_students` | you | **never** |
@@ -55,19 +59,21 @@ teams:
 The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A
 non-numeric score (`pass`, `A-`) is passed through verbatim with no arithmetic - unless a
 late penalty applies to it, which no arithmetic can do: that mark is **held**. Nothing is
-posted, written or emailed for it, the dry run and the run both count it (`held`), and it
+posted, written or emailed for it, the preview and the run both count it (`held`), and it
 goes out as soon as you put a number (or waive the penalty with `adjustment_individual`). The question names, the `# /N` maxima and the whole
 header come from `grading_config.yml` and `schedule.yml` and are re-emitted on every write - so
 edit them **there**, never in the sheet. The toolkit writes the file only when the data or
 that header really moved, so your quoting and spacing survive the quarter-hourly tick; YAML
-comments you add do not survive a rewrite when one happens.
+comments you add do not survive a rewrite when one happens. A sheet written before
+`feedback_per_question` existed never gains it: add `feedback_per_question:` under a unit
+by hand.
 
 ### When a sheet has something nobody can act on
 
 The quarter-hourly tick reads every sheet. Anything it cannot use - a save that does not
 parse, a key written twice, a mark or an adjustment that is not a number, a question
 `grading_config.yml` does not declare, a handle in two submission units - opens **one**
-issue in `classroom-config` (*grading sheets have entries the grader cannot read*) listing
+issue in `semester-config` (*grading sheets have entries the grader cannot read*) listing
 each by file and line, and emails whoever committed that line. Nothing is refreshed or sent
 for that unit until it is settled. The issue rewrites itself on every tick and closes when
 the last one goes.
@@ -86,7 +92,7 @@ before the marking does, not after. For the whole set of these, see
 A git committer date is written by the student's own client, so a submission dated before
 the deadline is a claim, not an observation. At the **cutoff** the freeze therefore asks
 GitHub when it saw the push that delivered the pinned commit, and records which rung
-answered in `snapshots/<slug>.csv`:
+answered in `.system/snapshots/<slug>.csv`:
 
 | `submitted_source` | what `info.submitted` is | `info.submitted_note` |
 |---|---|---|
@@ -109,7 +115,7 @@ last commit at or before the cutoff that touches `<handle>/` (or `<team>/`) **an
 by one of that unit's own members**, so a classmate's edit is never marked as their work. A
 folder nobody in the unit ever pushed to has no submission. Two things differ from the
 shapes with a repo each: `suspect` never appears (GitHub's last-push record is the whole
-repo's, so it would accuse the entire cohort of one student's late push), and
+repo's, so it would accuse the entire semester of one student's late push), and
 `submitted_note` carries what the search through the folder found:
 
 | `info.submitted_note` | what it means |
@@ -123,23 +129,24 @@ repo's, so it would accuse the entire cohort of one student's late push), and
 1. **Handout.** The sheet appears with one row per student or team, every student has a
    private `grades-<handle>` gradebook, and a `submit_via: assignment_repo`, `visibility: private`
    submission repo gets a **Submission receipts** issue. An `external` assignment has no repos, a
-   `shared_dropbox_repo` one has a repo the whole cohort reads, and a `public` or `student_choice` repo
+   `shared_dropbox_repo` one has a repo the whole semester reads, and a `public` or `student_choice` repo
    is not private - none of the three gets an issue, so none of the three gets receipts.
    Nothing else turns on it: marks and feedback go to the gradebook for every shape alike.
 2. **The due date.** `info:` fills, and each student gets a submission receipt on that
    issue. Late pushes refresh both, quarter-hourly, until the cutoff.
 3. **Collect submissions** (button) does that refresh now instead of waiting. It never
-   freezes anything.
+   freezes anything. Its `assignment` box names the schedule key only when two entries
+   share the template.
 4. **Type the marks.** Anything you write is kept forever - including keys you invent, and
    rows for students who have left. Delete a key and it stays deleted.
-5. **The cutoff** (`grading_datetime`, else the due date plus the late window) freezes the
+5. **The late cutoff** (the due date plus the late window) freezes the
    pin and the sheet. Its header then reads `FROZEN`.
-6. **Distribute grades** (button), `dry_run` first. The dry run writes no grades and sends
+6. **Distribute grades** (button), `preview` first. Leave `assignment` empty to return every sheet, or name one to return only its marks; each gradebook still shows everything already returned, rendered from those sheets as they stand now, so a mark changed on an already-returned assignment goes out with it. A scoped run refuses when it cannot tell what was returned (the registrar export missing or unreadable); an unscoped run rewrites it. The preview writes no grades and sends
    no mail. It prints the counts, and posts who gets what - each changed grade, who is
    emailed, marks **held** for a hand decision, unmarked questions - as a *Distribute
-   grades preview* issue in `classroom-config`. Each dry run rewrites that issue; the real
+   grades preview* issue in `semester-config`. Each preview rewrites that issue; the real
    run closes it. There is no assignment to pick: every gradebook and the registrar's
-   export are rebuilt from every sheet in the cohort on every run, so a student's
+   export are rebuilt from every sheet in the semester on every run, so a student's
    gradebook always shows everything they have been marked on. A half-typed sheet is
    therefore a reason to wait.
 
@@ -152,12 +159,22 @@ could change is not it.
 - **The private gradebook** `grades-<handle>`: `grades.yml` and a rendered `README.md`, in
   one commit. The student sees their final grade, never the sum behind it. Each member of
   a team reads the team's shared feedback here, in their own repo, beside their own grade.
-- **`cohort-gradebook.csv`** in `classroom-config` - the registrar export, one row per
+- **`.system/semester-gradebook.csv`** in `semester-config` - the registrar export, one row per
   enrolled student including the ungraded. Private, never logged.
 - **An email** with a link and no marks in it.
 
-Nothing is said twice: every send is recorded in `gradebook/distributed.csv`, so a re-run
-after one correction reaches one student. `silent` skips the email.
+Nothing is said twice: every send is recorded in `.system/gradebook/distributed.csv`, so a re-run
+after one correction reaches one student. The emails are recorded just before they go, so a
+run that fails afterwards never mails anyone twice. If some emails fail, they are retried
+only when you press Return marks again; if every one fails, `marks_return_datetime` tries
+again on its own. It also keeps trying while any mark is held, and sends only what has not
+gone out. A `grading_config.yml` refused as `NOT_MIGRATED` stops its sheet refresh and
+Return marks until the migration runs. Untick `notify` to skip the email.
+
+Two options, both off by default. `include_feedback` puts the markers' feedback text into
+the email: the overall feedback, then each question's. `receipt_note` posts one line,
+"Marks returned: see your marks repo.", on each returned student's or team's Submission
+receipts issue - once per assignment, however often you run it. The note carries no mark.
 
 The gradebook and the email are decided separately, on purpose. The **commit** is made
 whenever anything in the repo would change, so an improvement to the page's own wording
@@ -174,8 +191,8 @@ if you have one.
 Off unless you ask for it. `autograde: true` in the template's `grading_config.yml` runs the
 hidden tests from its `solution` branch at the cutoff, against the frozen pin, in a sandbox with the token stripped. The
 count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
-itself and a student never sees it. Per-test detail goes to `classroom-config/autograde/`.
-To regrade, delete `autograde/<slug>/`.
+itself and a student never sees it. Per-test detail goes to `semester-config/.system/autograde/`.
+To regrade, delete `.system/autograde/<slug>/`.
 
 ### Tests in another language: `tests/run.sh`
 
@@ -223,16 +240,16 @@ one word into `info.completion`:
 | `info.completion` | Means |
 |---|---|
 | `ran-clean` | every cell executed and none raised |
-| `errors:3` | three cells raised - read the executed copy in `autograde/<slug>/` to see which |
+| `errors:3` | three cells raised - read the executed copy in `.system/autograde/<slug>/` to see which |
 | `not-attempted` | the notebook is byte-for-byte the starter you handed out, or nothing was pushed |
 | `no-notebook` | the submission holds no `.ipynb` |
 | `timed-out` | the notebook never finished inside the time limit |
 | `did-not-run` | our runner could not execute it at all - tell the maintainer |
 
 Like `info.autograde` it is **information, never a mark**, and a student never sees it. The
-executed notebook is archived beside the result JSON as `autograde/<slug>/<key>.ipynb`.
+executed notebook is archived beside the result JSON as `.system/autograde/<slug>/<key>.ipynb`.
 
-It is **on by default for `format: ipynb`** and off for everything else; `completion_check:
+It is **on by default when `formats:` starts with `ipynb`** and off for everything else; `completion_check:
 true` / `false` in `grading_config.yml` overrides either way. It is independent of
 `autograde`, and that is the point - most notebook assignments are marked by hand.
 
@@ -263,8 +280,10 @@ fences - `<!-- BEGIN QUESTION -->` and `<!-- END QUESTION -->` in a markdown cel
 their own line in an Rmd/qmd) - and set `grader_pdf: true` in the template's
 `grading_config.yml`. At the cutoff every submission is filtered down to just those
 questions and archived beside the autograde detail, as
-`classroom-config/autograde/<slug>/<key>.pdf`. Setup cells, imports and machine-marked
-work are left out, so you read the answers rather than the repo.
+`semester-config/.system/autograde/<slug>/<key>.pdf`. Setup cells, imports and machine-marked
+work are left out, so you read the answers rather than the repo. A question marked from
+another file (`file:` in `questions:`) gets that file archived beside it as
+`<key>.<file>`, read as its compiled `.pdf` when one is committed.
 
 It is **not** behind `autograde:`, deliberately: the fences delimit what a *person* marks,
 so an all-manual assignment is the one that wants this most.
@@ -276,37 +295,39 @@ can knit). The run log says which, in counts. None of that ever reds the cutoff 
 submission with no fences in it, or one repo that could not be read, is counted and the
 freeze carries on.
 
-## Closing the cohort out
+<a id="closing-the-cohort-out"></a>
+
+## Archiving the semester
 
 **Ask for it once and it happens on its own.** Write an `archive:` block in `schedule.yml`
-and the scheduler archives the whole cohort org on its date. You do not have to remember
+and the scheduler archives the whole semester org on its date. You do not have to remember
 it, and nobody has to be around for it.
 
 ```yaml
 archive:
   event_datetime: 2027-02-16   # optional - default: semester_end + 60 days
-  show_on_site: true     # optional - default: true. A "Cohort archived" row on the site
+  show_on_site: true     # optional - default: true. A "Semester archived" row on the site
 ```
 
 The block is the switch: `archive:` on its own is enough, and means sixty days after your
-`semester_end`. **Without the block, nothing is ever archived** - the cohort stays live and
-writable, and its digest issue says so, term after term.
+`semester_end`. **Without the block, nothing is ever archived** - the semester stays live and
+writable, and its digest issue says so, semester after semester.
 
-**A fortnight before**, the cohort gets one issue in `classroom-config` and one email to
-the teaching team saying what is about to happen. That is the moment to move the date if
+**A fortnight before**, the semester gets one issue in `semester-config` and one email to
+the instructors saying what is about to happen. That is the moment to move the date if
 you need longer - move it inside the fortnight and a notice for the new date opens and
 mails again. Students see it too, in the site's Updates box and on its schedule.
 
 **On the day**, in this order:
 
-1. the cohort's edits to released material are offered back to the course org as a pull
-   request (see [Carrying cohort edits back](08-release-materials-to-cohort.md#carrying-cohort-edits-back));
-2. the toolkit's own open notices in `classroom-config` are closed;
+1. the semester's edits to released material are offered back to the course org as a pull
+   request (see [Carrying semester edits back](08-release-materials-to-cohort.md#carrying-semester-edits-back));
+2. the toolkit's own open notices in `semester-config` are closed;
 3. the website is synced one last time, so it ships the archived state;
 4. **every repository in the org is archived** - students' work, the released materials,
-   `welcome` (so nobody can still Join a term that is over), the website, `.github`;
-5. `archive/teardown.md` is written into `classroom-config`, recording what was frozen;
-6. `classroom-config` is archived last, which is what tells every nightly sync this cohort
+   `join` (so nobody can still Join a semester that is over), the website, `.github`;
+5. `.system/archive.md` (the archive record) is written into `semester-config`, recording what was archived;
+6. `semester-config` is archived last, which is what tells every nightly sync this semester
    is finished and to leave it alone.
 
 **Nobody is removed and nothing is deleted.** An archived repository is read-only for
@@ -318,14 +339,14 @@ project teams are untouched.
 To reopen anything - a grade appeal, a late submission - un-archive that repo from its own
 Settings page. It comes back exactly as it was, write access included.
 
-**Archive cohort** is the button for closing a cohort out early, or at all. `dry_run` is on
+**Archive semester** is the button for archiving a semester early, or at all. `preview` is on
 by default and prints the counts; the real run **refuses** until the archive date has
-arrived, and `force` overrides that - which is how a cohort with no `archive:` block, and
-so no date, is closed out. Run it again if it fails part-way - it picks up where it stopped,
+arrived, and `force` overrides that - which is how a semester with no `archive:` block, and
+so no date, is archived. Run it again if it fails part-way - it picks up where it stopped,
 and only the last step seals the record.
 
-`classroom-config` is now the cohort's whole record of assessment - roster, teams, schedule,
-grading sheets, autograde detail, what was sent to whom, and `cohort-gradebook.csv`. Delete
+`semester-config` is now the semester's whole record of assessment - roster, teams, schedule,
+grading sheets, autograde detail, what was sent to whom, and `.system/semester-gradebook.csv`. Delete
 the repository, and the archived student repos with it, when your institution's retention
 period for that record expires.
 

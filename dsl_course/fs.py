@@ -41,7 +41,7 @@ def copy_tree(src: Path, dst: Path, deny: Deny | None = None) -> None:
     `symlinks=True` copies each link AS a link, and is the reason this is one function.
     Following them, a symlink pointing at nothing raises shutil.Error and a directory
     symlink pointing at its own parent recurses - and the release runs under an hourly
-    cron, so one such path in one materials repo aborted a whole cohort's release every
+    cron, so one such path in one materials repo aborted a whole semester's release every
     hour. On the public path it is worse than an abort: a `notes.pdf ->
     ../solution/answers.pdf` would be published as the answers themselves, under a name
     no denylist has any reason to refuse."""

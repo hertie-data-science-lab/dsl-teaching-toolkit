@@ -9,16 +9,193 @@ import csv
 import hashlib
 import io
 import json
-from collections.abc import Iterable
+import re
+from collections.abc import Callable, Iterable
 from functools import cache
+from pathlib import PurePosixPath
 from typing import Any
+from urllib.parse import unquote
 
 import yaml
 
 from .faults import ConfigFault, Unusable, header_fault
-from .ghcli import gh, gh_json, is_missing_resource
-from .log import log_err, log_err_person, log_skip
+from .ghcli import (
+    ALL,
+    FILE,
+    FILES,
+    file_target,
+    forgets,
+    gh,
+    gh_json,
+    is_missing_resource,
+    on_write,
+)
+from .log import log_err, log_err_person, log_skip, on_cli_start
 from .repos import default_branch
+
+# ------------------------------------------------------------------ read once per process
+
+# A tick asks for the same file many times over: a semester's pointer to its course org was
+# read 45 times in one preview tick of a two-student demo (2026-09-26), because every spec,
+# cutoff and fault route resolves through it. So every read below is answered from the
+# network once per CLI process, keyed by its exact argv under its casefolded `org/repo`,
+# and forgotten the moment this process makes a write that can change that repo's files
+# (`ghcli.on_write`, which hears a `git push` too). Only a definite answer is kept - a
+# file, a 404, an empty repo's 409 - so a transient failure is asked again. A blob is
+# addressed by its sha and never changes, so no write forgets one.
+#
+# OFF until a CLI command line has parsed (`log.on_cli_start`), and off for a CLI whose
+# parser says `read_once=False` (`migrate`, which waits on other runs): a run that only
+# ever sees its own writes is the one this is right for. The e2e harness is one long
+# process reading what remote runs write, and never turns it on.
+#
+# A read forgotten by a write is not thrown away when its answer says which blob it was: a
+# file's Contents-API ETag IS its blob sha, so the next read of it asks `If-None-Match` and
+# an unchanged file comes back as a 304, which GitHub does not count against the budget.
+_reads: dict[str, dict[tuple[str, ...], tuple[int, str]]] | None = None
+_blobs: dict[tuple[str, ...], tuple[int, str]] | None = None
+_stale: dict[tuple[str, tuple[str, ...]], tuple[str, tuple[int, str]]] = {}
+_NOT_MODIFIED = "HTTP 304"
+
+
+def read_once(on: bool) -> None:
+    """Turn the per-process read memo on (empty) or off. `tests/conftest.py` turns it off
+    between tests."""
+    global _reads, _blobs
+    _reads, _blobs = ({}, {}) if on else (None, None)
+    _stale.clear()
+
+
+def _read(
+    org: str, repo: str, *args: str, reader: Callable | None = None
+) -> tuple[int, str]:
+    """`gh(*args)` for a read of `org/repo`, through the memo when it is on. `reader` is
+    the caller's own `gh`, for a module whose tests stub the name it imported."""
+    gh_ = reader or gh
+    if _reads is None:
+        return gh_(*args)
+    # The owner and repo are not case-sensitive on GitHub; the path inside the repo is.
+    prefix = f"repos/{org}/{repo}"
+    key = tuple(a.replace(prefix, prefix.casefold(), 1) for a in args)
+    held = _reads.setdefault(f"{org}/{repo}".casefold(), {})
+    if key in held:
+        return held[key]
+    etag, before = _stale.pop((f"{org}/{repo}".casefold(), key), ("", None))
+    if etag:
+        code, out = _conditional(gh_, args, etag)
+        if code != 0 and _NOT_MODIFIED in out:
+            held[key] = before
+            return before
+    else:
+        code, out = gh_(*args)
+    if code == 0 or is_missing_resource(out) or "HTTP 409" in out:
+        held[key] = (code, out)
+    return code, out
+
+
+def _conditional(gh_: Callable, args: tuple[str, ...], etag: str) -> tuple[int, str]:
+    """A file read asked with `If-None-Match`, answered in the shape its `--jq` would have.
+
+    Asked WITHOUT the jq and with `--include`: gh runs `--jq` over a 304's empty body and
+    fails with "unexpected end of JSON input", printing nothing that says 304 - and that
+    phrase is a transient the retry ladder waits out. Unfiltered, a 304 is `gh: HTTP 304`
+    and a 200 is the headers, a blank line and the file's JSON, projected here."""
+    jq = args[args.index("--jq") + 1]
+    bare = [
+        a for i, a in enumerate(args) if a != "--jq" and args[i - 1 : i] != ("--jq",)
+    ]
+    code, out = gh_(*bare, "--include", "-H", f'If-None-Match: "{etag}"')
+    if code != 0:
+        return code, out
+    try:
+        body = json.loads(re.split(r"\r?\n\r?\n", out, maxsplit=1)[1])
+        sha, content = str(body["sha"]), str(body.get("content") or "")
+    except (IndexError, KeyError, TypeError, ValueError):
+        return gh_(*args)  # an answer this cannot read: ask it plainly
+    if jq == ".sha":
+        return 0, sha
+    return 0, content.strip() if jq == ".content" else f"{sha}\n{content.strip()}"
+
+
+def read_repo(
+    org: str, repo: str, *args: str, reader: Callable | None = None
+) -> tuple[int, str]:
+    """Any READ of `org/repo` - a commit listing, say - through the same per-run memo as
+    its files, and forgotten by the same writes (a push to it, a commit to it)."""
+    return _read(org, repo, *args, reader=reader)
+
+
+def _held(
+    held: dict[tuple[str, ...], tuple[int, str]], args: tuple[str, ...]
+) -> tuple[int, str]:
+    if args in held:
+        return held[args]
+    code, out = gh(*args)
+    if code == 0 or is_missing_resource(out) or "HTTP 409" in out:
+        held[args] = (code, out)
+    return code, out
+
+
+def _etag(key: tuple[str, ...], answer: tuple[int, str]) -> str:
+    """The blob sha a held file read answered with - its ETag - or "" for any read whose
+    answer does not carry one (a tree, a listing, a 404)."""
+    code, out = answer
+    if code != 0 or not any("/contents/" in a for a in key) or "--jq" not in key:
+        return ""
+    jq = key[key.index("--jq") + 1]
+    if jq == ".content":
+        return blob_sha(base64.b64decode(out)) if out.strip() else ""
+    if jq in (".sha", _SHA_THEN_CONTENT):
+        # A directory answers these too, with a listing: only a file has one sha.
+        sha = out.partition("\n")[0].strip()
+        return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else ""
+    return ""
+
+
+def _contents_path(key: tuple[str, ...], repo_key: str) -> str | None:
+    """The path inside the repo a held read asked the Contents API for, or None for a read
+    of anything else (a tree, a commit listing, the repo object)."""
+    prefix = f"repos/{repo_key}/contents"
+    for arg in key:
+        if arg.startswith(prefix) and arg[len(prefix) : len(prefix) + 1] in (
+            "",
+            "/",
+            "?",
+        ):
+            return unquote(arg[len(prefix) :].split("?")[0].strip("/"))
+    return None
+
+
+def _retire(repo_key: str, held: dict, key: tuple[str, ...]) -> None:
+    """Forget one held read, keeping its ETag for the next ask."""
+    answer = held.pop(key)
+    if etag := _etag(key, answer):
+        _stale[(repo_key, key)] = (etag, answer)
+
+
+def _forget(kind: str, targets: frozenset[str]) -> None:
+    if _reads is None:
+        return
+    if kind == FILE:
+        # One path was committed: that file, every directory listing above it, and every
+        # read that is not of a file (a tree, a commit listing) - nothing else.
+        for target in targets:
+            repo_key, path = file_target(target)
+            held = _reads.get(repo_key, {})
+            for key in list(held):
+                where = _contents_path(key, repo_key)
+                if where is None or where in ("", path) or path.startswith(f"{where}/"):
+                    _retire(repo_key, held, key)
+    elif kind in (FILES, ALL):
+        for repo_key in list(_reads):
+            if forgets(repo_key, targets):
+                held = _reads[repo_key]
+                for key in list(held):
+                    _retire(repo_key, held, key)
+
+
+on_write(_forget)
+on_cli_start(lambda parser: read_once(parser.read_once))
 
 
 def missing_columns(
@@ -115,7 +292,7 @@ def yaml_problem(exc: yaml.YAMLError) -> str:
     """The parser's own complaint about a file that does not parse, and nothing else.
 
     Not `str(exc)`, which is what these messages used to be: PyYAML renders the offending
-    source LINE into it, and the line that broke a people.yml is the one carrying somebody's
+    source LINE into it, and the line that broke a instructors.yml is the one carrying somebody's
     email address. Every message here travels to a public run log, a public issue and an
     email."""
     return " ".join(str(getattr(exc, "problem", "") or "").split())
@@ -201,7 +378,9 @@ def file_exists(org: str, repo: str, path: str) -> bool:
     failure to read reads as absent, which costs a re-run rather than a missed one -
     unlike get_file_content, whose callers act on the CONTENT and must never take a rate
     limit for an empty file."""
-    code, _ = gh("api", f"repos/{org}/{repo}/contents/{path}", "--jq", ".sha")
+    code, _ = _read(
+        org, repo, "api", f"repos/{org}/{repo}/contents/{path}", "--jq", ".sha"
+    )
     return code == 0
 
 
@@ -325,8 +504,13 @@ def _tree(org: str, repo: str, branch: str, jq: str) -> list[str]:
     seed). Any OTHER failure RAISES rather than reporting an empty tree, the same rule as
     get_file_content: swallowed, an unreadable tree reads as "nothing is there", and the
     caller then rewrites the files it could not see or drops the links it never found."""
-    code, out = gh(
-        "api", f"repos/{org}/{repo}/git/trees/{branch}?recursive=1", "--jq", jq
+    code, out = _read(
+        org,
+        repo,
+        "api",
+        f"repos/{org}/{repo}/git/trees/{branch}?recursive=1",
+        "--jq",
+        jq,
     )
     if code != 0:
         if is_missing_resource(out) or "HTTP 409" in out:
@@ -351,6 +535,35 @@ def repo_blob_shas(org: str, repo: str, branch: str) -> dict[str, str]:
     return {path: sha for path, sha in entries}
 
 
+def repo_blob_entries(org: str, repo: str, branch: str) -> dict[str, tuple[str, str]]:
+    """`{path: (blob sha, file mode)}` for every file in `branch` - ONE recursive fetch.
+    `repo_blob_shas` with the mode kept, for a caller that re-points a file (`move_files`)
+    and must not turn an executable `run.sh` into a plain file on the way."""
+    lines = _tree(
+        org,
+        repo,
+        branch,
+        r'"\(.truncated)", (.tree[] | select(.type=="blob") | [.path, .sha, .mode] | @tsv)',
+    )
+    entries = (line.split("\t") for line in lines if line.count("\t") == 2)
+    return {path: (sha, mode) for path, sha, mode in entries}
+
+
+def repo_path_shas(org: str, repo: str, branch: str) -> dict[str, str]:
+    """`{path: sha}` for every entry in `org/repo`'s `branch`, directories included - ONE
+    recursive fetch.
+
+    `repo_blob_shas` with the trees kept: a directory's sha changes whenever anything under
+    it does, so one entry answers "has any grading sheet moved?" without listing them. What
+    `status.json` records its inputs by, so a reader can tell a stale status from one tree
+    read of its own."""
+    lines = _tree(
+        org, repo, branch, r'"\(.truncated)", (.tree[] | [.path, .sha] | @tsv)'
+    )
+    entries = (line.split("\t") for line in lines if "\t" in line)
+    return {path: sha for path, sha in entries}
+
+
 def get_blob(org: str, repo: str, sha: str) -> bytes | None:
     """The exact bytes of one blob, addressed by its git sha. None when the blob is gone.
 
@@ -364,7 +577,8 @@ def get_blob(org: str, repo: str, sha: str) -> bytes | None:
     What comes back is checked against the sha it was asked for, so an empty or truncated
     payload is a failure here rather than an empty file somewhere downstream. Same
     fail-loud rule as the rest of this module: only a genuine 404 is None."""
-    code, out = gh("api", f"repos/{org}/{repo}/git/blobs/{sha}", "--jq", ".content")
+    args = ("api", f"repos/{org}/{repo}/git/blobs/{sha}", "--jq", ".content")
+    code, out = gh(*args) if _blobs is None else _held(_blobs, args)
     if code != 0:
         if is_missing_resource(out):
             return None
@@ -388,7 +602,7 @@ def create_blob(org: str, repo: str, content: bytes) -> str | None:
     API: a tree entry's `content` field is text, so anything that is not UTF-8 has to be
     posted as a blob first and referenced by sha. Without it a corrected image or dataset
     under a patched folder raised `UnicodeDecodeError` out of a `.decode()`, past the
-    `RuntimeError` the caller catches, and abandoned a patch run mid-cohort."""
+    `RuntimeError` the caller catches, and abandoned a patch run mid-semester."""
     code, out = gh(
         "api",
         "--method",
@@ -502,6 +716,91 @@ def put_files(
     return _commit_tree(org, repo, branch, tree, message, person, parent=base)
 
 
+def move_clashes(shas: dict[str, str], moves: dict[str, str]) -> list[tuple[str, str]]:
+    """The `(old, new)` of `moves` whose source and target both exist in `shas` (`{path:
+    blob sha}`) with different bytes: a move that would lose one of two versions."""
+    return [
+        (old, new)
+        for old, new in moves.items()
+        if old in shas and new in shas and shas[old] != shas[new]
+    ]
+
+
+def refuse_clashes(
+    org: str, repo: str, shas: dict[str, str], moves: dict[str, str]
+) -> bool:
+    """Whether `moves` must be refused in `org/repo` (`move_clashes`), saying so when it
+    must. The public line gives a count and the folders; the paths, which can carry a
+    person's handle, go to the per-person log."""
+    clashes = move_clashes(shas, moves)
+    if not clashes:
+        return False
+    folders = sorted(
+        {
+            "/".join(PurePosixPath(new).parts[:-1][:2]) or "the root"
+            for _, new in clashes
+        }
+    )
+    log_err_person(
+        f"{org}/{repo}: {len(clashes)} move(s) onto a file that differs (under "
+        f"{', '.join(folders)}) - keep one version by hand; nothing was written",
+        "; ".join(f"both {old} and {new} exist and differ" for old, new in clashes),
+    )
+    return True
+
+
+def move_files(
+    org: str,
+    repo: str,
+    moves: dict[str, str],
+    message: str,
+    *,
+    files: dict[str, bytes] | None = None,
+    delete: Iterable[str] = (),
+    branch: str = "",
+) -> bool:
+    """Move `moves` (old path -> new path), write `files` and remove `delete`, as ONE
+    commit on `branch` (the default branch when "").
+
+    A move carries the blob's sha, not its bytes: the content never leaves GitHub, so a
+    binary moves as safely as text and the file at the new path is the old one exactly -
+    which is what a fire-once marker needs, since a copy that differed would be a second
+    marker. A move whose source is absent is skipped (already moved); one whose target
+    already holds the same bytes removes the source only. A target that holds DIFFERENT
+    bytes refuses the whole commit before anything is written, naming both paths: moving
+    would lose one of the two versions. Same no-op rule as `put_files`: nothing to do is
+    no commit. Returns False on a failed read, a refused move or any failed leg of the
+    commit."""
+    try:
+        branch = branch or default_branch(org, repo)
+        live = repo_blob_entries(org, repo, branch)
+    except RuntimeError as exc:
+        log_err(f"could not read {org}/{repo} before writing to it: {exc}")
+        return False
+    if refuse_clashes(org, repo, {p: entry[0] for p, entry in live.items()}, moves):
+        return False
+    tree: list[dict[str, Any]] = []
+    gone = {path: None for path in delete if path in live}
+    for old, new in moves.items():
+        if old not in live:
+            continue
+        if new not in live:
+            sha, mode = live[old]
+            tree.append({"path": new, "mode": mode, "type": "blob", "sha": sha})
+        gone[old] = None
+    for path, content in (files or {}).items():
+        if path in live and live[path][0] == blob_sha(content):
+            continue
+        entry = _tree_entry(org, repo, path, content)
+        if entry is None:
+            return False
+        tree.append(entry)
+    tree += [{"path": p, "mode": live[p][1], "type": "blob", "sha": None} for p in gone]
+    if not tree:
+        return True
+    return _commit_tree(org, repo, branch, tree, message)
+
+
 def _head(org: str, repo: str, branch: str) -> tuple[str, str] | None:
     """`(head sha, its tree sha)` for `branch`, or None if the repo has NO commits yet.
 
@@ -600,9 +899,9 @@ def _commit_tree(
         # API will create that first one. So the first write into a freshly-created repo
         # goes file by file through Contents, and every later write takes the batched path.
         #
-        # This is not hypothetical tidying: batching the classroom-config scaffolds into one
-        # commit moved them off Contents, and the first cohort org bootstrapped afterwards
-        # could not seed that repo at all - the roster, schedule and people.yml never
+        # This is not hypothetical tidying: batching the semester-config scaffolds into one
+        # commit moved them off Contents, and the first semester org bootstrapped afterwards
+        # could not seed that repo at all - the roster, schedule and instructors.yml never
         # landed, and every later step that reads them failed in turn.
         return _seed_first_commit(org, repo, tree, message, person)
     payload: dict[str, Any] = {"tree": tree, "base_tree": parent[1]}
@@ -730,7 +1029,7 @@ def _decoded(encoded: str) -> str:
     Decoded HERE rather than by jq's `@base64d`, because `ghcli.gh` hands its caller
     `(stdout + stderr).strip()` - so a file read through jq arrived without its trailing
     newline, and a CRLF file without its leading and trailing `\\r`. Written straight back
-    that is a different blob: the e2e teardown's fidelity check saw a cohort's
+    that is a different blob: the e2e teardown's fidelity check saw a semester's
     hand-edited `schedule.yml` "drift" by exactly one newline on every run. Base64 is the
     one payload that strip cannot damage - the API wraps it at 60 columns, and
     `b64decode` ignores whitespace anywhere in it."""
@@ -747,12 +1046,37 @@ def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | Non
     url = f"repos/{org}/{repo}/contents/{path}"
     if ref:
         url += f"?ref={ref}"
-    code, out = gh("api", url, "--jq", ".content")
+    if (held := _peek(org, repo, "api", url, "--jq", _SHA_THEN_CONTENT)) is not None:
+        return held[0]  # this run already read the file with its sha
+    code, out = _read(org, repo, "api", url, "--jq", ".content")
     if code != 0:
         if is_missing_resource(out):
             return None
         raise RuntimeError(f"could not read {org}/{repo}/{path}: {out[:200]}")
     return _decoded(out)
+
+
+def _peek(org: str, repo: str, *args: str) -> tuple[str, str] | None:
+    """`(decoded text, blob sha)` from a file read this run already holds under `args`
+    - either shape, since one answers the other - or None when it holds none."""
+    held = (_reads or {}).get(f"{org}/{repo}".casefold(), {})
+    prefix = f"repos/{org}/{repo}"
+    code, out = held.get(
+        tuple(a.replace(prefix, prefix.casefold(), 1) for a in args), (1, "")
+    )
+    if code != 0:
+        return None
+    if args[-1] == ".content":
+        sha, encoded = "", out
+    else:
+        sha, _, encoded = out.partition("\n")
+    if not encoded.strip():
+        # A file over 1 MB comes back with no content: nothing here says what it holds.
+        return None
+    return _decoded(encoded), sha or blob_sha(base64.b64decode(encoded))
+
+
+_SHA_THEN_CONTENT = r'"\(.sha)\n" + .content'
 
 
 def get_file_with_sha(
@@ -772,7 +1096,9 @@ def get_file_with_sha(
     url = f"repos/{org}/{repo}/contents/{path}"
     if ref:
         url += f"?ref={ref}"
-    code, out = gh("api", url, "--jq", r'"\(.sha)\n" + .content')
+    if (held := _peek(org, repo, "api", url, "--jq", ".content")) is not None:
+        return held  # this run already read the file; its sha is its blob's hash
+    code, out = _read(org, repo, "api", url, "--jq", _SHA_THEN_CONTENT)
     if code != 0:
         if is_missing_resource(out):
             return None
@@ -791,7 +1117,7 @@ def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ..
     the answer is a file or a folder - one fetch rather than two of the same tree.
 
     An absent or empty tree is `()` - see `_tree`, which also owns the fail-loud rule that
-    keeps an unreadable tree from republishing a cohort site with every material link and
+    keeps an unreadable tree from republishing a semester site with every material link and
     every session row deleted, silently and green.
     """
     select = f' | select(.type=="{kind}")' if kind else ""

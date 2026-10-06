@@ -490,7 +490,7 @@ def test_a_student_with_nothing_in_the_sheet_yet_has_no_gradebook_entry():
     assert build_gradebooks({"assignment-1": (individual_spec(), sheet)}) == {}
 
 
-def test_load_sheets_reads_every_sheet_in_a_classroom_config_checkout(tmp_path):
+def test_load_sheets_reads_every_sheet_in_a_semester_config_checkout(tmp_path):
     folder = tmp_path / "grading_sheets"
     folder.mkdir()
     (folder / "assignment-1.yml").write_text(

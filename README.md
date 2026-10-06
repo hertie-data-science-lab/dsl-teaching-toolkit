@@ -2,15 +2,15 @@
 
 Central registry of the workflows that deliver courses at the Hertie Data Science Lab. 
 
-A course lives once in a persistent **course** org and is delivered each year into a per-year **cohort** org; everything faculty-facing is a **GitHub Actions workflow**, and can be scheduled in advance at the start of the semester.
+A course lives once in a persistent **course** org and is delivered each year into a per-year **semester** org; everything faculty-facing is a **GitHub Actions workflow**, and can be scheduled in advance at the start of the semester.
 
 ## Start here
 
 | You are | Go to |
 |---------|-------|
 | Setting up a brand-new course | [workflow runbooks](docs/README.md) - [01](docs/01-new-course-org.md)-[03](docs/03-add-assignment-to-course.md) |
-| Starting a new cohort / semester of an existing course | [04 New cohort org](docs/04-new-cohort-org.md) onwards |
-| A TA joining a cohort | [runbooks](docs/README.md) [06](docs/06-enrol-students-to-cohort.md)-[10](docs/10-grade-and-return-assignments.md) - skip 01-05 |
+| Starting a new semester / semester of an existing course | [04 New semester org](docs/04-new-cohort-org.md) onwards |
+| A TA joining a semester | [runbooks](docs/README.md) [06](docs/06-enrol-students-to-cohort.md)-[10](docs/10-grade-and-return-assignments.md) - skip 01-05 |
 
 ## Deploying a course
 
@@ -20,10 +20,10 @@ A course lives once in a persistent **course** org and is delivered each year in
 1. [**Set up the course org**](docs/01-new-course-org.md) (once)
    - [Add materials](docs/02-add-materials-to-course.md) - lectures slides, readings, labs, other
    - [Add assignments](docs/03-add-assignment-to-course.md) - a template repo that is copied into student private response repos, optionally contains a solutions branch
-2. [**Set up a cohort org**](docs/04-new-cohort-org.md) (per year)
-   - [Declare the teaching team](docs/05-manage-teaching-team.md) - this year's instructors & TAs, optionally with `start`/`end` dates so access lapses on its own
+2. [**Set up a semester org**](docs/04-new-cohort-org.md) (per year)
+   - [Declare the instructors](docs/05-manage-teaching-team.md) - this year's instructors & TAs, optionally with `start`/`end` dates so access lapses on its own
    - [Enrol students](docs/06-enrol-students-to-cohort.md)
-   - [Set the schedule up front](docs/07-schedule-releases.md) - this automates release materials, assignments & grading runs from course org -> cohort org 
+   - [Set the schedule up front](docs/07-schedule-releases.md) - this automates release materials, assignments & grading runs from course org -> semester org 
 3. **Run the course**
    - Further manual release of [materials](docs/08-release-materials-to-cohort.md) and [assignments](docs/09-release-assignment-to-cohort.md) can be managed on an ad hoc basis
    - [Grade and return assignments](docs/10-grade-and-return-assignments.md)
@@ -32,7 +32,7 @@ A course lives once in a persistent **course** org and is delivered each year in
 
 Two org tiers:
 1. The **course** org is the faculty-facing control panel - the persistent registry of course materials & assignments, and where faculty & instructors push them from.
-2. The **cohort** org is the per-year student-facing delivery target - materials are released, assignments submitted and assessed, onboarding and the website live here.
+2. The **semester** org is the per-year student-facing delivery target - materials are released, assignments submitted and assessed, onboarding and the website live here.
 
 ```mermaid
 flowchart TB
@@ -53,17 +53,17 @@ profile (auto)
 
 + faculty & instructors workflows
 
-+ cohort registry`"]
++ semester registry`"]
   end
 
-  subgraph COHORT["COHORT org, e.g. hertie-dsl-demo-f/s202X (per-year)"]
+  subgraph SEMESTER["SEMESTER org, e.g. hertie-dsl-demo-f/s202X (per-year)"]
     cgh["`**.github**
 
-cohort config pointer + auto-generated student-facing org page`"]
-    welcome["`**welcome**
+semester config pointer + auto-generated student-facing org page`"]
+    join["`**join**
 
 Join issue → onboard.yml (+ student README)`"]
-    cfg["`**classroom-config**
+    cfg["`**semester-config**
 
 student-list, teams, schedule, grades, deadlines`"]
     cmat["`**released materials**
@@ -75,16 +75,16 @@ one private repo per student/group by default (generated; autograder rides along
     team["`**teams**
 
 student (& auditor) groups`"]
-    site["`**<cohort>.github.io**
+    site["`**<semester>.github.io**
 
-auto-deployed cohort website (material links: enrolled + auditors only)`"]
+auto-deployed semester website (material links: enrolled + auditors only)`"]
   end
 
   pub["`**<course-org>.github.io**
 
 open-courseware site - hosts shared lectures + readings`"]
 
-  COURSE -->|"cohort release"| COHORT
+  COURSE -->|"semester release"| SEMESTER
   gh -.->|"Publish course website (opt-in)"| pub
 
   subgraph KEY["Key"]
@@ -94,7 +94,7 @@ open-courseware site - hosts shared lectures + readings`"]
 
   classDef public fill:#e6f4ea,stroke:#2e7d32,color:#1b5e20;
   classDef private fill:#f3f3f3,stroke:#8a8a8a,color:#3c3c3c;
-  class gh,cgh,welcome,site,pub,keypub public;
+  class gh,cgh,join,site,pub,keypub public;
   class mat,tmpl,cfg,cmat,repos,team,keypriv private;
 ```
 
@@ -106,7 +106,7 @@ A course can optionally also publish a **public** `<course-org>.github.io` open-
 |---------|-------|
 | Chronological index of the e2e workflow | [the workflows](docs/README.md#the-workflows) |
 | An example course setup | [`example course`](example-course/README.md) |
-| Template artefacts | [`templates`](templates/classroom-config/README.md) |
+| Template artefacts | [`templates`](templates/semester-config/README.md) |
 | All available `.github` Actions tab workflows (course org) | [`actions reference`](docs/reference/actions-reference.md) |
 | Who may run those workflows, and which team grants it | [`access reference`](docs/reference/access-reference.md) |
 | **Deployment checklist** | [`DEPLOYMENT-CHECKLIST.md`](docs/DEPLOYMENT-CHECKLIST.md) |

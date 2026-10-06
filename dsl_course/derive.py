@@ -1,6 +1,6 @@
 """dsl-course derive -- write a template's student starter from its model solution.
 
-ONE authored file, two branches. Faculty keep the notebook (or Rmd/qmd/py) they actually
+ONE authored file, two branches. Faculty keep the notebook (or Rmd/qmd/py/tex) they actually
 teach from on the template's `solution` branch, under `solution/`, with the answers fenced
 off in the nbgrader/Otter vocabulary every notebook toolchain already speaks:
 
@@ -39,12 +39,11 @@ Nothing here ever writes to `solution`. `main` is the only destination, through 
 
 Usage:
     python3 -m dsl_course.derive --course-org hertie-dsl-demo-course-e1234 \\
-        --course-source-repo assignment-1-f2026 [--no-dry-run]
+        --course-source-repo assignment-1-f2026 [--no-preview]
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import sys
@@ -53,15 +52,28 @@ from typing import NamedTuple
 
 from .course import SOLUTION_BRANCH, SOLUTION_DIR
 from .gh_contents import get_file_content, put_files, repo_tree
-from .log import log, log_err, log_ok, log_step
+from .log import (
+    CLIParser,
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_step,
+    plural,
+)
 
 # ------------------------------------------------------------------ the fence vocabulary
 
 # nbgrader writes `### BEGIN SOLUTION`, Otter writes `# BEGIN SOLUTION`, and people type
 # `#BEGIN SOLUTION`. All three are the same instruction, so the match is on the WORDS: a
-# line that is nothing but comment hashes and the phrase. Case-insensitive, because a
-# marker that reads correctly to a human and not to this parser is the worst of both.
-_MARKER = re.compile(r"^\s*#*\s*(BEGIN|END)\s+SOLUTION\s*$", re.IGNORECASE)
+# line that is nothing but comment hashes (or LaTeX's `%`) and the phrase.
+# Case-insensitive, because a marker that reads correctly to a human and not to this
+# parser is the worst of both.
+_MARKER = re.compile(r"^\s*[#%]*\s*(BEGIN|END)\s+SOLUTION\s*$", re.IGNORECASE)
+# The LaTeX spelling `scaffold` seeds, since `#` is not a comment there.
+TEX_BEGIN_SOLUTION = "% BEGIN SOLUTION"
+TEX_END_SOLUTION = "% END SOLUTION"
 # The spelling to WRITE when something seeds a fenced file - `scaffold` seeds the model
 # answer this button reads, and a seed the button then refuses to derive is a red run on
 # the toolkit's own template. nbgrader's three-hash form, which `_MARKER` also matches.
@@ -89,11 +101,12 @@ _CHUNK_CLOSE = re.compile(r"^\s*`{3,}\s*$")
 PY_PLACEHOLDER = "pass  # YOUR CODE HERE"
 CODE_PLACEHOLDER = "# YOUR CODE HERE"
 TEXT_PLACEHOLDER = "_YOUR ANSWER HERE_"
+TEX_PLACEHOLDER = "% YOUR ANSWER HERE"
 
 # The suffixes this knows how to strip. Anything else under `solution/` is left where it is:
 # writing a faculty data file or a stray PDF onto `main` from a button called "derive the
 # student version" is a surprise, and `Release materials` is how a file gets published.
-DERIVABLE = (".ipynb", ".rmd", ".qmd", ".py", ".r")
+DERIVABLE = (".ipynb", ".rmd", ".qmd", ".py", ".r", ".tex")
 
 COMMIT_MESSAGE = "chore: derive the student starter from the solution branch"
 
@@ -295,7 +308,9 @@ def strip_source(path: str, text: str) -> Stripped:
         return strip_notebook(text, path)
     if suffix in (".rmd", ".qmd"):
         return strip_rmd(text, path)
-    placeholder = PY_PLACEHOLDER if suffix == ".py" else CODE_PLACEHOLDER
+    placeholder = {".py": PY_PLACEHOLDER, ".tex": TEX_PLACEHOLDER}.get(
+        suffix, CODE_PLACEHOLDER
+    )
     derived, regions = strip_regions(text, placeholder, path)
     return Stripped(derived, regions, 0)
 
@@ -450,25 +465,44 @@ def derivable_sources(tree: tuple[str, ...] | list[str]) -> list[str]:
 # -------------------------------------------------------------------------- the button
 
 
-def derive_student_version(course_org: str, template: str, dry_run: bool = True) -> int:
+def _missing_fences(path: str, tick: str) -> str:
+    """The fences a file with none could have used, in its own vocabulary."""
+    if PurePosixPath(path).suffix.lower() == ".tex":
+        return f"{tick}{TEX_BEGIN_SOLUTION}{tick} region"
+    return (
+        f"{tick}BEGIN SOLUTION{tick} region, no {tick}{SOLUTION_TAG}{tick} cell tag "
+        f"and no {tick}solution=TRUE{tick} chunk"
+    )
+
+
+def _refused(code: str, text: str) -> dict:
+    return {"code": code, "text": text}
+
+
+def derive_student_version(
+    course_org: str, template: str, dry_run: bool = True
+) -> Summary:
     """Write `template`'s student starter onto `main` from its `solution` branch.
 
     0 when every derivable file was derived (and written, on a real run); 1 if any of them
     could not be, which includes the "nothing was fenced" refusal. Partial success is still
     a failure: a starter set where one file kept its answers is not a starter set, and the
-    faculty member has to be told which file rather than left to notice.
+    faculty member has to be told which file rather than left to notice - so every file
+    that was not derived is a reason on the outcome, and every one that was is a detail,
+    on a dry run and a real one alike.
 
     No student, repo or person is named anywhere in this run's output - it walks a COURSE
     org's own template - so everything here is an ordinary log line."""
     log_step(
         f"Deriving the student version of {course_org}/{template} from "
-        f"`{SOLUTION_BRANCH}`{' (dry run)' if dry_run else ''}"
+        f"`{SOLUTION_BRANCH}`{' (preview)' if dry_run else ''}"
     )
     try:
         tree = repo_tree(course_org, template, SOLUTION_BRANCH, "blob")
     except RuntimeError as exc:
         log_err(f"could not read {template}'s `{SOLUTION_BRANCH}` branch: {exc}")
-        return 1
+        text = f"The {SOLUTION_BRANCH} branch of {template} could not be read."
+        return Summary(text, reasons=[_refused("BRANCH_UNREADABLE", text)], code=1)
     sources = derivable_sources(tree)
     if not sources:
         log_err(
@@ -476,64 +510,95 @@ def derive_student_version(course_org: str, template: str, dry_run: bool = True)
             f"`{SOLUTION_DIR}/` on its `{SOLUTION_BRANCH}` branch - there is nothing to "
             f"derive a starter from. Put the notebook you teach from there first."
         )
-        return 1
+        text = (
+            f"There is nothing to derive: no {', '.join(DERIVABLE)} file under "
+            f"{SOLUTION_DIR}/ on the {SOLUTION_BRANCH} branch."
+        )
+        return Summary(text, reasons=[_refused("NOTHING_TO_DERIVE", text)], code=1)
 
     files: dict[str, bytes] = {}
-    regions = cells = failures = 0
+    reasons: list[dict] = []
+    details: list[str] = []
+    regions = cells = 0
     for path in sources:
-        text = get_file_content(course_org, template, path, ref=SOLUTION_BRANCH)
+        try:
+            text = get_file_content(course_org, template, path, ref=SOLUTION_BRANCH)
+        except RuntimeError as exc:
+            # GitHub refused the read (permission, rate limit, network). Its answer names
+            # the file and says why; it is the course's own template, so it may be shown.
+            log_err(f"  ! {exc}")
+            reasons.append(_refused("READ_FAILED", f"{path} could not be read: {exc}."))
+            continue
         if text is None:
             # The tree listed it a moment ago, so this is a race or a permission fault
             # rather than an absence - either way the derived set is incomplete.
             log_err(f"  ! {path} could not be read - not derived")
-            failures += 1
+            reasons.append(_refused("SOURCE_UNREADABLE", f"{path} could not be read."))
             continue
         try:
             stripped = strip_source(path, text)
         except DeriveError as exc:
             log_err(f"  ! {exc}")
-            failures += 1
+            reasons.append(_refused("SOLUTION_REGION_BROKEN", f"{exc}."))
             continue
         if not stripped.replaced:
             log_err(
-                f"  ! {path} has no `BEGIN SOLUTION` region, no `{SOLUTION_TAG}` cell tag "
-                f"and no `solution=TRUE` chunk - NOT written, because the starter derived "
-                f"from it would be the model answer itself"
+                f"  ! {path} has no {_missing_fences(path, '`')} - NOT written, because "
+                f"the starter derived from it would be the model answer itself"
             )
-            failures += 1
+            reasons.append(
+                _refused(
+                    "NO_SOLUTION_REGION",
+                    f"{path} has no {_missing_fences(path, '')}, so the starter would be "
+                    f"the model answer.",
+                )
+            )
             continue
         files[student_path(path)] = stripped.text.encode()
         regions += stripped.regions
         cells += stripped.cells
-        log(
-            f"  {path} -> {student_path(path)}: {stripped.regions} region(s), "
+        line = (
+            f"{path} -> {student_path(path)}: {stripped.regions} region(s), "
             f"{stripped.cells} cell(s)/chunk(s) replaced"
         )
+        log(f"  {line}")
+        details.append(line)
 
-    summary = f"{len(files)} file(s), {regions} region(s) and {cells} cell(s)/chunk(s) replaced"
+    failures = len(reasons)
+    code = 1 if failures else 0
+    counts = {"files": len(files), "refused": failures}
+    derived = plural(len(files), "file")
+    refused = f"; {plural(failures, 'file')} could not be derived" if failures else ""
+
+    def summary(text: str, code: int = code) -> Summary:
+        return Summary(text, counts, reasons, code=code, details=details)
+
+    summary_line = f"{len(files)} file(s), {regions} region(s) and {cells} cell(s)/chunk(s) replaced"
     if dry_run:
         # The file LIST and the counts, never a line of the content: this log is the course
         # org's public `.github` Actions tab, and the content is the model answer.
-        log_ok(f"dry run: would write {summary} onto main")
-        return 1 if failures else 0
+        log_ok(f"preview: would write {summary_line} onto main")
+        return summary(f"Would derive {derived} onto main{refused}.")
     if files and not put_files(course_org, template, files, COMMIT_MESSAGE):
         log_err(
             f"the derived starter was NOT written to {course_org}/{template} - main still "
             f"holds whatever it held before; re-run once the cause is fixed"
         )
-        return 1
+        text = "The starter was not written; main still holds what it held before."
+        reasons.append(_refused("WRITE_FAILED", text))
+        return summary(text, code=1)
     if failures:
         log_err(
-            f"{failures} file(s) could not be derived (named above) - main has {summary}, "
-            f"and the rest of the starter is still whatever was already there"
+            f"{failures} file(s) could not be derived (named above) - main has "
+            f"{summary_line}, and the rest of the starter is still whatever was already there"
         )
-        return 1
-    log_ok(f"{course_org}/{template} main <- {summary}")
-    return 0
+        return summary(f"Derived {derived} onto main{refused}.")
+    log_ok(f"{course_org}/{template} main <- {summary_line}")
+    return summary(f"Derived {derived} onto main.")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True, help="Course org (the template)")
     parser.add_argument(
         "--course-source-repo",
@@ -541,24 +606,22 @@ def main() -> int:
         required=True,
         help="Assignment template repo (e.g. assignment-1-f2026)",
     )
-    # Default ON, like every other write button: the rendered workflow passes --dry-run /
-    # --no-dry-run explicitly, so a bare local invocation cannot overwrite a starter.
-    parser.add_argument(
-        "--dry-run",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="List the files and the counts; write nothing to main (default).",
+    # Default ON, like every other write button: the rendered workflow passes --preview /
+    # --no-preview explicitly, so a bare local invocation cannot overwrite a starter.
+    add_preview_flag(
+        parser, "List the files and the counts; write nothing to main (default)."
     )
     args = parser.parse_args()
     # A read helper that could not reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
         return derive_student_version(
-            args.course_org, args.template, dry_run=args.dry_run
+            args.course_org, args.template, dry_run=args.preview
         )
     except RuntimeError as exc:
         log_err(str(exc))
-        return 1
+        text = f"The derive stopped: {exc}."
+        return Summary(text, reasons=[_refused("DERIVE_STOPPED", text)], code=1)
 
 
 if __name__ == "__main__":
