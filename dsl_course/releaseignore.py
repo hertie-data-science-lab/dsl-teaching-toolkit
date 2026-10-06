@@ -12,7 +12,7 @@ that makes `!` correct - is here.
 paths do not all have a clone to look at:
 
   deny_for(root) / excludes(root, path)   a local clone      (deploy, public_site, assign)
-  from_tree(paths, read)                  a GitHub tree      (assign's cohort template,
+  from_tree(paths, read)                  a GitHub tree      (assign's semester template,
                                                               schedule's source check)
 
 Both anchor on a ROOT, not on the subpath being copied: a root `.releaseignore` governs a

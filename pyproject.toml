@@ -15,7 +15,7 @@ target-version = "py310"
 ignore = [
     # `date.today()` is deliberate wherever it appears: access windows (people.yml
     # start/end) and the site's own dates are day-granular, and Actions runners are UTC,
-    # so stamping them with a cohort timezone would not make them more correct. The
+    # so stamping them with a semester timezone would not make them more correct. The
     # timezone-sensitive code - schedule.yml parsing - is tz-aware and tested as such.
     "DTZ011",
     # Blind excepts here guard best-effort paths (a site sync after bootstrap, an org
@@ -24,6 +24,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Fixtures construct naive datetimes on purpose - reading them in the cohort's timezone is
+# Fixtures construct naive datetimes on purpose - reading them in the semester's timezone is
 # the behaviour under test, so a tz-aware fixture would test nothing.
 "tests/*" = ["DTZ001"]

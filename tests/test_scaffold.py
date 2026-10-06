@@ -22,9 +22,11 @@ from dsl_course import (
     gh_contents,
     ghcli,
     grades,
+    policy,
     releaseignore,
     repos,
     scaffold,
+    settings,
     workflows_place,
     workflows_render,
 )
@@ -81,8 +83,14 @@ def fake(monkeypatch):
     monkeypatch.setattr(scaffold, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "grant_tagged_team_access", lambda *a, **k: None)
-    monkeypatch.setattr(scaffold, "set_repo_topics", lambda *a, **k: None)
-    monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: [])
+    f.topics = {}
+
+    def set_topics(_org, repo, topics, **_):
+        f.topics[repo] = topics
+        return True
+
+    monkeypatch.setattr(scaffold, "set_repo_topics", set_topics)
+    monkeypatch.setattr(scaffold, "discover_semesters", lambda org: [])
     monkeypatch.setattr(scaffold, "discover_assignments", lambda org: [])
     monkeypatch.setattr(scaffold, "push_content_workflows", lambda *a, **k: 0)
     return f
@@ -91,16 +99,21 @@ def fake(monkeypatch):
 # --------------------------------------------------------------- materials scaffold
 
 
+def test_a_new_materials_repo_carries_the_materials_topic(fake):
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    assert fake.topics["course-materials-f2026"] == ["dsl-materials"]
+
+
 def test_fresh_materials_repo_gets_the_full_skeleton(fake):
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     assert fake.written("course-materials-f2026") == {
         "README.md",
-        "MAINTAINING.md",
+        ".system/MAINTAINING.md",
         "SYLLABUS.md",
         # The filled example beside the stub, on the repo's `<file>.sample` convention.
         # SYSTEM-owned like MAINTAINING.md, so a repo scaffolded before it existed picks it
         # up on the next Refresh.
-        "SYLLABUS.md.sample",
+        ".system/SYLLABUS.md.sample",
         "lectures/01_session-1/.gitkeep",
         # Readings get a stub rather than a .gitkeep: the folder's files are listed
         # automatically, but an empty folder gave no sign of that, nor that this file is
@@ -109,7 +122,7 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         "labs/01_session-1/.gitkeep",
         # Seeded inert, purely so faculty find out the withhold list exists.
         ".releaseignore",
-        # The other half of that question: what the cohort site may host in the open.
+        # The other half of that question: what the public website may publish.
         "publish.yml",
     }
     assert fake.skips == []
@@ -143,13 +156,13 @@ def test_maintaining_refreshes_on_rerun_while_readme_stays_create_only(fake):
     # and stays create-only, so a faculty-authored README is never clobbered.
     stale = "# stale maintainer guide\n"
     overview = "# faculty overview\n"
-    fake.files[("course-materials-f2026", "MAINTAINING.md")] = stale
+    fake.files[("course-materials-f2026", ".system/MAINTAINING.md")] = stale
     fake.files[("course-materials-f2026", "README.md")] = overview
 
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     # MAINTAINING.md re-written (refreshed from the template), README.md left as faculty had it.
-    assert "MAINTAINING.md" in fake.written("course-materials-f2026")
-    assert fake.files[("course-materials-f2026", "MAINTAINING.md")] != stale
+    assert ".system/MAINTAINING.md" in fake.written("course-materials-f2026")
+    assert fake.files[("course-materials-f2026", ".system/MAINTAINING.md")] != stale
     assert "README.md" not in fake.written("course-materials-f2026")
     assert fake.files[("course-materials-f2026", "README.md")] == overview
     assert "course-materials-f2026/README.md" in fake.skips
@@ -294,25 +307,27 @@ def test_a_notebook_among_the_starters_decides_the_notebook_machinery(
     assert "completion_check: true" in written["grading_config.yml"]
 
 
-def test_the_definition_records_the_starter_it_was_named_first_by(fake, monkeypatch):
-    # `grading_config.yml`'s `format:` is one word, because `grades` reads one - it is
-    # the vocabulary the file teaches, and the switch it stands behind is written out
-    # beside it either way. So several starters record the first, not a list no reader
-    # could use.
+def test_the_definition_records_every_starter_the_first_runnable(fake, monkeypatch):
+    # `formats:` lists every starter seeded, in the order it was named; the first is the
+    # runnable one, and the switch it stands behind is written out beside it either way.
     written = _solution_files(monkeypatch)
 
     assert scaffold.scaffold_assignment("Org", "1", "f2026", ["rmd", "ipynb"]) == 0
 
     spec = grades.parse_grading_spec(written["grading_config.yml"])
     assert spec.dropped == ()
+    assert spec.formats == ("rmd", "ipynb")
     assert spec.format == "rmd"
     assert spec.runs_completion_check  # the notebook in the list, said explicitly
-    # ...and the line SAYS the notebook is there, so `completion_check: true` beside
-    # `format: rmd` reads as the repo it describes rather than a hand-made override.
     (line,) = [
-        l for l in written["grading_config.yml"].splitlines() if l.startswith("format:")
+        l
+        for l in written["grading_config.yml"].splitlines()
+        if l.startswith("formats:")
     ]
-    assert "also seeded: ipynb" in line
+    assert line.startswith("formats: [rmd, ipynb]")
+    assert not any(
+        l.startswith("format:") for l in written["grading_config.yml"].splitlines()
+    )
 
 
 def test_a_fresh_assignment_gets_the_hand_out_button_and_nothing_else(
@@ -325,7 +340,7 @@ def test_a_fresh_assignment_gets_the_hand_out_button_and_nothing_else(
     monkeypatch.setattr(
         scaffold,
         "push_content_workflows",
-        lambda org, repo, cohorts, assignments, ref, *, workflows: (
+        lambda org, repo, semesters, assignments, ref, *, workflows: (
             asked.append((repo, workflows)) or 0
         ),
     )
@@ -346,7 +361,7 @@ def test_a_new_templates_button_pre_selects_it_before_the_listing_catches_up(
     monkeypatch.setattr(
         scaffold, "push_content_workflows", workflows_place.push_content_workflows
     )
-    monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(scaffold, "discover_semesters", lambda org: ["Semester-f2026"])
     monkeypatch.setattr(
         scaffold, "discover_assignments", lambda org: ["assignment-1-f2026"]
     )
@@ -535,7 +550,7 @@ def test_an_external_hand_in_asks_the_brief_where_it_goes(fake, monkeypatch):
 
 
 def test_an_external_brief_carries_no_repo_shaped_furniture(fake, monkeypatch):
-    # "Commit the notebook with its outputs saved" tells a cohort to hand in where nothing
+    # "Commit the notebook with its outputs saved" tells a semester to hand in where nothing
     # is ever read from: the repo collects nothing on a hand-in made off GitHub.
     _clone_ok(monkeypatch, _git_ok)
 
@@ -565,10 +580,10 @@ def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
     assert brief.startswith("# Neural networks from scratch\n\n## Task\n")
     assert "## Task" in brief and "## What to submit" in brief
     # No facts line at all. The deadline, the late rule and what the assignment is worth
-    # are the assignment's page on the cohort site, which prints all three off the plan
+    # are the assignment's page on the semester site, which prints all three off the plan
     # and off this assignment's own grading_config.yml (the total being the sum of its
     # `questions:` maxima) - spelt here as well, the hand-edited copy is the one that goes
-    # stale and a cohort reads two answers to one question.
+    # stale and a semester reads two answers to one question.
     assert "Points" not in brief
     assert "Due" not in brief and "Late work" not in brief
 
@@ -645,8 +660,8 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     # handout, the sheet and the Join-team form all read, over the course's own defaults.
     written = _solution_files(monkeypatch)
     monkeypatch.setattr(
-        scaffold,
-        "course_assignment_defaults",
+        settings,
+        "course_defaults",
         lambda org: {
             "max_team_size": 3,
             "late_window_days": 7,
@@ -661,7 +676,6 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
             ["ipynb"],
             "group",
             name="Neural networks: from scratch",
-            team_formation="assigned",
             submit_via="external",
             autograde=True,
         )
@@ -672,14 +686,47 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     assert (
         spec.title == "Neural networks: from scratch"
     )  # the colon survives the round trip
-    assert (spec.type, spec.team_formation, spec.max_team_size) == (
-        "group",
-        "assigned",
-        3,
-    )
+    assert spec.type == "group"
     assert (spec.submit_via, spec.format, spec.autograde) == ("external", "ipynb", True)
-    assert (spec.late_window_days, spec.late_penalty_per_day) == (7, "10%")
-    assert written["grading_config.yml"].startswith("# INSTRUCTOR-OWNED")
+    # No run setting is written at all, live or commented: they are each semester's
+    # assignments.yml, and the cascade answers them at read time.
+    text = written["grading_config.yml"]
+    assert not any(
+        line.lstrip("# ").startswith(f"{key}:")
+        for line in text.splitlines()
+        for key in settings.RUN_KEYS
+    )
+    assert "semester-config/assignments.yml" in text
+    resolved = grades.with_run_settings(spec, "Org")
+    assert (resolved.max_team_size, resolved.late_window_days) == (3, 7)
+    assert dict(resolved.sources)["late_window_days"] == "course"
+    assert text.startswith("# INSTRUCTOR-OWNED")
+
+
+def test_an_unasked_run_setting_leaves_the_semester_layer_to_answer(fake, monkeypatch):
+    # No box answered: nothing the scaffold writes may hide `assignments.yml`.
+    written = _solution_files(monkeypatch)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["ipynb"], "group") == 0
+    text = written["grading_config.yml"]
+    monkeypatch.setattr(
+        settings,
+        "_assignments_text",
+        lambda org: (
+            "defaults:\n  late_window_days: 3\n  late_penalty_per_day: 5%\n"
+            "  visibility: public\n  team_formation: assigned\n  max_team_size: 2\n"
+        ),
+    )
+    monkeypatch.setattr(grades, "_grading_text", lambda org, template: text)
+    spec = grades.load_grading_spec("Org", "t", semester_org="Sem", slug="a1")
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (3, "5%")
+    assert (spec.visibility, spec.team_formation, spec.max_team_size) == (
+        "public",
+        "assigned",
+        2,
+    )
+    sources = dict(spec.sources)
+    del sources["submit_url"]  # nobody states one
+    assert set(sources.values()) == {"semester"}
 
 
 def test_the_default_shape_is_seeded_as_assignment_repo_never_github(fake, monkeypatch):
@@ -695,94 +742,11 @@ def test_the_default_shape_is_seeded_as_assignment_repo_never_github(fake, monke
     assert spec.submit_via == "assignment_repo" and spec.dropped == ()
 
 
-def test_the_submit_url_line_is_seeded_commented_on_every_shape(fake, monkeypatch):
-    # `submit_url` is the one thing the toolkit is ever told about a handover it does not
-    # see, and it is not a form input - so the seeded file is where an instructor finds it.
-    # COMMENTED even on the shape that uses it: the value seeded is a placeholder, and a
-    # live line carrying it would put a `Submit on ...` button in front of a whole cohort
-    # pointing at a page nobody created.
-    written = _solution_files(monkeypatch)
-    for number, via in (("1", "external"), ("2", "assignment_repo")):
-        assert (
-            scaffold.scaffold_assignment("Org", number, "f2026", [], submit_via=via)
-            == 0
-        )
-        text = written["grading_config.yml"]
-        assert "\n# submit_url: https://" in text
-        spec = grades.parse_grading_spec(text)
-        assert spec.submit_url == "" and spec.dropped == ()
-
-
-def test_a_seeded_submit_url_uncommented_but_unanswered_is_refused(fake, monkeypatch):
-    # The next thing an instructor does to that line is uncomment it. Until they also
-    # replace the placeholder, the site shows the brief and no button.
-    written = _solution_files(monkeypatch)
-    assert (
-        scaffold.scaffold_assignment("Org", "1", "f2026", [], submit_via="external")
-        == 0
-    )
-    live = written["grading_config.yml"].replace("# submit_url:", "submit_url:")
-    spec = grades.parse_grading_spec(live)
-    assert spec.submit_url == ""
-    assert [d.field for d in spec.dropped] == ["submit_url"]
-
-
-def test_the_visibility_box_lands_in_the_file_the_handout_reads(fake, monkeypatch):
-    # Box 10, and the last one the form can ever have. It is read when each student's repo
-    # is CREATED, so the answer given here is the only chance to give it - and the seeded
-    # line is live, because `private` is a real answer and not an absence.
-    written = _solution_files(monkeypatch)
-    assert (
-        scaffold.scaffold_assignment("Org", "1", "f2026", [], visibility="public") == 0
-    )
-    public = written["grading_config.yml"]
-    assert "\nvisibility: public" in public
-    spec = grades.parse_grading_spec(public)
-    assert spec.visibility == "public" and spec.dropped == ()
-    assert not spec.has_receipts_issue  # derived, never declared
-
-
-def test_student_choice_lands_in_the_file_and_names_the_word_it_writes(
-    fake, monkeypatch
-):
-    # The third answer box 10 offers. It has to survive the round trip as the WORD - the
-    # handout branches on it, and a value the scaffold wrote and the reader then refused
-    # would hand out repos nobody chose.
-    written = _solution_files(monkeypatch)
-    assert (
-        scaffold.scaffold_assignment(
-            "Org", "1", "f2026", [], visibility="student_choice"
-        )
-        == 0
-    )
-    text = written["grading_config.yml"]
-    assert "\nvisibility: student_choice" in text
-    spec = grades.parse_grading_spec(text)
-    assert spec.visibility == "student_choice" and spec.dropped == ()
-    assert spec.visibility_is_students and not spec.has_receipts_issue
-    # And the seeded line teaches its own vocabulary: every value the reader takes is
-    # named in the comment beside it, or the file offers an instructor two of three.
-    (line,) = [ln for ln in text.splitlines() if ln.startswith("visibility:")]
-    assert all(word in line for word in course.VISIBILITIES)
-
-
-def test_the_visibility_line_is_commented_where_no_repo_is_created(fake, monkeypatch):
-    # `visibility:` describes a repo and `external` creates none - the parse drops it
-    # there - so a live line would be a setting that reads as if it did something.
-    written = _solution_files(monkeypatch)
-    assert (
-        scaffold.scaffold_assignment("Org", "1", "f2026", [], submit_via="external")
-        == 0
-    )
-    assert "\n# visibility: private" in written["grading_config.yml"]
-    assert grades.parse_grading_spec(written["grading_config.yml"]).dropped == ()
-
-
 def test_a_shared_drop_box_is_seeded_hand_marked_and_parses_clean(fake, monkeypatch):
     # The button wrote `completion_check: true` behind `format: ipynb` whatever the shape
     # was, and the parse refuses all three per-unit stages for a drop box - so the file
     # New assignment had just written reported a `Dropped` line on every quarter-hourly
-    # tick and stood in the cohort's digest issue as an advisory that escalates to mail.
+    # tick and stood in the semester's digest issue as an advisory that escalates to mail.
     # Nothing the scaffold seeds may be a value the reader will not take.
     written = _solution_files(monkeypatch)
     assert (
@@ -823,7 +787,10 @@ def test_the_model_answer_is_seeded_where_derive_reads_it(fake, monkeypatch):
     assert seeded.replaced == 1 and "return 42" not in seeded.text
 
 
-@pytest.mark.parametrize("fmt, name", [("rmd", "starter.Rmd"), ("qmd", "starter.qmd")])
+@pytest.mark.parametrize(
+    "fmt, name",
+    [("rmd", "starter.Rmd"), ("qmd", "starter.qmd"), ("latex", "starter.tex")],
+)
 def test_the_model_answer_is_seeded_in_the_format_the_template_uses(
     fake, monkeypatch, fmt, name
 ):
@@ -841,14 +808,11 @@ def test_the_model_answer_is_seeded_in_the_format_the_template_uses(
     assert seeded.replaced == 1 and "42" not in seeded.text
 
 
-@pytest.mark.parametrize("formats", [["latex"], []], ids=["latex", "no-starter"])
-def test_a_format_derive_cannot_read_is_seeded_no_model_answer(
-    fake, monkeypatch, formats
-):
-    # `.tex` is not derivable and a template with no starter has nothing to become, so a
-    # stub either way could only ever be a file the button refuses.
+def test_a_template_with_no_starter_is_seeded_no_model_answer(fake, monkeypatch):
+    # A template with no starter has nothing to become, so a stub could only ever be a
+    # file the button refuses.
     written = _solution_files(monkeypatch)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026", formats) == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", []) == 0
 
     assert [path for path in written if path.startswith("solution/")] == [
         "solution/README.md"
@@ -871,24 +835,20 @@ def test_the_cutoff_switches_are_written_out_with_their_defaults(fake, monkeypat
         assert "grader_pdf: false" in text
 
 
-def test_a_course_with_no_defaults_gets_the_toolkit_late_policy(fake, monkeypatch):
-    # Nothing is asserted on the course's behalf except late work, which the toolkit
-    # itself has a policy for (the Hertie syllabus rule): the file a grader opens carries
-    # the numbers the assignment will be graded by rather than a pair of comments and a
-    # default read from somewhere else. The team cap nobody declared stays a comment.
+def test_a_course_with_no_defaults_gets_the_institution_late_policy(fake, monkeypatch):
+    # The template states no late rule: the assignment is graded by the institution's
+    # until a semester or the course says otherwise.
     written = _solution_files(monkeypatch)
-    monkeypatch.setattr(scaffold, "course_assignment_defaults", lambda org: {})
+    monkeypatch.setattr(settings, "course_defaults", lambda org: {})
     assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
-    text = written["grading_config.yml"]
-    spec = grades.parse_grading_spec(text)
-    assert (spec.late_window_days, spec.late_penalty_per_day) == (
-        course.DEFAULT_LATE_WINDOW_DAYS,
-        course.DEFAULT_LATE_PENALTY_PER_DAY,
+    spec = grades.with_run_settings(
+        grades.parse_grading_spec(written["grading_config.yml"]), "Org"
     )
-    assert spec.max_team_size is None
-    assert "# max_team_size:" in text
-    assert f"late_window_days: {course.DEFAULT_LATE_WINDOW_DAYS}" in text
-    assert f"late_penalty_per_day: {course.DEFAULT_LATE_PENALTY_PER_DAY}" in text
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (
+        policy.defaults()["late_window_days"],
+        policy.defaults()["late_penalty_per_day"],
+    )
+    assert dict(spec.sources)["late_window_days"] == "institution"
 
 
 @pytest.mark.parametrize(
@@ -924,9 +884,9 @@ def test_a_format_box_the_scaffold_cannot_act_on_creates_no_repo(
             "Org",
             "--number",
             "1",
-            "--tag",
+            "--semester",
             "f2026",
-            "--format",
+            "--formats",
             answer,
         ],
     )
@@ -967,9 +927,9 @@ def test_a_colliding_format_box_creates_no_repo(fake, monkeypatch, capsys):
             "Org",
             "--number",
             "1",
-            "--tag",
+            "--semester",
             "f2026",
-            "--format",
+            "--formats",
             "ipynb,py",
             "--autograde",
             "true",
@@ -1232,8 +1192,8 @@ def test_a_copied_materials_repo_is_re_seeded_with_the_system_files_only(origins
     assert scaffold.scaffold_materials("Org", "f2026", "course-materials-f2025") == 0
 
     assert fake.written("course-materials-f2026") == {
-        "MAINTAINING.md",
-        "SYLLABUS.md.sample",
+        ".system/MAINTAINING.md",
+        ".system/SYLLABUS.md.sample",
     }
 
 
@@ -1305,7 +1265,7 @@ def test_a_copied_assignment_brings_both_branches(origins, fake):
 
 
 def test_a_copy_leaves_the_toolkit_owned_branches_behind(origins, capsys):
-    # `from-<cohort-org>` and `upstream` are regenerated by propagate and release from
+    # `from-<semester-org>` and `upstream` are regenerated by propagate and release from
     # whatever the repo holds at the time. Copied forward they would open next year's repo
     # on last year's half-merged working state, under names the toolkit then reuses. Said
     # out loud, though: an instructor who left work on one of them has nothing else to
@@ -1314,7 +1274,7 @@ def test_a_copy_leaves_the_toolkit_owned_branches_behind(origins, capsys):
     origins.commit(
         "assignment-1-f2025", {"grading_config.yml": "type: group\n"}, "solution"
     )
-    origins.commit("assignment-1-f2025", {"README.md": "# Proposed\n"}, "from-Cohort")
+    origins.commit("assignment-1-f2025", {"README.md": "# Proposed\n"}, "from-Semester")
     origins.commit("assignment-1-f2025", {"README.md": "# Released\n"}, "upstream")
 
     assert (
@@ -1326,7 +1286,7 @@ def test_a_copy_leaves_the_toolkit_owned_branches_behind(origins, capsys):
 
     assert origins.branches("assignment-1-f2026") == ["main", "solution"]
     (line,) = [l for l in capsys.readouterr().out.splitlines() if "left behind" in l]
-    assert "from-Cohort" in line and "upstream" in line
+    assert "from-Semester" in line and "upstream" in line
 
 
 def test_a_copy_opens_on_the_branch_its_source_opened_on(origins):
@@ -1388,7 +1348,7 @@ def test_a_copied_assignment_gets_a_button_aimed_at_itself(origins, monkeypatch)
     # way the fresh path seeds it, rather than leaving the repo wrong until a later refresh
     # that may be refused or may fail.
     stale = workflows_render.render_provision(
-        ["Cohort-f2026"],
+        ["Semester-f2026"],
         ["assignment-1-f2025", "assignment-1-f2026"],
         "assignment-1-f2025",
     )
@@ -1404,7 +1364,7 @@ def test_a_copied_assignment_gets_a_button_aimed_at_itself(origins, monkeypatch)
     monkeypatch.setattr(
         scaffold, "push_content_workflows", workflows_place.push_content_workflows
     )
-    monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(scaffold, "discover_semesters", lambda org: ["Semester-f2026"])
     monkeypatch.setattr(
         scaffold,
         "discover_assignments",
@@ -1464,15 +1424,8 @@ def test_a_copied_assignment_says_which_boxes_it_ignored(origins, monkeypatch, c
     )
     assert made["assignment-1-f2026"] == "Assignment 1: Neural networks from scratch"
     (line,) = [l for l in capsys.readouterr().out.splitlines() if "were ignored" in l]
-    assert "boxes 5-10" in line
-    for field in (
-        "format",
-        "type",
-        "team_formation",
-        "submit_via",
-        "autograde",
-        "visibility",
-    ):
+    assert "boxes 5-8" in line
+    for field in ("format", "type", "submit_via", "autograde"):
         assert field in line
     assert (
         "https://github.com/Org/assignment-1-f2026/blob/solution/grading_config.yml"
@@ -1499,9 +1452,9 @@ def test_a_copy_is_not_refused_over_the_starter_boxes_it_ignores(origins, monkey
             "Org",
             "--number",
             "1",
-            "--tag",
+            "--semester",
             "f2026",
-            "--format",
+            "--formats",
             "ipynb,py",
             "--autograde",
             "true",
@@ -1564,7 +1517,7 @@ def test_the_seeded_readme_would_be_withheld_from_a_release(fake):
 
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     seeded = fake.files[("course-materials-f2026", "README.md")]
-    assert deploy._is_withheld_stub("README.md", seeded)
+    assert deploy.is_withheld_stub("README.md", seeded)
 
 
 def test_the_syllabus_stub_is_faculty_owned_and_the_sample_is_refreshed(fake):
@@ -1573,14 +1526,16 @@ def test_the_syllabus_stub_is_faculty_owned_and_the_sample_is_refreshed(fake):
     # scaffolded before it existed gets one.
     written = "# Real syllabus\n\nBy faculty.\n"
     fake.files[("course-materials-f2026", "SYLLABUS.md")] = written
-    fake.files[("course-materials-f2026", "SYLLABUS.md.sample")] = "# stale example\n"
+    fake.files[("course-materials-f2026", ".system/SYLLABUS.md.sample")] = (
+        "# stale example\n"
+    )
 
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     assert fake.files[("course-materials-f2026", "SYLLABUS.md")] == written
     assert "SYLLABUS.md" not in fake.written("course-materials-f2026")
-    assert "SYLLABUS.md.sample" in fake.written("course-materials-f2026")
+    assert ".system/SYLLABUS.md.sample" in fake.written("course-materials-f2026")
     assert (
-        fake.files[("course-materials-f2026", "SYLLABUS.md.sample")]
+        fake.files[("course-materials-f2026", ".system/SYLLABUS.md.sample")]
         != "# stale example\n"
     )
 
@@ -1608,13 +1563,13 @@ def test_the_syllabus_stub_carries_the_standard_sections(fake):
 
 def test_no_system_file_is_ever_released_to_students():
     # A whole-repo release must not ship our example syllabus - or any other file the
-    # toolkit wrote about itself - into a cohort. Asserted over the whole manifest because
+    # toolkit wrote about itself - into a semester. Asserted over the whole manifest because
     # the nightly refresh back-fills these into repos that have been running for months:
     # the exclusion is the precondition that makes creating them there safe.
     from dsl_course import deploy
 
     for path in scaffold.materials_system_files("Org", "course-materials-f2026"):
-        assert path in deploy.ROOT_RELEASE_EXCLUDED, path
+        assert path.split("/")[0] in deploy.ROOT_RELEASE_EXCLUDED, path
 
 
 def test_a_stub_faculty_have_written_over_is_never_touched_again(fake):
@@ -1639,19 +1594,16 @@ def test_refresh_backfills_the_system_files_into_a_materials_repo(monkeypatch):
     # The gap this closes: both files are SYSTEM-owned - meant to be rewritten whenever the
     # toolkit changes them - but were only ever written by the scaffold, which made that
     # true of new repos and nothing else. This CREATES, because back-filling a file added
-    # after the repo was made is the point; hence the name gate, since the nightly sweep
-    # also hands us the code and dataset repos.
+    # after the repo was made is the point.
     f = FakeRepo()
     monkeypatch.setattr(scaffold, "put_files", f.put_files)
 
     assert scaffold.refresh_materials_system_files("Org", "course-materials-f2026") == 0
-    assert scaffold.refresh_materials_system_files("Org", "lecture-code-f2026") == 0
 
     assert f.written("course-materials-f2026") == {
-        "MAINTAINING.md",
-        "SYLLABUS.md.sample",
+        ".system/MAINTAINING.md",
+        ".system/SYLLABUS.md.sample",
     }
-    assert f.written("lecture-code-f2026") == set()
 
 
 def test_refresh_rewrites_a_stale_system_file(monkeypatch):
@@ -1659,12 +1611,12 @@ def test_refresh_rewrites_a_stale_system_file(monkeypatch):
     # ("kept current by the toolkit - copy from it, do not edit it").
     f = FakeRepo()
     monkeypatch.setattr(scaffold, "put_files", f.put_files)
-    f.files[("course-materials-f2026", "MAINTAINING.md")] = "# stale guide\n"
+    f.files[("course-materials-f2026", ".system/MAINTAINING.md")] = "# stale guide\n"
 
     assert scaffold.refresh_materials_system_files("Org", "course-materials-f2026") == 0
     assert (
         "Reference for faculty & instructors"
-        in f.files[("course-materials-f2026", "MAINTAINING.md")]
+        in f.files[("course-materials-f2026", ".system/MAINTAINING.md")]
     )
 
 
@@ -1803,6 +1755,7 @@ def test_a_failed_branch_policy_clear_is_reported(monkeypatch, capsys):
 
 # ------------------------------------------------------------------- publish.yml
 
+SKELETON = ("lectures", "labs", "readings")
 PUBLISH_TABLE = [
     (course.NOTHING_PUBLIC, course.PUBLIC_HTML_PDF, []),
     (course.PUBLIC_LECTURES, course.PUBLIC_HTML, ["lectures/**/*.html"]),
@@ -1832,7 +1785,24 @@ def test_the_two_form_answers_map_to_the_patterns_they_promise(dirs, types, expe
     # The whole of what the two dropdowns do. The `!` line comes LAST on the
     # except-readings answers, because the last matching pattern wins - written above the
     # pattern it carves out of, it would do nothing at all.
-    assert scaffold.publish_patterns(dirs, types) == expected
+    assert scaffold.publish_patterns(dirs, types, SKELETON) == expected
+
+
+def test_the_patterns_follow_the_folders_by_kind():
+    # "Lectures" and "readings" are kinds: a repo whose folders are called something else
+    # by the alias table still gets patterns that match them, and one without a lecture
+    # folder publishes nothing under "lectures".
+    folders = ["Lecture", "literature", "labs", "datasets"]
+    assert scaffold.publish_patterns(
+        course.PUBLIC_LECTURES, course.PUBLIC_HTML, folders
+    ) == ["Lecture/**/*.html"]
+    assert scaffold.publish_patterns(
+        course.PUBLIC_EXCEPT_READINGS, course.PUBLIC_ALL_FILES, folders
+    ) == ["**", "!literature/**"]
+    assert (
+        scaffold.publish_patterns(course.PUBLIC_LECTURES, course.PUBLIC_HTML, ["labs"])
+        == []
+    )
 
 
 def test_the_seeded_publish_file_declares_the_patterns_it_was_asked_for():
@@ -1841,13 +1811,17 @@ def test_the_seeded_publish_file_declares_the_patterns_it_was_asked_for():
     # file the site cannot read at all, and the failure would be a silent no-op. The
     # except-readings answer is the one that needs both.
     declared = yaml.safe_load(
-        scaffold._publish_stub(course.PUBLIC_EXCEPT_READINGS, course.PUBLIC_HTML_PDF)
+        scaffold._publish_stub(
+            course.PUBLIC_EXCEPT_READINGS, course.PUBLIC_HTML_PDF, SKELETON
+        )
     )
     assert declared["public"] == ["**/*.html", "**/*.pdf", "!readings/**"]
 
 
 def test_the_seeded_publish_file_is_instructor_owned_and_explains_itself():
-    body = scaffold._publish_stub(course.NOTHING_PUBLIC, course.PUBLIC_HTML_PDF)
+    body = scaffold._publish_stub(
+        course.NOTHING_PUBLIC, course.PUBLIC_HTML_PDF, SKELETON
+    )
     assert body.startswith("# INSTRUCTOR-OWNED")
     # Seeded inert when nothing was asked for, like `.releaseignore`: it exists to be
     # found, and a publish list nobody knows about is one nobody uses.

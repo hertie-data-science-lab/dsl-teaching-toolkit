@@ -36,7 +36,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import NamedTuple
@@ -45,7 +45,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
-from . import roster
+from . import policy, roster
 from .log import log, log_err, log_ok, log_person
 
 
@@ -107,11 +107,11 @@ _SINGLE_LINE = ("GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "GRAPH_SENDER")
 # alongside GRAPH_ENV, so a rename cannot leave an org silently unaddressed.
 MAINTAINER_ENV = "DSL_MAINTAINER_EMAIL"
 # Where a fault in the COURSE org's own config goes: the course admins, comma-separated.
-# An org SECRET and never a line in `dsl-course.yml`, which is public and is itself one of
-# the files these mails are about. Held centrally as a repository variable on the toolkit
+# The FALLBACK: an admin's own `email:` in `dsl-course.yml` wins when any admin declares
+# one (see `course_admin_addresses`). Held centrally as a repository variable on the toolkit
 # and propagated onto each course org by `bootstrap_course`, exactly as MAINTAINER_ENV is.
 # COURSE orgs only: every course-level mail is sent from the course org's `.github`, and
-# no workflow seeded into a cohort may wire the mail env at all (see maintainers.md).
+# no workflow seeded into a semester may wire the mail env at all (see maintainers.md).
 COURSE_ADMIN_ENV = "DSL_COURSE_ADMIN_EMAILS"
 
 
@@ -148,13 +148,13 @@ def graph_config_from_env() -> GraphConfig | None:
     )
 
 
-def maintainer_address() -> str | None:
-    """Where to mail the toolkit maintainer about a fault, or None if nowhere.
+def maintainer_address() -> str:
+    """Where to mail the toolkit maintainer about a fault. Always an address.
 
     `DSL_MAINTAINER_EMAIL` when the org has it, else `GRAPH_SENDER` - the shared mailbox
     the toolkit already sends AS is a mailbox the maintainer can read, which beats a fault
-    nobody hears about. None only when neither is set, and then the caller says so once
-    and carries on.
+    nobody hears about - else the institution's `contact` (policy.yml), so a fault always
+    has somewhere to go.
 
     Never logged: every faculty workflow runs in a PUBLIC repo. Log the NAME, or
     `mask_email` of the value."""
@@ -162,14 +162,19 @@ def maintainer_address() -> str | None:
         value = (os.environ.get(name) or "").strip()
         if value:
             return value
-    return None
+    return policy.load()["contact"]
 
 
-def course_admin_addresses() -> tuple[str, ...]:
-    """The course admins' addresses for THIS org, in declaration order. `()` when the
-    secret is unset, blank, or holds nothing that can be an address.
+def course_admin_addresses(declared: Iterable[str] = ()) -> tuple[str, ...]:
+    """The course admins' addresses for THIS org, in declaration order. `()` when none is
+    declared and the secret is unset, blank, or holds nothing that can be an address.
 
-    A comma-separated list, because that is what fits in one org secret and one repository
+    `declared` is the `email:` of each active admin in `dsl-course.yml`
+    (`sync_faculty.course_admin_emails`). When it holds any address it is the answer and
+    the secret is not read: the file is where a course keeps its admins, and a secret
+    somebody set at bootstrap goes stale the first time an admin changes.
+
+    The secret is a comma-separated list, because that is what fits in one org secret and one repository
     variable - there is no handle here, and therefore no way (and no need) to address one
     admin rather than another: a course-level fault is the course's to fix, and the
     committer git names is @mentioned on the digest issue instead.
@@ -179,6 +184,9 @@ def course_admin_addresses() -> tuple[str, ...]:
 
     Never logged: every faculty workflow runs in a PUBLIC repo. Log the NAME, a count, or
     `mask_email` of the value."""
+    own = tuple(a for a in (str(d).strip() for d in declared) if "@" in a)
+    if own:
+        return own
     raw = os.environ.get(COURSE_ADMIN_ENV) or ""
     return tuple(a for a in (part.strip() for part in raw.split(",")) if "@" in a)
 
@@ -284,7 +292,7 @@ _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 _MAX_SEND_ATTEMPTS = 3
 _RETRY_AFTER_DEFAULT = 5.0  # when the header is absent or unreadable
 _RETRY_AFTER_CAP = 60.0  # a header we cannot vet must not park the whole batch
-# Graph allows ~30 messages/minute per mailbox. 2.5s leaves headroom: a 126-row cohort takes
+# Graph allows ~30 messages/minute per mailbox. 2.5s leaves headroom: a 126-row semester takes
 # ~5min, where the same batch sent back-to-back starts 429-ing around message 30 and then
 # pays up to _MAX_SEND_ATTEMPTS x _RETRY_AFTER_CAP per recipient, serially.
 _SEND_INTERVAL = 2.5
@@ -386,7 +394,7 @@ def _graph_send_one(
         if status in _RETRY_STATUSES and attempt < _MAX_SEND_ATTEMPTS:
             # A throttle (429) or a brief 5xx is not a bad recipient - it is Graph asking
             # to be asked again. Un-retried, one throttled minute silently cost a whole
-            # cohort their enrolment codes, and the log said only "failed (429)".
+            # semester their enrolment codes, and the log said only "failed (429)".
             wait = retry_after_seconds(response_headers)
             log(
                 f"  [wait] send to {len(to)} recipient(s) got {status}, "
@@ -408,7 +416,7 @@ def _masked(addresses: tuple[str, ...]) -> str:
     apart, not enough to identify either.
 
     For `log_person` ONLY, which prints under `DSL_VERBOSE=1` and is set by no rendered
-    workflow. A mask is not anonymity: `j***@pm.me` beside a cohort's people.yml is a
+    workflow. A mask is not anonymity: `j***@pm.me` beside a semester's instructors.yml is a
     name, and every one of these workflows runs in a PUBLIC repo. What the run log gets is
     a count."""
     return ", ".join(mask_email(a) for a in addresses)
@@ -518,7 +526,7 @@ def send_bulk(
         if sample:
             log(SAMPLE_HEADER)
             log(sample)
-        log_ok(f"DRY-RUN previewed {len(batch)} message(s) - nothing sent")
+        log_ok(f"PREVIEW previewed {len(batch)} message(s) - nothing sent")
         preflight()
         return [a for msg in batch for a in msg.recipients]
     return [a for i in send_indexed(batch, html) for a in batch[i].recipients]

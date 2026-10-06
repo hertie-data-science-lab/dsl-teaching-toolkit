@@ -1,10 +1,10 @@
 """bootstrap_course metadata builders: instructors/TAs/course-admins live on the
-persistent course org (the SSOT, mirrored into every cohort by sync_faculty). A cohort
+persistent course org (the SSOT, mirrored into every semester by sync_faculty). A semester
 org's .github/dsl-course.yml is only a pointer back to it - its schedule lives in
-classroom-config/schedule.yml (seeded from templates/classroom-config/schedule.yml).
+semester-config/schedule.yml (seeded from templates/semester-config/schedule.yml).
 
 The seeded content itself lives in real files under templates/, read at runtime by
-welcome.template - so these also pin what a fresh cohort's config repo actually receives."""
+welcome.template - so these also pin what a fresh semester's config repo actually receives."""
 
 from __future__ import annotations
 
@@ -19,16 +19,17 @@ from dsl_course import roster, schedule, site, welcome
 
 
 def test_course_metadata_carries_faculty_block():
-    md = bc._course_metadata("My-Course-E1", "My Course", "Deep Learning", "E1")
-    assert "org: My-Course-E1" in md
+    md = bc._course_metadata("Deep Learning", "E1")
+    for key in ("org", "org_name", "semester_defaults"):
+        assert f"\n{key}:" not in md
     assert "course_name: Deep Learning" in md
     assert "course_code: E1" in md
-    # the (commented) faculty block faculty fill in - schedule stays cohort-side
+    # the (commented) faculty block faculty fill in - schedule stays semester-side
     assert "# people:" in md
     assert "github_handle" in md
     assert "schedule:" not in md
     # instructors get an OPTIONAL open-courseware card scaffold; TAs never do - they
-    # change every cohort, so they're declared per cohort, not course-level.
+    # change every semester, so they're declared per semester, not course-level.
     assert "# instructors:" in md
     assert "teaching_assistants" not in md
 
@@ -37,9 +38,7 @@ def test_course_metadata_seeds_admins_live_when_given():
     # --admins at bootstrap must land in the SSOT itself (uncommented), not just get a
     # one-time direct team invite (add_course_admins) - otherwise the next sync_faculty
     # run sees them as undeclared and prunes them right back out.
-    md = bc._course_metadata(
-        "My-Course-E1", "My Course", "Deep Learning", "E1", admins=["alice", "bob"]
-    )
+    md = bc._course_metadata("Deep Learning", "E1", admins=["alice", "bob"])
     assert "# people:" not in md  # live, not commented out
     assert "people:" in md
     assert '- github_handle: "alice"' in md
@@ -53,11 +52,11 @@ def test_parse_handles_splits_comma_and_space():
 
 
 def test_schedule_yml_seed_is_commented_and_covers_every_field():
-    # Mostly-commented, like the old cohort dsl-course.yml schedule block - faculty
+    # Mostly-commented, like the old semester dsl-course.yml schedule block - faculty
     # uncomment what they want to pin. The one live block is `archive:` at the end: the
-    # maintainer wants every cohort to say in its own file what happens at term end, with
+    # maintainer wants every semester to say in its own file what happens at term end, with
     # the date left to its default and the sentence written out.
-    schedule = welcome.template("classroom-config/schedule.yml")
+    schedule = welcome.template("semester-config/schedule.yml")
     skeleton, live = schedule.split("\narchive:\n")
     assert all(
         line.startswith("#") or not line.strip() for line in skeleton.splitlines()
@@ -70,13 +69,14 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
         "deploy",
         "course_source_repo",
         "course_source_path",
-        "cohort_dest_repo",
-        "cohort_dest_path",
+        "semester_dest_repo",
+        "semester_dest_path",
         "semester_start",
         "semester_end",
         "assignments",
         "handout_datetime",
-        "grading_datetime",
+        "solution_datetime",
+        "marks_return_datetime",
         "events",
         # The four display fields the schedule table's four columns read, which every
         # block now takes: a skeleton that teaches them on one block only is a skeleton
@@ -87,23 +87,26 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
         "tbc",
     ):
         assert key in schedule
+    # Timings only: nothing the seed offers is a key that left the file.
+    for key in ("grading_datetime", "default: the slug above", "README's `# ` heading"):
+        assert key not in schedule, key
 
 
 def test_the_seeded_archive_sentence_names_the_day_it_is_rendered_for():
     # End to end over the ONE token in the seeded file, because the two halves of it are
     # spelled differently and only the round trip can tell they agree. The scaffold is
     # `.format`-rendered at bootstrap (tag/year), so the template writes `{{date}}` and
-    # the cohort receives `{date}` - which is what `site._archive_entry` substitutes.
+    # the semester receives `{date}` - which is what `site._archive_entry` substitutes.
     # Asserting on the template text alone cannot catch either way of getting that wrong:
     # a `{date}` in the template raises KeyError for every bootstrap, and a `{{date}}` the
     # renderer never touched puts a stray brace pair on the Schedule tab and in the
-    # Updates box of every cohort that uncomments the sentence.
-    seeded = welcome.template("classroom-config/schedule.yml").format(
-        tag="f2026", year=2026, year_next=2027
+    # Updates box of every semester that uncomments the sentence.
+    seeded = welcome.template("semester-config/schedule.yml").format(
+        tag="f2026", year=2026, year_next=2027, timezone="Europe/Berlin", grace_days=60
     )
     meta = yaml.safe_load(seeded)
     # The skeleton leaves `semester_end:` commented out, and the archive date defaults off
-    # it - so pin one, exactly as the cohort filling this file in will.
+    # it - so pin one, exactly as the semester filling this file in will.
     meta["semester_end"] = "2026-12-18"
     sched = schedule.parse(meta)
     assert sched.dropped == []
@@ -114,31 +117,31 @@ def test_the_seeded_archive_sentence_names_the_day_it_is_rendered_for():
     assert "{" not in row and "}" not in row
 
 
-def test_classroom_readme_documents_the_cohort_files_it_holds():
-    # Instructors configure a cohort HERE (people.yml, schedule.yml, the roster); the README
+def test_config_readme_documents_the_semester_files_it_holds():
+    # Instructors configure a semester HERE (instructors.yml, schedule.yml, the roster); the README
     # must document those files and never send them back up to the course org.
-    readme = welcome.template("classroom-config/README.md")
-    assert "people.yml" in readme
+    readme = welcome.template("semester-config/README.md")
+    assert "instructors.yml" in readme
     assert "schedule.yml" in readme
     assert "schedule.csv" not in readme
     assert "course org's" not in readme
 
 
 def test_starter_roster_seeds_the_full_column_set():
-    # A cohort discovers the roster schema from its own config repo, so the seeded header
+    # A semester discovers the roster schema from its own config repo, so the seeded header
     # must be exactly roster.FIELDS - a short header (no `enrol_code`/`role`) sends faculty
     # looking for code-based onboarding and auditors that the columns don't offer. The
     # live file is header-only; the worked example rows live in students.csv.sample
     # (covered by the seeding tests, which validate every shipped sample).
-    starter = welcome.template("classroom-config/students.csv")
+    starter = welcome.template("semester-config/students.csv")
     assert tuple(starter.splitlines()[0].split(",")) == roster.FIELDS
     assert roster.parse(starter) == []  # header-only: nobody to enrol by accident
 
 
-def test_classroom_readme_documents_every_roster_column():
+def test_config_readme_documents_every_roster_column():
     # The README's roster table is what faculty read instead of the schema doc; a column
     # missing from it is a column nobody fills in.
-    readme = welcome.template("classroom-config/README.md")
+    readme = welcome.template("semester-config/README.md")
     documented = set(re.findall(r"^\| `?(\w+)`? \|", readme, re.MULTILINE))
     assert set(roster.FIELDS) <= documented
 
@@ -146,25 +149,25 @@ def test_classroom_readme_documents_every_roster_column():
 def test_every_seeded_template_path_resolves():
     # The seeded content is read from disk at bootstrap time, so a typo'd or renamed path
     # would only surface mid-bootstrap against a real org.
-    # Both seeding modules read templates: bootstrap_course for the course/classroom-config
+    # Both seeding modules read templates: bootstrap_course for the course/semester-config
     # files, welcome for the onboarding workflows it also re-pushes on every refresh.
     source = Path(bc.__file__).read_text() + Path(welcome.__file__).read_text()
     rels = set(re.findall(r"\btemplate\(\s*[\"']([^\"']+)[\"']\s*\)", source))
     # ...plus the two tables that carry a template path instead of calling template()
     # with a literal, and are therefore invisible to the scan above.
-    rels |= set(welcome.CLASSROOM_SCAFFOLDS.values())
-    rels |= {rel for _, rel in welcome.CLASSROOM_SYSTEM_FILES}
+    rels |= set(welcome.CONFIG_SCAFFOLDS.values())
+    rels |= {rel for _, rel in welcome.CONFIG_SYSTEM_FILES}
     assert len(rels) >= 12
     for rel in sorted(rels):
         assert (welcome.TEMPLATES / rel).is_file(), f"missing template: {rel}"
 
 
-def test_cohort_metadata_carries_course_pointer():
-    # The cohort .github/dsl-course.yml must carry a `course:` line - the classroom-config
+def test_semester_metadata_carries_course_pointer():
+    # The semester .github/dsl-course.yml must carry a `course:` line - the semester-config
     # dispatchers grep it to find where to fire Sync membership / Sync site.
-    md = bc._cohort_metadata("My-Cohort-f2026", "My-Course-E1")
+    md = bc._semester_metadata("My-Course-E1")
     assert "course: My-Course-E1" in md
-    assert "org: My-Cohort-f2026" in md
+    assert "org:" not in md
     # the dispatchers do: grep '^course:' | cut -d: -f2- | xargs
     course = next(
         ln.split(":", 1)[1].strip()
@@ -182,17 +185,17 @@ def _bootstrapped_topics(monkeypatch, **kwargs) -> list[list[str]]:
     monkeypatch.setattr(
         bc, "set_repo_topics", lambda org, repo, topics: stamped.append(topics) or True
     )
-    bc.create_profile_repo("Org", "Org Name", "Course Name", **kwargs)
+    bc.create_profile_repo("Org", "Course Name", **kwargs)
     return stamped
 
 
-def test_a_cohort_github_repo_is_stamped_dsl_cohort_and_nothing_else(monkeypatch):
-    # list_orgs.py enumerates COURSE orgs by the dsl-course-hub topic; a cohort org
+def test_a_semester_github_repo_is_stamped_dsl_semester_and_nothing_else(monkeypatch):
+    # list_orgs.py enumerates COURSE orgs by the dsl-course-hub topic; a semester org
     # stamped with it shows up in the course-org inventory as a phantom course. Asserted
     # through bootstrap itself: computing the right list and never stamping it - which is
     # what the old test allowed - leaves every org untagged and the inventory empty.
-    assert _bootstrapped_topics(monkeypatch, course_code="E1234", is_cohort=True) == [
-        ["dsl-cohort"]
+    assert _bootstrapped_topics(monkeypatch, course_code="E1234", is_semester=True) == [
+        ["dsl-semester"]
     ]
 
 
@@ -211,13 +214,13 @@ def test_a_repo_that_could_not_be_created_is_not_stamped(monkeypatch):
     monkeypatch.setattr(
         bc, "set_repo_topics", lambda org, repo, topics: stamped.append(topics) or True
     )
-    bc.create_profile_repo("Org", "Org Name", "Course Name")
+    bc.create_profile_repo("Org", "Course Name")
     assert stamped == []
 
 
-def test_inventory_skips_cohort_pointer_orgs(monkeypatch):
-    # Cohorts bootstrapped before the topic split still carry dsl-course-hub, so the
-    # inventory must also filter by metadata shape: a cohort's dsl-course.yml is a
+def test_inventory_skips_semester_pointer_orgs(monkeypatch):
+    # Semesters bootstrapped before the topic split still carry dsl-course-hub, so the
+    # inventory must also filter by metadata shape: a semester's dsl-course.yml is a
     # `course:` pointer, a course org's is not.
     from dsl_course import list_orgs
 
@@ -226,7 +229,7 @@ def test_inventory_skips_cohort_pointer_orgs(monkeypatch):
         "gh_json",
         lambda *a: [
             {"owner": {"login": "Course-Org"}, "name": ".github"},
-            {"owner": {"login": "Cohort-Org"}, "name": ".github"},
+            {"owner": {"login": "Semester-Org"}, "name": ".github"},
         ],
     )
     metas = {
@@ -235,7 +238,7 @@ def test_inventory_skips_cohort_pointer_orgs(monkeypatch):
             "course_name": "ML",
             "course_code": "E1",
         },
-        "Cohort-Org": {"course": "Course-Org", "org": "Cohort-Org"},
+        "Semester-Org": {"course": "Course-Org", "org": "Semester-Org"},
     }
     monkeypatch.setattr(list_orgs, "org_meta", lambda org: metas[org])
     monkeypatch.setattr(list_orgs, "org_exists", lambda org: True)
@@ -243,8 +246,8 @@ def test_inventory_skips_cohort_pointer_orgs(monkeypatch):
     assert [o["org"] for o in orgs] == ["Course-Org"]
 
 
-def test_a_cohort_cannot_be_bootstrapped_onto_its_own_tier(monkeypatch, capsys):
-    # A cohort has no tier of its own: central_ref_for follows its `course:` pointer, and
+def test_a_semester_cannot_be_bootstrapped_onto_its_own_tier(monkeypatch, capsys):
+    # A semester has no tier of its own: central_ref_for follows its `course:` pointer, and
     # tonight's refresh re-renders it at whatever the COURSE org declares. The pair looks
     # like a pin and lasts one night at most, so it is refused rather than silently undone
     # hours later, in an org nobody is watching.
@@ -253,8 +256,8 @@ def test_a_cohort_cannot_be_bootstrapped_onto_its_own_tier(monkeypatch, capsys):
         [
             "bootstrap_course",
             "--org",
-            "Cohort-f2026",
-            "--cohort",
+            "Semester-f2026",
+            "--semester",
             "--course",
             "Course-Org",
             "--central-ref",

@@ -8,7 +8,7 @@ teams.csv and therefore cannot live there. `grades` must never import it.
 Until this existed, a parked group handout told the teaching team nothing at all. A
 self-select assignment with no teams yet logs `[wait] no teams for <key>` and returns
 green (`assign.provision_all`), which is the right answer for the tick - teams arrive days
-after the handout, and the cron re-fires until they do - but the WHOLE cohort could be
+after the handout, and the cron re-fires until they do - but the WHOLE semester could be
 sitting on an assignment nobody had told them to team up for, and nothing said so until
 somebody asked on Slack.
 
@@ -36,7 +36,7 @@ And the students themselves are told, once when the window opens and once more w
 about to shut (`notify_windows`). This is the FIRST mail the toolkit sends off a clock
 rather than off a person's action - the enrolment codes fire on a push to students.csv,
 the grade notifications on a button - so every one of its safety properties is a claim on
-a whole cohort's inbox:
+a whole semester's inbox:
 
 - no transport, nothing claimed (asked BEFORE the claim, as `enrol_codes.run` asks it);
 - quiet hours hold the MAIL, never the window - the lock, the form, the site and the fault
@@ -53,27 +53,36 @@ per-person detail and goes nowhere but `log.log_person`.
 
 Usage:
     python3 -m dsl_course.team_formation --course-org Course-Org \\
-        --cohort-org hertie-dsl-demo-f2026 [--assignment assignment-2] [--no-dry-run]
+        --semester-org hertie-dsl-demo-f2026 [--assignment assignment-2] [--no-preview]
 """
 
 from __future__ import annotations
 
-import argparse
 import re
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
-from . import config_digest, grades, mailer, roster, schedule, teams
+from . import config_digest, grades, mailer, records, roster, schedule, teams
 from .course import CONFIG_REPO, course_phrase
-from .discovery import cohort_is_live, course_name_of, welcome_issue_url
+from .discovery import course_name_of, join_issue_url, semester_is_live
 from .faults import ConfigFault, Unusable
 from .gh_contents import dump_csv, get_file_with_sha, put_file, read_csv
 from .grades import self_select_keys
-from .log import log, log_err, log_ok, log_person, log_step
+from .log import (
+    CLIParser,
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_person,
+    log_step,
+    plural,
+)
 
-# What the cohort LOSES while somebody is still unteamed, and what would put it right -
+# What the semester LOSES while somebody is still unteamed, and what would put it right -
 # this fault's own two sentences, in the voice of `faults.CONSEQUENCE` and `faults._FIX`.
 #
 # The consequence has to be carried rather than looked up: `faults.CONSEQUENCE` is keyed on
@@ -94,26 +103,26 @@ NOUN = (
 )
 
 FIX = (
-    "write the missing rows into classroom-config/teams.csv yourself, or move the date on "
+    "write the missing rows into semester-config/teams.csv yourself, or move the date on "
     "the line above to keep team formation open for longer."
 )
 
 # How long a window may stand open with somebody still waiting before its fault reaches
 # the notify bar (`faults.NOTIFY_FROM`) on its own. The ladder alone says nothing until a
 # day before the close, and a fortnight-long window nobody has acted on for a week is a
-# cohort that has not been told - worth hearing about while there is still time to act.
+# semester that has not been told - worth hearing about while there is still time to act.
 WARN_AFTER_OPEN = timedelta(days=7)
 
 
 @dataclass(frozen=True)
 class Window:
     """One assignment's team-formation window - open at the moment it was asked about, or
-    shut with somebody still waiting - and what the cohort has done with it so far.
+    shut with somebody still waiting - and what the semester has done with it so far.
 
     TWO NAMES, for the reason `assign.provision_all` spells out: `key` is the SCHEDULE key,
     which teams.csv is keyed on (the Join-team form validates against `assignments:` and
-    writes that key), and `name` is the cohort-side name every repo is called after. They
-    differ exactly when the entry sets `cohort_dest_repo`.
+    writes that key), and `name` is the semester-side name every repo is called after. They
+    differ exactly when the entry sets `semester_dest_repo`.
 
     `waiting` carries the Students themselves and not a count, because the mail below is
     addressed to them - and because a count is all any public surface may print off it.
@@ -121,14 +130,14 @@ class Window:
 
     key: str
     name: str
-    # What a student calls this assignment: `gspec.title or entry.title or name`, the same
+    # What a student calls this assignment: `gspec.title or name`, the same
     # chain `grades.sheet_spec` walks for the gradebook's header. The mail is addressed to
     # a person, so it names the assignment the way the course site and the brief do rather
     # than by the slug the plan is keyed on.
     title: str
     closes: datetime
     # Every team with at least one row for `key` in teams.csv, as `(name, member count)`,
-    # sorted by name. `teams` counts them for the fault; the cohort site prints the names and the
+    # sorted by name. `teams` counts them for the fault; the semester site prints the names and the
     # room each has left off the same file (`site._formed_teams`).
     sizes: tuple[tuple[str, int], ...]
     # Enrolled, onboarded roster rows with no teams.csv row for `key` - and the people the
@@ -146,7 +155,7 @@ class Window:
     enrolled: int
     # How many people one team may hold - `grades.team_cap`, off the same spec the fault
     # above was decided from, so it is free here and cannot disagree with the Join-team
-    # form that refuses the (cap + 1)th member or with the cohort site that prints it.
+    # form that refuses the (cap + 1)th member or with the semester site that prints it.
     cap: int
     # Whether the door has already SHUT on the people in `waiting`. Such a window is
     # carried for the teaching team's fault alone (see the module docstring): the mail is
@@ -163,11 +172,11 @@ class Window:
 
 
 def open_windows(
-    course_org: str, cohort_org: str, sched: schedule.Schedule, now: datetime
+    course_org: str, semester_org: str, sched: schedule.Schedule, now: datetime
 ) -> list[Window] | None:
     """Every assignment whose team-formation window is open at `now` - plus every one that
     has SHUT with somebody still unteamed - with the roster x teams.csv diff for each.
-    `None` when the cohort could not be read.
+    `None` when the semester could not be read.
 
     None is NOT an empty list, for the reason `scheduler._config_faults` gives: "we could
     not look" must not be reported as "there is nothing to report". A rate limit on
@@ -176,7 +185,7 @@ def open_windows(
     A window is here only when the assignment's teams are SELF-SELECTED
     (`self_select_keys`). Whether `now` falls inside it is `schedule.formation_state`'s
     comparison and is not re-derived here: the lock the Join-team form refuses on, the
-    cohort site's callout and this all have to shut at the same moment.
+    semester site's callout and this all have to shut at the same moment.
 
     A SHUT window is marked `shut` and carried anyway, while anybody is still waiting at
     it, because that is the state the teaching team most needs told - see the module
@@ -186,23 +195,23 @@ def open_windows(
     """
     # Asked BEFORE the two reads below, and free by then: `declared_grading_spec` memoises
     # each template's text per process and the tick has read every one of them already. A
-    # cohort with no self-select assignment at all - most of them, for most of a term - has
+    # semester with no self-select assignment at all - most of them, for most of a term - has
     # no window any date could open, so students.csv and teams.csv would be two contents
     # reads a quarter of an hour that could only ever produce an empty list.
     keys = self_select_keys(course_org, sched)
     if not keys:
         return []
     try:
-        students = roster.load(cohort_org)
+        students = roster.load(semester_org)
         # ABSENT as well as unreadable, on `_config_faults`' terms: the roster is the
-        # allowlist, and the empty set it implies would report a whole cohort as teamed.
-        # A cohort with no students.csv already carries that fault on its own digest.
+        # allowlist, and the empty set it implies would report a whole semester as teamed.
+        # A semester with no students.csv already carries that fault on its own digest.
         if students is None:
             return None
-        per_assignment = teams.load(cohort_org)
+        per_assignment = teams.load(semester_org)
     except Exception as exc:
         log_err(
-            f"could not work out who is still without a team in {cohort_org} "
+            f"could not work out who is still without a team in {semester_org} "
             f"({type(exc).__name__}): {exc}"
         )
         return None
@@ -241,20 +250,22 @@ def open_windows(
             continue
         # The template's own definition, asked once for the two facts below: memoised per
         # template per process, and read already by `self_select_keys` above.
-        spec = grades.declared_grading_spec(course_org, entry.course_source_repo)
-        name = schedule.cohort_name(key, entry)
+        spec = grades.declared_grading_spec(
+            course_org, entry.course_source_repo, semester_org=semester_org, slug=key
+        )
+        name = schedule.semester_name(key, entry)
         found.append(
             Window(
                 key=key,
                 name=name,
                 # The gradebook's chain (`grades.sheet_spec`), so the mail, the sheet and
                 # the site all call the assignment one thing.
-                title=spec.title or entry.title or name,
+                title=spec.title or name,
                 closes=closes,
                 sizes=tuple(sorted((t, len(m)) for t, m in groups.items())),
                 waiting=waiting,
                 enrolled=len(participants),
-                cap=grades.team_cap(course_org, spec),
+                cap=grades.team_cap(course_org, spec, semester_org, key),
                 shut=shut,
                 opens=opens,
             )
@@ -267,11 +278,11 @@ def window_faults(
 ) -> list[ConfigFault] | None:
     """One fault per window that somebody is still waiting on - open or shut. Nothing for a
     window every student has already teamed up for, and `None` - not an empty list - when
-    the cohort could not be read (`windows is None`).
+    the semester could not be read (`windows is None`).
 
     That `None` travels all the way to `scheduler._preflight_sources`, which skips the
     digest sync on it. An empty list is what CLOSES the schedule.yml issue, so answering
-    "nothing is wrong" for a tick that could not look would tell a cohort with thirty
+    "nothing is wrong" for a tick that could not look would tell a semester with thirty
     unteamed students that its fault had been fixed, and file it again as new an hour
     later.
 
@@ -292,16 +303,15 @@ def window_faults(
 def _fault(sched: schedule.Schedule, window: Window) -> ConfigFault:
     """The fault for one window, filed on the line that decided when it SHUTS.
 
-    An explicit `grading_datetime` is that line where the entry sets one, and the due date
-    where it does not (`schedule.formation_window` closes on the grading pin). Naming the
-    key that actually decided is what makes the deep link land where somebody would edit
-    to give the cohort more time.
+    The due date's line: the window closes at the late cutoff, due + `late_window_days`
+    (`schedule.formation_window`), so the due date is the line in this file that decides
+    it.
 
     FLOORED at WARNING once the window has been open for `WARN_AFTER_OPEN` (`warn_from`):
     the ladder off `fires` stays as it is, and only lifts the fault above that floor.
     """
     entry = sched.assignments[window.key]
-    field = "grading_datetime" if entry.grading_datetime is not None else "due_datetime"
+    field = "due_datetime"
     return ConfigFault(
         f"assignments.{window.key}",
         _what(window),
@@ -322,7 +332,7 @@ def _what(window: Window) -> str:
     to a public run log, to a digest issue and to an email.
 
     Three sentences, because the states want different reading. Nobody having formed a team
-    is a cohort that has not been told to; some students left over is a handful of people to
+    is a semester that has not been told to; some students left over is a handful of people to
     chase, and the teams already formed are what a reader would put them in. A window that
     has SHUT is neither - it is a fact about the term, and its tense says so."""
     if window.shut:
@@ -343,17 +353,17 @@ def _what(window: Window) -> str:
     )
 
 
-# ------------------------------------------------------------------- telling the cohort
+# ------------------------------------------------------------------- telling the semester
 
-# One row per thing SAID, in the PRIVATE classroom-config, shaped like
+# One row per thing SAID, in the PRIVATE semester-config, shaped like
 # `grades.DISTRIBUTED_PATH`: a re-run says nothing twice, and a message that could not be
 # sent is retried exactly once, because the row holding its claim is given back.
-MAILED_PATH = "team-formation/mailed.csv"
+MAILED_PATH = records.path("team_formation", "mailed.csv")
 MAILED_HEADER = (
-    # The SCHEDULE key, not the cohort-side name: it is what teams.csv and the Join-team
-    # form are keyed on, and it survives an edit to `cohort_dest_repo` - which, keyed on
+    # The SCHEDULE key, not the semester-side name: it is what teams.csv and the Join-team
+    # form are keyed on, and it survives an edit to `semester_dest_repo` - which, keyed on
     # the name, would read as an assignment nobody had been told about and re-mail the
-    # whole cohort.
+    # whole semester.
     "assignment",
     # The student's `hertie_email`, CASEFOLDED. Not the handle: the address is what the
     # message is actually addressed to, and it is what collapses a roster row somebody
@@ -381,10 +391,10 @@ Claim = tuple[str, str, str]
 
 
 def spoken_date(when: datetime, tz_name: str) -> str:
-    """`4th Oct`, in the cohort's own zone - what the Join-team form calls the same day.
+    """`4th Oct`, in the semester's own zone - what the Join-team form calls the same day.
 
-    The spelling is `grades.spoken_day`'s, which is also the cohort site's and the form's
-    (`spokenDate`, in templates/welcome/team-formation.yml): written out rather than left
+    The spelling is `grades.spoken_day`'s, which is also the semester site's and the form's
+    (`spokenDate`, in templates/join/team-formation.yml): written out rather than left
     to `strftime`, which answers in the runner's locale, and shared so the
     mail, the site and the refusal a late student gets all name one day one way.
 
@@ -397,7 +407,7 @@ def greeting(name: str) -> str:
     """`Dear Anna,` off a roster row's full name - the FIRST token of it, because that is
     how a person is addressed and `Dear Anna Adams,` reads like a form letter.
 
-    A roster row with no name at all falls back to `Hello,`: blank is what a cohort
+    A roster row with no name at all falls back to `Hello,`: blank is what a semester
     imported from a system that only had addresses looks like, and a greeting to nobody is
     worse than none."""
     first = next(iter(name.split()), "")
@@ -405,7 +415,7 @@ def greeting(name: str) -> str:
 
 
 def numbered(title: str, name: str, number: int | None) -> str:
-    """`Assignment 3: Project` - the assignment as its page on the cohort site is
+    """`Assignment 3: Project` - the assignment as its page on the semester site is
     numbered, then as a student calls it.
 
     Not doubled up: a title that already starts `Assignment 3`, or that is only the slug,
@@ -426,7 +436,7 @@ def _render(
     title: str,
     cap: object,
     day: str,
-    cohort_org: str,
+    semester_org: str,
     course_name: str,
     phase: str,
     page_url: str | None,
@@ -445,7 +455,7 @@ def _render(
     this is the one mail about it a student ever gets, and `assignment-2` is what the plan
     calls it rather than what the site and the brief do.
 
-    `page_url` is the assignment's page on the cohort site, which lists the teams that
+    `page_url` is the assignment's page on the semester site, which lists the teams that
     exist, and the sentence pointing at it goes ONLY when there is one to point at. A
     course org whose templates could not be listed gets a shorter mail rather than a link
     to the wrong page.
@@ -455,7 +465,7 @@ def _render(
     nowhere the toolkit can read, and a mail that guessed would be overruling them in the
     students' inbox."""
     course = course_phrase(course_name)
-    welcome = welcome_issue_url(cohort_org)
+    join_url = join_issue_url(semester_org)
     if phase == PHASE_REMINDER:
         subject = f"Team formation for {title} closes on {day}"
         opening = (
@@ -468,8 +478,8 @@ def _render(
         opening = f"{title} in {course} is a group assignment."
         cap_line = f"Teams are up to {cap} people. Team formation closes on {day}."
     listed = (
-        f"\n\nThe teams that exist, and how much room each has, are listed on the "
-        f"assignment's page:\n  {page_url}"
+        f"\n\nThe teams that exist, and how much room each has, are listed in the "
+        f"student console, where you can join or start one:\n  {page_url}"
         if page_url
         else ""
     )
@@ -478,7 +488,7 @@ def _render(
         f"{opening}\n\n"
         f"{cap_line}\n\n"
         f"To start a team, or to join one, open a 'Join team' issue here:\n"
-        f"  {welcome}"
+        f"  {join_url}"
         f"{listed}\n"
     )
     return (f"{subject} - {course_name}" if course_name else subject), body
@@ -486,7 +496,7 @@ def _render(
 
 def message(
     window: Window,
-    cohort_org: str,
+    semester_org: str,
     course_name: str,
     phase: str,
     tz_name: str,
@@ -497,25 +507,25 @@ def message(
 
     Per student, for the greeting and for nothing else: the send path already builds one
     `mailer.Message` per recipient, so this costs nothing, and a mail asking somebody to go
-    and find three people to work with reads better addressed to them than to a cohort.
+    and find three people to work with reads better addressed to them than to a semester.
     The name therefore appears in the BODY and nowhere else - not in a log line, not in the
     dry run's sample, and not in a subject that a mail client shows in a list.
 
-    `page` is the assignment's page on the cohort site (`schedule.assignment_pages`): its
+    `page` is the assignment's page on the semester site (`schedule.assignment_pages`): its
     number names the assignment, and its URL is the list of teams."""
     return _render(
         greeting(name),
         numbered(window.title, window.name, page.number if page else None),
         window.cap,
         spoken_date(window.closes, tz_name),
-        cohort_org,
+        semester_org,
         course_name,
         phase,
-        page.url(cohort_org) if page else None,
+        page.url(semester_org) if page else None,
     )
 
 
-def sample_message(cohort_org: str, course_name: str = "") -> tuple[str, str]:
+def sample_message(semester_org: str, course_name: str = "") -> tuple[str, str]:
     """The message rendered from PLACEHOLDERS, for the dry run - `mailer.sample_of`'s job,
     done by hand because the facts this message stands on are an assignment's and not a
     student's.
@@ -529,7 +539,7 @@ def sample_message(cohort_org: str, course_name: str = "") -> tuple[str, str]:
         "Assignment <n>: <title>",
         "<n>",
         "<date>",
-        cohort_org,
+        semester_org,
         course_name,
         PHASE_OPEN,
         "<assignment page>",
@@ -633,26 +643,26 @@ def dump_mailed(rows: dict[Claim, str]) -> str:
     )
 
 
-def _read_mailed(cohort_org: str) -> tuple[dict[Claim, str], str] | None:
+def _read_mailed(semester_org: str) -> tuple[dict[Claim, str], str] | None:
     """`(what has already gone out, the sha it was read at)`, or None if it could not be
     read AS A RECORD.
 
-    An absent file is `({}, "")` rather than a failure - the first window of a cohort's
+    An absent file is `({}, "")` rather than a failure - the first window of a semester's
     term creates it. A file nobody can parse is None, and None mails nobody: a record read
     as empty is a record saying nothing has ever been sent, which is a second copy of every
-    message to every student in the cohort.
+    message to every student in the semester.
 
     `""` and NOT None, which is what `grades.sync_team_lock` passes for the same absence and
     for the same reason: `put_file` reads None as "fetch the sha yourself and overwrite",
     which is the exact opposite of what `_claim` promises. Empty is sent as no sha at all,
     so GitHub refuses the write if the file has appeared since - and the first claim of a
     term, which is the only time this file is absent, is precisely when a faculty press and
-    a tick can both be holding the whole cohort."""
+    a tick can both be holding the whole semester."""
     try:
-        read = get_file_with_sha(cohort_org, CONFIG_REPO, MAILED_PATH)
+        read = get_file_with_sha(semester_org, CONFIG_REPO, MAILED_PATH)
     except Exception as exc:
         log_err(
-            f"could not read {MAILED_PATH} in {cohort_org} ({exc}) - nothing mailed"
+            f"could not read {MAILED_PATH} in {semester_org} ({exc}) - nothing mailed"
         )
         return None
     if read is None:
@@ -666,7 +676,7 @@ def _read_mailed(cohort_org: str) -> tuple[dict[Claim, str], str] | None:
 
 
 def _claim(
-    cohort_org: str,
+    semester_org: str,
     claims: set[Claim],
     stamp: str,
     rows: dict[Claim, str],
@@ -676,7 +686,7 @@ def _claim(
     actually inserted, or None if no attempt was accepted.
 
     Claim-then-send is `enrol_codes.run`'s ordering, and it is here for its reason: a
-    record that cannot be written (an archived classroom-config, a token that lost write
+    record that cannot be written (an archived semester-config, a token that lost write
     scope, a run of 5xx) must mean NOTHING WAS MAILED, which the next tick retries - not a
     batch that went out with no record of it, which the next tick sends again.
 
@@ -694,7 +704,7 @@ def _claim(
         if not mine:
             return set()
         if put_file(
-            cohort_org,
+            semester_org,
             CONFIG_REPO,
             MAILED_PATH,
             dump_mailed(rows | dict.fromkeys(mine, stamp)).encode(),
@@ -705,17 +715,17 @@ def _claim(
         if attempt == WRITE_ATTEMPTS:
             break
         log_err(
-            f"{MAILED_PATH} in {cohort_org} could not be written as read - re-reading "
+            f"{MAILED_PATH} in {semester_org} could not be written as read - re-reading "
             f"and retrying ({attempt}/{WRITE_ATTEMPTS - 1})"
         )
-        fresh = _read_mailed(cohort_org)
+        fresh = _read_mailed(semester_org)
         if fresh is None:
             break
         rows, sha = fresh
     return None
 
 
-def _release(cohort_org: str, unsent: set[Claim], stamp: str) -> None:
+def _release(semester_org: str, unsent: set[Claim], stamp: str) -> None:
     """Give back the claims the send did not spend, so a later tick retries them.
 
     Only rows still carrying THIS run's exact `stamp` are dropped, so a claim another tick
@@ -725,7 +735,7 @@ def _release(cohort_org: str, unsent: set[Claim], stamp: str) -> None:
     raise of its own would replace the exception the caller has to see."""
     try:
         for attempt in range(1, WRITE_ATTEMPTS + 1):
-            read = _read_mailed(cohort_org)
+            read = _read_mailed(semester_org)
             if read is None:
                 break
             rows, sha = read
@@ -733,7 +743,7 @@ def _release(cohort_org: str, unsent: set[Claim], stamp: str) -> None:
             # Nothing of ours is left to give back - somebody else's write already took
             # the rows - so there is no claim outstanding and nothing to report.
             if len(keep) == len(rows) or put_file(
-                cohort_org,
+                semester_org,
                 CONFIG_REPO,
                 MAILED_PATH,
                 dump_mailed(keep).encode(),
@@ -741,7 +751,7 @@ def _release(cohort_org: str, unsent: set[Claim], stamp: str) -> None:
                 expected_sha=sha,
             ):
                 log_err(
-                    f"{len(unsent)} team-formation message(s) in {cohort_org} were not "
+                    f"{len(unsent)} team-formation message(s) in {semester_org} were not "
                     f"sent - their claim was released, so the next tick retries them."
                 )
                 return
@@ -754,7 +764,7 @@ def _release(cohort_org: str, unsent: set[Claim], stamp: str) -> None:
     # lands in a world-readable Actions log - but the stamp is exact, and every row
     # carrying it is a row to clear.
     log_err(
-        f"{len(unsent)} row(s) in {MAILED_PATH} in {cohort_org} are stamped "
+        f"{len(unsent)} row(s) in {MAILED_PATH} in {semester_org} are stamped "
         f"mailed_at={stamp} but were never sent, and the stamp could not be cleared - "
         f"delete those rows by hand, or those students never hear about team formation."
     )
@@ -764,7 +774,7 @@ def _course_name(course_org: str) -> str:
     """The course's name for the subject line, or "" if it cannot be read.
 
     Never fatal: `course_name_of` raises on a dsl-course.yml that is malformed or that the
-    API would not hand over, and a name is not worth losing a cohort's only notice of team
+    API would not hand over, and a name is not worth losing a semester's only notice of team
     formation over. A course carrying no name keeps the generic wording (`course_phrase`)
     rather than mailing a blank."""
     try:
@@ -776,7 +786,7 @@ def _course_name(course_org: str) -> str:
 
 def _messages(
     nudges: list[_Nudge],
-    cohort_org: str,
+    semester_org: str,
     course_name: str,
     tz_name: str,
     pages: dict[str, schedule.AssignmentPage],
@@ -788,7 +798,7 @@ def _messages(
             n.to,
             *message(
                 n.window,
-                cohort_org,
+                semester_org,
                 course_name,
                 n.phase,
                 tz_name,
@@ -801,7 +811,7 @@ def _messages(
 
 
 def _preview(
-    cohort_org: str,
+    semester_org: str,
     course_org: str,
     windows: list[Window],
     nudges: list[_Nudge],
@@ -813,7 +823,7 @@ def _preview(
     Its own and not a hand-rolled one, which is the whole value of a rehearsal here:
     `mailer.preflight` runs inside it and PROVES the GRAPH_* secrets, while a preview that
     returns before the transport is chosen reads the same whether the certificate is right,
-    wrong or absent. This is the toolkit's first clock-driven cohort-wide mail, so its only
+    wrong or absent. This is the toolkit's first clock-driven semester-wide mail, so its only
     rehearsal surface has to test something.
 
     No address and no name reaches the public log either way: `send_bulk` prints counts and
@@ -834,20 +844,20 @@ def _preview(
     mailer.send_bulk(
         _messages(
             nudges,
-            cohort_org,
+            semester_org,
             course_name,
             sched.timezone,
-            schedule.assignment_pages_by_key(course_org, cohort_org, sched),
+            schedule.assignment_pages_by_key(course_org, semester_org, sched),
         ),
         dry_run=True,
-        sample=sample_message(cohort_org, course_name)[1],
+        sample=sample_message(semester_org, course_name)[1],
     )
-    log_ok("DRY-RUN - nothing claimed")
+    log_ok("PREVIEW - nothing claimed")
 
 
 def notify_windows(
     course_org: str,
-    cohort_org: str,
+    semester_org: str,
     sched: schedule.Schedule,
     windows: list[Window] | None,
     now: datetime,
@@ -859,7 +869,7 @@ def notify_windows(
 
     RAISES where the transport does - a Graph token request that failed is a RuntimeError
     out of `mailer` - and the claim is given back first. The scheduler contains it per
-    cohort (`_team_formation_phase`); the faculty button lets `main` turn it into one line.
+    semester (`_team_formation_phase`); the faculty button lets `main` turn it into one line.
 
     The order of the guards below IS the safety argument, and every one of them is a thing
     that must not be reachable from a claim:
@@ -868,63 +878,76 @@ def notify_windows(
        teaching team's fault, which outlives the door (`window_faults`); asking a student to
        form a team the Join-team form would now refuse is asking for something they cannot
        do, and it is why a message the quiet hours held overnight is one never sent;
-    1. no window, no window anybody is still waiting on, or a cohort this tick could not
+    1. no window, no window anybody is still waiting on, or a semester this tick could not
        read - nothing at all, and no I/O. A window stands open for WEEKS, so that second
-       case is most of them: once the cohort has teamed up, the record below would be read
+       case is most of them: once the semester has teamed up, the record below would be read
        on every tick until the grading pin with nothing ever owed off it. It is exactly
        equivalent - `_nudges` iterates `window.waiting`, so an all-empty `waiting` can only
        produce an empty list - and it is the same filter `window_faults` already applies;
     2. a record nobody can read - nothing, and the tick goes red. Read as empty it would
-       be a second copy of every message to every student in the cohort;
+       be a second copy of every message to every student in the semester;
     3. nothing owed - every phase is already recorded, which is what a re-run hits;
     4. QUIET HOURS - the MAIL is held, never the window. The window itself turned at its
        own minute: the lock, the Join-team form, the site's callout and the teaching team's
        fault are all upstream of this call, and only the message waits for 07:00 local,
-       because a `handout_datetime` of 00:00 otherwise wakes a cohort at 2am;
-    5. a cohort that has been closed out - its classroom-config is frozen, so the claim
+       because a `handout_datetime` of 00:00 otherwise wakes a semester at 2am;
+    5. a semester that has been closed out - its semester-config is frozen, so the claim
        could not land, and nobody is forming a team in a term that is over;
     6. NO TRANSPORT, asked BEFORE the claim. An org whose GRAPH_* secrets were never set
        claims nothing, says so once, and is offered the same messages by the next tick -
-       which is what makes this inert rather than destructive on such a cohort;
+       which is what makes this inert rather than destructive on such a semester;
     7. the claim, then the send, then the release of whatever the send did not spend. A
        crash between the claim and the send loses a nudge; the other ordering duplicates
-       one, to a whole cohort, and that asymmetry is deliberate."""
+       one, to a whole semester, and that asymmetry is deliberate."""
     live = [w for w in windows or () if not w.shut]
     if not any(w.waiting for w in live):
-        return 0
-    read = _read_mailed(cohort_org)
+        return _NOBODY_WAITING
+    read = _read_mailed(semester_org)
     if read is None:
         return 1
     rows, sha = read
     nudges = _nudges(live, now, rows)
     if not nudges:
-        return 0
-    if config_digest.in_quiet_hours(schedule.in_cohort_zone(sched, now)):
+        return _NOBODY_WAITING
+    emails = plural(len(nudges), "team-formation email")
+    if config_digest.in_quiet_hours(schedule.in_semester_zone(sched, now)):
         log(
             f"  [skip] {len(nudges)} team-formation message(s) held until "
             f"{config_digest.QUIET_UNTIL:02d}:00 in {sched.timezone}"
         )
-        return 0
+        return Summary(
+            f"{emails} held until {config_digest.QUIET_UNTIL:02d}:00, the semester's "
+            f"morning; automation sends them then.",
+            {"held": len(nudges)},
+            conclusion="skipped",
+        )
     # Asked here rather than left to the scheduler's own guard because this module is the
-    # one that WRITES. `cohort_is_live` logs its own line.
-    if not cohort_is_live(cohort_org):
+    # one that WRITES. `semester_is_live` logs its own line.
+    if not semester_is_live(semester_org):
         return 0
     if dry_run:
-        _preview(cohort_org, course_org, live, nudges, sched)
-        return 0
+        _preview(semester_org, course_org, live, nudges, sched)
+        return Summary(
+            f"Preview: {emails} would go to students without a team.",
+            {"emails": len(nudges)},
+        )
     if mailer.graph_config_from_env() is None:
         log(
-            f"  [skip] no mail transport for {cohort_org} - nothing claimed, and the "
+            f"  [skip] no mail transport for {semester_org} - nothing claimed, and the "
             f"next tick offers these {len(nudges)} message(s) again"
         )
-        return 0
+        return Summary(
+            f"{emails} not sent: this course has no mail set up.",
+            {"held": len(nudges)},
+            conclusion="skipped",
+        )
     stamp = datetime.now(UTC).isoformat(timespec="seconds")
     claimed = _claim(
-        cohort_org, {c for n in nudges for c in n.claims}, stamp, rows, sha
+        semester_org, {c for n in nudges for c in n.claims}, stamp, rows, sha
     )
     if claimed is None:
         log_err(
-            f"could not write {MAILED_PATH} in {cohort_org} - nothing mailed, so the "
+            f"could not write {MAILED_PATH} in {semester_org} - nothing mailed, so the "
             f"next tick is safe to retry."
         )
         return 1
@@ -940,14 +963,14 @@ def notify_windows(
     if not mine:
         return 0
     # The pages are looked up HERE, on a tick that has a message to write, and not in
-    # `open_windows`, which runs on every cohort on every tick: they cost a listing of the
-    # course org, and once the cohort has teamed up nothing is owed.
+    # `open_windows`, which runs on every semester on every tick: they cost a listing of the
+    # course org, and once the semester has teamed up nothing is owed.
     messages = _messages(
         mine,
-        cohort_org,
+        semester_org,
         _course_name(course_org),
         sched.timezone,
-        schedule.assignment_pages_by_key(course_org, cohort_org, sched),
+        schedule.assignment_pages_by_key(course_org, semester_org, sched),
     )
     try:
         # WHICH MESSAGES went out, by position, and never which ADDRESSES: `mine` and the
@@ -960,8 +983,8 @@ def notify_windows(
         delivered = set(mailer.send_indexed(messages))
     except Exception:
         # A transport that RAISED sent nothing at all, and the claim must not outlive it:
-        # unreleased, it is a whole cohort silently recorded as told.
-        _release(cohort_org, claimed, stamp)
+        # unreleased, it is a whole semester silently recorded as told.
+        _release(semester_org, claimed, stamp)
         raise
     for window in live:
         owed = [(i, n) for i, n in enumerate(mine) if n.window.key == window.key]
@@ -983,9 +1006,20 @@ def notify_windows(
     # told and never mailed at all.
     unsent = [n for i, n in enumerate(mine) if i not in delivered]
     if unsent:
-        _release(cohort_org, {c for n in unsent for c in n.claims}, stamp)
+        _release(semester_org, {c for n in unsent for c in n.claims}, stamp)
         return 1
-    return 0
+    return Summary(
+        f"{plural(len(delivered), 'team-formation email')} sent to students without "
+        f"a team.",
+        {"emails": len(delivered)},
+    )
+
+
+# What a press that had nobody to reach says. Counts nothing: there is nothing to count.
+_NOBODY_WAITING = Summary(
+    "Every student already has a team, or has been told; nothing to send.",
+    conclusion="nothing_to_do",
+)
 
 
 # --------------------------------------------------------------- the faculty button
@@ -1002,7 +1036,7 @@ def notify_windows(
 # that needed no code here at all.
 #
 # QUIET HOURS APPLY TO THE PRESS TOO, deliberately: the 23:00-07:00 hold is a rule about
-# the STUDENTS' night, and a cohort woken at 02:00 is woken just as hard by a human as by
+# the STUDENTS' night, and a semester woken at 02:00 is woken just as hard by a human as by
 # a datetime. Nothing is lost to it either - a held message claims nothing, so the next
 # quarter-hourly tick after 07:00 sends exactly what the press asked for, and the run says
 # so in one line. The band is narrow enough that the case the button exists for (just told
@@ -1010,12 +1044,12 @@ def notify_windows(
 
 
 def _narrow(
-    cohort_org: str, sched: schedule.Schedule, windows: list[Window], only: str
+    semester_org: str, sched: schedule.Schedule, windows: list[Window], only: str
 ) -> list[Window] | None:
     """`windows` cut to the one `only` names. None - an ERROR - when it names none of them.
 
     A key nobody recognises must not read as "nothing to do": a mistyped box that exits 0
-    is a faculty member who believes a cohort has been mailed and has not been. So the
+    is a faculty member who believes a semester has been mailed and has not been. So the
     refusal names what IS open, which is both the correction and the list they wanted.
 
     Whether the key is in schedule.yml at all is worth saying as well, because the two
@@ -1030,7 +1064,7 @@ def _narrow(
         else f" (and no `{only}:` under `assignments:` in {schedule.SCHEDULE_PATH})"
     )
     log_err(
-        f"no team-formation window is open for {only} in {cohort_org}{unknown} - open "
+        f"no team-formation window is open for {only} in {semester_org}{unknown} - open "
         f"right now: {listed}. Nothing mailed."
     )
     return None
@@ -1038,7 +1072,7 @@ def _narrow(
 
 def run(
     course_org: str,
-    cohort_org: str,
+    semester_org: str,
     now: datetime,
     *,
     only: str = "",
@@ -1049,45 +1083,50 @@ def run(
 
     `only` is the SCHEDULE key, because that is what teams.csv, the Join-team form and the
     record are keyed on - and it is free text on the button rather than a dropdown, since
-    the keys are per cohort and the workflow is rendered once for the whole course org.
+    the keys are per semester and the workflow is rendered once for the whole course org.
 
-    A cohort this run could not READ is red here, where the tick treats the same None as
+    A semester this run could not READ is red here, where the tick treats the same None as
     "nothing to report": somebody is standing at this run, and a press that reached nobody
     must not look like a press that had nobody to reach."""
-    sched = schedule.load(cohort_org)
-    windows = open_windows(course_org, cohort_org, sched, now)
+    sched = schedule.load(semester_org)
+    windows = open_windows(course_org, semester_org, sched, now)
     if windows is None:
         log_err(
-            f"could not work out who is waiting for a team in {cohort_org} - nothing "
+            f"could not work out who is waiting for a team in {semester_org} - nothing "
             f"mailed. The line above says what could not be read."
         )
         return 1
     # The button mails, so it sees the windows a student can still act on. A shut one is
     # carried by `open_windows` for the teaching team's fault alone, and offering it here
-    # would let a press ask a cohort to walk through a door the form has already locked.
+    # would let a press ask a semester to walk through a door the form has already locked.
     windows = [w for w in windows if not w.shut]
     if only:
-        narrowed = _narrow(cohort_org, sched, windows, only)
+        narrowed = _narrow(semester_org, sched, windows, only)
         if narrowed is None:
             return 1
         windows = narrowed
     if not windows:
         log_ok(
-            f"no team-formation window is open in {cohort_org} right now - nothing to "
+            f"no team-formation window is open in {semester_org} right now - nothing to "
             f"send."
         )
-        return 0
+        return Summary(
+            "No team-formation window is open right now; nothing to send.",
+            conclusion="nothing_to_do",
+        )
     log_step(
-        f"Team formation in {cohort_org}: {len(windows)} open window(s)"
+        f"Team formation in {semester_org}: {len(windows)} open window(s)"
         + (f", asked about {only} alone" if only else "")
     )
-    return notify_windows(course_org, cohort_org, sched, windows, now, dry_run=dry_run)
+    return notify_windows(
+        course_org, semester_org, sched, windows, now, dry_run=dry_run
+    )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True)
-    parser.add_argument("--cohort-org", required=True)
+    parser.add_argument("--semester-org", required=True)
     parser.add_argument(
         "--assignment",
         default="",
@@ -1098,31 +1137,28 @@ def main() -> int:
         ),
     )
     # Default ON, as Distribute grades' flag is and for its reason: the rendered workflow
-    # passes --dry-run / --no-dry-run explicitly, so a bare local invocation cannot mail a
-    # cohort by accident.
-    parser.add_argument(
-        "--dry-run",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Preview the messages; claim nothing, send nothing (default).",
+    # passes --preview / --no-preview explicitly, so a bare local invocation cannot mail a
+    # semester by accident.
+    add_preview_flag(
+        parser, "Preview the messages; claim nothing, send nothing (default)."
     )
     args = parser.parse_args()
     # A read helper (or the mail transport) that couldn't reach its API raises; in an
     # Actions log a one-line error beats a traceback, and the run still goes red.
     try:
-        # A closed-out cohort's classroom-config is frozen, so the claim this send depends
+        # A closed-out semester's semester-config is frozen, so the claim this send depends
         # on could not land - and nobody is forming a team in a term that is over. Green,
         # as every other sweep treats one: a finished term is a state somebody chose.
         # `notify_windows` asks the same question again as its own last guard before it
-        # writes; this one is here so an archived cohort is not read first.
-        if not cohort_is_live(args.cohort_org):
+        # writes; this one is here so an archived semester is not read first.
+        if not semester_is_live(args.semester_org):
             return 0
         return run(
             args.course_org,
-            args.cohort_org,
+            args.semester_org,
             datetime.now(UTC),
             only=args.assignment,
-            dry_run=args.dry_run,
+            dry_run=args.preview,
         )
     except RuntimeError as exc:
         log_err(str(exc))

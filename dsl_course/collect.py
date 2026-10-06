@@ -9,13 +9,13 @@ sheet, as information for whoever marks it. Faculty & instructors write the mark
 
   course/<template> @ solution branch  ->  grading_config.yml + hidden tests
                 |
-  cohort/<slug>-<handle>  (individual)   clone @ snapshot, overlay tests, run
-  cohort/<slug>-<team>    (group)              |
+  semester/<slug>-<handle>  (individual)   clone @ snapshot, overlay tests, run
+  semester/<slug>-<team>    (group)              |
                 v
-  classroom-config/autograde/<slug>/<key>.json   (per-test detail, private archive)
-  classroom-config/autograde/<slug>/<key>.ipynb  (the executed notebook, where the
+  semester-config/.system/autograde/<slug>/<key>.json   (per-test detail, private archive)
+  semester-config/.system/autograde/<slug>/<key>.ipynb  (the executed notebook, where the
                                                  completion check ran)
-  classroom-config/grading_sheets/<slug>.yml     (`info.autograde`, `info.completion` -
+  semester-config/grading_sheets/<slug>.yml     (`info.autograde`, `info.completion` -
                                                  never a mark)
 
 Student code is run in a subprocess with the GitHub token stripped from the environment.
@@ -25,7 +25,7 @@ entirely client-supplied (`GIT_COMMITTER_DATE`), so late work backdated to befor
 deadline passes a `git log --before` pin. The hourly scheduler therefore freezes each
 assignment shortly after its grading deadline, writing one row per submission repo into
 
-    classroom-config/snapshots/<slug>.csv
+    semester-config/.system/snapshots/<slug>.csv
         repo,sha,recorded_at,submitted_at,submitted_source
 
 and never rewriting it. `submitted_at` is WHEN that submission arrived and
@@ -54,8 +54,8 @@ delete the snapshot CSV and let the next tick rebuild it.
 
 FIRE-ONCE.  The hourly scheduler autogrades each assignment exactly once, just after its
 grading deadline. The marker is an explicit SENTINEL file this module writes as the very last
-action of a successful run - `autograde/<slug>/_graded.json` - NOT the mere existence of the
-`autograde/<slug>/` directory: an unchecked archive write used to create that directory
+action of a successful run - `.system/autograde/<slug>/_graded.json` - NOT the mere existence of the
+`.system/autograde/<slug>/` directory: an unchecked archive write used to create that directory
 first, so an aborted run left the marker present over unwritten scores and un-graded everyone.
 While no sentinel exists the assignment has never been machine-graded, and once one exists it
 is never graded again automatically. A DECISION not to grade (no `solution` branch,
@@ -64,7 +64,7 @@ instead, saying why - because a skip that leaves the directory empty is re-decid
 cost of a template clone, every hour for ever. `has_autograde_results` tests for either
 record, never bare directory existence, so a stray early write into the directory can no
 longer be mistaken for a completed grade. To re-grade deliberately, delete
-`autograde/<slug>/` and let the next tick regrade.
+`.system/autograde/<slug>/` and let the next tick regrade.
 
 grading_config.yml (on the template's solution branch):
     type: individual        # or group
@@ -84,13 +84,12 @@ with `testthat` (see docs/10) without this module learning a word of R.
 
 Usage:
     python3 -m dsl_course.collect \\
-        --master-org COURSE --course-source-repo assignment-1-f2026 \\
-        --cohort-org COHORT --deadline 2026-10-15 [--group] [--dry-run]
+        --course-org COURSE --course-source-repo assignment-1-f2026 \\
+        --semester-org SEMESTER --deadline 2026-10-15 [--group] [--preview]
 """
 
 from __future__ import annotations
 
-import argparse
 import csv
 import errno
 import hashlib
@@ -113,15 +112,14 @@ from datetime import datetime, timezone
 from enum import Enum
 from functools import cache
 from operator import itemgetter
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
-from . import course, grades, roster, schedule, sync_teams, teams
+from . import course, grades, records, roster, schedule, sync_teams, teams
 from .course import (
     CONFIG_REPO,
     SANDBOX_USER,
     SOLUTION_BRANCH,
-    resolve_is_group,
     shared_repo,
     submission_repo,
 )
@@ -136,6 +134,7 @@ from .gh_contents import (
     get_file_with_sha,
     is_untouched_stub,
     put_file,
+    read_repo,
     repo_blob_shas,
 )
 from .ghcli import BOT_EMAIL, GIT_ENV, bot_login, clone, gh, git, is_missing_resource
@@ -149,13 +148,22 @@ from .grades import (
     parse_grading_spec,  # noqa: F401 - re-exported; `collect` no longer parses it itself
     sheet_spec,
 )
-from .log import log, log_err, log_ok, log_person, log_skip, log_step
+from .log import (
+    CLIParser,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_person,
+    log_skip,
+    log_step,
+)
 from .repos import default_branch, repo_missing
 
-AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
+AUTOGRADE_DIR = records.path("autograde")  # <it>/<slug>/<key>.json
 GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST write
 SKIP_RECORD = "_skipped.json"  # the same marker, for an assignment nothing grades
-SNAPSHOT_DIR = "snapshots"  # classroom-config/snapshots/<slug>.csv
+SNAPSHOT_DIR = records.path("snapshots")  # <it>/<slug>.csv
 SNAPSHOT_FIELDS = (
     "repo",
     "sha",
@@ -230,7 +238,7 @@ GRADE_FAILED_NOTE = "grading failed to run"
 # numpy/pandas submissions) before it can OOM-kill the runner. Deliberately NOT RLIMIT_AS:
 # virtual address space counts glibc malloc arenas and BLAS thread stacks, so an honest
 # small-RSS scientific process on a many-core host blows a 2 GiB VSZ cap and dies before pytest
-# can write junit - zeroing the whole cohort behind the sentinel, and unreproducible on macOS
+# can write junit - zeroing the whole semester behind the sentinel, and unreproducible on macOS
 # (which ignores RLIMIT_AS). The heap is what a memory bomb actually allocates.
 RLIMIT_DATA_BYTES = 2 * 1024**3
 # CPU-seconds (per process, summed across threads): a backstop should the wall-clock
@@ -303,7 +311,7 @@ def score_from_junit(xml_text: str) -> dict:
 
 
 # Salted per RUN. Without the salt the tag is sha1("<slug>-<handle>") and both halves are
-# public (the slug on the cohort site, the handle in the welcome repo's Join issue titles),
+# public (the slug on the semester site, the handle in the join repo's Join issue titles),
 # so anyone could recompute the tag and read the student back off the log.
 _REF_SALT = secrets.token_hex(8)
 
@@ -315,7 +323,7 @@ def target_ref(repo: str) -> str:
     The log is PUBLIC (every workflow runs in the course org's public `.github`) and a
     submission repo is named `<slug>-<handle>`, so naming it beside a score or a
     non-submission publishes a student's result. The private per-target archive under
-    autograde/<slug>/ records the tag next to the repo, which is where a marker looks it up."""
+    .system/autograde/<slug>/ records the tag next to the repo, which is where a marker looks it up."""
     return "#" + hashlib.sha1((_REF_SALT + repo).encode()).hexdigest()[:7]
 
 
@@ -328,12 +336,12 @@ def _zero_result(note: str) -> dict:
 
 
 def snapshot_path(slug: str) -> str:
-    """Where this assignment's deadline snapshot lives in `classroom-config`."""
+    """Where this assignment's deadline snapshot lives in `semester-config`."""
     return f"{SNAPSHOT_DIR}/{slug}.csv"
 
 
 def autograde_path(slug: str) -> str:
-    """Where this assignment's per-target result archive lives in `classroom-config`."""
+    """Where this assignment's per-target result archive lives in `semester-config`."""
     return f"{AUTOGRADE_DIR}/{slug}"
 
 
@@ -381,7 +389,7 @@ def parse_snapshot_rows(text: str) -> dict[str, SnapshotRow]:
     Keyed by NAME, not position: a snapshot frozen before `submitted_at`,
     `submitted_source`, `path` and `note` were recorded has three columns, and the file is
     write-once, so it is never backfilled. It must therefore still parse - with those
-    blank - rather than strand the cohort that owns it. A row with no `path` is a repo of
+    blank - rather than strand the semester that owns it. A row with no `path` is a repo of
     its own and keys on its own name, which is exactly what those older files hold.
 
     A bare DictReader, not gh_contents.read_csv: `dump_snapshots` above wrote this file,
@@ -493,7 +501,7 @@ class Target:
     @property
     def key(self) -> str:
         """What this unit's pin is filed under, in the snapshot and in every dict derived
-        from it: the repo, or - where one drop box holds the whole cohort - the unit
+        from it: the repo, or - where one drop box holds the whole semester - the unit
         itself.
 
         `SnapshotRow.unit` is asked for it rather than told: it computes the same key back
@@ -503,7 +511,7 @@ class Target:
 
     @property
     def shared(self) -> bool:
-        """Whether this unit shares its repo with the whole cohort. A folder of its own
+        """Whether this unit shares its repo with the whole semester. A folder of its own
         inside that repo is exactly what the shape gives it, so the path answers it."""
         return bool(self.path)
 
@@ -549,7 +557,7 @@ def _repeated(targets: list[Target]) -> set[str]:
 
 
 def submission_targets(
-    cohort_org: str,
+    semester_org: str,
     slug: str,
     is_group: bool,
     teams_key: str | None = None,
@@ -561,41 +569,41 @@ def submission_targets(
     Empty - with the reason logged - when there is nothing to grade.
 
     `shared` is `submit_via: shared_dropbox_repo`: every unit was handed the SAME repo,
-    the cohort's one drop box, and works in its own folder inside it. Passed in by the caller that
+    the semester's one drop box, and works in its own folder inside it. Passed in by the caller that
     holds the assignment's definition, never guessed here - the repo a unit's work is in
     is the one thing a wrong answer cannot be recovered from.
 
-    `slug` is the cohort-side NAME (`schedule.cohort_name`), which is what every repo here
+    `slug` is the semester-side NAME (`schedule.semester_name`), which is what every repo here
     is named after. `teams_key` is the SCHEDULE KEY, which is what teams.csv is keyed on -
     the Join-team form validates the assignment against `assignments:` in schedule.yml and
-    writes that key. The two differ whenever `cohort_dest_repo` is set, and looking teams
+    writes that key. The two differ whenever `semester_dest_repo` is set, and looking teams
     up by the name then found none, so a group assignment silently had no targets at all.
     Defaults to `slug` for the (usual) case where they are the same.
 
-    `is_group` is decided upstream by `resolve_is_group` (force -> grading_config.yml)
+    `is_group` is decided upstream, off the template's grading_config.yml `type:`
     and passed in; it is NEVER inferred from teams.csv here. teams.csv is student-writable (a
     "Join team" issue can add a row against an individual assignment), so trusting its rows to
     decide the assignment's KIND would let a student turn an individual assignment into a group
     one - it is read only to enumerate a KNOWN-group assignment's teams."""
-    # ONE repo for every unit where the cohort shares a drop box, and one named after the
+    # ONE repo for every unit where the semester shares a drop box, and one named after the
     # unit where it does not. Resolved once, above both arms: the repo a unit's work is in
     # is the one thing a wrong answer cannot be recovered from.
     drop_box = shared_repo(slug) if shared else ""
     if is_group:
         key = teams_key or slug
-        groups = teams.teams_for(teams.load(cohort_org), key)
+        groups = teams.teams_for(teams.load(semester_org), key)
         if not groups:
-            log_err(f"no teams for `{key}` in {cohort_org}/{CONFIG_REPO}/teams.csv.")
+            log_err(f"no teams for `{key}` in {semester_org}/{CONFIG_REPO}/teams.csv.")
             return []
-        # teams.csv is student-writable (the welcome "Join team" issue appends rows), so its
+        # teams.csv is student-writable (the "Join team" issue appends rows), so its
         # handles pass the SAME roster allowlist `assign.provision_all` vets them through
         # before they are handed out - `sync_teams.vet_groups` is that one allowlist.
         # Unvetted, a typo'd or invented handle earned a block of its OWN in the grading
         # sheet - the file faculty mark in, and `distribute` fans out from - for an account
-        # with no place in the cohort at all.
+        # with no place in the semester at all.
         out: list[Target] = []
         for team, vetted, rejected in sync_teams.vet_groups(
-            groups, roster.enrolled(roster.load(cohort_org) or [])
+            groups, roster.enrolled(roster.load(semester_org) or [])
         ):
             if rejected:
                 # A count, not the handles: this log is public, and the handles are a
@@ -619,21 +627,21 @@ def submission_targets(
             [s.github_handle],
             shared,
         )
-        for s in roster.enrolled(roster.load(cohort_org) or [])
+        for s in roster.enrolled(roster.load(semester_org) or [])
         if s.onboarded
     ]
     if not targets:
-        log_err(f"no onboarded enrolled students in {cohort_org} to grade.")
+        log_err(f"no onboarded enrolled students in {semester_org} to grade.")
     return one_per_unit(targets)
 
 
 def local_deadline(deadline: str, tz: str | None = None) -> datetime:
-    """`deadline` (ISO date or datetime) as an OFFSET-CARRYING datetime in the COHORT's own
+    """`deadline` (ISO date or datetime) as an OFFSET-CARRYING datetime in the SEMESTER's own
     timezone. Raises ValueError on anything that is not ISO.
 
     A bare date means the END of that day, and a naive datetime is a local time, because
     the deadline a student was given ("submit by the 15th") is a local one - the site shows
-    it in the cohort's zone and schedule.yml declares that zone. Read as UTC, as it was,
+    it in the semester's zone and schedule.yml declares that zone. Read as UTC, as it was,
     "the 15th" ran until 01:59 on the 16th in Berlin summer time: two hours of late work
     graded as on time, and the snapshot froze at the wrong instant to match.
 
@@ -779,7 +787,7 @@ PAGE_EXHAUSTED_NOTE = (
 
 
 def _snapshot_sha(
-    cohort_org: str,
+    semester_org: str,
     repo: str,
     deadline: str,
     recorded_at: str = "",
@@ -813,12 +821,17 @@ def _snapshot_sha(
     the student pushed nothing.
     Returns None when the API call itself failed - the caller then abandons the whole
     snapshot so the next cron tick retries, rather than baking a transient error into a
-    record that is never rewritten."""
-    code, out = gh(
+    record that is never rewritten.
+
+    Read once per run (`read_repo`): the freeze and the sheet refresh of one tick ask the
+    same question of every repo in the late window, and only a push can change the answer."""
+    code, out = read_repo(
+        semester_org,
+        repo,
         "api",
         "-X",
         "GET",
-        f"repos/{cohort_org}/{repo}/commits",
+        f"repos/{semester_org}/{repo}/commits",
         "-f",
         f"until={_until_param(deadline)}",
         "-f",
@@ -826,11 +839,12 @@ def _snapshot_sha(
         *(("-f", f"path={path}") if path else ()),
         "--jq",
         _COMMIT_FIELDS,
+        reader=gh,
     )
     if code == 0:
         lines = [line for line in out.splitlines() if line.strip()]
         if not lines:
-            _warn_if_late_commits_only(cohort_org, repo, deadline, path)
+            _warn_if_late_commits_only(semester_org, repo, deadline, path)
             return Pin()  # the repo is reachable; no commit on/before the deadline
         wanted = {m.casefold() for m in members} if members is not None else None
         outsider = False
@@ -960,7 +974,7 @@ _ACTIVITY_FIELDS = (
 )
 
 
-def _push_activity(cohort_org: str, repo: str) -> list[tuple[str, str]] | None:
+def _push_activity(semester_org: str, repo: str) -> list[tuple[str, str]] | None:
     """This repo's push records - `(the HEAD after the push, when GitHub saw it)` - or
     None if the question could not be answered.
 
@@ -972,7 +986,7 @@ def _push_activity(cohort_org: str, repo: str) -> list[tuple[str, str]] | None:
         "api",
         "-X",
         "GET",
-        f"repos/{cohort_org}/{repo}/activity",
+        f"repos/{semester_org}/{repo}/activity",
         "-f",
         "per_page=100",
         "--jq",
@@ -1028,7 +1042,7 @@ def push_time_for(activity: list[tuple[str, str]], sha: str, committed: str) -> 
 
 
 def _submitted(
-    cohort_org: str,
+    semester_org: str,
     repo: str,
     pin: Pin,
     pushed_at: str,
@@ -1047,7 +1061,7 @@ def _submitted(
     would time a backdated submission by the date the student typed into it. The caller
     abandons the snapshot instead and the next tick takes it - the same answer
     `_snapshot_sha` gives an unreadable commits read."""
-    activity = _push_activity(cohort_org, repo)
+    activity = _push_activity(semester_org, repo)
     if activity is None:
         return None
     server = push_time_for(activity, pin.sha, pin.committed)
@@ -1071,7 +1085,7 @@ def _submitted(
 
 
 def _warn_if_late_commits_only(
-    cohort_org: str, repo: str, deadline: str, path: str = ""
+    semester_org: str, repo: str, deadline: str, path: str = ""
 ) -> None:
     """When a reachable repo yielded no commit on/before the deadline, tell an empty repo
     apart from one that HAS commits, all dated after the cutoff. The snapshot filters on the
@@ -1082,16 +1096,19 @@ def _warn_if_late_commits_only(
     `path` narrows it to one folder of a shared drop box, for the same reason the pin is
     narrowed: without it every unit that had not submitted would be told that the repo has
     commits, because fifty other units are pushing into it."""
-    code, out = gh(
+    code, out = read_repo(
+        semester_org,
+        repo,
         "api",
         "-X",
         "GET",
-        f"repos/{cohort_org}/{repo}/commits",
+        f"repos/{semester_org}/{repo}/commits",
         "-f",
         "per_page=1",
         *(("-f", f"path={path}") if path else ()),
         "--jq",
         '.[0].sha // ""',
+        reader=gh,
     )
     if code == 0 and out.strip():
         log(
@@ -1100,23 +1117,30 @@ def _warn_if_late_commits_only(
         )
 
 
-def has_autograde_results(cohort_org: str, slug: str) -> bool:
-    """Whether `slug` carries the autograder's FIRE-ONCE marker in classroom-config: the
+def has_autograde_results(semester_org: str, slug: str) -> bool:
+    """Whether `slug` carries the autograder's FIRE-ONCE marker in semester-config: the
     `_graded.json` sentinel of a completed run, or the `_skipped.json` record of a decision
-    not to grade. NOT bare `autograde/<slug>/` existence - an aborted run can leave that
+    not to grade. NOT bare `.system/autograde/<slug>/` existence - an aborted run can leave that
     directory populated with archives but no sentinel, and it must then still regrade.
 
     The scheduler grades an assignment only while neither record is present, so a machine score
     is written once and never silently refreshed under a marker's hand-edits. A deliberate
-    re-grade means deleting `autograde/<slug>/` (the next tick then regrades) or running the
-    autograder."""
-    return any(
-        file_exists(cohort_org, CONFIG_REPO, f"{autograde_path(slug)}/{record}")
-        for record in (GRADED_RECORD, SKIP_RECORD)
-    )
+    re-grade means deleting `.system/autograde/<slug>/` (the next tick then regrades) or running the
+    autograder.
+
+    Off ONE tree read of semester-config per run rather than two probes per assignment:
+    the grading job asks it of every passed deadline on every tick. A tree that cannot be
+    read, or came back truncated, falls back to probing the two records."""
+    records = [f"{autograde_path(slug)}/{r}" for r in (GRADED_RECORD, SKIP_RECORD)]
+    try:
+        branch = default_branch(semester_org, CONFIG_REPO)
+        present = repo_blob_shas(semester_org, CONFIG_REPO, branch)
+    except RuntimeError:
+        return any(file_exists(semester_org, CONFIG_REPO, r) for r in records)
+    return any(r in present for r in records)
 
 
-def mark_not_autograded(cohort_org: str, slug: str, why: str) -> bool:
+def mark_not_autograded(semester_org: str, slug: str, why: str) -> bool:
     """Record that this assignment will never be machine-graded, and why.
 
     The `_skipped.json` record is one of the two fire-once markers (see
@@ -1125,7 +1149,7 @@ def mark_not_autograded(cohort_org: str, slug: str, why: str) -> bool:
     ever. The note is what tells a marker reading the archive that the empty result set was
     deliberate."""
     return put_file(
-        cohort_org,
+        semester_org,
         CONFIG_REPO,
         f"{autograde_path(slug)}/{SKIP_RECORD}",
         json.dumps(
@@ -1139,32 +1163,32 @@ def mark_not_autograded(cohort_org: str, slug: str, why: str) -> bool:
     )
 
 
-def _record_skip(cohort_org: str, slug: str, reason: str, dry_run: bool) -> int:
+def _record_skip(semester_org: str, slug: str, reason: str, dry_run: bool) -> int:
     """Record `slug`'s "not machine-graded" marker, and return the exit code for it.
 
     A skip DECIDED but not RECORDED is not a skip: `has_autograde_results` reads the
     marker, so without it the next hourly tick re-clones the template and re-decides the
-    identical skip, for ever - which ran live in the demo cohort for days. A failed write
+    identical skip, for ever - which ran live in the demo semester for days. A failed write
     is therefore red; a dry run writes nothing and is green."""
     if dry_run:
         return 0
-    if mark_not_autograded(cohort_org, slug, reason):
+    if mark_not_autograded(semester_org, slug, reason):
         return 0
     log_err(f"{slug}: could not record the skip - the next run re-decides it")
     return 1
 
 
-def mark_graded(cohort_org: str, slug: str) -> bool:
-    """Write the fire-once sentinel `autograde/<slug>/_graded.json` - the LAST action of a
+def mark_graded(semester_org: str, slug: str) -> bool:
+    """Write the fire-once sentinel `.system/autograde/<slug>/_graded.json` - the LAST action of a
     fully successful run, once every per-target archive is durably written.
 
-    Making the marker an EXPLICIT file (rather than the mere existence of `autograde/<slug>/`,
+    Making the marker an EXPLICIT file (rather than the mere existence of `.system/autograde/<slug>/`,
     which the first archive `put_file` created as a side effect) decouples "this assignment is
     graded" from any single archive write: a future early write into the directory can no
     longer be mistaken for a completed grade, and a run that fails part-way through the archives
     withholds this sentinel and so stays eligible for a retry."""
     return put_file(
-        cohort_org,
+        semester_org,
         CONFIG_REPO,
         f"{autograde_path(slug)}/{GRADED_RECORD}",
         json.dumps(
@@ -1177,18 +1201,18 @@ def mark_graded(cohort_org: str, slug: str) -> bool:
     )
 
 
-def load_snapshots(cohort_org: str, slug: str) -> dict[str, str] | None:
+def load_snapshots(semester_org: str, slug: str) -> dict[str, str] | None:
     """{repo: sha} from this assignment's snapshot CSV, or None if no snapshot was ever
     taken (the two are different: a recorded blank sha means "no submission", while no
     file at all means grading has to fall back to client-supplied commit dates)."""
-    content = get_file_content(cohort_org, CONFIG_REPO, snapshot_path(slug))
+    content = get_file_content(semester_org, CONFIG_REPO, snapshot_path(slug))
     return parse_snapshots(content) if content is not None else None
 
 
-def load_snapshot_rows(cohort_org: str, slug: str) -> dict[str, SnapshotRow] | None:
+def load_snapshot_rows(semester_org: str, slug: str) -> dict[str, SnapshotRow] | None:
     """The frozen snapshot in full - the pin AND when it was submitted - or None if no
     snapshot was ever taken. What the cutoff's grading-sheet write reads."""
-    content = get_file_content(cohort_org, CONFIG_REPO, snapshot_path(slug))
+    content = get_file_content(semester_org, CONFIG_REPO, snapshot_path(slug))
     return parse_snapshot_rows(content) if content is not None else None
 
 
@@ -1203,7 +1227,7 @@ class SnapshotResult(Enum):
 
 
 def snapshot_assignment(
-    cohort_org: str,
+    semester_org: str,
     slug: str,
     deadline: str,
     *,
@@ -1228,10 +1252,10 @@ def snapshot_assignment(
 
     `is_group` is REQUIRED (keyword-only): it decides which repos are frozen, so a silent
     default would let a forgetful future caller pin individual repos for a group assignment.
-    The caller resolves it once, upstream, via `resolve_is_group` - it is never guessed here
+    The caller resolves it once, upstream, off the template's `type:` - it is never guessed here
     from student-writable teams.csv.
 
-    `listing` is the cohort's repos keyed by name, off the ONE listing the caller's tick
+    `listing` is the semester's repos keyed by name, off the ONE listing the caller's tick
     already holds (`discovery.listing_by_name`). It is read for `pushed_at` alone - the
     server's word on when each repo last received anything, which is what a pin chosen on a
     date the student wrote is checked against - so a row it does not carry costs only the
@@ -1243,19 +1267,19 @@ def snapshot_assignment(
     is frozen against the same repo, each one's pin is the newest commit touching its own FOLDER and
     authored by one of its members, and the `pushed_at` rung is not consulted at all. That
     last one matters most - `pushed_at` is the whole REPO's last push, so one student
-    pushing at one minute past the deadline would mark the entire cohort `suspect`. It is
+    pushing at one minute past the deadline would mark the entire semester `suspect`. It is
     read here only to build the targets: what each unit's folder and row key are is
     settled there, once (`Target`)."""
-    if load_snapshots(cohort_org, slug) is not None:
+    if load_snapshots(semester_org, slug) is not None:
         log_skip(f"snapshot {snapshot_path(slug)}")
         return SnapshotResult.PRESENT
-    targets = submission_targets(cohort_org, slug, is_group, teams_key, shared=shared)
+    targets = submission_targets(semester_org, slug, is_group, teams_key, shared=shared)
     if not targets:
         # Nobody onboarded, or no teams for a group assignment - which is also what an
         # assignment not handed out yet looks like from here. The snapshot is write-once,
         # so freezing an empty one would pin the assignment to "nothing submitted" for
         # ever; write nothing and let a later tick take it. Green, because the alternative
-        # is a red hourly run for every assignment whose cohort has yet to fill up.
+        # is a red hourly run for every assignment whose semester has yet to fill up.
         # `submission_targets` has already logged which of the two it was.
         log(
             f"  [skip] snapshot {snapshot_path(slug)} - nothing to freeze yet; "
@@ -1264,14 +1288,14 @@ def snapshot_assignment(
         return SnapshotResult.NOTHING_TO_FREEZE
     recorded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if listing is None:
-        listing = listing_by_name(cohort_org) or {}
+        listing = listing_by_name(semester_org) or {}
     moment = local_deadline(deadline, tz)
     rows: list[tuple[str, ...]] = []
     any_present = False
     for target in targets:
         repo = target.repo
         pin = _snapshot_sha(
-            cohort_org,
+            semester_org,
             repo,
             deadline,
             recorded_at,
@@ -1289,12 +1313,12 @@ def snapshot_assignment(
             # student supplied and can backdate. The snapshot is write-once, so it is
             # recorded now or never.
             submitted = _submitted(
-                cohort_org,
+                semester_org,
                 repo,
                 pin,
                 # Not for a drop box: `pushed_at` is the whole repo's last push, so the
                 # rung it feeds - "the server says this arrived after the deadline while
-                # the commit claims otherwise" - would accuse every unit in the cohort of
+                # the commit claims otherwise" - would accuse every unit in the semester of
                 # the one that really did push late.
                 # Nor above a toolkit commit: the last push may be the solution's.
                 "" if target.shared or pin.past_toolkit else _pushed_at(listing, repo),
@@ -1327,7 +1351,7 @@ def snapshot_assignment(
         )
         return SnapshotResult.NOTHING_TO_FREEZE
     if not put_file(
-        cohort_org,
+        semester_org,
         CONFIG_REPO,
         snapshot_path(slug),
         dump_snapshots(rows).encode(),
@@ -1363,7 +1387,7 @@ class SheetPhase(Enum):
 
 
 def submitted_display(submitted_at: str, tz: str | None) -> str:
-    """The pinned commit's time in the COHORT's own clock, to the minute -
+    """The pinned commit's time in the SEMESTER's own clock, to the minute -
     `2026-10-03T22:14+02:00`.
 
     To the MINUTE: seconds add nothing a grader reads a submission time for, and this is
@@ -1377,7 +1401,7 @@ def submitted_display(submitted_at: str, tz: str | None) -> str:
 
 
 def days_late(submitted: datetime, due: datetime, tz: str | None = None) -> int:
-    """Whole days late, counted in the COHORT's own calendar and floored at 0.
+    """Whole days late, counted in the SEMESTER's own calendar and floored at 0.
 
     A day starts at local midnight, not 86400 seconds after the last one. The night the
     clocks go back is 25 hours long, so counting fixed blocks made a push at 23:59 the day
@@ -1400,12 +1424,14 @@ def days_late(submitted: datetime, due: datetime, tz: str | None = None) -> int:
 CONTRIBUTIONS_UNFILLED = "(not filled in)"
 
 
-def _contributions(cohort_org: str, repo: str, ref: str, path: str = "") -> str | None:
+def _contributions(
+    semester_org: str, repo: str, ref: str, path: str = ""
+) -> str | None:
     """CONTRIBUTIONS.md as it stood AT THE PIN - not as it stands now, which is a file the
     team can still edit after the deadline.
 
     `path` is the unit's own folder inside `repo` (`Target.path`), so a team sharing the
-    cohort's drop box is asked for ITS `<team>/CONTRIBUTIONS.md` rather than for a file at
+    semester's drop box is asked for ITS `<team>/CONTRIBUTIONS.md` rather than for a file at
     the top of a repo fifty units share - where the first team to write one would have
     answered for all of them.
 
@@ -1417,7 +1443,7 @@ def _contributions(cohort_org: str, repo: str, ref: str, path: str = "") -> str 
         return None
     try:
         text = get_file_content(
-            cohort_org, repo, f"{path}{CONTRIBUTIONS_FILE}", ref=ref
+            semester_org, repo, f"{path}{CONTRIBUTIONS_FILE}", ref=ref
         )
     except RuntimeError:
         return None  # a read failure is not a fact about the team
@@ -1427,7 +1453,7 @@ def _contributions(cohort_org: str, repo: str, ref: str, path: str = "") -> str 
 
 
 def _sheet_info(
-    cohort_org: str,
+    semester_org: str,
     targets: list[Target],
     pins: dict[str, tuple[str, str]],
     due: datetime | None,
@@ -1470,7 +1496,7 @@ def _sheet_info(
             info["submitted_note"] = note
         if is_group:
             info["contributions"] = _contributions(
-                cohort_org, target.repo, sha, target.path
+                semester_org, target.repo, sha, target.path
             )
         out[target.unit] = info
     return out
@@ -1510,7 +1536,7 @@ def _pushed_at(listing: dict[str, dict], repo: str) -> str:
 
 
 def _provisional_pins(
-    cohort_org: str,
+    semester_org: str,
     listing: dict[str, dict],
     targets: list[Target],
     deadline: str,
@@ -1522,7 +1548,7 @@ def _provisional_pins(
     The snapshot file stays write-once and stays the cutoff's job: these pins move with
     every push through the late window, which is the whole point of refreshing the sheet.
 
-    Only the repos that can have MOVED are read. The cohort listing handed in carries
+    Only the repos that can have MOVED are read. The semester listing handed in carries
     `pushed_at` for every repo, and one quiet since the commit the sheet already records
     cannot have gained a later one - so it is not asked, and the fact on the sheet stands (a unit
     absent from these pins is one `grades._merged_block` leaves alone). The refresh runs
@@ -1530,14 +1556,14 @@ def _provisional_pins(
     call per submission repo on every one of those ticks.
 
     Returns `(pins, a note per repo whose pin the server's own push time contradicts)`, or
-    None if a lookup we DID make failed - a half-read cohort must not rewrite the file.
+    None if a lookup we DID make failed - a half-read semester must not rewrite the file.
 
     No push records are read here, and so no row is ever sourced `push`: that is one call
     per submission repo and this runs four times an hour for the length of the late
     window. The freeze pays for it once (`_submitted`), which is where the answer is
     written down for good.
 
-    A SHARED target reads each unit's own FOLDER of the cohort's one drop box. Two of the
+    A SHARED target reads each unit's own FOLDER of the semester's one drop box. Two of the
     economies above do not survive that and must not be faked: `pushed_at` is the repo's
     last push, so it can only say that SOMEBODY pushed - which is why no unit is skipped as
     quiet once anybody has, and why no row is ever called suspect off it."""
@@ -1549,7 +1575,7 @@ def _provisional_pins(
         if _quiet_since(pushed_at, was.get("submitted"), was.get("checked")):
             continue
         pin = _snapshot_sha(
-            cohort_org,
+            semester_org,
             target.repo,
             deadline,
             path=target.path,
@@ -1593,7 +1619,7 @@ def _receipt_event(
 
 
 def _post_receipts(
-    cohort_org: str,
+    semester_org: str,
     spec: grades.SheetSpec,
     listing: dict[str, dict] | None,
     targets: list[Target],
@@ -1605,17 +1631,17 @@ def _post_receipts(
     dry_run: bool,
     changed: bool = True,
 ) -> None:
-    """Tell each student what we recorded for them, in their own repo's receipts issue.
+    """Tell each student what we recorded for them, in their own repo's Submission receipts issue.
 
     Never fatal: a receipt is a courtesy, and a repo whose issue cannot be opened must not
     stop the sheet - which is the record - from being written. Nothing at all where the
-    assignment has no receipts issue to post into: work handed in off GitHub has no push to
+    assignment has no Submission receipts issue to post into: work handed in off GitHub has no push to
     acknowledge, and a shape whose repo is not the student's own has nowhere private to say
     it. No mark is lost either way - marks go to the gradebook and never to a repo.
 
     That gate is the FILE's answer, and the loop below asks the LIVE one -
     `grades.receipts_thread`. The two can disagree: `visibility:` edited back to `private`
-    after hand-out leaves the file saying there is a private thread here and the cohort's
+    after hand-out leaves the file saying there is a private thread here and the semester's
     repos world-readable, and this would open one in each of them and post a student's
     submission times where the internet can read them. The repo wins. (The digest reports the disagreement itself - `grades._visibility_faults`; this
     is what keeps it from costing anything meanwhile.)"""
@@ -1627,7 +1653,7 @@ def _post_receipts(
         sha, submitted_at = pins.get(target.key, ("", ""))
         when = _parse_iso(submitted_at) if (sha and submitted_at) else None
         if when is not None:
-            # In the COHORT's clock, like everything else a student is shown: the API
+            # In the SEMESTER's clock, like everything else a student is shown: the API
             # answers UTC, and "pushed 20:14" for a 22:14 push reads as a bug.
             when = when.astimezone(schedule._tz(tz))
         shown = submitted_display(submitted_at, tz) if when is not None else ""
@@ -1647,11 +1673,11 @@ def _post_receipts(
         # private" may be posted into. Off the rows this pass already holds, so the guard
         # costs no call.
         issue = grades.receipts_thread(
-            spec, cohort_org, repo, unit, target.members, listing, dry_run=dry_run
+            spec, semester_org, repo, unit, target.members, listing, dry_run=dry_run
         )
         if issue is None:
             log_person(
-                f"    [skip] receipt on {cohort_org}/{repo} - no receipts thread this "
+                f"    [skip] receipt on {semester_org}/{repo} - no Submission receipts issue this "
                 f"run may post in"
             )
             continue
@@ -1660,7 +1686,7 @@ def _post_receipts(
             # the record, so this unit waits for the next tick.
             continue
         if grades.post_receipt(
-            cohort_org,
+            semester_org,
             repo,
             issue,
             body,
@@ -1668,7 +1694,7 @@ def _post_receipts(
             dry_run,
         ):
             posted += 1
-            log_person(f"    receipt ({event}) on {cohort_org}/{repo}#{issue}")
+            log_person(f"    receipt ({event}) on {semester_org}/{repo}#{issue}")
     if posted:
         # A COUNT: this log is public, and a receipt names a submission repo.
         log_ok(f"{posted} submission receipt(s) up to date")
@@ -1690,12 +1716,12 @@ def _status_line(
     unit = "teams" if spec.is_group else "students"
     line = f"OPEN - {submitted} of {total} {unit} have submitted"
     if derived:
-        line += "; late pushes still update `info:` until the cutoff."
+        line += "; late pushes still update `info:` until the late cutoff."
     return line
 
 
 def _sheet_phase(
-    cohort_org: str,
+    semester_org: str,
     slug: str,
     old_text: str,
     now: datetime,
@@ -1719,7 +1745,7 @@ def _sheet_phase(
     sealed = (
         now >= cutoff
         if cutoff is not None
-        else load_snapshots(cohort_org, slug) is not None
+        else load_snapshots(semester_org, slug) is not None
     )
     return SheetPhase.FREEZING if sealed else SheetPhase.OPEN
 
@@ -1738,7 +1764,7 @@ class SheetWrite(NamedTuple):
 
 def sync_sheet(
     course_org: str,
-    cohort_org: str,
+    semester_org: str,
     sched: schedule.Schedule,
     key: str,
     slug: str,
@@ -1766,21 +1792,27 @@ def sync_sheet(
     assignment, and nothing once the sheet is FROZEN. The write itself is skipped when the
     rendered text hashes to what the repo already holds, so the hourly tick is free.
 
-    `listing` is the cohort's repos keyed by name, off the ONE listing the caller's tick
+    `listing` is the semester's repos keyed by name, off the ONE listing the caller's tick
     already holds (`discovery.listing_by_name`): which of them has moved, and which of them
     is still private enough to post a receipt into. None means nobody handed one down - a
     button press, an autograde run - or the tick's own could not be read, and this takes
     its own, and only if it is going to derive anything at all."""
-    gspec = load_grading_spec(course_org, template)
-    spec = sheet_spec(sched, key, slug, gspec, is_group)
+    gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
     path = grades.sheet_path(slug)
+    if gspec.not_migrated:
+        # A refused definition is a default shape and late rule nobody wrote: refreshing
+        # off it rewrites a group sheet in the individual shape. Not a failed write - the
+        # digest carries the NOT_MIGRATED fault, and the hourly tick asks again.
+        log(f"  [skip] {path} - {GRADING_FILE} is NOT_MIGRATED; run the migration")
+        return SheetWrite(True)
+    spec = sheet_spec(sched, key, slug, gspec, is_group)
     entry = sched.assignments.get(key)
     due = entry.due_datetime if entry else None
 
     targets: list[Target] = []
     if units is None:
         targets = submission_targets(
-            cohort_org, slug, is_group, key, shared=gspec.submit_shared
+            semester_org, slug, is_group, key, shared=gspec.submit_shared
         )
         units = [(target.unit, target.members) for target in targets]
     else:
@@ -1800,13 +1832,17 @@ def sync_sheet(
         return SheetWrite(True)
 
     try:
-        found = get_file_with_sha(cohort_org, CONFIG_REPO, path)
+        found = get_file_with_sha(semester_org, CONFIG_REPO, path)
     except RuntimeError as exc:
         log_err(f"  ! could not read {path}: {exc}")
         return SheetWrite(False)
     old_text, old_sha = found if found else ("", "")
     phase = _sheet_phase(
-        cohort_org, slug, old_text, now, grades.cutoff_at(sched, key, gspec)
+        semester_org,
+        slug,
+        old_text,
+        now,
+        schedule.grading_cutoff_datetime(sched, key),
     )
     try:
         on_disk = grades.parse_sheet(old_text) if old_text else {}
@@ -1839,12 +1875,12 @@ def sync_sheet(
     # read stays None the whole way down: "we could not look" is not "the org is empty",
     # and the receipts below are exactly the reader that must not confuse the two.
     if derive and listing is None:
-        listing = listing_by_name(cohort_org)
+        listing = listing_by_name(semester_org)
     if derive and phase is SheetPhase.FREEZING:
-        rows = load_snapshot_rows(cohort_org, slug)
+        rows = load_snapshot_rows(semester_org, slug)
         if rows is None:
             # Sealing against a snapshot that is not there would record "nobody submitted"
-            # for the whole cohort, permanently. The facts the sheet already holds are the
+            # for the whole semester, permanently. The facts the sheet already holds are the
             # last ones anybody looked up, so they stand; only the header moves to FROZEN.
             log_err(
                 f"  ! no {snapshot_path(slug)} - sealing {path} on the facts it holds"
@@ -1871,10 +1907,10 @@ def sync_sheet(
             }
     elif derive:
         found = _provisional_pins(
-            cohort_org,
+            semester_org,
             listing or {},
             targets,
-            (grades.cutoff_at(sched, key, gspec) or now).isoformat(),
+            (schedule.grading_cutoff_datetime(sched, key) or now).isoformat(),
             previous,
             due,
         )
@@ -1884,7 +1920,7 @@ def sync_sheet(
         pins, notes = found
     if derive:
         info_updates = _sheet_info(
-            cohort_org,
+            semester_org,
             targets,
             pins,
             due,
@@ -1945,9 +1981,9 @@ def sync_sheet(
                 f"derived from the due date on; nothing to refresh yet"
             )
     elif dry_run:
-        log(f"    DRY-RUN  {path} ({status})")
+        log(f"    PREVIEW  {path} ({status})")
     else:
-        # The message carries counts, never a handle or a team name: classroom-config is
+        # The message carries counts, never a handle or a team name: semester-config is
         # private, but its commit messages are quoted back in public run logs.
         #
         # `expected_sha` is the sha this run READ the file at, so GitHub refuses the write
@@ -1957,7 +1993,7 @@ def sync_sheet(
         # that window would be silently reverted, marks and all. A refusal is counted, and
         # the next tick re-reads, re-merges and writes.
         written = put_file(
-            cohort_org,
+            semester_org,
             CONFIG_REPO,
             path,
             content,
@@ -1975,7 +2011,7 @@ def sync_sheet(
         # same event, and the one whose compare-and-swap write was refused has not recorded
         # what its receipt would promise - it posted a duplicate instead.
         _post_receipts(
-            cohort_org,
+            semester_org,
             spec,
             listing,
             targets,
@@ -2171,7 +2207,7 @@ def _grader_dep_missing(module: str) -> bool:
     indistinguishable from a submission that failed its tests: every target came back a
     grading-failed zero, the systemic guard reddened the cron, no sentinel was written, and
     the next hourly tick did it all again. A missing INTERPRETER dependency is a runner
-    fault with one fix, so it says so in words rather than through a cohort of zeros."""
+    fault with one fix, so it says so in words rather than through a semester of zeros."""
     if _grader_dep_present(module):
         return False
     log_err(
@@ -2247,7 +2283,7 @@ def sandbox_unusable() -> str:
     """Why no student code may be run right now, or `""` when it may.
 
     Asked ONCE per assignment, before anything clones a submission, so a runner without the
-    sandbox records one skip rather than grading a whole cohort as the token holder."""
+    sandbox records one skip rather than grading a whole semester as the token holder."""
     if sandbox_user():
         return ""
     if os.environ.get(_ACTIONS) == "true":
@@ -2486,7 +2522,7 @@ COMPLETION_DID_NOT_RUN = "did-not-run"
 # What the executed notebook is executed WITH. `nbconvert --execute` drives a kernel
 # through `nbclient`, and the kernel itself is `ipykernel` - a separate distribution that
 # nbconvert does not pull in, so a runner with only nbconvert fails every notebook with
-# "no such kernel" and would report a cohort of `did-not-run`. Both are pinned in
+# "no such kernel" and would report a semester of `did-not-run`. Both are pinned in
 # requirements-autograde.txt, which every grading job's preamble installs.
 COMPLETION_DEPS = ("nbconvert", "ipykernel")
 COMPLETION_DEP_SKIP = (
@@ -2496,7 +2532,7 @@ COMPLETION_DEP_SKIP = (
 # The ceiling on ANYTHING this module archives per submission - the executed notebook and
 # the grader's reading copy alike. Both are notebooks full of plots, i.e. base64 PNG all
 # the way down. Past this the state/verdict is still recorded and the copy is not:
-# classroom-config is a git repo somebody has to clone, and a term of 40 MB notebooks per
+# semester-config is a git repo somebody has to clone, and a term of 40 MB notebooks per
 # student makes it one nobody can.
 ARCHIVE_MAX_BYTES = 5 * 1024**2
 # The completion check runs OFFLINE. Not a jail - a real one needs a network namespace this
@@ -2623,7 +2659,7 @@ def _completion_state(executed: bytes) -> str:
 # literally against the kernels installed on the grading runner, where the only one is
 # `python3`. Without this a submission written anywhere but a bare Jupyter install raised
 # NoSuchKernel, wrote no output file, and was recorded `did-not-run`, i.e. "tell the
-# maintainer" - for a large share of a real cohort.
+# maintainer" - for a large share of a real semester.
 COMPLETION_KERNEL = "python3"
 
 
@@ -2868,10 +2904,10 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             return score_from_junit(raw.decode())
         except (ET.ParseError, UnicodeDecodeError) as exc:
             # A hand-written runner is the likely author of an XML nobody can parse, and an
-            # unhandled traceback here would abort the whole cohort's job rather than this
+            # unhandled traceback here would abort the whole semester's job rather than this
             # one submission. `UnicodeDecodeError` for the same reason: `run.sh` is written
             # by faculty in whatever language their course uses, and a latin-1 report is a
-            # report we cannot read, not a run we may abandon a cohort over.
+            # report we cannot read, not a run we may abandon a semester over.
             log_err(f"  ! the test report is not valid XML ({exc}) - nothing scored")
             return None
 
@@ -2910,7 +2946,7 @@ def pick_grader_document(
     where nothing carries a fence returns None, and the caller archives nothing.
 
     A document that will not parse is skipped rather than raised on: one broken notebook in
-    a cohort must not cost the other hundred their grader copy."""
+    a semester must not cost the other hundred their grader copy."""
     best: tuple[Path, Filtered] | None = None
     for path in sorted(_walk_files(workdir)):
         if path.suffix.lower() not in GRADER_DOCUMENTS:
@@ -2975,8 +3011,51 @@ def _export_document(source: Path, env: dict) -> tuple[str, bytes] | None:
     return None if own_source is None else (GRADER_SOURCE, own_source)
 
 
+def tagged_copies(folder: Path, name: str) -> list[tuple[str, bytes]]:
+    """The reading copies of a file a question is marked from (`questions: Q3: {file:
+    ...}`): `[(the file name it is archived under, its bytes)]`, empty when the submission
+    has no such regular file. A `.tex` also brings its compiled `.pdf` when one is
+    committed beside it - the PDF to read, the source to check it against. Never rendered
+    here: nothing a student wrote is executed for it. A file past the archive cap is
+    named in the log and not archived.
+
+    `name` is the template's, but every directory on the way is the student's, so a path
+    that resolves outside the checkout is refused like a symlink."""
+    candidates = [name]
+    if PurePosixPath(name).suffix.lower() == ".tex":
+        candidates.insert(0, str(PurePosixPath(name).with_suffix(".pdf")))
+    root = folder.resolve()
+    out: list[tuple[str, bytes]] = []
+    for candidate in candidates:
+        path = folder / candidate
+        if not path.parent.resolve().is_relative_to(root):
+            log_err("  ! a question's file is outside the submission - not read")
+            return []
+        data = _result_bytes(f"the question file {candidate}", path, ARCHIVE_MAX_BYTES)
+        if data is not None:
+            out.append((candidate.replace("/", "_"), data))
+    return out
+
+
+def _archive_tagged(
+    semester_org: str, slug: str, target_key: str, folder: Path, files: tuple[str, ...]
+) -> None:
+    """Archive the file each tagged question is marked from, beside the grader copy, as
+    `<unit>.<file>`. Missing files are simply not archived: the grader opens the repo."""
+    for name in files:
+        for archived, content in tagged_copies(folder, name):
+            put_file(
+                semester_org,
+                CONFIG_REPO,
+                f"{autograde_path(slug)}/{target_key}.{archived}",
+                content,
+                f"autograde: {slug}/{target_key} question file",
+                person=True,
+            )
+
+
 def _grader_document_for(
-    cohort_org: str,
+    semester_org: str,
     repo: str,
     target_key: str,
     slug: str,
@@ -2984,11 +3063,15 @@ def _grader_document_for(
     snapshot: str | None,
     env: dict,
     path: str = "",
+    files: tuple[str, ...] = (),
 ) -> str:
     """Archive one submission's grader copy. Returns one of the GRADER_* verdicts.
 
+    `files` are the submission files the tagged questions are marked from; each is
+    archived as it was submitted (`tagged_copies`), beside the copy of the runnable one.
+
     `path` is the unit's own folder inside `repo` (`Target.path`), and only a shared drop
-    box has one: the repo is the whole cohort's, so a picker let loose on the checkout
+    box has one: the repo is the whole semester's, so a picker let loose on the checkout
     would export whichever classmate's notebook it found first, under this unit's key. A
     drop box is hand-marked and `grader_pdf:` is dropped for it at the parse, so this is
     the second lock rather than the first."""
@@ -2996,7 +3079,7 @@ def _grader_document_for(
     # in this tree as the sandbox user, and a failed chown-back leaves it undeletable.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
         wd = Path(work) / "sub"
-        if not clone(cohort_org, repo, wd):
+        if not clone(semester_org, repo, wd):
             return GRADER_UNREADABLE
         if _pin_commit(wd, deadline, snapshot) is None:
             return GRADER_UNREADABLE
@@ -3009,6 +3092,7 @@ def _grader_document_for(
         folder = wd / path if path else wd
         if not folder.is_dir():
             return GRADER_NONE  # nothing pushed into this unit's folder at all
+        _archive_tagged(semester_org, slug, target_key, folder, files)
         picked = pick_grader_document(folder)
         if picked is None:
             return GRADER_NONE
@@ -3035,7 +3119,7 @@ def _grader_document_for(
         if len(content) > ARCHIVE_MAX_BYTES:
             # The same cap the executed notebook gets, for the same reason: an HTML export
             # of a plot-heavy notebook is base64 PNG all the way down, and one per student
-            # makes classroom-config a repo nobody can clone.
+            # makes semester-config a repo nobody can clone.
             return GRADER_TOO_BIG
         # The verdict for a rendered export IS its extension; only the fallback has to
         # ask the file what it is.
@@ -3044,10 +3128,10 @@ def _grader_document_for(
             if verdict in (GRADER_PDF, GRADER_HTML)
             else source.suffix.lstrip(".")
         )
-        # `person=True`: the PATH is `autograde/<slug>/<handle>.pdf`, and this log is
-        # world-readable even where classroom-config is not.
+        # `person=True`: the PATH is `.system/autograde/<slug>/<handle>.pdf`, and this log is
+        # world-readable even where semester-config is not.
         if not put_file(
-            cohort_org,
+            semester_org,
             CONFIG_REPO,
             f"{autograde_path(slug)}/{target_key}.{suffix}",
             content,
@@ -3059,15 +3143,17 @@ def _grader_document_for(
 
 
 def export_grader_documents(
-    cohort_org: str,
+    semester_org: str,
     slug: str,
     key: str,
     is_group: bool,
     deadline: str,
     dry_run: bool,
     shared: bool = False,
+    files: tuple[str, ...] = (),
 ) -> None:
-    """Archive a reading copy of every submission, filtered to its hand-marked questions.
+    """Archive a reading copy of every submission, filtered to its hand-marked questions,
+    and the file each tagged question is marked from (`files`).
 
     Opt-in per assignment (`grader_pdf: true` in the template's `grading_config.yml`) and
     deliberately NOT behind `autograde:`: it is the questions a PERSON marks that the
@@ -3078,14 +3164,14 @@ def export_grader_documents(
     fences, one unclonable repo - none of those is a reason to red the cutoff pass and
     re-run the whole freeze on the next tick. Every outcome is counted into one summary
     line and the run carries on. Counts only: the archive PATHS carry handles."""
-    targets = submission_targets(cohort_org, slug, is_group, key, shared=shared)
+    targets = submission_targets(semester_org, slug, is_group, key, shared=shared)
     if not targets:
         return
     if dry_run:
-        log(f"    DRY-RUN would archive {len(targets)} grader copy/copies for {slug}")
+        log(f"    PREVIEW would archive {len(targets)} grader copy/copies for {slug}")
         return
     log_step(f"Grader copies for {slug}: {len(targets)} target(s)")
-    snapshots = load_snapshots(cohort_org, slug)
+    snapshots = load_snapshots(semester_org, slug)
     # `_export_document` runs `python -m jupyter` FROM the notebook's own directory (an
     # exporter resolves a document's relative assets from there), so it needs the same
     # sandbox environment the hidden tests and the completion check get.
@@ -3093,7 +3179,7 @@ def export_grader_documents(
     tally: dict[str, int] = {}
     for target in targets:
         verdict = _grader_document_for(
-            cohort_org,
+            semester_org,
             target.repo,
             target.unit,
             slug,
@@ -3101,6 +3187,7 @@ def export_grader_documents(
             None if snapshots is None else snapshots.get(target.key),
             env,
             target.path,
+            files,
         )
         tally[verdict] = tally.get(verdict, 0) + 1
     log_ok(
@@ -3111,7 +3198,7 @@ def export_grader_documents(
 
 
 def _grade_target(
-    cohort_org: str,
+    semester_org: str,
     repo: str,
     tests_src: Path | None,
     deadline: str,
@@ -3135,8 +3222,8 @@ def _grade_target(
     # completion check and the hidden tests, and a failed chown-back leaves it undeletable.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
         wd = Path(work) / "sub"
-        if not clone(cohort_org, repo, wd):
-            if repo_missing(cohort_org, repo):
+        if not clone(semester_org, repo, wd):
+            if repo_missing(semester_org, repo):
                 # GitHub SAYS the repo does not exist (deleted, or never provisioned) - a
                 # recorded zero, NOT a transient failure. Returning None ('unreachable') would
                 # hold the fire-once marker and re-clone + re-grade every OTHER repo hourly,
@@ -3177,7 +3264,7 @@ def _grade_target(
             # next one. `_run_limited`'s `Popen` is what raises here - an unenterable cwd
             # (the 0700 hand-over above), a missing interpreter, no file descriptor left -
             # and it used to come out of this function as a traceback, so the FIRST target
-            # to hit it un-graded the whole cohort. Nothing is lost by containing it: if it
+            # to hit it un-graded the whole semester. Nothing is lost by containing it: if it
             # is every graded target then the fault is the runner's, and the systemic guard
             # in `collect` reds the run and writes no sentinel just as it does for timeouts.
             log_err(
@@ -3192,11 +3279,10 @@ def _grade_target(
 
 
 def refresh_assignment_sheet(
-    master_org: str,
+    course_org: str,
     template: str,
-    cohort_org: str,
+    semester_org: str,
     *,
-    group: bool = False,
     dry_run: bool = False,
     slug: str = "",
 ) -> int:
@@ -3211,19 +3297,27 @@ def refresh_assignment_sheet(
     the sheet and the clock - so no press of this button can move a fact the freeze
     recorded, and one pressed over a cutoff that passed while nothing ran does the sealing
     the tick missed."""
-    sched = schedule.load(cohort_org)
+    sched = schedule.load(semester_org)
     # `slug` arrives as the SCHEDULE KEY (which of two entries handing out from this one
-    # template) and is consumed here; from the next line on it means the cohort-side name.
-    target = schedule.resolve_target(sched, template, slug)
+    # template) and is consumed here; from the next line on it means the semester-side name.
+    target = schedule.resolve_target(
+        sched, template, slug, remedy=schedule.NAME_THE_ENTRY
+    )
     if isinstance(target, str):
         log_err(target)
         return 1
     key, slug = target
-    gspec = load_grading_spec(master_org, template)
-    is_group = resolve_is_group(force=group, template_type=gspec.type)
+    gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
+    if gspec.not_migrated:
+        log_err(
+            f"{template}/{GRADING_FILE} is NOT_MIGRATED (an old key, or a run setting "
+            f"that moved to assignments.yml) - run the migration; nothing is refreshed"
+        )
+        return 1
+    is_group = gspec.is_group
     ok = sync_sheet(
-        master_org,
-        cohort_org,
+        course_org,
+        semester_org,
         sched,
         key,
         slug,
@@ -3235,8 +3329,8 @@ def refresh_assignment_sheet(
     return 0 if ok else 1
 
 
-def _today_in_cohort_tz(sched: schedule.Schedule) -> str:
-    """Today's date in the COHORT's timezone (schedule.yml `timezone`, default
+def _today_in_semester_tz(sched: schedule.Schedule) -> str:
+    """Today's date in the SEMESTER's timezone (schedule.yml `timezone`, default
     Europe/Berlin) - the last-resort grading pin for an unscheduled assignment. The
     Actions runner is UTC, so its own `date.today()` can be a day behind Berlin
     (00:00-02:00 local) and pin the grading to the wrong day."""
@@ -3244,18 +3338,17 @@ def _today_in_cohort_tz(sched: schedule.Schedule) -> str:
 
 
 def collect(
-    master_org: str,
+    course_org: str,
     template: str,
-    cohort_org: str,
+    semester_org: str,
     deadline: str | None = None,
-    group: bool = False,
     dry_run: bool = False,
     scheduled: bool = False,
     slug: str = "",
 ) -> int:
     """Examine every submission for `template` as of `deadline` - the hidden tests where
     the assignment asked to be autograded, the completion check where it asked for one -
-    archiving what each run produced and recording the machine facts into the cohort's
+    archiving what each run produced and recording the machine facts into the semester's
     grading sheet (`info.autograde`, `info.completion`). Idempotent.
 
     `scheduled` marks the hourly cron: an assignment with no submission targets is then a
@@ -3264,18 +3357,20 @@ def collect(
     `slug` names WHICH schedule entry this is, when two of them hand out from this one
     template. Left empty with two in the plan, this refuses: they keep separate snapshots,
     separate grading sheets and separate marks, and the freeze is write-once."""
-    if master_org == cohort_org:
-        log_err("master-org and cohort-org must differ.")
+    if course_org == semester_org:
+        log_err("course-org and semester-org must differ.")
         return 1
-    # The cohort-side identity is the SCHEDULE key when the assignment is scheduled
+    # The semester-side identity is the SCHEDULE key when the assignment is scheduled
     # (the slug is a free label since course_source_repo), else the repo name minus its
-    # tag. Everything cohort-side keys on it - snapshots, autograde markers, grades - and
+    # tag. Everything semester-side keys on it - snapshots, autograde markers, grades - and
     # the scheduler's fire-once marker uses the schedule key, so the two must agree or a
     # passed deadline re-grades every tick.
-    sched = schedule.load(cohort_org)
+    sched = schedule.load(semester_org)
     # As in `provision_all`: the parameter is the SCHEDULE KEY, consumed here, and `slug`
-    # then means the cohort-side name for the rest of the run.
-    target = schedule.resolve_target(sched, template, slug)
+    # then means the semester-side name for the rest of the run.
+    target = schedule.resolve_target(
+        sched, template, slug, remedy=schedule.NAME_THE_ENTRY
+    )
     if isinstance(target, str):
         log_err(target)
         return 1
@@ -3285,35 +3380,40 @@ def collect(
     # of them never reach a clone: a template with no solution branch, and an all-manual
     # assignment. Both are ordinary states, not failures, and both still have a deadline.
     # It is also what the cutoff itself is measured with (`late_window_days`).
-    gspec = load_grading_spec(master_org, template)
-    # SSOT: default the grading pin to the assignment's CUTOFF - an explicit
-    # `grading_datetime`, else the due date plus the template's late window. An explicit
-    # `deadline` (CLI override) wins; fall back to today - in the cohort's own timezone,
-    # like every other date here - only if unscheduled.
-    at = grades.cutoff_at(sched, key, gspec)
+    gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
+    if gspec.not_migrated:
+        log_err(
+            f"{template}/grading_config.yml is NOT_MIGRATED (an old key, or a run "
+            f"setting that moved to assignments.yml) - run the migration; nothing is "
+            f"graded"
+        )
+        return 1
+    # SSOT: the grading pin is the assignment's late CUTOFF (due + `late_window_days`);
+    # fall back to today - in the semester's own timezone, like every other date here -
+    # only if unscheduled.
+    at = schedule.grading_cutoff_datetime(sched, key)
     deadline = (
-        deadline or (at.isoformat() if at else None) or _today_in_cohort_tz(sched)
+        deadline or (at.isoformat() if at else None) or _today_in_semester_tz(sched)
     )
-    # Pin the deadline to an explicit instant in the COHORT's timezone, once, here: a bare
+    # Pin the deadline to an explicit instant in the SEMESTER's timezone, once, here: a bare
     # `--deadline 2026-11-15` means the end of the 15th where the students are, and every
     # consumer below (the commits API `until=`, `git log --before`, the log lines)
     # then reads the same moment instead of each defaulting to the runner's UTC.
     #
     # It also validates (raises on a non-ISO string). `git log --before` would
     # otherwise take an unparseable `--deadline` as an approxidate that silently matches
-    # NOTHING, zeroing every submission in the cohort without a word.
+    # NOTHING, zeroing every submission in the semester without a word.
     try:
         deadline = local_deadline(deadline, sched.timezone).isoformat()
     except ValueError:
         log_err(
             f"--deadline '{deadline}' is not an ISO date/datetime - refusing to grade "
-            f"(git would silently match no commits and zero the whole cohort)"
+            f"(git would silently match no commits and zero the whole semester)"
         )
         return 1
 
-    # group-vs-individual via the single `resolve_is_group` precedence (force -> the
-    # template's grading_config.yml `type:` -> individual).
-    is_group = resolve_is_group(force=group, template_type=gspec.type)
+    # group-vs-individual: the template's grading_config.yml `type:`, else individual.
+    is_group = gspec.is_group
     cutoff = local_deadline(deadline, sched.timezone)
 
     # The grader's reading copy, when the assignment asks for one - BEFORE every autograde
@@ -3342,7 +3442,14 @@ def collect(
         return 1
     if gspec.grader_pdf:
         export_grader_documents(
-            cohort_org, slug, key, is_group, deadline, dry_run, gspec.submit_shared
+            semester_org,
+            slug,
+            key,
+            is_group,
+            deadline,
+            dry_run,
+            gspec.submit_shared,
+            tuple(dict.fromkeys((gspec.question_files or {}).values())),
         )
 
     def freeze_sheet(
@@ -3353,8 +3460,8 @@ def collect(
         `info:` is never touched again. Every path out of a passed cutoff runs it, because
         a sheet left OPEN after the deadline tells a grader marks can still move."""
         return sync_sheet(
-            master_org,
-            cohort_org,
+            course_org,
+            semester_org,
             sched,
             key,
             slug,
@@ -3388,9 +3495,9 @@ def collect(
 
     with tempfile.TemporaryDirectory() as sd:
         soldir = Path(sd) / "sol"
-        if not clone(master_org, template, soldir, branch=SOLUTION_BRANCH):
+        if not clone(course_org, template, soldir, branch=SOLUTION_BRANCH):
             log_err(
-                f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template} - no hidden "
+                f"no `{SOLUTION_BRANCH}` branch on {course_org}/{template} - no hidden "
                 f"tests to run; nothing to collect."
             )
             # Hand-marked, then: say so once in the archive rather than re-deciding it
@@ -3399,9 +3506,9 @@ def collect(
             if not sealed():
                 return 1
             return _record_skip(
-                cohort_org,
+                semester_org,
                 slug,
-                f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template}",
+                f"no `{SOLUTION_BRANCH}` branch on {course_org}/{template}",
                 dry_run,
             )
         # WHAT this run does, decided once: hidden tests, a completion check, either,
@@ -3412,7 +3519,7 @@ def collect(
         # A drop box does NEITHER, whatever its spec says. `_cross_check` turns both
         # settings off for one at the parse and this is the second lock, asked before
         # either stage does any work: both clone the repo a TARGET names, and every target
-        # of a drop box names the same repo - so each student would have the whole cohort's
+        # of a drop box names the same repo - so each student would have the whole semester's
         # work run under their own key and every one of them would get the same result.
         drop_box = gspec.submit_shared
         tests_src: Path | None = None if drop_box else soldir / gspec.tests
@@ -3437,31 +3544,31 @@ def collect(
             # should have to read the log once.
             if [dep for dep in COMPLETION_DEPS if _grader_dep_missing(dep)]:
                 # A runner fault with one fix, said in words by `_grader_dep_missing`
-                # rather than through a cohort of `did-not-run`. Recorded like any other
+                # rather than through a semester of `did-not-run`. Recorded like any other
                 # decision not to machine-mark, so the cron does not re-decide it hourly;
-                # deleting `autograde/<slug>/` re-runs it once the runner is fixed.
+                # deleting `.system/autograde/<slug>/` re-runs it once the runner is fixed.
                 no_completion = COMPLETION_DEP_SKIP
             else:
-                starters = _starter_notebook_shas(master_org, template)
+                starters = _starter_notebook_shas(course_org, template)
 
         if tests_src is None and starters is None:
             log_ok(f"{slug}: hand-marked, nothing to collect.")
             if not sealed():
                 return 1
             return _record_skip(
-                cohort_org,
+                semester_org,
                 slug,
                 "; ".join(reason for reason in (no_tests, no_completion) if reason),
                 dry_run,
             )
 
         # Targets: one per team (group) or one per onboarded student (individual). Repos
-        # are named after the cohort-side `slug`; teams.csv is keyed on the schedule `key`.
+        # are named after the semester-side `slug`; teams.csv is keyed on the schedule `key`.
         targets = submission_targets(
-            cohort_org, slug, is_group, key, shared=gspec.submit_shared
+            semester_org, slug, is_group, key, shared=gspec.submit_shared
         )
         if not targets:
-            # Nothing to grade at a passed deadline: a cohort with nobody onboarded, or a
+            # Nothing to grade at a passed deadline: a semester with nobody onboarded, or a
             # group assignment whose teams.csv has no teams. On the cron path that is a "not
             # yet" - the skip record is fire-once, so writing it would retire the assignment
             # before anyone could submit. On a button press it is the operator's answer, and
@@ -3470,13 +3577,13 @@ def collect(
                 log(f"  [wait] {slug} - no submission targets as of {deadline}")
                 return 0
             return _record_skip(
-                cohort_org, slug, f"no submission targets as of {deadline}", dry_run
+                semester_org, slug, f"no submission targets as of {deadline}", dry_run
             )
 
         # Which commit each repo is graded at was frozen just after the deadline, at a
         # moment the server chose (see the module docstring). Without that file the pin
         # moves with every later push - say so loudly rather than silently.
-        snapshots = load_snapshots(cohort_org, slug)
+        snapshots = load_snapshots(semester_org, slug)
         if snapshots is None:
             log_err(
                 f"  ! no {snapshot_path(slug)} for {slug} - pinning on committer dates, "
@@ -3484,7 +3591,7 @@ def collect(
             )
 
         log_step(
-            f"Collecting {slug} in {cohort_org}: {len(targets)} "
+            f"Collecting {slug} in {semester_org}: {len(targets)} "
             f"{'team(s)' if is_group else 'student(s)'} as of {deadline}"
         )
 
@@ -3502,7 +3609,7 @@ def collect(
         # The per-target result archives are held here and written only AFTER the grading
         # sheet is durable (see below), with the `_graded.json` sentinel written last. Writing
         # archives mid-loop is what let an aborted run un-grade everyone back when bare
-        # `autograde/<slug>/` existence was the marker; the explicit sentinel now decouples the
+        # `.system/autograde/<slug>/` existence was the marker; the explicit sentinel now decouples the
         # marker from any archive write, but the ordering is kept as defence in depth.
         archives: list[tuple[str, bytes, str]] = []
         # `_grade_target` returns None for one reason only: the submission repo could not be
@@ -3512,12 +3619,12 @@ def collect(
         unreachable: list[str] = []
         # Targets whose grading run itself broke (timeout / no report), as opposed to a genuine
         # non-submission. If that is EVERY graded target the fault is the runner, not the
-        # cohort - see the systemic-failure guard below.
+        # semester - see the systemic-failure guard below.
         failed_to_run: list[str] = []
         for target in targets:
             repo, target_key, members = target.repo, target.unit, target.members
             # WHICH row of the snapshot is this unit's: the repo, or - where the whole
-            # cohort shares a drop box - the unit itself (`Target.key`).
+            # semester shares a drop box - the unit itself (`Target.key`).
             frozen_at = target.key
             log_step(target_ref(repo))
             if dry_run:
@@ -3527,7 +3634,7 @@ def collect(
                     pin = f"snapshot {(snapshots[frozen_at] or 'none')[:8]}"
                 else:
                     pin = "no snapshot row -> zero"
-                log(f"    DRY-RUN would grade {target_ref(repo)} (pin {pin})")
+                log(f"    PREVIEW would grade {target_ref(repo)} (pin {pin})")
                 continue
             if snapshots is not None and frozen_at not in snapshots:
                 # The snapshot file exists but never recorded THIS repo (provisioned after the
@@ -3544,7 +3651,7 @@ def collect(
                 )
             else:
                 result, executed = _grade_target(
-                    cohort_org,
+                    semester_org,
                     repo,
                     tests_src,
                     deadline,
@@ -3571,7 +3678,7 @@ def collect(
                 # The notebook as the toolkit ran it, beside the result JSON: `errors:3` is
                 # a number, and the grader has to be able to see WHICH three. Capped,
                 # because a notebook of plots is base64 all the way down and
-                # classroom-config is a repo somebody has to clone. No path in this log -
+                # semester-config is a repo somebody has to clone. No path in this log -
                 # it would name the handle.
                 if len(executed) <= ARCHIVE_MAX_BYTES:
                     archives.append(
@@ -3618,7 +3725,7 @@ def collect(
             # Every target WAS examined and none of them yielded a grade. Not a failure: the
             # snapshot is frozen, so an hourly retry would see exactly what this run saw and
             # go red for ever. Record the skip and stay green - a deliberate re-grade is
-            # still a delete of autograde/<slug>/ away.
+            # still a delete of .system/autograde/<slug>/ away.
             log_ok(
                 f"{slug}: nothing gradable across {len(targets)} target(s) - recording "
                 f"the skip rather than retrying every hour."
@@ -3626,7 +3733,7 @@ def collect(
             if not sealed():
                 return 1
             return _record_skip(
-                cohort_org,
+                semester_org,
                 slug,
                 f"nothing gradable across {len(targets)} target(s) as of {deadline}",
                 dry_run,
@@ -3634,13 +3741,13 @@ def collect(
         if failed_to_run and len(failed_to_run) == len(examined):
             # EVERY target that was examined failed to grade for the same class of reason -
             # a broken image, a missing dependency, an rlimit the runner can't satisfy. That
-            # is a runner fault, not a cohort of non-submitters, so it is treated like the
+            # is a runner fault, not a semester of non-submitters, so it is treated like the
             # unreachable case: nothing recorded, no sentinel, red run, next tick retries.
-            # Recording it would write a whole cohort of write-once zeros and then lock them
+            # Recording it would write a whole semester of write-once zeros and then lock them
             # in behind the fire-once marker.
             log_err(
                 f"{slug}: all {len(failed_to_run)} graded target(s) came back "
-                f"'{GRADE_FAILED_NOTE}' - a runner-wide failure, not a cohort of bad "
+                f"'{GRADE_FAILED_NOTE}' - a runner-wide failure, not a semester of bad "
                 f"submissions; nothing recorded, and NOT marking machine-graded"
             )
             return 1
@@ -3663,10 +3770,10 @@ def collect(
         # and the sentinel.
         archive_ok = True
         for apath, acontent, amsg in archives:
-            # `person=True`: the PATH is `autograde/<slug>/<handle>.json`, and this log is
-            # world-readable even when classroom-config is not.
+            # `person=True`: the PATH is `.system/autograde/<slug>/<handle>.json`, and this log is
+            # world-readable even when semester-config is not.
             if not put_file(
-                cohort_org, CONFIG_REPO, apath, acontent, amsg, person=True
+                semester_org, CONFIG_REPO, apath, acontent, amsg, person=True
             ):
                 log_person(f"    ! could not write {apath}")
                 archive_ok = False
@@ -3676,7 +3783,9 @@ def collect(
         # re-derives them), and a frozen sheet with no sentinel is simply re-frozen next
         # tick to identical bytes, which writes nothing.
         if not (
-            archive_ok and sealed(scores, completions) and mark_graded(cohort_org, slug)
+            archive_ok
+            and sealed(scores, completions)
+            and mark_graded(semester_org, slug)
         ):
             log_err(
                 f"{slug}: examined {len(examined)} target(s) but a result archive, the grading "
@@ -3694,9 +3803,9 @@ def collect(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument(
-        "--master-org", required=True, help="Course org (template source)"
+        "--course-org", required=True, help="Course org (template source)"
     )
     parser.add_argument(
         "--course-source-repo",
@@ -3704,14 +3813,10 @@ def main() -> int:
         required=True,
         help="Assignment template (e.g. assignment-1-f2026)",
     )
-    parser.add_argument("--cohort-org", required=True, help="Cohort org (submissions)")
     parser.add_argument(
-        "--deadline",
-        default=None,
-        help="ISO date override; default = the cohort schedule's grading deadline, else today",
-    )
-    parser.add_argument(
-        "--group", action="store_true", help="Group assignment (one repo per team)"
+        "--semester-org",
+        required=True,
+        help="Semester org (submissions)",
     )
     parser.add_argument(
         "--refresh-only",
@@ -3719,29 +3824,28 @@ def main() -> int:
         help="Refresh the grading sheet now and stop - no snapshot, no grading, no freeze",
     )
     parser.add_argument(
-        "--slug",
+        "--assignment",
         default="",
-        help="Which assignment in the cohort's schedule.yml this is, when two of them hand out from the same template (each with its own cohort_dest_repo). Leave empty otherwise.",
+        metavar="KEY",
+        help="The schedule.yml assignments key, needed only when two entries hand out "
+        "from this template.",
     )
-    parser.add_argument("--dry-run", action="store_true")
+    add_preview_flag(parser, "Report what would be collected; write nothing (default).")
     args = parser.parse_args()
     if args.refresh_only:
         return refresh_assignment_sheet(
-            args.master_org,
+            args.course_org,
             args.template,
-            args.cohort_org,
-            group=args.group,
-            dry_run=args.dry_run,
-            slug=args.slug,
+            args.semester_org,
+            dry_run=args.preview,
+            slug=args.assignment,
         )
     return collect(
-        args.master_org,
+        args.course_org,
         args.template,
-        args.cohort_org,
-        args.deadline,
-        group=args.group,
-        dry_run=args.dry_run,
-        slug=args.slug,
+        args.semester_org,
+        dry_run=args.preview,
+        slug=args.assignment,
     )
 
 

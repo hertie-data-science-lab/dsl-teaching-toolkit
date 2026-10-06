@@ -4,7 +4,7 @@ assertions are the whole contract."""
 
 from __future__ import annotations
 
-from dsl_course import course, discovery
+from dsl_course import course, discovery, policy
 
 
 def test_session_number_extracts_ordinal_prefix():
@@ -54,7 +54,7 @@ def test_is_repo_root_knows_every_whole_repo_spelling():
 
 
 def test_active_today_accepts_date_objects_as_bounds():
-    # An unquoted `start: 2026-09-01` in people.yml parses to a datetime.date, not a
+    # An unquoted `start: 2026-09-01` in instructors.yml parses to a datetime.date, not a
     # string; `today < start` used to raise TypeError: str < date.
     from datetime import date, datetime
 
@@ -69,33 +69,22 @@ def test_active_today_accepts_date_objects_as_bounds():
 
 
 def test_term_tag_is_case_insensitive_and_lowercased():
-    assert course.term_tag("course-materials-F2026") == "f2026"
-    assert course.term_tag("Stats-s2030") == "s2030"
-    assert course.term_tag("no-tag-here") is None
+    assert course.semester_of("course-materials-F2026") == "f2026"
+    assert course.semester_of("Stats-s2030") == "s2030"
+    assert course.semester_of("no-tag-here") is None
 
 
 def test_pages_repo_lowercases_the_org():
     assert course.pages_repo("Hertie-DSL-F2026") == "hertie-dsl-f2026.github.io"
 
 
-def test_assignment_slug_drops_only_a_trailing_cohort_suffix():
+def test_assignment_slug_drops_only_a_trailing_semester_suffix():
     assert course.assignment_slug("assignment-1-f2026") == "assignment-1"
     assert course.assignment_slug("assignment-1") == "assignment-1"
 
 
-def test_resolve_is_group_precedence():
-    # force wins over the assignment's own declaration
-    assert course.resolve_is_group(force=True, template_type="individual") is True
-    # else grading_config.yml's `type:` - the only other rung there is
-    assert course.resolve_is_group(force=False, template_type="group") is True
-    assert course.resolve_is_group(force=False, template_type="individual") is False
-    # else individual
-    assert course.resolve_is_group(force=False, template_type=None) is False
-    assert course.resolve_is_group(force=False, template_type="") is False
-
-
 def test_the_shared_drop_box_is_named_off_the_template_and_carries_no_handle():
-    # `<slug>-submissions`, never the bare slug (that is the frozen cohort TEMPLATE), and
+    # `<slug>-submissions`, never the bare slug (that is the frozen semester TEMPLATE), and
     # never a `<slug>-<handle>`: it is the one submission-repo name a public log may print.
     assert course.shared_repo("assignment-3") == "assignment-3-submissions"
     # And it is a name `classify_repos` reads off the template, which is what earns it the
@@ -117,11 +106,12 @@ def test_the_late_rule_reads_as_one_sentence_for_every_way_it_can_be_declared():
     assert course.late_rule(7, None) == "accepted up to 7 days late"
     assert course.late_rule(None, "10%") == "not accepted after the deadline"
     assert course.late_rule(0, None) == "not accepted after the deadline"
-    # The sentence a cohort reads when nobody has declared anything: the toolkit's own
+    # The sentence a semester reads when nobody has declared anything: the toolkit's own
     # default is the Hertie syllabus rule, not silence (`grades.parse_grading_spec`).
     assert (
         course.late_rule(
-            course.DEFAULT_LATE_WINDOW_DAYS, course.DEFAULT_LATE_PENALTY_PER_DAY
+            policy.defaults()["late_window_days"],
+            policy.defaults()["late_penalty_per_day"],
         )
         == "10% per day, up to 10 days"
     )

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assignments": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "late_penalty_per_day": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "late_window_days": {
+            "type": "integer"
+          },
+          "max_team_size": {
+            "type": "integer"
+          },
+          "semester_dest_repo": {
+            "type": "string"
+          },
+          "submit_url": {
+            "type": "string"
+          },
+          "team_formation": {
+            "enum": [
+              "self_select",
+              "assigned"
+            ],
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "private",
+              "public",
+              "student_choice"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "defaults": {
+      "additionalProperties": false,
+      "properties": {
+        "late_penalty_per_day": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "late_window_days": {
+          "type": "integer"
+        },
+        "max_team_size": {
+          "type": "integer"
+        },
+        "submit_url": {
+          "type": "string"
+        },
+        "team_formation": {
+          "enum": [
+            "self_select",
+            "assigned"
+          ],
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "private",
+            "public",
+            "student_choice"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "title": "semester-config/assignments.yml",
+  "type": "object"
+}

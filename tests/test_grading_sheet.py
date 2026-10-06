@@ -108,7 +108,7 @@ def test_an_externally_submitted_assignment_has_no_info_block_at_all():
     # the override is the grader's, not the machine's.
     block = new_sheet(individual(submit_via="external"), SOLO)["submissions"]["ada-l"]
     assert "info" not in block
-    assert list(block) == ["score_individual", *PERSON_KEYS]
+    assert list(block) == [*PERSON_KEYS, "score_individual"]
 
 
 def test_declared_questions_become_a_blank_skeleton_and_nothing_else_does():
@@ -334,16 +334,16 @@ def test_the_header_carries_the_status_line_and_what_the_toolkit_fills():
             group(),
             TEAMS,
             (
-                "score_group, feedback_group, adjustment_individual, "
-                "feedback_individual, notes_not_shared_with_students."
+                "feedback_group, adjustment_individual, feedback_individual, "
+                "notes_not_shared_with_students, score_group."
             ),
         ),
         (
             individual(),
             SOLO,
             (
-                "score_individual, adjustment_individual, feedback_individual, "
-                "notes_not_shared_with_students."
+                "adjustment_individual, feedback_individual, "
+                "notes_not_shared_with_students, score_individual."
             ),
         ),
     ],
@@ -784,8 +784,8 @@ def test_the_line_scan_reads_nesting_off_the_indentation():
     assert lines[("teams", "team-alpha", "score_group", "Q1")] == 4
 
 
-def _cohort_sheets(monkeypatch, sheets: dict, failing: str = "") -> list:
-    """`cohort_sheet_faults` over `sheets`, with one of them refusing to be read."""
+def _semester_sheets(monkeypatch, sheets: dict, failing: str = "") -> list:
+    """`semester_sheet_faults` over `sheets`, with one of them refusing to be read."""
     monkeypatch.setattr(
         grades, "sheet_specs", lambda course, sched: dict.fromkeys(sheets, individual())
     )
@@ -798,12 +798,14 @@ def _cohort_sheets(monkeypatch, sheets: dict, failing: str = "") -> list:
 
     monkeypatch.setattr(grades, "get_file_content", _read)
     found: list = []
-    grades.cohort_sheet_faults("Course", "Cohort", None, found)
+    grades.semester_sheet_faults("Course", "Semester", None, found)
     return found
 
 
-def test_every_sheet_in_the_cohort_reaches_one_list_carrying_its_own_path(monkeypatch):
-    found = _cohort_sheets(
+def test_every_sheet_in_the_semester_reaches_one_list_carrying_its_own_path(
+    monkeypatch,
+):
+    found = _semester_sheets(
         monkeypatch, {"a1": "submissions: nope\n", "a2": "submissions: nope\n"}
     )
     assert [f.file for f in found] == ["grading_sheets/a1.yml", "grading_sheets/a2.yml"]
@@ -824,7 +826,7 @@ def test_a_sheet_that_could_not_be_read_reports_none_of_them(monkeypatch):
         lambda *a: (_ for _ in ()).throw(RuntimeError("rate-limited")),
     )
     with pytest.raises(RuntimeError):
-        grades.cohort_sheet_faults("Course", "Cohort", None, found)
+        grades.semester_sheet_faults("Course", "Semester", None, found)
     assert found == []
 
 
@@ -834,5 +836,42 @@ def test_an_assignment_with_no_sheet_yet_is_not_a_fault(monkeypatch):
     )
     monkeypatch.setattr(grades, "get_file_content", lambda *a: None)
     found: list = []
-    grades.cohort_sheet_faults("Course", "Cohort", None, found)
+    grades.semester_sheet_faults("Course", "Semester", None, found)
     assert found == []
+
+
+# ------------------------------------------------------------- per-question feedback
+
+
+def test_declared_questions_get_a_feedback_cell_each_after_the_members():
+    # The marking grid nests teams > members > questions, and the file nests the same way.
+    block = new_sheet(group(questions=QUESTIONS), TEAMS)["teams"]["team-alpha"]
+    assert list(block) == [
+        "info",
+        "feedback_group",
+        "members",
+        "score_group",
+        grades.QUESTION_FEEDBACK_KEY,
+    ]
+    assert block[grades.QUESTION_FEEDBACK_KEY] == {"Q1": None, "Q2": None}
+    solo = new_sheet(individual(questions=QUESTIONS), SOLO)["submissions"]["ada-l"]
+    assert list(solo)[-2:] == ["score_individual", grades.QUESTION_FEEDBACK_KEY]
+
+
+def test_no_questions_means_no_per_question_feedback():
+    assert (
+        grades.QUESTION_FEEDBACK_KEY
+        not in new_sheet(individual(), SOLO)["submissions"]["ada-l"]
+    )
+
+
+def test_a_question_marked_from_another_file_names_it_beside_its_maximum():
+    spec = individual(questions=QUESTIONS, question_files={"Q2": "report.tex"})
+    text = dump_sheet(new_sheet(spec, SOLO), spec, "OPEN")
+    q1, q2 = [
+        line
+        for line in text.splitlines()
+        if line.strip().startswith(("Q1:", "Q2:")) and "#" in line
+    ][:2]
+    assert q1.endswith("# /15")
+    assert q2.endswith("# /10 · report.tex")

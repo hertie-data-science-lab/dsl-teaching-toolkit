@@ -130,7 +130,7 @@ def _clean_repos(org: str, run_id: str, dry_run: bool, left: list[str]) -> int:
 def _clean_config(org: str, run_id: str, dry_run: bool) -> int:
     """Take the fenced block out of schedule.yml and drop this run's artefacts.
 
-    Skipped for an org with no classroom-config, which is every course org."""
+    Skipped for an org with no semester-config, which is every course org."""
     config = course.CONFIG_REPO
     if config not in {row["name"] for row in discovery.list_org_repos(org)}:
         return 0
@@ -143,6 +143,17 @@ def _clean_config(org: str, run_id: str, dry_run: bool) -> int:
             log(f"  {org}: removing the fenced schedule block")
             if not dry_run and not schedule_edit.put_schedule(org, without, sha):
                 log_err(f"could not rewrite {org}/{config}/{schedule.SCHEDULE_PATH}")
+                failures += 1
+    read = gh_contents.get_file_with_sha(org, config, schedule_edit.ASSIGNMENTS_PATH)
+    if read is not None:
+        text, sha = read
+        without = schedule_edit.remove_block(text, run_id)
+        if without != text:
+            log(f"  {org}: removing the fenced assignments.yml block")
+            if not dry_run and not schedule_edit.put_instance(org, without, sha):
+                log_err(
+                    f"could not rewrite {org}/{config}/{schedule_edit.ASSIGNMENTS_PATH}"
+                )
                 failures += 1
     branch = repos.default_branch(org, config, fallback="main")
     live = gh_contents.repo_blob_shas(org, config, branch)
@@ -160,7 +171,7 @@ def _clean_config(org: str, run_id: str, dry_run: bool) -> int:
 
 
 def _is_artefact(path: str, run_id: str) -> bool:
-    """A classroom-config path inside this run's namespace - `snapshots/<slug>.csv`,
+    """A semester-config path inside this run's namespace - `snapshots/<slug>.csv`,
     `autograde/<slug>/...`, `grading_sheets/<slug>.yml`, for each of the run's per-shape
     slugs.
 
@@ -168,9 +179,10 @@ def _is_artefact(path: str, run_id: str) -> bool:
     the namespace: `-` starts a shape name, `.` an extension, `/` a directory. A prefix
     rule rather than a list of shapes, so a shape added to `shapes.SHAPES` cannot leave
     its artefacts behind."""
-    head, _, rest = path.partition("/")
-    if head not in ARTEFACT_DIRS:
+    head = next((d for d in ARTEFACT_DIRS if path.startswith(f"{d}/")), None)
+    if head is None:
         return False
+    rest = path[len(head) + 1 :]
     mine = slug(run_id)
     return rest == mine or rest.startswith((f"{mine}/", f"{mine}.", f"{mine}-"))
 
@@ -188,7 +200,7 @@ def _refresh_workflows(org: str, run_id: str, dry_run: bool) -> int:
     dispatched. So the teardown presses that button itself, in process, through the same
     writer the workflow runs (`seed.seed_github_workflows`).
 
-    A no-op in a cohort org, which holds no org-level workflows, and a no-op in a course
+    A no-op in a semester org, which holds no org-level workflows, and a no-op in a course
     org already converged - `put_files` drops a path whose sha already matches, so there
     is no commit at all when nothing moved. That is what makes this safe to run by hand.
 

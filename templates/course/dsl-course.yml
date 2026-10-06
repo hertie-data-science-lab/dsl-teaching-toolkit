@@ -1,7 +1,5 @@
 # INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
 #
-org: {org}
-org_name: {org_name}
 course_name: {course_name}
 course_code: {course_code}
 # central_ref: <40-character commit SHA>   # OPTIONAL: pin this course to one known
@@ -10,30 +8,37 @@ course_code: {course_code}
 #   # (`main` is the trunk and is also accepted, but only the demo course runs it: an org
 #   # on `main` takes every merge the moment it lands. `preview` is a PR tip the maintainer
 #   # force-pushes, for looking at a feature before it merges - the demo course and nothing
-#   # else.) Cohorts inherit this; setting it in a cohort's own file does nothing.
-# course_description: One or two sentences, on ONE line - the blurb on every cohort site.
-# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the COHORT sites, link ONLY
+#   # else.) Semesters inherit this; setting it in a semester's own file does nothing.
+# course_description: One or two sentences, on ONE line - the blurb on every semester site.
+# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the SEMESTER sites, link ONLY
 #   # these file types. Default (unset): each session's root files, plus one link per
 #   # subfolder - so a rendered deck lists the deck, not its hundreds of assets. Either way
 #   # everything you release still ships, and the folder itself is always one click away.
 #   # (The public open-courseware site always lists root files - it hosts what it lists.)
-#   # WHICH of those files the cohort site hosts publicly, so an HTML deck opens rendered
+#   # WHICH of those files the semester site hosts publicly, so an HTML deck opens rendered
 #   # instead of showing as source, is `publish.yml` in the materials repo - not here.
 
-# What every assignment under this course starts from. **New assignment** stamps these
-# values into the `grading_config.yml` it generates, so each assignment's own file says
-# what it does and can be edited there afterwards; changing them here changes the NEXT
-# assignment, never one that already exists. The two late-work lines are the toolkit's
-# own default, applied when they are absent here and from the assignment too.
+# Defaults for this course's assignments (all OPTIONAL). Each run setting resolves
+# nearest-first: the assignment's block in a semester's `semester-config/assignments.yml`,
+# that file's `defaults:`, this block, then the institution's policy - the values shown are
+# the institution's, so an unset line changes nothing. A line set here applies to every
+# assignment that does not set its own, from the next run on. `formats`, `submit_via`,
+# `team_formation` and `visibility` also answer New assignment's boxes of the same name when
+# they are left at "(course default)". A late line alone is a whole rule: the other half
+# is then none.
 assignment_defaults:
-  max_team_size: 5            # group assignments only
-  late_window_days: 10        # 0 = nothing after the due date is accepted
-  late_penalty_per_day: 10%   # of the EARNED grade, per day started
+  # max_team_size: 5            # group assignments only
+  # late_window_days: 10        # 0 = nothing after the due date is accepted
+  # late_penalty_per_day: 10%   # of the EARNED grade, per day started
+  # formats: [ipynb]            # ipynb | py | rmd | qmd | latex | none - starters, first runnable
+  # submit_via: assignment_repo # assignment_repo | external | shared_dropbox_repo
+  # team_formation: self_select # self_select | assigned - group assignments only
+  # visibility: private         # private | public | student_choice
 
-# `course_name`, `course_code` and `course_description` are what reach the cohort
-# websites. Editing them here re-syncs every cohort site already bootstrapped from this
+# `course_name`, `course_code` and `course_description` are what reach the semester
+# websites. Editing them here re-syncs every semester site already bootstrapped from this
 # course org.
 #
-# This is the persistent COURSE org - it spans many cohorts (years). Cohorts are
-# registered separately in .github/cohort-courses-pages.yml.
+# This is the persistent COURSE org - it spans many semesters (years). Semesters are
+# registered separately in .github/semesters.yml.
 

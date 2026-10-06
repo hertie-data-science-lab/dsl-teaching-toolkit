@@ -1,5 +1,5 @@
 """sync-roster pure core -- which handle belongs in which role team. The reconcile decides
-org + team access for a whole cohort, so the split has to be exact: an auditor landing in
+org + team access for a whole semester, so the split has to be exact: an auditor landing in
 `students` would be handed assignment repos, an enrolled student landing in `auditors`
 would silently lose them. The gh calls around it are wiring, not tested.
 """
@@ -17,7 +17,7 @@ HEADER = ROSTER_HEADER
 @pytest.fixture(autouse=True)
 def _no_teams_csv(monkeypatch):
     """The revoke reads teams.csv to know which submission repos belong to a TEAM. A
-    cohort with no group assignments is the uninteresting answer here; the tests about
+    semester with no group assignments is the uninteresting answer here; the tests about
     that read set their own."""
     monkeypatch.setattr(sync_roster.teams, "load", lambda org: {})
 
@@ -76,6 +76,7 @@ def test_sync_hands_the_prune_each_teams_own_github_ids(monkeypatch):
     )
     monkeypatch.setattr(roster, "load", lambda org: students)
     monkeypatch.setattr(sync_roster, "set_org_membership", lambda *a, **kw: True)
+    monkeypatch.setattr(sync_roster, "org_member_logins", lambda org: None)
     monkeypatch.setattr(sync_roster, "list_org_repos", lambda org: [])
     seen: dict[str, set[str]] = {}
     monkeypatch.setattr(
@@ -85,8 +86,31 @@ def test_sync_hands_the_prune_each_teams_own_github_ids(monkeypatch):
             seen.update({team: set(keep_ids)}) or 0
         ),
     )
-    assert sync_roster.sync("COHORT", prune=True) == 0
+    assert sync_roster.sync("SEMESTER", prune=True) == 0
     assert seen == {sync_roster.TEAM: {"42"}, sync_roster.AUDITOR_TEAM: {"99"}}
+
+
+def test_a_student_the_member_listing_shows_is_not_asked_about(monkeypatch):
+    # Hourly, and after the first week nearly everyone is a member: one listing of the
+    # org stands in for a membership read per student. A case-only difference is the
+    # same account.
+    students = _roster(
+        "ada@uni.edu,Ada,enrolled,Ada-L,42,dsl-abc",
+        "bo@uni.edu,Bo,enrolled,bo-b,99,dsl-def",
+    )
+    monkeypatch.setattr(roster, "load", lambda org: students)
+    monkeypatch.setattr(
+        sync_roster, "org_member_logins", lambda org: frozenset({"ada-l"})
+    )
+    asked = []
+    monkeypatch.setattr(
+        sync_roster,
+        "set_org_membership",
+        lambda org, handle, role="member": asked.append(handle) or True,
+    )
+    monkeypatch.setattr(sync_roster, "reconcile_team_members", lambda *a, **kw: 0)
+    assert sync_roster.sync("SEMESTER") == 0
+    assert asked == ["bo-b"]
 
 
 def test_sync_reconciles_nothing_without_a_roster_and_reds_for_neither(monkeypatch):
@@ -94,7 +118,7 @@ def test_sync_reconciles_nothing_without_a_roster_and_reds_for_neither(monkeypat
     # roster it implies would revoke every student's access - but it does not red the
     # run: it is a file faculty have to write, and it reaches them on the students.csv
     # digest issue. A roster that exists but has no rows yet (a freshly bootstrapped
-    # cohort) is a valid state and reconciles cleanly. A read that FAILED raises out of
+    # semester) is a valid state and reconciles cleanly. A read that FAILED raises out of
     # `roster.load` and never gets here.
     monkeypatch.setattr(sync_roster, "reconcile_team_members", lambda *a, **kw: 0)
     monkeypatch.setattr(sync_roster, "list_org_repos", lambda org: [])
@@ -104,26 +128,27 @@ def test_sync_reconciles_nothing_without_a_roster_and_reds_for_neither(monkeypat
         "set_org_membership",
         lambda *a, **kw: reconciled.append(a) or True,
     )
+    monkeypatch.setattr(sync_roster, "org_member_logins", lambda org: None)
 
     monkeypatch.setattr(roster, "load", lambda org: None)
-    assert sync_roster.sync("some-cohort", prune=True) == 0
+    assert sync_roster.sync("some-semester", prune=True) == 0
     assert reconciled == []
 
     monkeypatch.setattr(roster, "load", lambda org: [])
-    assert sync_roster.sync("some-cohort", prune=True) == 0
+    assert sync_roster.sync("some-semester", prune=True) == 0
 
 
 def test_load_distinguishes_missing_from_empty(monkeypatch):
-    # Two cohort names, not one: students.csv is read once per cohort per process, so
+    # Two semester names, not one: students.csv is read once per semester per process, so
     # re-answering for the same org would be served from that memo.
     monkeypatch.setattr(roster, "get_file_content", lambda *a, **kw: None)
-    assert roster.load("cohort-without-a-roster") is None
+    assert roster.load("semester-without-a-roster") is None
 
     monkeypatch.setattr(roster, "get_file_content", lambda *a, **kw: HEADER + "\n")
-    assert roster.load("cohort-with-an-empty-roster") == []
+    assert roster.load("semester-with-an-empty-roster") == []
 
 
-def test_students_csv_is_read_once_per_cohort_but_each_caller_parses_its_own(
+def test_students_csv_is_read_once_per_semester_but_each_caller_parses_its_own(
     monkeypatch,
 ):
     # One run asks for the roster several times over (the handout, the collection, the
@@ -138,12 +163,12 @@ def test_students_csv_is_read_once_per_cohort_but_each_caller_parses_its_own(
             or (HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n")
         ),
     )
-    first = roster.load("COHORT")
-    second = roster.load("COHORT")
-    assert reads == ["COHORT"]
+    first = roster.load("SEMESTER")
+    second = roster.load("SEMESTER")
+    assert reads == ["SEMESTER"]
     assert first == second and first is not second
     first.clear()
-    assert roster.load("COHORT") == second
+    assert roster.load("SEMESTER") == second
 
 
 def test_a_role_change_moves_the_handle_between_teams():
@@ -167,12 +192,12 @@ def _repos(*names, templates=()):
     return [repo_row(n, isTemplate=n in templates) for n in (*names, *templates)]
 
 
-def test_submission_repo_suffixes_splits_on_the_cohort_template_name():
+def test_submission_repo_suffixes_splits_on_the_semester_template_name():
     repos = _repos(
         "assignment-1-ada-l",
         "assignment-1-bob-b",
         "assignment-4-project-team-x",
-        "welcome",
+        "join",
         "grades-ada-l",
         templates=("assignment-1", "assignment-4-project"),
     )
@@ -204,7 +229,7 @@ def _offboard_stubs(monkeypatch, *, collaborators, declared=None, probed=None):
     monkeypatch.setattr(sync_roster, "list_org_repos", lambda org: repos)
     monkeypatch.setattr(sync_roster.teams, "load", lambda org: declared or {})
 
-    def collaborator(org, repo, login, person=False):
+    def collaborator(org, repo, login, person=False, held=None):
         if probed is not None:
             probed.append(repo)
         return login in collaborators
@@ -233,7 +258,7 @@ def test_a_handle_off_the_roster_loses_its_submission_repos(monkeypatch):
     # student DIRECTLY as a maintain collaborator, so a deleted roster row kept full write
     # on every repo they had ever been handed.
     removed = _offboard_stubs(monkeypatch, collaborators={"ada-l", "zoe-z"})
-    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 0
+    assert sync_roster.revoke_offboarded_access("SEMESTER", {"ada-l"}) == 0
     assert removed == [("assignment-1-zoe-z", "zoe-z")]
 
 
@@ -242,7 +267,7 @@ def test_a_group_repos_team_suffix_is_never_revoked(monkeypatch):
     # revoked because nothing by that name is a collaborator - the name alone is not a
     # reason to take access away.
     removed = _offboard_stubs(monkeypatch, collaborators={"ada-l"})
-    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 0
+    assert sync_roster.revoke_offboarded_access("SEMESTER", {"ada-l"}) == 0
     assert removed == []
 
 
@@ -257,7 +282,7 @@ def test_a_repo_teams_csv_declares_as_a_teams_is_not_even_probed(monkeypatch):
         declared={"assignment-4-project": {"team-x": ["ada-l"]}},
         probed=probed,
     )
-    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 0
+    assert sync_roster.revoke_offboarded_access("SEMESTER", {"ada-l"}) == 0
     assert removed == [("assignment-1-zoe-z", "zoe-z")]
     assert probed == ["assignment-1-zoe-z"], "the team repo was probed anyway"
 
@@ -273,14 +298,14 @@ def test_a_team_name_that_matches_another_assignment_still_probes(monkeypatch):
         declared={"assignment-4-project": {"zoe-z": ["ada-l"]}},
         probed=probed,
     )
-    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 0
+    assert sync_roster.revoke_offboarded_access("SEMESTER", {"ada-l"}) == 0
     assert removed == [("assignment-1-zoe-z", "zoe-z")]
     assert "assignment-1-zoe-z" in probed
 
 
 def test_a_case_only_difference_is_the_same_account(monkeypatch):
     removed = _offboard_stubs(monkeypatch, collaborators={"Ada-L", "zoe-z"})
-    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l", "zoe-z"}) == 0
+    assert sync_roster.revoke_offboarded_access("SEMESTER", {"ada-l", "zoe-z"}) == 0
     assert removed == []
 
 
@@ -302,7 +327,7 @@ def test_a_never_accepted_invitation_is_cancelled_too(monkeypatch):
             cancelled.append((repo, invitation_id)) or True
         ),
     )
-    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 0
+    assert sync_roster.revoke_offboarded_access("SEMESTER", {"ada-l"}) == 0
     assert removed == []
     assert cancelled == [("assignment-1-zoe-z", "777")]
 
@@ -310,19 +335,21 @@ def test_a_never_accepted_invitation_is_cancelled_too(monkeypatch):
 def test_an_unreadable_invitation_listing_is_an_error_not_a_pass(monkeypatch):
     _offboard_stubs(monkeypatch, collaborators=set())
     monkeypatch.setattr(sync_roster, "pending_invitations", lambda *a, **k: None)
-    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 2
+    assert sync_roster.revoke_offboarded_access("SEMESTER", {"ada-l"}) == 2
 
 
 def test_an_unreadable_collaborator_check_is_an_error_not_a_revoke(monkeypatch):
     _repos_only = _offboard_stubs(monkeypatch, collaborators=set())
     monkeypatch.setattr(sync_roster, "is_collaborator", lambda *a, **k: None)
-    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 2
+    assert sync_roster.revoke_offboarded_access("SEMESTER", {"ada-l"}) == 2
     assert _repos_only == []  # a rate limit is not evidence of anything
 
 
 def test_a_dry_run_revokes_nothing(monkeypatch):
     removed = _offboard_stubs(monkeypatch, collaborators={"zoe-z"})
-    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}, dry_run=True) == 0
+    assert (
+        sync_roster.revoke_offboarded_access("SEMESTER", {"ada-l"}, dry_run=True) == 0
+    )
     assert removed == []
 
 
@@ -334,10 +361,11 @@ def test_a_pruning_sync_revokes_a_vanished_handles_submission_repos(monkeypatch)
     students = _roster("ada@uni.edu,Ada,enrolled,Ada-L,42,dsl-abc")
     monkeypatch.setattr(roster, "load", lambda org: students)
     monkeypatch.setattr(sync_roster, "set_org_membership", lambda *a, **kw: True)
+    monkeypatch.setattr(sync_roster, "org_member_logins", lambda org: None)
     monkeypatch.setattr(sync_roster, "reconcile_team_members", lambda *a, **kw: 0)
     removed = _offboard_stubs(monkeypatch, collaborators={"ada-l", "zoe-z"})
 
-    assert sync_roster.sync("COHORT", prune=True) == 0
+    assert sync_roster.sync("SEMESTER", prune=True) == 0
     assert removed == [("assignment-1-zoe-z", "zoe-z")]  # ada-l is still on the roster
 
 
@@ -349,4 +377,4 @@ def test_the_revoke_only_runs_behind_the_prune_flag(monkeypatch):
         "list_org_repos",
         lambda org: (_ for _ in ()).throw(AssertionError("must not enumerate repos")),
     )
-    assert sync_roster.sync("COHORT", prune=False) == 0
+    assert sync_roster.sync("SEMESTER", prune=False) == 0

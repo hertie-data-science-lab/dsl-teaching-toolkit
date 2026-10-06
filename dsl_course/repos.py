@@ -7,10 +7,19 @@ from __future__ import annotations
 import json
 import time
 from fnmatch import fnmatch
-from functools import cache
 from typing import NamedTuple
 
-from .ghcli import gh, is_already_exists, is_missing_resource
+from .course import RETIRED_REPO_NAMES
+from .faults import NOT_MIGRATED
+from .ghcli import (
+    ALL,
+    FILES,
+    META,
+    gh,
+    is_already_exists,
+    is_missing_resource,
+    on_write,
+)
 from .log import log, log_err, log_err_person, log_ok, log_person, log_skip
 
 
@@ -23,16 +32,23 @@ class _RepoReadFailed(RuntimeError):
         self.out = out
 
 
-@cache
+# Keyed by the casefolded `org/name`: GitHub's names are not case-sensitive, and callers do
+# not agree on the spelling. Cleared between tests (tests/conftest.py).
+_repos: dict[str, dict] = {}
+
+
 def _repo(org: str, name: str) -> dict:
     """The repo object, read once per repo per process.
 
     "Is it there", "is it private", "is it archived", "what is its default branch" are
     four questions about ONE object, and a single sweep asks several of them about the
-    same repo; a repo's identity cannot change under one run. A failed read RAISES rather
-    than returning a sentinel, because functools.cache does not memoise a raise - so a 502
-    is retried on the next question instead of being pinned for the life of the process.
-    Cleared between tests (tests/conftest.py)."""
+    same repo; a repo's identity cannot change under one run except by this process's own
+    writes, which `_forget_repo` hears. A failed read RAISES rather than returning a
+    sentinel and is not held - so a 502 is retried on the next question instead of being
+    pinned for the life of the process."""
+    key = f"{org}/{name}".casefold()
+    if key in _repos:
+        return _repos[key]
     code, out = gh("api", f"repos/{org}/{name}")
     if code != 0:
         raise _RepoReadFailed(out)
@@ -42,7 +58,22 @@ def _repo(org: str, name: str) -> dict:
         raise _RepoReadFailed(out) from exc
     if not isinstance(body, dict):
         raise _RepoReadFailed(out)
+    _repos[key] = body
     return body
+
+
+def _forget_repo(kind: str, targets: frozenset[str]) -> None:
+    """A write that makes, renames or deletes a repo (an org-wide target, see
+    `ghcli.written`) makes every answer stale - rare, so the whole memo goes. A settings
+    write to one repo (`META`: archived, visibility, forking) makes that repo's alone."""
+    if kind in (FILES, ALL) and any("/" not in t for t in targets):
+        _repos.clear()
+    elif kind == META:
+        for target in targets:
+            _repos.pop(target, None)
+
+
+on_write(_forget_repo)
 
 
 def repo_missing(org: str, name: str) -> bool:
@@ -75,12 +106,12 @@ def org_exists(org: str) -> bool:
 
     Fails CLOSED: only an unambiguous 404 is absence. A 403, a 5xx, a rate limit or a
     timeout all mean "could not tell", and both callers act destructively on a False (a
-    row dropped from a generated page, a cohort unregistered from every nightly sync), so
+    row dropped from a generated page, a semester unregistered from every nightly sync), so
     it raises instead. `repo_exists` above is deliberately the opposite shape.
 
     Even the 404 is weaker evidence than it looks: GitHub answers 404, not 403, for an org
     the TOKEN cannot see, so a bot removed from one org reads exactly like a deleted one.
-    False therefore means "not visible to this token", and seed._live_cohorts requires two
+    False therefore means "not visible to this token", and seed._live_semesters requires two
     consecutive misses before acting on it."""
     code, out = gh("api", f"orgs/{org}", "--jq", ".login")
     if code == 0:
@@ -121,7 +152,7 @@ def repo_is_archived(org: str, name: str) -> bool:
     """Return True if the repo is archived (assume LIVE if the check fails).
 
     Archived repos are read-only - every write 403s. The optimistic default is deliberate:
-    a transient API failure must not silently skip a live cohort's refresh. Guess wrong
+    a transient API failure must not silently skip a live semester's refresh. Guess wrong
     that way and the write itself fails loudly, which is the outcome we want.
     """
     try:
@@ -176,13 +207,13 @@ def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
     re-archives fine).
 
     The strongest thing this toolkit can do to a repo, deliberately: the bot's token holds
-    no `delete_repo` scope, so a finished cohort is CLOSED rather than destroyed, and a repo
+    no `delete_repo` scope, so a finished semester is CLOSED rather than destroyed, and a repo
     frozen in error is un-archived from its own Settings page with nothing lost.
 
     An archived repo takes no push, no issue and no collaborator change, so anything a
     caller still means to READ or WRITE has to happen BEFORE this lands - see
     `dsl_course.teardown`, whose whole order follows from that. Freezing is also how it
-    withdraws write access: read-only for everyone is what a closed cohort is, so nobody
+    withdraws write access: read-only for everyone is what a closed semester is, so nobody
     is revoked and everyone keeps the read they had.
 
     `person=True` when the repo is somebody's, so the failure line names it only in the
@@ -217,7 +248,7 @@ def rename_repo(
     if description is not None:
         args += ["-f", f"description={description}"]
     code, out = gh_settled(*args, "--jq", ".name")
-    _repo.cache_clear()
+    _repos.clear()
     if code == 0 and out.strip() == new_name:
         return True
     _failed_on(
@@ -243,7 +274,7 @@ def set_visibility(
     The ONE exception is the shape where a person changing it is the thing being
     corrected: a `student_choice` repo published before its grading cutoff is put back
     here by `scheduler._reprivatise_student_repos`, which is the promise the assignment's
-    own page makes to the rest of the cohort. After the cutoff nothing flips it again.
+    own page makes to the rest of the semester. After the cutoff nothing flips it again.
 
     `person=True` when the repo is somebody's, so the failure line names it only in the
     verbose log (see `log.log_err_person`)."""
@@ -280,7 +311,7 @@ def allow_forking(org: str, name: str) -> bool:
     Which is why it READS before it writes. The release runs every quarter of an hour, so
     an unconditional PATCH is 96 writes a day per dest for a flag that changes once; and
     GitHub REFUSES the field on a public repo ("Allow forks setting can only be changed on
-    org-owned private repositories", HTTP 422), so a cohort whose materials repo is public
+    org-owned private repositories", HTTP 422), so a semester whose materials repo is public
     logged a warning on every tick, for ever, about a repo that anyone can already fork.
     The read costs nothing: `repo_is_archived` has fetched this same repo object earlier
     in the same run and `_repo` is cached per process.
@@ -331,8 +362,8 @@ def plan_refused_rulesets(out: str) -> bool:
 def protect_shared_repo(org: str, name: str) -> bool:
     """Stop the default branch of a shared drop box being force-pushed or deleted.
 
-    Every student in the cohort has `push` on that one repo, so without this ONE of them
-    can erase the whole cohort's work and the history it is pinned to - and the deadline
+    Every student in the semester has `push` on that one repo, so without this ONE of them
+    can erase the whole semester's work and the history it is pinned to - and the deadline
     snapshot then points at a commit that no longer exists. Folders are a convention
     inside the repo, not a boundary, and nothing GitHub offers makes them one; what CAN be
     guaranteed is that whatever was pushed stays reachable, which is what these two rules
@@ -341,7 +372,7 @@ def protect_shared_repo(org: str, name: str) -> bool:
     `non_fast_forward` + `deletion` and nothing else: a rule requiring pull requests, or a
     linear history, would stop the ordinary push the assignment is handed out to collect.
     No bypass actors - an org owner can still edit the ruleset itself, which is the escape
-    hatch, and listing one would only widen who may rewrite the cohort's work.
+    hatch, and listing one would only widen who may rewrite the semester's work.
 
     Idempotent, and reads before it writes: the handout re-fires on every tick, so a
     second POST would 422 on the name for the rest of the term. A listing that could not
@@ -371,7 +402,7 @@ def protect_shared_repo(org: str, name: str) -> bool:
                 "enforcement": "active",
                 "bypass_actors": [],
                 # `~DEFAULT_BRANCH` rather than `main`: the drop box is generated from the
-                # cohort template, so its default branch is whatever the course template's
+                # semester template, so its default branch is whatever the course template's
                 # is, and a ruleset naming the wrong branch protects nothing.
                 "conditions": {
                     "ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}
@@ -389,15 +420,15 @@ def protect_shared_repo(org: str, name: str) -> bool:
         # merely unprotected, and the next tick's POST succeeds the day the plan changes.
         log_err(
             f"{org}/{name} is NOT protected against force-push: rulesets on a private repo "
-            f"need GitHub Team (the org is on Free). Every student in the cohort has push, "
-            f"so a force-push could rewrite the cohort's work - git history is the only "
+            f"need GitHub Team (the org is on Free). Every student in the semester has push, "
+            f"so a force-push could rewrite the semester's work - git history is the only "
             f"safety net until the plan is upgraded."
         )
         return True
     log_err(
         f"could not protect {org}/{name} against force-push and deletion: {out[:160]}. "
-        f"Every student in the cohort has push on that repo, so until the ruleset is "
-        f"there one of them can erase the whole cohort's work - add it by hand from "
+        f"Every student in the semester has push on that repo, so until the ruleset is "
+        f"there one of them can erase the whole semester's work - add it by hand from "
         f"Settings > Rules, or re-run the release."
     )
     return False
@@ -469,7 +500,7 @@ SUPERSEDED_DESCRIPTIONS = {
     "Course website (auto-deployed on push)": (
         "[do not touch]: Course website (auto-deployed)"
     ),
-    # The wording before that one. Found on a cohort scaffolded early enough to predate the
+    # The wording before that one. Found on a semester scaffolded early enough to predate the
     # rename, which is the whole reason this table is a mapping and not a single pair: a
     # description set at creation stays until something converges it, so every wording we
     # have ever written needs a row here or that org keeps it forever.
@@ -478,20 +509,31 @@ SUPERSEDED_DESCRIPTIONS = {
     ),
 }
 
-# Per TIER, because one old wording wants two different new ones. A cohort org's `.github`
+# Per TIER, because one old wording wants two different new ones. A semester org's `.github`
 # is machine-owned scaffolding faculty never open; a COURSE org's is where they actually
 # work - it holds dsl-course.yml and every workflow they run. A flat old -> new mapping
 # cannot tell those apart, so the tier picks the table. Same forcing function as above: a
 # reworded literal must be added here or convergence silently stops.
-SUPERSEDED_COHORT_DESCRIPTIONS = {
+# The semester config repo's description, as bootstrap_course creates it.
+_CONFIG_REPO_DESCRIPTION = (
+    "[visible to instructors only]: Everything you configure for this semester is here - "
+    "student roster, teams, schedule, and marking. Students never see it, and no PII "
+    "leaves this repo."
+)
+SUPERSEDED_SEMESTER_DESCRIPTIONS = {
     "Org profile and configuration": "[do not touch]: Org profile and configuration",
-    # Every org still carries the wording on the LEFT, so this is a single hop rather than
-    # a chain: the interim text this replaced never reached one.
     "PRIVATE cohort config - roster (students.csv). No PII leaves here.": (
-        "[visible to instructors only]: Everything you configure for this cohort is "
-        "here - student roster, teams, term schedule, and marking. Students never see "
-        "it, and no PII leaves this repo."
+        _CONFIG_REPO_DESCRIPTION
     ),
+    # The wording before "cohort" and "term" became "semester" (decision 0012).
+    "[visible to instructors only]: Everything you configure for this cohort is here - "
+    "student roster, teams, term schedule, and marking. Students never see it, and no "
+    "PII leaves this repo.": _CONFIG_REPO_DESCRIPTION,
+}
+# Descriptions that carry the repo's own name, so no one literal can key them: the old
+# ENDING -> the new one. `assign` names each semester-side template `<slug> - ...`.
+SUPERSEDED_DESCRIPTION_ENDINGS = {
+    " - cohort assignment template": " - semester assignment template",
 }
 SUPERSEDED_COURSE_DESCRIPTIONS = {
     "Org profile and configuration": "[control panel]: Org profile & configuration",
@@ -507,15 +549,34 @@ class Converged(NamedTuple):
     failures: int = 0
 
 
+def current_description(said: str, tier: str | None = None) -> str | None:
+    """The wording a repo described as `said` should carry now, or None when it already
+    does (or is not one we wrote). `tier` as in `converge_descriptions`."""
+    said = said.strip()
+    superseded = SUPERSEDED_DESCRIPTIONS | (
+        SUPERSEDED_COURSE_DESCRIPTIONS
+        if tier == "course"
+        else SUPERSEDED_SEMESTER_DESCRIPTIONS
+    )
+    return superseded.get(said) or next(
+        (
+            said[: -len(old)] + new
+            for old, new in SUPERSEDED_DESCRIPTION_ENDINGS.items()
+            if said.endswith(old)
+        ),
+        None,
+    )
+
+
 def converge_descriptions(
     org: str, repos: list[dict], tier: str | None = None
 ) -> Converged:
     """Update every repo in `repos` whose description we have since reworded.
 
     `tier` (`discovery.org_tier`) selects the tier-specific table on top of the shared
-    one: the same old `.github` wording becomes "[do not touch]" on a cohort org and
+    one: the same old `.github` wording becomes "[do not touch]" on a semester org and
     "[control panel]" on a course org, because they are opposite instructions to the same
-    reader. None - a listing that cannot place the org - reads as a cohort, the same way
+    reader. None - a listing that cannot place the org - reads as a semester, the same way
     the faculty floor does.
 
     A GitHub description is only ever set at repo CREATION, so a wording fix otherwise
@@ -531,17 +592,12 @@ def converge_descriptions(
     A failed PATCH is a line, not an exception; whether it reds the run is the caller's
     call (see seed._converge_org_metadata).
     """
-    superseded = SUPERSEDED_DESCRIPTIONS | (
-        SUPERSEDED_COURSE_DESCRIPTIONS
-        if tier == "course"
-        else SUPERSEDED_COHORT_DESCRIPTIONS
-    )
     changed = 0
     failures = 0
     for repo in repos:
         if repo.get("archived"):
-            continue  # GitHub refuses the PATCH; a frozen cohort logged one failure a night
-        want = superseded.get((repo.get("description") or "").strip())
+            continue  # GitHub refuses the PATCH; a frozen semester logged one failure a night
+        want = current_description(repo.get("description") or "", tier)
         if not want:
             continue
         code, _ = gh(
@@ -579,7 +635,21 @@ def create_repo(
 
     Sets `description` only on creation. Bringing an EXISTING repo's description up to a
     reworded one is converge_descriptions' job, off the listing the refresh already
-    holds - not this function's, which would have to pay a read per call to find out."""
+    holds - not this function's, which would have to pay a read per call to find out.
+
+    Refuses a RETIRED name (`course.RETIRED_REPO_NAMES`): a repo created there would end
+    the redirect GitHub keeps from the renamed one, and with it every link already sent."""
+    if name in RETIRED_REPO_NAMES:
+        log_err(
+            f"refused to create {org}/{name}: that name was retired and redirects to "
+            f"its renamed repo - {NOT_MIGRATED}: run the migration"
+        )
+        return False
+    if f"{org}/{name}".casefold() in _repos:
+        # This run has already read the repo object, so it is there: the POST would only
+        # be refused. A release asks this of its dest on every tick.
+        (log_person if person else log_skip)(f"repo {org}/{name}")
+        return True
     args = [
         "api",
         "--method",
@@ -614,8 +684,8 @@ def create_repo(
 # hidden `tests/`, a `.env` with a live key. None of those is a release decision anyone
 # made; they are what "copy the folder" means.
 #
-# NOT a release policy for the cohort path - `deploy` deliberately releases what faculty
-# name, including a solution, because a cohort repo is private and marking sometimes needs
+# NOT a release policy for the semester path - `deploy` deliberately releases what faculty
+# name, including a solution, because a semester repo is private and marking sometimes needs
 # one. This is the PUBLIC site, where there is no such case.
 PUBLICATION_DENYLIST = (
     "solution",
@@ -644,7 +714,7 @@ def has_denied_component(path: str) -> bool:
 # at every depth, case-insensitively. What a file manager drops in a folder it opened
 # (`.DS_Store`, `Thumbs.db`, `desktop.ini`), the empty placeholder that holds an empty
 # folder open in git (`.gitkeep`), and the caches an interpreter and a notebook leave
-# behind (`__pycache__/`, `.ipynb_checkpoints/`). A cohort's public site listed four of
+# behind (`__pycache__/`, `.ipynb_checkpoints/`). A semester's public site listed four of
 # these as its course materials and counted them into its sessions - "6 files" over a
 # session holding five, one of which was a `.gitkeep`.
 #
@@ -835,8 +905,65 @@ def _direct_logins(
     return [line.strip() for line in out.splitlines() if line.strip()], out
 
 
+# One GraphQL page per hundred repos: every repo of an org with its DIRECT collaborators.
+# GraphQL has a budget of its own, apart from the 5,000 REST calls an hour every workflow
+# shares, and this one question used to cost a REST listing per repo.
+_COLLABORATORS_QUERY = """query($org: String!, $endCursor: String) {
+  organization(login: $org) {
+    repositories(first: 100, after: $endCursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes { name collaborators(affiliation: DIRECT, first: 100) {
+        totalCount edges { permission node { login } } } }
+    }
+  }
+}"""
+
+
+# One page of the query, projected by `gh --jq` into a tab-separated row per repo.
+COLLABORATORS_JQ = (
+    ".data.organization.repositories.nodes[] | [.name, "
+    "((.collaborators.totalCount // -1) | tostring), "
+    '((.collaborators.edges // []) | map("\\(.node.login):\\(.permission)") | join(","))]'
+    " | @tsv"
+)
+
+
+def direct_collaborators_by_repo(org: str) -> dict[str, dict[str, str]] | None:
+    """`{repo: {login: permission}}` (names casefolded; GraphQL's READ, TRIAGE, WRITE,
+    MAINTAIN, ADMIN) of every repo in `org` whose DIRECT collaborators GraphQL listed in
+    full, or None when the query failed. A repo it could not list whole (no answer, or more
+    than a hundred) is left out, and its caller reads it itself. Like the REST listing's
+    `affiliation=direct`, it holds no pending invitee."""
+    code, out = gh(
+        "api",
+        "graphql",
+        "--paginate",
+        "-f",
+        f"query={_COLLABORATORS_QUERY}",
+        "-f",
+        f"org={org}",
+        "--jq",
+        COLLABORATORS_JQ,
+    )
+    if code != 0:
+        return None
+    held = {}
+    for line in out.splitlines():
+        name, count, pairs = (line.split("\t") + ["", ""])[:3]
+        found = dict(p.rpartition(":")[::2] for p in pairs.split(",") if ":" in p)
+        found = {login.casefold(): perm for login, perm in found.items()}
+        if name and count.isdigit() and int(count) == len(found):
+            held[name.casefold()] = found
+    return held
+
+
 def is_collaborator(
-    org: str, repo: str, login: str, *, person: bool = False
+    org: str,
+    repo: str,
+    login: str,
+    *,
+    person: bool = False,
+    held: dict[str, dict[str, str]] | None = None,
 ) -> bool | None:
     """Whether `login` holds a DIRECT collaborator grant on `org/repo`.
 
@@ -849,7 +976,12 @@ def is_collaborator(
 
     None means the answer could not be read. Kept distinct from False on purpose: the
     caller is about to REVOKE access, and a rate limit or a network drop must never read
-    as "not a collaborator, nothing to do" - nor, worse, be acted on either way."""
+    as "not a collaborator, nothing to do" - nor, worse, be acted on either way.
+
+    `held` is `direct_collaborators_by_repo(org)` when the caller took it: a repo listed
+    there is answered from it, with no read."""
+    if held is not None and repo.casefold() in held:
+        return login.casefold() in held[repo.casefold()]
     logins, out = _direct_logins(
         org, repo, "collaborators?affiliation=direct&per_page=100", ".[].login"
     )
@@ -876,7 +1008,7 @@ def direct_collaborators(
     appearing here, which is what makes this set safe to converge AGAINST - the caller
     revokes off it, and faculty and the bot must never be in what it revokes.
 
-    TWO listings for a whole cohort, where asking `is_collaborator` per student is two
+    TWO listings for a whole semester, where asking `is_collaborator` per student is two
     calls per student. That is what makes the shared drop box's grant loop affordable: the
     handout re-fires on every tick (which is how a late onboarder gets their access), and
     one repo serving fifty units has no per-unit repo whose existence records the grant.

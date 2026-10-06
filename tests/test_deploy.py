@@ -1,6 +1,6 @@
 """deploy.parse_path_pairs turns the Release materials button's two
-comma-separated inputs into (course_source_path, cohort_dest_path) pairs, and the read
-grant covers both cohort role teams.
+comma-separated inputs into (course_source_path, semester_dest_path) pairs, and the read
+grant covers both semester role teams.
 
 (Session-directory discovery/matching lives in course.py - see test_course.py; the deploy
 batching itself is exercised in test_scheduler.py, which drives the same
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import access, course, deploy, ghcli, repos
+from dsl_course import access, course, deploy, ghcli, records, repos
 
 
 def test_a_single_path_with_no_comma_still_works():
@@ -23,7 +23,7 @@ def test_a_single_path_with_no_comma_still_works():
 
 
 def test_blank_dest_path_mirrors_every_source_path():
-    # Blank dest path means the same thing here as an omitted `cohort_dest_path:` in
+    # Blank dest path means the same thing here as an omitted `semester_dest_path:` in
     # schedule.yml: mirror the source path (None = let deploy_many mirror it).
     assert deploy.parse_path_pairs("lectures/02,labs/02,readings/02") == [
         ("lectures/02", None),
@@ -47,11 +47,11 @@ def test_mismatched_counts_fail_loudly_naming_both_counts():
     # error naming both counts - not a silently truncated release (the schedule, on an
     # unattended cron, is the one that drops what it can't pair).
     with pytest.raises(
-        ValueError, match="3 course_source_paths but 2 cohort_dest_paths"
+        ValueError, match="3 course_source_paths but 2 semester_dest_paths"
     ):
         deploy.parse_path_pairs("a,b,c", "x,y")
     with pytest.raises(
-        ValueError, match="2 course_source_paths but 3 cohort_dest_paths"
+        ValueError, match="2 course_source_paths but 3 semester_dest_paths"
     ):
         deploy.parse_path_pairs("a,b", "x,y,z")
 
@@ -82,20 +82,21 @@ def test_cli_rejects_a_count_mismatch_with_a_nonzero_exit(monkeypatch, capsys):
         "sys.argv",
         [
             "deploy",
-            "--source-org",
+            "--course-org",
             "Course",
             "--course-source-repo",
             "course-materials-f2026",
-            "--cohort-org",
-            "Cohort-f2026",
+            "--semester-org",
+            "Semester-f2026",
             "--course-source-path",
             "a,b,c",
-            "--cohort-dest-path",
+            "--semester-dest-path",
             "x,y",
+            "--no-preview",
         ],
     )
     assert deploy.main() == 1
-    assert "3 course_source_paths but 2 cohort_dest_paths" in capsys.readouterr().err
+    assert "3 course_source_paths but 2 semester_dest_paths" in capsys.readouterr().err
 
 
 def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
@@ -103,9 +104,9 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
     # through ONE deploy_many call - so each repo is cloned once for the whole batch.
     seen = {}
 
-    def fake_deploy_many(source_org, cohort_org, deploys, sync=True):
+    def fake_deploy_many(course_org, semester_org, deploys, sync=True):
         seen.update(
-            source_org=source_org, cohort_org=cohort_org, deploys=deploys, sync=sync
+            course_org=course_org, semester_org=semester_org, deploys=deploys, sync=sync
         )
         return 0, True
 
@@ -114,18 +115,19 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
         "sys.argv",
         [
             "deploy",
-            "--source-org",
+            "--course-org",
             "Course",
             "--course-source-repo",
             "course-materials-f2026",
-            "--cohort-org",
-            "Cohort-f2026",
-            "--cohort-dest-repo",
+            "--semester-org",
+            "Semester-f2026",
+            "--semester-dest-repo",
             "materials",
             "--course-source-path",
             "lectures/02,labs/02",
-            "--cohort-dest-path",
+            "--semester-dest-path",
             "week02/lecture,",
+            "--no-preview",
         ],
     )
     assert deploy.main() == 1  # unpaired counts (2 sources, 1 dest)
@@ -134,24 +136,25 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
         "sys.argv",
         [
             "deploy",
-            "--source-org",
+            "--course-org",
             "Course",
             "--course-source-repo",
             "course-materials-f2026",
-            "--cohort-org",
-            "Cohort-f2026",
+            "--semester-org",
+            "Semester-f2026",
             "--course-source-path",
             "lectures/02,labs/02",
+            "--no-preview",
         ],
     )
     assert deploy.main() == 0
-    assert seen["source_org"] == "Course" and seen["cohort_org"] == "Cohort-f2026"
+    assert seen["course_org"] == "Course" and seen["semester_org"] == "Semester-f2026"
     assert [
         (
             d.course_source_repo,
             d.course_source_path,
-            d.cohort_dest_repo,
-            d.cohort_dest_path,
+            d.semester_dest_repo,
+            d.semester_dest_path,
         )
         for d in seen["deploys"]
     ] == [
@@ -162,7 +165,7 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
     assert seen["sync"] is True
 
 
-def test_cohort_dest_repo_defaults_to_materials(monkeypatch):
+def test_semester_dest_repo_defaults_to_materials(monkeypatch):
     captured = []
     monkeypatch.setattr(
         deploy,
@@ -173,20 +176,21 @@ def test_cohort_dest_repo_defaults_to_materials(monkeypatch):
         "sys.argv",
         [
             "deploy",
-            "--source-org",
+            "--course-org",
             "Course",
             "--course-source-repo",
             "course-materials-f2026",
-            "--cohort-org",
-            "Cohort-f2026",
-            "--cohort-dest-repo",
+            "--semester-org",
+            "Semester-f2026",
+            "--semester-dest-repo",
             "   ",  # a blank text box must not create a repo named ""
             "--course-source-path",
             "lectures/02",
+            "--no-preview",
         ],
     )
     assert deploy.main() == 0
-    assert captured[0][0].cohort_dest_repo == "materials"
+    assert captured[0][0].semester_dest_repo == "materials"
 
 
 def test_dry_run_prints_the_resolved_pairs_without_deploying(monkeypatch, capsys):
@@ -202,17 +206,17 @@ def test_dry_run_prints_the_resolved_pairs_without_deploying(monkeypatch, capsys
         "sys.argv",
         [
             "deploy",
-            "--source-org",
+            "--course-org",
             "Course",
             "--course-source-repo",
             "course-materials-f2026",
-            "--cohort-org",
-            "Cohort-f2026",
+            "--semester-org",
+            "Semester-f2026",
             "--course-source-path",
             "lectures/02,labs/02",
-            "--cohort-dest-path",
+            "--semester-dest-path",
             "week02/lecture,week02/lab",
-            "--dry-run",
+            "--preview",
         ],
     )
     assert deploy.main() == 0
@@ -224,15 +228,15 @@ def test_dry_run_prints_the_resolved_pairs_without_deploying(monkeypatch, capsys
 def _dry_run_argv(source_path):
     return [
         "deploy",
-        "--source-org",
+        "--course-org",
         "Course",
         "--course-source-repo",
         "course-materials-f2026",
-        "--cohort-org",
-        "Cohort-f2026",
+        "--semester-org",
+        "Semester-f2026",
         "--course-source-path",
         source_path,
-        "--dry-run",
+        "--preview",
     ]
 
 
@@ -267,7 +271,7 @@ def test_dry_run_still_flags_a_path_escaping_the_clone(monkeypatch, capsys):
     assert "course-materials-f2026/lectures/02 -> materials/lectures/02" in out
 
 
-def test_a_released_repo_is_actually_granted_to_both_cohort_role_teams(monkeypatch):
+def test_a_released_repo_is_actually_granted_to_both_semester_role_teams(monkeypatch):
     # Auditors see exactly what enrolled students see once it's released, so a release must
     # grant BOTH role teams read on its destination repo. Asserted through a real release
     # rather than by comparing an import binding: deploy could call the right helper for
@@ -279,9 +283,41 @@ def test_a_released_repo_is_actually_granted_to_both_cohort_role_teams(monkeypat
         lambda org, team, repo, perm, **k: granted.append((team, repo, perm)) or True,
     )
     _stub_deploy_many(monkeypatch, _one_file, real_grants=True)
-    deploy.deploy_many("COURSE", "COHORT", [_deploy("sec")], sync=False)
+    deploy.deploy_many("COURSE", "SEMESTER", [_deploy("sec")], sync=False)
     assert ("students", "materials", "pull") in granted
     assert ("auditors", "materials", "pull") in granted
+
+
+def test_a_dest_already_holding_every_grant_is_granted_nothing_again(monkeypatch):
+    # Every tick visits the dest: one listing of its teams stands in for four PUTs, and a
+    # team held ABOVE what the release grants (instructors raised to admin by hand) is
+    # left there rather than demoted.
+    granted: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        access,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm, **k: granted.append((team, repo, perm)) or True,
+    )
+    held = {"students": "pull", "auditors": "pull", "instructors": "admin"}
+    _stub_deploy_many(monkeypatch, _one_file, real_grants=True, held=held)
+    deploy.deploy_many("COURSE", "SEMESTER", [_deploy("sec")], sync=False)
+    assert granted == [("course-admin", "materials", "admin")]
+
+
+def test_a_role_team_holding_more_than_read_is_put_back_to_read(monkeypatch):
+    # The never-demote floor is faculty's: students and auditors get exactly read, so a
+    # role team found holding push on the dest is PUT back to pull.
+    granted: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        access,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm, **k: granted.append((team, repo, perm)) or True,
+    )
+    held = {"students": "push", "auditors": "pull", "instructors": "push"}
+    held["course-admin"] = "admin"
+    _stub_deploy_many(monkeypatch, _one_file, real_grants=True, held=held)
+    deploy.deploy_many("COURSE", "SEMESTER", [_deploy("sec")], sync=False)
+    assert granted == [("students", "materials", "pull")]
 
 
 SUPERSEDED = "Released course materials (enrolled students only)"
@@ -343,7 +379,7 @@ def test_every_superseded_description_names_a_replacement_we_still_write(monkeyp
         }
     for table in (
         repos.SUPERSEDED_DESCRIPTIONS,
-        repos.SUPERSEDED_COHORT_DESCRIPTIONS,
+        repos.SUPERSEDED_SEMESTER_DESCRIPTIONS,
         repos.SUPERSEDED_COURSE_DESCRIPTIONS,
     ):
         for old, new in table.items():
@@ -354,7 +390,7 @@ def test_every_superseded_description_names_a_replacement_we_still_write(monkeyp
 
 
 def test_the_dotgithub_description_says_the_opposite_thing_per_tier():
-    # A cohort org's .github is scaffolding nobody should open; a course org's is where
+    # A semester org's .github is scaffolding nobody should open; a course org's is where
     # faculty work. Converging both onto one wording would tell half of them the wrong
     # thing, which is why the tier picks the table.
     listing = [{"name": ".github", "description": "Org profile and configuration"}]
@@ -367,13 +403,13 @@ def test_the_dotgithub_description_says_the_opposite_thing_per_tier():
 
     repos.gh = fake
     try:
-        cohort = [dict(r) for r in listing]
-        repos.converge_descriptions("Cohort-f2026", cohort, "cohort")
+        semester = [dict(r) for r in listing]
+        repos.converge_descriptions("Semester-f2026", semester, "semester")
         course = [dict(r) for r in listing]
         repos.converge_descriptions("Course", course, "course")
     finally:
         repos.gh = original
-    assert cohort[0]["description"] == "[do not touch]: Org profile and configuration"
+    assert semester[0]["description"] == "[do not touch]: Org profile and configuration"
     assert course[0]["description"] == "[control panel]: Org profile & configuration"
 
 
@@ -383,7 +419,7 @@ def test_the_dotgithub_description_says_the_opposite_thing_per_tier():
 # decisions it rests on - which spellings mean the root, and what never travels with a copy.
 
 # The one definition of "this means the repo root". Blank is included because that is what
-# an empty `cohort_dest_path` reduces to internally; neither front door accepts it as a
+# an empty `semester_dest_path` reduces to internally; neither front door accepts it as a
 # SOURCE (parse_path_pairs and schedule.py both reject an empty course_source_path).
 ROOT_SPELLINGS = ["/", ".", "", "./", "//"]
 
@@ -405,12 +441,12 @@ def test_a_normal_subpath_still_resolves_under_the_clone(tmp_path):
 
 
 def test_a_whole_repo_release_skips_the_faculty_side_of_the_repo(tmp_path):
-    # MAINTAINING.md is written into every materials repo by scaffold as "never released";
+    # `.system/` is written into every materials repo by scaffold as "never released";
     # `.github` is the Release buttons and their bot-token wiring. Both are faculty-side, so
     # neither may ride along with "give me everything".
     ignore = deploy._copy_ignore(tmp_path)
-    names = [".git", ".github", "MAINTAINING.md", "labs", "SYLLABUS.md"]
-    assert ignore(str(tmp_path), names) == {".git", ".github", "MAINTAINING.md"}
+    names = [".git", ".github", ".system", "labs", "SYLLABUS.md"]
+    assert ignore(str(tmp_path), names) == {".git", ".github", ".system"}
 
 
 def test_the_faculty_side_is_skipped_only_at_the_repo_root(tmp_path):
@@ -431,7 +467,7 @@ def test_naming_the_faculty_side_explicitly_still_releases_it(tmp_path):
 
 # ------------------------------------------ what is never course material, wherever it is
 # A release copies a session folder wholesale, so whatever a file manager, an interpreter
-# or the scaffold itself left in that folder ships as course material. A cohort's public
+# or the scaffold itself left in that folder ships as course material. A semester's public
 # site listed `labs/01_session-1/.gitkeep`, `lectures/01_session-1/.gitkeep` and a
 # `readings/.DS_Store` among its materials, with the session counts inflated to match.
 
@@ -474,7 +510,7 @@ def test_junk_is_matched_however_the_machine_that_wrote_it_spelled_it(tmp_path):
 # The scaffold's README is addressed to FACULTY - "replace this placeholder", a section
 # headed "delete this section before releasing", a link to MAINTAINING.md and the course
 # org's Actions tab. Releasing it publishes all of that to students as their course
-# overview, which is what happened in a live cohort, in three repos at once, silently.
+# overview, which is what happened in a live semester, in three repos at once, silently.
 
 
 def _scaffold_readme() -> str:
@@ -491,12 +527,12 @@ def _scaffold_readme() -> str:
 
 
 def test_the_scaffold_readme_is_recognised_as_unedited():
-    assert deploy._is_withheld_stub("README.md", _scaffold_readme())
+    assert deploy.is_withheld_stub("README.md", _scaffold_readme())
 
 
 def test_a_real_readme_is_released():
     real = "# Foundations of Machine Learning\n\nWelcome. Slides go up Tuesdays.\n"
-    assert not deploy._is_withheld_stub("README.md", real)
+    assert not deploy.is_withheld_stub("README.md", real)
 
 
 def test_a_readme_quoting_one_marker_is_still_released():
@@ -504,8 +540,8 @@ def test_a_readme_quoting_one_marker_is_still_released():
     # half-edited one where the faculty section is already gone - is the faculty's writing,
     # and withholding it would be the guard overreaching.
     half = f"# Real overview\n\nWe kept a note: {course.FACULTY_ONLY_HEADING}\n"
-    assert not deploy._is_withheld_stub("README.md", half)
-    assert not deploy._is_withheld_stub(
+    assert not deploy.is_withheld_stub("README.md", half)
+    assert not deploy.is_withheld_stub(
         "README.md", "# Real\n\n> **Replace this placeholder.** (quoted)\n"
     )
 
@@ -515,9 +551,9 @@ def test_only_a_root_readme_is_guarded():
     # folder; the stub only ever exists at the repo root. Matching on the file NAME rather
     # than the whole path would have withheld those too.
     for nested in ("lectures/01_intro/README.md", "labs/README.md", "docs/README.md"):
-        assert not deploy._is_withheld_stub(nested, _scaffold_readme())
-    assert deploy._is_withheld_stub("README.md", _scaffold_readme())
-    assert deploy._is_withheld_stub("/README.md", _scaffold_readme())
+        assert not deploy.is_withheld_stub(nested, _scaffold_readme())
+    assert deploy.is_withheld_stub("README.md", _scaffold_readme())
+    assert deploy.is_withheld_stub("/README.md", _scaffold_readme())
 
 
 def test_an_unwritten_syllabus_stub_is_withheld_too():
@@ -527,23 +563,28 @@ def test_an_unwritten_syllabus_stub_is_withheld_too():
     from dsl_course import scaffold
 
     stub = scaffold._SYLLABUS_STUB.format(tag="f2026")
-    assert deploy._is_withheld_stub("SYLLABUS.md", stub)
+    assert deploy.is_withheld_stub("SYLLABUS.md", stub)
     # Written, so released.
-    assert not deploy._is_withheld_stub(
+    assert not deploy.is_withheld_stub(
         "SYLLABUS.md",
         "# Machine Learning\n\n## 1. General information\n\nReal content.\n",
     )
     # Root only, as for the README.
-    assert not deploy._is_withheld_stub("docs/SYLLABUS.md", stub)
+    assert not deploy.is_withheld_stub("docs/SYLLABUS.md", stub)
 
 
 def test_the_excluded_root_files_are_named_from_one_place():
-    # Re-spelling them per module is how an exclusion lapses when a file is renamed.
-    assert course.SYLLABUS_SAMPLE_FILE in deploy.ROOT_RELEASE_EXCLUDED
-    assert course.SYLLABUS_SESSIONS_FILE in deploy.ROOT_RELEASE_EXCLUDED
+    # Excluded as ONE folder, so no file the toolkit writes there can lapse out of it.
+    assert records.SYSTEM_DIR in deploy.ROOT_RELEASE_EXCLUDED
+    for path in (
+        course.SYLLABUS_SAMPLE_FILE,
+        course.SYLLABUS_SESSIONS_FILE,
+        course.MAINTAINING_FILE,
+    ):
+        assert path.split("/")[0] == records.SYSTEM_DIR
 
 
-# ----------------------------- a bad symlink is one failed copy, not a dead cohort
+# ----------------------------- a bad symlink is one failed copy, not a dead semester
 
 
 def _one_file(src):
@@ -551,7 +592,7 @@ def _one_file(src):
     (src / "sec" / "notes.md").write_text("real\n")
 
 
-def _stub_deploy_many(monkeypatch, build_source, real_grants=False):
+def _stub_deploy_many(monkeypatch, build_source, real_grants=False, held=None):
     """Drive deploy_many against local trees: `build_source(path)` fills each source clone,
     dest clones start empty, and nothing is committed.
 
@@ -593,6 +634,7 @@ def _stub_deploy_many(monkeypatch, build_source, real_grants=False):
     monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: held)
     if not real_grants:
         monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
         monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
@@ -608,7 +650,7 @@ def _deploy(path: str):
 
 def test_a_dangling_symlink_is_copied_as_a_link_not_followed(monkeypatch):
     # Followed, a link pointing at nothing raises shutil.Error - and this runs under the
-    # hourly cron, so it aborted the whole cohort's release every hour.
+    # hourly cron, so it aborted the whole semester's release every hour.
     def build(src):
         (src / "sec").mkdir()
         (src / "sec" / "notes.md").write_text("real\n")
@@ -616,7 +658,7 @@ def test_a_dangling_symlink_is_copied_as_a_link_not_followed(monkeypatch):
 
     snaps = _stub_deploy_many(monkeypatch, build)
     errors, _changed = deploy.deploy_many(
-        "COURSE", "COHORT", [_deploy("sec")], sync=False
+        "COURSE", "SEMESTER", [_deploy("sec")], sync=False
     )
     assert errors == 0
     assert snaps["materials"]["sec/notes.md"] == "real\n"
@@ -631,7 +673,7 @@ def test_a_directory_symlink_loop_does_not_recurse(monkeypatch):
 
     snaps = _stub_deploy_many(monkeypatch, build)
     errors, _changed = deploy.deploy_many(
-        "COURSE", "COHORT", [_deploy("sec")], sync=False
+        "COURSE", "SEMESTER", [_deploy("sec")], sync=False
     )
     assert errors == 0
     assert snaps["materials"]["sec/loop"] == "@link"
@@ -655,7 +697,7 @@ def test_one_unusable_path_is_one_counted_error_and_the_rest_still_ship(monkeypa
 
     monkeypatch.setattr(deploy.shutil, "copytree", flaky)
     errors, _changed = deploy.deploy_many(
-        "COURSE", "COHORT", [_deploy("bad"), _deploy("good")], sync=False
+        "COURSE", "SEMESTER", [_deploy("bad"), _deploy("good")], sync=False
     )
     assert errors == 1  # not an exception out of deploy_many
     assert snaps["materials"]["good/notes.md"] == "good"
@@ -667,7 +709,7 @@ def test_a_dest_that_cannot_reach_upstream_is_dropped_like_a_failed_clone(
 ):
     # `_checkout_upstream` used to discard both checkout return codes, so a refused
     # checkout left the clone on the branch students read - the release copied straight
-    # onto it, undoing whatever the cohort had edited, and the merge phase then reported
+    # onto it, undoing whatever the semester had edited, and the merge phase then reported
     # two errors about a branch that had never been cut. A dest that cannot go onto
     # `upstream` is as unusable as one that would not clone, and is dropped the same way.
     snaps = _stub_deploy_many(monkeypatch, _one_file)
@@ -680,11 +722,11 @@ def test_a_dest_that_cannot_reach_upstream_is_dropped_like_a_failed_clone(
 
     monkeypatch.setattr(deploy, "git", refuses_the_checkout)
     errors, changed = deploy.deploy_many(
-        "COURSE", "COHORT", [_deploy("sec")], sync=False
+        "COURSE", "SEMESTER", [_deploy("sec")], sync=False
     )
 
     assert (errors, changed) == (1, False)  # one impossible copy, counted once
     assert snaps == {}  # nothing was staged onto the base branch
     err = capsys.readouterr().err
-    assert "COHORT/materials" in err
+    assert "SEMESTER/materials" in err
     assert deploy.UPSTREAM_BRANCH in err

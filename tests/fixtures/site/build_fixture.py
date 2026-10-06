@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write a complete cohort site into a directory, from the real renderers.
+"""Write a complete semester site into a directory, from the real renderers.
 
 What the `jekyll-contract` CI job builds (.github/workflows/ci.yml), and what
 tests/test_site_templates.py cross-checks the templates' Liquid keys against. Both read
@@ -13,23 +13,23 @@ rest of the seed-once half from `templates/site-seed/`. Only the THEME's stand-i
 not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
-session, an unreleased one, a lab, a session whose readings are still to come, a
+lecture, an unreleased one, a lab, a silent readings row with its reading list inlined, a
+drop-in whose one copy is a single file, a silent syllabus copy that raises no row, a
 handed-out assignment with a declared `details:`, a pending one, one handed in off GitHub, one handed in off GitHub
 that is not out yet, one whose repos are public, one handed into a shared drop box, one
 group assignment inside its team-formation window, a dated exam and a TBC
 one, a special event, the two term boundaries, the archive row inside its notice window,
-an All Materials index nested three directories deep, and - within the released session -
-a published file linked to the site's own hosted copy beside an unpublished one linked to
-GitHub.
+and the banner to the student console. A semester site is a public calendar (decision
+0011 rule 5): no assignment pages, teams, hosted copies or All Materials index.
 
     python3 tests/fixtures/site/build_fixture.py <dest>
 """
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import sys
-import tempfile
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -38,19 +38,19 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT))
 
-from dsl_course import grades, schedule, schedule_plan, site, site_repo
+from dsl_course import grades, materials, schedule, schedule_plan, site, site_repo
 
 BERLIN = ZoneInfo("Europe/Berlin")
 COURSE_ORG = "hertie-dsl-fixture-course"
-COHORT_ORG = "hertie-dsl-fixture-f2026"
+SEMESTER_ORG = "hertie-dsl-fixture-f2026"
 MATERIALS = "course-materials"
 # Handed in off GitHub (`submit_via: external`), so NO repo is created for it: its page and
-# its due row must name none, and must not tell the cohort to push to `main`. It names a
+# its due row must name none, and must not tell the semester to push to `main`. It names a
 # `submit_url`, which is what puts the `Submit on <host>` button on both.
 EXTERNAL = "assignment-3-f2026"
 EXTERNAL_URL = "https://moodle.example.edu/mod/assign/view.php?id=EXAMPLE"
 # Portfolio work (`visibility: public`): the same repo per student, world-readable from
-# hand-out, and no receipts issue - so its page and its due row have to say so before a
+# hand-out, and no Submission receipts issue - so its page and its due row have to say so before a
 # student pushes anything into it.
 PUBLIC = "assignment-4-f2026"
 # External AND still pending, which is the pair of states that reaches no reader: the
@@ -60,15 +60,13 @@ EXTERNAL_PENDING = "assignment-5-f2026"
 # student is its admin and may publish it once the grading cutoff has passed. Its page has
 # to carry both halves of that, and its due row the one word that says the flag is theirs.
 STUDENT_CHOICE = "assignment-6-f2026"
-# One drop box for the whole cohort (`submit_via: shared_dropbox_repo`): `repo_name` is a REAL repo
+# One drop box for the whole semester (`submit_via: shared_dropbox_repo`): `repo_name` is a REAL repo
 # rather than a shape, what is the student's own is a folder inside it, and the name must
-# NOT be rewritten to one per reader - which is the one thing open_in.html does to every
-# other assignment page.
+# NOT be read as a shape to substitute a handle into.
 SHARED = "assignment-7-f2026"
 # A group assignment whose teams the students pick themselves (`team_formation:
-# self_select`), rendered INSIDE its team-formation window: the brief is out, no repo
-# exists yet because no team does, and the page carries the invitation to form one in
-# place of the submission-repo button. Dated before the first lecture for the same reason
+# self_select`), rendered INSIDE its team-formation window: it is out, no repo exists yet
+# because no team does, and its hand-out row carries the invitation to form one. Dated before the first lecture for the same reason
 # 06 and 07 are - see the note beside them.
 GROUP_FORMING = "assignment-8-f2026"
 # The moment the fixture is rendered "at", so a handout pin is in the past or the future
@@ -82,18 +80,15 @@ FORMING_SCHEDULE = schedule.Schedule(
     assignments={
         FORMING_KEY: schedule.AssignmentEntry(
             course_source_repo=GROUP_FORMING,
-            # Open at NOW: handed out a month ago, and the grading pin that shuts the
-            # window is still two months off.
+            # Open at NOW: handed out a month ago, and the late cutoff that shuts the
+            # window (due + the institution's 10 days) is still two months off.
             handout_datetime=datetime(2026, 8, 31, 9, 0, tzinfo=BERLIN),
             due_datetime=datetime(2026, 11, 24, 23, 59, tzinfo=BERLIN),
-            grading_datetime=datetime(2026, 11, 26, 9, 0, tzinfo=BERLIN),
         )
     }
 )
 
-# The cohort's released tree, as `_repo_tree` would report it. Three directories deep
-# under `lectures/01_week-1/`, which is the nesting the All Materials index recurses over
-# - the include that once rendered an empty page and took two live sites down.
+# The semester's released tree, as `_repo_tree` would report it.
 TREE = (
     "SYLLABUS.md",
     "labs/01_week-1/Lab_Session_1.ipynb",
@@ -105,13 +100,12 @@ TREE = (
     "lectures/02_week-2/slides.pdf",
     "readings/01_week-1/READINGS.md",
     "readings/01_week-1/schmidhuber-1997.pdf",
+    "readings/extra/attention.pdf",
+    "clinic/notes.pdf",
+    "exams/mock.pdf",
+    # Released outside the plan (no entry copies it): an undated row on the Labs tab.
+    "labs/02_week-2/Lab_Session_2.ipynb",
 )
-
-# What this course's `publish.yml` declares, through the real parser: rendered decks and
-# nothing else - the shape a Quarto course takes. Session 1 therefore carries BOTH row
-# shapes, a published `slides.html` (whose `slides_files/` bundle follows it) beside an
-# unpublished `slides.pdf`, which is the pair the templates have to tell apart.
-PUBLISH_POLICY = {MATERIALS: (site.parse_patterns("lectures/**/*.html"),)}
 
 READINGS_MD = """# Session 1 readings
 
@@ -159,16 +153,7 @@ def _repo_tree(_org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     return "main", TREE if repo == MATERIALS else ()
 
 
-def _formed_teams(_org: str, _key: str) -> list[tuple[str, list[str]]]:
-    """Two teams for the assignment inside its team-formation window - one with room and
-    one full, so the built page carries both halves of the Places-left column."""
-    return [
-        ("team-alpha", ["ada-l", "bo-b"]),
-        ("team-bravo", ["cy-c", "di-d", "ed-e", "flo-f"]),
-    ]
-
-
-def _grading_spec(_org: str, repo: str):
+def _grading_spec(_org: str, repo: str, **_):
     """The assignment's own definition, which names the repo shape a student looks for,
     says whether the work is handed in on GitHub at all, and declares what happens to work
     that arrives late. The fixture's assignments are individual, so the rest of the empty
@@ -182,25 +167,28 @@ def _grading_spec(_org: str, repo: str):
     and the named shapes declare none, so the fixture holds a page with the line and pages
     without it."""
     if repo in (EXTERNAL, EXTERNAL_PENDING):
-        return grades.parse_grading_spec(
-            f"submit_via: external\nsubmit_url: {EXTERNAL_URL}\n"
-        )
+        return _spec("submit_via: external\n", submit_url=EXTERNAL_URL)
     if repo == PUBLIC:
-        return grades.parse_grading_spec("visibility: public\n")
+        return _spec("", visibility="public")
     if repo == STUDENT_CHOICE:
-        return grades.parse_grading_spec("visibility: student_choice\n")
+        return _spec("", visibility="student_choice")
     if repo == SHARED:
-        return grades.parse_grading_spec("submit_via: shared_dropbox_repo\n")
+        return _spec("submit_via: shared_dropbox_repo\n")
     if repo == GROUP_FORMING:
-        # The cap is declared, which is what `New assignment` stamps into every file it
-        # writes - so the page prints it without the course-org read `grades.team_cap`
-        # falls back to.
-        return grades.parse_grading_spec(
-            "type: group\nteam_formation: self_select\nmax_team_size: 4\n"
-        )
-    return grades.parse_grading_spec(
-        "late_window_days: 7\nlate_penalty_per_day: 10%\nquestions:\n  Q1: 15\n  Q2: 10\n"
+        # The cap is the semester's (assignments.yml), so the page prints it without the
+        # course-org read `grades.team_cap` falls back to.
+        return _spec("type: group\n", team_formation="self_select", max_team_size=4)
+    return _spec(
+        "questions:\n  Q1: 15\n  Q2: 10\n",
+        late_window_days=7,
+        late_penalty_per_day="10%",
     )
+
+
+def _spec(text: str, **run) -> grades.GradingSpec:
+    """The template's definition with the run settings its semester's assignments.yml
+    gives it - what `load_grading_spec` hands the site."""
+    return dataclasses.replace(grades.parse_grading_spec(text), **run)
 
 
 def _get_file_content(_org: str, _repo: str, path: str) -> str | None:
@@ -211,82 +199,120 @@ def _get_file_content(_org: str, _repo: str, path: str) -> str | None:
     return None
 
 
-def _lectures(hosted: dict) -> dict[str, str]:
-    """The `_lectures` collection: the four session states that render differently."""
-    released = schedule_plan.PlannedRow(
-        when=datetime(2026, 9, 7, 10, 0, tzinfo=BERLIN),
-        subtitle="What a neural network is",
-        details="Perceptrons, activation functions and the chain rule.",
-        readings_planned=True,
+def _copy(path: str) -> schedule.Deploy:
+    return schedule.Deploy(
+        course_source_repo=MATERIALS,
+        course_source_path=path,
+        semester_dest_repo=MATERIALS,
     )
-    pending_readings = schedule_plan.PlannedRow(
-        when=datetime(2026, 9, 14, 10, 0, tzinfo=BERLIN),
-        subtitle="Backpropagation",
-        readings_planned=True,
-    )
-    unreleased = schedule_plan.PlannedRow(
-        when=datetime(2026, 9, 21, 10, 0, tzinfo=BERLIN),
-        dests={f"{MATERIALS}/lectures/03_week-3": None},
-        subtitle="Convolutions",
-        details="Why weight sharing works.\n\nAnd where it does not.",
-        readings_planned=True,
-    )
-    lab = schedule_plan.PlannedRow(when=datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN))
-    return {
-        # Released, with a reading list inlined off the released READINGS.md overlay.
-        "session-01.md": site._lecture_entry(
-            COHORT_ORG,
-            "1",
-            released,
-            [
-                (MATERIALS, "lectures", "01_week-1"),
-                (MATERIALS, "readings", "01_week-1"),
-            ],
-            hosted=hosted,
+
+
+def _release(label: str, when: datetime, *paths: str, **kw) -> schedule.Release:
+    return schedule.Release(label, when, [_copy(p) for p in paths], **kw)
+
+
+# The release plan the rows come from, one entry per row state.
+SCHEDULE = schedule.Schedule(
+    semester_start=date(2026, 9, 7),
+    releases=[
+        # Silent, and all it lands is a root file: a course document, not a row.
+        _release(
+            "course-intro",
+            datetime(2026, 8, 31, 9, 0, tzinfo=BERLIN),
+            "SYLLABUS.md",
+            show_on_site=False,
         ),
-        # Released, but the plan's readings have not landed -> readings_pending.
-        "session-02.md": site._lecture_entry(
-            COHORT_ORG,
-            "2",
-            pending_readings,
-            [(MATERIALS, "lectures", "02_week-2")],
-            hosted=hosted,
+        # Silent readings a week ahead, numbered 1: joins lecture 1 (its list inlined,
+        # and lecture 1 listed on the Readings tab).
+        _release(
+            "readings-1",
+            datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),
+            "readings/01_week-1",
+            show_on_site=False,
+        ),
+        # A titled silent readings entry: its own unnumbered row, on the Readings tab only.
+        _release(
+            "extra-reading",
+            datetime(2026, 9, 2, 9, 0, tzinfo=BERLIN),
+            "readings/extra",
+            show_on_site=False,
+            title="Attention, further",
+        ),
+        # A drop-in whose one copy is a single file outside any session folder.
+        _release(
+            "clinic",
+            datetime(2026, 9, 4, 16, 0, tzinfo=BERLIN),
+            "clinic/notes.pdf",
+            kind="drop-in",
+            title="Project clinic",
+        ),
+        # Released, with a published deck beside an unpublished pdf.
+        _release(
+            "lecture-1",
+            datetime(2026, 9, 7, 10, 0, tzinfo=BERLIN),
+            "lectures/01_week-1",
+            title="What a neural network is",
+            details="Perceptrons, activation functions and the chain rule.",
+        ),
+        _release("lab-1", datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN), "labs/01_week-1"),
+        # Its readings are still to come: readings_pending on lecture 2.
+        _release(
+            "readings-2",
+            datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
+            "readings/02_week-2",
+            show_on_site=False,
+        ),
+        _release(
+            "lecture-2",
+            datetime(2026, 9, 14, 10, 0, tzinfo=BERLIN),
+            "lectures/02_week-2",
+            title="Backpropagation",
+        ),
+        # An exam kind: the Exams tab, which also lists the `events:` exams. Dated early,
+        # so it stays out of the Updates box the CI job checks (the seven newest).
+        _release(
+            "mock-exam",
+            datetime(2026, 8, 25, 10, 0, tzinfo=BERLIN),
+            "exams/mock.pdf",
+            kind="exam",
         ),
         # Nothing shipped -> unreleased, and the row names where it will land.
-        "session-03.md": site._lecture_entry(
-            COHORT_ORG,
-            "3",
-            unreleased,
-            [],
-            live_repos=frozenset({MATERIALS}),
-            hosted=hosted,
+        _release(
+            "lecture-3",
+            datetime(2026, 9, 21, 10, 0, tzinfo=BERLIN),
+            "lectures/03_week-3",
+            title="Convolutions",
+            details="Why weight sharing works.\n\nAnd where it does not.",
         ),
-        "lab-01.md": site._lecture_entry(
-            COHORT_ORG,
-            "1",
-            lab,
-            [(MATERIALS, "labs", "01_week-1")],
-            kind="lab",
-            hosted=hosted,
-        ),
-    }
+    ],
+)
+
+
+def _lectures() -> tuple[dict[str, str], list[str]]:
+    """The `_lectures` collection, through the sync's own row code, and the kinds it has."""
+    return site._site_rows(
+        SEMESTER_ORG,
+        schedule_plan.planned_rows(SCHEDULE),
+        frozenset(),
+        frozenset({MATERIALS}),
+    )
 
 
 def _assignments() -> dict[str, str]:
-    """Every way an assignment says where the work goes: one handed out (repo link, brief,
+    """Every way an assignment says where the work goes: one handed out (repo link,
     README-derived name), one still pending, one handed in off GitHub, one handed in off
     GitHub but not out yet, one whose repos are public, and one whose repos the students
     may publish themselves.
 
-    The external ones are handed out by their PIN rather than by a frozen cohort template:
+    The external ones are handed out by their PIN rather than by a frozen semester template:
     that handout creates no repos at all, so `handed_out` never carries their name and
-    `site._assignment_entry`'s other half is what publishes the brief."""
+    `site._assignment_entry`'s other half is what says they are out."""
     return {
         # The only one the plan NAMES, so the only one that can carry a declared
         # `details:` - which rides both its rows, the due row's copy nested a level in.
         "01-assignment-1.md": site._assignment_entry(
             COURSE_ORG,
-            COHORT_ORG,
+            SEMESTER_ORG,
             "assignment-1-f2026",
             datetime(2026, 10, 20, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN),
@@ -304,7 +330,7 @@ def _assignments() -> dict[str, str]:
         ),
         "02-assignment-2.md": site._assignment_entry(
             COURSE_ORG,
-            COHORT_ORG,
+            SEMESTER_ORG,
             "assignment-2-f2026",
             datetime(2026, 11, 24, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 11, 3, 9, 0, tzinfo=BERLIN),
@@ -312,7 +338,7 @@ def _assignments() -> dict[str, str]:
         ),
         "03-assignment-3.md": site._assignment_entry(
             COURSE_ORG,
-            COHORT_ORG,
+            SEMESTER_ORG,
             EXTERNAL,
             datetime(2026, 12, 8, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 9, 30, 9, 0, tzinfo=BERLIN),
@@ -320,7 +346,7 @@ def _assignments() -> dict[str, str]:
         ),
         "04-assignment-4.md": site._assignment_entry(
             COURSE_ORG,
-            COHORT_ORG,
+            SEMESTER_ORG,
             PUBLIC,
             datetime(2026, 12, 15, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN),
@@ -329,7 +355,7 @@ def _assignments() -> dict[str, str]:
         ),
         "05-assignment-5.md": site._assignment_entry(
             COURSE_ORG,
-            COHORT_ORG,
+            SEMESTER_ORG,
             EXTERNAL_PENDING,
             datetime(2026, 12, 22, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 11, 10, 9, 0, tzinfo=BERLIN),
@@ -341,7 +367,7 @@ def _assignments() -> dict[str, str]:
         # to eighth place and the contract failed on a page nothing here had touched.
         "06-assignment-6.md": site._assignment_entry(
             COURSE_ORG,
-            COHORT_ORG,
+            SEMESTER_ORG,
             STUDENT_CHOICE,
             datetime(2027, 1, 12, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),
@@ -350,19 +376,17 @@ def _assignments() -> dict[str, str]:
         ),
         "07-assignment-7.md": site._assignment_entry(
             COURSE_ORG,
-            COHORT_ORG,
+            SEMESTER_ORG,
             SHARED,
             datetime(2027, 1, 19, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 9, 2, 9, 0, tzinfo=BERLIN),
             handed_out=frozenset({"assignment-7"}),
             now=NOW,
         ),
-        # Out, and waiting for its teams: the brief is published, no `repo_url` is, and
-        # the `team_join_*` keys and the teams formed so far say what to do about it
-        # instead.
+        # Out, and waiting for its teams: the `team_join_*` keys say what to do about it.
         "08-assignment-8.md": site._assignment_entry(
             COURSE_ORG,
-            COHORT_ORG,
+            SEMESTER_ORG,
             GROUP_FORMING,
             datetime(2026, 11, 24, 23, 59, tzinfo=BERLIN),
             handout=FORMING_SCHEDULE.assignments[FORMING_KEY].handout_datetime,
@@ -394,15 +418,15 @@ def _events() -> dict[str, str]:
         "03-resit-exam.md": site._event_row(
             "exam", "Resit Exam", end, tbc=True, dateless=True
         ),
-        "term-start.md": site._term_date_entry("Term starts", date(2026, 9, 7)),
-        "term-end.md": site._term_date_entry("Term ends", end),
+        "term-start.md": site._term_date_entry("Semester starts", date(2026, 9, 7)),
+        "term-end.md": site._term_date_entry("Semester ends", end),
         # Inside its notice window and with a sentence, which is the only shape that
         # carries `announce: true` - the one row the Updates box takes off the schedule.
-        "cohort-archived.md": site._archive_entry(
+        "semester-archived.md": site._archive_entry(
             schedule.ArchiveRow(
                 when=archived,
                 details=(
-                    "This cohort goes read-only on {date}. You keep read access to "
+                    "This semester goes read-only on {date}. You keep read access to "
                     "everything."
                 ),
             ),
@@ -411,68 +435,59 @@ def _events() -> dict[str, str]:
     }
 
 
-def collections(hosted: dict) -> dict[str, dict[str, str]]:
+def collections() -> dict[str, dict[str, str]]:
     """The generated collections, front-matter stamp and all - exactly what
     `_sync_site_repo` writes into the site repo."""
     return {
-        "_lectures": _lectures(hosted),
+        "_lectures": _lectures()[0],
         "_assignments": _assignments(),
         "_events": _events(),
     }
 
 
-def data_files(hosted: dict) -> dict[str, str]:
+def data_files() -> dict[str, str]:
     """The generated `_data/*.yml`, keyed by repo-relative path."""
+    kinds = _lectures()[1]
     return {
+        "_data/kinds.yml": site_repo.kinds_yaml(),
         "_data/people.yml": site_repo.people_yaml(
-            COHORT_ORG, PEOPLE, edit_at=f"{COHORT_ORG}/classroom-config/people.yml"
+            SEMESTER_ORG,
+            PEOPLE,
+            edit_at=f"{SEMESTER_ORG}/semester-config/instructors.yml",
         ),
-        "_data/nav.yml": site_repo.nav_yaml(cohort=True),
-        "_data/materials.yml": site._materials_index(
-            COHORT_ORG,
-            [MATERIALS],
-            hosted,
-            syllabus=site_repo.Link(
+        "_data/nav.yml": site_repo.nav_yaml(semester=True, kinds=kinds),
+        "_data/materials.yml": site._home_data(
+            site_repo.Link(
                 "SYLLABUS.md",
-                f"https://github.com/{COHORT_ORG}/{MATERIALS}/blob/main/SYLLABUS.md",
+                f"https://github.com/{SEMESTER_ORG}/{MATERIALS}/blob/main/SYLLABUS.md",
             ),
         ),
+        "_data/console.yml": site_repo.console_yaml(SEMESTER_ORG),
     }
 
 
-def generated(
-    site_wd: Path | None = None,
-) -> dict[str, dict[str, str] | dict[str, dict[str, str]]]:
+def generated() -> dict[str, dict[str, str] | dict[str, dict[str, str]]]:
     """Everything the sync writes, with the gh reads stubbed out and put back.
 
     Reassigning the module globals rather than passing fakes down: `_repo_tree` is
     memoised and `get_file_content` is imported into `site`'s namespace, so this is the
-    seam every caller below actually goes through.
-
-    `site_wd` is a real site checkout to mirror the public copies into, so `files/` holds
-    what a live sync would put there and the built site serves the very copy its rows
-    link. Without one the mirror still runs, into a throwaway directory: what the rows say
-    is hosted has to come from the REAL `_mirror_public` either way, or the fixture would
-    claim a copy nothing ever made."""
+    seam every caller below actually goes through."""
     real_tree, real_content = site._repo_tree, site.get_file_content
-    real_spec, real_clone = site.load_grading_spec, site.clone
-    real_teams = site._formed_teams
+    real_spec, real_materials = site.load_grading_spec, site.read_materials
     site._repo_tree, site.get_file_content = _repo_tree, _get_file_content
-    site.load_grading_spec, site.clone = _grading_spec, _clone
-    site._formed_teams = _formed_teams
+    site.load_grading_spec = _grading_spec
+    site.read_materials = lambda _org, _repo: materials.Declared()
     try:
-        with tempfile.TemporaryDirectory() as work:
-            hosted = site._mirror_public(
-                site_wd or Path(work), COHORT_ORG, PUBLISH_POLICY
-            )
         return {
-            "collections": collections(hosted),
-            "files": {**data_files(hosted), **site_repo.theme_pages(cohort=True)},
+            "collections": collections(),
+            "files": {
+                **data_files(),
+                **site_repo.theme_pages(semester=True, kinds=_lectures()[1]),
+            },
         }
     finally:
         site._repo_tree, site.get_file_content = real_tree, real_content
-        site.load_grading_spec, site.clone = real_spec, real_clone
-        site._formed_teams = real_teams
+        site.load_grading_spec, site.read_materials = real_spec, real_materials
 
 
 # The overlay the offline build layers on top of the generated `_config.yml`. The primary
@@ -492,24 +507,13 @@ remote_theme: ""
 """
 
 
-def _clone(_org: str, repo: str, dest, branch=None, shallow=False) -> bool:
-    """A `ghcli.clone` stand-in: the cohort repo's released tree as real (tiny) files, so
-    the mirror below has bytes to copy. Every path of TREE, whether published or not - the
-    policy is what decides, and that decision is the code under test."""
-    for rel in TREE if repo == MATERIALS else ():
-        f = Path(dest) / rel
-        f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(f"fixture {rel}\n", encoding="utf-8")
-    return True
-
-
 def build(dest: Path) -> None:
     """Write the whole fixture site into `dest`, replacing whatever was there."""
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(HERE / "base", dest)
 
-    out = generated(dest)
+    out = generated()
     # Written through the sync's OWN apply step, so the site CI builds is assembled the
     # way a real one is - config upsert, collection regeneration, front-matter stamp and
     # all - rather than by a second copy of it here that can drift out of step.
@@ -523,7 +527,7 @@ def build(dest: Path) -> None:
                 ),
                 "course_semester": "Fall 2026",
                 "course_code": "E1234",
-                "github_org": COHORT_ORG,
+                "github_org": SEMESTER_ORG,
             },
             collections=out["collections"],
             files={**out["files"], **site_repo.site_templates()},

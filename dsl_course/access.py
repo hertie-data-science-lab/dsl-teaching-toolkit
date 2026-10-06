@@ -8,9 +8,11 @@ import json
 
 from .course import (
     AUDITORS_TEAM,
+    CONFIG_REPO,
     COURSE_ADMIN_TEAM,
     GRADEBOOK_PREFIX,
     INSTRUCTORS_TEAM,
+    JOIN_REPO,
     STUDENTS_TEAM,
 )
 from .discovery import classify_repos
@@ -71,21 +73,21 @@ def grant_team_repo_access(
 # owner hand-granting each new repo.
 COURSE_TEAM_ACCESS = {INSTRUCTORS_TEAM: "push", COURSE_ADMIN_TEAM: "admin"}
 
-# Faculty access to a repo a cohort RECEIVES per person - a submission repo, a gradebook.
+# Faculty access to a repo a semester RECEIVES per person - a submission repo, a gradebook.
 # An edit made there is not durable and looks like one that stuck (a gradebook is rewritten
-# from `classroom-config/grading_sheets/`), so the grant sites say where each one's truth
+# from `semester-config/grading_sheets/`), so the grant sites say where each one's truth
 # actually lives. Released materials used to be in this list and no longer are: a release
 # merges rather than copies over, so an edit there survives (see `deploy._merge_and_push`).
 # `course-admin` stays admin throughout: it is the org's owner of last resort, and read
 # access cannot fix a broken repo.
 FACULTY_READ_ACCESS = {INSTRUCTORS_TEAM: "pull", COURSE_ADMIN_TEAM: "admin"}
 
-# The cohort repos faculty AUTHOR in - the only cohort repos this FLOOR gives write.
-# Everything else in a cohort org has its source of truth elsewhere and takes
+# The semester repos faculty AUTHOR in - the only semester repos this FLOOR gives write.
+# Everything else in a semester org has its source of truth elsewhere and takes
 # FACULTY_READ_ACCESS. `.github` is here because GitHub requires write on a repo to trigger
 # a workflow_dispatch at all. A release DEST also ends up at push, granted by every release
 # rather than by this floor: the two agree because the sweep only ever raises.
-COHORT_WRITE_REPOS = frozenset({".github", "welcome", "classroom-config"})
+SEMESTER_WRITE_REPOS = frozenset({".github", JOIN_REPO, CONFIG_REPO})
 
 # GitHub's repo permissions, weakest first, in the vocabulary a PUT takes (`permission=`).
 # A team-repos LISTING answers in a different one (`role_name`: read/write/...) - which is
@@ -97,19 +99,26 @@ def faculty_floor(
     repo: str, tier: str | None, protected: frozenset[str] = frozenset()
 ) -> dict[str, str]:
     """The faculty teams' MINIMUM grant on `repo`: write where faculty AUTHOR (every repo
-    of a course org, the COHORT_WRITE_REPOS of a cohort), read everywhere else.
+    of a course org, the SEMESTER_WRITE_REPOS of a semester), read everywhere else.
 
     `tier` is `discovery.org_tier`, and None - a listing that cannot place the org - reads
-    as a cohort: only a listing that positively says "course" earns the write-everywhere
+    as a semester: only a listing that positively says "course" earns the write-everywhere
     floor. `protected` names the per-student repos (discovery.student_repo_names), which
     take the READ floor whatever the tier says - so a mis-told tier can under-grant a
     course org, but can never hand instructors push on a student's submission or
     gradebook."""
     if repo in protected:
         return FACULTY_READ_ACCESS
-    if tier == "course" or repo in COHORT_WRITE_REPOS:
+    if tier == "course" or repo in SEMESTER_WRITE_REPOS:
         return COURSE_TEAM_ACCESS
     return FACULTY_READ_ACCESS
+
+
+def holds(held: dict[str, str | None] | None, team: str, permission: str) -> bool:
+    """Whether `held` (`repo_team_permissions`) shows `team` at `permission` or above - so
+    a grant would change nothing (and a lower one would demote). False when unknown."""
+    have = (held or {}).get(team.casefold())
+    return bool(have) and _PERM_RANK[have] >= _PERM_RANK[permission]
 
 
 def grant_faculty(
@@ -119,47 +128,60 @@ def grant_faculty(
     *,
     missing_is_note: bool = False,
     person: bool = False,
+    held: dict[str, str | None] | None = None,
 ) -> None:
     """Give the faculty teams `access` - COURSE_TEAM_ACCESS where they author,
     FACULTY_READ_ACCESS where the source of truth is elsewhere - on one repo, at the point
     it is created.
 
     `missing_is_note` for the per-student hot path (every gradebook, every submission
-    repo): a cohort whose faculty teams are not there yet must not print two errors per
-    student, and `converge_faculty_access` repairs the grant on the next sweep."""
+    repo): a semester whose faculty teams are not there yet must not print two errors per
+    student, and `converge_faculty_access` repairs the grant on the next sweep.
+
+    `held` is the repo's team grants when the caller read them (`repo_team_permissions`):
+    a team already at `perm` or above is left alone rather than PUT again."""
     for team, perm in access.items():
+        if holds(held, team, perm):
+            continue
         grant_team_repo_access(
             org, team, repo, perm, missing_is_note=missing_is_note, person=person
         )
 
 
 def grant_tagged_team_access(course_org: str, repo: str, tag: str) -> None:
-    """Give this tag's cohort-declared instructors team (`instructors-<tag>`) push
+    """Give this tag's semester-declared instructors team (`instructors-<tag>`) push
     access on `repo` - scoped to just that tag's own content, unlike the standing
     COURSE_TEAM_ACCESS grant every repo gets. No course-admin-<tag> variant: admin
     access stays on the single, course-wide `course-admin` team.
 
     Ensures the team exists first (idempotent) - callable in either order, whether
-    a tag's content repo is scaffolded before or after its cohort first declares
+    a tag's content repo is scaffolded before or after its semester first declares
     instructors."""
     team = f"{INSTRUCTORS_TEAM}-{tag}"
-    create_team(course_org, team, f"Instructors for {tag} (cohort-declared)")
+    create_team(course_org, team, f"Instructors for {tag} (semester-declared)")
     grant_team_repo_access(course_org, team, repo, "push")
 
 
-# The cohort-org role teams that get read on released content.
+# The semester-org role teams that get read on released content.
 READ_TEAMS = (STUDENTS_TEAM, AUDITORS_TEAM)
 
 
-def grant_read_teams(cohort_org: str, repo: str) -> None:
-    """Give both cohort role teams read on a released repo.
+def grant_read_teams(
+    semester_org: str, repo: str, held: dict[str, str | None] | None = None
+) -> None:
+    """Give both semester role teams read on a released repo.
 
     Auditors see exactly what enrolled students see once it's released - the split is
     assignments and grades, not content - so every release grant covers both teams. A
     missing team is a note, not an error: an org can be released into before its teams
-    exist, and the next release (or Sync membership) fixes it."""
+    exist, and the next release (or Sync membership) fixes it. `held`: as `grant_faculty`."""
     for team in READ_TEAMS:
-        if grant_team_repo_access(cohort_org, team, repo, "pull", missing_is_note=True):
+        # EXACTLY read, not "read or above": the floor that never demotes is faculty's.
+        # A role team holding more than read is corrected by the PUT, as every release
+        # always did.
+        if (held or {}).get(team.casefold()) == "pull" or grant_team_repo_access(
+            semester_org, team, repo, "pull", missing_is_note=True
+        ):
             log_ok(f"{team} team -> read")
 
 
@@ -200,6 +222,29 @@ def team_repo_access(org: str, team: str) -> dict[str, str | None] | None:
             f"unparseable repo listing for {org}/{team}: {out[:200]}"
         ) from exc
     return {r["name"]: _strongest_permission(r["permissions"]) for r in rows}
+
+
+def repo_team_permissions(org: str, repo: str) -> dict[str, str | None] | None:
+    """`{team slug (casefolded): strongest permission}` on ONE repo, PUT vocabulary, off
+    one listing - or None when it could not be read, which callers answer by granting as
+    before. For a repo every tick visits (a release dest), where the grants it converges
+    are almost always already there."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"repos/{org}/{repo}/teams?per_page=100",
+        "--jq",
+        ".[] | {slug, permissions: (.permissions // {})}",
+    )
+    if code != 0:
+        return None
+    try:
+        rows = [json.loads(line) for line in out.splitlines() if line.strip()]
+    except json.JSONDecodeError:
+        return None
+    return {
+        str(r["slug"]).casefold(): _strongest_permission(r["permissions"]) for r in rows
+    }
 
 
 def repo_teams(org: str, repo: str) -> frozenset[str] | None:
@@ -248,7 +293,7 @@ def converge_faculty_access(
     refuses the PUT).
 
     Cost: `2 * ceil(N/100)` GETs for a converged org; the FIRST sweep of an unconverged
-    org is one PUT per missing grant (a 300-repo cohort: ~600 sequential PUTs, which may
+    org is one PUT per missing grant (a 300-repo semester: ~600 sequential PUTs, which may
     trip the secondary rate limit and crawl through gh()'s backoff - it self-heals, the
     next night finishes)."""
     changed = 0
@@ -298,7 +343,7 @@ def converge_faculty_access(
 
 
 def converge_topics(org: str, repos: list[dict], tier: str | None) -> Converged:
-    """Stamp the machinery topics missing from a COHORT org's per-student repos.
+    """Stamp the machinery topics missing from a SEMESTER org's per-student repos.
 
     `submission` (plus the template's own name) on `<template>-<handle>`, `gradebook` on
     `grades-<handle>` - exactly what assign.py and grades.py stamp at creation. That stamp
@@ -312,12 +357,12 @@ def converge_topics(org: str, repos: list[dict], tier: str | None) -> Converged:
     ADDITIVE, and only where something is missing: the PUT replaces the whole topic list,
     so whatever else a repo carries is read off the listing and written back with it, and
     a repo already carrying its topics costs no call at all. Only a listing that says
-    "cohort" is swept: a course org has neither repo kind, and an unplaceable one is not
+    "semester" is swept: a course org has neither repo kind, and an unplaceable one is not
     worth a PATCH per repo on a guess.
 
     Costs no reads (the caller's listing carries `topics` and `isTemplate`) and raises
     nothing: set_repo_topics logs its own failure, and this counts it."""
-    if tier != "cohort":
+    if tier != "semester":
         return Converged()
     derived = classify_repos(repos)
     changed = 0

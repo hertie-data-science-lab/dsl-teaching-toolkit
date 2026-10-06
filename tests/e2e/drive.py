@@ -52,7 +52,7 @@ ACTIVE_STATUSES = frozenset(
 POLL_SECONDS = 10
 # A grading tick clones and tests every submission repo, and one tick of this harness's
 # run now hands out FIVE assignments - one per submission shape - each of which re-syncs
-# the cohort site. The seeded job's own budget is far longer; this is the ceiling past
+# the semester site. The seeded job's own budget is far longer; this is the ceiling past
 # which something is wrong rather than slow.
 RUN_TIMEOUT_SECONDS = 1800
 # Between the POST and the run appearing in the listing.
@@ -181,14 +181,14 @@ def wait_for_push_driven_tick(
     appear: int = DISPATCH_TIMEOUT_SECONDS,
     timeout: int = RUN_TIMEOUT_SECONDS,
 ) -> int | None:
-    """Wait out the Scheduled release a cohort's own schedule.yml push starts.
+    """Wait out the Scheduled release a semester's own schedule.yml push starts.
 
-    A cohort's seeded `dispatch-scheduled-release.yml` fires the course org's Scheduled
+    A semester's seeded `dispatch-scheduled-release.yml` fires the course org's Scheduled
     release from every push to its schedule.yml, so this harness's schedule edits now
     drive the scheduler themselves. That run does exactly the work the pass dispatched
     next does, and it is idempotent - what it must not do is arrive in the middle of the
     stage after it. Returns the run id it waited on, or None when none appeared: the
-    dispatcher is only in cohorts that have refreshed since it shipped, and its absence
+    dispatcher is only in semesters that have refreshed since it shipped, and its absence
     is not what this test is about."""
     deadline = _now() + appear
     while True:

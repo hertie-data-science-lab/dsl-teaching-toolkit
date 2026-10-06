@@ -15,8 +15,9 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
+from conftest import issue_row
 
-from dsl_course import cadence, course, issues
+from dsl_course import cadence, course, ghcli, issues, settings
 from dsl_course.schedule import AssignmentEntry, Deploy, Release, Schedule
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -154,12 +155,12 @@ def test_prev_executed_ignores_a_cancelled_run_and_a_manual_dispatch():
     assert v.gap == timedelta(minutes=90)
 
 
-def test_a_run_scoped_to_one_cohort_is_no_tick_of_the_course():
-    # A classroom-config push's run releases into ONE cohort. Counted, it would shrink the
-    # gap another cohort's late release is measured by - and date the dispatcher, which it
+def test_a_run_scoped_to_one_semester_is_no_tick_of_the_course():
+    # A semester-config push's run releases into ONE semester. Counted, it would shrink the
+    # gap another semester's late release is measured by - and date the dispatcher, which it
     # is not. Its `run-name` says what it was; that is all the listing shows.
     scoped = _run(5, run_id=2) | {
-        "display_title": f"{course.SCOPED_RUN_TITLE} Cohort-A"
+        "display_title": f"{course.SCOPED_RUN_TITLE} Semester-A"
     }
     v = _evaluate([scoped, _run(150, run_id=3)])
     assert v.prev_executed_at == NOW - timedelta(minutes=150)
@@ -203,8 +204,18 @@ def test_a_malformed_row_does_not_take_the_check_out():
 # ---------------------------------------------------------------------------- late items
 
 
+@pytest.fixture(autouse=True)
+def _no_late_window(monkeypatch):
+    """The plans below take no late work: the late cutoff (the snapshot moment) is the due
+    date itself. The window is a run setting (`settings`), so it is set there."""
+    ours = settings.institution_defaults()
+    monkeypatch.setattr(
+        settings, "institution_defaults", lambda: {**ours, "late_window_days": 0}
+    )
+
+
 def _plan() -> tuple[list[Release], Schedule]:
-    """A cohort plan whose moments straddle the gap: one deploy at 09:00 Berlin (= 07:00
+    """A semester plan whose moments straddle the gap: one deploy at 09:00 Berlin (= 07:00
     UTC, five hours before NOW), a handout, a grading pin and a solution."""
     sched = Schedule(
         releases=[
@@ -249,7 +260,7 @@ def test_late_items_only_reports_moments_that_fell_in_this_gap():
     assert labels == [
         "releases.lecture_02 -> deploy[1]",  # 09:00 Berlin, the earliest
         "assignments.assignment-1 handout",  # 09:30
-        "assignments.assignment-1 snapshot",  # 10:00 (due_datetime, no grading pin)
+        "assignments.assignment-1 snapshot",  # 10:00 (due_datetime, no late window)
         "assignments.assignment-1 solution",  # 10:30
         "releases.lecture_02 -> deploy[0]",  # 11:00, the entry's own event_datetime
     ]
@@ -317,7 +328,7 @@ def test_neither_handout_nor_solution_is_reported_without_a_synthesised_release(
 
 
 def test_a_late_label_names_a_yaml_field_and_never_a_repo_or_a_person():
-    # The cohort issue is private, but the same labels reach the run log of a PUBLIC repo,
+    # The semester issue is private, but the same labels reach the run log of a PUBLIC repo,
     # and `describe()` output would name the course org's template repos.
     releases, sched = _plan()
     items = cadence.late_items(releases, sched, NOW - timedelta(days=1), NOW)
@@ -393,7 +404,9 @@ def test_a_disarmed_verdict_with_no_open_issue_writes_nothing_anywhere(stub, cap
     v = _verdict(armed=False, ds01_dead=False, last_dispatch_at=None)
     assert cadence.report_course("Course-Org", v) == 0
     assert (
-        cadence.report_cohort("Course-Org", "Cohort-f2026", v, [_item("releases.a")])
+        cadence.report_semester(
+            "Course-Org", "Semester-f2026", v, [_item("releases.a")]
+        )
         == 0
     )
     assert (s.upserted, s.closed) == ([], [])
@@ -443,13 +456,13 @@ def _driver_body(verdict: cadence.Verdict) -> str:
 
 def test_the_driver_body_carries_only_timestamps_and_minutes():
     # This issue lives in a WORLD-READABLE repo, so the body is held to workflow names,
-    # timestamps, minutes and thresholds - nothing that says who is in the cohort.
+    # timestamps, minutes and thresholds - nothing that says who is in the semester.
     body = _driver_body(
         _verdict(ds01_dead=True, last_dispatch_at=NOW - timedelta(minutes=180))
     )
     assert cadence.read_state(body) == {"dispatch": cadence.DISPATCH_STALE}
     assert body.strip().endswith("-->")  # the marker is last, out of the reader's way
-    for leak in ("classroom-config/", "-anna", "grades-"):
+    for leak in ("semester-config/", "-anna", "grades-"):
         assert leak not in body
 
 
@@ -533,33 +546,33 @@ def test_an_exception_inside_the_check_is_counted_never_raised(monkeypatch, caps
     assert "driver health" in capsys.readouterr().err
 
 
-def test_a_cohort_exception_is_counted_never_raised(monkeypatch, capsys):
+def test_a_semester_exception_is_counted_never_raised(monkeypatch, capsys):
     def boom(*a, **k):
         raise RuntimeError("GitHub is having a day")
 
     monkeypatch.setattr(cadence, "find_issue", boom)
     v = _verdict(recent_gaps=[])
-    assert cadence.report_cohort("Course-Org", "Cohort-f2026", v, [_item("a")]) == 1
+    assert cadence.report_semester("Course-Org", "Semester-f2026", v, [_item("a")]) == 1
     assert "late deliveries" in capsys.readouterr().err
 
 
 # ---- late delivery
 
 
-def test_late_items_open_the_issue_in_the_private_classroom_config(stub):
+def test_late_items_open_the_issue_in_the_private_semester_config(stub):
     s = stub()
     items = [
         _item("releases.lecture_02 -> deploy[0]", 132),
         _item("assignments.a1 snapshot", 95),
     ]
     v = _verdict(prev_executed_at=NOW - timedelta(minutes=140), recent_gaps=[])
-    assert cadence.report_cohort("Course-Org", "Cohort-f2026", v, items) == 0
+    assert cadence.report_semester("Course-Org", "Semester-f2026", v, items) == 0
     (repo, title, body, comment) = s.upserted[0]
-    assert repo == "Cohort-f2026/classroom-config"
+    assert repo == "Semester-f2026/semester-config"
     assert title == cadence.LATE_TITLE
     assert "`releases.lecture_02 -> deploy[0]`: due " in body
     assert "(+132 min)" in body
-    assert "cc @Cohort-f2026/instructors" in body
+    assert "cc @Semester-f2026/instructors" in body
     assert comment is not None
     assert cadence.read_state(body) == {
         "items": ["assignments.a1 snapshot", "releases.lecture_02 -> deploy[0]"]
@@ -568,21 +581,26 @@ def test_late_items_open_the_issue_in_the_private_classroom_config(stub):
 
 def test_only_an_item_the_body_does_not_already_list_earns_a_comment(stub):
     body = cadence._late_body(
-        "Course-Org", "Cohort-f2026", _verdict(), [_item("releases.a")]
+        "Course-Org", "Semester-f2026", _verdict(), [_item("releases.a")]
     )
     s = stub(existing=(7, body))
     v = _verdict(recent_gaps=[])
     # the same item again: refreshed, and silent
     assert (
-        cadence.report_cohort("Course-Org", "Cohort-f2026", v, [_item("releases.a")])
+        cadence.report_semester(
+            "Course-Org", "Semester-f2026", v, [_item("releases.a")]
+        )
         == 0
     )
     assert s.upserted[0][3] is None
     # a second, different item: one comment, naming only the new one
     s = stub(existing=(7, body))
     assert (
-        cadence.report_cohort(
-            "Course-Org", "Cohort-f2026", v, [_item("releases.a"), _item("releases.b")]
+        cadence.report_semester(
+            "Course-Org",
+            "Semester-f2026",
+            v,
+            [_item("releases.a"), _item("releases.b")],
         )
         == 0
     )
@@ -595,15 +613,15 @@ def test_nothing_late_but_no_proven_cadence_leaves_the_issue_open(stub):
     # issue on the next late moment, twice an hour.
     s = stub(existing=(7, "body"))
     v = _verdict(recent_gaps=[timedelta(minutes=15), timedelta(minutes=200)])
-    assert cadence.report_cohort("Course-Org", "Cohort-f2026", v, []) == 0
+    assert cadence.report_semester("Course-Org", "Semester-f2026", v, []) == 0
     assert (s.upserted, s.closed) == ([], [])
 
 
 def test_eight_healthy_gaps_close_the_late_delivery_issue(stub):
     s = stub(existing=(7, "body"))
-    assert cadence.report_cohort("Course-Org", "Cohort-f2026", _verdict(), []) == 0
+    assert cadence.report_semester("Course-Org", "Semester-f2026", _verdict(), []) == 0
     ((repo, title, comment),) = s.closed
-    assert (repo, title) == ("Cohort-f2026/classroom-config", cadence.LATE_TITLE)
+    assert (repo, title) == ("Semester-f2026/semester-config", cadence.LATE_TITLE)
     assert str(cadence.HEALTHY_GAPS) in comment
 
 
@@ -615,7 +633,7 @@ def test_this_ticks_own_gap_counts_towards_the_close(stub):
     limped_in = _verdict(prev_executed_at=NOW - timedelta(hours=3))
     assert limped_in.gap == timedelta(hours=3)
     assert limped_in.healthy is False
-    assert cadence.report_cohort("Course-Org", "Cohort-f2026", limped_in, []) == 0
+    assert cadence.report_semester("Course-Org", "Semester-f2026", limped_in, []) == 0
     assert (s.upserted, s.closed) == ([], [])
 
 
@@ -636,18 +654,18 @@ def test_no_previous_tick_at_all_is_not_good_news():
     assert _verdict(prev_executed_at=None).healthy is False
 
 
-def test_a_cohort_dry_run_writes_nothing(stub):
+def test_a_semester_dry_run_writes_nothing(stub):
     s = stub()
     v = _verdict(recent_gaps=[])
     assert (
-        cadence.report_cohort(
-            "Course-Org", "Cohort-f2026", v, [_item("releases.a")], dry_run=True
+        cadence.report_semester(
+            "Course-Org", "Semester-f2026", v, [_item("releases.a")], dry_run=True
         )
         == 0
     )
     assert (
-        cadence.report_cohort(
-            "Course-Org", "Cohort-f2026", _verdict(), [], dry_run=True
+        cadence.report_semester(
+            "Course-Org", "Semester-f2026", _verdict(), [], dry_run=True
         )
         == 0
     )
@@ -657,7 +675,7 @@ def test_a_cohort_dry_run_writes_nothing(stub):
 def test_a_write_that_failed_is_counted(stub):
     s = stub(rc=1)
     v = _verdict(recent_gaps=[])
-    assert cadence.report_cohort("Course-Org", "Cohort-f2026", v, [_item("a")]) == 1
+    assert cadence.report_semester("Course-Org", "Semester-f2026", v, [_item("a")]) == 1
     assert len(s.upserted) == 1
 
 
@@ -691,3 +709,47 @@ def test_own_run_id_comes_from_the_actions_environment(monkeypatch):
     assert cadence.own_run_id() is None
     monkeypatch.setenv("GITHUB_RUN_ID", "17")
     assert cadence.own_run_id() == "17"
+
+
+# ---- the API budget
+
+
+def _budget(remaining: int) -> ghcli.Budget:
+    # 1_790_000_400 is 14:20Z.
+    return ghcli.Budget("dsl-bot", 5000, remaining, 5000 - remaining, 1_790_000_400)
+
+
+def test_a_tick_that_starts_under_a_quarter_opens_the_budget_issue(gh):
+    fake = gh([])
+    assert cadence.report_budget("Course-Org", _budget(1249)) == 0
+    (created,) = fake.did("issue", "create")
+    assert created[created.index("--repo") + 1] == "Course-Org/.github"
+    assert created[created.index("--title") + 1] == cadence.BUDGET_TITLE
+    body = fake.body_of("issue", "create")
+    assert "1249 of 5000" in body and "14:20Z" in body
+
+
+def test_a_standing_budget_issue_is_rewritten_not_repeated(gh):
+    fake = gh([issue_row(4, cadence.BUDGET_TITLE, "older numbers")])
+    assert cadence.report_budget("Course-Org", _budget(300)) == 0
+    assert fake.did("issue", "create") == fake.did("issue", "comment") == []
+    assert "300 of 5000" in fake.body_of("issue", "edit")
+
+
+def test_between_a_quarter_and_a_half_whatever_stands_stands(gh):
+    fake = gh([issue_row(4, cadence.BUDGET_TITLE)])
+    assert cadence.report_budget("Course-Org", _budget(2000)) == 0
+    assert fake.calls == []
+
+
+def test_a_tick_that_starts_over_half_closes_it(gh):
+    fake = gh([issue_row(4, cadence.BUDGET_TITLE)])
+    assert cadence.report_budget("Course-Org", _budget(2501)) == 0
+    (closed,) = fake.did("issue", "close")
+    assert closed[2] == "4" and "2501 of 5000" in closed[closed.index("--comment") + 1]
+
+
+def test_no_start_reading_reports_nothing(gh):
+    fake = gh([])
+    assert cadence.report_budget("Course-Org", None) == 0
+    assert fake.calls == []

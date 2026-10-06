@@ -13,9 +13,9 @@ import pytest
 
 from dsl_course import pulls
 
-REPO = "Cohort-f2026/materials"
+REPO = "Semester-f2026/materials"
 HEAD = "upstream"
-CREATED_URL = "https://github.com/Cohort-f2026/materials/pull/7"
+CREATED_URL = "https://github.com/Semester-f2026/materials/pull/7"
 
 
 def _row(number: int, head: str, fork: bool = False, base: str = "main") -> dict:
@@ -186,17 +186,17 @@ def test_the_lookup_asks_for_more_than_the_default_page(gh_pr):
 
 def test_the_reviewer_is_requested_on_the_pr_this_run_opened(gh_pr):
     fake = gh_pr([])
-    assert _upsert(reviewer="Cohort-f2026/instructors").url == CREATED_URL
+    assert _upsert(reviewer="Semester-f2026/instructors").url == CREATED_URL
     (edit,) = fake.did("pr", "edit")
     assert edit[2] == "7"  # the number parsed out of what `gh pr create` printed
-    assert edit[edit.index("--add-reviewer") + 1] == "Cohort-f2026/instructors"
+    assert edit[edit.index("--add-reviewer") + 1] == "Semester-f2026/instructors"
 
 
 def test_a_review_request_that_did_not_stick_still_keeps_the_pr(gh_pr):
     # Whether a TEAM can be requested at all depends on the org's plan. The PR is the
     # thing that matters; a release must not go red because the request bounced.
     gh_pr([], edit_code=1)
-    assert _upsert(reviewer="Cohort-f2026/instructors") == pulls.Upserted(
+    assert _upsert(reviewer="Semester-f2026/instructors") == pulls.Upserted(
         0, CREATED_URL
     )
 
@@ -204,7 +204,7 @@ def test_a_review_request_that_did_not_stick_still_keeps_the_pr(gh_pr):
 def test_an_adopted_pr_is_not_re_requested(gh_pr):
     # The reviewers a human has since dismissed are their decision.
     fake = gh_pr([_row(4, HEAD)])
-    assert _upsert(reviewer="Cohort-f2026/instructors").errors == 0
+    assert _upsert(reviewer="Semester-f2026/instructors").errors == 0
     assert fake.did("pr", "edit") == []
 
 

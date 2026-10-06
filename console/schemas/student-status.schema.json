@@ -1,0 +1,473 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "announcements": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "when": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "when",
+          "title",
+          "details"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "archive_datetime": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "assignments": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "brief": {
+            "type": "string"
+          },
+          "cutoff_sentence": {
+            "type": "string"
+          },
+          "due_datetime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "grading_cutoff_datetime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "group": {
+            "type": "boolean"
+          },
+          "handed_out": {
+            "type": "boolean"
+          },
+          "handout_datetime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "late_rule": {
+            "type": "string"
+          },
+          "max_points": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "private_repo": {
+            "type": "boolean"
+          },
+          "shape": {
+            "type": "string"
+          },
+          "shape_note": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "solution_datetime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "submit_url": {
+            "type": "string"
+          },
+          "submit_via": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "tbc": {
+            "type": "boolean"
+          },
+          "team_formation": {
+            "additionalProperties": false,
+            "properties": {
+              "closes_datetime": {
+                "type": "string"
+              },
+              "max_team_size": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "closes_datetime",
+              "max_team_size"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "teams": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cap": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "members": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "members",
+                "cap"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "title",
+          "subtitle",
+          "handout_datetime",
+          "due_datetime",
+          "grading_cutoff_datetime",
+          "late_rule",
+          "cutoff_sentence",
+          "submit_via",
+          "shape",
+          "shape_note",
+          "private_repo",
+          "submit_url",
+          "group",
+          "team_formation",
+          "teams",
+          "solution_datetime",
+          "max_points",
+          "handed_out",
+          "brief",
+          "tbc"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "course_name": {
+      "type": "string"
+    },
+    "home_markdown": {
+      "type": "string"
+    },
+    "instructors": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "picture": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "instructor",
+              "teaching_assistant"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "webpage": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "title",
+          "webpage",
+          "picture",
+          "role",
+          "email"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "kinds": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "background": {
+            "type": "string"
+          },
+          "colour": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "colour",
+          "background"
+        ],
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "late_policy": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "materials_index": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "repo": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "paths"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "materials_repos": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "rows": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "all_day": {
+            "type": "boolean"
+          },
+          "assignment": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "details": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "links": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "repo": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "repo",
+                "path",
+                "url"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "number": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "off_schedule": {
+            "type": "boolean"
+          },
+          "reading_list": {
+            "type": "string"
+          },
+          "readings": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "repo": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "repo",
+                "path",
+                "url"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "readings_pending": {
+            "type": "boolean"
+          },
+          "released": {
+            "type": "boolean"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "tbc": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          },
+          "when": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "number",
+          "when",
+          "all_day",
+          "title",
+          "subtitle",
+          "details",
+          "assignment",
+          "released",
+          "tbc",
+          "off_schedule",
+          "links",
+          "readings",
+          "reading_list",
+          "readings_pending"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema": {
+      "enum": [
+        "dsl.student-status/1"
+      ]
+    },
+    "semester": {
+      "type": "string"
+    },
+    "syllabus": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo",
+        "path"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "term_label": {
+      "type": "string"
+    },
+    "timezone": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "semester",
+    "course_name",
+    "term_label",
+    "timezone",
+    "archive_datetime",
+    "home_markdown",
+    "syllabus",
+    "kinds",
+    "rows",
+    "assignments",
+    "instructors",
+    "late_policy",
+    "materials_repos",
+    "materials_index",
+    "announcements"
+  ],
+  "title": "student-status.json",
+  "type": "object"
+}

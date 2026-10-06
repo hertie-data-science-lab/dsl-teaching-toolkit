@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "autograde": {
+      "type": "boolean"
+    },
+    "completion_check": {
+      "type": "boolean"
+    },
+    "formats": {
+      "oneOf": [
+        {
+          "items": {
+            "enum": [
+              "ipynb",
+              "py",
+              "rmd",
+              "qmd",
+              "latex",
+              "none"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "grader_pdf": {
+      "type": "boolean"
+    },
+    "questions": {
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "points": {
+                "type": [
+                  "string",
+                  "number"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        ]
+      },
+      "type": "object"
+    },
+    "submit_via": {
+      "enum": [
+        "assignment_repo",
+        "shared_dropbox_repo",
+        "external"
+      ],
+      "type": "string"
+    },
+    "tests": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "type": {
+      "enum": [
+        "individual",
+        "group"
+      ],
+      "type": "string"
+    }
+  },
+  "title": "grading_config.yml",
+  "type": "object"
+}

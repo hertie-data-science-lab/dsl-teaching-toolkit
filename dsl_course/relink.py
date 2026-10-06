@@ -12,7 +12,8 @@ The stored `github_id` is the pending marker, written LAST; every step is idempo
 (old, new), so a run that stops anywhere is finished by the next. Nothing is deleted:
 anything a person wrote on both sides is a REFUSAL, held until faculty settle it. The
 config commit is compare-and-set, and the old account leaves the org only as a plain
-member in no faculty team. Not moved: drop-box folders, `snapshots/`, receipts text.
+member in no faculty team. Not moved: drop-box folders, `.system/snapshots/`, Submission
+receipts text.
 """
 
 from __future__ import annotations
@@ -24,17 +25,18 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from . import roster, schedule, teams
+from . import records, roster, schedule, teams
 from .collect import AUTOGRADE_DIR
 from .course import (
     COURSE_ADMIN_TEAM,
     GRADEBOOK_PREFIX,
     INSTRUCTORS_TEAM,
+    JOIN_REPO,
     submission_repo,
     submission_suffix,
     unit_permission,
 )
-from .discovery import classify_repos, course_org_for_cohort
+from .discovery import classify_repos, course_org_for_semester
 from .enrol_codes import write_column
 from .faults import Unusable
 from .gh_contents import (
@@ -63,8 +65,8 @@ from .grades import (
     INFO_KEY,
     SHEETS_DIR,
     SheetUnreadable,
-    _blank,
     dump_distributed,
+    is_blank,
     key_lines,
     parse_distributed,
     parse_sheet,
@@ -82,11 +84,10 @@ from .repos import (
 from .sync_roster import revoke_repo_grants
 
 MAX_PER_PASS = 3
-RELINKS_DIR = "enrolment/relinks"
+RELINKS_DIR = records.path("enrolment", "relinks")
 ASIDE_PREFIX = "relink-aside-"
-WELCOME_REPO = "welcome"
 THROTTLE_LABEL = "needs-review"
-# Onboard's own commit message for a binding (templates/welcome/onboard.yml). The relink
+# Onboard's own commit message for a binding (templates/join/onboard.yml). The relink
 # writes the same prefix, so a pair the toolkit linked is always recognisable as one.
 LINK_MESSAGE = "roster: link @{handle} (id {user_id})"
 _CLOSE_COMMENT = (
@@ -329,9 +330,9 @@ def _move_repos(
 
 
 def _unit_permissions(org: str) -> dict[str, str]:
-    """`{cohort template: the grant its units get}`, by provisioning's own rule off each
+    """`{semester template: the grant its units get}`, by provisioning's own rule off each
     assignment's `grading_config.yml`."""
-    specs = sheet_specs(course_org_for_cohort(org), schedule.load(org))
+    specs = sheet_specs(course_org_for_semester(org), schedule.load(org))
     return {name: unit_permission(spec.visibility) for name, spec in specs.items()}
 
 
@@ -371,7 +372,7 @@ def _unmarked(entry: object) -> bool:
     """Nothing a person typed: blank apart from the toolkit's own `info:`."""
     if isinstance(entry, dict):
         entry = {k: v for k, v in entry.items() if k != INFO_KEY}
-    return _blank(entry)
+    return is_blank(entry)
 
 
 _KEY_LINE = re.compile(r"^(\s*)(['\"]?)(.+?)\2:(\s|$)")
@@ -491,7 +492,7 @@ def _rekey_distributed(text: str, old: str, new: str) -> str | None:
 def _config_changes(
     org: str, p: Pending
 ) -> tuple[dict[str, bytes], list[str], tuple[str, str] | None]:
-    """Everything in classroom-config that names the old login, rewritten for the new one:
+    """Everything in semester-config that names the old login, rewritten for the new one:
     `(files to write, paths to remove, the commit they were read at)`. Raises `Refused`
     for a collision. The commit goes to `put_files` as its `base`, so a write that landed
     after this read makes the commit fail rather than be overwritten."""
@@ -504,7 +505,7 @@ def _config_changes(
     def read(path: str) -> bytes:
         content = get_blob(org, config, live[path])
         if content is None:
-            raise RuntimeError("a classroom-config file changed while it was read")
+            raise RuntimeError("a semester-config file changed while it was read")
         return content
 
     files: dict[str, bytes] = {}
@@ -521,14 +522,15 @@ def _config_changes(
             raise Refused("a grading sheet does not parse right now") from exc
         if text is not None:
             files[path] = text.encode()
+    prefix = f"{AUTOGRADE_DIR}/"
     for path in sorted(live):
-        parts = path.split("/")
-        if len(parts) != 3 or parts[0] != AUTOGRADE_DIR:
+        parts = path.removeprefix(prefix).split("/")
+        if not path.startswith(prefix) or len(parts) != 2:
             continue
-        stem, dot, ext = parts[2].partition(".")
+        stem, dot, ext = parts[1].partition(".")
         if stem.casefold() != p.old.casefold() or not dot:
             continue
-        to = f"{parts[0]}/{parts[1]}/{p.new}.{ext}"
+        to = f"{prefix}{parts[0]}/{p.new}.{ext}"
         if to in live:
             raise Refused("both accounts have autograde results for one assignment")
         files[to] = read(path)
@@ -575,7 +577,7 @@ def _record(org: str, p: Pending, repos: list[str]) -> bool:
         "new_id": p.new_id,
         "relinked_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "repos": repos,
-        "not_moved": "shared drop-box folders, snapshots/, receipts issue text",
+        "not_moved": "shared drop-box folders, .system/snapshots/, Submission receipts text",
     }
     return put_file(
         org,
@@ -614,7 +616,7 @@ def relink_row(
     org: str, p: Pending, existing: dict[str, dict], dry_run: bool = False
 ) -> str:
     """Move one student to their new account: `DONE`, `FAILED` when a step's write failed,
-    or `RACED` when another commit landed in classroom-config between the read and the
+    or `RACED` when another commit landed in semester-config between the read and the
     write. Either way the id is untouched and the next run resumes. Raises `Refused` for a
     collision - checked before anything moves, so a refused relink moves nothing."""
     team_repos = _team_repos(org)
@@ -640,7 +642,7 @@ def relink_row(
     ):
         return RACED if head_commit(org, roster.CONFIG_REPO) != base else FAILED
     closed, failed = close_by_creator(
-        f"{org}/{WELCOME_REPO}", p.new, THROTTLE_LABEL, _CLOSE_COMMENT
+        f"{org}/{JOIN_REPO}", p.new, THROTTLE_LABEL, _CLOSE_COMMENT
     )
     log_person(f"  [ok] closed {closed} unresolved Join issue(s) from @{p.new}")
     done = (
@@ -696,10 +698,10 @@ def sync(org: str, existing: dict[str, dict] | None, dry_run: bool = False) -> i
             )
             errors += 1
     if raced:
-        # Transient, so not an error: somebody edited classroom-config mid-relink, the
+        # Transient, so not an error: somebody edited semester-config mid-relink, the
         # commit was refused rather than written over them, and the next sync retries.
         log(
-            f"  ({raced} relink(s) in {org} met a concurrent classroom-config edit - "
+            f"  ({raced} relink(s) in {org} met a concurrent semester-config edit - "
             f"nothing was overwritten; the next sync retries)"
         )
     if done:
