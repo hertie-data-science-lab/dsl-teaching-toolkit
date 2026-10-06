@@ -147,6 +147,19 @@ def test_a_repo_per_kind_destination_is_its_own_section():
     assert _kind(Deploy("cm", "01_x", "readings")) == ("readings", True)
 
 
+def test_a_whole_folder_copied_to_the_root_is_that_folder():
+    # `lectures` copied whole lands at `materials/lectures`: the folder, not the repo.
+    lectures = Deploy("cm", "lectures")
+    assert schedule_plan.deploy_section(lectures) == "lectures"
+    assert _kind(lectures) == ("lecture", True)
+    (row,) = _rows([Release("lecture-1", _at(1), [lectures])])
+    assert [sr.row.key for sr in schedule_plan.site_rows([row])] == ["lecture-1"]
+    # A repo's own alias names a folder too.
+    slides = Deploy("cm", "Slides")
+    assert _kind(slides, aliases=lambda r: {"slides": "lecture"}) == ("lecture", True)
+    assert schedule_plan.deploy_section(slides, {"slides": "lecture"}) == "Slides"
+
+
 def test_the_first_copy_decides_a_mixed_entry():
     assert _kind(Deploy("cm", "labs/03"), Deploy("cm", "lectures/03")) == ("lab", True)
 

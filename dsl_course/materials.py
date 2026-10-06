@@ -11,9 +11,10 @@ say, and is absent for the default layout:
       quiz: other
 
 A release entry that declares no `kind` takes one from the section its first copy lands in:
-the top folder of the DESTINATION path, or the destination repo itself when the copy lands
-at its root. The source repo's `kinds:` first, then the built-in aliases, both matched
-case-insensitively, else `lecture`.
+the top folder of the DESTINATION path; for a copy into the root, the copied name when it
+names a kind (`lectures` copied whole), else the destination repo itself. The source
+repo's `kinds:` first, then the built-in aliases, both matched case-insensitively, else
+`lecture`.
 
 `publish.yml` beside it says which files the public website may publish. Its patterns match
 the paths of THIS repo (`hosted_paths`), and a release that renames a path is translated

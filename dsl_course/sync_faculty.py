@@ -55,6 +55,7 @@ from .course import (
     OLD_PEOPLE_FILE,
     RETIRED_COURSE_KEYS,
     active_today,
+    instructor_role,
     semester_of,
 )
 from .discovery import (
@@ -136,9 +137,7 @@ def _declared(
         out: dict[str, list[tuple[str, object]]] = {}
         for index, p in enumerate(listed):
             where = f"instructors[{index}]"
-            role = INSTRUCTOR_ROLES.get(
-                str(p.get("role") or "") if isinstance(p, dict) else ""
-            )
+            role = instructor_role(p.get("role") if isinstance(p, dict) else "")
             if role is None:
                 lines = take_lines(p) if isinstance(p, dict) else {}
                 log_err(f"  ! skipping {where}: `role:` is not one of {_ROLE_WORDS}")
@@ -148,7 +147,8 @@ def _declared(
                             where,
                             "role",
                             f"`role:` must be one of {_ROLE_WORDS} - the entry is "
-                            f"skipped, so it grants no access and is not notified",
+                            f"skipped, so it is not notified, and nobody is removed "
+                            f"from the teaching teams until it is fixed",
                             lines,
                             file,
                             repo,
@@ -447,7 +447,6 @@ def load_faculty(course_org: str) -> dict[str, list[dict]] | None:
     return parse_faculty_from_meta(meta)
 
 
-@cache
 def load_semester_faculty(semester_org: str) -> dict[str, list[dict]] | None:
     """Fetch + parse this semester's own semester-config/instructors.yml - instructors/TAs
     only (no course_admins key here; that role stays exclusively course-level).
@@ -461,10 +460,22 @@ def load_semester_faculty(semester_org: str) -> dict[str, list[dict]] | None:
     changes only when somebody edits it. The memo also means the "no usable `email:`"
     error lines are printed once per run rather than once per reader.
     `tests/conftest.py` clears it."""
+    return _semester_faculty(semester_org)[0]
+
+
+@cache
+def _semester_faculty(semester_org: str) -> tuple[dict[str, list[dict]] | None, bool]:
+    """`load_semester_faculty`'s answer, and whether any entry of the file names no
+    role: the sweep then adds but never removes (a misspelt `role:` is a fault to report,
+    never a reason to take somebody's access away)."""
     meta, path = _load_semester_file(semester_org)
     if meta is None:
-        return None
-    return _semester_roles_only(parse_faculty_from_meta(meta, file=path))
+        return None, False
+    unknown = any(
+        instructor_role(p.get("role") if isinstance(p, dict) else "") is None
+        for p in meta["instructors"]
+    )
+    return _semester_roles_only(parse_faculty_from_meta(meta, file=path)), unknown
 
 
 class NoInstructorsList(Unusable):
@@ -725,7 +736,7 @@ def sync_semester_instructors(
     (rather than re-discovered here) so a multi-semester `sync()` fetches them once,
     not once per semester."""
     try:
-        faculty = load_semester_faculty(semester_org)
+        faculty, unknown_role = _semester_faculty(semester_org)
     except (NotMigrated, NoInstructorsList) as exc:
         # Fail CLOSED: an old or empty file is no desired set to prune to. Skip this
         # semester's instructors sweep - the digest issue carries the fault - and stay green.
@@ -746,9 +757,19 @@ def sync_semester_instructors(
             f"absent config would prune every instructor); skipping"
         )
         return 0
+    # The faculty-access FLOOR: an entry whose `role:` names no role is left out of the
+    # desired set, and pruning to that set would remove its person. Hold the removals
+    # until it is fixed; the digest issue carries the fault.
+    prune = not unknown_role
+    if unknown_role:
+        log_err(
+            f"  ! {SEMESTER_PEOPLE_PATH} has an entry whose `role:` is not one of "
+            f"{_ROLE_WORDS} - nobody is removed from {semester_org}'s teaching teams "
+            f"until it is fixed"
+        )
     desired = _desired_for(faculty, INSTRUCTORS_TEAM, date.today().isoformat())
     errors = reconcile_team_members(
-        semester_org, INSTRUCTORS_TEAM, desired, prune=True, dry_run=dry_run
+        semester_org, INSTRUCTORS_TEAM, desired, prune=prune, dry_run=dry_run
     )
 
     tag = semester_of(semester_org)
@@ -766,21 +787,29 @@ def sync_semester_instructors(
             # one root failure and firing doomed API calls). Report it once and stop here.
             return errors + 1
         # Hourly, for grants that are almost always there already: ONE listing of what
-        # the team holds (unreadable, or a team made a moment ago: grant them all).
-        held = None if outcome == CREATED else team_repo_access(course_org, team)
-        held = {name.casefold(): perm for name, perm in (held or {}).items()}
-        for repo in _tag_repos(content_repos, assignments, tag):
-            if holds({team.casefold(): held.get(repo.casefold())}, team, "push"):
-                continue
-            if not grant_team_repo_access(course_org, team, repo, "push"):
-                errors += 1
+        # the team holds (a team made a moment ago, or a 404: grant them all).
+        try:
+            held = None if outcome == CREATED else team_repo_access(course_org, team)
+        except RuntimeError as exc:
+            # A listing that FAILED (a 5xx, a bad page) is not "holds nothing": a PUT at
+            # push on a repo the team holds higher would demote it. Count it, skip this
+            # team's grants until the next run, and carry on with the rest of the sync.
+            log_err(f"  ! {exc} - {team}'s repo grants not checked this run")
+            errors += 1
+        else:
+            held = {name.casefold(): perm for name, perm in (held or {}).items()}
+            for repo in _tag_repos(content_repos, assignments, tag):
+                if holds({team.casefold(): held.get(repo.casefold())}, team, "push"):
+                    continue
+                if not grant_team_repo_access(course_org, team, repo, "push"):
+                    errors += 1
     # A team made a moment ago is not read back: GitHub's REST API 404s a new team for up
     # to minutes, which would spend the whole lag budget and abort the reconcile.
     errors += reconcile_team_members(
         course_org,
         team,
         desired,
-        prune=True,
+        prune=prune,
         dry_run=dry_run,
         just_created=outcome == CREATED,
     )

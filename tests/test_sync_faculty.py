@@ -11,6 +11,7 @@ import yaml
 
 from dsl_course import faults as faults_mod
 from dsl_course import gh_contents, gh_teams, sync_faculty
+from dsl_course.course import people_by_role
 
 
 def _parse(raw: str) -> dict:
@@ -77,7 +78,7 @@ def test_sync_semester_instructors_refuses_to_prune_when_people_yml_is_absent(
     # semester's whole instructors team - and the run stays GREEN: a file faculty have to
     # write reaches them on the instructors.yml digest issue, while this run's red X reaches
     # only a maintainer who cannot write another org's teaching team.
-    monkeypatch.setattr(sync_faculty, "load_semester_faculty", lambda org: None)
+    monkeypatch.setattr(sync_faculty, "_semester_faculty", lambda org: (None, False))
     calls = []
     monkeypatch.setattr(
         sync_faculty,
@@ -92,7 +93,7 @@ def test_sync_semester_instructors_refuses_to_prune_when_people_yml_is_absent(
 def test_sync_semester_instructors_counts_failed_grants(monkeypatch):
     # create_team / grant_team_repo_access returns used to be discarded, so a failed grant
     # was invisible to the exit code. Now each failure is counted.
-    monkeypatch.setattr(sync_faculty, "load_semester_faculty", lambda org: {})
+    monkeypatch.setattr(sync_faculty, "_semester_faculty", lambda org: ({}, False))
     monkeypatch.setattr(sync_faculty, "reconcile_team_members", lambda *a, **k: 0)
     monkeypatch.setattr(sync_faculty, "semester_of", lambda org: "f2026")
     monkeypatch.setattr(
@@ -113,7 +114,7 @@ def test_a_tag_grant_the_team_already_holds_is_not_made_again(monkeypatch):
     # Hourly, and almost always already there: one listing of the team's repos stands in
     # for a PUT per repo. Held at push or above is held; below it is granted. Names are
     # matched whatever their case, on both the team and the repo.
-    monkeypatch.setattr(sync_faculty, "load_semester_faculty", lambda org: {})
+    monkeypatch.setattr(sync_faculty, "_semester_faculty", lambda org: ({}, False))
     monkeypatch.setattr(sync_faculty, "reconcile_team_members", lambda *a, **k: 0)
     monkeypatch.setattr(sync_faculty, "semester_of", lambda org: "f2026")
     monkeypatch.setattr(
@@ -136,10 +137,50 @@ def test_a_tag_grant_the_team_already_holds_is_not_made_again(monkeypatch):
     assert granted == ["course-materials-f2026"]
 
 
+def test_a_failed_read_of_the_tag_teams_grants_is_counted_and_the_sync_goes_on(
+    monkeypatch,
+):
+    # A 5xx on the team's repo listing used to raise out of the whole faculty sync. It is
+    # counted, nothing is granted on its strength (a PUT at push would demote a higher
+    # grant), and the membership reconcile and the next semester still run.
+    monkeypatch.setattr(sync_faculty, "_semester_faculty", lambda org: ({}, False))
+    monkeypatch.setattr(sync_faculty, "semester_of", lambda org: org.rsplit("-", 1)[1])
+    monkeypatch.setattr(
+        sync_faculty, "create_team_outcome", lambda *a, **k: gh_teams.EXISTED
+    )
+
+    def listing(org, team):
+        if team == "instructors-f2026":
+            raise RuntimeError("could not read Course/instructors-f2026's repos: 502")
+        return {}
+
+    monkeypatch.setattr(sync_faculty, "team_repo_access", listing)
+    granted = []
+    monkeypatch.setattr(
+        sync_faculty,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm: granted.append((team, repo)) or True,
+    )
+    reconciled = []
+    monkeypatch.setattr(
+        sync_faculty,
+        "reconcile_team_members",
+        lambda org, team, *a, **k: reconciled.append((org, team)) or 0,
+    )
+    monkeypatch.setattr(sync_faculty, "sync_course_admins", lambda *a, **k: 0)
+    monkeypatch.setattr(sync_faculty, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_faculty, "discover_assignments", lambda org: [])
+    errors = sync_faculty.sync("Course", ["Course-f2026", "Course-s2027"])
+    assert errors == 1
+    assert granted == [("instructors-s2027", ".github")]
+    assert ("Course", "instructors-f2026") in reconciled
+    assert ("Course", "instructors-s2027") in reconciled
+
+
 def test_sync_semester_instructors_skips_wiring_when_team_creation_fails(monkeypatch):
     # A failed create_team must not then grant access + reconcile against a nonexistent
     # team (which would triple-count the one failure and fire doomed API calls).
-    monkeypatch.setattr(sync_faculty, "load_semester_faculty", lambda org: {})
+    monkeypatch.setattr(sync_faculty, "_semester_faculty", lambda org: ({}, False))
     monkeypatch.setattr(sync_faculty, "semester_of", lambda org: "f2026")
     monkeypatch.setattr(sync_faculty, "create_team_outcome", lambda *a, **k: None)
     grants = []
@@ -645,8 +686,8 @@ def test_a_just_created_instructors_tag_team_is_not_read_back(
     # aborted. A team that was already there is still read.
     monkeypatch.setattr(
         sync_faculty,
-        "load_semester_faculty",
-        lambda org: {"instructors": [{"github_handle": "prof-a"}]},
+        "_semester_faculty",
+        lambda org: ({"instructors": [{"github_handle": "prof-a"}]}, False),
     )
     monkeypatch.setattr(sync_faculty, "create_team_outcome", lambda *a, **k: outcome)
     monkeypatch.setattr(sync_faculty, "grant_team_repo_access", lambda *a, **k: True)
@@ -715,3 +756,63 @@ def test_course_admin_emails_are_the_active_usable_ones_in_order():
 def test_a_course_admin_email_in_a_semester_file_is_not_checked():
     # A semester's instructors.yml drops course_admins altogether; nothing to report there.
     assert _faults(COURSE_PEOPLE) == []
+
+
+def test_a_role_is_read_whatever_its_case_and_surrounding_space():
+    # `role: Instructor` was matched exactly, so the entry was skipped and the hourly
+    # sync pruned that person from the teaching teams. The roster's role ignores case.
+    meta = {
+        "instructors": [
+            {"github_handle": "prof-a", "role": "Instructor", "email": "a@x.org"},
+            {
+                "github_handle": "ta-b",
+                "role": " Teaching_Assistant ",
+                "email": "b@x.org",
+            },
+        ]
+    }
+    faults: list = []
+    faculty = sync_faculty.parse_faculty_from_meta(meta, faults)
+    assert [p["github_handle"] for p in faculty["instructors"]] == ["prof-a"]
+    assert [p["github_handle"] for p in faculty["teaching_assistants"]] == ["ta-b"]
+    assert faults == []
+    grouped = people_by_role(meta, semester=True)
+    assert [len(grouped[k]) for k in ("instructors", "teaching_assistants")] == [1, 1]
+
+
+def test_an_unknown_role_is_reported_and_holds_every_removal(monkeypatch, capsys):
+    # The faculty-access sweep is a floor: an entry it cannot place is left out of the
+    # desired set, so pruning to that set would take its person's access away.
+    text = (
+        "instructors:\n"
+        "  - {github_handle: prof-a, role: instructor, email: a@x.org}\n"
+        "  - {github_handle: prof-b, role: lecturer, email: b@x.org}\n"
+    )
+    monkeypatch.setattr(
+        sync_faculty,
+        "load_yaml_config",
+        lambda org, repo, path, lines=False: (
+            yaml.safe_load(text) if path == sync_faculty.SEMESTER_PEOPLE_PATH else None
+        ),
+    )
+    calls = []
+    monkeypatch.setattr(
+        sync_faculty,
+        "reconcile_team_members",
+        lambda org, team, desired, **k: calls.append((team, desired, k["prune"])) or 0,
+    )
+    monkeypatch.setattr(sync_faculty, "semester_of", lambda org: None)
+    assert sync_faculty.sync_semester_instructors("Course", "Course-f2026", [], []) == 0
+    assert calls == [("instructors", {"prof-a"}, False)]
+    assert "nobody is removed" in capsys.readouterr().err
+    faults: list = []
+    sync_faculty.parse_faculty_from_meta(yaml.safe_load(text), faults)
+    assert [f.field for f in faults] == ["role"]
+    assert "nobody is removed" in faults[0].what
+
+    # Fixed, the sweep prunes again.
+    text = text.replace("lecturer", "instructor")
+    sync_faculty._semester_faculty.cache_clear()
+    calls.clear()
+    sync_faculty.sync_semester_instructors("Course", "Course-f2026", [], [])
+    assert calls == [("instructors", {"prof-a", "prof-b"}, True)]

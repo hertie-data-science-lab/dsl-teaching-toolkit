@@ -65,7 +65,10 @@ def _repo(org: str, name: str) -> dict:
 def _forget_repo(kind: str, targets: frozenset[str]) -> None:
     """A write that makes, renames or deletes a repo (an org-wide target, see
     `ghcli.written`) makes every answer stale - rare, so the whole memo goes. A settings
-    write to one repo (`META`: archived, visibility, forking) makes that repo's alone."""
+    write to one repo (`META`: archived, visibility, forking) makes that repo's alone.
+    The one repo-object write filed under FILES on a single repo, the PATCH that moves
+    its default branch, is not told apart from a push here; `set_default_branch` drops
+    that repo's record itself."""
     if kind in (FILES, ALL) and any("/" not in t for t in targets):
         _repos.clear()
     elif kind == META:
@@ -452,6 +455,8 @@ def set_default_branch(org: str, name: str, branch: str) -> bool:
         "--field",
         f"default_branch={branch}",
     )
+    # Whatever the outcome: a failed PATCH can still have landed.
+    _repos.pop(f"{org}/{name}".casefold(), None)
     if code == 0:
         return True
     log_err(f"could not open {org}/{name} on {branch}: {out[:160]}")

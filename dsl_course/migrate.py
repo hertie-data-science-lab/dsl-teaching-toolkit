@@ -379,15 +379,29 @@ def schedule_timing(text: str) -> str:
     """`schedule.yml` without the keys that left it (`RETIRED_ASSIGNMENT_KEYS` on an
     assignment entry, `assignment:` on a release, the `enrolment:` block), each with the
     lines of its value. Run after `schedule_keys`, so `cohort_dest_repo` is spelt
-    `semester_dest_repo` by then."""
+    `semester_dest_repo` by then.
+
+    A blank line or a comment inside a cut block does not end it: it is held until the
+    next line says whether the block goes on (dropped with it) or has ended (kept, as
+    what separates it from the next key). Ending the cut there kept the block's later
+    lines, which then nested under whatever key came before."""
     out, section = [], ""
     scalar: int | None = None  # the column of the key whose block scalar this is in
     cut: int | None = None  # the column of the key being removed, with its value
+    held: list[str] = []  # blank and comment lines met inside the cut block
     for line in text.split("\n"):
         if cut is not None:
-            if line.strip() and _indent(line) > cut:
+            if line.strip() and not line.lstrip().startswith("#"):
+                if _indent(line) > cut:
+                    held = []
+                    continue
+            elif not line.strip() or _indent(line) <= cut:
+                held.append(line)
                 continue
-            cut = None
+            else:
+                continue  # a comment indented into the block is part of it
+            out += held
+            held, cut = [], None
         if scalar is not None and (not line.strip() or _indent(line) > scalar):
             out.append(line)
             continue
@@ -405,7 +419,41 @@ def schedule_timing(text: str) -> str:
         if block := _BLOCK_SCALAR.match(line):
             scalar = len(block.group(1))
         out.append(line)
-    return "\n".join(out)
+    return "\n".join(out + held)
+
+
+def schedule_entries(text: str | None) -> dict | None:
+    """`{top-level key: its entry keys}` of a `schedule.yml` (None for a key whose value
+    is not a mapping), the retired top-level blocks left out: what the keys step must
+    leave exactly as it found it. None when the text does not parse to a mapping."""
+    try:
+        data = yaml.safe_load(text or "") or {}
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {
+        str(key): sorted(map(str, value)) if isinstance(value, dict) else None
+        for key, value in data.items()
+        if key not in RETIRED_TOP
+    }
+
+
+def entries_kept(before: str | None, after: str | None) -> bool:
+    """`after` parses, and holds the same blocks and entries as `before` (named when
+    not, for a person to fix by hand)."""
+    old, new = schedule_entries(before), schedule_entries(after)
+    if new is None:
+        log_err(f"{schedule.SCHEDULE_PATH} would not be valid YAML - fix by hand")
+        return False
+    if old is not None and old != new:
+        changed = sorted(k for k in old.keys() | new.keys() if old.get(k) != new.get(k))
+        log_err(
+            f"{schedule.SCHEDULE_PATH}: the rewrite would change the entries of "
+            f"{', '.join(changed)} - fix by hand"
+        )
+        return False
+    return True
 
 
 def strip_run_keys(text: str) -> str:
@@ -1984,6 +2032,9 @@ class Semester:
         self.people = ""
         self.pause = Pause(org, self.targets, course_org, org)
         self.renamed_now: dict[str, str] = {}  # old -> new, renamed by this run
+        self.schedule_before: str | None = (
+            None  # schedule.yml as the keys step found it
+        )
 
     def config(self) -> str:
         """The config repo under whichever name it has right now."""
@@ -2357,9 +2408,12 @@ class Semester:
 
     def keys(self) -> bool:
         text, new = self.keys_text()
+        self.schedule_before = text  # what keys_verified compares the commit against
         instance, _ = self.instance_work()
         files = {}
         if text != new:
+            if not entries_kept(text, new):
+                return False
             files[schedule.SCHEDULE_PATH] = new.encode()
         if instance is not None:
             if not _instance_clean(instance):
@@ -2376,6 +2430,7 @@ class Semester:
         instance = self.instance_text()
         return (
             text == new
+            and entries_kept(self.schedule_before, text)
             and instance is not None
             and _instance_clean(instance)
             and _schedule_clean(text, instance)

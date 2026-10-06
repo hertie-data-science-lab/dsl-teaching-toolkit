@@ -1329,6 +1329,10 @@ def main() -> int:
             refused = preview_first(args.semester_org, args.template, preview=True)
             if refused is not None:
                 return refused
+        if when == SOLUTION_NOW and not args.preview and rc == 0:
+            # Spent only by a hand out that worked: one that failed part-way keeps its
+            # preview, so the retry needs no new one.
+            spend_preview(args.semester_org)
         return rc
     except RuntimeError as exc:
         log_err(str(exc))
@@ -1360,8 +1364,10 @@ def preview_first(
     the model answer and rubric into every student's repo, and cannot be undone. A preview
     records who previewed which template, and when (`SOLUTION_PREVIEW`, private); the real
     run goes ahead only when the last record is that person's preview of that template
-    from the last `PREVIEW_VALID`, and then spends it. None = go ahead; a refusal
-    otherwise. Fail closed: a record that cannot be read or spent refuses."""
+    from the last `PREVIEW_VALID`. None = go ahead; a refusal otherwise. Fail closed: a
+    record that cannot be read refuses. The check spends nothing: `main` spends the
+    preview (`spend_preview`) once the hand out has worked, so a run that failed on a
+    transient error can be retried on the same preview."""
     now = now or datetime.now(timezone.utc)
     actor = _actor()
     want = {"actor": actor.casefold(), "template": template, "solution": SOLUTION_NOW}
@@ -1388,25 +1394,32 @@ def preview_first(
         last, at = {}, None
     fresh = at is not None and at.tzinfo is not None and now - at <= PREVIEW_VALID
     if actor and last == want and fresh:
-        # Spent BEFORE anything is handed out: a spend that fails must not leave the
-        # preview good for another run.
-        if put_file(
-            semester_org,
-            CONFIG_REPO,
-            SOLUTION_PREVIEW,
-            b"{}\n",
-            "Spend the preview of a hand out with the solution",
-        ):
-            return None
-        return _refusal(
-            "The preview could not be marked as used, so nothing was handed out: run "
-            "the preview again, then the hand out."
-        )
+        return None
     return _refusal(
         "Handing out with the solution pushes the model answer and rubric into every "
         "student's repo, and cannot be undone: preview this hand out first (within "
         "24 hours), then run it."
     )
+
+
+def spend_preview(semester_org: str) -> bool:
+    """Mark the preview used, after the hand out it licensed has worked. A spend that
+    fails leaves the preview good for a repeat of the same hand out by the same person
+    within `PREVIEW_VALID`: said, and not counted, since the hand out itself succeeded
+    and repeating it is an idempotent overwrite."""
+    if put_file(
+        semester_org,
+        CONFIG_REPO,
+        SOLUTION_PREVIEW,
+        b"{}\n",
+        "Spend the preview of a hand out with the solution",
+    ):
+        return True
+    log_err(
+        "The preview could not be marked as used: it stays good for a repeat of this "
+        "hand out for up to 24 hours."
+    )
+    return False
 
 
 def solution_record_path(slug: str) -> str:

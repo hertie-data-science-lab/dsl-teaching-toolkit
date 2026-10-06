@@ -448,10 +448,12 @@ def _snapshot_passed_deadlines(
     now: datetime,
     dry_run: bool,
     listing: dict[str, dict] | None,
+    fired: set[str] | None = None,
 ) -> int:
     """Freeze every passed-deadline assignment that has no snapshot yet. Write-once: an
     assignment already frozen is skipped silently, so this is a no-op on every tick after
-    the first. Returns the error count.
+    the first. Returns the error count; a freeze this call wrote adds `semester_org` to
+    `fired` (see `run`).
 
     What was frozen is NOT returned: the snapshot file itself is the handoff to the
     autograde phase, which runs in another job (and so another process) entirely.
@@ -499,6 +501,8 @@ def _snapshot_passed_deadlines(
         )
         if result is SnapshotResult.FAILED:
             errors += 1
+        elif result is SnapshotResult.WRITTEN and fired is not None:
+            fired.add(semester_org)
     return errors
 
 
@@ -1583,6 +1587,7 @@ def _release_phase(
     verdict: cadence.Verdict | None,
     listing: dict[str, dict] | None,
     defer_site_sync: bool = False,
+    fired: set[str] | None = None,
 ) -> int:
     """Snapshot every passed deadline, refresh every open grading sheet, pre-flight the
     plan's sources, and fire everything now due. Returns the error count. No grading: see
@@ -1592,7 +1597,10 @@ def _release_phase(
     invocation does not report lateness at all (see `main`).
 
     `listing` is this tick's one listing of the semester (see `run`), handed to each pass
-    below in the order they already run in. None means it could not be read."""
+    below in the order they already run in. None means it could not be read.
+
+    `fired` gets `semester_org` when this pass released, handed out, froze or asked for
+    marks to go back (see `run`)."""
     # Re-sorted, not just concatenated: the synthesised handouts carry their own datetimes
     # and would otherwise land after every scheduled release whatever their date.
     releases = sorted(
@@ -1632,7 +1640,7 @@ def _release_phase(
     # snapshot. Independent of the release plan - a semester can pin due dates without
     # scheduling a single release.
     errors += _snapshot_passed_deadlines(
-        course_org, semester_org, sched, now, dry_run, listing
+        course_org, semester_org, sched, now, dry_run, listing, fired
     )
     # Then the sheets, in the same pass and straight after: the freeze has just settled
     # every assignment past its cutoff, and everything else that is past its DUE date
@@ -1720,7 +1728,10 @@ def _release_phase(
             course_org, semester_org, due, now, listing
         )
         errors += release_errors
-    errors += _return_marks(course_org, semester_org, sched, marks_ready)
+    return_errors = _return_marks(course_org, semester_org, sched, marks_ready)
+    errors += return_errors
+    if fired is not None and (release_changed or return_errors < len(marks_ready)):
+        fired.add(semester_org)
 
     # THE one website sync of the tick, and the only place it is decided: a release that
     # provisioned something, or a team-formation window that moved, and nothing else. Both
@@ -1817,9 +1828,14 @@ def run(
     autograde: bool = True,
     verdict: cadence.Verdict | None = None,
     defer_site_sync: bool = False,
+    fired: set[str] | None = None,
 ) -> int:
     """One semester, one or both phases. The workflow's two jobs each ask for one phase
     (`--skip-autograde` / `--autograde-only`); a local run asks for both.
+
+    `fired`, when given, gets `semester_org` if the release pass changed something the
+    console shows (a release or hand-out that provisioned, a freeze, a marks return), so
+    the whole-course tick refreshes the status of only the semesters it moved.
 
     `verdict` is the cadence reading of the drivers, taken once per course by `main`. None
     (the default) means this invocation reports no lateness - see `main` for which ones."""
@@ -1837,14 +1853,24 @@ def run(
     preview: Summary | None = None
     if sched.instance_unparseable:
         # Every run setting is unknown, so nothing here may act on a default the semester
-        # did not choose. The tick stays green and the fault goes out on the schedule.yml
-        # digest, like an unreadable schedule.yml.
+        # did not choose. The tick stays green. The fault goes out on assignments.yml's own
+        # digest, and the schedule.yml digest is HELD: its window, number, marks-return
+        # and held-solution faults cannot be worked out without the settings, and syncing
+        # it without them posted Cleared for each (and a mail), then New again once fixed.
         log_err(
             f"{semester_org}/{schedule.CONFIG_REPO}/{schedule.ASSIGNMENTS_FILE} is not "
             f"valid YAML - nothing is released, handed out or graded until it is fixed"
         )
         if release:
-            _preflight_sources(course_org, semester_org, sched, now, dry_run, [])
+            _preflight_sources(course_org, semester_org, sched, now, dry_run, None)
+            _sync_config_digest(
+                config_digest.ASSIGNMENTS,
+                course_org,
+                semester_org,
+                [f for f in sched.faults if f.file == schedule.ASSIGNMENTS_FILE],
+                schedule.in_semester_zone(sched, now),
+                dry_run,
+            )
         return 0
     if release:
         # ONE listing of the semester for the whole tick, taken here at the start of it and
@@ -1874,6 +1900,7 @@ def run(
             verdict,
             listing,
             defer_site_sync,
+            fired,
         )
         errors += phase
         if isinstance(phase, Summary):
@@ -2085,6 +2112,10 @@ def main() -> int:
                 # nothing more: `verdict` stays None and every release below still runs.
                 log_err(f"could not read {args.course_org}'s run history: {exc}")
                 rc |= 1
+        # The semesters this tick moved: their status.json and student-status.json follow
+        # below, so an automatic release shows on the console within the tick. A quiet
+        # tick moves none and refreshes none.
+        fired: set[str] = set()
         for semester in semesters:
             # One semester's raised failure (a read helper that couldn't reach the API, a
             # site sync that blew up) must not abort the remaining semesters' scheduled
@@ -2097,11 +2128,17 @@ def main() -> int:
                     now,
                     dry_run=args.preview,
                     verdict=verdict,
+                    fired=fired,
                     **phases,
                 )
             except Exception as exc:
                 log_err(f"scheduler run for {semester} failed: {exc}")
                 rc |= 1  # accumulate, don't clobber prior semesters' status bits
+        # Never counted, as on the one-semester path: the release's exit code is the
+        # release's. A preview fires nothing, so `fired` is empty on one.
+        for semester in semesters:
+            if semester in fired:
+                status.refresh(args.course_org, semester)
         # Last, so a driver-health alarm can never delay a release: the drivers being down
         # is not this run's problem to fix, only to report.
         if verdict is not None:
