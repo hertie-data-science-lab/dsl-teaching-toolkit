@@ -61,7 +61,7 @@ republishes it. Rotation is still a per-org Bootstrap run from central.
 
 **Hard rules** (ordering is not optional):
 
-- **Owner before token.** Invite the bot as Owner and have it accept (3) before propagating (5).
+- **Owner before token.** Invite the bot as Owner, and let it join (3) before propagating (5): it joins by itself once the org is in `orgs.yml` (a course) or its course's `semesters.yml` (a semester).
 - **The bot must be a member of the central org.** Bootstrap's team gate reads
   `hertie-data-science-lab`'s teams **under `DSL_BOT_TOKEN`**; without that membership the gate
   **denies everyone**. Member is enough; it needn't be an owner there.
@@ -73,8 +73,10 @@ republishes it. Rotation is still a per-org Bootstrap run from central.
 ## Before bootstrapping a new org
 
 - Create the org by hand in the GitHub web UI (there is no org-creation API).
-- Invite the bot as an **Owner** and have it **accept** before Bootstrap runs - an unaccepted
-  invite makes the run fail. Same for semester orgs.
+- Invite the bot as an **Owner**. It joins by itself on the next scheduler tick once the org
+  is registered: a course by adding it to `orgs.yml` at this repo's root, a semester by
+  listing it in its course's `.github/semesters.yml` (the console's New semester does this).
+  Bootstrap fails until the bot has joined.
 - Walkthroughs: [01-new-course-org.md](../docs/01-new-course-org.md) and
   [04-new-cohort-org.md](../docs/04-new-cohort-org.md).
 

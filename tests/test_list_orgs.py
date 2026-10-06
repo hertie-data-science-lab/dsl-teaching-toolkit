@@ -11,7 +11,17 @@ import json
 import pytest
 import yaml
 
-from dsl_course import gh_contents, list_orgs, repos
+from dsl_course import gh_contents, issues, list_orgs, repos
+
+
+def _registry(monkeypatch, *orgs: str) -> None:
+    """`orgs.yml` naming `orgs`: what the fan-out's inventory now walks."""
+    monkeypatch.setattr(list_orgs.org_registry, "names", lambda: orgs)
+
+
+@pytest.fixture(autouse=True)
+def empty_registry(monkeypatch):
+    _registry(monkeypatch)
 
 
 def _contents(text: str):
@@ -254,7 +264,7 @@ def test_each_course_org_reports_the_toolkit_tier_it_runs(monkeypatch):
     # The inventory is where a maintainer checks what a promotion would move, so the tier
     # has to come off the same metadata read the page already makes - and an org that
     # declares nothing reports the default rather than a blank.
-    monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Trunk", "Live"])
+    _registry(monkeypatch, "Trunk", "Live")
     monkeypatch.setattr(
         list_orgs,
         "org_meta",
@@ -272,7 +282,7 @@ def test_one_unreadable_org_does_not_hide_every_other_one(monkeypatch, capsys):
     # abort on the first malformed dsl-course.yml, so one org's typo left the whole
     # estate un-refreshed. The bad org comes back with a null tier instead - which the
     # tier filter cannot match, so it is skipped and the others still go.
-    monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Bad", "Good"])
+    _registry(monkeypatch, "Bad", "Good")
 
     def meta(org):
         if org == "Bad":
@@ -322,6 +332,7 @@ def test_an_unreadable_org_is_shown_on_the_tree_not_dropped_from_it(monkeypatch)
 def test_the_json_form_still_prints_what_it_could_read(monkeypatch, capsys):
     # Promote parses this. It has to get the listing even when the run is partial, so the
     # verdict rides on the exit code rather than on withholding the output.
+    _registry(monkeypatch, "Bad")
     monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Bad"])
     nope = lambda org: (_ for _ in ()).throw(RuntimeError("nope"))
     monkeypatch.setattr(list_orgs, "org_meta", nope)
@@ -336,8 +347,137 @@ def test_the_json_form_still_prints_what_it_could_read(monkeypatch, capsys):
 def test_an_org_whose_declared_tier_is_junk_reports_no_tier(monkeypatch, capsys):
     # A null tier matches none, so Promote's fan-out names the org and skips it. It used
     # to resolve to `release`, which refreshed a mistyped org onto a tier nobody chose.
-    monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Typo"])
+    _registry(monkeypatch, "Typo")
     monkeypatch.setattr(list_orgs, "org_meta", lambda org: {"central_ref": "stagign"})
 
     assert [o["central_ref"] for o in list_orgs.discover_course_orgs()] == [None]
     assert "stagign" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------- the course org registry
+
+
+def test_the_fan_out_reads_the_registry_and_never_a_topic_search(monkeypatch):
+    # The topic is anyone's to set, and the fan-out writes the bot token into every org it
+    # refreshes: only orgs.yml decides which orgs reach it.
+    _registry(monkeypatch, "Trunk")
+
+    def search(topic):
+        raise AssertionError("the fan-out must not search topics")
+
+    monkeypatch.setattr(list_orgs, "_tagged_orgs", search)
+    monkeypatch.setattr(list_orgs, "org_meta", lambda org: {})
+    assert [o["org"] for o in list_orgs.discover_course_orgs()] == ["Trunk"]
+
+
+def test_a_failed_semester_search_never_empties_the_fan_out(monkeypatch, capsys):
+    _registry(monkeypatch, "Trunk")
+    monkeypatch.setattr(list_orgs, "org_meta", lambda org: {})
+
+    def full(topic):
+        raise RuntimeError("returned the full 100-result page")
+
+    monkeypatch.setattr(list_orgs, "_tagged_orgs", full)
+    monkeypatch.setattr("sys.argv", ["list_orgs"])
+    list_orgs.main()
+    out = capsys.readouterr()
+    assert [o["org"] for o in json.loads(out.out)["course_orgs"]] == ["Trunk"]
+    assert "semester orgs not listed" in out.err
+
+
+def test_awaiting_registration_lists_invitations_and_tagged_courses(monkeypatch):
+    _registry(monkeypatch, "Trunk")
+    monkeypatch.setattr(
+        list_orgs.invitations,
+        "pending_orgs",
+        lambda: ["Trunk", "New-Course", "Trunk-S2027"],
+    )
+    # A semester a registered course lists waits on nobody: its course's pass accepts it.
+    monkeypatch.setattr(
+        list_orgs,
+        "discover_semesters",
+        lambda org: ["trunk-s2027"] if org == "Trunk" else [],
+    )
+    monkeypatch.setattr(
+        list_orgs, "_tagged_orgs", lambda topic: ["Trunk", "Tagged", "Old-f2025"]
+    )
+    # A tagged org whose metadata points at a course is a semester, not a course.
+    monkeypatch.setattr(
+        list_orgs,
+        "org_meta",
+        lambda org: {"course": "Trunk"} if org == "Old-f2025" else {},
+    )
+    assert list_orgs.awaiting_registration() == [
+        {"org": "New-Course", "why": "invited the bot"},
+        {"org": "Tagged", "why": "tagged dsl-course-hub"},
+    ]
+
+
+def test_the_awaiting_issue_is_written_while_orgs_wait_and_closed_when_none(
+    monkeypatch,
+):
+    written, closed = [], []
+    monkeypatch.setattr(
+        issues,
+        "upsert_issue",
+        lambda repo, title, body: (
+            written.append((repo, title, body)) or issues.Upserted(0)
+        ),
+    )
+    monkeypatch.setattr(
+        issues,
+        "close_issues_titled",
+        lambda repo, title, comment=None: closed.append((repo, title)) or 0,
+    )
+    waiting = [{"org": "New-Course", "why": "invited the bot"}]
+    assert list_orgs.file_awaiting(waiting) == 0
+    repo, title, body = written[0]
+    assert (repo, title) == (list_orgs.CENTRAL, "Course orgs awaiting registration")
+    assert "- [New-Course](https://github.com/New-Course) - invited the bot" in body
+    assert list_orgs.file_awaiting([]) == 0
+    assert closed == [(list_orgs.CENTRAL, "Course orgs awaiting registration")]
+
+
+def test_the_awaiting_list_goes_through_a_file_between_the_two_tokens(
+    monkeypatch, capsys, tmp_path
+):
+    monkeypatch.setattr(
+        list_orgs,
+        "awaiting_registration",
+        lambda: [{"org": "New-Course", "why": "invited the bot"}],
+    )
+    monkeypatch.setattr("sys.argv", ["list_orgs", "--awaiting-registration"])
+    assert list_orgs.main() == 0
+    out = tmp_path / "awaiting.json"
+    out.write_text(capsys.readouterr().out)
+    filed = []
+    monkeypatch.setattr(
+        list_orgs, "file_awaiting", lambda orgs: filed.append(orgs) or 0
+    )
+    monkeypatch.setattr("sys.argv", ["list_orgs", "--file-awaiting", str(out)])
+    assert list_orgs.main() == 0
+    assert filed == [[{"org": "New-Course", "why": "invited the bot"}]]
+
+
+def test_awaiting_registration_survives_a_broken_registry_and_a_full_search(
+    monkeypatch, capsys
+):
+    _registry(monkeypatch, "Trunk", "Broken")
+    monkeypatch.setattr(list_orgs.invitations, "pending_orgs", lambda: ["New-Course"])
+
+    def semesters(org):
+        if org == "Broken":
+            raise list_orgs.Unusable("malformed semester registry")
+        return []
+
+    def full(topic):
+        raise RuntimeError("returned the full 100-result page")
+
+    monkeypatch.setattr(list_orgs, "discover_semesters", semesters)
+    monkeypatch.setattr(list_orgs, "_tagged_orgs", full)
+    assert list_orgs.awaiting_registration() == [
+        {"org": "New-Course", "why": "invited the bot"}
+    ]
+    err = capsys.readouterr().err
+    assert "Broken: malformed semester registry" in err
+    assert "full 100-result page" in err

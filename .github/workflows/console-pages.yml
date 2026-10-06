@@ -35,10 +35,12 @@ jobs:
       - run: npm test
       # The GitHub App sign-in shows only when both are set; the relay's origin also goes
       # into the page's Content-Security-Policy. Empty variables build a token-only console.
+      # GH_APP_SLUG names the App's install page; empty drops the install step.
       - run: npm run build
         env:
           VITE_GH_APP_CLIENT_ID: ${{ vars.GH_APP_CLIENT_ID }}
           VITE_AUTH_RELAY_URL: ${{ vars.AUTH_RELAY_URL }}
+          VITE_GH_APP_SLUG: ${{ vars.GH_APP_SLUG }}
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b  # v5
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa  # v3
         with:

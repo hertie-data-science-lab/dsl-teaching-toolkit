@@ -50,10 +50,34 @@ Build-time settings, for `npm run build` or `npm run dev`:
 
     VITE_GH_APP_CLIENT_ID=Iv23...    # the GitHub App's client id; empty hides the App button
     VITE_AUTH_RELAY_URL=https://dsl-console-auth.<subdomain>.workers.dev
+    VITE_GH_APP_SLUG=dsl-teaching-toolkit  # the App's URL name; empty drops the install step
 
 The deployed console gets them in `.github/workflows/console-pages.yml`, as an `env:` on the
-`npm run build` step, from the repository variables `GH_APP_CLIENT_ID` and `AUTH_RELAY_URL`
-(either may be empty).
+`npm run build` step, from the repository variables `GH_APP_CLIENT_ID`, `AUTH_RELAY_URL` and
+`GH_APP_SLUG` (any may be empty).
+
+## Setting up an org
+
+The first step of New course and New semester lists the three things only a person can do on
+GitHub, each with a tick that appears by itself (the step re-checks every 10 seconds and when
+the window regains focus, until all pass): create the org, install the console app on it,
+and invite `hertie-dsl-bot` as an Owner. The bot accepts the invitation itself, on the
+scheduler's next quarter-hourly run in any course org, once the maintainers have added the org
+to `orgs.yml` (`dsl_course/invitations.py`; maintainers.md, "The course org registry"). New
+semester lists the semester's org in the course's `semesters.yml` as soon as it exists, which
+is enough: the course's own run accepts the bot's invitation to it. Whether
+the app is installed can only be seen from an App sign-in; with a token the line says so and
+does not hold the step back.
+
+The install link goes to the App's install page for that org in the same tab, and GitHub
+sends the person back to the App's **Setup URL** with `installation_id` and `setup_action`;
+the console drops them and reopens the wizard step the link was pressed on. In the App's
+settings (General, Post installation):
+
+- **Setup URL**: the console's URL, `https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/`;
+- **Redirect on update**: on, so changing an existing installation comes back too;
+- **Request user authorization (OAuth) during installation**: off (GitHub then ignores the
+  Setup URL).
 
 The build writes a Content-Security-Policy meta into `index.html` (`src/csp.ts`): scripts from
 the console's own origin, calls to `api.github.com`, `github.com` and the relay's origin,

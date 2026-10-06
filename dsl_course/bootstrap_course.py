@@ -688,7 +688,7 @@ def seed_workflows(org: str, central_ref: str) -> int:
     return seed.seed_github_workflows(org, central_ref)
 
 
-def preflight(org: str) -> bool:
+def preflight(org: str, semester: bool = False) -> bool:
     """Verify the org exists AND the bot can administer it before configuring anything.
 
     GitHub has NO API to create an organisation (github.com); it must be created in the
@@ -717,13 +717,20 @@ def preflight(org: str) -> bool:
     )
     membership = membership.strip() if code == 0 else "not a member"
     if membership != "active/admin":
+        # The bot joins by itself once the org is vouched for: a course by the DSL team's
+        # orgs.yml, a semester by its own course's .github/semesters.yml.
+        joins = (
+            "list the org in the course's .github/semesters.yml (or use the console's "
+            "New semester), and wait for the bot"
+            if semester
+            else "the DSL team registers new courses; the bot then joins by itself"
+        )
         log_err(f"@{bot} cannot administer {org} (membership: {membership}).")
         log(
             f"\nThe bot must be an ACTIVE OWNER of {org} - creating the .github repo, role "
             f"teams, and org secret all require Owner. Fix by the matching case, then re-run:\n"
-            f"  - 'pending/admin'  -> @{bot} was invited but hasn't accepted: sign in as "
-            f"@{bot} and accept at https://github.com/orgs/{org}/invitation\n"
-            f"  - 'not a member'   -> invite @{bot} to {org} as Owner, then accept as @{bot}\n"
+            f"  - 'pending/admin'  -> @{bot} was invited: {joins}\n"
+            f"  - 'not a member'   -> invite @{bot} to {org} as Owner, then {joins}\n"
             f"  - 'active/member'  -> promote @{bot} to Owner in the org's People page\n"
         )
         return False
@@ -869,7 +876,7 @@ def _run(args: argparse.Namespace) -> int:
     log(f"  Course name: {course_name}")
 
     # 0. Preflight - the org must already exist (GitHub can't create one via API).
-    if not preflight(args.org):
+    if not preflight(args.org, semester=args.semester):
         return 1
 
     # 1. Org settings - converged, not set once: the nightly refresh runs the same call

@@ -2,6 +2,8 @@
 // `semester.bootstrap` operation, through the course's Console), then Instructors, Schedule and
 // Students as three cards that open their editors and come back. Revision brief v2 section 7.
 
+import type { ComponentChildren } from 'preact';
+import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import type { Files } from '../model/files';
@@ -14,14 +16,16 @@ import { Crumbs } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { useDraft } from '../wizards/drafts';
 import { cohortOrgName, cohortTerms, openAt, TERM_RE, termLabel } from '../wizards/model';
-import { allOk, checkCohortSetUp, checkOrg, useLive, type Check } from '../wizards/verify';
-import { Checks, LiveChecks, OrgLinks, Rail, StepCard, Verified } from '../wizards/Wizard';
+import { BOT_PENDING_SEMESTER, allOk, checkCohortSetUp, checkOrg, useLive, usePoll, type Check } from '../wizards/verify';
+import { Checks, OrgSteps, OrgWhy, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
+import { authorOf } from '../github/client';
+import { registerSemester } from '../model/discovery';
 import type { CourseProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO, INSTRUCTORS_FILE, JOIN_REPO } from '../model/names';
 import { YamlText, obj } from '../edit/yamlText';
 
 const STEPS = [
-  { t: 'Org', s: 'Create it on GitHub' },
+  { t: 'Org', s: 'Three things on GitHub' },
   { t: 'Setup', s: 'Site, join form, settings' },
   { t: 'Instructors, schedule, students', s: 'Three editors' },
 ];
@@ -31,6 +35,8 @@ export interface NkDraft {
   org?: string;
   orgVerified?: string;
   setUp?: string;
+  /** The org New semester has listed in the course's registry, so the bot may join it. */
+  listed?: string;
 }
 
 export function nkDone(d: NkDraft, org: string, orgChecks: Check[] | null, setUp: Check[] | null): boolean[] {
@@ -66,20 +72,39 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
   const org = d.org ?? cohortOrgName(course.org, course.code, term);
   const label = termLabel(term);
   const runs = env?.ops.runs.value.length ?? 0;
-  const orgLive = useLive(env ? async () => ({ org, checks: await checkOrg(env.client, org) }) : null, [asked]);
+  const orgLive = useLive(env ? async () => ({ org, ...(await checkOrg(env.client, org, { kind: env.kind, pending: BOT_PENDING_SEMESTER })) }) : null, [asked]);
   const setupLive = useLive(env ? async () => ({ org, checks: await checkCohortSetUp(env.client, course.org, org) }) : null, [org, asked, runs]);
   const orgChecks = orgLive.value?.org === org ? orgLive.value.checks : null;
   const setUp = setupLive.value?.org === org ? setupLive.value.checks : null;
   const done = nkDone(d, org, orgChecks, setUp);
   const step = openAt(done, asked);
+  usePoll(orgLive, !!env && step === 1 && !allOk(orgChecks));
+  // Continue lists the org in the course's registry, once the person has shown they own it:
+  // the course's admins vouch for their semesters, and that is what lets the bot join it by
+  // itself. Never on a poll, never for an org someone else owns.
+  const [listing, setListing] = useState<{ org: string; busy: boolean; error?: string } | null>(null);
+  const list = async () => {
+    if (!env) return;
+    setListing({ org, busy: true });
+    const fail = (error: string) => setListing({ org, busy: false, error });
+    try {
+      const m = await env.client.getMyMembership(org);
+      if (m?.state !== 'active' || m.role !== 'admin') return fail(`You must be an owner of ${org}.`);
+      await registerSemester(env.client, course.org, org, authorOf(env.user));
+      set({ listed: org, term });
+      setListing(null);
+    } catch (e) {
+      fail(`Could not list ${org} with the course: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
   const go = (k: number) => {
     if (typeof location !== 'undefined') location.hash = `#new-semester-${k}`;
   };
   const q = `?course=${course.org}`;
 
-  let title = '', body, foot;
+  let title: ComponentChildren = '', body, foot;
   if (step === 1) {
-    title = 'Create the org on GitHub, install the app, then I check';
+    title = <>Three things on GitHub <OrgWhy doc="04-new-cohort-org.md" /></>;
     const tiers = cohortOrgTiers(terms.includes(term) ? terms : [term, ...terms]);
     const vals: Values = { term, org };
     const errs = fieldErrors(null, tiers, vals);
@@ -91,11 +116,16 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
           const edited = v.org !== org ? String(v.org ?? '') : d.org;
           set({ term: t, org: edited && edited !== derived && t === term ? edited : undefined });
         }} />
-        <OrgLinks org={org} doc="04-new-cohort-org.md" />
-        <LiveChecks live={{ value: orgChecks, busy: orgLive.busy, run: orgLive.run }} pending={[`The org ${org} exists`, 'hertie-dsl-bot can manage it']} />
+        <OrgSteps org={org} check={orgLive.value?.org === org ? orgLive.value : null} busy={orgLive.busy} run={orgLive.run} back={`${q}#new-semester-1`} />
+        {listing?.org === org && listing.error ? <WizError>{listing.error}</WizError> : null}
+        {d.listed === org && !done[0] ? <p class="footnote">Listed with {course.name}.</p> : null}
       </>
     );
-    foot = <button class="btn" type="button" disabled={!done[0] || Object.keys(errs).length > 0} onClick={() => { set({ orgVerified: org, term }); go(2); }}>Continue</button>;
+    // Everything but the bot passes: Continue lists the org, which is what the bot waits for.
+    const checks = orgChecks ?? [];
+    const toList = !done[0] && d.listed !== org && checks.length > 1 && allOk(checks.slice(0, -1));
+    const busy = listing?.org === org && listing.busy;
+    foot = <button class="btn" type="button" disabled={(!done[0] && !toList) || busy || Object.keys(errs).length > 0} onClick={() => (done[0] ? (set({ orgVerified: org, term }), go(2)) : void list())}>Continue</button>;
   } else if (step === 2) {
     title = `Set up ${label}`;
     const ok = setUp ? allOk(setUp) : false;

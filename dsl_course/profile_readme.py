@@ -30,6 +30,7 @@ from collections.abc import Callable
 from .central import CENTRAL
 from .course import CONFIG_REPO, COURSE_CONFIG, JOIN_REPO
 from .discovery import (
+    being_set_up,
     carries_old_semester_topic,
     course_name_for_semester,
     discover_semesters,
@@ -264,6 +265,7 @@ def render_profile_readme(
     semesters: list[str] | None = None,
     *,
     central_ref: str,
+    setting_up: frozenset[str] = frozenset(),
 ) -> str:
     """Org overview. Semester orgs get a student-facing page; course orgs a faculty & instructors one.
 
@@ -316,7 +318,12 @@ _Hertie Data Science Lab._
 """
     table = _repo_table(repos)
     semester_lines = (
-        "\n".join(f"- [{c}](https://github.com/{c})" for c in (semesters or []))
+        "\n".join(
+            f"- {c} _(being set up)_"
+            if c in setting_up
+            else f"- [{c}](https://github.com/{c})"
+            for c in (semesters or [])
+        )
         or "_(none registered yet - run Bootstrap semester)_"
     )
     return f"""# {course_name} Course
@@ -513,6 +520,7 @@ def profile_files(
         is_semester,
         semesters,
         central_ref=central_ref,
+        setting_up=frozenset(s for s in semesters or [] if being_set_up(s)),
     )
     if is_semester:
         body = _semester_profile_body(org, repos, body)
