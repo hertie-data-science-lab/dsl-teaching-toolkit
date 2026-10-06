@@ -7,7 +7,7 @@
 import { settingsTiers } from './grading';
 import { opt, type FieldTier, type Tiers } from './types';
 import { ORG_NAME_RE } from '../model/policy';
-import { PUBLIC_DIRS, PUBLIC_TYPES, PUBLIC_TYPES_DEFAULT, autogradeBlock, termLabel } from '../wizards/model';
+import { autogradeBlock, termLabel } from '../wizards/model';
 
 const pick = (t: Tiers, keys: string[]): Tiers => Object.fromEntries(keys.map((k) => [k, t[k]]));
 
@@ -76,27 +76,14 @@ export function assignmentMarking(): Tiers {
 
 
 export function newMaterials(terms: string[], repos: string[]): Tiers {
-  const copying = (v: Record<string, unknown>) => !!v.copy_from;
   return {
     term: {
       tier: 'default', label: 'Semester', widget: 'select', defaultLabel: 'default: the newest semester',
       reason: 'Materials are usually per semester. Seeds the repo name and the syllabus header.', options: terms.map((t) => opt(t, termLabel(t))),
     },
-    open: {
-      tier: 'default', label: 'Select some of it for the public website', widget: 'checkbox', default: false, defaultLabel: 'default: off keeps everything private to enrolled students',
-      forced: (v) => (copying(v) ? { value: false, reason: 'Copying takes its publish settings too, so there is nothing to choose here.' } : null),
-    },
-    public_dirs: {
-      tier: 'conditional', under: 'open', when: (v) => v.open === true && !copying(v), label: 'Which folders', widget: 'select', default: PUBLIC_DIRS[0], defaultLabel: `default: ${PUBLIC_DIRS[0]}`,
-      reason: 'By kind: the starter’s lecture or readings folders. Seeds publish.yml; you can change it on the repo’s settings later.', options: PUBLIC_DIRS.map((x) => opt(x, x)),
-    },
-    public_types: {
-      tier: 'conditional', under: 'open', when: (v) => v.open === true && !copying(v), label: 'Which file types', widget: 'select', default: PUBLIC_TYPES_DEFAULT, defaultLabel: `default: ${PUBLIC_TYPES_DEFAULT}`,
-      options: PUBLIC_TYPES.map((x) => opt(x, x)),
-    },
     copy_from: {
       tier: 'advanced', label: 'Copy an existing materials repo', widget: 'select', default: '', defaultLabel: 'default: fresh starter',
-      reason: 'Copying takes its publish settings too, so the choices above are ignored.', options: [opt('', 'No, a fresh starter'), ...repos.map((r) => opt(r, r))],
+      reason: 'Starts from an existing repo: every branch and its history.', options: [opt('', 'No, a fresh starter'), ...repos.map((r) => opt(r, r))],
     },
   };
 }

@@ -31,7 +31,7 @@ migration under a hold neither pauses nor unpauses.
 Semester org, in order: preflight, pause, rename repos, layout, keys, proposed releases,
 topic, re-render, status, unpause. Course org: preflight, pause, registry, .system/,
 dsl-course.yml keys, template keys, seeded text, materials topic, materials files,
-publish.yml comment, re-render, status, unpause.
+public website, re-render, status, unpause.
 """
 
 from __future__ import annotations
@@ -68,7 +68,6 @@ from .course import (
     OLD_JOIN_REPO,
     OLD_PEOPLE_FILE,
     OLD_SEMESTER_TOPIC,
-    PUBLISH_FILE,
     RETIRED_COURSE_KEYS,
     SEMESTER_TOPIC,
     SETTING_PLACEHOLDER,
@@ -106,6 +105,8 @@ from .grades import (
 )
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 from .materials import MATERIALS_TOPIC, is_materials_repo
+from .opencourse import OPENCOURSE_FILE, READINGS_MODES, OpenCourse
+from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
 from .repos import (
     current_description,
@@ -113,7 +114,7 @@ from .repos import (
     repo_missing,
     set_repo_topics,
 )
-from .scaffold import PUBLISH_HEADER, materials_system_files
+from .scaffold import materials_system_files
 from .schedule_plan import label_number, offplan_folders
 from .setting_readers import RENAMED_SETTINGS, read_settings
 from .settings import ASSIGNMENT_DEFAULTS_KEY, RUN_KEYS
@@ -906,11 +907,6 @@ def seeded_wording(ref: str) -> dict[str, str]:
             "# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the SEMESTER "
             "sites, link ONLY"
         ),
-        "#   # WHICH of those files the cohort site hosts publicly, so an HTML deck "
-        "opens rendered": (
-            "#   # WHICH of those files the semester site hosts publicly, so an HTML deck "
-            "opens rendered"
-        ),
         "# `course_name`, `course_code` and `course_description` are what reach the "
         "cohort": (
             "# `course_name`, `course_code` and `course_description` are what reach the "
@@ -1026,62 +1022,33 @@ def review_plan(texts: dict[str, str]) -> list[str]:
     ]
 
 
-# ------------------------------------------------------------------ publish.yml
-# A materials repo's `publish.yml` header as New materials repo seeded it before #330: it
-# said a pattern matches the SEMESTER copy, the opposite of the rule now (patterns match
-# SOURCE paths; a negated folder excludes its subtree). The file is instructor-owned, but
-# a header still exactly as seeded is the toolkit's wording, so it takes the current one.
-# Two spellings are live: as first seeded (`cohort`), and after the 0012 rename.
-OLD_PUBLISH_HEADER = f"""\
-# INSTRUCTOR-OWNED - yours. Written once when this repo was scaffolded, and never
-# rewritten by the toolkit, so anything you put here stays.
-#
-# What the cohort site hosts PUBLICLY, so a rendered deck opens in a browser instead of
-# showing as source on GitHub. Same syntax as .gitignore, relative to this repo - or,
-# strictly, to the cohort's copy, so a release that renames a path with cohort_dest_path
-# needs the pattern written the way the COHORT repo has it. Anything unmatched stays
-# exactly as it is today: enrolled students open it on GitHub. A deck's
-# <name>_files/ bundle follows its deck. solution/, tests/, grading files and .env are
-# never copied whatever is written here. Applies to every cohort of this course. Edit,
-# then press Sync site (or wait for the next release / daily sync) - a file that does not
-# parse stops the sync and is reported, rather than quietly publishing nothing. Full rules:
-# https://github.com/{CENTRAL}/blob/main/docs/11-configure-cohort-site.md
-"""
-_RENAMED_PUBLISH_WORDS = (
-    ("cohort site hosts", "semester site hosts"),
-    ("cohort's copy", "semester's copy"),
-    ("cohort_dest_path", "semester_dest_path"),
-    ("COHORT repo", "SEMESTER repo"),
-    ("every cohort of", "every semester of"),
-)
-# The old rule in a header someone has edited: listed by line, never rewritten.
-_OLD_PUBLISH_RULE = re.compile(
-    r"(?i)the way the (?:semester|cohort) repo has it|to the (?:semester|cohort)'s copy"
-)
+# ------------------------------------------------------------------ public website
+# Decision 0016: `publish.yml` in a materials repo is retired (the semester site is a
+# calendar, and the public website never read it), and the public website's settings move
+# from the `_publish-config.yml` a publish left in the site repo into the course's
+# `.github/opencourse.yml`. The step deletes every `publish.yml` and seeds `opencourse.yml`
+# once; the next publish deletes the old settings file.
+RETIRED_PUBLISH_FILE = "publish.yml"
+RETIRED_PUBLISH_CONFIG = "_publish-config.yml"
+PUBLISH_COMMIT = "migrate: retire publish.yml"
 
 
-def old_publish_headers() -> list[list[str]]:
-    """The old seeded `publish.yml` header's lines, in each spelling a live repo has."""
-    renamed_header = OLD_PUBLISH_HEADER
-    for old, new in _RENAMED_PUBLISH_WORDS:
-        renamed_header = renamed_header.replace(old, new)
-    return [h.rstrip("\n").split("\n") for h in (OLD_PUBLISH_HEADER, renamed_header)]
-
-
-def publish_header(text: str) -> str:
-    """`publish.yml` with its header, where still exactly as seeded, the current one."""
-    for old in old_publish_headers():
-        text = _replace_block(text, old, PUBLISH_HEADER)
-    return text
-
-
-def old_rule_lines(text: str) -> list[int]:
-    """The line numbers of `text` that still state the old rule."""
-    return [
-        n
-        for n, line in enumerate(text.split("\n"), 1)
-        if _OLD_PUBLISH_RULE.search(line)
-    ]
+def opencourse_from(config: str | None) -> OpenCourse:
+    """`opencourse.yml`'s values from a leftover `_publish-config.yml`: on, with its
+    settings, when it names a source repo; else off."""
+    try:
+        cfg = yaml.safe_load(config or "")
+    except yaml.YAMLError:
+        cfg = None
+    if not isinstance(cfg, dict) or not cfg.get("source_repo"):
+        return OpenCourse()
+    mode = str(cfg.get("readings_mode") or "")
+    return OpenCourse(
+        enabled=True,
+        source_repo=str(cfg["source_repo"]),
+        readings_mode=mode if mode in READINGS_MODES else READINGS_MODES[0],
+        include_lectures=bool(cfg.get("include_lectures", True)),
+    )
 
 
 # ------------------------------------------------------------------ proposed releases
@@ -2915,49 +2882,60 @@ class Course:
             for repo in self.untopicked_materials()
         )
 
-    # publish.yml -------------------------------------------------------------
-    def publish_texts(self) -> dict[str, tuple[str, str]]:
-        """`{materials repo: (its publish.yml now, after this step)}`, for each that has
-        one."""
-        out = {}
-        for repo in self.materials_repos():
-            text = get_file_content(self.org, repo, PUBLISH_FILE)
-            if text is not None:
-                out[repo] = (text, publish_header(text))
-        return out
-
-    def publish_work(self) -> dict[str, bytes]:
-        return {
-            repo: new.encode()
-            for repo, (text, new) in self.publish_texts().items()
-            if new != text
-        }
-
-    def publish_notes(self) -> list[str]:
-        """Each `publish.yml` that still states the old rule where it is not as seeded:
-        listed by line, for a person to reword."""
-        found = {
-            repo: lines
-            for repo, (_, new) in self.publish_texts().items()
-            if (lines := old_rule_lines(new))
-        }
-        if not found:
-            return []
+    # public website ----------------------------------------------------------
+    def publish_files(self) -> list[str]:
+        """The materials repos that still carry a `publish.yml`."""
         return [
-            (
-                f"{PUBLISH_FILE} still says patterns match the semester's copy (they match "
-                "SOURCE paths now) - reword by hand, left as it is:"
-            ),
-            *(
-                f"  {repo}/{PUBLISH_FILE}: line(s) {', '.join(map(str, lines))}"
-                for repo, lines in found.items()
-            ),
+            repo
+            for repo in self.materials_repos()
+            if get_file_content(self.org, repo, RETIRED_PUBLISH_FILE) is not None
         ]
 
-    def rewrite_publish(self) -> bool:
-        return all(
-            move_files(self.org, repo, {}, TEXT_COMMIT, files={PUBLISH_FILE: body})
-            for repo, body in self.publish_work().items()
+    def opencourse_missing(self) -> bool:
+        return get_file_content(self.org, ".github", OPENCOURSE_FILE) is None
+
+    def opencourse_seed(self) -> OpenCourse:
+        return opencourse_from(
+            get_file_content(self.org, pages_repo(self.org), RETIRED_PUBLISH_CONFIG)
+        )
+
+    def website_done(self) -> bool:
+        return not self.publish_files() and not self.opencourse_missing()
+
+    def website_plan(self) -> list[str]:
+        out = []
+        if self.opencourse_missing():
+            oc = self.opencourse_seed()
+            out.append(
+                f".github/{OPENCOURSE_FILE}: seeded "
+                + (
+                    f"on, from {pages_repo(self.org)}/{RETIRED_PUBLISH_CONFIG} "
+                    f"(source_repo {oc.source_repo}, readings_mode {oc.readings_mode})"
+                    if oc.enabled
+                    else "off (no earlier publish settings)"
+                )
+            )
+        out += [
+            f"{repo}/{RETIRED_PUBLISH_FILE}: deleted (retired)"
+            for repo in self.publish_files()
+        ]
+        return out
+
+    def retire_publish(self) -> bool:
+        """Seed `opencourse.yml` (create-only: only while it is missing), then delete
+        every `publish.yml`."""
+        seeded = not self.opencourse_missing() or move_files(
+            self.org,
+            ".github",
+            {},
+            PUBLISH_COMMIT,
+            files={OPENCOURSE_FILE: opencourse_text(self.opencourse_seed()).encode()},
+        )
+        return seeded and all(
+            move_files(
+                self.org, repo, {}, PUBLISH_COMMIT, delete=[RETIRED_PUBLISH_FILE]
+            )
+            for repo in self.publish_files()
         )
 
     # re-render ---------------------------------------------------------------
@@ -3115,19 +3093,15 @@ class Course:
                 rollback=f"git revert the '{LAYOUT_COMMIT}' commit in each materials repo",
             ),
             Step(
-                f"{PUBLISH_FILE} comment",
-                done=lambda: not self.publish_work(),
-                plan=lambda: [
-                    (
-                        f"{repo}/{PUBLISH_FILE}: the seeded comment -> the current one "
-                        "(patterns match SOURCE paths)"
-                    )
-                    for repo in self.publish_work()
-                ],
-                do=self.rewrite_publish,
-                verify=lambda: not self.publish_work(),
-                rollback=f"git revert the '{TEXT_COMMIT}' commit in each materials repo",
-                notes=self.publish_notes,
+                "public website",
+                done=self.website_done,
+                plan=self.website_plan,
+                do=self.retire_publish,
+                verify=self.website_done,
+                rollback=(
+                    f"git revert the '{PUBLISH_COMMIT}' commit in each materials repo "
+                    f"and in {dotgithub}"
+                ),
             ),
             Step(
                 "re-render",

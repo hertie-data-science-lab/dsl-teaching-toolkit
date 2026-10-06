@@ -465,33 +465,13 @@
     {
       "args_schema": {
         "additionalProperties": false,
-        "properties": {
-          "include_lectures": {
-            "description": "Publish lecture files",
-            "type": "boolean"
-          },
-          "readings_mode": {
-            "enum": [
-              "reading-list",
-              "actual-readings",
-              "none"
-            ],
-            "type": "string"
-          },
-          "source_repo": {
-            "description": "Materials repo; replaces the live public site",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "source_repo"
-        ],
+        "properties": {},
+        "required": [],
         "type": "object"
       },
       "counts_doc": "",
       "doc": "docs/reference/actions-reference.md",
-      "help": "Publish the public website from a materials repo.",
+      "help": "Publish the public website as its settings (opencourse.yml) say.",
       "name": "course.publish_website",
       "preview": false,
       "required_team": "instructors",
@@ -556,25 +536,6 @@
           "copy_from": {
             "description": "Materials repo to copy forward",
             "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
-            "type": "string"
-          },
-          "public_dirs": {
-            "default": "(nothing public)",
-            "enum": [
-              "(nothing public)",
-              "lectures",
-              "everything except readings",
-              "everything"
-            ],
-            "type": "string"
-          },
-          "public_types": {
-            "default": "html + pdf",
-            "enum": [
-              "html",
-              "html + pdf",
-              "all files"
-            ],
             "type": "string"
           },
           "semester": {

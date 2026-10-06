@@ -550,15 +550,13 @@ def refreshed(doc: dict) -> Summary:
     """What a status write says it did: the counts the console's home screen leads
     with. Counts only - the course file is public, and so is the run log."""
     problems = len(doc.get("problems") or [])
+    # No sentence prints a problem count of zero.
+    said = plural(problems, "problem") if problems else "no problems"
     if "semester" not in doc:
-        return Summary(
-            f"Course status refreshed: {plural(problems, 'problem')}.",
-            {"problems": problems},
-        )
+        return Summary(f"Course status refreshed: {said}.", {"problems": problems})
     week = len(doc.get("this_week") or [])
     return Summary(
-        f"Status refreshed: {plural(problems, 'problem')}, "
-        f"{plural(week, 'item')} this week.",
+        f"Status refreshed: {said}, {plural(week, 'item')} this week.",
         {"problems": problems, "this_week": week},
     )
 

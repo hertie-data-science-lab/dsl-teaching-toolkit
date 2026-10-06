@@ -224,14 +224,13 @@ def _course(**over) -> status_json.CourseFacts:
             ".github/workflows/scheduled-release.yml": "beef",
         },
         registry=[SEMESTER],
-        materials=[
-            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus", True)
-        ],
+        materials=[status_json.MaterialsFacts("course-materials-f2026", "# Syllabus")],
         templates=[
             status_json.TemplateFacts("assignment-2-f2026", "# Regression"),
             status_json.TemplateFacts("assignment-3-f2026", "# Trees"),
         ],
         public_site=True,
+        website_on=True,
     )
     for key, value in over.items():
         setattr(facts, key, value)
@@ -394,6 +393,75 @@ def test_the_contract_example_marks_k4_k5_and_c5_and_lists_three_problems():
     assert assignment["problem"] is True
 
 
+def _course_block(course: status_json.CourseFacts) -> dict:
+    return status_json.render_course_file(course, NOW)["course"]
+
+
+@pytest.mark.parametrize(
+    ("over", "ready"),
+    [
+        # C4-C6 are listed but optional: none of them stops a new semester.
+        ({"materials": [], "templates": [], "public_site": False}, True),
+        (
+            {"materials": [status_json.MaterialsFacts("course-materials-x", None)]},
+            True,
+        ),
+        # C1-C3 are required.
+        ({"github_paths": None}, False),
+        ({"github_paths": {"dsl-course.yml": "c0ffee"}}, False),
+        ({"meta": {"course_name": "Machine Learning"}}, False),
+    ],
+)
+def test_ready_is_c1_to_c3_done(over, ready):
+    block = _course_block(_course(**over))
+    assert block["ready"] is ready
+    if not ready:
+        assert any(block["stage_why"].get(s) for s in ("C1", "C2", "C3"))
+
+
+def test_a_course_problem_stops_ready_though_every_required_stage_is_done():
+    course = _course()
+    course.templates[1].faults = [_autograde_sometimes()]
+    block = _course_block(course)
+    assert {s: block["stages"][s] for s in ("C1", "C2", "C3")} == dict.fromkeys(
+        ("C1", "C2", "C3"), "done"
+    )
+    assert block["ready"] is False
+    # A migration problem on a materials repo is a course problem too.
+    unmigrated = status_json.MaterialsFacts("course-materials-x", "# S", True)
+    unmigrated.topic = False
+    assert _course_block(_course(materials=[unmigrated]))["ready"] is False
+
+
+@pytest.mark.parametrize(
+    ("now", "archived", "ended"),
+    [
+        (NOW, False, False),  # week 3
+        (datetime(2026, 12, 19, 12, 0, tzinfo=UTC), False, True),  # past the end
+        (datetime(2026, 12, 18, 12, 0, tzinfo=UTC), False, False),  # its last day
+        # 23:30 UTC on the 18th is already the 19th in Berlin, the semester's zone.
+        (datetime(2026, 12, 18, 23, 30, tzinfo=UTC), False, True),
+        (datetime(2026, 12, 19, 12, 0, tzinfo=UTC), True, False),  # archived
+    ],
+)
+def test_a_semester_past_its_end_and_not_archived_has_ended(now, archived, ended):
+    semester = _semester()
+    if archived:
+        semester.listing["semester-config"] = {
+            **semester.listing["semester-config"],
+            "archived": True,
+        }
+    doc = _render(semester=semester, now=now)
+    assert doc["semester"]["ended"] is ended
+    assert doc["semester"]["live"] is not archived
+
+
+def test_a_semester_with_no_end_date_has_not_ended():
+    sched = _sched(SCHEDULE.replace("semester_end: 2026-12-18\n", ""))
+    doc = _render(semester=_semester(sched=sched))
+    assert doc["semester"]["ended"] is False
+
+
 def test_two_faults_on_one_entry_are_two_problems():
     second = _missing_s5()
     second.path = "lectures/05_forests"
@@ -466,7 +534,7 @@ def test_an_undeclared_kind_is_inferred_through_the_repos_aliases_and_says_so():
 
 
 def test_a_materials_repo_by_its_old_name_only_is_not_migrated():
-    old = status_json.MaterialsFacts("course-materials-f2025", "# S", True, topic=False)
+    old = status_json.MaterialsFacts("course-materials-f2025", "# S", topic=False)
     doc = _render(_course(materials=[old]))
     assert doc["course"]["materials"] == [
         {"repo": "course-materials-f2025", "state": "problem"}
@@ -490,7 +558,7 @@ def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
     )
     monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(
-        status_json, "get_file_content", lambda org, repo, path, ref="": "public: []"
+        status_json, "get_file_content", lambda org, repo, path, ref="": None
     )
     present = {"E1282_syllabus.pdf": "5ha"}
     monkeypatch.setattr(status_json, "repo_path_shas", lambda org, repo, b: present)
@@ -940,7 +1008,6 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
             CONTRACT_EXAMPLE["operations"][0]
         ),
         (COURSE, "course-materials-f2026", "SYLLABUS.md"): "# Syllabus",
-        (COURSE, "course-materials-f2026", "publish.yml"): "public: lectures\n",
         (COURSE, "assignment-2-f2026", "README.md"): "# Regression",
         (COURSE, "assignment-2-f2026", "grading_config.yml"): "autograde: sometimes\n",
         (SEMESTER, f"{SEMESTER}.github.io", "index.md"): "# Welcome",
@@ -970,6 +1037,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     for module in (status_json, schedule, grades):
         monkeypatch.setattr(module, "get_file_content", content)
     monkeypatch.setattr(status_json, "read_materials", lambda org, repo: Declared())
+    monkeypatch.setattr(status_json, "read_opencourse", lambda org: None)
     schedule._schedule_text.cache_clear()
     monkeypatch.setattr(status_json, "list_org_repos", lambda org: listings[org])
     monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
@@ -1251,9 +1319,9 @@ def test_a_stage_that_is_not_done_says_why():
     course = _course(
         materials=[
             status_json.MaterialsFacts(
-                "course-materials-f2025", "<!-- dsl-stub: syllabus -->", True
+                "course-materials-f2025", "<!-- dsl-stub: syllabus -->"
             ),
-            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus", True),
+            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus"),
         ]
     )
     doc = _render(course, _semester(people=ta_only))
@@ -1296,10 +1364,27 @@ def test_the_archive_stage_says_when():
 
 
 def test_the_course_file_carries_its_whys_too():
-    course = _course(public_site=False)
+    course = _course(website_on=False)
     public = status_json.render_course_file(course, NOW)
     assert public["course"]["stage_why"] == {
-        "C6": "There is no public website; it is optional."
+        "C6": "The public website is off; it is optional."
+    }
+
+
+def test_a_website_turned_on_but_never_published_is_not_done_yet():
+    # C6 reads opencourse.yml: a site repo left from an older publish is not "published"
+    # while the file says off, and an enabled file waits for its first publish.
+    on = status_json.render_course_file(_course(public_site=False), NOW)
+    assert on["course"]["stage_why"] == {
+        "C6": "The public website is on but not published yet."
+    }
+    off = status_json.render_course_file(_course(website_on=False), NOW)
+    assert off["course"]["stages"]["C6"] != "done"
+    broken = status_json.render_course_file(
+        _course(website_on=False, website_unusable=True), NOW
+    )
+    assert broken["course"]["stage_why"] == {
+        "C6": "The public website settings file does not parse."
     }
 
 

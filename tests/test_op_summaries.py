@@ -275,7 +275,7 @@ def test_status_refresh_counts_problems_and_this_week():
     assert s.counts == {"problems": 2, "this_week": 1}
     assert (
         status.refreshed({"problems": []}).text
-        == "Course status refreshed: 0 problems."
+        == "Course status refreshed: no problems."
     )
 
 

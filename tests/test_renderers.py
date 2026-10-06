@@ -86,7 +86,7 @@ ALL_RENDERED = {
         ["Semester-f2026"], ["assignment-1-f2026"]
     ),
     "sync_site": workflows_render.render_sync_site(["Semester-f2026"]),
-    "publish_site": workflows_render.render_publish_site(["course-materials-f2026"]),
+    "publish_site": workflows_render.render_publish_site(),
     "status": workflows_render.render_status(["Semester-f2026"]),
     "scheduler": workflows_render.render_scheduler(),
     "console": workflows_render.render_console(),
@@ -199,7 +199,7 @@ DATED_RENDERED = {
     "propagate_semester": workflows_render.render_propagate_semester(SEMESTERS_2),
     "archive_semester": workflows_render.render_archive_semester(SEMESTERS_2),
     "sync_site": workflows_render.render_sync_site(SEMESTERS_2),
-    "publish_site": workflows_render.render_publish_site(REPOS_2, REPOS_2),
+    "publish_site": workflows_render.render_publish_site(),
     "status": workflows_render.render_status(SEMESTERS_2),
 }
 
@@ -244,36 +244,9 @@ def test_every_renderer_is_covered_by_the_yaml_sweep():
     assert renderers == set(ALL_RENDERED)
 
 
-def test_publish_site_inputs():
-    inp = workflow_inputs(
-        workflows_render.render_publish_site(
-            ["course-materials-f2026", "course-materials-f2025"]
-        )
-    )
-    assert set(inp) == {"source_repo", "readings_mode", "include_lectures"}
-    assert inp["source_repo"]["options"] == [
-        "course-materials-f2026",
-        "course-materials-f2025",
-    ]
-    assert inp["readings_mode"]["options"] == [
-        "reading-list",
-        "actual-readings",
-        "none",
-    ]
-    assert inp["readings_mode"]["default"] == "reading-list"
-    assert inp["include_lectures"]["type"] == "boolean"
-
-
-def test_publish_site_defaults_to_the_newest_materials_repo():
-    # Publishing REPLACES what the site serves. The dropdown's default used to be the
-    # alphabetically last option of the newest year, so a faculty member clicking Run with
-    # the defaults republished from a code repo and wiped a live site's materials. A
-    # materials repo is one with the topic, whatever its name.
-    repos = ["course-materials-f2025", "course-materials-s2026", "lecture-code-f2026"]
-    repos += ["slides-f2026"]
-    materials = ["course-materials-f2025", "course-materials-s2026", "slides-f2026"]
-    inp = workflow_inputs(workflows_render.render_publish_site(repos, materials))
-    assert inp["source_repo"]["default"] == "slides-f2026"
+def test_publish_site_takes_no_inputs():
+    # opencourse.yml says what to publish (decision 0016), so the button asks nothing.
+    assert workflow_inputs(workflows_render.render_publish_site()) == {}
 
 
 def test_the_release_and_syllabus_dropdowns_default_to_the_newest_materials_repo():
@@ -286,33 +259,21 @@ def test_the_release_and_syllabus_dropdowns_default_to_the_newest_materials_repo
         assert inp["default"] == "course-materials-f2026"
 
 
-def test_publish_site_prefers_a_materials_repo_when_no_name_carries_a_term():
-    inp = workflow_inputs(
-        workflows_render.render_publish_site(["lecture-code", "slides"], ["slides"])
-    )
-    assert inp["source_repo"]["default"] == "slides"
-
-
-def test_publish_site_without_a_materials_repo_defaults_to_the_first_option():
-    inp = workflow_inputs(
-        workflows_render.render_publish_site(["lecture-code", "slides-f2026"])
-    )
-    assert inp["source_repo"]["default"] == "lecture-code"
-
-
 def test_publish_site_has_publish_job_running_public_sync():
-    rendered = workflows_render.render_publish_site(["course-materials-f2026"])
-    assert "publish" in workflow_jobs(rendered)
-    assert "dsl_course.site public-sync" in rendered
-    # include_lectures off must map to the CLI flag.
-    assert "--no-include-lectures" in rendered
+    rendered = workflows_render.render_publish_site()
+    run = next(
+        s
+        for s in workflow_jobs(rendered)["publish"]["steps"]
+        if s.get("name") == "Publish course website"
+    )["run"]
+    assert 'python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG"' in run
+    assert "--daily" not in run  # a person asked: an off website is refused
 
 
-def test_publish_site_cron_resyncs_from_persisted_settings():
-    # The only flow that used to need a human re-click: a daily cron now re-runs the last
-    # publish's persisted settings (public-sync with no source args), while the manual
-    # button keeps its inputs and its check-team gate exactly as before.
-    rendered = workflows_render.render_publish_site(["course-materials-f2026"])
+def test_publish_site_cron_republishes_from_opencourse():
+    # The daily cron runs the same publish, quiet where opencourse.yml is absent or off;
+    # the manual button keeps its check-team gate.
+    rendered = workflows_render.render_publish_site()
     doc = yaml.safe_load(rendered)
     trigger = doc.get("on", doc.get(True))
     assert trigger["schedule"] == [{"cron": "58 5 * * *"}]
@@ -326,7 +287,7 @@ def test_publish_site_cron_resyncs_from_persisted_settings():
         "run"
     ]
     assert "python3 -m dsl_course.site public-sync --course-org" in run
-    assert "--source-repo" not in run  # no inputs: the settings come from the site repo
+    assert "--daily" in run
     assert jobs["publish"]["needs"] == "check-team"
 
 
@@ -836,8 +797,8 @@ def test_bootstrap_org_workflow_routes_inputs_through_env_not_the_shell():
 def test_choice_falls_back_when_empty():
     # An empty dropdown must still be valid YAML (a placeholder option), never blank.
     assert "(none-yet)" in workflows_render._choice([])
-    inp = workflow_inputs(workflows_render.render_publish_site([]))
-    assert inp["source_repo"]["options"] == ["(none-yet)"]
+    inp = workflow_inputs(workflows_render.render_generate_syllabus([], [], []))
+    assert inp["course_source_repo"]["options"] == ["(none-yet)"]
 
 
 def test_sync_site_auto_resyncs_on_sourced_changes():
@@ -2503,33 +2464,12 @@ def test_the_git_authentication_sweep_sees_the_pushing_buttons():
     } <= pushing
 
 
-def test_the_publishing_dropdowns_default_to_nothing_public():
-    # The one answer on this form that cannot be taken back is the one that puts bytes on
-    # a public site, so an untouched form must produce exactly today's course.
-    inputs = workflow_inputs(workflows_render.render_new_materials())
-    assert inputs["public_dirs"]["options"] == list(course.PUBLIC_DIRS)
-    assert inputs["public_dirs"]["default"] == course.NOTHING_PUBLIC
-    assert inputs["public_types"]["options"] == list(course.PUBLIC_TYPES)
-    assert inputs["public_types"]["default"] == course.PUBLIC_HTML_PDF
-    # Neither is required: both always arrive answered, and neither is a decision the form
-    # needs a faculty member to make.
-    assert inputs["public_dirs"].get("required") is not True
-    assert inputs["public_types"].get("required") is not True
-
-
-def test_the_publishing_answers_reach_the_scaffolder():
-    # A dropdown whose answer never leaves the form is a setting that silently does
-    # nothing - the whole of what these two boxes do is become `publish.yml`.
-    rendered = workflows_render.render_new_materials()
-    step = next(
-        s
-        for job in workflow_jobs(rendered).values()
-        for s in job.get("steps", [])
-        if "scaffold materials" in s.get("run", "")
-    )
-    assert step["env"]["PUBLIC_DIRS"] == "${{ inputs.public_dirs }}"
-    assert step["env"]["PUBLIC_TYPES"] == "${{ inputs.public_types }}"
-    assert "--public-dirs" in step["run"] and "--public-types" in step["run"]
+def test_new_materials_asks_nothing_about_publishing():
+    # publish.yml is retired (decision 0016): the public website has its own settings.
+    assert set(workflow_inputs(workflows_render.render_new_materials())) == {
+        "semester",
+        "copy_from",
+    }
 
 
 # ------------------------------------------------------------------ the Console workflow

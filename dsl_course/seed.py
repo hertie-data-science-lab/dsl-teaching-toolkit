@@ -290,9 +290,7 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
             assignments
         ),
         ".github/workflows/sync-site.yml": render_sync_site(semesters),
-        ".github/workflows/publish-site.yml": render_publish_site(
-            source_repos, materials
-        ),
+        ".github/workflows/publish-site.yml": render_publish_site(),
         ".github/workflows/sync-membership.yml": render_sync_membership(semesters),
         ".github/workflows/send-codes.yml": render_send_codes(),
         ".github/workflows/distribute-grades.yml": render_distribute_grades(semesters),

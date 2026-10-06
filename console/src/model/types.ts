@@ -31,6 +31,9 @@ export interface CourseStatus {
   name: string;
   code: string;
   stages: Record<string, StageState>;
+  /** One sentence per stage that is not done, saying why. */
+  stage_why?: Record<string, string>;
+  /** C1-C3 done and no course problem: a new semester can start (decision 0019). */
   ready: boolean;
   materials: { repo: string; state: string }[];
   templates: { repo: string; slug: string; state: string }[];
@@ -49,7 +52,10 @@ export interface SemesterStatus {
   week?: number | null;
   weeks?: number | null;
   live: boolean;
+  /** Past its end and not archived yet; absent on an older status. */
+  ended?: boolean;
   stages: Record<string, StageState>;
+  stage_why?: Record<string, string>;
   archive_date: string | null;
 }
 

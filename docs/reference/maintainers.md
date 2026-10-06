@@ -147,13 +147,15 @@ Things whose *literal spelling* is depended on from outside Python:
   marked file would still read as untouched and be rewritten by the nightly refresh -
   faculty's patterns gone, and whatever they withheld shipping again on a green run. The
   price is that its wording cannot be improved in a repo that already has it.
-- **`course.PUBLISH_FILE`** (`publish.yml`) is the other filename faculty type into a
-  materials repo. It selects what the public website publishes; until slice E rebuilds that
-  site, only the console's preview reads it (its rule, `materials.hosted_paths`, is exported
-  in `console/schemas/materials.json`). The
-  semester site no longer hosts anything (decision 0011 rule 5: the site is a calendar, and
-  the sync removes its old `files/` copies). Seeded CREATE-ONLY and
-  INSTRUCTOR-OWNED, and no workflow writes it after creation.
+- **`opencourse.OPENCOURSE_FILE`** (`opencourse.yml`, in the course `.github`) is the
+  public website's one declaration (decision 0016): `enabled`, `source_repo`,
+  `readings_mode`, `include_lectures`, `withhold` (`.releaseignore` syntax,
+  `releaseignore.deny_lines`). The Publish public website operation and the daily cron read
+  it and nothing else; `enabled: false` stops both. Seeded CREATE-ONLY and INSTRUCTOR-OWNED
+  by Bootstrap Course Org (off), schema in `console/schemas/opencourse.schema.json`. A
+  materials repo's `publish.yml` and the site repo's `_publish-config.yml` are retired: the
+  migration deletes the first and seeds `opencourse.yml` from the second; a publish deletes
+  the second.
 - **`course.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
   and the dest's DEFAULT branch is what students, the website and `propagate` read. The
   release commits onto `upstream` and merges it into the default one; a conflict aborts the
@@ -416,7 +418,7 @@ layers above its own:
 | 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
-| 5 and up | `access` (team permissions and the faculty floor), `materials` (the `materials.yml` escape hatch and the kind aliases), `schedule_plan` (the rows a plan declares, one per release entry), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
+| 5 and up | `access` (team permissions and the faculty floor), `materials` (the `materials.yml` escape hatch and the kind aliases), `opencourse` (the public website's `opencourse.yml`), `schedule_plan` (the rows a plan declares, one per release entry), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
 
 Two placements are not where they read: `access` sits above `discovery`, because the
 faculty floor is computed from what discovery finds, and `site_repo` above `scaffold` and
@@ -853,6 +855,7 @@ Promote.
 | course `.github/.github/.last-refresh`, `.github/.github/.missing-cohorts` | `.github/.system/last-refresh`, `.github/.system/missing-semesters` | course org |
 | materials `MAINTAINING.md`, `SYLLABUS.md.sample`, `SYLLABUS.sessions.md` | `.system/MAINTAINING.md`, `.system/SYLLABUS.md.sample`, `.system/SYLLABUS.sessions.md`; a whole-repo release skips `.system/` | every `course-materials-*` repo |
 | a `course-materials-*` name as the mark of a materials repo | the `dsl-materials` topic (the name stays the scaffold's default) | course org; the course step "materials topic" adds it |
+| a materials repo's `publish.yml`; the public site repo's `_publish-config.yml` | the course's `.github/opencourse.yml` (decision 0016) | every materials repo; the course step "public website" deletes each `publish.yml` and seeds `opencourse.yml` from `_publish-config.yml` (else off); the next publish deletes `_publish-config.yml` |
 | semester site Assignments, All Materials and Your Profile tabs, assignment pages, hosted copies under `files/`, team lists and member digests | none: the site is a public calendar (decision 0011 rule 5); the student console reads `student-status.json` | the site sync removes them (`site_repo.retired_sections`) |
 | semester site rows keyed by the `NN_` folder ordinal; the `readings` section | one row per shown `releases:` entry, of its kind, numbered by `number:`, else the label, else position; numbered readings joined to the lecture of that number, others their own row (`schedule_plan.site_rows`, decision 0013); unplanned kind folders as undated tab rows; tabs per kind; the pinned syllabus by `materials.yml` declaration, else the old root-file rule | every semester site, on its next sync |
 | semester topic `dsl-cohort` on an ARCHIVED semester | kept for ever: archived semesters are never migrated, and every sweep skips them (`discovery.semester_is_live`, `seed.refresh`) | - |
@@ -946,8 +949,9 @@ still keyed `cohorts:`), `.system/` in `.github`, `dsl-course.yml` keys, templat
 and the run settings out, recorded first in `.github/.system/migration-run-keys.json` for
 the semesters, re-read with `parse_grading_spec` - course-owned, so here rather than per
 semester),
-materials files, `publish.yml` comment (a header still exactly as seeded before #330 takes the
-current one; one that states the old rule otherwise is listed by line), re-render (Refresh
+materials files, public website (every materials repo's `publish.yml` deleted; `.github/opencourse.yml`
+seeded, create-only, from the site repo's `_publish-config.yml` when there is one - on, with its
+settings - else off), re-render (Refresh
 actions from the checkout, the course's own repos only -
 no semester; with no `DSL_BOT_TOKEN` on the laptop the repo secret is left, with a note, to
 the org's next Refresh actions; drift checked in `.github`, every content repo and every

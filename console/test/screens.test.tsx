@@ -12,7 +12,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { CohortScreen } from '../src/screens/Cohort';
-import { CourseScreen, TemplateScreen } from '../src/screens/Course';
+import { CourseScreen, SetupList, TemplateScreen, readyWords, semesterChip, stepLink } from '../src/screens/Course';
 import { HomeScreen, ReadonlyScreen, SignInScreen } from '../src/screens/Home';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
@@ -254,7 +254,7 @@ describe('S6 schedule and S11 release', () => {
 });
 
 describe('operation outcome', () => {
-  it('shows what the op produced in the details fold, preformatted', () => {
+  it('shows the generated text directly, and what the op touched in the details fold', () => {
     const def = generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026');
     const outcome = { schema: 'dsl.outcome/1' as const, op: def.op, run_id: 7, actor: 'a', preview: true, conclusion: 'previewed' as const, summary: 'Preview: the session list.', reasons: [{ code: 'NO_SOLUTION_REGION', text: 'solution.py\nhas no region' }], details: ['main/solution.py', 'main/README.md'], block: '## Course sessions and readings\n- Session 1: Intro' };
     const out = html(<OutcomeView result={{ outcome, people: [], leaked: [] }} def={def} />);
@@ -262,7 +262,8 @@ describe('operation outcome', () => {
     expect(out).toContain('<ul class="outcome-list"><li>main/solution.py</li><li>main/README.md</li></ul>');
     expect(out).toContain('<pre class="outcome-details">## Course sessions and readings\n- Session 1: Intro</pre>');
     expect(out).toContain('>Copy</button>');
-    expect(out.indexOf('outcome-list')).toBeLessThan(out.indexOf('outcome-details'));
+    // The session list is what a preview is for (finding 31): above the fold, not in it.
+    expect(out.indexOf('outcome-details')).toBeLessThan(out.indexOf('<summary>Details</summary>'));
     expect(out).toContain('<td class="pre">solution.py\nhas no region');
   });
 });
@@ -357,7 +358,11 @@ describe('S2 course and S17 template', () => {
   const cp = { course, loaded: { kind: 'absent' } as Loaded, cohortStates: { [COHORT_ORG]: ready }, files, now: NOW };
   it('shows problems, templates, materials, details and cohorts', () => {
     const t = text(<CourseScreen {...cp} />);
-    expect(t).toContain('Not ready for a new semester');
+    // C1-C3 are done; the template's problem is what holds the course back.
+    expect(t).toContain('Not ready: a problem below needs fixing.');
+    expect(t).not.toMatch(/\b0 (setup steps|problems)/);
+    expect(t).toContain('Setup steps are things still to do. Problems are things that broke.');
+    expect(t).toContain('Students get only what a semester releases or hands out');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).toContain('assignment-3-f2026');
     expect(t).toContain('course-materials-f2026');
@@ -365,6 +370,60 @@ describe('S2 course and S17 template', () => {
     expect(t).toContain('up to 5, ');
     expect(t).not.toContain('this course’s default');
     expect(t).toContain('Fall 2026');
+  });
+  const base = STATUS.course!;
+  const withWhy = {
+    ...base,
+    stages: { C1: 'done', C2: 'done', C3: 'todo', C4: 'todo', C5: 'blocked', C6: 'todo' },
+    stage_why: {
+      C3: 'Course details have no description yet.',
+      C4: 'There is no materials repo yet.',
+      C5: 'Waiting for the course to be set up.',
+      C6: 'There is no public website; it is optional.',
+    },
+    materials: [],
+    templates: [],
+    ready: false,
+  } as typeof base;
+  it('renders the setup checklist from stage_why: ticks, the why and one link each', () => {
+    const out = html(<SetupList course={withWhy} />);
+    expect((out.match(/class="done"/g) ?? []).length).toBe(2);
+    expect((out.match(/class="open"/g) ?? []).length).toBe(4);
+    expect(out).toContain('Course details have no description yet.');
+    expect(out).toContain('href="#details"');
+    expect(out).toContain(`href="?course=${COURSE_ORG}#new-materials"`);
+    expect(out).toContain(`href="https://github.com/${COURSE_ORG}/.github"`); // C5 is blocked on C2
+    expect(out).toContain('href="#website"');
+    expect((out.match(/<span class="s-need">required<\/span>/g) ?? []).length).toBe(3);
+    // Unmarked is optional: the website's own sentence says so.
+    expect(out).not.toContain('>optional</span>');
+    expect(out).toContain('<span class="sr">: To do</span>');
+    expect(out).toContain('<span class="sr">: Blocked</span>');
+    // Done lines carry no link and no sentence.
+    expect(out).not.toContain('Open on GitHub');
+  });
+  it('links a problem step to its card and a blocked step to what it waits for', () => {
+    expect(stepLink('C5', base)).toEqual({ href: '#course-problems', label: 'See the problem' });
+    // C5 waits for C2 (set up on GitHub); C6 for C4, itself waiting for C2.
+    const waiting = { ...withWhy, stages: { ...withWhy.stages, C2: 'todo', C4: 'blocked', C6: 'blocked' } } as typeof base;
+    expect(stepLink('C5', waiting).label).toBe('Open .github');
+    expect(stepLink('C6', waiting).label).toBe('Open .github');
+    expect(stepLink('C6', withWhy)).toEqual({ href: '#website', label: 'Set up the public website' });
+    expect(stepLink('C4', { ...withWhy, materials: [{ repo: 'm', state: 'todo' }] }).label).toBe('Open materials');
+    expect(stepLink('C5', { ...withWhy, stages: { ...withWhy.stages, C5: 'todo' }, templates: [{ repo: 't', slug: 't', state: 'todo' }] }).label).toBe('Open templates');
+    expect(html(<SetupList course={base} />)).toContain('href="#course-problems">See the problem</a>');
+  });
+  it('says how many required steps are left, never a problem count', () => {
+    expect(readyWords(withWhy)).toBe('Not ready: 1 setup step left.');
+    expect(readyWords({ ...withWhy, stages: { ...withWhy.stages, C1: 'todo', C2: 'blocked' } })).toBe('Not ready: 3 setup steps left.');
+    expect(readyWords({ ...withWhy, ready: true })).toBe('Ready for a new semester.');
+    expect(readyWords(base)).toBe('Not ready: a problem below needs fixing.');
+  });
+  it('reads a semester as live, ended but not archived, or archived', () => {
+    const sem = STATUS.semester!;
+    expect(text(<>{semesterChip(sem)}</>).trim()).toBe('Live');
+    expect(text(<>{semesterChip({ ...sem, ended: true })}</>).trim()).toBe('Ended, not archived');
+    expect(text(<>{semesterChip({ ...sem, live: false, ended: false })}</>).trim()).toBe('Archived');
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3" />);

@@ -12,6 +12,8 @@ export interface Names {
   system_dir: string;
   instructors_file: string;
   assignments_file: string;
+  /** The public website's settings, in the course's `.github` (decision 0016). */
+  opencourse_file: string;
   /** The course's list of its semesters, in its `.github`. */
   registry_file: string;
   /** Engine-written records, as paths inside the repo that holds them (`records.path` in the engine). */
@@ -28,6 +30,7 @@ export const INSTRUCTORS_FILE = NAMES.instructors_file;
 /** The semester's run settings for its assignments (decision 0010 rule 5). */
 export const ASSIGNMENTS_FILE = NAMES.assignments_file;
 export const REGISTRY_FILE = NAMES.registry_file;
+export const OPENCOURSE_FILE = NAMES.opencourse_file;
 export const STATUS_PATH = NAMES.records.status;
 /** A semester's public facts for its students, in the semester org's `.github`. */
 export const STUDENT_STATUS_PATH = NAMES.records.student_status;
