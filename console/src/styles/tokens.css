@@ -1,0 +1,68 @@
+/* Ported verbatim from the v3 mockup (.project/design/mockup/index.html); the design system. */
+/* ================= tokens: light ================= */
+:root {
+  --brand-bar: #BA0020;      /* the student site's $brand-color: top bar only */
+  --on-brand: #ffffff;
+  --ground: #f4f4f5;
+  --surface: #ffffff;
+  --surface-2: #f9f9fa;
+  --sunk: #eef0f2;
+  --ink: #1d1c1f;
+  --ink-2: #4a4a4a;
+  --muted: #6c7a89;
+  --rule: #e3e3e3;
+  --rule-strong: #c5c9cf;
+  --btn-bg: #242328;         /* primary + preview: neutral ink */
+  --btn-ink: #ffffff;
+  --link: #2c6386;
+  --focus: #2f7fb5;
+  --ok: #2f7d4a;
+  --ok-soft: #e3f1e6;
+  --amber: #c0851a;          /* a stage that has a problem */
+  --amber-soft: #fbf2d5;
+  --amber-ink: #7d6230;
+  --bad: #b3261e;            /* problems only */
+  --bad-soft: #f8e4e2;
+  --bad-ink: #a2231c;
+  --idle: #a3abb4;
+  --lec-bg: #f2dede;  --lec-ink: #a94442;
+  --lab-bg: #dff0d8;  --lab-ink: #3c763d;
+  --asg-bg: #d9edf7;  --asg-ink: #31708f;
+  --exam-bg: #f0f1f2; --exam-ink: #5a5f66;
+  --evt-bg: #fbf2d5;  --evt-ink: #7d6230;
+  --term-bg: #e5dcf0; --term-ink: #59468f;
+  --row-text: #111111;
+  --shadow: 0 10px 30px rgba(30, 20, 24, 0.14);
+  --font-display: 'Titillium Web', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-body: 'Source Sans 3', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-code: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --brand-bar: #7e0f20; --on-brand: #ffffff;
+    --ground: #141316; --surface: #1c1b1f; --surface-2: #212024; --sunk: #28272c;
+    --ink: #ececee; --ink-2: #c6c6cb; --muted: #9aa4af; --rule: #2e2d32; --rule-strong: #4a4950;
+    --btn-bg: #e9e9ec; --btn-ink: #17161a; --link: #8ec5e6; --focus: #8ec5e6;
+    --ok: #62b980; --ok-soft: #1d3325; --amber: #e2ab4a; --amber-soft: #3a3120; --amber-ink: #e8c883;
+    --bad: #ef6b62; --bad-soft: #3d2224; --bad-ink: #f5a59e; --idle: #6b7380;
+    --lec-bg: #3b2426; --lec-ink: #eea39d; --lab-bg: #213324; --lab-ink: #9fd09a;
+    --asg-bg: #1b3041; --asg-ink: #8ec5e6; --exam-bg: #2a2c30; --exam-ink: #b8bec6;
+    --evt-bg: #3a3120; --evt-ink: #e3c27c; --term-bg: #2c2641; --term-ink: #c0afea;
+    --row-text: #ececee; --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --brand-bar: #7e0f20; --on-brand: #ffffff;
+  --ground: #141316; --surface: #1c1b1f; --surface-2: #212024; --sunk: #28272c;
+  --ink: #ececee; --ink-2: #c6c6cb; --muted: #9aa4af; --rule: #2e2d32; --rule-strong: #4a4950;
+  --btn-bg: #e9e9ec; --btn-ink: #17161a; --link: #8ec5e6; --focus: #8ec5e6;
+  --ok: #62b980; --ok-soft: #1d3325; --amber: #e2ab4a; --amber-soft: #3a3120; --amber-ink: #e8c883;
+  --bad: #ef6b62; --bad-soft: #3d2224; --bad-ink: #f5a59e; --idle: #6b7380;
+  --lec-bg: #3b2426; --lec-ink: #eea39d; --lab-bg: #213324; --lab-ink: #9fd09a;
+  --asg-bg: #1b3041; --asg-ink: #8ec5e6; --exam-bg: #2a2c30; --exam-ink: #b8bec6;
+  --evt-bg: #3a3120; --evt-ink: #e3c27c; --term-bg: #2c2641; --term-ink: #c0afea;
+  --row-text: #ececee; --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+

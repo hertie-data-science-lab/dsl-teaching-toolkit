@@ -1,0 +1,18 @@
+/* ================= the Open split button (ui/OpenButton.tsx) ================= */
+.split { position: relative; display: inline-flex; align-items: stretch; }
+.split > .split-main { border-top-right-radius: 0; border-bottom-right-radius: 0; padding-right: 12px; }
+.split > .split-caret { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1.5px; padding: 0 11px; border-left-color: color-mix(in srgb, currentColor 35%, transparent); }
+.split.small > .split-caret { padding: 0 9px; }
+.split-caret .caret { width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); margin-top: -4px; }
+.split .open-menu { left: auto; right: 0; top: calc(100% + 6px); width: 320px; max-width: calc(100vw - 32px); }
+.open-menu [role="menuitem"]:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--sunk); }
+.open-menu .pm-copy { display: grid; justify-items: start; gap: 3px; }
+.open-menu .pm-cmd { font-family: var(--font-code); font-size: 12px; color: var(--muted); white-space: normal; overflow-wrap: anywhere; user-select: all; }
+.open-menu svg { width: 12px; height: 12px; color: var(--muted); flex: none; }
+
+/* ================= Your setup (screens/Setup.tsx) ================= */
+.setup-form { display: grid; gap: 22px; max-width: 640px; }
+.setup-form .saved { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.setup-form .scheme { margin-top: 6px; }
+/* A row's buttons sit at the left on a phone: the menu opens rightwards from there. */
+@media (max-width: 560px) { .rows .split .open-menu { left: 0; right: auto; } }
