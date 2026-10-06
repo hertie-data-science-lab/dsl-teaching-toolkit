@@ -9,7 +9,7 @@ import os
 import sys
 from collections.abc import Callable
 
-from .faults import not_migrated_text
+from .faults import moved_text, not_migrated_text
 
 
 def log(msg: str) -> None:
@@ -145,6 +145,7 @@ def add_preview_flag(parser: argparse.ArgumentParser, help: str) -> None:
 # otherwise resolve to `--formats`, `--solution` to `--solution-datetime`). A command line
 # that spells one is refused as NOT_MIGRATED, naming the new flag - unless the CLI still
 # defines that spelling for a meaning of its own (`status --format`, `list_orgs --format`).
+# A value that is not a flag says where a RETIRED flag's fact comes from now.
 OLD_FLAGS = {
     "--cohort-org": "--semester-org",
     "--all-cohorts": "--all-semesters",
@@ -160,6 +161,9 @@ OLD_FLAGS = {
     "--write": "--no-preview",
     "--master-org": "--course-org",
     "--source-org": "--course-org",
+    "--slug": "--assignment",
+    "--deadline": "the deadline comes from schedule.yml, drop it",
+    "--group": "group or individual comes from grading_config.yml, drop it",
 }
 
 
@@ -227,7 +231,12 @@ class CLIParser(argparse.ArgumentParser):
         for token in argv:
             flag = str(token).split("=", 1)[0]
             if flag in OLD_FLAGS and flag not in known:
-                self.error(not_migrated_text(flag, OLD_FLAGS[flag]))
+                new = OLD_FLAGS[flag]
+                self.error(
+                    not_migrated_text(flag, new)
+                    if new.startswith("--")
+                    else moved_text(flag, new)
+                )
         return super().parse_known_args(args, namespace)
 
     def parse_args(self, args=None, namespace=None):

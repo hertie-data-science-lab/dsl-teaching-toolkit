@@ -619,7 +619,7 @@ under an older one is still found, updated and closed.
 | issue title | file | where it lives |
 | --- | --- | --- |
 | `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` and `assignments.yml` | semester `semester-config` |
-| `people.yml has entries the sync cannot use` | `instructors.yml` | semester `semester-config` |
+| `instructors.yml has entries the sync cannot use` (was `people.yml ...`) | `instructors.yml` | semester `semester-config` |
 | `students.csv has rows the toolkit cannot use` | `students.csv` | semester `semester-config` |
 | `teams.csv has rows the toolkit cannot use` | `teams.csv` | semester `semester-config` |
 | `grading sheets have entries the grader cannot read` | `grading_sheets/` | semester `semester-config` |
@@ -888,7 +888,7 @@ Promote.
 | `schedule.yml` `assignments.<k>.semester_dest_repo` (and `cohort_dest_repo`) | `assignments.yml` `assignments.<k>.semester_dest_repo` | moved by the tool |
 | `schedule.yml` `releases.<l>.assignment`, top-level `enrolment:` | none (a hand out is `handout_datetime`; codes go out on a push to students.csv) | stripped by the tool |
 | New assignment inputs `team_formation`, `visibility`; CLI `scaffold --team-formation`, `--visibility` | none: each semester's `assignments.yml` | the workflow and the console op |
-| CLI `collect --group`, `--deadline`, `--slug`; `assign --slug`; Collect / Patch input `slug`; op arg `slug` | none: the schedule names the entry; a template two entries share is refused, naming them | every caller; a request still sending one is refused by the op's args schema |
+| CLI `collect --group`, `--deadline`, `--slug`; `assign --slug`; Collect / Patch input `slug`; op arg `slug` | none: the schedule names the entry, and `--assignment KEY` picks one when two entries share a template (a shared template without it is refused, naming them) | every caller; a CLI still spelling one is refused (`log.OLD_FLAGS`), a request by the op's args schema |
 | dispatch payload `cohort_org` | `semester_org` | the semester dispatchers (re-rendered by Refresh actions) |
 | dispatch payload `all_cohorts` | `all_semesters` | **ds01-infra's membership timer must switch at Promote.** Until then Sync membership reads `all_cohorts` as a deprecated alias (a log line, no fault) - the one dispatch exception |
 | request field `cohort_org`; op args `cohort_dest_repo`, `cohort_dest_path`, `tag`, `format`, `include_solution` | `semester_org`; `semester_dest_repo`, `semester_dest_path`, `semester`, `formats`, `solution_datetime: now` | `dsl.request/1` (the console) |
@@ -936,8 +936,7 @@ Promote.
 | status `inputs` key `assignments.lock.yml` | `.system/assignments.lock.yml` | `dsl.status/1` |
 | toolkit `templates/classroom-config/`, `templates/welcome/`, `templates/cohort/` | `templates/semester-config/`, `templates/join/`, `templates/semester/` | this repo only |
 
-Not renamed here, deliberately: the frozen doc filenames, the digest issue titles (so `people.yml has entries the sync
-cannot use` keeps its old word), the site's `_data/people.yml` the pinned theme reads, the
+Not renamed here, deliberately: the frozen doc filenames, the site's `_data/people.yml` the pinned theme reads, the
 `SCOPED_RUN_TITLE` run-name the cadence check reads back, the `dsl_course.welcome` module
 name (not a CLI), and the site's `files/materials/` dest.
 
@@ -1121,8 +1120,9 @@ changed (`ghcli.written`, `ghcli.on_write`):
   nothing and forgets that name only;
 - a repo's settings or topics (`PATCH` without `name=`, `topics`, `gh repo edit/archive`)
   forget that repo's metadata and its org's listing, and no file - except a new
-  `default_branch`, which forgets that repo's files;
-- an issue write forgets that repo's issue listing only;
+  `default_branch`, which forgets that repo's files and metadata;
+- an issue write forgets that repo's issue listing only, and an issue CREATE lists the
+  repo afresh first (another run may have opened the same title since);
 - every other write (teams, collaborators, invitations, secrets, Actions settings,
   dispatches) forgets nothing.
 

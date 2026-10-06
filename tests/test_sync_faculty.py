@@ -152,6 +152,46 @@ def test_a_tag_grant_the_team_already_holds_is_not_made_again(monkeypatch):
     assert granted == ["course-materials-f2026"]
 
 
+def test_a_failed_read_of_the_tag_teams_grants_is_counted_and_the_sync_goes_on(
+    monkeypatch,
+):
+    # A 5xx on the team's repo listing used to raise out of the whole faculty sync. It is
+    # counted, nothing is granted on its strength (a PUT at push would demote a higher
+    # grant), and the membership reconcile and the next semester still run.
+    monkeypatch.setattr(sync_faculty, "_semester_faculty", lambda org: ({}, False))
+    monkeypatch.setattr(sync_faculty, "semester_of", lambda org: org.rsplit("-", 1)[1])
+    monkeypatch.setattr(
+        sync_faculty, "create_team_outcome", lambda *a, **k: gh_teams.EXISTED
+    )
+
+    def listing(org, team):
+        if team == "instructors-f2026":
+            raise RuntimeError("could not read Course/instructors-f2026's repos: 502")
+        return {}
+
+    monkeypatch.setattr(sync_faculty, "team_repo_access", listing)
+    granted = []
+    monkeypatch.setattr(
+        sync_faculty,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm: granted.append((team, repo)) or True,
+    )
+    reconciled = []
+    monkeypatch.setattr(
+        sync_faculty,
+        "reconcile_team_members",
+        lambda org, team, *a, **k: reconciled.append((org, team)) or 0,
+    )
+    monkeypatch.setattr(sync_faculty, "sync_course_admins", lambda *a, **k: 0)
+    monkeypatch.setattr(sync_faculty, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_faculty, "discover_assignments", lambda org: [])
+    errors = sync_faculty.sync("Course", ["Course-f2026", "Course-s2027"])
+    assert errors == 1
+    assert granted == [("instructors-s2027", ".github")]
+    assert ("Course", "instructors-f2026") in reconciled
+    assert ("Course", "instructors-s2027") in reconciled
+
+
 def test_sync_semester_instructors_skips_wiring_when_team_creation_fails(monkeypatch):
     # A failed create_team must not then grant access + reconcile against a nonexistent
     # team (which would triple-count the one failure and fire doomed API calls).

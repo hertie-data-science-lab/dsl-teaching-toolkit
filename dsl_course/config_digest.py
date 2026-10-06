@@ -136,7 +136,8 @@ class Digest:
 # in one file would only earn its own issue if it kept different time, as schedule.yml's
 # two do.
 PEOPLE = Digest(
-    title="people.yml has entries the sync cannot use",
+    title="instructors.yml has entries the sync cannot use",
+    older_titles=("people.yml has entries the sync cannot use",),
     file=SEMESTER_PEOPLE_PATH,
     doc="docs/05-manage-teaching-team.md",
 )

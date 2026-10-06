@@ -799,17 +799,26 @@ def sync_semester_instructors(
             # one root failure and firing doomed API calls). Report it once and stop here.
             return errors + 1
         # Hourly, for grants that are almost always there already: ONE listing of what
-        # the team holds (unreadable, or a team made a moment ago: grant them all).
-        held = None if outcome == CREATED else team_repo_access(course_org, team)
-        held = {name.casefold(): perm for name, perm in (held or {}).items()}
-        # A floor, as every faculty grant is: a repo the schedule stops citing keeps what
-        # the team holds on it. An unreadable schedule reads as empty and grants `.github`.
-        cited = schedule.cited_repos(schedule.load(semester_org))
-        for repo in _cited_repos(content_repos, assignments, cited):
-            if holds({team.casefold(): held.get(repo.casefold())}, team, "push"):
-                continue
-            if not grant_team_repo_access(course_org, team, repo, "push"):
-                errors += 1
+        # the team holds (a team made a moment ago, or a 404: grant them all).
+        try:
+            held = None if outcome == CREATED else team_repo_access(course_org, team)
+        except RuntimeError as exc:
+            # A listing that FAILED (a 5xx, a bad page) is not "holds nothing": a PUT at
+            # push on a repo the team holds higher would demote it. Count it, skip this
+            # team's grants until the next run, and carry on with the rest of the sync.
+            log_err(f"  ! {exc} - {team}'s repo grants not checked this run")
+            errors += 1
+        else:
+            held = {name.casefold(): perm for name, perm in (held or {}).items()}
+            # A floor, as every faculty grant is: a repo the schedule stops citing keeps
+            # what the team holds on it. An unreadable schedule reads as empty and grants
+            # `.github`.
+            cited = schedule.cited_repos(schedule.load(semester_org))
+            for repo in _cited_repos(content_repos, assignments, cited):
+                if holds({team.casefold(): held.get(repo.casefold())}, team, "push"):
+                    continue
+                if not grant_team_repo_access(course_org, team, repo, "push"):
+                    errors += 1
     # A team made a moment ago is not read back: GitHub's REST API 404s a new team for up
     # to minutes, which would spend the whole lag budget and abort the reconcile.
     errors += reconcile_team_members(

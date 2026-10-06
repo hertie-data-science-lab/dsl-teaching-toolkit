@@ -21,6 +21,7 @@ not "there is no issue", and inventing that answer would open a duplicate every 
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from typing import NamedTuple
@@ -237,13 +238,28 @@ def upsert_issue(
 
     `existing` is a `find_issue` result the caller has already fetched - every consumer
     reads the body for its own previous state before deciding what to write, so without
-    this the search runs twice per tick."""
+    this the search runs twice per tick.
+
+    Before a CREATE the open issues are listed afresh, past the memo: another run (a
+    push-scoped digest beside the cron) may have opened the same title since this one
+    listed, and two issues under one exact title is what the title exists to prevent.
+    One found there is written to as the open issue it is."""
+    # Whether the "none open" below came straight off GitHub: only a memo's answer, or a
+    # caller's (which may be one), is listed again before the create.
+    fresh = existing is _UNASKED and _listings is None
     if existing is _UNASKED:
         try:
             existing = find_issue(repo, title)
         except RuntimeError as exc:
             log_err(str(exc))
             return Upserted(1)
+    if not existing and not fresh:
+        if _listings is not None:
+            _listings.pop(repo.casefold(), None)
+        # Best effort: the caller has already answered "none open", so a fresh listing
+        # that fails leaves the create it asked for (`site_repo` relies on that).
+        with contextlib.suppress(RuntimeError):
+            existing = find_issue(repo, title)
     held = _held(repo)
     if existing:
         url = issue_url(repo, existing.number)
