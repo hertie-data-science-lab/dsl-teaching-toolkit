@@ -22,6 +22,7 @@ export interface GhUser {
 
 export interface GhOrg {
   login: string;
+  id?: number;
   avatar_url?: string;
   description?: string | null;
 }

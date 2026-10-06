@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 
 from ..course import COURSE_ADMIN_TEAM, INSTRUCTORS_TEAM
-from ..discovery import discover_semesters
+from ..discovery import being_set_up, discover_semesters
 from ..faults import NOT_MIGRATED, moved_text, not_migrated_text
 from ..gh_teams import get_team_members, list_teams
 from ..schema_check import validate
@@ -156,6 +156,11 @@ def check_access(request: Request) -> str | None:
         registered = {c.casefold() for c in discover_semesters(request.course_org)}
         if request.semester_org.casefold() not in registered:
             return f"{request.semester_org} is not a semester of {request.course_org}."
+        # Listed by the New semester wizard, not set up yet: nothing to run an op on.
+        if being_set_up(request.semester_org):
+            return (
+                f"{request.semester_org} is being set up: run Bootstrap semester first."
+            )
     if _member(request.course_org, COURSE_ADMIN_TEAM, actor):
         return None
     refusal = f"@{actor} may not run {op.name}: it needs the {op.required_team} team"

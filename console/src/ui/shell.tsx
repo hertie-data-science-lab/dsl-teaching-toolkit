@@ -198,11 +198,14 @@ export function cohortFlags(l: Loaded | undefined): { problems: number | null; a
  * carries aria-current: in a semester, Dashboard above already marks the page.
  */
 function CohortsNav({ course, cohortStates }: { course: Course; cohortStates: Record<string, Loaded> }) {
-  if (!course.cohorts.length) return null;
+  if (!course.cohorts.length && !course.settingUp?.length) return null;
   return (
     <>
       <div class="nav-h">Semesters</div>
       <ul>
+        {(course.settingUp ?? []).map((k) => (
+          <li><span class="nav-pending">{k.termLabel}<span class="n-soon"> being set up</span></span></li>
+        ))}
         {course.cohorts.map((k) => {
           const f = cohortFlags(cohortStates[k.org]);
           return (

@@ -49,6 +49,7 @@ code, .mono { font-family: var(--font-code); font-size: 0.86em; }
 .sidenav .n-count { font-family: var(--font-display); font-weight: 700; font-size: 11.5px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--bad); color: #fff; display: inline-grid; place-items: center; }
 .sidenav .n-soon { font-size: 11px; color: var(--muted); font-weight: 400; }
 .sidenav a.archived { color: var(--muted); }
+.sidenav .nav-pending { display: flex; align-items: center; gap: 4px; padding: 6px 10px; min-height: 34px; color: var(--muted); }
 .sidenav .home-link { font-size: 13.5px; color: var(--muted); }
 main { min-width: 0; }
 @media (max-width: 860px) {

@@ -225,6 +225,18 @@ def _teams(members: dict[tuple[str, str], set[str]]):
 @pytest.fixture(autouse=True)
 def _semester_is_registered(monkeypatch):
     monkeypatch.setattr(request_mod, "discover_semesters", lambda org: [SEMESTER])
+    monkeypatch.setattr(request_mod, "being_set_up", lambda org: False)
+
+
+def test_a_semester_still_being_set_up_is_refused(monkeypatch):
+    # Listed by the New semester wizard so the bot can join it; nothing to run an op on
+    # until Bootstrap semester has made it.
+    req = parse_request(json.dumps(_request()))
+    monkeypatch.setattr(request_mod, "being_set_up", lambda org: org == SEMESTER)
+    monkeypatch.setattr(
+        request_mod, "get_team_members", _teams({(COURSE, "course-admin"): {"prof"}})
+    )
+    assert "is being set up" in request_mod.check_access(req)
 
 
 def test_a_semester_of_another_course_is_refused(monkeypatch):

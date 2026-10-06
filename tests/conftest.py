@@ -226,7 +226,7 @@ def stub_bootstrap(monkeypatch) -> None:
         "create_profile_repo",
     ):
         monkeypatch.setattr(bc, name, lambda *a, **k: 0)
-    monkeypatch.setattr(bc, "preflight", lambda org: True)
+    monkeypatch.setattr(bc, "preflight", lambda org, semester=False: True)
     monkeypatch.setattr(bc, "add_course_admins", lambda org, handles: 0)
     monkeypatch.setattr(bc, "validate_secret_presence", lambda org, secret: True)
     monkeypatch.setattr(bc, "put_file", lambda *a, **k: True)

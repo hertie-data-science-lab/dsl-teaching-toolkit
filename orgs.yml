@@ -1,0 +1,10 @@
+# The course orgs this toolkit serves (dsl_course/org_registry.py). The bot accepts an org
+# invitation only from an org listed here, and only these orgs are refreshed and given the
+# bot token. Add a new course's org here, by pull request, once you have checked who asked
+# for it; the daily "Course orgs awaiting registration" issue lists the ones waiting.
+# Semester orgs are not listed: each course's semesters.yml registers its own.
+course_orgs:
+  - hertie-dsl-demo-course-e1234
+  - hertie-intro-to-data-science-c11
+  - hertie-maths-data-science-C23
+  - hertie-nlp-e1282
