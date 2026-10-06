@@ -737,6 +737,12 @@ INSTRUCTOR_ROLES = {
 }
 
 
+def instructor_role(value: object) -> str | None:
+    """The role key an `instructors.yml` entry's `role:` names, read the way the roster's
+    role is (case and surrounding space ignored), or None when it names no role."""
+    return INSTRUCTOR_ROLES.get(str(value or "").strip().lower())
+
+
 def people_by_role(meta: object, *, semester: bool = False) -> dict | None:
     """A people block as `{role key: [entries]}`: a semester's `instructors:` list grouped
     by each entry's `role:` (an entry without a valid one is left out - `sync_faculty`
@@ -749,9 +755,7 @@ def people_by_role(meta: object, *, semester: bool = False) -> dict | None:
     if isinstance(listed, list):
         grouped: dict[str, list] = {key: [] for key in INSTRUCTOR_ROLES.values()}
         for entry in listed:
-            role = INSTRUCTOR_ROLES.get(
-                str(entry.get("role") or "") if isinstance(entry, dict) else ""
-            )
+            role = instructor_role(entry.get("role") if isinstance(entry, dict) else "")
             if role:
                 grouped[role].append(entry)
         return grouped

@@ -409,14 +409,21 @@ def test_status_json_names_the_cutoff_grading_cutoff_datetime():
 # ------------------------------------------- solution_datetime (include_solution, --solution)
 
 
-def _hand_out(monkeypatch, *flags: str, store: dict | None = None, rc: int = 0):
-    """`assign.main` for a hand out, over a semester-config held in `store`."""
+def _hand_out(
+    monkeypatch,
+    *flags: str,
+    store: dict | None = None,
+    rc: int = 0,
+    provisioned: int = 0,
+):
+    """`assign.main` for a hand out, over a semester-config held in `store`;
+    `provisioned` is what the hand out itself returns."""
     seen: list[bool] = []
     store = {} if store is None else store
     monkeypatch.setattr(
         assign,
         "provision_all",
-        lambda *a, solution=False, **k: seen.append(solution) or (0, 0),
+        lambda *a, solution=False, **k: seen.append(solution) or (provisioned, 0),
     )
     monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
     monkeypatch.setattr(
@@ -476,6 +483,19 @@ def test_a_hand_out_with_the_solution_runs_only_straight_after_its_preview(
     )
     monkeypatch.setattr(sys, "argv", [*sys.argv, "--no-preview"])
     assert assign.main() == 1 and seen == []
+
+
+def test_a_hand_out_that_failed_leaves_its_preview_for_the_retry(monkeypatch):
+    # The preview used to be spent BEFORE the hand out ran, so a transient failure cost
+    # it and the retry was refused with "preview first". Spent only once the run worked.
+    now = ("--solution-datetime", "now")
+    store: dict = {}
+    assert _hand_out(monkeypatch, *now, store=store) == [True]
+    assert _hand_out(
+        monkeypatch, *now, "--no-preview", store=store, rc=1, provisioned=1
+    ) == [True]
+    assert _hand_out(monkeypatch, *now, "--no-preview", store=store) == [True]
+    assert _hand_out(monkeypatch, *now, "--no-preview", store=store, rc=1) == []
 
 
 def test_a_hand_out_without_the_solution_needs_no_preview(monkeypatch):
@@ -629,6 +649,41 @@ def test_every_cli_previews_unless_told_otherwise(monkeypatch, capsys):
     assert f"{NOT_MIGRATED}: `--dry-run` is the old name of `--preview`" in (
         capsys.readouterr().err
     )
+
+
+@pytest.mark.parametrize(
+    "flag, said",
+    [
+        ("--slug", "`--slug` is the old name of `--assignment`"),
+        ("--deadline", "`--deadline` is no longer read here - the deadline comes from"),
+        (
+            "--group",
+            "`--group` is no longer read here - group or individual comes from",
+        ),
+    ],
+)
+def test_a_retired_collect_flag_is_refused_as_not_migrated(
+    monkeypatch, capsys, flag, said
+):
+    # Gone from collect's command line; refused by name, never parsed as anything.
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "collect",
+            "--course-org",
+            "C",
+            "--course-source-repo",
+            "a1",
+            "--semester-org",
+            "S",
+            flag,
+            "x",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        collect.main()
+    assert f"{NOT_MIGRATED}: {said}" in capsys.readouterr().err
 
 
 def test_every_rendered_run_of_a_previewing_cli_says_which_it_is(monkeypatch):
@@ -988,13 +1043,16 @@ def test_a_preview_older_than_a_day_no_longer_counts(monkeypatch):
     assert assign.preview_first("S", "t", preview=False, now=late) is not None
 
 
-def test_a_spend_that_fails_refuses_and_a_failed_preview_says_so(monkeypatch):
+def test_a_spend_that_fails_says_so_and_a_failed_preview_says_so(monkeypatch, capsys):
     store = _gate_store(monkeypatch)
     assert assign.preview_first("S", "t", preview=True) is None
-    # The spend fails: nothing may be handed out on a preview still good for another run.
+    # Checking the preview spends nothing: that waits for a hand out that worked.
+    assert assign.preview_first("S", "t", preview=False) is None
+    assert assign.preview_first("S", "t", preview=False) is None
+    # The spend fails after the hand out: said, and the record is left as it was.
     monkeypatch.setattr(assign, "put_file", lambda *a, **k: False)
-    refused = assign.preview_first("S", "t", preview=False)
-    assert refused is not None and "could not be marked as used" in refused.text
-    assert store  # the record was not spent
+    assert assign.spend_preview("S") is False
+    assert "could not be marked as used" in capsys.readouterr().err
+    assert json.loads(store[assign.SOLUTION_PREVIEW])["template"] == "t"
     refused = assign.preview_first("S", "t", preview=True)
     assert refused is not None and "could not be recorded" in refused.text

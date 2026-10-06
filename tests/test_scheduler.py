@@ -2698,9 +2698,7 @@ def test_all_semesters_loop_survives_one_semesters_raised_failure(monkeypatch, c
     )
     seen: list[str] = []
 
-    def fake_run(
-        course, semester, now, dry_run=False, release=True, autograde=True, verdict=None
-    ):
+    def fake_run(course, semester, now, dry_run=False, **kwargs):
         seen.append(semester)
         if semester == "Semester-A":
             raise RuntimeError("Semester-A: gh: HTTP 502")
@@ -2776,6 +2774,31 @@ def test_skip_autograde_releases_without_grading(monkeypatch):
     )
     assert scheduler.main() == 0
     assert calls == ["snapshot", "preflight", "release"]
+
+
+def test_a_tick_refreshes_the_status_of_only_the_semester_it_moved(monkeypatch):
+    # The whole-course tick used to refresh no status at all, so an automatic release
+    # sat off the console until a push-scoped run or the nightly refresh. Only a semester
+    # the tick moved is re-read: a quiet tick costs nothing.
+    _phase_spies(monkeypatch, _DUE_RELEASE)
+    monkeypatch.setattr(
+        scheduler.discovery,
+        "discover_semesters",
+        lambda org: ["Semester-A", "Semester-B"],
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_run_releases",
+        lambda course, semester, *a, **k: (0, semester == "Semester-A"),
+    )
+    monkeypatch.setattr(scheduler.site, "sync_site", lambda *a, **k: 0)
+    refreshed: list = []
+    monkeypatch.setattr(
+        scheduler.status, "refresh", lambda *a: refreshed.append(a) or 0
+    )
+    _all_semesters_argv(monkeypatch)
+    assert scheduler.main() == 0
+    assert refreshed == [("Course-Org", "Semester-A")]
 
 
 def test_autograde_only_grades_without_releasing_anything(monkeypatch):
@@ -4933,3 +4956,29 @@ def test_an_assignments_yml_that_is_not_yaml_holds_the_tick_green(monkeypatch):
     assert scheduler.run("Course", "Semester-f2026", now) == 0
     ((fault,),) = synced
     assert fault.file == "assignments.yml"
+
+
+def test_an_unparseable_assignments_yml_holds_the_schedule_digest(monkeypatch):
+    # It synced the schedule.yml digest with no window, number, marks-return or
+    # held-solution faults: Cleared for each, with a mail, then New again once fixed.
+    broken = ConfigFault(
+        "", "this file is not valid YAML", file=schedule_mod.ASSIGNMENTS_FILE
+    )
+    standing = ConfigFault("releases.wk1", "no number", file=schedule_mod.SCHEDULE_PATH)
+    sched = Schedule(faults=[broken, standing])
+    sched.instance_unparseable = True
+    monkeypatch.setattr(scheduler.schedule, "load", lambda semester: sched)
+    synced: list = []
+    monkeypatch.setattr(
+        scheduler.source_digest, "sync", lambda *a, **k: synced.append("schedule")
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_sync_config_digest",
+        lambda spec, course, semester, faults, *a: synced.append((spec, faults)),
+    )
+    for release in (True, False):
+        synced.clear()
+        rc = scheduler.run("Course-Org", "Semester-Org", WHEN, release=release)
+        assert rc == 0
+        assert synced == ([(config_digest.ASSIGNMENTS, [broken])] if release else [])

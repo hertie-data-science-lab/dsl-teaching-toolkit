@@ -238,12 +238,20 @@ def test_upsert_uses_the_listing_the_caller_already_made(gh):
 
 def test_a_caller_that_looked_and_found_nothing_is_not_asked_again(gh):
     # `existing=None` is an ANSWER - "I looked, nothing is open" - and it must not read as
-    # "I did not look", or the tick that has to CREATE searches twice.
+    # "I did not look". The one listing it costs is the fresh one before the create
+    # (another run may have opened the issue since the caller looked); never two.
     fake = gh([])
     issues.find_issue(REPO, TITLE)
     assert issues.upsert_issue(REPO, TITLE, "ours", existing=None).errors == 0
-    assert len(fake.did("issue", "list")) == 1
+    assert len(fake.did("issue", "list")) == 2
     assert len(fake.did("issue", "create")) == 1
+
+
+def test_an_unasked_create_with_the_memo_off_lists_once(gh):
+    # With no memo the lookup itself is fresh: nothing to list again.
+    fake = gh([])
+    assert issues.upsert_issue(REPO, TITLE, "ours").errors == 0
+    assert len(fake.did("issue", "list")) == 1
 
 
 def test_the_issue_url_is_spelled_once_for_every_caller():
@@ -346,7 +354,24 @@ def test_an_issue_this_process_opened_is_in_the_listing_it_holds(gh):
     fake = gh([])
     assert issues.upsert_issue(REPO, TITLE, "new").errors == 0
     assert issues.find_issue(REPO, TITLE) == issues.Issue(12, "new")
-    assert len(fake.did("issue", "list")) == 1
+    # The lookup, and the fresh one right before the create; never a third.
+    assert len(fake.did("issue", "list")) == 2
+
+
+def test_an_issue_another_run_opened_since_the_listing_is_not_opened_twice(gh):
+    # Two overlapping runs (a push-scoped digest and the cron) each held a listing with
+    # no such issue, and each opened one. The create re-lists first, past the memo, and
+    # writes to the issue the other run opened instead.
+    issues.list_once(True)
+    fake = gh([])
+    assert issues.find_issue(REPO, TITLE) is None
+    fake.rows.append({**_issue(9, TITLE, "theirs"), "state": "OPEN"})
+    out = issues.upsert_issue(REPO, TITLE, "ours", comment="new", existing=None)
+    assert out.errors == 0
+    assert fake.did("issue", "create") == []
+    assert len(fake.did("issue", "edit", "9")) == 1
+    assert len(fake.did("issue", "comment", "9")) == 1
+    assert issues.find_issue(REPO, TITLE) == issues.Issue(9, "ours")
 
 
 def test_an_edited_body_and_a_close_are_in_the_listing_it_holds(gh):

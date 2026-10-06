@@ -202,7 +202,7 @@ def clear_process_memos() -> None:
     gh_contents.last_committer.cache_clear()
     gh_contents.blame_logins.cache_clear()
     gh_contents.path_committers.cache_clear()
-    sync_faculty.load_semester_faculty.cache_clear()
+    sync_faculty._semester_faculty.cache_clear()
     ghcli.bot_login.cache_clear()
     gh_contents.read_once(False)
     issues.list_once(False)

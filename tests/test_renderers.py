@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 from pathlib import Path
 
@@ -1635,13 +1636,14 @@ def _assert_emails_the_maintainer(step: dict, detached: bool) -> None:
 
 def _assert_the_reported_step_writes_its_log(job: dict, where: str) -> None:
     """The mail above tails a log, so the step it reports on has to write one."""
-    teed = [i for i, s in enumerate(job["steps"]) if "| tee " in s.get("run", "")]
+    teed = [i for i, s in enumerate(job["steps"]) if "(tee " in s.get("run", "")]
     assert len(teed) == 1, where
     step = job["steps"][teed[0]]
-    assert workflows_render._RUN_LOG in step["run"], where
-    # A pipeline's exit status is its LAST command's - `tee`, which succeeds - so without
-    # this the failure the mail exists for would leave the step green and report nothing.
-    assert step["run"].rstrip().endswith('exit "${PIPESTATUS[0]}"'), where
+    assert step["run"].rstrip().endswith(workflows_render._TEE_RUN_LOG), where
+    # `exec`'d, so a cancel signals Python itself and the step exits with Python's status.
+    last = step["run"].rstrip().split("\n")
+    command = next(line for line in reversed(last) if "python" in line)
+    assert command.strip().startswith("exec python"), where
     mail = next(
         i for i, s in enumerate(job["steps"]) if "dsl_course.notify" in s.get("run", "")
     )
@@ -2602,6 +2604,29 @@ def test_the_request_reaches_the_cli_through_env_only():
     assert "${{" not in step["run"]
 
 
+def test_a_stop_reaches_the_logged_command_at_once(tmp_path):
+    # Stop signals the step's own process. Through `exec` that is Python, which stops
+    # at once; a shell waiting on a pipeline held it until GitHub killed the step.
+    script = (
+        'exec python3 -c \'import sys, time; print("started", flush=True); '
+        "time.sleep(30)'" + workflows_render._TEE_RUN_LOG
+    )
+    proc = subprocess.Popen(
+        ["bash", "-e", "-c", script],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    assert proc.stdout.readline() == "started\n"
+    proc.send_signal(signal.SIGINT)
+    out, _ = proc.communicate(timeout=5)
+    assert proc.returncode != 0
+    assert "KeyboardInterrupt" in out
+    # The log the report tails holds what the run printed.
+    assert (tmp_path / "run.log").read_text() == "started\n" + out
+
+
 def test_a_broken_console_run_is_reported_but_a_refused_caller_is_not(tmp_path):
     (job,) = workflow_jobs(ALL_RENDERED["console"]).values()
     steps = job["steps"]
@@ -2613,7 +2638,8 @@ def test_a_broken_console_run_is_reported_but_a_refused_caller_is_not(tmp_path):
     for step in (opener, mail):
         assert "workflow_dispatch" not in step["if"]
         assert "steps.gate.outcome == 'success'" in step["if"]
-        assert "cancelled()" in step["if"]
+        # Stop in the Console cancels the run: not a broken run, so no report.
+        assert "cancelled()" not in step["if"]
     assert "steps.notice.outputs.report == 'true'" in mail["if"]
     assert set(mailer.GRAPH_ENV) <= set(mail["env"])
     assert closer["if"] == "success()"
