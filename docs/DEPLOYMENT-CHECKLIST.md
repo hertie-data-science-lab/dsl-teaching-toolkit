@@ -55,6 +55,8 @@ course_name: Deep Learning       # the course's name: every site's title
 course_code: E1234               # shown beside it
 course_description: One or two sentences, on one line - the sites' blurb
 site_link_extensions: [pdf, html]  # optional - semester sites only; see below
+contact: course@example.org     # optional - the public website's contact; unset = the lab's
+licence: CC BY 4.0              # optional - one of policy.yml's licences; unset = its first
 people:
   course_admins:
     - github_handle: "janedoe"   # admin on the course org + every semester

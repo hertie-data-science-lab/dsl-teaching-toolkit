@@ -14,7 +14,15 @@ from urllib.parse import unquote
 import pytest
 import yaml
 
-from dsl_course import discovery, migrate, records, repos, scaffold, workflows_render
+from dsl_course import (
+    discovery,
+    migrate,
+    opencourse,
+    records,
+    repos,
+    scaffold,
+    workflows_render,
+)
 from dsl_course.central import MissingCentralRef
 from dsl_course.course import (
     CONFIG_REPO,
@@ -28,6 +36,7 @@ from dsl_course.course import (
 )
 from dsl_course.faults import NOT_MIGRATED
 from dsl_course.gh_contents import blob_sha
+from dsl_course.opencourse import OpenCourse
 from dsl_course.welcome import template
 
 SEM, COURSE = "Sem-f2026", "Course-E1"
@@ -404,7 +413,11 @@ def _migrated_course(fake, monkeypatch):
     fake.add(
         COURSE,
         ".github",
-        {"semesters.yml": b"semesters:\n- Sem-f2026\n", **COURSE_WORKFLOWS},
+        {
+            "semesters.yml": b"semesters:\n- Sem-f2026\n",
+            "opencourse.yml": b"enabled: false\n",
+            **COURSE_WORKFLOWS,
+        },
         topics=["dsl-course-hub"],
     )
     fake.add(COURSE, "course-materials-f2026", WORKFLOW, topics=["dsl-materials"])
@@ -1179,8 +1192,15 @@ def course(fake, monkeypatch):
             "MAINTAINING.md": b"guide",
             "SYLLABUS.md.sample": b"s",
             "SYLLABUS.md": b"x",
+            "publish.yml": b'public:\n  - "lectures/**"\n',
             migrate.RELEASE_WORKFLOWS[0]: b"old",
         },
+    )
+    # The settings an older publish left in the public site repo.
+    fake.add(
+        COURSE,
+        f"{COURSE.lower()}.github.io",
+        {"_publish-config.yml": b"source_repo: course-materials-f2026\n"},
     )
     _course_renders(fake, monkeypatch)
     calls: list[str] = []
@@ -1223,6 +1243,8 @@ def test_a_course_preview_writes_nothing(fake, course, monkeypatch, capsys):
     assert f"-   .github/.last-refresh -> {records.path('heartbeat')}" in out
     assert "-   MAINTAINING.md -> .system/MAINTAINING.md" in out
     assert "course-materials-f2026: add the topic dsl-materials" in out
+    assert "course-materials-f2026/publish.yml: deleted (retired)" in out
+    assert ".github/opencourse.yml: seeded on, from " in out
     assert "(the files are listed once the registry step has run)" in out
     assert f"disable Actions in {COURSE}/.github, {COURSE}/assignment-1-f2026" in out
     assert _state(fake) == before and fake.puts == [] and course == []
@@ -1246,12 +1268,16 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
     assert grading == b"formats: [ipynb]\nautograde: true\n"
     materials = fake.tree(COURSE, "course-materials-f2026")
-    assert set(materials) == {
+    assert set(materials) == {  # publish.yml deleted
         ".system/MAINTAINING.md",
         ".system/SYLLABUS.md.sample",
         "SYLLABUS.md",
         *migrate.RELEASE_WORKFLOWS,
     }
+    assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse(
+        enabled=True, source_repo="course-materials-f2026"
+    )
+    assert tree["opencourse.yml"].startswith(b"# INSTRUCTOR-OWNED")
     assert fake._repo(COURSE, "course-materials-f2026")["topics"] == ["dsl-materials"]
     template = fake.tree(COURSE, "assignment-1-f2026")
     assert set(migrate.TEMPLATE_WORKFLOWS) <= set(template)
@@ -2276,7 +2302,7 @@ def test_the_ticks_cover_every_rendered_cron():
         workflows_render.render_refresh(),
         workflows_render.render_sync_membership(["S"]),
         workflows_render.render_sync_site(["S"]),
-        workflows_render.render_publish_site(["course-materials-x"]),
+        workflows_render.render_publish_site(),
         *(p.read_text() for p in Path(migrate.ROOT, "templates").rglob("*.yml")),
     ]
     crons = [cron for text in rendered for cron in re.findall(r'cron: "([^"]+)"', text)]
@@ -2511,53 +2537,54 @@ def test_a_semester_whose_folders_are_all_in_the_plan_proposes_nothing(
     assert "proposed releases: already migrated" in capsys.readouterr().out
 
 
-# ---------------------------------------------------------------- publish.yml
+# ---------------------------------------------------------------- public website
 
 
-def _publish(header: str, patterns: str = '  - "lectures/**/*.html"\n') -> bytes:
-    return (header + "public:\n" + patterns).encode()
-
-
-def test_the_old_seeded_publish_comment_takes_the_current_one(
+def test_the_public_website_step_seeds_off_without_earlier_settings(
     fake, course, monkeypatch, capsys
 ):
-    cohort, renamed = ("\n".join(h) + "\n" for h in migrate.old_publish_headers())
-    edited = renamed.replace("Edit,\n", "Edit (we do),\n")
-    fake.tree(COURSE, "course-materials-f2026")["publish.yml"] = _publish(cohort)
-    for name, header in (("f2025", renamed), ("f2024", edited)):
-        fake.add(
-            COURSE,
-            f"course-materials-{name}",
-            {"publish.yml": _publish(header)},
-            topics=["dsl-materials"],
-        )
+    del fake.tree(COURSE, f"{COURSE.lower()}.github.io")["_publish-config.yml"]
     assert _main(monkeypatch, COURSE) == 0
-    out = capsys.readouterr().out
-    assert "- course-materials-f2026/publish.yml: the seeded comment" in out
-    assert "- course-materials-f2025/publish.yml: the seeded comment" in out
-    # Not as seeded: listed by line (the old rule's two lines), never rewritten.
-    assert "-   course-materials-f2024/publish.yml: line(s) 6, 7" in out
-    assert "course-materials-f2024/publish.yml: the seeded" not in out
-
+    assert ".github/opencourse.yml: seeded off" in capsys.readouterr().out
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    for name in ("f2026", "f2025"):
-        body = fake.tree(COURSE, f"course-materials-{name}")["publish.yml"]
-        assert body == _publish(scaffold.PUBLISH_HEADER), name
-    assert fake.tree(COURSE, "course-materials-f2024")["publish.yml"] == _publish(
-        edited
-    )
+    tree = fake.tree(COURSE, ".github")
+    assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse()
+
+
+def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
+    fake, course, monkeypatch, capsys
+):
+    # The demo orgs are migrated already: a re-run deletes a publish.yml that is still
+    # there, and never touches an opencourse.yml someone has written.
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    mine = b"enabled: true\nsource_repo: other\n"
+    fake.tree(COURSE, ".github")["opencourse.yml"] = mine
+    fake.tree(COURSE, "course-materials-f2026")["publish.yml"] = b"public:\n"
+    capsys.readouterr()
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    out = capsys.readouterr().out
+    assert "course-materials-f2026/publish.yml: deleted (retired)" in out
+    assert "opencourse.yml: seeded" not in out
+    assert "publish.yml" not in fake.tree(COURSE, "course-materials-f2026")
+    assert fake.tree(COURSE, ".github")["opencourse.yml"] == mine
     capsys.readouterr()
     assert _main(monkeypatch, COURSE) == 0
-    out = capsys.readouterr().out
-    # Done, and the hand-edited one is still listed for a person.
-    assert "publish.yml comment: already migrated" in out
-    assert "-   course-materials-f2024/publish.yml: line(s) 6, 7" in out
+    assert "public website: already migrated" in capsys.readouterr().out
 
 
-def test_the_publish_header_is_the_one_the_scaffold_seeds():
-    stub = scaffold._publish_stub(scaffold.PUBLIC_LECTURES, scaffold.PUBLIC_HTML, [])
-    assert stub.startswith(scaffold.PUBLISH_HEADER + "public:\n")
-    old = migrate.OLD_PUBLISH_HEADER + "public:\n"
-    assert migrate.publish_header(old.replace("\n", "\r\n")) == (
-        scaffold.PUBLISH_HEADER + "public:\n"
-    ).replace("\n", "\r\n")
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        (None, OpenCourse()),
+        ("", OpenCourse()),
+        ("readings_mode: none\n", OpenCourse()),
+        (": not yaml: [", OpenCourse()),
+        (
+            "source_repo: m\nreadings_mode: actual-readings\ninclude_lectures: false\n",
+            OpenCourse(True, "m", "actual-readings", False),
+        ),
+        ("source_repo: m\nreadings_mode: junk\n", OpenCourse(True, "m")),
+    ],
+)
+def test_the_old_publish_settings_become_opencourse(config, expected):
+    assert migrate.opencourse_from(config) == expected

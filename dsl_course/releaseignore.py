@@ -12,6 +12,7 @@ that makes `!` correct - is here.
 paths do not all have a clone to look at:
 
   deny_for(root) / excludes(root, path)   a local clone      (deploy, public_site, assign)
+  deny_lines(root, lines)                 a pattern list     (opencourse.yml's withhold)
   from_tree(paths, read)                  a GitHub tree      (assign's semester template,
                                                               schedule's source check)
 
@@ -149,17 +150,8 @@ def _local(root: Path) -> Ignore:
     return Ignore(lambda dirrel: _spec_in(root / dirrel if dirrel else root))
 
 
-def deny_for(root: Path) -> Deny:
-    """An `fs.Deny` withholding whatever the `.releaseignore` files under `root` exclude.
-
-    Withholding a directory PRUNES it: `copytree` does not descend into a name this
-    returns, so nothing inside is ever tested and no `!` written inside (or below) it can
-    resurrect anything - which is exactly git's rule, for exactly git's reason.
-
-    `root` must be an ancestor of every directory `copytree` walks, which it is: it walks
-    the tree it was given. Paths are never resolved, so matching is on the names in the
-    tree and a `notes.pdf -> ../solution/answers.pdf` is judged as `notes.pdf`."""
-    ignore = _local(root)
+def _deny(root: Path, ignore: Ignore) -> Deny:
+    """An `fs.Deny` withholding what `ignore` excludes, for a `copytree` walk of `root`."""
 
     def deny(dirpath: str, names: list[str]) -> set[str]:
         here = Path(dirpath)
@@ -177,11 +169,38 @@ def deny_for(root: Path) -> Deny:
     return deny
 
 
-def excludes(root: Path, path: Path) -> bool:
-    """Whether one named `path` under the clone at `root` is withheld."""
+def deny_for(root: Path) -> Deny:
+    """An `fs.Deny` withholding whatever the `.releaseignore` files under `root` exclude.
+
+    Withholding a directory PRUNES it: `copytree` does not descend into a name this
+    returns, so nothing inside is ever tested and no `!` written inside (or below) it can
+    resurrect anything - which is exactly git's rule, for exactly git's reason.
+
+    `root` must be an ancestor of every directory `copytree` walks, which it is: it walks
+    the tree it was given. Paths are never resolved, so matching is on the names in the
+    tree and a `notes.pdf -> ../solution/answers.pdf` is judged as `notes.pdf`."""
+    return _deny(root, _local(root))
+
+
+def listed(lines: Iterable[str]) -> Ignore:
+    """One pattern list read as a `.releaseignore` at the root, and nowhere else."""
+    spec = parse("\n".join(lines))
+    return Ignore(lambda dirrel: None if dirrel else spec)
+
+
+def deny_lines(root: Path, lines: Iterable[str]) -> Deny:
+    """`deny_for` for a pattern list that lives in no file (`opencourse.yml`'s
+    `withhold:`): the same rule, read as if it were `root`'s own `.releaseignore`."""
+    return _deny(root, listed(lines))
+
+
+def excludes(root: Path, path: Path, lines: Iterable[str] | None = None) -> bool:
+    """Whether one named `path` under the clone at `root` is withheld: by the
+    `.releaseignore` files under `root`, or, given `lines`, by that pattern list alone."""
     if path == root or root not in path.parents:
         return False
-    return _local(root).excludes(
+    ignore = _local(root) if lines is None else listed(lines)
+    return ignore.excludes(
         path.relative_to(root).as_posix(), lambda rel: _is_dir(root / rel)
     )
 

@@ -68,6 +68,10 @@
       "pattern": "^(?:main|release|preview|[0-9a-f]{40})$",
       "type": "string"
     },
+    "contact": {
+      "pattern": "^[^@\\s]+@[^@\\s]+$",
+      "type": "string"
+    },
     "course_code": {
       "type": "string"
     },
@@ -75,6 +79,9 @@
       "type": "string"
     },
     "course_name": {
+      "type": "string"
+    },
+    "licence": {
       "type": "string"
     },
     "people": {

@@ -23,6 +23,7 @@ import pytest
 import yaml
 
 from dsl_course import ghcli, public_site, site, site_repo
+from dsl_course.opencourse import OpenCourse
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "site"
 
@@ -517,7 +518,8 @@ def public_plan(monkeypatch, tmp_path):
     monkeypatch.setattr(public_site, "yaml_file", lambda *a: {})
     monkeypatch.setattr(public_site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(ghcli, "gh", lambda *a, **k: (0, ""))
-    assert public_site.sync_public_site("Course-Org", "course-materials-f2026") == 0
+    oc = OpenCourse(enabled=True, source_repo="course-materials-f2026")
+    assert public_site.sync_public_site("Course-Org", oc) == 0
     return captured["plan"]
 
 

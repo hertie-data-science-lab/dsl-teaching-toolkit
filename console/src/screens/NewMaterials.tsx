@@ -22,7 +22,7 @@ export function NewMaterialsScreen(p: CourseProps) {
   const env = useEnv();
   const terms = contentTerms(course.cohorts.map((c) => c.term), now);
   const repos = (courseView(p).course?.materials ?? []).map((m) => m.repo);
-  const [d, set, clear] = useDraft<{ v: Values; submitted?: string }>(`new-materials:${course.org}`, () => ({ v: { term: terms[0], open: false } }));
+  const [d, set, clear] = useDraft<{ v: Values; submitted?: string }>(`new-materials:${course.org}`, () => ({ v: { term: terms[0] } }));
   const tiers = newMaterials(terms.includes(String(d.v.term)) ? terms : [String(d.v.term), ...terms], repos);
   const v = effective(tiers, d.v);
   const repo = materialsRepo(String(v.term ?? terms[0]));
@@ -50,7 +50,6 @@ export function NewMaterialsScreen(p: CourseProps) {
         <div class="form" style="max-width:640px">
           <p class="footnote ctx">For {course.name}</p>
           <SchemaForm id="nm" schema={null} tiers={tiers} values={d.v} onChange={(nv) => set({ v: nv })} advancedOpen={!!d.v.copy_from} />
-          {d.v.copy_from ? <p class="footnote">The publish choices are ignored when copying.</p> : null}
           <p class="footnote">Will create <code>{repo}</code> in the course.</p>
           {free.c || free.busy ? <Checks list={free.c ? [free.c] : null} busy={free.busy} pending={[`${repo} is free in the course`]} /> : null}
           {d.submitted === repo ? <Checks list={live.value?.repo === repo ? [live.value.c] : null} busy={live.busy} pending={[`${repo} created`]} /> : null}

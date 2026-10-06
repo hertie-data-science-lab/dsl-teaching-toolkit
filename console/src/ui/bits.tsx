@@ -37,7 +37,7 @@ export function Probs({ n }: { n: number }) {
   return n ? (
     <span class="probs"><span class="count-badge">{n}</span>{n === 1 ? '1 problem' : `${n} problems`}</span>
   ) : (
-    <span class="probs none"><span class="count-badge zero">0</span>No problems</span>
+    <span class="probs none">No problems</span>
   );
 }
 

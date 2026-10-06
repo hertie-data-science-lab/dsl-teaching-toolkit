@@ -11,7 +11,6 @@ import { StaticFiles } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { validateArgs } from '../src/ops/adapter';
-import { opSpec } from '../src/ops/registry';
 import { FormatPicker } from '../src/forms/FormatPicker';
 import { NewAssignmentScreen, extrasOf, initialValues, naDone, S1, S2, withExtras } from '../src/screens/NewAssignment';
 import { NewCohortScreen, cardsDone, nkDone } from '../src/screens/NewCohort';
@@ -22,7 +21,7 @@ import type { CohortProps, CourseProps } from '../src/screens/types';
 import { assignmentMarking, assignmentWork, newMaterials } from '../src/tiers/wizard';
 import { CENTRAL, bootstrapInputs, runBootstrap } from '../src/wizards/central';
 import {
-  PUBLIC_DIRS, assignmentArgs, autogradeBlock, cohortOrgName, cohortTerms, contentTerms, courseOrgName, courseSlugOf, formatBlock, formatError, materialsArgs,
+  assignmentArgs, autogradeBlock, cohortOrgName, cohortTerms, contentTerms, courseOrgName, courseSlugOf, formatBlock, formatError, materialsArgs,
   nextFreeNumber, nextTerm, openAt, signature, templateRepo, toggleFormat,
 } from '../src/wizards/model';
 import { checkOrg, checkTemplate } from '../src/wizards/verify';
@@ -128,13 +127,10 @@ describe('conditional fields', () => {
     expect(layout(t, { ...base, autograde: 'true', formats: ['latex'] }).main.find((i) => i.key === 'autograde')!.under).toEqual([]);
   });
 
-  it('asks which folders to publish only when publishing openly, and not at all when copying', () => {
+  it('asks nothing about the public website: it has its own settings', () => {
     const t = newMaterials(['f2026'], ['course-materials-f2026']);
-    expect(layout(t, { term: 'f2026', open: false }).main.map((i) => i.key)).toEqual(['term', 'open']);
-    expect(layout(t, { term: 'f2026', open: true }).main[1].under.map((i) => i.key)).toEqual(['public_dirs', 'public_types']);
-    const copy = layout(t, { term: 'f2026', open: true, copy_from: 'course-materials-f2026' });
-    expect(copy.main[1].under).toEqual([]);
-    expect(t.open.forced?.({ copy_from: 'x' })?.value).toBe(false);
+    expect(layout(t, { term: 'f2026' }).main.map((i) => i.key)).toEqual(['term']);
+    expect(Object.keys(t)).toEqual(['term', 'copy_from']);
   });
 });
 
@@ -185,18 +181,10 @@ describe('what the wizards send', () => {
     expect(validateArgs('assignment.create', copy)).toEqual([]);
   });
 
-  it('builds materials.create args, nothing public unless asked', () => {
-    expect(materialsArgs({ term: 'f2026', open: false })).toMatchObject({ semester: 'f2026', public_dirs: '(nothing public)' });
-    const open = materialsArgs({ term: 'f2026', open: true, public_dirs: 'everything', public_types: 'html' });
-    expect(open).toEqual({ semester: 'f2026', public_dirs: 'everything', public_types: 'html' });
-    expect(validateArgs('materials.create', open)).toEqual([]);
-    expect(materialsArgs({ term: 'f2026', open: true, copy_from: 'course-materials-s2026' })).toEqual({ semester: 'f2026', copy_from: 'course-materials-s2026' });
-  });
-
-  it('offers the engine’s publish answers, with its defaults', () => {
-    const args = opSpec('materials.create').args_schema.properties!;
-    expect(['(nothing public)', ...PUBLIC_DIRS]).toEqual(args.public_dirs.enum);
-    expect(materialsArgs({ term: 'f2026', open: true })).toEqual({ semester: 'f2026', public_dirs: PUBLIC_DIRS[0], public_types: args.public_types.default });
+  it('builds materials.create args', () => {
+    expect(materialsArgs({ term: 'f2026' })).toEqual({ semester: 'f2026' });
+    expect(validateArgs('materials.create', materialsArgs({ term: 'f2026' }))).toEqual([]);
+    expect(materialsArgs({ term: 'f2026', copy_from: 'course-materials-s2026' })).toEqual({ semester: 'f2026', copy_from: 'course-materials-s2026' });
   });
 
   it('writes no run setting into grading_config.yml: those are each semester\'s', () => {
@@ -293,11 +281,10 @@ describe('the wizard screens', () => {
     expect(out).toContain('Advanced <span class="cnt">(none changed)</span>');
   });
 
-  it('New materials offers the term and a closed publish toggle', () => {
+  it('New materials offers the term and asks nothing about publishing', () => {
     const out = render(<NewMaterialsScreen {...cp()} />);
     expect(out).toContain('Will create <code>course-materials-f2026</code> in the course.');
-    expect(out).toContain('Select some of it for the public website');
-    expect(out).not.toContain('Which folders');
+    expect(out).not.toContain('public website');
   });
 
   it('the schedule editor opens a new assignment entry prefilled with the template', () => {

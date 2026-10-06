@@ -4,8 +4,9 @@ The course org's `<course-org>.github.io` is PUBLIC and opt-in. The `course-mate
 repos it publishes are private, so linking into them would 404 for the public; instead
 this HOSTS the chosen repo's files in the site repo (Jekyll serves any path not starting
 with `_`) and links to site-relative URLs. Session materials only - no assignments, no
-events, no semester repos. The first publish is a manual click that persists its settings
-into the site repo (`PUBLISH_CONFIG`); the daily cron then re-syncs from those.
+events, no semester repos. What it publishes is the course's `opencourse.yml`
+(`opencourse`): the Publish public website operation and the daily update both read it,
+and `enabled: false` stops both.
 
 Driven through `python3 -m dsl_course.site public-sync`, which delegates here.
 """
@@ -19,26 +20,25 @@ from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
-import yaml
-
 from .course import (
     discover_local_sessions,
     discover_sections,
     find_session_dir,
     pages_repo,
 )
+from .faults import Unusable
 from .fs import copy_tree, union_deny
-from .gh_contents import get_file_content
 from .ghcli import clone
-from .log import log, log_err, log_step
+from .log import Summary, log, log_err, log_step
+from .opencourse import OPENCOURSE_FILE, OpenCourse
+from .opencourse import read as read_opencourse
 from .readings import readings_block
-from .releaseignore import deny_for, excludes
+from .releaseignore import deny_for, deny_lines, excludes
 from .repos import (
     has_denied_component,
     has_never_material_component,
     is_denied_publication,
     is_never_material,
-    repo_exists,
 )
 from .site_repo import (
     PUBLISH_CONFIG,
@@ -64,7 +64,7 @@ from .site_repo import (
 PUBLIC_MATERIALS_DIR = "public-materials"
 
 # The open site is still built from one repo's folders (its own design, `openware`, is
-# not written yet): `readings` is the section `--readings-mode` governs, and `labs` is the
+# not written yet): `readings` is the section `opencourse.yml`'s `readings_mode` governs, and `labs` is the
 # one section that makes a lab row. The semester site reads kinds from the schedule.
 READINGS_SECTION = "readings"
 LAB_SECTION = "labs"
@@ -92,19 +92,21 @@ def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
     return {n for n in names if is_denied_publication(n) or is_never_material(n)}
 
 
-def _withheld_from_site(root: Path, path: Path) -> bool:
+def _withheld_from_site(root: Path, path: Path, withhold: tuple[str, ...] = ()) -> bool:
     """Whether one path under the clone at `root` must not reach the public site.
 
     The same rules `copy_tree`'s filter applies, as a PREDICATE - because the listing
     paths cannot use a copytree filter. `reading-list` mode (the DEFAULT) hosts nothing, so
     it never calls `copy_tree` and the `ignore` hook never runs: it publishes filenames,
     and inlines the overlay's prose verbatim. Without this, a withheld reading was named on
-    the open web and a withheld OVERLAY had its full text published there."""
+    the open web and a withheld OVERLAY had its full text published there. `withhold` is
+    `opencourse.yml`'s list, judged from the clone's root."""
     rel = path.relative_to(root).as_posix()
     return (
         has_denied_component(rel)
         or has_never_material_component(rel)
         or excludes(root, path)
+        or excludes(root, path, withhold)
     )
 
 
@@ -202,23 +204,22 @@ def _public_lecture_entry(
     )
 
 
-def sync_public_site(
-    course_org: str,
-    source_repo: str,
-    readings_mode: str = "reading-list",
-    include_lectures: bool = True,
-) -> int:
-    """Build/refresh the PUBLIC course site `<course-org>.github.io` (open courseware).
+def sync_public_site(course_org: str, oc: OpenCourse) -> int:
+    """Build/refresh the PUBLIC course site `<course-org>.github.io` (open courseware)
+    from `oc`, the course's `opencourse.yml`.
 
-    Opt-in: the first run scaffolds the site (Pages), later runs re-sync it. Every run
-    records its settings in the site repo (`PUBLISH_CONFIG`) so the daily cron can repeat
-    them unattended. Hosts the chosen `course-materials-*` repo's files - every section it
+    The first run scaffolds the site (Pages), later runs re-sync it; each deletes a
+    `PUBLISH_CONFIG` an older publish left in the site repo. Hosts the declared
+    `source_repo`'s files - every section it
     actually has (see course.discover_sections), plus, in `actual-readings` mode, `readings`
     - in the public site repo and links to them with site-relative URLs. `reading-list` mode
     publishes the citation text only. `include_lectures` toggles the file sections as a
-    group (its name predates generic sections; the workflow input is unchanged). Session
-    materials only - no assignments/events. Served files are namespaced per source repo
-    so several years can coexist on one site."""
+    group (its name predates generic sections). `withhold` keeps its paths off the site,
+    on top of the repo's `.releaseignore` and the denylist. Session materials only - no
+    assignments/events. Served files are namespaced per source repo so several years can
+    coexist on one site."""
+    source_repo, readings_mode = oc.source_repo, oc.readings_mode
+    include_lectures = oc.include_lectures
     if not include_lectures and readings_mode == "none":
         log_err("nothing to publish - file sections off and readings set to none.")
         return 1
@@ -241,10 +242,13 @@ def sync_public_site(
             if not clone(course_org, source_repo, src):
                 log_err(f"could not clone {spec}")
                 return None
-            # Two filters unioned, not one list: the denylist is what this toolkit
-            # refuses to publish, `.releaseignore` is faculty's own. Anchored at the CLONE
-            # root even though what gets copied is a session folder deep inside it.
-            withhold = union_deny(_publication_ignore, deny_for(src))
+            # Three filters unioned, not one list: the denylist is what this toolkit
+            # refuses to publish, `.releaseignore` is faculty's own for every copy, and
+            # `opencourse.yml`'s `withhold` theirs for this site alone. Anchored at the
+            # CLONE root even though what gets copied is a session folder deep inside it.
+            withhold = union_deny(
+                _publication_ignore, deny_for(src), deny_lines(src, oc.withhold)
+            )
 
             # Both readings of the source's structure come off THE CLONE - which every
             # session below is copied out of anyway. The session list used to be a
@@ -259,7 +263,7 @@ def sync_public_site(
             # Sections are whatever THIS repo has (the same discovery the release workflows
             # use), not a hardcoded lectures/readings pair - a course whose content lives
             # in `labs/` publishes labs. `readings` is the one section with special
-            # semantics (--readings-mode, below); `include_lectures` gates all the others.
+            # semantics (`readings_mode`, below); `include_lectures` gates all the others.
             file_sections = (
                 [sec for sec in discover_sections(src) if sec != READINGS_SECTION]
                 if include_lectures
@@ -303,7 +307,8 @@ def sync_public_site(
                             section_links.append((READINGS_SECTION, links))
                     elif readings_mode == "reading-list":
                         reading_list_md = _reading_list_md(
-                            read_src, lambda p: not _withheld_from_site(src, p)
+                            read_src,
+                            lambda p: not _withheld_from_site(src, p, oc.withhold),
                         )
 
                 # A row with nothing published gets no page at all, rather than an empty
@@ -361,19 +366,11 @@ def sync_public_site(
                 # how a session renders is tested against the generator that
                 # writes its front matter before any site sees it.
                 **site_templates(),
-                # Persist the settings THIS publish used, in the site repo itself, so the
-                # daily cron can repeat it with no inputs (see resync_public_site).
-                PUBLISH_CONFIG: (
-                    "# Written by `python3 -m dsl_course.site public-sync` - the settings of the\n"
-                    "# last publish. The daily 'Publish course website' cron re-syncs from them;\n"
-                    "# delete this file to stop the automatic refresh.\n"
-                    f"source_repo: {source_repo}\n"
-                    f"readings_mode: {readings_mode}\n"
-                    f"include_lectures: {str(include_lectures).lower()}\n"
-                ),
             },
-            # Templates this toolkit no longer ships (a semester site's retired sections).
-            retire=RETIRED_TEMPLATES,
+            # Templates this toolkit no longer ships (a semester site's retired sections),
+            # and the settings file an older publish kept here: `opencourse.yml` holds
+            # them now.
+            retire=(*RETIRED_TEMPLATES, PUBLISH_CONFIG),
             commit=f"site: publish public course site from {source_repo}",
             label="public site",
             title="Public website",
@@ -383,28 +380,28 @@ def sync_public_site(
     return sync_site_repo(course_org, build, scaffold_missing=True)
 
 
-def resync_public_site(course_org: str) -> int:
-    """Re-publish the public course site from the settings the last publish persisted.
+def publish(course_org: str, *, daily: bool = False) -> int:
+    """Publish the public website as the course's `opencourse.yml` declares it.
 
-    The daily cron path: a materials edit then reaches the public site without anyone
-    re-running the workflow. Opting in is still a deliberate manual publish, so a course org
-    with no public site - or a site with no `PUBLISH_CONFIG` (published before this existed,
-    or deliberately unhooked by deleting the file) - is a one-line no-op, NOT a failure:
-    the cron ships in every course org's `.github`, and most never publish."""
-    site = pages_repo(course_org)
-    hint = "run the Publish course website action (or pass --source-repo) to publish"
-    if not repo_exists(course_org, site):
-        log(f"no public course site ({course_org}/{site}) - nothing to re-sync; {hint}")
-        return 0
-    raw = get_file_content(course_org, site, PUBLISH_CONFIG) or ""
-    cfg = yaml.safe_load(raw) if raw.strip() else None
-    if not isinstance(cfg, dict) or not cfg.get("source_repo"):
-        log(f"no {PUBLISH_CONFIG} in {course_org}/{site} - nothing to re-sync; {hint}")
-        return 0
-    log_step(f"Re-syncing {course_org}/{site} from {PUBLISH_CONFIG}")
-    return sync_public_site(
-        course_org,
-        str(cfg["source_repo"]),
-        str(cfg.get("readings_mode") or "reading-list"),
-        include_lectures=bool(cfg.get("include_lectures", True)),
-    )
+    `daily` is the cron's catch-up: a course with no `opencourse.yml`, or one that says
+    `enabled: false`, is a one-line no-op there, since the cron ships in every course org
+    and most never publish. Asked for by a person, the same answer is a refusal with the
+    sentence that says what to change."""
+    where = f"{course_org}/.github/{OPENCOURSE_FILE}"
+    try:
+        oc = read_opencourse(course_org)
+    except Unusable as exc:
+        text = f"The public website settings do not parse: {exc}."
+        log_err(text)
+        return Summary(text, reasons=[{"code": "UNUSABLE", "text": text}], code=1)
+    if oc is None or not oc.enabled:
+        text = (
+            "The public website is off. Turn it on under Public website, then publish."
+        )
+        if daily:
+            log(f"{where} is absent or says enabled: false - nothing to publish")
+            return Summary(text, conclusion="nothing_to_do")
+        log_err(text)
+        return Summary(text, reasons=[{"code": "WEBSITE_OFF", "text": text}], code=1)
+    log_step(f"Publishing from {where}")
+    return sync_public_site(course_org, oc)

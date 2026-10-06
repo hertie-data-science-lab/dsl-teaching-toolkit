@@ -9,7 +9,6 @@ import { POLICY } from './policy';
 
 export const MATERIALS_TOPIC = rules.topic;
 export const MATERIALS_FILE = rules.file;
-export const PUBLISH_FILE = rules.publish_file;
 export const DEFAULT_SYLLABUS = rules.default_syllabus;
 export const DEFAULT_KIND = rules.default_kind;
 const ALIASES: Record<string, string> = rules.aliases;
