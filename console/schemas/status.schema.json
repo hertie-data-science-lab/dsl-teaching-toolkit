@@ -36,6 +36,12 @@
             },
             "type": "object"
           },
+          "number": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "problem": {
             "type": "boolean"
           },

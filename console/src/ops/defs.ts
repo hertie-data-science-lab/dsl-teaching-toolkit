@@ -215,10 +215,11 @@ export function bootstrapCohort(s: Scope & { cohortOrg: string }, courseName: st
   };
 }
 
-export function createAssignment(s: Scope, repo: string, title: string, args: Record<string, unknown>): OpDef {
+/** `from`: the repo an import copies from; the engine makes the template, the console copies the files after. */
+export function createAssignment(s: Scope, repo: string, title: string, args: Record<string, unknown>, from?: string): OpDef {
   return {
     ...base(s, 'assignment.create', repo), name: 'New assignment', title, where: s.where,
-    intro: `Creates ${repo}: a main branch for the brief students get and a solution branch for marking. Nothing reaches students until it is on a schedule.`,
+    intro: `Creates ${repo}: a main branch for the brief students get and a solution branch for marking.${from ? ` The files you ticked in ${from} are copied into it next, as you.` : ''} Nothing reaches students until it is on a schedule.`,
     verb: 'Create assignment', running: `Creating ${repo}`, cancel: 'Stop', args,
   };
 }

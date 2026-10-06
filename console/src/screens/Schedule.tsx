@@ -8,10 +8,10 @@ import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save'
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
 import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
-import { parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
+import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  blankDraft, blockOf, draftErrors, freshId, readDraft, slugOfTemplate, writeDraft,
-  type AssignmentDraft, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
+  assignmentKey, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, withNumber, writeDraft,
+  type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
 import { validator } from '../model/validate';
@@ -146,7 +146,7 @@ function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDr
         <F id="e-type" k="type" d={d} set={set} t={{ tier: 'default', label: 'Kind', widget: 'select', defaultLabel: 'default: inferred from where it lands', reason: 'Sets the row’s tab, colour and name.', options: [{ value: '', label: `${KIND_LABEL[inferred] ?? inferred} (inferred)` }, ...kinds.map((k) => ({ value: k, label: KIND_LABEL[k] ?? k }))] }} />
         <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'from the folder name', reason: 'The name, shown after the identifier. Plain text.' }} />
       </div>
-      {(d.type || inferred) === 'readings' ? <p class="footnote">On the student site, numbered readings (readings-3, or number: 3) join that lecture’s row; other readings are their own row.</p> : null}
+      <NumberField d={d} set={set as Setter<ReleaseDraft | AssignmentDraft>} errors={errors} kind={d.type || inferred} />
       <div class="row-2">
         <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: `Automation releases at this time, ${tz}.` }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time' }} />
@@ -207,6 +207,26 @@ function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDr
   );
 }
 
+/**
+ * The Number field (decision 0020): required where the entry needs one, prefilled for a new
+ * entry. For readings it is optional and never prefilled: a number joins the lecture with that
+ * number, none makes a row of its own (decision 0013 rule 3).
+ */
+function NumberField({ d, set, errors, kind, why }: { d: ReleaseDraft | AssignmentDraft; set: Setter<ReleaseDraft | AssignmentDraft>; errors: Record<string, string>; kind: string; why?: preact.ComponentChildren }) {
+  const noun = (KIND_LABEL[kind] ?? kind).toLowerCase();
+  const label = kind === 'readings'
+    ? <><label for="e-num">Joins lecture</label><span class="default"> (optional)</span> <Hint label="About joining a lecture">A number attaches these readings to the lecture with that number. Leave it blank for a readings row of its own.</Hint></>
+    : <><label for="e-num">Number</label>{needsNumber(d, kind) ? null : <span class="default"> optional</span>} <Hint label="About the number">The number students see. Prefilled with the next one; change it if this is not the next {noun}.</Hint></>;
+  return (
+    <div class="field">
+      <span class="label">{label}</span>
+      <input id="e-num" type="number" min="1" max="999" value={d.number ?? ''} aria-invalid={errors.number ? 'true' : undefined} style="max-width:110px"
+        onInput={(e) => { const t = (e.target as HTMLInputElement).value; set({ number: t === '' ? '' : Number(t) }); }} />
+      {errors.number ? <Invalid>{errors.number}</Invalid> : why ? <p class="why">{why}</p> : null}
+    </div>
+  );
+}
+
 /** A new entry's run settings, asked with the cascade's defaults and written to assignments.yml after the entry. */
 export interface NewRun {
   values: Values;
@@ -216,7 +236,7 @@ export interface NewRun {
 
 function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; slug: string; state: string }[]; isNew: boolean; run: NewRun }) {
   const tpl = templates.find((t) => t.repo === d.template);
-  const key = d.id || slugOfTemplate(d.template);
+  const key = d.id || assignmentKey(d.number);
   const af = assignmentsFile(p.files, p.cohort.org);
   const doc = af && af !== 'loading' ? af.doc : {};
   const layers = semesterLayers(p, doc, isNew ? '' : key);
@@ -224,7 +244,9 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: Ready
   const cfg = d.template ? gradingConfig(p, d.template) : {};
   const vis = forcedVisibility(cfg) ? 'private' : resolve('visibility', mine).value;
   const late = resolve('late_window_days', mine);
-  const opts = [...templates.map((t) => ({ value: t.repo, label: `${t.slug.replace(/^assignment-(\d+).*/, 'Assignment $1')} (${t.repo})` }))];
+  // Each template by its title (a copy may share one, so a repeated title says its repo too).
+  const titles = templates.map((t) => String(gradingConfig(p, t.repo).title ?? '') || t.repo);
+  const opts = templates.map((t, i) => ({ value: t.repo, label: titles.indexOf(titles[i]) !== titles.lastIndexOf(titles[i]) ? `${titles[i]} (${t.repo})` : titles[i] }));
   if (d.template && !tpl) opts.push({ value: d.template, label: d.template });
   return (
     <>
@@ -235,10 +257,12 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: Ready
           {opts.map((o) => <option value={o.value} selected={o.value === d.template}>{o.label}</option>)}
         </select>
         {errors.template ? <Invalid>{errors.template}</Invalid>
-          : tpl && tpl.state !== 'ready' ? <Invalid>This assignment template has a problem. <a href={`#template-${tpl.slug}`}>Fix it on the assignment template</a></Invalid>
+          : tpl && tpl.state !== 'ready' ? <Invalid>This assignment template has a problem. <a href={`#template-${tpl.repo}`}>Fix it on the assignment template</a></Invalid>
           : d.template ? <span class="valid-msg"><Check />Assignment template ready</span> : null}
         <p class="why">Must exist and be ready.</p>
       </div>
+      <NumberField d={d} set={set as Setter<ReleaseDraft | AssignmentDraft>} errors={errors} kind="assignment"
+        why={isNew ? <>Each student's repo is {assignmentKey(d.number)}-&lt;handle&gt;.</> : undefined} />
       <div class="field">
         <span class="label">Hand out</span>
         <div class="choices">
@@ -342,13 +366,14 @@ function ArchiveForm({ d, set, errors }: { d: ArchiveDraft; set: Setter<ArchiveD
 
 const NEW_TYPES: [string, string, string][] = [['lecture', 'lecture', 'lec'], ['lab', 'lab', 'lab'], ['readings', 'readings', 'lec'], ['handout', 'hand out', 'asg'], ['exam', 'exam', 'exam'], ['special_event', 'event', 'evt']];
 
-function identOf(d: Draft, row: Row | undefined, doc: Record<string, unknown>): string {
+/** A new entry's identifier, from the number it will be written with (decision 0020); a saved entry's is its row's. */
+function identOf(d: Draft, row: Row | undefined, kind: string): string {
   if (row) return row.ident;
-  if (d.kind === 'assignments') return (slugOfTemplate(d.template) || 'assignment').replace(/^assignment-(\d+).*/, 'Assignment $1');
+  if (d.kind === 'assignments') return d.number ? `Assignment ${d.number}` : 'Assignment';
   if (d.kind === 'events') return d.type === 'exam' ? 'Exam' : 'Event';
   if (d.kind === 'releases') {
-    const n = Object.values((doc.releases ?? {}) as Record<string, { type?: string }>).filter((x) => (x.type || 'lecture') === (d.type || 'lecture')).length + 1;
-    return d.type === 'readings' ? 'Readings' : `${d.type === 'lab' ? 'Lab' : 'Session'} ${n}`;
+    const word = KIND_LABEL[kind] ?? kind;
+    return d.number ? `${word} ${d.number}` : word;
   }
   return '';
 }
@@ -378,7 +403,14 @@ function View(p: ReadyProps) {
   const [newRun, setNewRun] = useState<Values>({});
 
   const baseOf = (k: string): Draft | null => (k === 'new' ? null : readDraft(doc, k));
-  const draftOf = (k: string): Draft | null => drafts[k] ?? baseOf(k);
+  // Each entry's kind as the engine reads it (inferred where the file names none).
+  const statusKind = Object.fromEntries((status.releases ?? []).map((r) => [r.id, r.kind]));
+  const kindOf: KindOf = (k, e) => statusKind[k] ?? (String((e as { kind?: unknown })?.kind ?? '') || 'lecture');
+  // A release's kind as the engine will read it: its own, else the one its folder implies.
+  const kindFor = (d: Draft): string | undefined => (d.kind === 'releases' ? d.type || inferredKind(p, d) : undefined);
+  // A new entry shows the number it will get until one is typed (decision 0020).
+  const prefill = (d: Draft): Draft => withNumber(d, doc, kindOf, kindFor(d));
+  const draftOf = (k: string): Draft | null => (drafts[k] ? prefill(drafts[k]) : baseOf(k));
   const dirtyKeys = Object.keys(drafts).filter((k) => k === 'new' || !deepEqual(drafts[k], baseOf(k)));
   const dirty = dirtyKeys.length + Object.keys(removed).length;
   const setDraft = (k: string, d: Draft) => {
@@ -408,7 +440,7 @@ function View(p: ReadyProps) {
     const days = resolve('late_window_days', isNew ? { ...layers, assignment: usableBlock(newRunFor(d)) } : layers).value;
     return cutoffOf(d.dueDate, d.dueTime, typeof days === 'number' ? days : 0);
   };
-  const errorsOf = (d: Draft) => draftErrors(d, { templateUsers }, cutoffFor(d));
+  const errorsOf = (d: Draft) => draftErrors(prefill(d), { templateUsers, doc, kind: kindFor(d) }, cutoffFor(d));
   const newRunErrors = (d: Draft): Record<string, string> => {
     if (d.kind !== 'assignments') return {};
     const cfg = d.template ? gradingConfig(p, d.template) : {};
@@ -426,10 +458,10 @@ function View(p: ReadyProps) {
     const y = new YamlText(sf.text);
     let newId: string | null = null;
     for (const k of dirtyKeys) {
-      const d = drafts[k];
+      const d = prefill(drafts[k]);
       if (k === 'new' && (d.kind === 'releases' || d.kind === 'assignments' || d.kind === 'events')) {
-        const stem = d.kind === 'releases' ? d.type || 'lecture' : d.kind === 'assignments' ? slugOfTemplate(d.template) : d.title || 'event';
-        newId = freshId(doc, d.kind, stem);
+        const stem = d.kind === 'releases' ? `${kindFor(d)}${d.number ? `-${d.number}` : ''}` : d.title || 'event';
+        newId = d.kind === 'assignments' ? assignmentKey(d.number) : freshId(doc, d.kind, stem);
         writeDraft(y, { ...d, id: newId }, doc);
       } else writeDraft(y, d, doc);
     }
@@ -481,10 +513,10 @@ function View(p: ReadyProps) {
     if (!filters[r.block]) continue;
     const rel = r.block === 'releases' ? (status.releases ?? []).find((x) => x.id === r.entry) : undefined;
     const gone = !!removed[r.entry];
-    const ref = rel ? releaseRef(rel, status.releases ?? [], tz, year) : null;
+    const ref = rel ? releaseRef(rel, tz, year) : null;
     const st = gone ? (
       <><span>Removed.</span><button class="textlink" type="button" style="min-height:0;padding:0" onClick={() => { const n = { ...removed }; delete n[r.entry]; setRemoved(n); }}>Undo</button></>
-    ) : r.fault && r.block === 'releases' ? <><span class="st-chip skip">will be skipped</span><span class="st-note">Fix the folder first</span></>
+    ) : r.fault && r.block === 'releases' ? <><span class="st-chip skip">will be skipped</span><span class="st-note">{needsANumber(status, r.entry) ? 'Give it a number first' : 'Fix the folder first'}</span></>
       : rel && !ref ? <><span class="st-note">{NOTHING_TO_RELEASE}</span><a class="textlink" href={`#schedule-${r.entry}`}>Edit</a></>
       : ref && rel?.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small" label="Release early" /></>
       : <span class="st-chip">{r.state}</span>;
@@ -501,7 +533,7 @@ function View(p: ReadyProps) {
 
   let sheet = null;
   if (key && sf) {
-    const d = key === 'new' ? drafts.new ?? null : draftOf(key);
+    const d = draftOf(key);
     const close = <a class="x" href="#schedule" aria-label="Close entry" style="text-decoration:none;display:grid;place-items:center">&times;</a>;
     if (key === 'new' && !d) {
       sheet = (
@@ -516,10 +548,17 @@ function View(p: ReadyProps) {
       );
     } else if (d) {
       const errors = key in drafts ? errorsOf(d) : {};
-      const set = <T,>(patch: Partial<T>) => setDraft(key, { ...(d as object), ...patch } as unknown as Draft);
+      const set = <T,>(patch: Partial<T>) => {
+        let next = { ...(d as object), ...patch } as unknown as Draft;
+        // A new release holds only a typed number: the proposed one follows its kind (chosen, or
+        // inferred from the folder), so a kind or folder change takes that kind's next number.
+        // Readings get no proposal, so their number is always typed and stays.
+        if (key === 'new' && d.kind === 'releases' && next.kind === 'releases' && kindFor(d) !== 'readings' && d.number === nextNumber(doc, kindFor(d)!, kindOf)) next = { ...next, number: undefined };
+        setDraft(key, next);
+      };
       const rel = d.kind === 'releases' && key !== 'new' ? (status.releases ?? []).find((x) => x.id === key) : undefined;
-      const ref = rel ? releaseRef(rel, status.releases ?? [], tz, year) : null;
-      const ident = identOf(d, current, doc);
+      const ref = rel ? releaseRef(rel, tz, year) : null;
+      const ident = identOf(d, current, kindFor(d) ?? '');
       const title = d.kind === 'semester' ? <>Semester dates</> : d.kind === 'archive' ? <><b>Archive</b>: {d.title || 'Semester archived'}</> : <><b>{ident}</b>: {d.title || (current?.name ?? 'Untitled')}</>;
       const eyebrow = d.kind === 'semester' ? 'Semester' : d.kind === 'archive' ? 'Archive' : d.kind === 'assignments' ? 'Assignment entry' : `${TYPE_LABEL[d.kind === 'releases' ? d.type || 'lecture' : d.type] ?? ''}${d.date ? `, ${fmtDay(d.date, tz, year)}${d.time ? ` ${d.time}` : ''}` : ''}`;
       const probs = (status.problems ?? []).filter((x) => x.fix?.entry === key && x.fix.path === 'schedule.yml');
@@ -555,7 +594,7 @@ function View(p: ReadyProps) {
             {rel ? (
               !ref ? <div class="savebar"><span class="st-note">{NOTHING_TO_RELEASE}. Add a deploy above.</span></div>
               : rel.state === 'planned' ? <div class="savebar"><span class="footnote">Goes out at its time without you.</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small outline" label="Release early…" /></div>
-              : rel.state === 'will_be_skipped' ? <div class="savebar"><span class="st-note">Fix the folder first; it cannot be released until it exists.</span></div>
+              : rel.state === 'will_be_skipped' ? <div class="savebar"><span class="st-note">{needsANumber(status, rel.id) ? 'Give it a number first; it cannot be released until it has one.' : 'Fix the folder first; it cannot be released until it exists.'}</span></div>
               : rel.state === 'released' ? <div class="savebar"><span class="footnote">Released.</span><a class="btn small quiet" href={`#release-${rel.id}`}>Release again…</a></div>
               : null
             ) : null}
@@ -640,11 +679,10 @@ export function ScheduleScreen(p: CohortProps) {
 function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const { status, now, rel } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
-  const all = status.releases ?? [];
-  const ident = releaseIdent(rel, all);
+  const ident = releaseIdent(rel);
   const st = rel.state;
   const scope = cohortScope(p);
-  const ref = releaseRef(rel, all, tz, year);
+  const ref = releaseRef(rel, tz, year);
   if (!ref) {
     return (
       <>
@@ -669,7 +707,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         <div>
           <h1><b>{ident}</b>: {rel.title} <Hint doc="08-release-materials-to-cohort.md">{st === 'released'
             ? 'Edits students should see: push to the semester copy, or release again after fixing the course copy. Edits future semesters should keep: keep for future semesters.'
-            : st === 'will_be_skipped' ? 'Automation will skip this until the folder exists.'
+            : st === 'will_be_skipped' ? (needsANumber(status, rel.id) ? 'Automation will skip this until it has a number.' : 'Automation will skip this until the folder exists.')
             : st === 'late' ? 'Reason codes tell you whether the source, the schedule or the scheduler was at fault.'
             : 'Nothing to do; it goes out at the scheduled time. You can release it early.'}</Hint></h1>
           <p class="lede"><span class={`chip ${st === 'will_be_skipped' ? 'bad' : st === 'released' ? 'ok' : ''}`}>{RELEASE_WORD[st]}</span>{fmtWhen(rel.when, tz, year)}</p>

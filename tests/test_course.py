@@ -78,11 +78,6 @@ def test_pages_repo_lowercases_the_org():
     assert course.pages_repo("Hertie-DSL-F2026") == "hertie-dsl-f2026.github.io"
 
 
-def test_assignment_slug_drops_only_a_trailing_semester_suffix():
-    assert course.assignment_slug("assignment-1-f2026") == "assignment-1"
-    assert course.assignment_slug("assignment-1") == "assignment-1"
-
-
 def test_the_shared_drop_box_is_named_off_the_template_and_carries_no_handle():
     # `<slug>-submissions`, never the bare slug (that is the frozen semester TEMPLATE), and
     # never a `<slug>-<handle>`: it is the one submission-repo name a public log may print.

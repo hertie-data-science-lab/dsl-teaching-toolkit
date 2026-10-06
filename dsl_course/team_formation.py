@@ -847,7 +847,7 @@ def _preview(
             semester_org,
             course_name,
             sched.timezone,
-            schedule.assignment_pages_by_key(course_org, semester_org, sched),
+            schedule.assignment_pages_by_key(sched),
         ),
         dry_run=True,
         sample=sample_message(semester_org, course_name)[1],
@@ -970,7 +970,7 @@ def notify_windows(
         semester_org,
         _course_name(course_org),
         sched.timezone,
-        schedule.assignment_pages_by_key(course_org, semester_org, sched),
+        schedule.assignment_pages_by_key(sched),
     )
     try:
         # WHICH MESSAGES went out, by position, and never which ADDRESSES: `mine` and the

@@ -30,9 +30,9 @@ example-course/
       labs/01_week-1../05_week-5/      # 5 sessions of labs (lab.py + lab.ipynb each)
       SYLLABUS.md
     lecture-code-f2026/mlpkg/       # a growing package, disclosed module-by-module
-    assignment-1-f2026/             # individual (.py)      main/ + solution/
-    assignment-2-f2026/             # individual (notebook) main/ + solution/
-    assignment-4-project-f2026/     # GROUP project         main/ + solution/
+    assignment-linear-regression/   # individual (.py)      main/ + solution/
+    assignment-gradient-descent/    # individual (notebook) main/ + solution/
+    assignment-group-project/       # GROUP project         main/ + solution/
   semester-org/
     students.csv                    # 10 students + 1 auditor (handles blank until they onboard)
     teams.csv                       # 3 project teams of 3-4 (auditors are refused from teams)

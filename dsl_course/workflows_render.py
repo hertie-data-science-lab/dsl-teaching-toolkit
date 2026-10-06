@@ -936,7 +936,7 @@ def _assignment_input(
             default if default in assignments else None,
         )
     return (
-        f'      course_source_repo:\n        description: "{description} (e.g. assignment-1-f2026)"\n'
+        f'      course_source_repo:\n        description: "{description} (e.g. assignment-linear-regression)"\n'
         "        required: true"
     )
 
@@ -1898,44 +1898,32 @@ on:
 # them, else the institution policy (`scaffold.resolve_answers`, `settings`).
 _STARTER_FORMATS_INPUT = f"""\
       formats:
-        description: "5. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only. The first is the runnable one. {COURSE_DEFAULT_CHOICE} = the course's default, else the institution policy's"
+        description: "2. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only. The first is the runnable one. {COURSE_DEFAULT_CHOICE} = the course's default, else the institution policy's"
         default: "{COURSE_DEFAULT_CHOICE}\""""
 
 
-def render_new_assignment(assignments: list[str] | None = None) -> str:
-    """Scaffold an assignment-N-<semester> template repo (main + solution branch), then refresh.
+def render_new_assignment() -> str:
+    """Scaffold an `assignment-<name>` template repo (main + solution branch), then refresh.
 
-    TEN boxes, and between them they are the whole assignment: everything but `formats`
+    Five boxes, and between them they are the whole assignment: everything but `formats`
     lands verbatim in the solution branch's `grading_config.yml`, which the handout, the
     grading sheet, the receipts and the Join-team form all read. How a semester RUNS it -
     team formation, max team size, the late rule, visibility - is not asked: it is that
-    semester's `assignments.yml`.
-
-    `copy_from` is the box that asks for none of it: last year's template arrives whole,
-    and the `grading_config.yml` that comes with it is the definition, so boxes 5-8 are
-    ignored. It is box 4 for that reason - GitHub renders these top to bottom and the
-    answer that voids the rest belongs above them, not after the boxes it voids. The
-    name and the number are asked for either way: they name the repo and describe it."""
+    semester's `assignments.yml`. No number and no semester (decision 0014): the ordinal
+    comes from a semester's schedule, and a template serves every semester."""
     return f"""name: New assignment
 
 on:
   workflow_dispatch:
     inputs:
       assignment_name:
-        description: "1. The assignment's name, e.g. Neural networks from scratch"
+        description: "1. The assignment's name, e.g. Neural networks from scratch - creates assignment-<name>"
         required: true
-      assignment_number:
-        description: "2. Assignment number, e.g. 1"
-        required: true
-      semester:
-        description: "3. Semester, e.g. f2026 or s2026 - creates assignment-<number>-<semester>"
-        required: true
-{_copy_from_input("4. Copy an existing template forward instead - both branches, whole history. Boxes 5-8 are then ignored", assignments or [])}
 {_STARTER_FORMATS_INPUT}
-{_choice_input("type", "6. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual", required=False)}
-{_choice_input("submit_via", f"7. Where students hand in. assignment_repo = they push to their repo and the late cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole semester, each student pushes into their own folder, peers can read it. {COURSE_DEFAULT_CHOICE} = the course's default, else assignment_repo", [COURSE_DEFAULT_CHOICE, *SUBMIT_VIA], COURSE_DEFAULT_CHOICE, required=False)}
+{_choice_input("type", "3. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual", required=False)}
+{_choice_input("submit_via", f"4. Where students hand in. assignment_repo = they push to their repo and the late cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole semester, each student pushes into their own folder, peers can read it. {COURSE_DEFAULT_CHOICE} = the course's default, else assignment_repo", [COURSE_DEFAULT_CHOICE, *SUBMIT_VIA], COURSE_DEFAULT_CHOICE, required=False)}
       autograde:
-        description: "8. Also run hidden tests at the late cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
+        description: "5. Also run hidden tests at the late cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean
         default: false
 
@@ -1947,20 +1935,14 @@ on:
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           ORG: ${{{{ github.repository_owner }}}}
           NAME: ${{{{ inputs.assignment_name }}}}
-          NUMBER: ${{{{ inputs.assignment_number }}}}
-          SEMESTER: ${{{{ inputs.semester }}}}
-          COPY_FROM: ${{{{ inputs.copy_from }}}}
           FORMATS: ${{{{ inputs.formats }}}}
           TYPE: ${{{{ inputs.type }}}}
           SUBMIT_VIA: ${{{{ inputs.submit_via }}}}
           AUTOGRADE: ${{{{ inputs.autograde }}}}
         run: |
           gh auth setup-git
-          args=(--org "$ORG" --number "$NUMBER" --semester "$SEMESTER" --name "$NAME" \\
-            --formats "$FORMATS" --type "$TYPE" --submit-via "$SUBMIT_VIA" \\
-            --autograde "$AUTOGRADE")
-          [ "$COPY_FROM" = "{_FRESH_STARTER}" ] && COPY_FROM=""
-          [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
+          args=(--org "$ORG" --name "$NAME" --formats "$FORMATS" --type "$TYPE" \\
+            --submit-via "$SUBMIT_VIA" --autograde "$AUTOGRADE")
           python3 -m dsl_course.scaffold assignment "${{args[@]}}"
           python3 -m dsl_course.seed refresh --course-org "$ORG"
 """

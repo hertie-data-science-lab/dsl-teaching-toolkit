@@ -17,6 +17,8 @@ course_code: {course_code}
 #   # subfolder - so a rendered deck lists the deck, not its hundreds of assets. Either way
 #   # everything you release still ships, and the folder itself is always one click away.
 #   # (The public open-courseware site always lists root files - it hosts what it lists.)
+#   # WHICH files the public website shows, and how, is `opencourse.yml` beside this
+#   # file - not here.
 
 # Defaults for this course's assignments (all OPTIONAL). Each run setting resolves
 # nearest-first: the assignment's block in a semester's `semester-config/assignments.yml`,

@@ -39,7 +39,6 @@ from .course import (
     CONFIG_REPO,
     INSTRUCTORS_FILE,
     SELF_SELECT,
-    assignment_slug,
     identifier,
     pages_repo,
     row_name,
@@ -51,7 +50,6 @@ from .course import (
 )
 from .discovery import (
     SEMESTERS_PATH,
-    discover_assignments,
     discover_release_sources,
     discover_semesters,
     handed_out_assignments,
@@ -670,7 +668,7 @@ def _assignment_entry(
     (`schedule.formation_state`, the same answer the Join-team form's lock reads), the
     hand-out row carries `team_join_url` / `team_join_closes`: the one thing a student can
     do about it, and the day the door shuts. Never the teams."""
-    slug = schedule.semester_name(*found) if found else assignment_slug(repo)
+    slug = schedule.semester_name(*found) if found else repo
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
     due = iso_when(when, "23:59:00")
     released = iso_when(handout) if handout is not None else due
@@ -970,7 +968,6 @@ def sync_site(course_org: str, semester_org: str) -> int:
         semester_repos = list_org_repos(semester_org)
         content_repos = semester_content_repos(semester_repos)
         release_sources = discover_release_sources(semester_org, content_repos)
-        assignments = discover_assignments(course_org)
         # Which of them this semester has actually been given - what gates their briefs. Read
         # from the semester org rather than inferred from the plan, since the manual workflow
         # hands out with no `handout_datetime` pinned at all.
@@ -986,10 +983,9 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # Every datetime on `sched` is already the semester's wall clock (the parser converts
         # a written offset into the semester timezone), so the renderers below just print it.
         start = sched.semester_start or _semester_start(semester_org)
-        # Every assignment this semester has a page for, numbered as every link to one
-        # numbers it (`schedule.assignment_pages`: this term's templates plus the plan's
-        # entries, hidden ones included so that a hidden page keeps its ordinal unspent).
-        pages = schedule.assignment_pages(semester_org, sched, assignments)
+        # Every assignment of the plan, numbered as every link to one numbers it
+        # (`schedule.assignment_pages`, hidden ones included).
+        pages = schedule.assignment_pages(sched)
 
         def shown(hit: tuple[str, schedule.AssignmentEntry] | None) -> bool:
             """Does this assignment appear on the site at all?
@@ -1133,19 +1129,18 @@ def sync_site(course_org: str, semester_org: str) -> int:
             # assignment slug), else a synthesised fortnightly cadence.
             collections={
                 "_lectures": rows,
-                # Named by the semester-side name, ordinal from the position in the full
-                # list, so every assignment keeps its URL for the whole term. A pending one
-                # is a placeholder rather than an absence - see `_assignment_entry`.
-                # A hidden one is SKIPPED, not renumbered around: its ordinal stays spent,
-                # so hiding one mid-term leaves every other assignment's URL - and every
-                # synthesised fallback date - exactly where it was.
+                # Named by the number and the semester-side name (the name alone
+                # without a number), so every assignment keeps its URL for the whole
+                # term. A pending one is a placeholder rather than an absence - see
+                # `_assignment_entry`. A hidden one is SKIPPED: numbers are explicit, so
+                # hiding one moves nobody else's URL.
                 "_assignments": {
                     f"{page.stem}.md": _assignment_entry(
                         course_org,
                         semester_org,
                         page.repo,
                         *_assignment_dates(
-                            page.hit, start + timedelta(days=page.number * 14)
+                            page.hit, start + timedelta(days=(page.number or 0) * 14)
                         ),
                         found=page.hit,
                         handed_out=handed_out,

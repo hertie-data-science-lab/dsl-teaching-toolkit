@@ -8,15 +8,25 @@ from __future__ import annotations
 
 import dataclasses
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
 import yaml
 
 from dsl_course import assign, collect, course, grades, settings, workflows_place
-from dsl_course.schedule import Schedule
+from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER, repo_row
+from tests.plans import citing
+
+# Every template these tests hand out, collect or patch: the plan cites each.
+TEMPLATES = (
+    "assignment-1-f2026",
+    "assignment-2-f2026",
+    "assignment-4-project-f2026",
+    "project-f2026",
+    "wk3-regression-f2026",
+)
 
 HEADER = ROSTER_HEADER
 
@@ -31,7 +41,7 @@ def _roster_file(tmp_path, *rows: str):
 def _no_semester_schedule(monkeypatch):
     """provision_all resolves the semester-side name from schedule.yml; these tests exercise
     the provisioning mechanics, not the lookup, and must never reach for the network."""
-    monkeypatch.setattr("dsl_course.schedule.load", lambda org: Schedule())
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: citing(*TEMPLATES))
 
 
 @pytest.fixture(autouse=True)
@@ -255,8 +265,7 @@ def test_an_unusable_solution_branch_does_not_block_provisioning(
         lambda *a, **k: provisioned.append(a[3]) or "created",
     )
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
-    monkeypatch.setattr("dsl_course.schedule.load", lambda org: Schedule())
-    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: citing(*TEMPLATES))
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
     recorded = []
     monkeypatch.setattr(
@@ -290,8 +299,7 @@ def test_a_handout_that_skipped_every_repo_syncs_no_site(tmp_path, monkeypatch):
         assign, "ensure_semester_template", lambda *a, **k: "assignment-1"
     )
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
-    monkeypatch.setattr("dsl_course.schedule.load", lambda org: Schedule())
-    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: citing(*TEMPLATES))
     synced: list[tuple] = []
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a: synced.append(a))
 
@@ -327,8 +335,7 @@ def _marker_run(
     )
     monkeypatch.setattr(assign, "provision_one", lambda *a, **k: status)
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
-    monkeypatch.setattr("dsl_course.schedule.load", lambda org: Schedule())
-    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: citing(*TEMPLATES))
 
     def sync(*a, **k):
         if site_raises:
@@ -2133,7 +2140,7 @@ def test_the_handout_refreshes_the_team_formation_lock(tmp_path, monkeypatch):
     # A handout is the last moment the schedule and the template's definition can have
     # moved before students are looking at the assignment, and the Join-team form cannot
     # read either one. The lock is written with the schedule this run already loaded.
-    sched = Schedule()
+    sched = citing(*TEMPLATES)
     monkeypatch.setattr("dsl_course.schedule.load", lambda org: sched)
     locked: list[tuple] = []
     monkeypatch.setattr(
@@ -2163,7 +2170,7 @@ def test_a_tick_that_handed_nothing_out_does_not_rewrite_the_lock(
     # handed-out assignment for the rest of the term. A pass whose every repo was skipped
     # handed nothing out, and nothing it mirrors can have moved with it - writing anyway
     # costs one contents read per assignment per tick to find the file unchanged.
-    monkeypatch.setattr("dsl_course.schedule.load", lambda org: Schedule())
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: citing(*TEMPLATES))
     locked: list[tuple] = []
     monkeypatch.setattr(
         assign.grades,
@@ -2686,6 +2693,8 @@ def _external(monkeypatch, tmp_path, *, rows=(), group="", scheduled=True, **kwa
             "dsl_course.schedule.load",
             lambda org: Schedule(assignments={"assignment-1": entry}),
         )
+    else:
+        monkeypatch.setattr("dsl_course.schedule.load", lambda org: Schedule())
     monkeypatch.setattr(
         "dsl_course.schedule.record_handout",
         lambda org, slug, stamp=None: effects["handout"].append(slug),
@@ -2812,17 +2821,131 @@ def test_an_external_dry_run_writes_nothing_at_all(
     assert sheet_writes == [] and gradebooks == []
 
 
-def test_an_unscheduled_external_release_is_refused_and_writes_nothing(
+def test_an_unscheduled_release_is_refused_and_writes_nothing(
     tmp_path, monkeypatch, sheet_writes, gradebooks, capsys
 ):
-    # The manual button on a template the plan does not name. A fabricated entry carries no
-    # `due_datetime`, and for this shape the entry is the only record that it went out at
-    # all - so the operator is sent to schedule.yml rather than left with a half-handout.
+    # Decision 0014: a template the plan does not cite is handed out by nothing - the
+    # entry is what numbers and dates it - so the operator is sent to the schedule.
     out = _external(monkeypatch, tmp_path, scheduled=False)
     assert out["result"] == (1, False)
     assert out["handout"] == [] and out["site"] == []
     assert sheet_writes == [] and gradebooks == []
-    assert "due_datetime" in capsys.readouterr().err
+    assert "Add it to the schedule first." in capsys.readouterr().err
+
+
+def test_the_manual_hand_out_refuses_an_uncited_template_with_the_sentence(
+    monkeypatch, capsys
+):
+    # The console shows the op's summary verbatim, so the refusal is the Summary, and
+    # nothing is read past the schedule.
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: Schedule())
+
+    def boom(*a, **k):
+        raise AssertionError("an uncited template is never provisioned")
+
+    monkeypatch.setattr(assign, "provision_all", boom)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["assign", "--course-org", "C", "--course-source-repo", "assignment-trees",
+         "--semester-org", "S", "--no-preview"],
+    )  # fmt: skip
+    out = assign.main()
+    assert out == 1
+    assert out.text == (
+        "assignment-trees is not in this semester's schedule. "
+        "Add it to the schedule first."
+    )
+    assert out.reasons == [{"code": "NOT_SCHEDULED", "text": out.text}]
+
+
+def _unnumbered_project() -> Schedule:
+    return Schedule(
+        assignments={
+            "project": AssignmentEntry(
+                course_source_repo="assignment-trees",
+                due_datetime=datetime(2026, 11, 1, 23, 59, tzinfo=timezone.utc),
+            )
+        }
+    )
+
+
+@pytest.mark.parametrize("patch", [False, True])
+def test_a_manual_run_refuses_an_entry_with_no_number(monkeypatch, patch):
+    # Decision 0020 rule 3: hand out and update every copy refuse an entry with no
+    # number, the way an uncited template is refused.
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: _unnumbered_project())
+
+    def boom(*a, **k):
+        raise AssertionError("an unnumbered entry is never handed out or patched")
+
+    monkeypatch.setattr(assign, "provision_all", boom)
+    monkeypatch.setattr(assign, "patch_released", boom)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["assign", "--course-org", "C", "--course-source-repo", "assignment-trees",
+         "--semester-org", "S", "--no-preview",
+         *(["--patch-path", "README.md"] if patch else [])],
+    )  # fmt: skip
+    out = assign.main()
+    assert out == 1
+    assert out.text == "Give project a number first."
+    assert out.reasons == [{"code": "NOT_NUMBERED", "text": out.text}]
+
+
+def _two_entries_one_numbered() -> Schedule:
+    due = datetime(2026, 11, 1, 23, 59, tzinfo=timezone.utc)
+    return Schedule(
+        assignments={
+            "project": AssignmentEntry(
+                course_source_repo="assignment-trees", due_datetime=due
+            ),
+            "assignment-2": AssignmentEntry(
+                course_source_repo="assignment-trees", due_datetime=due
+            ),
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("argv", "refused"),
+    [
+        (["--patch-path", "README.md", "--assignment", "assignment-2"], False),
+        (["--patch-path", "README.md", "--assignment", "project"], True),
+        # No slug on a hand out: which entry is meant is not known, so the number is
+        # not what refuses it (provision_all refuses a template two entries cite).
+        ([], False),
+    ],
+)
+def test_a_template_cited_twice_is_refused_only_for_the_unnumbered_entry(
+    monkeypatch, argv, refused
+):
+    monkeypatch.setattr(
+        "dsl_course.schedule.load", lambda org: _two_entries_one_numbered()
+    )
+    ran: list = []
+    monkeypatch.setattr(
+        assign, "provision_all", lambda *a, **k: ran.append("hand out") or (1, False)
+    )
+    monkeypatch.setattr(
+        assign, "patch_released", lambda *a, **k: ran.append("patch") or 0
+    )
+    monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["assign", "--course-org", "C", "--course-source-repo", "assignment-trees",
+         "--semester-org", "S", "--no-preview", *argv],
+    )  # fmt: skip
+    out = assign.main()
+    if refused:
+        assert out.reasons == [
+            {"code": "NOT_NUMBERED", "text": "Give project a number first."}
+        ]
+        assert ran == []
+    else:
+        assert len(ran) == 1
 
 
 # ------------------------------------------------- an assignment handed out in the open

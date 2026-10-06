@@ -1,7 +1,7 @@
 """dsl-course assign -- provision per-student assignment repos from a template repo.
 
 Generates ONE private repo per onboarded ENROLLED student from an assignment TEMPLATE repo
-(e.g. assignment-1-f2026) in the course org, using GitHub's native template-generate,
+(e.g. assignment-linear-regression) in the course org, using GitHub's native template-generate,
 then adds the student as a collaborator (maintain). The template carries its own
 starter code + autograder workflow, which every generated repo inherits. Students
 never use a CLI. Roster rows with `role=auditor` are skipped - auditors are read-only.
@@ -45,7 +45,7 @@ the scheduler puts any of them back that has gone public early.
 
 Usage:
     python3 -m dsl_course.assign \\
-        --course-org TEST-HERTIE-COURSE --course-source-repo assignment-1-f2026 \\
+        --course-org TEST-HERTIE-COURSE --course-source-repo assignment-linear-regression \\
         --semester-org TEST-HERTIE-SEMESTER-f2026
 """
 
@@ -135,6 +135,7 @@ from .repos import (
     set_visibility,
     topic_name,
 )
+from .schedule_plan import refuse_unnumbered, unnumbered_assignment
 from .workflows_place import NEVER_IN_STUDENT_REPOS
 
 # Fire-once sentinel for the SCHEDULED solution push, in semester-config. Needed because
@@ -1238,7 +1239,7 @@ def main() -> int:
         "--course-source-repo",
         dest="template",
         required=True,
-        help="COURSE-org repo to hand out from (e.g. assignment-1-f2026)",
+        help="COURSE-org repo to hand out from (e.g. assignment-linear-regression)",
     )
     parser.add_argument("--semester-org", required=True, help="Semester org (target)")
     parser.add_argument(
@@ -1299,7 +1300,12 @@ def main() -> int:
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
+        sched = schedule.load(args.semester_org)
         if args.patch_path:
+            # Decision 0020 rule 3: an entry with no number is refused, as on hand out.
+            refusal = unnumbered_assignment(sched, args.template, args.assignment)
+            if refusal:
+                return refuse_unnumbered(refusal)
             return patch_released(
                 args.course_org,
                 args.template,
@@ -1309,6 +1315,19 @@ def main() -> int:
                 overwrite=args.overwrite,
                 dry_run=args.preview,
             )
+        # A manual hand out needs the schedule entry the plan numbers and dates the
+        # assignment by (decision 0014): refused here with the console's sentence, before
+        # anything is read or recorded.
+        if not schedule.entries_for_repo(sched, args.template):
+            text = schedule.not_scheduled(args.template)
+            log_err(text)
+            return Summary(
+                text, reasons=[{"code": NOT_SCHEDULED, "text": text}], code=1
+            )
+        # ... and a number (decision 0020 rule 3), refused the same way.
+        refusal = unnumbered_assignment(sched, args.template)
+        if refusal:
+            return refuse_unnumbered(refusal)
         if when == SOLUTION_NOW and not args.preview:
             refused = preview_first(args.semester_org, args.template, preview=False)
             if refused is not None:
@@ -1341,6 +1360,7 @@ def main() -> int:
 
 SOLUTION_PREVIEW = records.path("solution_preview")
 PREVIEW_FIRST = "PREVIEW_FIRST"
+NOT_SCHEDULED = "NOT_SCHEDULED"
 
 
 def _actor() -> str:
@@ -1755,9 +1775,8 @@ def provision_all(
     onboarded = [s for s in participants if s.onboarded]
     skipped = len(participants) - len(onboarded)
     # TWO names, and they are not interchangeable.
-    #   `slug`: the semester-side NAME - `semester_dest_repo`, else the schedule key, else (for
-    #     a handout of an unscheduled template) the template name minus its tag. Every repo
-    #     made here, and every snapshot/autograde/grades artefact, is named after it.
+    #   `slug`: the semester-side NAME - `semester_dest_repo`, else the schedule key. Every
+    #     repo made here, and every snapshot/autograde/grades artefact, is named after it.
     #   `key`: the SCHEDULE KEY. teams.csv is keyed on it - the Join-team form
     #     validates the assignment against `assignments:` in schedule.yml and writes that
     #     key - and `sync_teams.desired_teams` derives its GitHub team slugs from it.
@@ -1787,17 +1806,6 @@ def provision_all(
     # The run settings (visibility, the late pair, the team rules) are this semester's
     # for this entry, now that it is known which entry this is.
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
-    if not gspec.creates_repos and key not in sched.assignments:
-        # Nothing is written at all, and this is the only shape it can happen to. An
-        # assignment that creates no repo leaves the schedule entry as the one record that
-        # it went out - and the brief, the sheet's cutoff and the site's due row all hang
-        # off a `due_datetime:` that a fabricated entry cannot supply.
-        log_err(
-            f"`{slug}` is handed in off GitHub and this semester's schedule.yml has no "
-            f"entry for it - add the assignment there with a `due_datetime:` first, then "
-            f"release it."
-        )
-        return 1, False
     # The sheet's header and the Submission receipts issue's body, off the definition read above.
     spec = sheet_spec(sched, key, slug, gspec, group)
 

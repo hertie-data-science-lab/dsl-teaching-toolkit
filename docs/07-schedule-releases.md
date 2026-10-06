@@ -43,13 +43,13 @@ The site's schedule table has four columns, and every block below fills them wit
 
 Use this for releasing teaching materials, code, datasets, anything else.
 
-Each entry is one row on the semester site, in date order. The site names the row by its kind and its number (`Lecture 3`, `Lab 9`, `Drop-in 1`), plus your `title:` if you give one. The number is the entry's `number:`, else the number in its label (`lecture_03`, `lab-9`, `01_lab`), else its position among the shown rows of its kind; so adding or moving an entry renumbers nothing. The same numbers head the generated syllabus. Folder names mean nothing to the row: an `NN_` prefix is harmless, never needed. Each entry holds:
+Each entry is one row on the semester site, in date order. The site names the row by its kind and its number (`Lecture 3`, `Lab 9`, `Drop-in 1`), plus your `title:` if you give one. The number is the entry's `number:`, else the number in its label (`lecture_03`, `lab-9`, `01_lab`). It is never counted, so adding or moving an entry renumbers nothing. A shown entry with neither is a problem: the console asks you to give it a number, and its release is skipped until you do. Two entries of one kind with the same number are a problem too. (Readings are the exception: a readings entry without a number is simply its own row.) The same numbers head the generated syllabus. Folder names mean nothing to the row: an `NN_` prefix is harmless, never needed. Each entry holds:
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `event_datetime` | **yes** | - | when the class happens - what the site's schedule shows, and the default fire time for this entry's deploys |
 | `deploy` (nested entry) | no | - | the copies this entry ships (a nested list - see below) |
-| `number` | no | the label's number, else the position | the row's number (`Lecture 3`) |
+| `number` | unless the label carries one | the label's number | the row's number (`Lecture 3`); the console fills in the next one |
 | `kind` | no | inferred | the row's kind: one of the institution's kinds (Hertie: `lecture`, `lab`, `readings`, `exam`, `drop-in`, `other`). Left out, it is inferred once from the folder the first copy lands in: `labs`/`lab`/`tutorials` -> lab, `readings`/`reading`/`literature` -> readings, anything else -> lecture, or the source repo's own `materials.yml` aliases ([02](02-add-materials-to-course.md#materialsyml)). The folder is the top folder of the DESTINATION path (for a copy into the repo's root: the copied name when it names a kind, as `lectures` copied whole does, else the destination repo), matched whatever its case. The console shows the inferred kind for you to confirm. An unknown value is flagged by **Validate schedule** and shown as `other`. Each kind gets its own tab on the site |
 | `title` | no | - | the session's name, shown beside the row's name ("Lecture 1 / Probability Theory") on the schedule and its kind's tab |
 | `details` | no | - | what the session covers - the **learning objectives** of a Hertie syllabus. Shown in the schedule's Details column AND under the row's heading on its kind's tab; may run to several paragraphs (use a `>` or `\|` block) |
@@ -72,7 +72,7 @@ A week's readings often go out ahead of the lecture. Give them their own entry w
         course_source_path: readings/04_week-4
 ```
 
-A readings entry with a number - its `number:`, else its label's (`readings-4`) - belongs to the lecture with that number, silent or not, whatever its date: that lecture's row links the readings and inlines the reading list, the Readings tab lists it under the lecture's name, and until the files land the Readings tab says they are still to come. Any other readings entry, or one whose number no shown lecture has, is a row of its own; a silent one is on the Readings tab only, unnumbered.
+A readings entry with a number - its `number:`, else its label's (`readings-4`) - belongs to the lecture with that number, silent or not, whatever its date: that lecture's row links the readings and inlines the reading list, the Readings tab lists it under the lecture's name, and until the files land the Readings tab says they are still to come. Any other readings entry, or one whose number no shown lecture has, is a row of its own; a silent one is on the Readings tab only, unnumbered. In the console's schedule editor, **Joins lecture** on a readings entry sets its `number:`; leave it blank for a row of its own.
 
 Any other silent entry (setup files, a quiz solution) is no row: its files are in the student console's Materials, and the lectures around it keep their numbers. One that lands only root files (a `course-intro` shipping `SYLLABUS.md`) is a course document, pinned on the home page.
 
@@ -186,7 +186,7 @@ Each assignment's **dates**, keyed by a key you choose. `course_source_repo` nam
 ```yaml
 assignments:
   assignment-1:
-    course_source_repo: assignment-1-f2026
+    course_source_repo: assignment-linear-regression
     handout_datetime: 2026-09-22T09:00
     due_datetime: 2026-10-13
     solution_datetime: 2026-10-16T09:00 # optional. No default - omitted = never

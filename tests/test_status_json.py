@@ -370,7 +370,8 @@ def test_the_contract_example_marks_k4_k5_and_c5_and_lists_three_problems():
     assert [p["id"] for p in doc["problems"]] == [
         "schedule:s5:SOURCE_MISSING",
         "roster:header:ROSTER",
-        "template:assignment-3:GRADING_CONFIG",
+        # A template is no schedule entry: its problem is keyed by the repo.
+        "template:assignment-3-f2026:GRADING_CONFIG",
     ]
     source, _, template = doc["problems"]
     assert source["stops"] == "The release on Thu 8 Oct will be skipped."
@@ -543,6 +544,66 @@ def test_a_materials_repo_by_its_old_name_only_is_not_migrated():
     assert problem["id"] == "materials:course-materials-f2025:NOT_MIGRATED"
     assert "dsl-materials" in problem["text"] and problem["stage"] == "C4"
     assert validate(doc, schemas.status_schema()) == []
+
+
+def test_an_assignment_template_by_its_old_name_only_is_not_migrated():
+    old = status_json.TemplateFacts("assignment-1-f2025", "# Trees", topic=False)
+    doc = _render(_course(templates=[old]))
+    assert doc["course"]["templates"] == [
+        {"repo": "assignment-1-f2025", "slug": "assignment-1-f2025", "state": "problem"}
+    ]
+    (problem,) = [p for p in doc["problems"] if p["id"].startswith("template:")]
+    assert problem["id"] == "template:assignment-1-f2025:NOT_MIGRATED"
+    assert "dsl-assignment" in problem["text"] and problem["stage"] == "C5"
+    assert validate(doc, schemas.status_schema()) == []
+
+
+def test_gather_lists_a_template_without_the_topic_as_not_migrated(monkeypatch):
+    listing = [
+        repo_row(".github"),
+        repo_row("trees", isTemplate=True, topics=["dsl-assignment"]),
+        repo_row("assignment-1-f2025", isTemplate=True),
+        # Shares the prefix, is no GitHub template: not an assignment template at all.
+        repo_row("assignment-notes"),
+    ]
+    monkeypatch.setattr(status_json, "list_org_repos", lambda org: listing)
+    monkeypatch.setattr(status_json, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(status_json, "repo_path_shas", lambda *a, **k: {})
+    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(status_json, "org_meta", lambda org: {})
+    monkeypatch.setattr(status_json, "read_semester_registry", lambda org, f: [])
+    monkeypatch.setattr(status_json, "read_opencourse", lambda org: None)
+    monkeypatch.setattr(
+        status_json.sync_faculty, "read_course_config", lambda org, faults: None
+    )
+    facts = status_json.gather_course(COURSE)
+    assert [(t.repo, t.topic) for t in facts.templates] == [
+        ("assignment-1-f2025", False),
+        ("trees", True),
+    ]
+
+
+def test_gather_raises_no_problem_for_an_archived_template_without_the_topic(
+    monkeypatch,
+):
+    # The migration never writes to an archived repo, so an archived old template can
+    # never be stamped: it is not NOT_MIGRATED.
+    listing = [
+        repo_row(".github"),
+        repo_row("assignment-0-f2024", isTemplate=True, archived=True),
+    ]
+    monkeypatch.setattr(status_json, "list_org_repos", lambda org: listing)
+    monkeypatch.setattr(status_json, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(status_json, "repo_path_shas", lambda *a, **k: {})
+    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(status_json, "org_meta", lambda org: {})
+    monkeypatch.setattr(status_json, "read_semester_registry", lambda org, f: [])
+    monkeypatch.setattr(status_json, "read_opencourse", lambda org: None)
+    monkeypatch.setattr(
+        status_json.sync_faculty, "read_course_config", lambda org, faults: None
+    )
+    facts = status_json.gather_course(COURSE)
+    assert not [t for t in facts.templates if not t.topic]
 
 
 def test_a_release_carries_the_number_the_site_gives_it():
@@ -868,7 +929,7 @@ def test_a_problem_is_dated_by_the_moment_it_bites_and_a_roster_one_is_not(
     assert when[("K4", "s5")] == "2026-10-08T10:00:00+02:00"  # the release
     assert when[("K4", "assignment-3")] == "2026-10-20T10:00:00+02:00"  # hand out
     # A template fault bites when the template is handed out, not at the late cutoff.
-    assert when[("C5", "assignment-3")] == "2026-10-20T10:00:00+02:00"
+    assert when[("C5", "assignment-3-f2026")] == "2026-10-20T10:00:00+02:00"
     assert when[("K5", None)] is None  # the roster's header: no date pins it
     assert "when" not in next(p for p in doc["problems"] if p["stage"] == "K5")
     # The course's own file, with no semester to hand the template out, leaves it undated.
@@ -1022,7 +1083,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
             repo_row("course-materials-f2026", topics=["dsl-materials"]),
             # Content, but not a materials repo: no topic.
             repo_row("lecture-code-f2026"),
-            repo_row("assignment-2-f2026", isTemplate=True),
+            repo_row("assignment-2-f2026", isTemplate=True, topics=["dsl-assignment"]),
         ],
         SEMESTER: [
             repo_row(n)
@@ -1092,7 +1153,9 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     assert a2["marks"] == {"filled": 1, "total": 1}
     # The template's unreadable value, seen from the semester that cites it and from the
     # course: one fault, both scopes' problem lists.
-    assert "template:assignment-2:GRADING_CONFIG" in [p["id"] for p in doc["problems"]]
+    assert "template:assignment-2-f2026:GRADING_CONFIG" in [
+        p["id"] for p in doc["problems"]
+    ]
     course = status_json.collect_course(COURSE, NOW)
     assert course["course"]["templates"][0]["state"] == "problem"
     # The topic makes a materials repo, not the name: the code repo is not one.
@@ -1531,3 +1594,111 @@ def test_an_assignments_yml_that_is_not_yaml_is_a_problem_not_a_crash(monkeypatc
         status_json.problem_from_fault(f, SEMESTER, NOW) for f in facts.schedule_faults
     ]
     assert [p["id"] for p in problems] == ["assignments:file:ASSIGNMENTS"]
+
+
+# ------------------------------------------------------------ explicit numbers (0020)
+
+UNNUMBERED = """\
+timezone: Europe/Berlin
+releases:
+  lecture-3:
+    event_datetime: 2026-09-24T10:00
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/03_trees
+  guest:
+    event_datetime: 2026-10-08T10:00
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/05_guest
+  week-reading:
+    event_datetime: 2026-10-09T10:00
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/extra
+  setup:
+    event_datetime: 2026-09-10T10:00
+    show_on_site: false
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: setup
+  other-three:
+    event_datetime: 2026-10-15T10:00
+    number: 3
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/03_again
+assignments:
+  project:
+    course_source_repo: assignment-project
+    handout_datetime: 2026-10-20T10:00
+    due_datetime: 2026-11-01T23:59
+  assignment-2:
+    course_source_repo: assignment-2-f2026
+    due_datetime: 2026-09-27T23:59
+"""
+
+
+def _numbers_render() -> dict:
+    return _render(semester=_semester(sched=_sched(UNNUMBERED), dest_paths={}))
+
+
+def test_an_entry_with_no_number_is_a_problem_dated_at_what_it_stops():
+    problems = {p["id"]: p for p in _numbers_render()["problems"]}
+    guest = problems["number:lecture:guest"]
+    assert guest["text"] == "Give guest a number."
+    assert guest["stops"] == "The release on Thu 8 Oct will be skipped."
+    assert guest["when"] == "2026-10-08T10:00:00+02:00"
+    assert guest["scope"] == "semester"
+    assert guest["fix"]["path"] == "schedule.yml"
+    assert guest["fix"]["entry"] == "guest"
+    assert guest["fix"]["screen"] == "schedule"
+    assert guest["fix"]["line"] == 9
+    project = problems["number:assignment:project"]
+    assert project["when"] == "2026-10-20T10:00:00+02:00"
+    assert project["stops"] == "The hand out on Tue 20 Oct will be skipped."
+    # Label-numbered entries, a stand-alone readings row and a silent copy need none.
+    assert not {
+        "number:lecture:lecture-3",
+        "number:readings:week-reading",
+        "number:lecture:setup",
+        "number:assignment:assignment-2",
+    } & set(problems)
+
+
+def test_an_unnumbered_release_already_out_says_only_its_row_goes_without():
+    # Every copy is there (released before the number was required): nothing is skipped.
+    doc = _render(
+        semester=_semester(
+            sched=_sched(UNNUMBERED),
+            dest_paths={schedule.DEFAULT_DEST_REPO: {"lectures/05_guest"}},
+        )
+    )
+    guest = {p["id"]: p for p in doc["problems"]}["number:lecture:guest"]
+    assert guest["text"] == "Give guest a number."
+    assert guest["stops"] == "Its rows show no number until then."
+    assert "when" not in guest
+    assert "skipped" not in guest["stops"]
+
+
+def test_two_entries_sharing_a_number_are_one_problem():
+    problems = {p["id"]: p for p in _numbers_render()["problems"]}
+    dup = problems["number:lecture:3"]
+    assert dup["text"] == "Two lectures are numbered 3: lecture-3, other-three."
+    assert dup["fix"]["entry"] == "other-three"
+    assert "when" not in dup
+    ids = [p["id"] for p in _numbers_render()["problems"]]
+    assert len(ids) == len(set(ids))
+
+
+def test_an_unnumbered_release_will_be_skipped_and_an_assignment_says_so():
+    doc = _numbers_render()
+    states = {r["id"]: r["state"] for r in doc["releases"]}
+    assert states["guest"] == "will_be_skipped"
+    assert states["lecture-3"] == "planned"
+    assert states["week-reading"] == "planned"
+    rows = {a["slug"]: a for a in doc["assignments"]}
+    assert rows["project"]["number"] is None and rows["project"]["problem"]
+    assert rows["assignment-2"]["number"] == 2
+    numbers = {r["id"]: r["number"] for r in doc["releases"]}
+    assert numbers["guest"] is None and numbers["lecture-3"] == 3

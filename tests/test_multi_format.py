@@ -23,8 +23,8 @@ def test_a_two_format_template_is_scaffolded_derived_collected_and_returned(
 ):
     # scaffold: one starter per format on main, a fenced model answer per format
     written = _solution_files(monkeypatch)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["ipynb", "latex"]) == 0
-    assert {"starter.ipynb", "starter.tex"} <= fake.written("assignment-1-f2026")
+    assert scaffold.scaffold_assignment("Org", "Assignment 1", ["ipynb", "latex"]) == 0
+    assert {"starter.ipynb", "starter.tex"} <= fake.written("assignment-1")
 
     # derive: each file type in its own fence vocabulary
     for name in ("starter.ipynb", "starter.tex"):

@@ -142,7 +142,7 @@ describe('S4 cohort overview', () => {
     // This week on load: the s5 problem (week 5) is counted on its cell, not listed.
     expect(t).not.toContain('Session 5 cites folder lectures/05_trees');
     expect(out).toMatch(/aria-label="Week 5, from 5 Oct[^"]*; 1 problem"/);
-    expect(out).toContain('href="#template-assignment-3"');
+    expect(out).toContain('href="#template-assignment-3-f2026"');
     expect(t).toContain('(course)');
     expect(t).toContain('Assignment 2: Regression');
     expect(t).toContain('37 of 48 submitted so far.');
@@ -426,7 +426,9 @@ describe('S2 course and S17 template', () => {
     expect(text(<>{semesterChip({ ...sem, live: false, ended: false })}</>).trim()).toBe('Archived');
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
-    const out = html(<TemplateScreen {...cp} entry="assignment-3" />);
+    const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
+    expect(out).toContain('<h1>Group project <span class="hint">');
+    expect(out).toContain('<span>Group project</span></div>');
     expect(out).toContain('value="Group project"');
     expect(out).toMatch(/value="group" checked/);
     expect(out).toContain('The file says “sometimes”. Choose on or off.');
@@ -442,7 +444,7 @@ describe('S2 course and S17 template', () => {
       {},
       TREE,
     );
-    const out = html(<TemplateScreen {...cp} files={tagged} entry="assignment-3" />);
+    const out = html(<TemplateScreen {...cp} files={tagged} entry="assignment-3-f2026" />);
     expect(out).toContain('value="30"');
     expect(out).toContain('<td>50</td>');
     expect(out).not.toContain('[object Object]');
@@ -470,5 +472,35 @@ describe('read only and the shell', () => {
     const foot = text(<Footer course={course} cohort={cohort} />);
     expect(foot).toContain('Friedrichstraße 180');
     expect(foot).toContain('Part of the Hertie Data Science Lab.');
+  });
+});
+
+describe('explicit numbers (decision 0020)', () => {
+  const GUEST = `${SCHEDULE.replace('assignments:', `  guest:\n    event_datetime: 2026-09-25T10:00\n    kind: lecture\n    deploy:\n      - course_source_repo: course-materials-f2026\n        course_source_path: lectures/03_regularisation\nassignments:`)}`;
+  const numbered: Loaded = {
+    kind: 'ready', sha: 's', stale: [],
+    status: {
+      ...STATUS,
+      releases: [...(STATUS.releases ?? []), { id: 'guest', when: '2026-09-25T10:00:00+02:00', kind: 'lecture', number: null, title: '', state: 'will_be_skipped', source: { repo: 'course-materials-f2026', path: 'lectures/03_regularisation' }, dest: { repo: 'materials', path: 'lectures/03_regularisation' }, show_on_site: true, tbc: false }],
+      problems: [...(STATUS.problems ?? []), { id: 'number:lecture:guest', scope: 'semester', stage: 'K4', text: 'Give guest a number.', stops: 'The release on Fri 25 Sep will be skipped.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', line: 14, screen: 'schedule', entry: 'guest' }, when: '2026-09-25T10:00:00+02:00' }],
+    },
+  };
+  const guestFiles = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: GUEST }, {}, TREE);
+
+  it('shows an entry with no number by its kind alone, says why it is skipped, and asks for the number', () => {
+    const out = html(<ScheduleScreen {...props({ loaded: numbered, files: guestFiles, entry: 'guest' })} />);
+    expect(out).toContain('<b>Lecture</b>: ');
+    expect(out).toContain('Give it a number first</span>');
+    expect(out).toContain('Give it a number first; it cannot be released until it has one.');
+    expect(out).toContain('Give guest a number.');
+    expect(out).toContain('<input id="e-num" type="number" min="1" max="999" value style');
+    expect(out).toContain('The number students see. Prefilled with the next one; change it if this is not the next lecture.');
+  });
+
+  it('shows a saved entry its own number, and the release detail says what it waits for', () => {
+    const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
+    expect(out).toMatch(/<input id="e-num" type="number" min="1" max="999" value="5"/);
+    const t = text(<ReleaseScreen {...props({ loaded: numbered, files: guestFiles, entry: 'guest' })} />);
+    expect(t).toContain('Automation will skip this until it has a number.');
   });
 });

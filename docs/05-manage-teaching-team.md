@@ -108,14 +108,12 @@ Worked example: [`example-course/semester-org/instructors.yml`](../example-cours
 
 `instructors-<semester>` gets:
 1. **push** on the course org's **`.github`** - which is what makes the workflows (Release materials, Release assignment, Refresh actions, Check semester setup…) visible and runnable for them
-2. every course-org repo whose **name ends their associated `-<semester>`** (`course-materials-f2026`, `assignment-1-f2026`, `lecture-code-f2026`).
+2. every course-org repo **their semester's `schedule.yml` names**: each assignment's template and each release's source repo.
 3. Semester-side they also get write on `semester-config`, `join` and the **released materials**, so they can edit the roster, schedule and team lists, and fix a broken lab in place during class - a release merges rather than overwrites, so the fix stays ([08](08-release-materials-to-cohort.md#fixing-something-you-have-already-released)). **Read** on everything else in the semester: every student's submission repo, every gradebook. Full table: [`access-reference.md`](reference/access-reference.md#what-faculty-hold-on-each-repo).
 
 So a TA on f2026 can `git push` labs into the course org level `course-materials-f2026` ([02](02-add-materials-to-course.md)) and then release them to the semester org ([08](08-release-materials-to-cohort.md)) themselves.
 
->The suffix match is the whole rule: a course-org repo **without** the semester in its name is not covered. Name per-year content repos `<thing>-<semester>`. 
->
->A repo scaffolded by **New materials repo** / **New assignment** is granted as it is created - there is nothing to run afterwards.
+>A repo the schedule does not name is not covered, whatever it is called. A template two semesters use is granted to both. The grant follows the next push to `schedule.yml` and the hourly sync.
 
 <a id="only-staff-in-these-teams"></a>
 

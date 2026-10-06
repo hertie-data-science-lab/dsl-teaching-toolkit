@@ -21,6 +21,8 @@ from dsl_course import (
     records,
     repos,
     scaffold,
+    schedule,
+    schedule_plan,
     workflows_render,
 )
 from dsl_course.central import MissingCentralRef
@@ -35,7 +37,7 @@ from dsl_course.course import (
     SUBMIT_VIA,
 )
 from dsl_course.faults import NOT_MIGRATED
-from dsl_course.gh_contents import blob_sha
+from dsl_course.gh_contents import blob_sha, load_yaml_lines
 from dsl_course.opencourse import OpenCourse
 from dsl_course.welcome import template
 
@@ -384,11 +386,6 @@ def _course_renders(fake, monkeypatch):
     )
     monkeypatch.setattr(
         migrate,
-        "discover_assignment_repos",
-        lambda org: [r for r in fake.list_org_repos(org) if r["isTemplate"]],
-    )
-    monkeypatch.setattr(
-        migrate,
         "content_workflow_files",
         lambda sems, names, repo, ref, *, workflows: _hosted(repo, workflows),
     )
@@ -634,9 +631,9 @@ def test_a_second_run_finds_every_step_already_migrated(
 
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     out = capsys.readouterr().out
-    # Nine steps, each "already migrated" in the plan and again in the run: nothing is
+    # Ten steps, each "already migrated" in the plan and again in the run: nothing is
     # paused, nothing written, status.json not rewritten.
-    assert out.count("already migrated") == 18
+    assert out.count("already migrated") == 20
     assert fake.commits == commits and fake.puts == puts and semester == []
     assert len(fake.dispatches) == 2  # nothing paused, so nothing was dropped
 
@@ -1245,6 +1242,7 @@ def test_a_course_preview_writes_nothing(fake, course, monkeypatch, capsys):
     assert "course-materials-f2026: add the topic dsl-materials" in out
     assert "course-materials-f2026/publish.yml: deleted (retired)" in out
     assert ".github/opencourse.yml: seeded on, from " in out
+    assert "assignment-1-f2026: add the topic dsl-assignment" in out
     assert "(the files are listed once the registry step has run)" in out
     assert f"disable Actions in {COURSE}/.github, {COURSE}/assignment-1-f2026" in out
     assert _state(fake) == before and fake.puts == [] and course == []
@@ -1281,6 +1279,8 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     assert fake._repo(COURSE, "course-materials-f2026")["topics"] == ["dsl-materials"]
     template = fake.tree(COURSE, "assignment-1-f2026")
     assert set(migrate.TEMPLATE_WORKFLOWS) <= set(template)
+    # The template is found by its topic now (decision 0014), stamped beside its own.
+    assert "dsl-assignment" in fake._repo(COURSE, "assignment-1-f2026")["topics"]
     assert all(fake.paused_at_commit[1:-1]) and fake.enabled(COURSE, ".github")
     assert course == ["refresh", "status"]
     assert fake.dispatches == [
@@ -1302,8 +1302,51 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     course.clear()
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    assert capsys.readouterr().out.count("already migrated") == 24
+    assert capsys.readouterr().out.count("already migrated") == 26
     assert course == [] and fake.commits == commits and fake.puts == puts
+
+
+def test_the_assignment_topic_step_stamps_only_the_old_templates(
+    fake, course, monkeypatch, capsys
+):
+    # A template made by the new scaffold already has the topic, and a repo that only
+    # shares the prefix (not a GitHub template) is not one: only the old one is stamped,
+    # its own topics kept.
+    fake.add(COURSE, "assignment-neural-nets", {}, topics=["dsl-assignment"])
+    fake._repo(COURSE, "assignment-neural-nets")["isTemplate"] = True
+    fake.add(COURSE, "assignment-notes", {"x.md": b"x"})
+    fake._repo(COURSE, "assignment-1-f2026")["topics"] = ["keep-me"]
+    assert _main(monkeypatch, COURSE) == 0
+    out = capsys.readouterr().out
+    assert "assignment-1-f2026: add the topic dsl-assignment" in out
+    assert "assignment-neural-nets: add the topic" not in out
+    assert "assignment-notes: add the topic" not in out
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    topics = fake._repo(COURSE, "assignment-1-f2026")["topics"]
+    assert sorted(topics) == ["dsl-assignment", "keep-me"]
+    assert fake._repo(COURSE, "assignment-notes").get("topics") in (None, [])
+
+
+def test_the_assignment_topic_step_leaves_an_archived_template_alone(
+    fake, course, monkeypatch, capsys
+):
+    # GitHub refuses writes on an archived repo: an archived old template is neither
+    # planned nor stamped, and with only archived ones left the step reads done.
+    fake.add(COURSE, "assignment-0-f2024", {}, archived=True, template=True)
+    assert _main(monkeypatch, COURSE) == 0
+    out = capsys.readouterr().out
+    assert "assignment-1-f2026: add the topic dsl-assignment" in out
+    assert "assignment-0-f2024: add the topic" not in out
+    migrate._forget()
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    assert "dsl-assignment" in fake._repo(COURSE, "assignment-1-f2026")["topics"]
+    assert fake._repo(COURSE, "assignment-0-f2024")["topics"] == []
+    migrate._forget()
+    step = next(
+        s for s in migrate.Course(COURSE).steps() if s.name == "assignment topic"
+    )
+    assert step.done()
+    assert step.plan() == []
 
 
 def test_a_course_with_no_workflow_repo_passes_the_pause(
@@ -2588,3 +2631,137 @@ def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
 )
 def test_the_old_publish_settings_become_opencourse(config, expected):
     assert migrate.opencourse_from(config) == expected
+
+
+# ------------------------------------------------------------ explicit numbers (0020)
+
+POSITIONAL = """\
+timezone: Europe/Berlin
+releases:
+  intro:        # the first lecture
+    event_datetime: 2026-09-08T10:00
+    kind: lecture
+  lecture-5:
+    event_datetime: 2026-09-15T10:00
+    kind: lecture
+  setup:
+    event_datetime: 2026-09-16T10:00
+    show_on_site: false
+  wrap-up:
+    kind: lecture
+    event_datetime: 2026-09-22T10:00
+  reading:
+    event_datetime: 2026-09-23T10:00
+    kind: readings
+  flow: {event_datetime: 2026-09-29T10:00, kind: lab}
+assignments:
+  project:
+    course_source_repo: assignment-project
+    due_datetime: 2026-11-01T23:59
+  assignment-1:
+    course_source_repo: assignment-one
+    due_datetime: 2026-10-01T23:59
+"""
+
+
+def _parsed(text: str) -> schedule.Schedule:
+    return schedule.parse(load_yaml_lines(text))
+
+
+def test_position_numbers_are_the_numbers_shown_today_and_only_those():
+    stamps = migrate.position_numbers(_parsed(POSITIONAL), lambda repo: {})
+    # Label-numbered entries, a silent copy and a stand-alone readings row are left.
+    assert stamps == {
+        ("releases", "intro"): 1,
+        ("releases", "wrap-up"): 3,
+        ("releases", "flow"): 1,
+        ("assignments", "project"): 2,
+    }
+
+
+def test_numbers_are_stamped_keeping_every_comment_and_read_done_on_rerun():
+    stamps = migrate.position_numbers(_parsed(POSITIONAL), lambda repo: {})
+    new, declined = migrate.stamp_numbers(POSITIONAL, stamps)
+    assert declined == {"flow": "written as a flow mapping"}
+    assert "  intro:        # the first lecture\n    number: 1\n" in new
+    assert "  wrap-up:\n    number: 3\n    kind: lecture\n" in new
+    assert "  project:\n    number: 2\n" in new
+    # Only lines added: every line of the original is still there, in order.
+    assert [ln for ln in new.splitlines() if "number:" not in ln] == (
+        POSITIONAL.splitlines()
+    )
+    again = migrate.position_numbers(_parsed(new), lambda repo: {})
+    assert again == {("releases", "flow"): 1}
+    # The site shows exactly what it showed before.
+    before = {
+        sr.row.key: sr.number
+        for sr in schedule_plan.site_rows(schedule_plan.planned_rows(_parsed(new)))
+    }
+    assert before["intro"] == 1 and before["wrap-up"] == 3
+
+
+def test_an_empty_entry_is_declined_as_empty_not_as_a_flow_mapping():
+    text = "releases:\n  guest:\n  flow: {kind: lab}\n"
+    stamps = {("releases", "guest"): 1, ("releases", "flow"): 2}
+    new, declined = migrate.stamp_numbers(text, stamps)
+    assert new == text
+    assert declined == {"guest": "empty", "flow": "written as a flow mapping"}
+
+
+UNDATED = POSITIONAL.replace(
+    "assignments:\n",
+    "  later:\n    event_datetime: tbc\n    kind: lecture\n"
+    "  hidden:\n    event_datetime: tbc\n    show_on_site: false\n"
+    "assignments:\n",
+)
+
+
+def test_an_undated_shown_entry_is_listed_apart_from_the_stamps():
+    sched = _parsed(UNDATED)
+    assert migrate.undated_unnumbered(sched, lambda repo: {}) == ["later"]
+    assert ("releases", "later") not in migrate.position_numbers(sched, lambda repo: {})
+
+
+def test_the_numbers_step_previews_each_key_then_stamps_then_reads_done(
+    fake, semester, monkeypatch, capsys
+):
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    tree = fake.tree(SEM, CONFIG_REPO)
+    tree["schedule.yml"] = UNDATED.replace(
+        "  flow: {event_datetime: 2026-09-29T10:00, kind: lab}\n", ""
+    ).encode()
+    fake.commits.clear()
+    capsys.readouterr()
+
+    assert _main(monkeypatch, SEM) == 0
+    out = capsys.readouterr().out
+    assert "  intro: 1\n" in out and "  wrap-up: 3\n" in out and "  project: 2\n" in out
+    assert "  later: undated: will show as a problem until dated and numbered\n" in out
+    assert fake.commits == []
+
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    text = fake.tree(SEM, CONFIG_REPO)["schedule.yml"].decode()
+    assert "  intro:        # the first lecture\n    number: 1\n" in text
+    assert [c[3] for c in fake.commits].count(migrate.NUMBERS_COMMIT) == 1
+    commits = list(fake.commits)
+    capsys.readouterr()
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert "  explicit numbers: already migrated" in capsys.readouterr().out
+    assert fake.commits == commits
+
+
+def test_the_old_pointer_at_publish_yml_names_opencourse_yml():
+    for word in ("cohort", "semester"):
+        old = (
+            "course_name: X\n"
+            f"#   # WHICH of those files the {word} site hosts publicly, so an HTML deck "
+            "opens rendered\n"
+            "#   # instead of showing as source, is `publish.yml` in the materials repo "
+            "- not here.\n"
+        )
+        new = migrate.seeded_yaml(old, "main", "Course-e1")
+        assert "publish.yml" not in new
+        assert new.endswith(
+            "#   # WHICH files the public website shows, and how, is `opencourse.yml` "
+            "beside this\n#   # file - not here.\n"
+        )

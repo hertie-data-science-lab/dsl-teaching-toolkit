@@ -61,6 +61,10 @@
               }
             ]
           },
+          "number": {
+            "minimum": 1,
+            "type": "integer"
+          },
           "show_on_site": {
             "type": "boolean"
           },
@@ -160,6 +164,7 @@
             "type": "string"
           },
           "number": {
+            "minimum": 1,
             "type": "integer"
           },
           "show_on_site": {

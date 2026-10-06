@@ -75,16 +75,15 @@ Push on:
 
 - the course org's **`.github`** - which is what makes the central workflows visible and runnable
   for them; and
-- every course-org repo whose **name ends `-<semester>`**: `course-materials-f2026`,
-  `assignment-1-f2026`, `lecture-code-f2026`.
+- every course-org repo the semester's `schedule.yml` **names**: each assignment's
+  `course_source_repo` (its template) and each release copy's `course_source_repo`.
 
 So a TA on `f2026` can push labs into `course-materials-f2026` and release them to the semester
 without any further grant - the release itself runs server-side as the bot.
 
-The suffix match is the whole rule. A course-org repo **without** the semester in its name is not
-covered; name per-year content repos `<thing>-<semester>`, or grant that repo by hand. A repo scaffolded
-by **New materials repo** / **New assignment** is granted **as it is created**, not on some later
-sync.
+Citation is the whole rule (decision 0014): a repo the schedule does not name is not covered,
+whatever it is called, and a template two semesters cite is granted to both. Like every
+faculty grant it is a floor: a repo the schedule stops naming keeps what the team holds.
 
 Semester-side, the same people get write on `semester-config` and `join`.
 
