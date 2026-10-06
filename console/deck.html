@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- The deck viewer: its own document with its own policy, so a deck's scripts (reveal.js,
+     Quarto) run here and never under the console's. Nothing is fetched: the deck arrives from
+     the console tab over a BroadcastChannel named by the random id in this page's fragment,
+     and runs in a frame sandboxed to scripts only (an opaque origin: no storage, no cookies,
+     no way to the console's token). This page keeps no session storage of its own. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deck</title>
+<style>
+html, body { margin: 0; height: 100%; background: #fff; }
+iframe { border: 0; width: 100%; height: 100%; display: block; }
+p { font: 16px system-ui, sans-serif; padding: 24px; color: #333; }
+</style>
+</head>
+<body>
+<p id="msg">Opening the deck…</p>
+<script>
+(function () {
+  try { sessionStorage.clear(); } catch (e) { /* no storage */ }
+  var id = location.hash.slice(1);
+  history.replaceState(null, '', location.pathname);
+  var msg = document.getElementById('msg');
+  if (!/^[0-9a-f]{32}$/.test(id) || typeof BroadcastChannel === 'undefined') {
+    msg.textContent = 'Open a deck from the console’s Materials screen.';
+    return;
+  }
+  var ch = new BroadcastChannel('dsl-deck-' + id);
+  var got = false;
+  var asked = 0;
+  ch.onmessage = function (e) {
+    var d = e.data;
+    if (got || !d || typeof d.html !== 'string') return;
+    got = true;
+    ch.close();
+    var title = typeof d.title === 'string' && d.title ? d.title : 'Deck';
+    var f = document.createElement('iframe');
+    f.setAttribute('sandbox', 'allow-scripts');
+    f.setAttribute('title', title);
+    f.srcdoc = d.html;
+    document.title = title;
+    msg.remove();
+    document.body.appendChild(f);
+  };
+  (function ask() {
+    if (got) return;
+    ch.postMessage({ ready: true });
+    if (++asked < 40) setTimeout(ask, 250);
+    else { ch.close(); msg.textContent = 'The deck did not arrive. Open it again from the console.'; }
+  })();
+})();
+</script>
+</body>
+</html>

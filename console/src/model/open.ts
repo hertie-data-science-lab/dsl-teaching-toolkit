@@ -1,0 +1,126 @@
+// Where a course repo opens: on GitHub, on github.dev, in VS Code, in GitHub Desktop, in
+// another editor by its link scheme, or from a clone command. One set of rules for the
+// student Set up screen and the instructors' Open button (decision 0017). The local folder
+// and editor come from Your setup (`model/prefs.ts`); nothing here reads storage.
+
+export type OpenChoice = 'github' | 'githubdev' | 'vscode' | 'desktop' | 'editor' | 'clone';
+export const OPEN_CHOICES: OpenChoice[] = ['github', 'githubdev', 'vscode', 'desktop', 'editor', 'clone'];
+
+export type Editor = 'vscode' | 'desktop' | 'other';
+export const EDITORS: Editor[] = ['vscode', 'desktop', 'other'];
+
+/** Your setup: the folder the course repos live under, the editor, and the Open button's last choice. */
+export interface Setup {
+  folder: string;
+  editor: Editor;
+  /** Another editor's link, with `{path}` where the folder goes (`myeditor://open/{path}`). */
+  scheme?: string;
+  lastOpen?: OpenChoice;
+}
+
+/** A repo to open, and optionally a branch and a path inside it. */
+export interface RepoRef {
+  org: string;
+  repo: string;
+  branch?: string;
+  path?: string;
+}
+
+/** `folder` + `name`, with the folder's own separator (a Windows folder keeps its backslashes). */
+export function joinPath(folder: string, name: string): string {
+  const f = folder.trim().replace(/[\\/]+$/, '');
+  if (!f) return name;
+  return `${f}${f.includes('\\') && !f.includes('/') ? '\\' : '/'}${name}`;
+}
+
+/** A local path as a URL path: forward slashes, no leading one, each segment encoded, a drive letter's colon kept. */
+// UNC paths (\\server\share) are not supported, as on the live site's profile.
+function urlPath(path: string): string {
+  return path.replace(/\\/g, '/').split('/').filter(Boolean).map((s) => encodeURIComponent(s).replace(/%3A/gi, ':')).join('/');
+}
+
+/** VS Code's link to open a local folder: forward slashes, one after `file`, a drive letter kept. */
+export const vscodeFolder = (path: string) => `vscode://file/${urlPath(path)}`;
+
+export const cloneCommand = (url: string, folder: string, name: string) => `git clone ${url}.git${folder.trim() ? ` "${joinPath(folder, name)}"` : ''}`;
+
+/** An editor link can take a folder only when `{path}` follows a slash or a colon, as in `vscode://file/{path}`. */
+export const schemeOk = (scheme: string) => /[/:]\{path\}/.test(scheme.trim());
+
+/**
+ * The folder a course's repos go in: a folder of the course org's name inside Your setup's
+ * folder, so two courses with a `materials` repo each do not share one clone. A folder that
+ * already ends in the org's name is used as it is. Empty when no folder is set up.
+ */
+export function courseFolder(folder: string, org: string): string {
+  const f = folder.trim().replace(/[\\/]+$/, '');
+  if (!f) return '';
+  const last = f.split(/[\\/]/).pop() ?? '';
+  return last.toLowerCase() === org.toLowerCase() ? f : joinPath(f, org);
+}
+
+/** `/tree/<branch>/<path>` inside a repo on github.com or github.dev; nothing for the repo's root on its default branch. */
+const inRepo = (r: RepoRef) => (r.path || r.branch ? `/tree/${r.branch ?? 'main'}${r.path ? `/${r.path.split('/').filter(Boolean).map(encodeURIComponent).join('/')}` : ''}` : '');
+
+export const repoUrl = (r: RepoRef) => `https://github.com/${r.org}/${r.repo}`;
+
+/** One entry of the Open menu: a link, or a command to copy. */
+export interface OpenItem {
+  choice: OpenChoice;
+  label: string;
+  href?: string;
+  /** The text to copy, for the clone command. */
+  copy?: string;
+  /** Where it sits in the menu. */
+  group: 'online' | 'local';
+}
+
+export const SETUP_HREF = '#setup';
+
+/** Every way to open `r` with this setup, in menu order. */
+export function openItems(r: RepoRef, setup: Setup | null): OpenItem[] {
+  const url = repoUrl(r);
+  const parent = courseFolder(setup?.folder ?? '', r.org);
+  const local = parent ? joinPath(parent, r.repo) : '';
+  const inside = local ? (r.path ?? '').split('/').filter(Boolean).reduce(joinPath, local) : '';
+  const items: OpenItem[] = [
+    { choice: 'github', label: 'Open on GitHub', href: `${url}${inRepo(r)}`, group: 'online' },
+    { choice: 'githubdev', label: 'Open on github.dev', href: `https://github.dev/${r.org}/${r.repo}${inRepo(r)}`, group: 'online' },
+    local
+      ? { choice: 'vscode', label: 'Open in VS Code', href: vscodeFolder(inside), group: 'local' }
+      : { choice: 'vscode', label: 'Clone in VS Code', href: `vscode://vscode.git/clone?url=${encodeURIComponent(url)}${r.branch ? `&ref=${encodeURIComponent(r.branch)}` : ''}`, group: 'local' },
+    { choice: 'desktop', label: 'Open in GitHub Desktop', href: `x-github-client://openRepo/${url}${r.branch ? `?branch=${encodeURIComponent(r.branch)}` : ''}`, group: 'local' },
+  ];
+  const scheme = setup?.editor === 'other' ? (setup.scheme ?? '').trim() : '';
+  // Another editor opens a folder or nothing: with no folder set up, the menu's last line
+  // ("Set up a local folder") is its way in.
+  if (local && schemeOk(scheme)) items.push({ choice: 'editor', label: 'Open in your editor', href: scheme.replace('{path}', urlPath(inside)), group: 'local' });
+  items.push({ choice: 'clone', label: 'Copy the clone command', copy: cloneCommand(url, parent, r.repo), group: 'local' });
+  return items;
+}
+
+const EDITOR_CHOICE: Record<Editor, OpenChoice> = { vscode: 'vscode', desktop: 'desktop', other: 'editor' };
+
+/** The button's own action: the last choice, else the editor once a folder is set up, else GitHub. */
+export function defaultItem(items: OpenItem[], setup: Setup | null): OpenItem {
+  const find = (c: OpenChoice | undefined) => items.find((i) => i.choice === c);
+  return find(setup?.lastOpen) ?? (setup?.folder.trim() ? find(EDITOR_CHOICE[setup.editor]) : undefined) ?? items[0];
+}
+
+/** Whether a link leaves for a web page (a new tab) rather than an app's own scheme (no empty tab left behind). */
+export const isWeb = (href: string) => /^https?:/i.test(href);
+
+export type Platform = 'mac' | 'win' | 'linux';
+
+/** The reader's platform as far as the browser says, else macOS. */
+export function platformOf(nav: { platform?: string; userAgentData?: { platform?: string } } | undefined = globalThis.navigator): Platform {
+  const p = nav?.userAgentData?.platform || nav?.platform || '';
+  if (/^win/i.test(p)) return 'win';
+  if (/^(linux|x11|.*bsd|cros|chrome ?os)/i.test(p)) return 'linux';
+  return 'mac';
+}
+
+/** An example folder for the course repos, spelt the way the reader's platform spells a home folder. */
+export function folderExample(p: Platform): string {
+  return p === 'win' ? 'C:\\Users\\you\\Documents\\repositories' : p === 'linux' ? '/home/you/repositories' : '/Users/you/Documents/repositories';
+}

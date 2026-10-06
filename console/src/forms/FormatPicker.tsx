@@ -1,0 +1,53 @@
+// The template's `formats`: every starter format students hand in, ticked, and which one is
+// the runnable one (listed first: autograde and the completion check read it; decision 0009
+// rule 10). Used by New assignment and the template's Settings form.
+
+import { SOURCE_WORD } from '../model/cascade';
+import { DEFAULT_FORMATS } from '../model/policy';
+import { Hint } from '../ui/Hint';
+import { Invalid } from './Form';
+import { FORMATS, formatWord } from '../tiers/grading';
+import type { Values } from '../tiers/types';
+import { autogradeBlock, formatBlock, formatError, toggleFormat } from '../wizards/model';
+
+/** `formats` with `f` moved to the front, the runnable place. */
+export function runnableFirst(formats: string[], f: string): string[] {
+  return formats.includes(f) ? [f, ...formats.filter((x) => x !== f)] : formats;
+}
+
+/** `fallback`: what applies when the template lists none, and whose it is (the course's, else the institution's). */
+export function FormatPicker({ v, set, id = 'na', fallback }: { v: Values; set: (v: Values) => void; id?: string; fallback?: { formats: string[]; source: 'course' | 'institution' } }) {
+  const dflt = fallback ?? { formats: DEFAULT_FORMATS, source: 'institution' as const };
+  const formats = (v.formats as string[] | undefined) ?? [];
+  const auto = v.autograde === 'true' && !autogradeBlock(v);
+  const offs = FORMATS.map(([f]) => formatBlock(formats, f, auto)).filter((x): x is string => !!x);
+  const err = formatError(v);
+  const runnable = formats.filter((f) => f !== 'none');
+  return (
+    <div class="field">
+      <span class="label">What students hand in <span class="default">{SOURCE_WORD[dflt.source]}: {dflt.formats.map(formatWord).join(' + ')}</span></span>
+      <div class="fmt-grid">
+        {FORMATS.map(([f, label]) => {
+          const why = formatBlock(formats, f, auto);
+          return (
+            <label class={`check${why ? ' off' : ''}`} title={why ?? undefined}>
+              <input type="checkbox" id={`${id}-fmt-${f}`} checked={formats.includes(f)} disabled={!!why} onChange={() => set({ ...v, formats: toggleFormat(formats, f) })} />
+              <span>{label}</span>
+            </label>
+          );
+        })}
+      </div>
+      {offs.length ? <p class="off-why">{[...new Set(offs)].join(' ')}</p> : null}
+      {err ? <Invalid>{err}</Invalid> : null}
+      {runnable.length > 1 ? (
+        <div class="field">
+          <span class="lbl-row"><label for={`${id}-runnable`}>Runnable format</label><Hint label="About the runnable format">With several formats, the first is what autograde runs and the completion check reads.</Hint></span>
+          <select id={`${id}-runnable`} onChange={(e) => set({ ...v, formats: runnableFirst(formats, (e.target as HTMLSelectElement).value) })}>
+            {runnable.map((f) => <option value={f} selected={formats[0] === f}>{formatWord(f)}</option>)}
+          </select>
+        </div>
+      ) : null}
+      <p class="why">Seeds the starter files and decides how markers see submissions. One mark sheet covers them all.</p>
+    </div>
+  );
+}

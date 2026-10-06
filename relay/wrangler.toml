@@ -1,0 +1,20 @@
+# The console's sign-in relay. Deployed by .github/workflows/relay-deploy.yml; see README.md.
+name = "dsl-console-auth"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+# Set at deploy from repository variables (relay-deploy.yml `vars:`), not here:
+#   GH_APP_CLIENT_ID   the GitHub App's client id (public)
+#   CONSOLE_ORIGIN     the console's origin, e.g. https://hertie-data-science-lab.github.io
+# A Worker secret, never in the repo:
+#   GH_APP_CLIENT_SECRET
+
+# 20 requests a minute per client address; a sign-in takes one, a refresh one every 8 hours.
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 20
+  period = 60
