@@ -30,6 +30,7 @@ import shutil
 import stat
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from functools import cache
@@ -76,7 +77,7 @@ from .materials import read as read_materials
 from .opencourse import read as read_opencourse
 from .public_site import publish as publish_public_site
 from .readings import demote_headings
-from .releaseignore import excludes
+from .releaseignore import listed
 from .releaseignore import parse as parse_patterns
 from .repos import (
     default_branch,
@@ -122,6 +123,7 @@ from .site_repo import (
     theme_pages,
     yaml_file,
 )
+from .student_status import _brief as read_brief
 
 
 def _semester_start(semester_org: str) -> date:
@@ -181,18 +183,22 @@ def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
 
     The policy is COURSE-level and lives in the source repo faculty actually edit, not in
     each semester's copy. Memoised for the run because `--all-semesters` asks the same
-    course the same question once per semester. Patterns go through the parser faculty's
-    `.releaseignore` goes through, so one syntax covers both directions of the question.
+    course the same question once per semester: `sync_site` leaves the memo alone, and
+    `main` clears it once the run's last semester is built. Patterns go through the
+    parser faculty's `.releaseignore` goes through, so one syntax covers both directions
+    of the question.
 
     A file that is absent or empty is "nothing public", and the mirror may then delete
     what an earlier sync copied. A file that does not PARSE, or whose `public:` is not a
     list of patterns, stops the sync and reports: read as "nothing public" it would
-    unpublish a whole course's rendered decks over a typo, on a green run."""
+    unpublish a whole course's rendered decks over a typo, on a green run. The second is
+    a `RuntimeError`, the faculty-fixable config fault every caller of `sync_site` (a
+    hand-out, the CLI) reports in one line and survives."""
     declared = yaml_file(course_org, source_repo, PUBLISH_FILE).get("public")
     if declared is None:
         return None
     if not isinstance(declared, list) or not all(isinstance(x, str) for x in declared):
-        raise ValueError(
+        raise RuntimeError(
             f"{course_org}/{source_repo}/{PUBLISH_FILE}: `public:` must be a list of "
             "patterns"
         )
@@ -230,9 +236,80 @@ def _publish_policies(
     }
 
 
+# A destination repo's copies as (path in the semester copy, path in the course source)
+# pairs, one per deploy into it (`_deploy_sources`).
+Renames = dict[str, tuple[tuple[str, str], ...]]
+
+
+def _deploy_sources(sched: schedule.Schedule) -> Renames:
+    """Each semester repo the schedule releases into, mapped to where each copy into it
+    came from: `(semester_dest_path, course_source_path)`, the destination as
+    `deploy_dest` resolves it. What turns a path in the semester copy back into the
+    path faculty wrote a pattern against, when a deploy renamed it on the way."""
+    out: dict[str, list[tuple[str, str]]] = {}
+    for release in sched.releases:
+        for d in release.deploy:
+            pair = (deploy_dest(d), d.course_source_path.strip("/"))
+            out.setdefault(d.semester_dest_repo, []).append(pair)
+    return {repo: tuple(pairs) for repo, pairs in out.items()}
+
+
+def _source_paths(path: str, renames: tuple[tuple[str, str], ...]) -> set[str]:
+    """Where `path` of a semester copy came from in the course source, through every
+    deploy that landed it (a copy may land inside another, so there can be several)."""
+    out = set()
+    for dest, source in renames:
+        if not dest:
+            rest = path
+        elif path == dest:
+            rest = ""
+        elif path.startswith(f"{dest}/"):
+            rest = path[len(dest) + 1 :]
+        else:
+            continue
+        out.add("/".join(p for p in (source, rest) if p))
+    return out
+
+
 def _bundle_prefix(path: str) -> str:
     """The `<stem>_files/` directory a rendered deck keeps its assets in, beside it."""
     return f"{path.rsplit('.', 1)[0]}_files/"
+
+
+def _matched(
+    paths: tuple[str, ...],
+    specs: tuple[GitIgnoreSpec, ...],
+    allowed: Callable[[str], bool],
+) -> set[str]:
+    """The paths a policy makes public and `allowed` lets through: rendered formats, plus
+    each matched deck's bundle (`_public_selection`)."""
+    matched = {
+        path
+        for path in paths
+        if file_ext(path) in RENDERED_EXTENSIONS
+        and any(spec.check_file(path).include for spec in specs)
+        and allowed(path)
+    }
+    for path in list(matched):
+        if file_ext(path) in DECK_EXTENSIONS:
+            prefix = _bundle_prefix(path)
+            matched |= {a for a in paths if a.startswith(prefix) and allowed(a)}
+    return matched
+
+
+def _prune(served: Path, keep: set[str]) -> None:
+    """Delete every file under `served` that is not in `keep`, and the directories that
+    leaves empty."""
+    if not served.is_dir():
+        return
+    for path in sorted(served.rglob("*"), reverse=True):
+        if path.is_dir() and not path.is_symlink():
+            if not any(path.iterdir()):
+                path.rmdir()
+        elif path.relative_to(served).as_posix() not in keep:
+            path.unlink()
+    if not any(served.iterdir()):
+        served.rmdir()
 
 
 def _public_selection(
@@ -241,6 +318,7 @@ def _public_selection(
     paths: tuple[str, ...],
     specs: tuple[GitIgnoreSpec, ...],
     withhold: tuple[str, ...] = (),
+    renames: tuple[tuple[str, str], ...] = (),
 ) -> frozenset[str]:
     """Which paths of `repo` the site can host, out of its released tree.
 
@@ -253,8 +331,10 @@ def _public_selection(
 
     Two deny filters gate every candidate, bundles included, and cannot be written
     around: the denylist (`materials.publishable`), and `opencourse.yml`'s `withhold`
-    (`withhold`, matched against the path in this copy) - a file kept off the
-    open-courseware site is never hosted publicly here either.
+    (`withhold`) - a file kept off the open-courseware site is never hosted publicly here
+    either. `withhold` is written against SOURCE repo paths, so it is matched against the
+    path in this copy AND every source path a deploy landed it from (`renames`, this
+    repo's `_deploy_sources`): a deploy that renames a withheld folder hosts nothing.
 
     A file GitHub would refuse on a push is dropped with a warning rather than failing the
     sync. So is anything that is not a regular file - `lstat`, so a symlink is judged as
@@ -262,24 +342,20 @@ def _public_selection(
     have. Judged over the same tree the links are built from (`_repo_tree`); the clone is
     only where the bytes and the sizes come from."""
 
-    def allowed(path: str) -> bool:
-        return publishable(path) and not (
-            withhold and excludes(src, src / path, withhold)
+    ignore = listed(withhold) if withhold else None
+
+    def withheld(path: str) -> bool:
+        # Every name above a released blob is a directory, and the blob itself is not.
+        return any(
+            ignore.excludes(p, lambda rel, p=p: rel != p)
+            for p in {path, *_source_paths(path, renames)}
         )
 
-    matched = {
-        path
-        for path in paths
-        if file_ext(path) in RENDERED_EXTENSIONS
-        and any(spec.check_file(path).include for spec in specs)
-        and allowed(path)
-    }
-    for path in list(matched):
-        if file_ext(path) in DECK_EXTENSIONS:
-            prefix = _bundle_prefix(path)
-            matched |= {a for a in paths if a.startswith(prefix) and allowed(a)}
+    def allowed(path: str) -> bool:
+        return publishable(path) and not (ignore and withheld(path))
+
     keep = set()
-    for path in matched:
+    for path in _matched(paths, specs, allowed):
         try:
             st = (src / path).lstat()
         except OSError:
@@ -300,7 +376,8 @@ def _mirror_public(
     site_wd: Path,
     semester_org: str,
     policies: dict[str, tuple[GitIgnoreSpec, ...]],
-    withhold: tuple[str, ...] = (),
+    withhold: tuple[str, ...] | None = (),
+    renames: Renames | None = None,
 ) -> Hosted:
     """Copy every publicly declared file of this semester's content repos into the site's
     own `files/<repo>/` tree, and say what actually landed there.
@@ -315,7 +392,11 @@ def _mirror_public(
     outage than a copy one sync stale. A `files/<repo>/` whose repo is no longer a key of
     `policies` (the plan stopped releasing into it) goes too.
 
-    `withhold` is `opencourse.yml`'s list (`_public_selection`).
+    `withhold` is `opencourse.yml`'s list and `renames` the plan's `_deploy_sources`
+    (`_public_selection`). `withhold=None` is an `opencourse.yml` that could not be read:
+    then only the deletion half runs - stale repos, repos with nothing declared, and every
+    copy the policy no longer matches go, with no clone - and nothing is copied or linked,
+    because what the file would withhold is unknown.
 
     Logs name repos and paths only: `policies` covers the release plan's declared
     destinations, never a student's repo."""
@@ -336,6 +417,11 @@ def _mirror_public(
                 shutil.rmtree(served)
             continue
         _branch, paths = _repo_tree(semester_org, repo)
+        if withhold is None:
+            # A superset of what a readable file would keep: whatever is outside it was
+            # unpublished, and has to go now rather than when the file is fixed.
+            _prune(served, _matched(paths, policies[repo], publishable))
+            continue
         with tempfile.TemporaryDirectory() as work:
             src = Path(work) / repo
             if not clone(semester_org, repo, src, shallow=True):
@@ -344,7 +430,14 @@ def _mirror_public(
                     "site are left as the last sync made them"
                 )
                 continue
-            keep = _public_selection(src, repo, paths, policies[repo], withhold)
+            keep = _public_selection(
+                src,
+                repo,
+                paths,
+                policies[repo],
+                withhold,
+                (renames or {}).get(repo, ()),
+            )
             if served.exists():
                 shutil.rmtree(served)
             if not keep:
@@ -577,18 +670,27 @@ def _materials_index(
     hidden `tests/` is not course material, and this index lists everything a release
     happened to carry; the never-material names (`.gitkeep`) go with them.
 
-    Root files come out separately as `documents:`, deduped by NAME: a course-level
-    document released into three content repos is one document, not three sections."""
+    Root files come out separately as `documents:`, one unheaded group rather than a
+    section per repo. A name two repos both hold is listed once per repo, named
+    `<repo>/<name>` - they are different files, and neither is dropped.
+
+    `repos:` names `content_repos` themselves, in order: Your Profile forks and clones the
+    first, and `open_in.html` offers `online` / `local` for that repo's files."""
     found: dict[str, dict[str, _IndexEntry]] = {}
-    docs: dict[str, _IndexEntry] = {}
+    docs: list[tuple[str, str, Link]] = []
     for repo in sorted(content_repos):
         branch, paths = _repo_tree(semester_org, repo)
         for path in paths:
             if not publishable(path):
                 continue
             if "/" not in path:
-                doc = file_link(semester_org, repo, branch, path, path, hosted)
-                docs.setdefault(path, _IndexEntry(path, False, doc, files=1))
+                docs.append(
+                    (
+                        repo,
+                        path,
+                        file_link(semester_org, repo, branch, path, path, hosted),
+                    )
+                )
                 continue
             section, prefix = _section_boundary(repo, path)
             _insert_released_path(
@@ -607,7 +709,12 @@ def _materials_index(
         rows_out.append(f"    files: {sum(e.files for e in entries)}")
         rows_out.append("    entries:")
         rows_out.extend(_emit_entries(entries, "      "))
-    doc_rows = _emit_entries(sorted(docs.values(), key=lambda e: e.name.lower()), "  ")
+    shared = {name for _r, name, _l in docs if sum(n == name for _x, n, _y in docs) > 1}
+    doc_entries = [
+        _IndexEntry(f"{repo}/{name}" if name in shared else name, False, link, files=1)
+        for repo, name, link in docs
+    ]
+    doc_rows = _emit_entries(sorted(doc_entries, key=lambda e: e.name.lower()), "  ")
     header = (
         "# Generated by `python3 -m dsl_course.site sync` - the syllabus and every released\n"
         "# file, nested as its repo has it. Edit nothing here; it is rewritten on every sync.\n"
@@ -616,6 +723,8 @@ def _materials_index(
         # where there is one and the GitHub blob otherwise.
         f"syllabus: {syllabus.view_url or syllabus.url}\n" if syllabus else ""
     )
+    repos = ", ".join(f'"{q(r)}"' for r in sorted(content_repos))
+    header += f"repos: [{repos}]\n"
     body = "documents:\n" + "\n".join(doc_rows) + "\n" if doc_rows else ""
     body += "sections:\n" + "\n".join(rows_out) if rows_out else "sections: []"
     return header + body + "\n"
@@ -916,19 +1025,33 @@ def member_digest(semester_org: str, handle: str) -> str:
     return hashlib.sha256(f"{semester_org}:{handle.lower()}".encode()).hexdigest()
 
 
-def _formed_teams(semester_org: str, key: str) -> list[tuple[str, list[str]]]:
-    """`(team, member handles)` for every team formed for `key` so far, by name - the
-    same reader (`teams.teams_for`) the student console's team list uses.
+FormedTeams = Callable[[str], list[tuple[str, list[str]]]]
+
+
+def _formed_teams(semester_org: str) -> FormedTeams:
+    """A reader of `(team, member handles)` for every team formed for an assignment key
+    so far, by name - the same reader (`teams.teams_for`) the student console's team list
+    uses. teams.csv is loaded once, on the first ask, however many assignments are forming
+    teams, and never when none is.
 
     Never fatal: teams.csv is student-written, and a row somebody broke must not take down
     the render of a semester's whole website. The callout still goes out; only the table
     is missing."""
-    try:
-        groups = teams.teams_for(teams.load(semester_org), key)
-    except RuntimeError as exc:
-        log_err(f"could not read {semester_org}'s teams for {key}: {exc}")
-        return []
-    return sorted((team, sorted(members)) for team, members in groups.items())
+
+    @cache
+    def loaded() -> dict[str, dict[str, list[str]]] | None:
+        try:
+            return teams.load(semester_org)
+        except RuntimeError as exc:
+            log_err(f"could not read {semester_org}'s teams: {exc}")
+            return None
+
+    def formed(key: str) -> list[tuple[str, list[str]]]:
+        per = loaded()
+        groups = teams.teams_for(per, key) if per is not None else {}
+        return sorted((team, sorted(members)) for team, members in groups.items())
+
+    return formed
 
 
 def _assignment_entry(
@@ -941,6 +1064,7 @@ def _assignment_entry(
     handed_out: frozenset[str] = frozenset(),
     now: datetime | None = None,
     sched: schedule.Schedule | None = None,
+    formed_teams: FormedTeams | None = None,
 ) -> str:
     """An assignment's page (`_layouts/assignment.html`), plus the two schedule rows it
     drives: the entry's own `date:` is the hand-out ("Assignment out") row and its
@@ -970,7 +1094,8 @@ def _assignment_entry(
     (`schedule.formation_state`, the same answer the Join-team form's lock reads), the
     entry carries `team_join_url` / `team_join_cap` / `team_join_closes` / `team_salt`,
     and `teams:` once any has formed: each team's name, headcount, cap, its members as
-    salted digests (`member_digest`, never a handle) and its repo's URL."""
+    salted digests (`member_digest`, never a handle) and its repo's URL. `formed_teams` is
+    the sync's one reader of teams.csv (`_formed_teams`), shared by every page."""
     slug = schedule.semester_name(*found) if found else repo
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
     due = iso_when(when, "23:59:00")
@@ -1062,7 +1187,7 @@ def _assignment_entry(
 
         listed = "".join(
             team_entry(name, handles)
-            for name, handles in _formed_teams(semester_org, found[0])
+            for name, handles in (formed_teams or _formed_teams(semester_org))(found[0])
         )
         closes = spoken_day(schedule.in_semester_zone(sched, shuts))
         team_fm = (
@@ -1077,15 +1202,11 @@ def _assignment_entry(
     repo_fm = "".join(f"{ln}\n" for ln in repo_lines)
     repo_due = "".join(f"    {ln}\n" for ln in repo_lines)
     if out:
-        readme = get_file_content(course_org, repo, "README.md") or ""
+        heading, brief = read_brief(
+            get_file_content(course_org, repo, "README.md") or ""
+        )
         if not subtitle:
-            heading = next(
-                (ln[2:] for ln in readme.splitlines() if ln.startswith("# ")), ""
-            )
             subtitle = row_name(heading, title)
-        brief = "\n".join(
-            ln for ln in readme.splitlines() if not ln.startswith("# ")
-        ).strip()
         flags = ""
         # The page's body is the brief, and nothing else.
         body = liquid_raw(brief or "Assignment brief.")
@@ -1376,7 +1497,8 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # `opencourse.yml`'s `withhold` is a deny filter here too: what the course keeps
         # off its open-courseware site is never hosted publicly on this one. Read only
         # when something is declared public, and a file that cannot be read stops the
-        # hosting (the last sync's copies stand, linked from nothing), never the sync.
+        # copying (the last sync's copies stand, linked from nothing), never the sync -
+        # nor the deletions: an unpublished file still leaves `files/`.
         policies = _publish_policies(course_org, sched, content_repos)
         hosted: Hosted = {}
         if any(policies.values()):
@@ -1387,16 +1509,20 @@ def sync_site(course_org: str, semester_org: str) -> int:
                     f"{course_org}/.github/opencourse.yml could not be read, so no copy "
                     f"is hosted on this sync: {exc}"
                 )
+                _mirror_public(site_wd, semester_org, policies, None)
             else:
                 hosted = _mirror_public(
                     site_wd,
                     semester_org,
                     policies,
                     opencourse.withhold if opencourse else (),
+                    _deploy_sources(sched),
                 )
         else:
             hosted = _mirror_public(site_wd, semester_org, policies)
         rows, present = _site_rows(semester_org, planned, allow, live, kinds, hosted)
+        # ONE read of teams.csv for every assignment forming teams (`_formed_teams`).
+        formed_teams = _formed_teams(semester_org)
         log_step(
             f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} row(s) "
             f"({sum('unreleased: true' in text for text in rows.values())} not released "
@@ -1527,6 +1653,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
                         found=page.hit,
                         handed_out=handed_out,
                         sched=sched,
+                        formed_teams=formed_teams,
                     )
                     for page in pages
                     if shown(page.hit)
@@ -1546,8 +1673,6 @@ def sync_site(course_org: str, semester_org: str) -> int:
     # clear ran on the rare path and never on the common one. Keys include the org, so this
     # is purely about memory, never staleness.
     _repo_tree.cache_clear()
-    # Cleared for memory, like the tree memo above: the key names the course org.
-    _publish_policy.cache_clear()
     return sync_site_repo(semester_org, build)
 
 
@@ -1631,6 +1756,9 @@ def main() -> int:
     except (RuntimeError, yaml.YAMLError) as exc:
         log_err(str(exc))
         return 1
+    finally:
+        # The end of the build: every semester of this run has read the course's policy.
+        _publish_policy.cache_clear()
 
 
 if __name__ == "__main__":

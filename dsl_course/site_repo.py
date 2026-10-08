@@ -361,8 +361,9 @@ _SEMESTER_PAGES = (
         "fas fa-folder-open",
         # Deliberately not "everything released": a semester org also holds each student's
         # private submission repo, which this must never list. See `site._indexable_repos`.
+        # The hosted copies (`site._mirror_public`) are the exception to the gate.
         "All released course material so far; only accessible to enrolled "
-        "students/auditors.",
+        "students/auditors, except files the course hosts publicly (the render button).",
     ),
     _ThemePage(
         "profile.md",

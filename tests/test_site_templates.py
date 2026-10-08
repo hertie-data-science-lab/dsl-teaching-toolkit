@@ -1377,6 +1377,21 @@ def test_the_open_in_control_is_included_once_by_every_page_that_lists_files():
         )
 
 
+def test_the_open_courseware_home_page_offers_no_profile_it_does_not_have(
+    semester_plan, public_plan
+):
+    # The set-up line links /profile/, a semester-site tab. The public site ships the same
+    # home layout, so the include is guarded on a fact only the semester sync writes.
+    home = _strip_comments(_templates()["_layouts/home.html"])
+    assert (
+        "{% if site.data.materials.repos %}{% include open_in.html %}{% endif %}"
+        in home
+    )
+    assert "repos" in yaml.safe_load(semester_plan.files["_data/materials.yml"])
+    assert "_data/materials.yml" not in public_plan.files
+    assert "/profile/" not in public_plan.files["_data/nav.yml"]
+
+
 def test_the_control_takes_what_it_needs_from_data_attributes():
     # Never from the rendered prose: an assignment page's repo SHAPE is front matter, and
     # reading it out of the sentence that happens to print it would break the day that
@@ -1471,11 +1486,39 @@ def test_the_folder_fields_default_to_one_folder_per_repo_under_this_semester():
         re.findall(r'id="dsl-(materials|assignments)"[^>]*?placeholder="([^"]+)"', body)
     )
     assert placeholders["materials"].endswith(
-        "/repositories/{{ site.github_org }}/materials"
+        "/repositories/{{ site.github_org }}/{{ setup_repo }}"
     )
     assert placeholders["assignments"].endswith(
         "/repositories/{{ site.github_org }}/assignments"
     )
+
+
+def test_the_profile_sets_up_the_repo_the_semester_releases_into(generated):
+    # Not a hard-coded `materials`: the fixture releases into `course-materials`, and a
+    # fork button for a repo the semester does not have is a 404 on step 2. The sync
+    # names the repos; the page forks and clones the first and says so when there are
+    # several.
+    index = yaml.safe_load(generated["files"]["_data/materials.yml"])
+    assert index["repos"] == [build_fixture.MATERIALS]
+    body = _strip_comments(_profile())
+    assert 'data-materials-repo="materials"' not in body
+    assert (
+        '{%- assign setup_repo = materials_repos | first | default: "materials" -%}'
+        in body
+    )
+    assert 'data-materials-repo="{{ setup_repo }}"' in body
+    assert "{{ site.github_org }}/{{ setup_repo }}/fork" in body
+    assert "{%- if materials_repos.size > 1 %}" in body
+
+
+def test_online_and_local_are_offered_only_for_the_repo_the_profile_set_up():
+    # The materials folder is the clone of ONE repo, and step 2 forks that one: a file of
+    # another repo has no fork for `online` and no clone for `local` to open.
+    body = _strip_comments(_open_in())
+    assert 'data-materials-repo="{{ site.data.materials.repos | first }}"' in body
+    files = body.split("function decorateFiles(root, me) {")[1].split("\n  }")[0]
+    assert 'var mine = root.getAttribute("data-materials-repo") || "";' in files
+    assert "if (m[2].toLowerCase() !== mine.toLowerCase()) { continue; }" in files
 
 
 def test_the_folder_examples_are_respelt_for_the_readers_platform():

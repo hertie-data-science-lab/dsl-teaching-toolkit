@@ -176,6 +176,11 @@ jobs:
             grep -q "Open files in your local copy" "$f" || {
               echo "::error::$f carries no set-up line"; missing=1; }
           done
+          # The repo the semester releases into, never a hard-coded `materials`.
+          grep -q 'data-materials-repo="course-materials"' profile/index.html || {
+            echo "::error::/profile/ does not set up course-materials"; missing=1; }
+          grep -q 'href="https://github.com/[^/"]*/course-materials/fork"' profile/index.html || {
+            echo "::error::/profile/ does not fork course-materials"; missing=1; }
           if grep -q "Open files in your local copy" profile/index.html; then
             echo "::error::/profile/ offers to send the reader to /profile/"
             missing=1

@@ -352,6 +352,23 @@ def test_a_passed_handout_inlines_the_brief(monkeypatch):
     assert "The brief." in out
 
 
+def test_the_page_keeps_a_code_comment_in_the_brief(monkeypatch):
+    # The site reads the brief as the student console does (`student_status._brief`):
+    # a `# ` comment inside a fenced block is code, not the README's heading.
+    readme = "# Assignment 1\n\nRun this:\n\n```bash\n# install the deps\npip install -r requirements.txt\n```\n\n# Part 2\nMore."
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: readme)
+    out = site._assignment_entry(
+        "Course",
+        "Semester-f2026",
+        "assignment-1",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+    )
+    assert "# install the deps" in out and "# Part 2" in out
+    assert "# Assignment 1" not in out
+
+
 def test_a_manual_handout_releases_the_brief_with_no_date_pinned(monkeypatch):
     # The manual button's documented mode pins no handout_datetime at all, so the plan
     # cannot say this went out - the frozen semester template repo it creates is what says
@@ -645,6 +662,42 @@ def test_a_teams_csv_that_cannot_be_read_still_renders_the_page(monkeypatch, cap
     out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=FORMING, teams_csv=boom)
     assert "team_join_url" in out and "teams:" not in out
     assert "rate limit" in capsys.readouterr().err
+
+
+def test_a_sync_reads_teams_csv_once_for_every_forming_assignment(
+    monkeypatch, tmp_path
+):
+    # Two assignments forming teams at once: one read of teams.csv for the whole sync,
+    # not one per page.
+    monkeypatch.setattr(
+        site, "load_grading_spec", lambda *a, **k: _spec(SELF_SELECT_GROUP)
+    )
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    reads = []
+    monkeypatch.setattr(
+        site.teams,
+        "_teams_text",
+        lambda org: (
+            reads.append(org)
+            or "assignment,team,github_handle\nassignment-1,alpha,ada-l\n"
+        ),
+    )
+    now = datetime.now(BERLIN)
+    sched = Schedule(
+        assignments={
+            f"assignment-{n}": AssignmentEntry(
+                course_source_repo=f"assignment-{n}-f2026",
+                handout_datetime=now - timedelta(days=1),
+                due_datetime=now + timedelta(days=10 + n),
+            )
+            for n in (1, 2)
+        },
+        org="Semester-f2026",
+    )
+    out = _plan(monkeypatch, tmp_path, sched).collections["_assignments"]
+    assert all("team_join_url" in text for text in out.values())
+    assert 'name: "alpha"' in out["01-assignment-1.md"]
+    assert reads == ["Semester-f2026"]
 
 
 def test_a_team_member_is_published_as_a_salted_digest_of_their_handle():
@@ -1137,6 +1190,7 @@ def _plan(
     handed_out=(),
     declared=None,
     content=lambda *a, **k: "",
+    yaml_file=lambda *a: {},
 ):
     """Run sync_site against a faked org and return the SitePlan it built. `trees` is each
     semester content repo's released tree (`{repo: (path, ...)}`, default: none);
@@ -1161,7 +1215,7 @@ def _plan(
     monkeypatch.setattr(
         site, "discover_release_sources", lambda org, repos: list(sources)
     )
-    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    monkeypatch.setattr(site, "yaml_file", yaml_file)
     monkeypatch.setattr(site.schedule, "load", lambda org: sched)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(
@@ -2521,7 +2575,13 @@ def _policy(*patterns: str) -> dict[str, tuple]:
 
 
 def _mirror(
-    monkeypatch, origins, tmp_path, tree: dict[str, str], policies, withhold=()
+    monkeypatch,
+    origins,
+    tmp_path,
+    tree: dict[str, str],
+    policies,
+    withhold=(),
+    renames=None,
 ):
     """Mirror a faked semester repo into a site checkout; return (hosted, what it serves).
 
@@ -2533,7 +2593,7 @@ def _mirror(
         site, "_repo_tree", lambda org, repo: ("main", tuple(sorted(tree)))
     )
     site_wd = tmp_path / "site"
-    hosted = site._mirror_public(site_wd, "Semester-f2026", policies, withhold)
+    hosted = site._mirror_public(site_wd, "Semester-f2026", policies, withhold, renames)
     served = site_wd / site.SITE_FILES_DIR
     return hosted, sorted(
         p.relative_to(served).as_posix() for p in served.rglob("*") if p.is_file()
@@ -2694,9 +2754,39 @@ def test_a_policy_that_does_not_parse_stops_the_sync(monkeypatch):
     with pytest.raises(yaml.YAMLError):
         site._publish_policies("Course-Org", _one_deploy(), ["materials"])
 
+    # A faculty-fixable config fault, so a RuntimeError: a hand-out (assign.py) and the
+    # CLI catch exactly that and YAMLError, and anything else aborted the hand-out.
     monkeypatch.setattr(site, "yaml_file", lambda *a: {"public": "lectures/**"})
-    with pytest.raises(ValueError, match="must be a list of patterns"):
+    with pytest.raises(RuntimeError, match="must be a list of patterns"):
         site._publish_policies("Course-Org", _one_deploy(), ["materials"])
+
+
+def test_every_semester_of_one_run_reuses_the_courses_policy(monkeypatch, tmp_path):
+    # `--all-semesters` builds each semester in one process: the course's publish.yml is
+    # read once for the run, and `main` drops the memo when the run ends.
+    asked = []
+
+    def yaml_file(org, repo, path):
+        asked.append(path)
+        return {"public": ["lectures/**"]} if path == site.PUBLISH_FILE else {}
+
+    monkeypatch.setattr(site, "_mirror_public", lambda *a, **k: {})
+    for _semester in range(2):
+        _plan(
+            monkeypatch,
+            tmp_path,
+            _one_deploy(),
+            trees={"materials": ()},
+            yaml_file=yaml_file,
+        )
+    assert asked.count(site.PUBLISH_FILE) == 1
+
+    monkeypatch.setattr(
+        "sys.argv", ["site", "sync", "--course-org", "C", "--all-semesters"]
+    )
+    monkeypatch.setattr(site, "live_semesters", lambda org: [])
+    assert site.main() == 0
+    assert site._publish_policy.cache_info().currsize == 0
 
 
 def test_a_file_github_would_refuse_is_skipped_rather_than_failing_the_sync(
@@ -2769,6 +2859,21 @@ def test_the_sync_writes_the_restored_tabs_and_the_materials_index(
     )
 
 
+def test_the_materials_index_names_the_repos_it_indexes(monkeypatch):
+    # Your Profile forks and clones the first of them; `open_in.html` reads it too.
+    trees = {"datasets": ("data/rows.csv",), "course-materials": ("SYLLABUS.md",)}
+    monkeypatch.setattr(
+        site, "_repo_tree", lambda org, repo: ("main", trees.get(repo, ()))
+    )
+    index = yaml.safe_load(
+        site._materials_index("Semester-f2026", ["datasets", "course-materials"], {})
+    )
+    assert index["repos"] == ["course-materials", "datasets"]
+    assert (
+        yaml.safe_load(site._materials_index("Semester-f2026", [], {}))["repos"] == []
+    )
+
+
 NOTEBOOK = '{"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}\n'
 
 
@@ -2831,13 +2936,56 @@ def test_the_sync_hands_the_open_sites_withhold_list_to_the_mirror(
     monkeypatch.setattr(
         site,
         "_mirror_public",
-        lambda wd, org, policies, withhold=(): seen.append(withhold) or {},
+        lambda wd, org, policies, withhold=(), renames=None: (
+            seen.append((withhold, renames)) or {}
+        ),
     )
     monkeypatch.setattr(
         site, "_publish_policies", lambda *a: _policy("lectures/**/*.html")
     )
     _plan(monkeypatch, tmp_path, _one_deploy(), trees={"materials": ()})
-    assert seen == [("*exam*",)]
+    # And where each copy came from, so the withhold is matched on the source paths too.
+    assert seen == [(("*exam*",), {"materials": (("lectures/01_a", "lectures/01_a"),)})]
+
+
+def test_a_renamed_deploy_of_a_withheld_folder_hosts_nothing(
+    monkeypatch, origins, tmp_path
+):
+    # `withhold` is written against the SOURCE repo's paths. A deploy that renames the
+    # folder on its way into the semester must not carry it past the filter: the copy is
+    # judged on the path it came from as well as the path it landed at.
+    sched = Schedule(
+        releases=[
+            Release(
+                "s1",
+                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
+                deploy=[
+                    Deploy(
+                        "course-materials-f2026",
+                        "drafts/exam-review",
+                        "materials",
+                        "lectures/01_review",
+                    )
+                ],
+            )
+        ]
+    )
+    renames = site._deploy_sources(sched)
+    assert renames == {"materials": (("lectures/01_review", "drafts/exam-review"),)}
+    tree = {
+        "lectures/01_review/slides.html": "deck",
+        "lectures/01_review/slides_files/fig.svg": "<svg/>",
+    }
+    hosted, served = _mirror(
+        monkeypatch,
+        origins,
+        tmp_path,
+        tree,
+        _policy("lectures/**"),
+        withhold=("drafts/",),
+        renames=renames,
+    )
+    assert (hosted, served) == ({}, [])
 
 
 def _broken_opencourse(org):
@@ -2859,10 +3007,36 @@ def test_a_broken_opencourse_yml_stops_the_hosting_not_the_sync(
     monkeypatch.setattr(
         site, "_publish_policies", lambda *a: _policy("lectures/**/*.html")
     )
-    monkeypatch.setattr(site, "_mirror_public", _never_cloned)
+    seen = []
+    monkeypatch.setattr(
+        site,
+        "_mirror_public",
+        lambda wd, org, policies, withhold=(), renames=None: (
+            seen.append(withhold) or {"materials": frozenset({"x.html"})}
+        ),
+    )
     plan = _plan(monkeypatch, tmp_path, _one_deploy(), trees={"materials": ()})
     assert "materials.md" in plan.files
     assert "no copy is hosted" in capsys.readouterr().err
+    # The mirror still runs, to delete (`withhold=None`), and nothing it says is linked.
+    assert seen == [None]
+    assert "/files/" not in plan.files["_data/materials.yml"]
+
+
+def test_an_unreadable_opencourse_yml_still_unpublishes(monkeypatch, origins, tmp_path):
+    # Only the COPY half waits for a readable opencourse.yml: a file whose pattern was
+    # removed leaves `files/` on this sync, with no clone, and nothing is linked.
+    tree = {"lectures/01_a/slides.html": "deck", "labs/01_a/lab.html": "lab"}
+    _hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, _policy("**/*.html")
+    )
+    assert len(served) == 2
+    monkeypatch.setattr(site, "clone", _never_cloned)
+    hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, _policy("lectures/**"), withhold=None
+    )
+    assert (hosted, served) == ({}, ["materials/lectures/01_a/slides.html"])
+    assert not (tmp_path / "site" / site.SITE_FILES_DIR / "materials" / "labs").exists()
 
 
 def test_a_repo_no_longer_released_into_loses_its_copies(

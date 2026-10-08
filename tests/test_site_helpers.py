@@ -743,6 +743,11 @@ def test_every_page_states_its_own_access_rule():
     # auditors read released materials, so the materials pages name them
     assert "enrolled students & auditors." in semester["lectures.md"]
     assert "enrolled students & auditors." in semester["readings.md"]
+    # All Materials links the hosted copies too, which are public: the note says so.
+    assert (
+        "All released course material so far; only accessible to enrolled "
+        "students/auditors, except files the course hosts publicly (the render button)."
+    ) in semester["materials.md"]
     # The public open-courseware site publishes the same files on purpose, so it claims no
     # gate anywhere.
     for page in site_repo.theme_pages(semester=False).values():
@@ -994,13 +999,33 @@ def test_root_documents_are_one_group_not_a_section_per_repo(monkeypatch):
     }
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", repos[r]))
     got = yaml.safe_load(site._materials_index("C", sorted(repos), {}))
-    assert [d["name"] for d in got["documents"]] == ["README.md", "SYLLABUS.md"]
+    # Two repos' READMEs are two files: both listed, each named for its repo, never one
+    # dropped for the other.
+    assert [d["name"] for d in got["documents"]] == [
+        "labs/README.md",
+        "labs/SYLLABUS.md",
+        "lectures/README.md",
+        "lectures/SYLLABUS.md",
+    ]
+    assert [d["url"].split("/")[4] for d in got["documents"]] == [
+        "labs",
+        "labs",
+        "lectures",
+        "lectures",
+    ]
     # ...and they are gone from the sections, which now hold only session folders.
     assert [s["name"] for s in got["sections"]] == ["labs", "lectures"]
     for section in got["sections"]:
         assert [e["name"] for e in section["entries"]] == [
             f"01_{'lab' if section['name'] == 'labs' else 'intro'}/"
         ]
+
+
+def test_a_root_document_only_one_repo_holds_keeps_its_plain_name(monkeypatch):
+    repos = {"labs": ("README.md",), "lectures": ("SYLLABUS.md",)}
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", repos[r]))
+    got = yaml.safe_load(site._materials_index("C", sorted(repos), {}))
+    assert [d["name"] for d in got["documents"]] == ["README.md", "SYLLABUS.md"]
 
 
 def test_a_semester_with_only_root_documents_is_not_reported_as_empty(monkeypatch):
@@ -1089,10 +1114,11 @@ def test_index_is_empty_yaml_when_nothing_is_released(monkeypatch):
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     assert yaml.safe_load(
         site._materials_index("Semester-f2026", ["materials"], {})
-    ) == {"sections": []}
+    ) == {"repos": ["materials"], "sections": []}
     # And with no repos at all, without touching the tree.
     assert yaml.safe_load(site._materials_index("Semester-f2026", [], {})) == {
-        "sections": []
+        "repos": [],
+        "sections": [],
     }
 
 

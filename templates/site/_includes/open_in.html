@@ -5,7 +5,8 @@ toolkit; every sync rewrites it.
 {% comment %}
 The quiet set-up line, and the one script on this site: the `online` and `local` buttons
 that finish the row of controls beside a file link, opening the same file in the student's
-own fork or their own clone.
+own fork or their own clone - for the files of the materials repo /profile/ sets up (the
+first of `site.data.materials.repos`), the only repo it forks and clones.
 
 Half of that row is written in Liquid, by `file_link.html`, which knows the URLs without
 being told: `source` (the file's home on GitHub) and, where the site hosts a rendered copy,
@@ -25,6 +26,7 @@ that prints it would break the day that sentence is reworded.
 {% endcomment %}
 <div id="dsl-open-in" class="open-in-setup"
      data-org="{{ site.github_org }}"
+     data-materials-repo="{{ site.data.materials.repos | first }}"
      data-repo-name="{{ page.repo_name | escape }}">
 {%- unless page.url == '/profile/' -%}
 <p class="open-in-line">Open files in your local copy &mdash; <a href="{{ '/profile/' | prepend: site.baseurl }}">set up &rarr;</a></p>
@@ -263,6 +265,9 @@ that prints it would break the day that sentence is reworded.
 
   function decorateFiles(root, me) {
     var org = root.getAttribute("data-org");
+    /* The repo /profile/ forks and clones: a file of any other has no copy of the
+       reader's for `online` or `local` to open. */
+    var mine = root.getAttribute("data-materials-repo") || "";
     var links = document.querySelectorAll(SCOPE);
     for (var i = 0; i < links.length; i++) {
       var a = links[i];
@@ -275,6 +280,7 @@ that prints it would break the day that sentence is reworded.
       var source = row ? row.querySelector("a[href]") : null;
       var m = SOURCE.exec((source || a).getAttribute("href") || "");
       if (!m || m[1].toLowerCase() !== org.toLowerCase()) { continue; }
+      if (m[2].toLowerCase() !== mine.toLowerCase()) { continue; }
       var what = a.textContent.trim() || "this file";
       var online = (me.handle && !SKIP.test(m[5]))
         ? onlineUrl(me.handle, m[2], "/" + m[3] + "/" + m[4] + "/" + m[5])
