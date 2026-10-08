@@ -222,7 +222,7 @@ LABELS = {
     "team_formation": {
         SELF_SELECT: {
             "label": "Students form their own",
-            "help": "On the Join screen of the student console.",
+            "help": "On the assignment's page in the student console.",
         },
         ASSIGNED: {
             "label": "You assign them",

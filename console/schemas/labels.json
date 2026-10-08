@@ -47,7 +47,7 @@
       "label": "You assign them"
     },
     "self_select": {
-      "help": "On the Join screen of the student console.",
+      "help": "On the assignment's page in the student console.",
       "label": "Students form their own"
     }
   },
