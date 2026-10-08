@@ -2694,8 +2694,10 @@ def test_a_policy_that_does_not_parse_stops_the_sync(monkeypatch):
     with pytest.raises(yaml.YAMLError):
         site._publish_policies("Course-Org", _one_deploy(), ["materials"])
 
+    # A faculty-fixable config fault, so a RuntimeError: a hand-out (assign.py) and the
+    # CLI catch exactly that and YAMLError, and anything else aborted the hand-out.
     monkeypatch.setattr(site, "yaml_file", lambda *a: {"public": "lectures/**"})
-    with pytest.raises(ValueError, match="must be a list of patterns"):
+    with pytest.raises(RuntimeError, match="must be a list of patterns"):
         site._publish_policies("Course-Org", _one_deploy(), ["materials"])
 
 

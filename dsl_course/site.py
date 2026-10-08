@@ -187,12 +187,14 @@ def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
     A file that is absent or empty is "nothing public", and the mirror may then delete
     what an earlier sync copied. A file that does not PARSE, or whose `public:` is not a
     list of patterns, stops the sync and reports: read as "nothing public" it would
-    unpublish a whole course's rendered decks over a typo, on a green run."""
+    unpublish a whole course's rendered decks over a typo, on a green run. The second is
+    a `RuntimeError`, the faculty-fixable config fault every caller of `sync_site` (a
+    hand-out, the CLI) reports in one line and survives."""
     declared = yaml_file(course_org, source_repo, PUBLISH_FILE).get("public")
     if declared is None:
         return None
     if not isinstance(declared, list) or not all(isinstance(x, str) for x in declared):
-        raise ValueError(
+        raise RuntimeError(
             f"{course_org}/{source_repo}/{PUBLISH_FILE}: `public:` must be a list of "
             "patterns"
         )
