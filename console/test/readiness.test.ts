@@ -29,8 +29,12 @@ describe('bitesAt', () => {
     expect(bitesAt(iso(NOW + 15 * DAY), { days: 14 }, NOW)).toBe('later');
   });
   it('says the day a moment’s problem starts to count', () => {
-    expect(problemFromDay('2026-11-04T10:00:00+01:00', undefined, 'Europe/Berlin')).toBe('2026-10-28');
-    expect(problemFromDay('2026-11-04T10:00:00+01:00', { days: 14 }, 'Europe/Berlin')).toBe('2026-10-21');
+    expect(problemFromDay('2026-11-04T10:00:00+01:00', undefined)).toBe('2026-10-28');
+    expect(problemFromDay('2026-11-04T10:00:00+01:00', { days: 14 })).toBe('2026-10-21');
+    // The day boundary is the moment's own offset, not UTC's or the machine's.
+    expect(problemFromDay('2026-11-04T00:30:00+01:00', undefined)).toBe('2026-10-28');
+    expect(problemFromDay('2026-11-04T23:30:00-05:00', undefined)).toBe('2026-10-28');
+    expect(problemFromDay('2026-11-04T00:30', undefined)).toBe('2026-10-28');
   });
 });
 

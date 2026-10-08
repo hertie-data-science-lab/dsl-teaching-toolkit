@@ -9,18 +9,18 @@ import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { KIND_LABEL, ago, fmtDay, fmtShort, opLabel, templateName } from '../model/format';
 import {
-  SYLLABUS_HINT, SYLLABUS_LABEL, materialsReadiness, problemCount, problemFromDay, standing, stepItems, suggestionsCount, templateReadinessIn, tier, todoAside, verdictOf,
+  SYLLABUS_HINT, SYLLABUS_LABEL, dayAt, materialsReadiness, problemCount, problemFromDay, standing, stepItems, suggestionsCount, templateReadinessIn, tier, todoAside, verdictOf,
   type Tiered, type Verdict as VerdictT,
 } from '../model/readiness';
 import { checkNow, derive, publishWebsite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
 import { courseBlock, institutionLayer, lateWord, resolve, valueWord, type Layers } from '../model/cascade';
-import { DEFAULT_FORMATS, DEFAULT_TIMEZONE, POLICY } from '../model/policy';
+import { DEFAULT_FORMATS, POLICY } from '../model/policy';
 import { formatsList, fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import { pick, type Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
-import type { CourseStatus, MaterialsCheck, Operation, Outcome, Problem, SemesterStatus, Status, Todo } from '../model/types';
+import type { CourseStatus, Horizon, MaterialsCheck, Operation, Outcome, Problem, SemesterStatus, Status, Todo } from '../model/types';
 import { nextEvent, nextEventWords, recentActivity, whoWord, type Activity } from '../model/status';
 import type { CohortRef } from '../model/discovery';
 import { outcomePath } from '../ops/adapter';
@@ -36,7 +36,7 @@ import { detailsOf, newestScope, websiteUrl } from './CourseEdit';
 import type { CourseProps } from './types';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from '../model/names';
 import { useSetAside } from './SetAside';
-import { REFRESH_HINT, courseScope, todayOf, tzOf, yearOf } from './common';
+import { REFRESH_HINT, courseScope, tzOf, yearOf } from './common';
 import { weekWords } from '../model/week';
 
 /** The status that carries the course block: the course's own, else a semester's. */
@@ -49,17 +49,18 @@ function courseStatus(p: Pick<CourseProps, 'loaded' | 'cohortStates'>): Status |
 /** The course block, for a caller that needs no problems; null until a status carries it. */
 export const courseOf = (p: Pick<CourseProps, 'loaded' | 'cohortStates'>): CourseStatus | null => courseStatus(p)?.course ?? null;
 
-/** The course block and its course-scope problems with when each bites (`tiered`), and those now or soon (`problems`). */
+/** The course block and its course-scope problems with when each bites (`tiered`), and those now or soon (`problems`); `horizon` is the carrying status's. */
 export interface CourseView {
   course: CourseStatus | null;
   tiered: Tiered[];
   problems: Problem[];
+  horizon?: Horizon;
 }
 
 export function courseView(p: Pick<CourseProps, 'loaded' | 'cohortStates'>, now: number): CourseView {
   const st = courseStatus(p);
   const tiered = tier(st ?? undefined, now, 'course');
-  return { course: st?.course ?? null, tiered, problems: standing(tiered) };
+  return { course: st?.course ?? null, tiered, problems: standing(tiered), horizon: st?.horizon };
 }
 
 /** `courseView` once per render. */
@@ -136,13 +137,15 @@ export function todoLine(t: Todo, c: CourseStatus): { label: string; hint?: stri
 /**
  * "Hands out Wed 4 Nov; a problem from 28 Oct.": a template to-do's hand-out, from its problem
  * (`BRIEF` / `STARTER`) when a dated hand-out cites the template; none while it is a problem now.
+ * The days are the moment's own (the engine writes it at the semester's offset), the horizon the status's.
  */
-export function handoutWords(tiered: Tiered[], repo: string, check: string, now: number): string | undefined {
+export function handoutWords(tiered: Tiered[], repo: string, check: string, now: number, horizon?: Horizon): string | undefined {
   const x = tiered.find((t) => t.p.fix?.entry === repo && t.p.kind === check.toUpperCase() && t.b !== 'now' && t.p.when);
   if (!x) return undefined;
-  const tz = DEFAULT_TIMEZONE, when = x.p.when!;
-  const from = problemFromDay(when, undefined, tz);
-  return `Hands out ${fmtDay(when, tz, yearOf(now, tz))}${from > todayOf(now, tz) ? `; a problem from ${fmtShort(from)}` : ''}.`;
+  const when = x.p.when!, today = dayAt(now, when);
+  const from = problemFromDay(when, horizon);
+  // Its wall-clock part, which `fmtDay` reads as it stands.
+  return `Hands out ${fmtDay(when.slice(0, 16), undefined, Number(today.slice(0, 4)))}${from > today ? `; a problem from ${fmtShort(from)}` : ''}.`;
 }
 
 /** Where an open course step is done, and what it is (its `?`). */
@@ -152,7 +155,7 @@ const STEP_OPTS = (c: CourseStatus) => ({ hint: STEP_HINT, link: (id: string) =>
  * The course's Setup & To do items: each step, then each to-do. A step with a problem now or
  * soon is a red row whose Fix opens the problem's screen; `list` is the set-aside ids as read.
  */
-export function courseItems(c: CourseStatus, tiered: Tiered[], list: string[] | null, now = 0): SetupItem[] {
+export function courseItems(c: CourseStatus, tiered: Tiered[], list: string[] | null, now = 0, horizon?: Horizon): SetupItem[] {
   const steps = stepItems(c, SETUP_STEPS, tiered, list, STEP_OPTS(c));
   const todos: SetupItem[] = (c.todo ?? []).map((t) => {
     const line = todoLine(t, c);
@@ -160,7 +163,7 @@ export function courseItems(c: CourseStatus, tiered: Tiered[], list: string[] | 
       id: t.id, label: line.label, kind: 'todo', need: t.need ?? 'needed', state: 'open', repo: t.repo, hint: line.hint,
       hintLabel: line.label === SYLLABUS_LABEL ? 'About the syllabus' : 'About this to-do',
       why: line.label === t.text ? undefined : t.text,
-      when: t.kind === 'template' && t.check ? handoutWords(tiered, t.repo, t.check, now) : undefined,
+      when: t.kind === 'template' && t.check ? handoutWords(tiered, t.repo, t.check, now, horizon) : undefined,
       link: { href: todoHref(t), label: 'Open settings', aria: `Open ${t.repo} settings` },
       aside: todoAside(t, list),
     };
@@ -215,10 +218,10 @@ export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
 }
 
 /** A template's needed checklist (the brief, the student version), from the course's open to-dos. */
-export function templateItems(repo: string, todo: Todo[], starter: 'derived' | 'handwritten' | undefined, tiered: Tiered[], now: number): SetupItem[] {
+export function templateItems(repo: string, todo: Todo[], starter: 'derived' | 'handwritten' | undefined, tiered: Tiered[], now: number, horizon?: Horizon): SetupItem[] {
   const row = (k: 'brief' | 'starter', label: string): SetupItem => {
     const t = todo.find((x) => x.kind === 'template' && x.repo === repo && x.check === k);
-    const when = t ? handoutWords(tiered, repo, k, now) : undefined;
+    const when = t ? handoutWords(tiered, repo, k, now, horizon) : undefined;
     return { id: k, label, kind: 'step', need: 'needed', state: t ? 'open' : 'done', why: t?.text, when, hint: TEMPLATE_TODO[k].hint, hintLabel: 'About this check' };
   };
   return [row('brief', TEMPLATE_TODO.brief.label), row('starter', starter === 'handwritten' ? 'Starter files on main' : TEMPLATE_TODO.starter.label)];
@@ -422,8 +425,8 @@ export function overviewHeights(o: { course: CourseStatus | null; semesters: num
 }
 
 /** The course's Setup & To do rows and its verdict, from the set-aside list as the console last read it (`aside.list`). */
-export function courseReadiness(c: CourseStatus, tiered: Tiered[], list: string[] | null, now: number): { items: SetupItem[]; verdict: VerdictT | null } {
-  const items = courseItems(c, tiered, list, now);
+export function courseReadiness(c: CourseStatus, tiered: Tiered[], list: string[] | null, now: number, horizon?: Horizon): { items: SetupItem[]; verdict: VerdictT | null } {
+  const items = courseItems(c, tiered, list, now, horizon);
   return { items, verdict: verdictOf(c.verdict, 'course', suggestionsCount(items)) };
 }
 
@@ -464,7 +467,7 @@ export function CourseScreen(p: CourseProps) {
   const live = liveSemesters(p);
   const [tab, setTab] = useState('problems');
   const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.migrated, write: p.course.write });
-  const ready = v.course ? courseReadiness(v.course, v.tiered, aside.list, p.now) : null;
+  const ready = v.course ? courseReadiness(v.course, v.tiered, aside.list, p.now, v.horizon) : null;
   const ops = courseOperations(p, live, env?.ops.runs.value ?? [], env?.user.login ?? '');
   // A previewed run published nothing: the age is the last real publish's.
   const lastPublish = recentActivity(ops.map((l) => l.filter((o) => o.op === 'course.publish_website' && o.conclusion !== 'previewed')), 1)[0];
@@ -688,7 +691,7 @@ export function TemplateScreen(p: CourseProps) {
         <div><h2 class="h1">{heading} <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. These settings apply to every semester, and after hand out they reach students only through Update every copy.</Hint></h2><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
         <div class="actions">{tplReady ? <RepoChip r={tplReady} /> : null}<OpenButton org={course.org} repo={repo} /></div>
       </div>
-      {tpl ? <section class="panel section" style="margin-bottom:18px"><RepoChecklist items={templateItems(repo, v.course?.todo ?? [], tpl.starter, v.tiered, p.now)} /></section> : null}
+      {tpl ? <section class="panel section" style="margin-bottom:18px"><RepoChecklist items={templateItems(repo, v.course?.todo ?? [], tpl.starter, v.tiered, p.now, v.horizon)} /></section> : null}
       {problems.length ? <div style="margin-bottom:18px"><ProblemCards list={problems} /></div> : null}
       {file.kind === 'loading' ? <Loading what="Reading grading_config.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no grading_config.yml on the solution branch of {repo}.</CheckLine> : null}

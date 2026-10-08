@@ -4,7 +4,6 @@
 // at load, for a file the previous engine wrote (contract C). Every helper below and every
 // screen trusts the fields.
 
-import { dayKey } from './format';
 import { DAY } from './week';
 import type { Bites, CourseStatus, Horizon, MaterialsCheck, Need, Problem, Release, SemesterStatus, Status, Todo, VerdictState } from './types';
 
@@ -55,9 +54,21 @@ export function normalise(status: Status, now: number): Status {
   return { ...status, ...(course ? { course } : {}), ...(semester ? { semester } : {}), ...(problems ? { problems } : {}) };
 }
 
-/** The day (yyyy-mm-dd, in `tz`) a moment's problem starts to count: the horizon's days before it. */
-export function problemFromDay(iso: string, horizon: Horizon | undefined, tz: string): string {
-  return dayKey(new Date(Date.parse(iso) - horizonDays(horizon) * DAY).toISOString(), tz);
+/** An ISO moment's own UTC offset in ms: its `±hh:mm` suffix; 0 for `Z` or none. */
+function offsetOf(iso: string): number {
+  const m = /T.*([+-])(\d{2}):(\d{2})$/.exec(iso);
+  return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) * 60000 : 0;
+}
+
+/** The instant an ISO moment names; one with no offset is wall-clock time, read as UTC so its wall day stands. */
+const instantOf = (iso: string) => Date.parse(iso.includes('T') && !/(Z|[+-]\d{2}:\d{2})$/.test(iso) ? `${iso}Z` : iso);
+
+/** The day (yyyy-mm-dd) instant `ms` falls on at `iso`'s own offset: the engine writes each moment in the semester's. */
+export const dayAt = (ms: number, iso: string) => new Date(ms + offsetOf(iso)).toISOString().slice(0, 10);
+
+/** The day (yyyy-mm-dd, at the moment's own offset) its problem starts to count: the horizon's days before it. */
+export function problemFromDay(iso: string, horizon: Horizon | undefined): string {
+  return dayAt(instantOf(iso) - horizonDays(horizon) * DAY, iso);
 }
 
 /** A problem with when it bites. */

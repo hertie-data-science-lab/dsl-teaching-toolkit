@@ -354,9 +354,8 @@ export interface ComingRow {
  * ones it cites included. Each becomes a problem once inside the horizon.
  */
 export function comingRows(status: Status, tiered: Tiered[]): ComingRow[] {
-  const tz = tzOf(status);
   return tiered.filter((x) => x.b === 'later').map(({ p }) => ({
-    key: p.id, when: p.when, from: p.when ? problemFromDay(p.when, status.horizon, tz) : undefined, text: p.text, href: fixHref(p) ?? '#schedule', link: 'Fix',
+    key: p.id, when: p.when, from: p.when ? problemFromDay(p.when, status.horizon) : undefined, text: p.text, href: fixHref(p) ?? '#schedule', link: 'Fix',
   }));
 }
 
