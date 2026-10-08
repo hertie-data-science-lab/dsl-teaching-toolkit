@@ -77,7 +77,7 @@ describe('Home', () => {
   });
 
   it('leaves out what the semester does not have', () => {
-    const d = doc({ announcements: [], syllabus: null, home_markdown: '', instructors: [], rows: [], assignments: [] });
+    const d = doc({ announcements: [], syllabus: null, home_markdown: '', instructors: [], rows: [], assignments: [], course_description: '', previous_offerings: [] });
     const html = render(<HomeView facts={factsFromStatus(d)} org={ORG} now={NOW} />);
     for (const s of ['Updates', 'Syllabus', 'Course description', 'Previous offerings', 'Instructors', 'Teaching assistants']) expect(html).not.toContain(s);
   });

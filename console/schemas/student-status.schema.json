@@ -183,6 +183,9 @@
       },
       "type": "array"
     },
+    "course_description": {
+      "type": "string"
+    },
     "course_name": {
       "type": "string"
     },
@@ -242,12 +245,16 @@
           },
           "label": {
             "type": "string"
+          },
+          "tab": {
+            "type": "boolean"
           }
         },
         "required": [
           "label",
           "colour",
-          "background"
+          "background",
+          "tab"
         ],
         "type": "object"
       },
@@ -262,6 +269,25 @@
     "materials_repos": {
       "items": {
         "type": "string"
+      },
+      "type": "array"
+    },
+    "previous_offerings": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "type": "object"
       },
       "type": "array"
     },
@@ -362,6 +388,12 @@
           "subtitle": {
             "type": "string"
           },
+          "tabs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "tbc": {
             "type": "boolean"
           },
@@ -391,7 +423,8 @@
           "links",
           "readings",
           "reading_list",
-          "readings_pending"
+          "readings_pending",
+          "tabs"
         ],
         "type": "object"
       },
@@ -444,12 +477,14 @@
     "schema",
     "semester",
     "course_name",
+    "course_description",
     "semester_start",
     "semester_end",
     "generated_at",
     "timezone",
     "archive_datetime",
     "home_markdown",
+    "previous_offerings",
     "syllabus",
     "kinds",
     "rows",

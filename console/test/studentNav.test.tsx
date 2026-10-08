@@ -11,6 +11,16 @@ import { kindTabs, movedHash, parseHash, studentHref, studentLanding, studentScr
 import { StudentNav } from '../src/ui/shell';
 
 const DOC = JSON.parse(readFileSync(new URL('./fixtures/student-status.json', import.meta.url), 'utf8'));
+
+/** The fixture as an engine before decision 0035 wrote it: no tab fields, no description, no offerings. */
+function older() {
+  const d = structuredClone(DOC);
+  for (const k of Object.values(d.kinds) as { tab?: boolean }[]) delete k.tab;
+  for (const r of d.rows) delete r.tabs;
+  delete d.course_description;
+  delete d.previous_offerings;
+  return d;
+}
 const ORG = DOC.semester as string;
 const sem: Semester = { org: ORG, term: 'f2026', termLabel: 'Fall 2026', courseOrg: 'c', courseName: 'Deep Learning', archived: false, role: 'student' };
 
@@ -39,11 +49,11 @@ describe('the student status’s tab fields', () => {
   });
 
   it('defaults an older file: a row on its own kind’s tab, only lectures, labs and readings with tabs, nothing else', () => {
-    const f = factsFromStatus(DOC);
+    const f = factsFromStatus(older());
     expect(f.rows.find((r) => r.id === 'lecture_02')!.tabs).toEqual(['lecture']);
     expect(Object.entries(f.kinds!).filter(([, v]) => v.tab).map(([k]) => k)).toEqual(['lecture', 'lab', 'readings']);
-    expect(f.courseDescription).toBe('');
-    expect(f.previousOfferings).toEqual([]);
+    expect(f.courseDescription ?? '').toBe('');
+    expect(f.previousOfferings ?? []).toEqual([]);
   });
 
   it('keeps undated and off-schedule rows for the kind tabs only, never on the schedule', () => {
@@ -60,8 +70,10 @@ describe('the student screens', () => {
     const f = factsFromStatus(doc());
     expect(kindTabs(f)).toEqual([['kind-lecture', 'Lectures'], ['kind-lab', 'Labs'], ['kind-readings', 'Readings'], ['kind-drop-in', 'Drop-ins']]);
     expect(studentScreens(f).map(([k]) => k)).toEqual(['home', 'week', 'schedule', 'kind-lecture', 'kind-lab', 'kind-readings', 'kind-drop-in', 'assignments', 'materials', 'instructors']);
-    // A kind no row names has no tab; the fixed tabs alone while the facts are read.
-    expect(kindTabs(factsFromStatus(DOC))).toEqual([['kind-lecture', 'Lectures']]);
+    // A kind no row names has no tab (no lab, drop-in or supporting files here); the exam's own row gives Exams one.
+    expect(kindTabs(factsFromStatus(DOC))).toEqual([['kind-lecture', 'Lectures'], ['kind-readings', 'Readings'], ['kind-exam', 'Exams']]);
+    expect(kindTabs(factsFromStatus(older()))).toEqual([['kind-lecture', 'Lectures']]);
+    // The fixed tabs alone while the facts are read.
     expect(studentScreens(null).map(([, t]) => t)).toEqual(['Home', 'This week', 'Schedule', 'Assignments', 'All materials', 'Instructors']);
     expect([tabWord('Lab'), tabWord('Readings')]).toEqual(['Labs', 'Readings']);
   });

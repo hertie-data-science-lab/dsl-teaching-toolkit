@@ -427,6 +427,13 @@ def kind_tab(kind: dict) -> _ThemePage:
     )
 
 
+def row_tabs(kind: str, has_readings: bool) -> list[str]:
+    """The kind tabs a row is listed on: its own kind's, and Readings too when readings are
+    attached to it (landed or pending) - a lecture carrying its week's readings. The site's
+    `tabs:` front matter and the student file's `rows[].tabs` both come from here."""
+    return [kind, "readings"] if kind != "readings" and has_readings else [kind]
+
+
 def kind_pages(present: Iterable[str]) -> tuple[_ThemePage, ...]:
     """A tab per content kind this semester has rows of, in the policy's order."""
     wanted = set(present)
