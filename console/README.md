@@ -277,6 +277,16 @@ of the student's own is read.
 An **archived semester** is history: the student's own repos (read-only) and their marks from
 the gradebook, from the same reads as a live one. No operation runs against it.
 
+**Every file link** on the student screens (schedule rows, kind tabs, All materials, the
+assignment page's files; the Updates box keeps names only) is the file's name, opening it in
+the console when it lives in a materials repo, else on GitHub, then a row of buttons (decision
+0035 rule 10): `source` (the GitHub blob), `online` (github.dev, in the student's fork when they
+forked the repo, else the org's) and `local` (the editor from Profile, at
+`<semester folder>/<repo>/<path>`). `online` and `local` only for a file an editor opens (not
+pdf, pptx, docx, xlsx, zip); `local` only once Profile has a folder and VS Code or an editor
+link with `{path}` (GitHub Desktop opens repos, not files). Whether the student forked a repo is
+read once per session, when a row first needs it, and Profile's fork check refreshes it.
+
 **Materials** open inside the console from the private copy: markdown and notebooks through
 GitHub's markdown endpoint (one call; its HTML is sanitised by GitHub), notebook outputs as
 text and images; an HTML page with its `<stem>_files/` bundle inlined (stylesheets as

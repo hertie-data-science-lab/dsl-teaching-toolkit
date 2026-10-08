@@ -35,3 +35,11 @@
 .course-folders li code { overflow-wrap: anywhere; }
 .course-folders li input { flex: 1 1 260px; min-width: 0; }
 .course-folders li p.hint { flex-basis: 100%; margin: 0; }
+/* ================= a file's button row (screens/StudentFiles.tsx, decision 0035 rule 10) =================
+   source | online | local after a file's name, small and outlined as on the 0.9.0 site, so
+   the names stay what the eye scans for; filled on hover. */
+.file-link { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 0; }
+.file-btns { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 0.5em; vertical-align: baseline; }
+.file-btn { display: inline-block; padding: 0 8px; border: 1px solid var(--link); border-radius: 999px; color: var(--link); font-family: var(--font-display); font-weight: 600; font-size: 11px; line-height: 1.65; letter-spacing: 0.02em; white-space: nowrap; text-decoration: none; }
+.file-btn:hover { background: var(--link); color: var(--surface); text-decoration: none; }
+.file-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }

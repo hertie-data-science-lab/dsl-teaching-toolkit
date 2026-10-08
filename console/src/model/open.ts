@@ -1,6 +1,7 @@
 // Where a course repo opens: on GitHub, on github.dev, in VS Code, in GitHub Desktop, in
 // another editor by its link scheme. One Open button for both
-// roles (decisions 0017, 0027): instructors on their course screens, students on Set up. The
+// roles (decisions 0017, 0027): instructors on their course screens, students in Profile. A
+// released file's `online` and `local` buttons (decision 0035 rule 10) come from here too. The
 // folder and editor come from Profile (`model/prefs.ts`); nothing here reads storage.
 
 import { ghUrl } from '../ui/bits';
@@ -196,4 +197,33 @@ export function platformOf(nav: { platform?: string; userAgentData?: { platform?
 /** An example folder for the course repos, spelt the way the reader's platform spells a home folder. */
 export function folderExample(p: Platform): string {
   return p === 'win' ? 'C:\\Users\\you\\Documents\\repositories' : p === 'linux' ? '/home/you/repositories' : '/Users/you/Documents/repositories';
+}
+
+// --------------------------------------------------------------------------- one file (decision 0035 rule 10)
+
+/** Files an editor opens: everything but the documents and archives the 0.9.0 site left out. */
+const NOT_EDITABLE = ['pdf', 'pptx', 'docx', 'xlsx', 'zip'];
+export const editableFile = (path: string) => {
+  const name = path.split('/').pop() ?? '';
+  const dot = name.lastIndexOf('.');
+  return !NOT_EDITABLE.includes(dot > 0 ? name.slice(dot + 1).toLowerCase() : '');
+};
+
+const encPath = (path: string) => path.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+
+/** A file on github.dev: in `owner`'s copy (the student's fork, or the org's own repo). */
+export const fileOnline = (owner: string, repo: string, path: string) => `https://github.dev/${owner}/${repo}/blob/HEAD/${encPath(path)}`;
+
+/**
+ * A file in the person's editor: `<course folder of home>/<repo>/<path>` through the editor
+ * Profile names, VS Code's `vscode://file/` or another editor's scheme. Null without a folder,
+ * and for GitHub Desktop, which opens repos, not files.
+ */
+export function fileLocal(setup: Setup | null, home: string, repo: string, path: string): string | null {
+  const parent = courseFolder(setup, home);
+  if (!setup || !parent) return null;
+  const local = path.split('/').filter(Boolean).reduce(joinPath, joinPath(parent, repo));
+  if (setup.editor === 'vscode') return vscodeFolder(local);
+  const scheme = setup.editor === 'other' ? (setup.scheme ?? '').trim() : '';
+  return schemeOk(scheme) ? scheme.replace('{path}', urlPath(local)) : null;
 }
