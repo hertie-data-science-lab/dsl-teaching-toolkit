@@ -26,8 +26,10 @@ describe('the URLs', () => {
     expect(['slides.pdf', 'deck.PPTX', 'a.docx', 'b.xlsx', 'all.zip'].some(editableFile)).toBe(false);
   });
 
-  it('opens a file on github.dev in the given owner’s copy', () => {
+  it('opens a file on github.dev in the given owner’s copy, on the branch its GitHub link names', () => {
     expect(fileOnline(LOGIN, 'materials', 'labs/01 intro/lab.ipynb')).toBe(`https://github.dev/${LOGIN}/materials/blob/HEAD/labs/01%20intro/lab.ipynb`);
+    expect(fileOnline(LOGIN, 'materials', 'a.md', `https://github.com/${ORG}/materials/blob/spring-2026/a.md`)).toBe(`https://github.dev/${LOGIN}/materials/blob/spring-2026/a.md`);
+    expect(fileOnline(ORG, 'materials', 'a.md', 'https://example.org/a.md')).toBe(`https://github.dev/${ORG}/materials/blob/HEAD/a.md`);
   });
 
   it('opens a file in the editor, in the semester’s folder, only with a folder and an editor that takes a path', () => {
@@ -67,7 +69,7 @@ describe('the button row', () => {
     const el = await mount(<FileList org={ORG} repos={['materials']} links={[link('labs/lab.ipynb'), link('notes.md'), link('slides.pdf')]} />, gh);
     const [nb, md, pdf] = [...el.querySelectorAll('li')].map(btns);
     expect(nb.source.getAttribute('href')).toBe(`https://github.com/${ORG}/materials/blob/main/labs/lab.ipynb`);
-    expect(nb.online.getAttribute('href')).toBe(`https://github.dev/${LOGIN}/materials/blob/HEAD/labs/lab.ipynb`);
+    expect(nb.online.getAttribute('href')).toBe(`https://github.dev/${LOGIN}/materials/blob/main/labs/lab.ipynb`);
     expect(nb.online.title).toBe('Edit lab.ipynb in your fork, in the browser');
     expect(md.online.getAttribute('target')).toBe('_blank');
     expect(Object.keys(pdf)).toEqual(['source']);
@@ -84,12 +86,17 @@ describe('the button row', () => {
     const el = await mount(<FileChips org={ORG} repos={['materials']} links={[link('labs/lab.ipynb')]} />, gh);
     const b = btns(el);
     expect(el.querySelector('a.st-chip')!.textContent).toBe('lab.ipynb');
-    expect(b.online.getAttribute('href')).toBe(`https://github.dev/${ORG}/materials/blob/HEAD/labs/lab.ipynb`);
+    expect(b.online.getAttribute('href')).toBe(`https://github.dev/${ORG}/materials/blob/main/labs/lab.ipynb`);
     expect(b.online.title).toBe('Edit lab.ipynb in the browser');
     expect(b.local.getAttribute('href')).toBe(`zed://file/Users/o/repos/${ORG}/materials/labs/lab.ipynb`);
     expect(b.local.title).toBe('Open lab.ipynb in your editor');
     // A custom scheme opens no new tab.
     expect(b.local.hasAttribute('target')).toBe(false);
+  });
+
+  it('links source to the GitHub blob when the link carries no url', async () => {
+    const el = await mount(<FileList org={ORG} repos={['materials']} links={[{ ...link('slides.pdf'), url: '' }]} />, new FakeGitHub());
+    expect(btns(el).source.getAttribute('href')).toBe(`https://github.com/${ORG}/materials/blob/HEAD/slides.pdf`);
   });
 
   it('reads no fork for rows that need none, and gives a link outside the org no buttons', async () => {

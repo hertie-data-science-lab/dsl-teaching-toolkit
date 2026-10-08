@@ -8,13 +8,13 @@
 // of the tab being shown; "Check again" checks now and starts that again. A repo of the name
 // that is not the fork, or a read that failed, waits for "Check again". A section reads its
 // semester (facts, then the student's own repos) only once it is opened. The fork answers are
-// kept for the session (`cachedFork`), which the file button row reads too (rule 10).
+// kept for the session (`model/fork.ts`), which the file button row reads too (rule 10).
 
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import type { GitHubClient } from '../github/client';
 import { poll } from '../github/poll';
-import type { Semester } from '../model/discovery';
+import { semesterName, type Semester } from '../model/discovery';
+import { forkOf, noteFork, type ForkState } from '../model/fork';
 import { readMine, type Mine } from '../model/mine';
 import type { SemesterFacts } from '../model/student';
 import { CheckLine, Loading, ghUrl } from '../ui/bits';
@@ -23,40 +23,6 @@ import { Ext } from '../ui/icons';
 import { useLoad } from '../ui/load';
 import { OpenButton } from '../ui/OpenButton';
 import { studentData } from './Student';
-
-export type ForkState = { kind: 'forked'; url: string } | { kind: 'none' } | { kind: 'other'; url: string };
-
-/** Whether `login` has a fork of `org/repo` under the same name: a repo of that name that is not its fork is `other`. */
-export async function forkOf(client: GitHubClient, login: string, org: string, repo: string): Promise<ForkState> {
-  const r = await client.getRepo(login, repo);
-  if (!r) return { kind: 'none' };
-  return r.fork && r.parent?.full_name.toLowerCase() === `${org}/${repo}`.toLowerCase() ? { kind: 'forked', url: r.html_url } : { kind: 'other', url: r.html_url };
-}
-
-/** This session's fork answers, per client (one per sign-in), by `<login>/<org>/<repo>`. */
-const forks = new WeakMap<GitHubClient, Map<string, Promise<ForkState>>>();
-const forkKey = (login: string, org: string, repo: string) => `${login}/${org}/${repo}`.toLowerCase();
-const forksOf = (client: GitHubClient) => {
-  let m = forks.get(client);
-  if (!m) forks.set(client, (m = new Map()));
-  return m;
-};
-
-/** `forkOf`, read once per session; a read that failed is not kept, so the next row asks again. */
-export function cachedFork(client: GitHubClient, login: string, org: string, repo: string): Promise<ForkState> {
-  const m = forksOf(client);
-  const k = forkKey(login, org, repo);
-  let p = m.get(k);
-  if (!p) {
-    p = forkOf(client, login, org, repo);
-    m.set(k, p);
-    p.catch(() => m.delete(k));
-  }
-  return p;
-}
-
-/** Keep a fresh answer (the fork check's re-reads), so the button rows opened after it follow. */
-const noteFork = (client: GitHubClient, login: string, org: string, repo: string, f: ForkState) => forksOf(client).set(forkKey(login, org, repo), Promise.resolve(f));
 
 /** How often the fork check runs again while a repo is not forked, slower after a minute, and for how long. */
 export const RECHECK_MS = 10000;
@@ -158,7 +124,7 @@ export function YourRepos({ semester, open = false }: { semester: Semester; open
   const [shown, setShown] = useState(open);
   return (
     <details class="panel section fold your-repos" open={open} onToggle={(e) => (e.currentTarget as HTMLDetailsElement).open && setShown(true)}>
-      <summary><h2>Your repos in {semester.courseName || semester.org}, {semester.termLabel}</h2></summary>
+      <summary><h2>Your repos in {semesterName(semester)}</h2></summary>
       {shown ? <SemesterRepos org={semester.org} /> : null}
     </details>
   );

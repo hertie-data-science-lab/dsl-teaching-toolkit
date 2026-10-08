@@ -17,15 +17,14 @@ import { fmtDay } from '../model/format';
 import { ASSETS_KIND, aliasKind } from '../model/materialsRules';
 import { showFile, type Shown } from '../model/materials';
 import { sortedRows, type SemesterFacts } from '../model/student';
-import { studentHref } from '../router';
 import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
 import { FileHead, FolderHead } from '../ui/FileTree';
 import { Ext } from '../ui/icons';
 import { useLoad } from '../ui/load';
-import { FileLinkItem } from './StudentFiles';
+import { FileLinkItem, materialHref, useYourSetup } from './StudentFiles';
 
-/** The route entry for a file: `<repo>/<path>`. */
-export const materialHref = (org: string, repo: string, path: string) => `${studentHref(org, 'materials')}-${encodeURIComponent(`${repo}/${path}`)}`;
+// The route entry for a file lives with the file links (`StudentFiles.tsx`), so they import nothing from here.
+export { materialHref };
 
 /** `<repo>/<path>` back into its parts, for a repo among `repos`. */
 export function splitEntry(entry: string, repos: string[]): { repo: string; path: string } | null {
@@ -67,6 +66,7 @@ export const isSupport = (n: TreeNode) => !!n.children && aliasKind(n.name) === 
 
 /** Every repo's tree; `current`, the file open beside it, is marked and its folders open. */
 export function MaterialsTree({ org, trees, current }: { org: string; trees: (readonly [string, TreeEntry[] | null])[]; current?: { repo: string; path: string } | null }) {
+  const setup = useYourSetup();
   const shown = trees.filter(([, t]) => t !== null);
   if (!shown.length) return <p class="footnote">Nothing has been released yet, or you cannot read the materials: that needs the semester’s student team, which joining gives you.</p>;
   return (
@@ -78,7 +78,7 @@ export function MaterialsTree({ org, trees, current }: { org: string; trees: (re
           n.children ? (
             <li class="ft-dir"><details open={(depth === 0 && !n.name.endsWith('_files')) || !!here?.startsWith(`${n.path}/`)}><summary><FolderHead name={n.name} /></summary><ul>{n.children.map((c) => node(c, depth + 1))}</ul></details></li>
           ) : (
-            <li class={`ft-file${here === n.path ? ' current' : ''}`}><FileHead name={n.name}><FileLinkItem org={org} repos={[repo]} link={{ name: n.name, repo, path: n.path, url: ghUrl(org, repo, n.path, 'HEAD') }} cls="ft-name" current={here === n.path} /></FileHead></li>
+            <li class={`ft-file${here === n.path ? ' current' : ''}`}><FileHead name={n.name}><FileLinkItem org={org} repos={[repo]} link={{ name: n.name, repo, path: n.path, url: ghUrl(org, repo, n.path, 'HEAD') }} setup={setup} cls="ft-name" current={here === n.path} /></FileHead></li>
           );
         const top = buildTree(files);
         const support = top.filter(isSupport);

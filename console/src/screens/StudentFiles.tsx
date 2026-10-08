@@ -4,16 +4,26 @@
 // they forked the repo, else the org's) and `local` (the editor Profile names, in the
 // semester's folder). `online` and `local` only for a file an editor opens; `local` only once
 // Profile has a folder and an editor that takes a path. Whether the student forked a repo is
-// read once per session, when a row first needs it (`cachedFork`). Every file link the
+// read once per session, when a row first needs it (`model/fork.ts`). Every file link the
 // student screens draw renders through here; the Updates box keeps names only (`inline`).
 
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { editableFile, fileLocal, fileOnline, isWeb } from '../model/open';
+import { cachedFork, type ForkState } from '../model/fork';
+import { editableFile, fileLocal, fileOnline, isWeb, type Setup } from '../model/open';
 import { yourSetup } from '../model/prefs';
 import { repoPath, type FileLink } from '../model/student';
-import { materialHref } from './StudentMaterials';
-import { cachedFork, type ForkState } from './StudentSetup';
+import { studentHref } from '../router';
+import { ghUrl } from '../ui/bits';
+
+/** The route entry for a file: `<repo>/<path>`. */
+export const materialHref = (org: string, repo: string, path: string) => `${studentHref(org, 'materials')}-${encodeURIComponent(`${repo}/${path}`)}`;
+
+/** The signed-in person's Profile, read once by a list for all its rows. */
+export function useYourSetup(): Setup | null {
+  const login = useEnv()?.user.login ?? '';
+  return login ? yourSetup(login) : null;
+}
 
 /** Where a released file opens: inside the console when it is in a materials repo, else on GitHub. */
 export function fileHref(org: string, repos: string[], l: FileLink): { href: string; ext: boolean } {
@@ -44,8 +54,8 @@ function useFork(org: string, repo: string, want: boolean): ForkState | undefine
 
 const newTab = (href: string) => (isWeb(href) ? { target: '_blank', rel: 'noopener' } : {});
 
-/** The buttons after a file's name: source, online, local. */
-export function FileButtons({ org, link }: { org: string; link: FileLink }) {
+/** The buttons after a file's name: source, online, local; `setup` is the Profile the list read. */
+export function FileButtons({ org, link, setup }: { org: string; link: FileLink; setup: Setup | null }) {
   const env = useEnv();
   const at = inOrg(org, link);
   const edit = !!at && editableFile(at.path);
@@ -54,12 +64,12 @@ export function FileButtons({ org, link }: { org: string; link: FileLink }) {
   const name = link.name || at.path.split('/').pop() || 'file';
   const login = env?.user.login ?? '';
   const forked = fork?.kind === 'forked';
-  const local = edit ? fileLocal(login ? yourSetup(login) : null, org, at.repo, at.path) : null;
+  const local = edit ? fileLocal(setup, org, at.repo, at.path) : null;
   return (
     <span class="file-btns">
-      <a class="file-btn" href={link.url} target="_blank" rel="noopener" title={`${name} on GitHub`}>source</a>
+      <a class="file-btn" href={link.url || ghUrl(org, at.repo, at.path, 'HEAD')} target="_blank" rel="noopener" title={`${name} on GitHub`}>source</a>
       {edit ? (
-        <a class="file-btn" href={fileOnline(forked ? login : org, at.repo, at.path)} target="_blank" rel="noopener" title={forked ? `Edit ${name} in your fork, in the browser` : `Edit ${name} in the browser`}>online</a>
+        <a class="file-btn" href={fileOnline(forked ? login : org, at.repo, at.path, link.url)} target="_blank" rel="noopener" title={forked ? `Edit ${name} in your fork, in the browser` : `Edit ${name} in the browser`}>online</a>
       ) : null}
       {local ? <a class="file-btn" href={local} {...newTab(local)} title={`Open ${name} in your editor`}>local</a> : null}
     </span>
@@ -67,26 +77,30 @@ export function FileButtons({ org, link }: { org: string; link: FileLink }) {
 }
 
 /** A file's name, linked (with the class `cls`; `current` for the file open beside it), then its button row: the one file link of the student screens. */
-export function FileLinkItem({ org, repos, link, cls, current }: { org: string; repos: string[]; link: FileLink; cls?: string; current?: boolean }) {
+export function FileLinkItem({ org, repos, link, setup, cls, current }: { org: string; repos: string[]; link: FileLink; setup: Setup | null; cls?: string; current?: boolean }) {
   const h = fileHref(org, repos, link);
   return (
     <span class="file-link">
       <a class={cls} href={h.href} {...(h.ext ? { target: '_blank', rel: 'noopener' } : {})} {...(current ? { 'aria-current': 'page' as const } : {})}>{link.name || 'file'}</a>
-      <FileButtons org={org} link={link} />
+      <FileButtons org={org} link={link} setup={setup} />
     </span>
   );
 }
 
+const linkKey = (l: FileLink) => l.url || `${l.repo}/${l.path}`;
+
 /** A row's files as chips, each with its button row (the schedule). */
 export function FileChips({ org, repos, links }: { org: string; repos: string[]; links: FileLink[] }) {
-  return <>{links.map((l) => <FileLinkItem org={org} repos={repos} link={l} cls="st-chip" />)}</>;
+  const setup = useYourSetup();
+  return <>{links.map((l) => <FileLinkItem key={linkKey(l)} org={org} repos={repos} link={l} setup={setup} cls="st-chip" />)}</>;
 }
 
 /** A row's files as a list, the site's `session-files`, each with its button row. */
 export function FileList({ org, repos, links }: { org: string; repos: string[]; links: FileLink[] }) {
+  const setup = useYourSetup();
   return (
     <ul class="session-files">
-      {links.map((l) => <li><FileLinkItem org={org} repos={repos} link={l} /></li>)}
+      {links.map((l) => <li key={linkKey(l)}><FileLinkItem org={org} repos={repos} link={l} setup={setup} /></li>)}
     </ul>
   );
 }
