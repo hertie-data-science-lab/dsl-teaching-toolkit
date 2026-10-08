@@ -438,6 +438,9 @@ _MAIL_LOG_ENV = "__CRON_MAIL_LOG_ENV__"
 # Console is dispatched on every run, by the Console rather than a person reading the log.
 _UNATTENDED = "__CRON_UNATTENDED_IF__"
 _NOTE = "__CRON_NOTE__"
+# What runs before a FIRST report files anything; empty, so most workflows report at once.
+# See `_strike_gate`.
+_STRIKE = "__CRON_STRIKE__"
 
 # Where a cron step keeps its own output for the mail step below to tail. The runner's
 # temp directory, so it is per JOB - the scheduler's grading matrix runs a leg per semester,
@@ -559,7 +562,9 @@ _CRON_NOTICE_TEMPLATE = (
           # together: a maintainer who gets an email can always find the issue it came
           # from, and a thread that is being kept quiet does not mail either.
           if [ -z "$existing" ]; then
-            gh issue create --repo "$REPO" --title "$title" --body "$body"
+"""
+    + _STRIKE
+    + """            gh issue create --repo "$REPO" --title "$title" --body "$body"
             echo "report=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -597,6 +602,7 @@ def _fill(
         "The unattended run failed or was cancelled: %s\\n\\nNothing retries it before"
         " the next scheduled run. This issue closes itself once a run succeeds.\\n"
     ),
+    strike: str = "",
 ) -> str:
     """Bind one job's issue scope - and how it tells a failure from a success, and where it
     reads the failed log - into a reporting template.
@@ -606,7 +612,8 @@ def _fill(
     expression, which GitHub substitutes before the shell parses the line. The three
     keyword arguments default to the in-job answers (this job's own status, this job's own
     teed log) and are only given for reporting that had to be moved off the runner it
-    reports on - see `_AUTOGRADE_REPORT`."""
+    reports on - see `_AUTOGRADE_REPORT`. `strike` holds back a first failure - see
+    `_strike_gate`."""
     return (
         template.replace(_SCOPE, f" ({scope})" if scope else "")
         .replace(_SCOPE_ENV, scope_env)
@@ -616,7 +623,45 @@ def _fill(
         .replace(_MAIL_LOG_ENV, mail_log_env)
         .replace(_UNATTENDED, unattended)
         .replace(_NOTE, note)
+        .replace(_STRIKE, strike)
     )
+
+
+def _strike_gate(job: str, runs: str = "") -> str:
+    """Two strikes, for the frequent crons: a failure with no issue open yet files (and
+    mails) only if the same job also failed in the previous run. A single failed run that
+    the next one recovers from is almost always a GitHub blip, and it mailed course-admin
+    and the maintainer about nothing.
+
+    "The previous run" is the newest other unattended run of this workflow (narrowed
+    further by the jq clause `runs`) whose job named `job` - a shell string, so it may say
+    `$SEMESTER` - ran to an end. Judged by that JOB, not the run: a scheduler run is still
+    in progress while its grading legs run for hours, and its release job has long ended.
+    A job not yet ended, skipped, or cancelled while it waited in its concurrency queue is
+    passed over; each of these jobs is queued behind its own previous run, so a later run
+    can only ever be passed over. Only a previous SUCCESS holds the
+    report back:
+    a failure, a lookup error or no answer at all reports, because the point of the issue
+    is that somebody hears. An already-open issue is past the first strike and never gets
+    here."""
+    return f"""            # Two strikes: a first failure files and mails only if this job also failed
+            # in the previous run, so a one-off GitHub blip reaches nobody. Any lookup
+            # error reports. GITHUB_WORKFLOW_REF ends `<file>@<ref>`.
+            wf=${{GITHUB_WORKFLOW_REF%@*}}
+            prior=$(gh api "repos/$REPO/actions/workflows/${{wf##*/}}/runs?per_page=30" \\
+              --jq ".workflow_runs[] | select(.id != $GITHUB_RUN_ID and .event != \\"workflow_dispatch\\"{runs}) | .id" | head -n 10) || prior=""
+            prev=""
+            for id in $prior; do
+              prev=$(gh api "repos/$REPO/actions/runs/$id/jobs" --paginate \\
+                --jq ".jobs[] | select(.name == \\"{job}\\" and .conclusion != null and .conclusion != \\"skipped\\" and (.conclusion != \\"cancelled\\" or ((.steps // []) | length) > 0)) | .conclusion" | head -n 1) || prev=""
+              [ -n "$prev" ] && break
+            done
+            if [ "$prev" = "success" ]; then
+              echo "first failure since the last good run - no issue or mail yet; the next run reports if it fails too"
+              echo "report=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+"""
 
 
 # The unscoped pair, for the workflows with a single unattended job.
@@ -627,10 +672,17 @@ _CRON_CLOSE = _fill(_CRON_CLOSE_TEMPLATE)
 # scoped to that one semester (job-level `SCOPED`, see render_scheduler) neither files nor
 # closes it. Otherwise a green push in semester A closes the issue semester B's fault holds open,
 # and the next full tick re-files it - cc course-admin and a maintainer mail - once per push.
+#
+# It is also one of the two frequent crons, so a first failure waits for a second (see
+# `_strike_gate`), and a scoped run is not a "previous run" for that either.
 _RELEASE_NOTICE = _fill(
     _CRON_NOTICE_TEMPLATE,
     failed="(failure() || cancelled()) && env.SCOPED == ''",
     succeeded="success() && env.SCOPED == ''",
+    strike=_strike_gate(
+        "release",
+        f' and ((.display_title // \\"\\") | startswith(\\"{SCOPED_RUN_TITLE}\\") | not)',
+    ),
 )
 
 # The scheduler's grading legs report PER SEMESTER: they run in parallel, so on a shared
@@ -707,6 +759,9 @@ _AUTOGRADE_REPORT = _AUTOGRADE_OUTCOME + _fill(
         "          REPO: ${{ github.repository }}\n"
         "          JOB_ID: ${{ steps.graded.outputs.job_id }}\n"
     ),
+    # Per semester: the legs fail independently, so a strike is this semester's leg in the
+    # previous run. A scoped run grades its semester too, so it counts here.
+    strike=_strike_gate("autograde $SEMESTER"),
 )
 
 
@@ -1106,6 +1161,8 @@ def render_sync_membership(semester_orgs: list[str]) -> str:
         'python3 -m dsl_course.sync_membership "${args[@]}"',
         on_push=False,
         all_from_payload=True,
+        # Hourly from ds01, so it waits for a second failure in a row; see `_strike_gate`.
+        notice=_fill(_CRON_NOTICE_TEMPLATE, strike=_strike_gate("sync-auto")),
     )
     return f"""name: Sync membership
 
@@ -1150,6 +1207,7 @@ def _sync_auto_job(
     *,
     on_push: bool,
     all_from_payload: bool,
+    notice: str = _CRON_NOTICE,
 ) -> str:
     """The `sync-auto` job a scheduled, pushed or dispatched sync runs: one step, `env`
     after the shared payload lines, `before` (which sets `args`) ahead of the routing, and
@@ -1193,7 +1251,7 @@ def _sync_auto_job(
 {unnamed}              fi ;;
           esac
           {_logged(cmd)}
-{_CRON_NOTICE}"""
+{notice}"""
 
 
 def _semester_dropdown(semester_orgs: list[str], optional: bool = False) -> str:

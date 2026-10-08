@@ -680,9 +680,11 @@ reach a person who is at the keyboard. `Check semester setup` shows which digest
 Five seeded crons: **Scheduled release** at :07/:22/:37/:52 every hour; **Refresh actions**
 05:27, **Publish course website** 05:58, **Sync membership** 06:13, **Sync site** 06:41 daily.
 Each reports its own failures, because GitHub emails a scheduled-run failure only to whoever
-last committed the file - the bot. **Send enrolment codes** and the **Console** carry the
-same three steps (`_CRON_NOTICE` + `_CRON_MAIL` + `_CRON_CLOSE`) without being crons: a roster
-push fires the first, so it has no actor, and the second's caller reads the outcome, not the
+last committed the file - the bot. Scheduled release and Sync membership, the frequent ones,
+report only the second failure in a row (`_strike_gate`), judged by the same job (the same
+grading semester) in the previous unattended run; the release job passes over scoped runs.
+**Send enrolment codes** and the **Console** carry the same three steps (`_CRON_NOTICE` +
+`_CRON_MAIL` + `_CRON_CLOSE`) without being crons: a roster push fires the first, so it has no actor, and the second's caller reads the outcome, not the
 log, so only a run that breaks after its gate files *Console is failing*. A cancelled
 Console run files nothing: Stop is a cancel, and GitHub ends a `timeout-minutes` expiry the
 same way, so a timed-out Console run goes unreported. Seven workflows report their own

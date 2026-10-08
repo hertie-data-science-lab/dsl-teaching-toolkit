@@ -547,7 +547,10 @@ file · tree · team · repo list`"]
 - **Unattended failures are visible.** The five crons (Scheduled release, Sync membership, Sync
   site, Refresh actions, Publish course website) open - or comment on - an issue titled
   *"\<workflow\> is failing"* in the course org's `.github`, and close it on the next success. An
-  open issue always means "still broken". Manual dispatch is exempt: someone is watching.
+  open issue always means "still broken". Manual dispatch is exempt: someone is watching. The
+  two frequent ones, Scheduled release (per job, per grading semester) and Sync membership, file
+  only on the second failure in a row (`workflows_render._strike_gate`); a lookup that cannot
+  show the previous run was green files anyway.
 - **...and reach the one person who can fix them.** On the same 6h throttle, gated off the
   notice step's own output so the two channels can never diverge, the failing job emails the
   **maintainer** the run URL and the last 30 lines of the step that failed
