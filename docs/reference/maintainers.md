@@ -97,9 +97,10 @@ Things whose *literal spelling* is depended on from outside Python:
   `tests/test_join_templates.py` runs the SHIPPED scanner over the writer's real output;
   keep that pairing.
 - **An assignment page's URL** - `schedule.AssignmentPage` (`<nn>-<semester name>`, or the
-  name alone for an entry with no number; the number from `schedule.assignment_pages`) names the site's `_assignments/` file AND every link to
-  it: the team-formation mail, the lock's `team_formation_page:` (which the Join-team form's
-  header and refusals link) and the site itself. That page is the one list of a window's
+  name alone for an entry with no number; the number from `schedule.assignment_pages`) names the site's `_assignments/` file, and
+  `AssignmentPage.url` is every link to the assignment's teams: its page in the student
+  console (`?semester=<org>#assignment-<key>`), used by the team-formation mail and the lock's
+  `team_formation_page:` (which the Join-team form's header and refusals link). That page is the one list of a window's
   teams - names and counts only. Never build the URL anywhere else.
 - **`gh_contents.STUB_MARKS` and `SUPERSEDED_DESCRIPTIONS` / `SUPERSEDED_SEMESTER_*` / `SUPERSEDED_COURSE_*`**
   are convergence chains matched against *live* state. Rewording a stub or a repo description
