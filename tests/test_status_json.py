@@ -2904,3 +2904,18 @@ def test_two_course_faults_with_one_base_id_both_count_in_the_course_file():
     ]
     assert doc["course"]["stage_why"]["C3"] == "2 problems need fixing."
     assert doc["course"]["verdict"]["problems"] == 2
+
+
+def test_the_email_to_do_counts_who_is_active_on_the_renders_own_date():
+    # An instructor from 1 Jan 2030, no email: counted once the render's date (in the
+    # semester's timezone) reaches it, whatever the machine's clock says.
+    people = sync_faculty.parse_faculty_from_meta(
+        {"people": {"instructors": [{"github_handle": "prof", "start": "2030-01-01"}]}}
+    )
+    facts = _semester(people=people)
+    eve = datetime(2029, 12, 31, 22, 30, tzinfo=UTC)  # 23:30 in Berlin
+    ids = {t["id"] for t in _render(semester=facts, now=eve)["semester"]["todo"]}
+    assert "instructors:email" not in ids
+    berlin_new_year = datetime(2029, 12, 31, 23, 30, tzinfo=UTC)  # 00:30 in Berlin
+    todo = _render(semester=facts, now=berlin_new_year)["semester"]["todo"]
+    assert "instructors:email" in {t["id"] for t in todo}

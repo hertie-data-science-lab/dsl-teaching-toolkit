@@ -2058,11 +2058,12 @@ def semester_checks(
 
 
 def semester_todo(
-    facts: SemesterFacts, aside: frozenset[str] = frozenset()
+    facts: SemesterFacts, today: date, aside: frozenset[str] = frozenset()
 ) -> list[dict]:
     """Decision 0034: the semester's suggested to-dos - the student site's home page still
     the placeholder, no archive date in the schedule, instructor entries with no email (a
-    count, never a handle). None of them stops automation or misleads a student."""
+    count, never a handle, of those active on `today`: the render's date in the semester's
+    timezone). None of them stops automation or misleads a student."""
     out = []
     site = pages_repo(facts.org)
     if site in facts.listing and not _written(facts.site_home):
@@ -2097,7 +2098,7 @@ def semester_todo(
                 screen="schedule",
             )
         )
-    missing = sync_faculty.without_email(facts.people or {}, date.today().isoformat())
+    missing = sync_faculty.without_email(facts.people or {}, today.isoformat())
     if missing:
         n = len(missing)
         out.append(
@@ -2315,7 +2316,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     done = {stage: checks[stage] is None for stage in SEMESTER_STAGES}
     stages = _stage_states(SEMESTER_STAGES, done, problems)
     why = stage_why(stages, checks, problems)
-    todo = semester_todo(facts, set_aside_ids(course.meta))
+    todo = semester_todo(facts, today, set_aside_ids(course.meta))
     week, weeks = semester_weeks(sched.semester_start, sched.semester_end, today)
     tag = semester_of(facts.org)
     assignments = render_assignments(facts, problems, now)
