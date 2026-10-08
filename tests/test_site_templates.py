@@ -1377,6 +1377,21 @@ def test_the_open_in_control_is_included_once_by_every_page_that_lists_files():
         )
 
 
+def test_the_open_courseware_home_page_offers_no_profile_it_does_not_have(
+    semester_plan, public_plan
+):
+    # The set-up line links /profile/, a semester-site tab. The public site ships the same
+    # home layout, so the include is guarded on a fact only the semester sync writes.
+    home = _strip_comments(_templates()["_layouts/home.html"])
+    assert (
+        "{% if site.data.materials.repos %}{% include open_in.html %}{% endif %}"
+        in home
+    )
+    assert "repos" in yaml.safe_load(semester_plan.files["_data/materials.yml"])
+    assert "_data/materials.yml" not in public_plan.files
+    assert "/profile/" not in public_plan.files["_data/nav.yml"]
+
+
 def test_the_control_takes_what_it_needs_from_data_attributes():
     # Never from the rendered prose: an assignment page's repo SHAPE is front matter, and
     # reading it out of the sentence that happens to print it would break the day that

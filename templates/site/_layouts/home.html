@@ -12,8 +12,8 @@ layout: default
 
     {% include announcements.html %}
 
-    {%- comment -%}For the set-up line alone: the syllabus pin below is one link with no `[source]` beside it, so the control has nothing here to decorate.{%- endcomment -%}
-    {% include open_in.html %}
+    {%- comment -%}For the set-up line alone: the syllabus pin below is one link with no `[source]` beside it, so the control has nothing here to decorate. Semester sites only: the set-up line links /profile/, which the public open-courseware site does not have. `site.data.materials.repos` is written by the semester sync alone (an empty list still counts: Liquid's only false values are nil and false).{%- endcomment -%}
+    {% if site.data.materials.repos %}{% include open_in.html %}{% endif %}
     <br />
 
     {%- comment -%}
