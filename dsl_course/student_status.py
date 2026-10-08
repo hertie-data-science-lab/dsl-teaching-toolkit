@@ -7,6 +7,10 @@ announcements, the materials index) instead of from the semester site. The engin
 it to the semester org's `.github` under `.system/`, beside `status.json`'s refresh: the
 same facts, the same moment.
 
+It also carries what the site's landing page and kind tabs show: the course description,
+the previous offerings (the site repo's `_data/previous_offering.yml`), the kind tabs each row
+is listed on (`site_repo.row_tabs`, the site's own rule) and which kinds have a tab.
+
 PUBLIC, and so ALLOW-LISTED. `.github` is a public repo, so every key at every level is
 named below and the exported schema refuses any other (`additionalProperties: false`
 throughout). It carries nothing about a person: no roster, no marks, no handles, no
@@ -57,7 +61,13 @@ from .schedule_plan import (
     planned_rows,
     site_rows,
 )
-from .site_repo import landed_links, link_extensions, people_cards, yaml_file
+from .site_repo import (
+    landed_links,
+    link_extensions,
+    people_cards,
+    row_tabs,
+    yaml_file,
+)
 from .status_json import CourseFacts, SemesterFacts, _iso, dumps, handed_out
 
 SCHEMA = "dsl.student-status/2"
@@ -65,6 +75,7 @@ SCHEMA = "dsl.student-status/2"
 REPO = ".github"
 PATH = records.path("student_status")
 ANNOUNCEMENTS_DIR = "_announcements"
+PREVIOUS_OFFERINGS = "_data/previous_offering.yml"
 
 # ---------------------------------------------------------------- the allow-list
 
@@ -72,12 +83,14 @@ TOP_KEYS = (
     "schema",
     "semester",
     "course_name",
+    "course_description",
     "semester_start",
     "semester_end",
     "generated_at",
     "timezone",
     "archive_datetime",
     "home_markdown",
+    "previous_offerings",
     "syllabus",
     "kinds",
     "rows",
@@ -104,6 +117,7 @@ ROW_KEYS = (
     "readings",
     "reading_list",
     "readings_pending",
+    "tabs",
 )
 LINK_KEYS = ("name", "repo", "path", "url")
 ASSIGNMENT_KEYS = (
@@ -135,7 +149,8 @@ TEAM_KEYS = ("name", "members", "cap")
 INSTRUCTOR_KEYS = ("name", "title", "webpage", "picture", "role", "email")
 ANNOUNCEMENT_KEYS = ("when", "title", "details")
 SYLLABUS_KEYS = ("repo", "path")
-KIND_KEYS = ("label", "colour", "background")
+KIND_KEYS = ("label", "colour", "background", "tab")
+OFFERING_KEYS = ("title", "url")
 
 _S, _SN = {"type": "string"}, {"type": ["string", "null"]}
 _B, _IN = {"type": "boolean"}, {"type": ["integer", "null"]}
@@ -170,6 +185,7 @@ def json_schema() -> dict:
         "assignment": _SN,
         "links": _list(link),
         "readings": _list(link),
+        "tabs": _list(_S),
     }
     assignment_types = {
         "handout_datetime": _SN,
@@ -201,7 +217,9 @@ def json_schema() -> dict:
         "syllabus": _closed({k: _S for k in SYLLABUS_KEYS}, nullable=True),
         "kinds": {
             "type": "object",
-            "additionalProperties": _closed({k: _S for k in KIND_KEYS}),
+            "additionalProperties": _closed(
+                {k: _B if k == "tab" else _S for k in KIND_KEYS}
+            ),
         },
         "rows": _list(_closed({k: row_types.get(k, _S) for k in ROW_KEYS})),
         "assignments": _list(
@@ -218,6 +236,7 @@ def json_schema() -> dict:
         "late_policy": _list(_S),
         "materials_repos": _list(_S),
         "announcements": _list(_closed({k: _S for k in ANNOUNCEMENT_KEYS})),
+        "previous_offerings": _list(_closed({k: _S for k in OFFERING_KEYS})),
     }
     body = _closed({k: top_types.get(k, _S) for k in TOP_KEYS})
     body["properties"]["schema"] = {"enum": [SCHEMA]}
@@ -247,6 +266,8 @@ class StudentFacts:
     cards: tuple[list[dict], list[dict]] | None = None
     home: str = ""
     announcements: list[dict] = field(default_factory=list)
+    # The site repo's `_data/previous_offering.yml`, as `previous_offerings` reads it.
+    previous_offerings: list[dict] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------- pure core
@@ -326,6 +347,7 @@ def _row(
     readings: list[dict] | None = None,
     reading_list: str = "",
     readings_pending: bool = False,
+    tabs: list[str] | None = None,
 ) -> dict:
     return {
         "id": id_,
@@ -344,6 +366,9 @@ def _row(
         "readings": readings or [],
         "reading_list": reading_list,
         "readings_pending": readings_pending,
+        # Event rows (exam, due, hand-out, semester dates) sit on their own kind's tab
+        # only, as the site's kind.html lists site.events by kind.
+        "tabs": tabs or [kind],
     }
 
 
@@ -382,6 +407,8 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
                 readings=links if own else readings,
                 reading_list=_reading_list(extra, prose),
                 readings_pending=pending,
+                # Readings attached, landed or not: the site's own test.
+                tabs=row_tabs(r.kind, bool(sr.readings)),
             )
         )
     return out
@@ -640,6 +667,7 @@ def render(
         "schema": SCHEMA,
         "semester": facts.org,
         "course_name": str((course.meta or {}).get("course_name") or ""),
+        "course_description": str((course.meta or {}).get("course_description") or ""),
         # schedule.yml's dates, so the console counts "Week N of M" as the instructor's does.
         "semester_start": _iso(sched.semester_start),
         "semester_end": _iso(sched.semester_end),
@@ -649,6 +677,7 @@ def render(
         # Always, whatever `show_on_site` says: a student loses write access either way.
         "archive_datetime": _iso(sched.archive.when if sched.archive else None),
         "home_markdown": home_markdown(extra.home, site_config(course, facts.org)),
+        "previous_offerings": extra.previous_offerings,
         "syllabus": {"repo": extra.syllabus[0], "path": extra.syllabus[1]}
         if extra.syllabus
         else None,
@@ -657,6 +686,8 @@ def render(
                 "label": k["label"],
                 "colour": k["colour"],
                 "background": k["background"],
+                # A kind the engine makes rows for itself has no tab (`kinds_yaml`).
+                "tab": not k["system"],
             }
             for k in policy.kinds()
         },
@@ -708,6 +739,25 @@ def _announcements(org: str, site: str) -> list[dict]:
     return out
 
 
+def previous_offerings(text: str) -> list[dict]:
+    """The `offerings:` of the site repo's `_data/previous_offering.yml`, as the landing page
+    lists them: each a title and an http(s) URL. Instructor-owned: a file that does not
+    parse, or an entry without a URL, is skipped, not fatal; a missing title is the URL.
+    The http(s)-only filter is deliberately stricter than the site's `home.html`, which
+    renders every entry: the console turns each into a link."""
+    try:
+        data = yaml.safe_load(text or "")
+    except yaml.YAMLError:
+        return []
+    entries = data.get("offerings") if isinstance(data, dict) else None
+    out = []
+    for e in entries if isinstance(entries, list) else []:
+        url = str(e.get("url") or "").strip() if isinstance(e, dict) else ""
+        if re.match(r"https?://", url):
+            out.append({"title": str(e.get("title") or "").strip() or url, "url": url})
+    return out
+
+
 def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentFacts:
     """Read what the student file needs beyond `facts`. A read that fails raises, as
     `status_json.gather_semester` does."""
@@ -748,6 +798,9 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
     if site in facts.listing:
         extra.home = facts.site_home or ""
         extra.announcements = _announcements(org, site)
+        extra.previous_offerings = previous_offerings(
+            get_file_content(org, site, PREVIOUS_OFFERINGS) or ""
+        )
     return extra
 
 

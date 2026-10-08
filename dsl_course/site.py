@@ -96,6 +96,7 @@ from .site_repo import (
     retired_kind_pages,
     retired_sections,
     row_file,
+    row_tabs,
     site_readme,
     site_templates,
     slug,
@@ -352,9 +353,7 @@ def _row_entry(
         [(item.section, item.links) for item in row.landed]
         + [(READINGS_LINKS, item.links) for item in row.readings]
     )
-    tabs = [row.kind]
-    if row.kind != "readings" and (row.readings or row.readings_pending):
-        tabs.append("readings")
+    tabs = row_tabs(row.kind, bool(row.readings or row.readings_pending))
     flags, body = "", ""
     if not row.landed and not row.readings:
         flags = "unreleased: true\n"
@@ -505,9 +504,9 @@ def _site_rows(
     tabs: dict[str, None] = {}
     for key, row in built:
         out[_row_filename(row, key, out)] = _row_entry(semester_org, row, live_repos)
-        tabs[row.kind] = None
-        if row.kind != "readings" and (row.readings or row.readings_pending):
-            tabs["readings"] = None
+        tabs |= dict.fromkeys(
+            row_tabs(row.kind, bool(row.readings or row.readings_pending))
+        )
     return out, list(tabs)
 
 

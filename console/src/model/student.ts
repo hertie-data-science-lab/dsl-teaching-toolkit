@@ -43,6 +43,14 @@ export interface ScheduleRow {
   readingList: string;
   /** The session has readings planned that are not released yet. */
   readingsPending: boolean;
+  /** The kind tabs that list the row, as the site's own: a lecture carrying readings is on the readings tab too. `[kind]` when the source does not say. */
+  tabs: string[];
+}
+
+/** A link on the landing page to an earlier run of the course (the site repo's `_data/previous_offering.yml`). */
+export interface PreviousOffering {
+  title: string;
+  url: string;
 }
 
 export interface FileLink {
@@ -139,8 +147,12 @@ export interface SemesterFacts {
   announcements: Announcement[];
   /** The released syllabus, pinned; null when none has been released. */
   syllabus: FileLink | null;
-  /** The institution's row kinds (label and colours), when the source carries them. */
+  /** The institution's row kinds (label, colours and whether the kind has a tab), when the source carries them. A kind's tab shows only when the semester has rows of that kind (the engine's `kind_pages(present)`). */
   kinds?: Record<string, RowKind>;
+  /** The course's one-line blurb (`course_description` in dsl-course.yml); absent or '' when unset. */
+  courseDescription?: string;
+  /** Earlier runs of the course, as the site's landing page lists them; absent when the source does not say. */
+  previousOfferings?: PreviousOffering[];
   /** `semester_start` / `semester_end` (yyyy-mm-dd), when the source carries them: week 1 starts on `start`. */
   start?: string;
   end?: string;
@@ -152,6 +164,22 @@ export interface RowKind {
   label: string;
   colour: string;
   background: string;
+  /** The kind has a tab of its own (the site's kind tabs); false for the rows the engine makes (hand-out, term dates, archive). */
+  tab: boolean;
+}
+
+/** The kinds that had a tab before the file said which do: a file without `tab` is read this way. */
+const TABBED_KINDS = ['lecture', 'lab', 'readings'];
+
+/** A row's kind tabs as written, or its own kind's alone when the source says nothing. */
+function tabsOf(v: unknown, kind: string): string[] {
+  const tabs = (Array.isArray(v) ? v : []).map(str).filter(Boolean);
+  return tabs.length ? tabs : [kind];
+}
+
+/** The previous offerings, each an http(s) link; a missing title is the URL. */
+function offeringsOf(v: unknown): PreviousOffering[] {
+  return arr(v).map((o) => ({ title: str(o.title) || str(o.url), url: str(o.url) })).filter((o) => /^https?:\/\//.test(o.url));
 }
 
 /** Where a student's screens get the semester's shared facts. */
@@ -328,8 +356,8 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     const slug = id.replace(/^\d+-/, '');
     const due = fm.due_event as Record<string, unknown> | undefined;
     const out: ScheduleRow[] = [];
-    if (fm.date) out.push({ ...base, id: `${id}:handout`, kind: 'assignment', when: str(fm.date), assignment: slug });
-    if (due?.date) out.push({ ...base, id: `${id}:due`, kind: 'due', when: str(due.date), assignment: slug, details: str(due.details), tbc: due.tbc === true || base.tbc });
+    if (fm.date) out.push({ ...base, id: `${id}:handout`, kind: 'assignment', when: str(fm.date), assignment: slug, tabs: ['assignment'] });
+    if (due?.date) out.push({ ...base, id: `${id}:due`, kind: 'due', when: str(due.date), assignment: slug, details: str(due.details), tbc: due.tbc === true || base.tbc, tabs: ['due'] });
     return out;
   }
   // A row with `show_on_site: false` is on its kind's tab only, and an undated one (a
@@ -341,11 +369,13 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     const rp = repoPath(url, org);
     return { name: str(l.name), url, ...(rp ?? {}) };
   });
+  const kind = str(fm.kind) || str(fm.type) || (dir === '_lectures' ? 'lecture' : 'special_event');
   return [{
     ...base,
     id,
-    kind: str(fm.kind) || str(fm.type) || (dir === '_lectures' ? 'lecture' : 'special_event'),
+    kind,
     when: str(fm.date),
+    tabs: tabsOf(fm.tabs, kind),
     links,
     readings: links.filter((_, i) => /^readings?$/.test(str(raw[i].section))),
     readingList: str(fm.reading_list).trim(),
@@ -408,13 +438,14 @@ export class SiteSource implements StudentData {
     const site = `${org}.github.io`;
     const c = this.client;
     const dirs = ['_lectures', '_events', '_assignments', '_announcements'] as const;
-    const [listings, people, late, materials, config, home] = await Promise.all([
+    const [listings, people, late, materials, config, home, offerings] = await Promise.all([
       Promise.all(dirs.map((d) => c.listDir(org, site, d))),
       c.getContents(org, site, '_data/people.yml'),
       c.getContents(org, site, '_data/late_policy.yml'),
       c.getContents(org, site, '_data/materials.yml'),
       c.getContents(org, site, '_config.yml'),
       c.getContents(org, site, 'index.md'),
+      c.getContents(org, site, '_data/previous_offering.yml'),
     ]);
     if (listings.slice(0, 3).every((l) => l === null) && !people) return null;
     const files = dirs.flatMap((d, i) => (listings[i] ?? []).filter((e: DirEntry) => e.type === 'file' && e.name.endsWith('.md')).map((e) => [d, e] as const));
@@ -447,6 +478,8 @@ export class SiteSource implements StudentData {
     announcements.sort((a, b) => instant(b.when) - instant(a.when));
     return {
       courseName: str(cfg.course_name),
+      courseDescription: str(cfg.course_description),
+      previousOfferings: offeringsOf(yamlOf(offerings?.text).offerings),
       timezone: str(cfg.timezone) || DEFAULT_TIMEZONE,
       rows,
       assignments,
@@ -496,6 +529,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
       readings,
       readingList: str(r.reading_list).trim(),
       readingsPending: r.readings_pending === true,
+      tabs: tabsOf(r.tabs, str(r.kind)),
     };
   });
   const assignments: SemesterAssignment[] = arr(doc.assignments).map((a) => {
@@ -529,10 +563,12 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
   const syl = doc.syllabus as Obj | null | undefined;
   const syllabusPath = syl ? str(syl.path) : '';
   const kinds: Record<string, RowKind> = {};
-  for (const [k, v] of Object.entries((doc.kinds as Record<string, Obj> | undefined) ?? {})) kinds[k] = { label: str(v.label), colour: str(v.colour), background: str(v.background) };
+  for (const [k, v] of Object.entries((doc.kinds as Record<string, Obj> | undefined) ?? {})) kinds[k] = { label: str(v.label), colour: str(v.colour), background: str(v.background), tab: typeof v.tab === 'boolean' ? v.tab : TABBED_KINDS.includes(k) };
   const org = str(doc.semester);
   return {
     courseName: str(doc.course_name),
+    courseDescription: str(doc.course_description),
+    previousOfferings: offeringsOf(doc.previous_offerings),
     timezone: str(doc.timezone) || DEFAULT_TIMEZONE,
     rows,
     assignments,
