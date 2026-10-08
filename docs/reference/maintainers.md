@@ -471,6 +471,10 @@ level (`console/schemas/student-status.schema.json`, `tests/test_student_status.
 marks, handles, enrol codes or team membership (a team is its name, headcount and cap), an
 email only where `show_email: true`, a brief and shape note only once handed out, and no
 assignment with `show_on_site: false`. A key added to it is added to the allow-list first.
+Decision 0035 rule 13 added what the site's landing page and kind tabs show: `course_description`,
+`previous_offerings` (the site repo's `_data/previous_offering.yml`, skipped when malformed),
+each row's `tabs` (`site_repo.row_tabs`, the rule the site's `tabs:` front matter uses) and each
+kind's `tab`. The console reads a file without them as before (a row on its kind's tab alone).
 Unlike `status.json` it carries one moment, `generated_at`, for the student's "Updated <age>":
 `student_status.settle` keeps the published file's moment when nothing else changed, so an
 unchanged semester still makes no commit. The console reads `/1` files too (no dates, no age).
