@@ -8,6 +8,29 @@ export type AssignmentState = 'declared' | 'teams_forming' | 'blocked' | 'open' 
 export type ReleaseState = 'planned' | 'will_be_skipped' | 'released' | 'late';
 export type Conclusion = 'done' | 'nothing_to_do' | 'skipped' | 'previewed' | 'failed';
 
+/**
+ * Decision 0034. Every field below is optional: a status the previous engine wrote lacks them,
+ * and `model/readiness.ts` derives each one then (contract C). Screens read them only through
+ * that module.
+ */
+export type Need = 'needed' | 'suggested';
+/** When a problem bites: past or undated (`now`), inside the horizon (`soon`), beyond it (`later`). */
+export type Bites = 'now' | 'soon' | 'later';
+/** The rolling window (decision 0034, amended): problems up to `days` (7) ahead are `soon`. No dates: the file would change every tick. */
+export interface Horizon {
+  days?: number;
+}
+/** A course's or semester's verdict (`fixing`: a now or soon problem; `not_ready`: a needed item open). */
+export interface VerdictState {
+  state: 'fixing' | 'not_ready' | 'ready';
+  problems: number;
+  /** The first open needed item's sentence; null when none (or fixing). */
+  missing: string | null;
+  suggestions: number;
+  /** The semester's only. */
+  coming_up?: number;
+}
+
 export interface Fix {
   repo: string;
   path: string;
@@ -27,6 +50,7 @@ export interface Problem {
   fix?: Fix;
   /** When the fault bites (ISO); absent for a fault no date pins. */
   when?: string;
+  bites?: Bites;
 }
 
 export interface CourseStatus {
@@ -39,8 +63,11 @@ export interface CourseStatus {
   /** Decision 0032, per stage: may it be set aside (C4-C6), and is it. Absent on an older status. */
   stage_optional?: Record<string, boolean>;
   stage_set_aside?: Record<string, boolean>;
+  /** Per stage: needed or suggested (decision 0034); replaces `stage_optional` as the faculty-facing field. */
+  stage_need?: Record<string, Need>;
   /** C1-C3 done and no course problem: a new semester can start (decision 0019). */
   ready: boolean;
+  verdict?: VerdictState;
   materials: MaterialsState[];
   /** `starter`: how main is written (decision 0028), the key or the engine's reading of the markers. */
   templates: { repo: string; slug: string; state: string; starter?: 'derived' | 'handwritten' }[];
@@ -57,6 +84,7 @@ export interface MaterialsCheck {
   /** What is missing, one sentence; null once done. */
   why?: string | null;
   blocks: boolean;
+  need?: Need;
   /** On `kind_folder`: every content kind, with the top folders of that kind. */
   detail?: { kind: string; folders: string[] }[];
 }
@@ -67,9 +95,10 @@ export interface MaterialsState {
   checks?: MaterialsCheck[];
 }
 
+/** A course's or semester's to-do. */
 export interface Todo {
   id: string;
-  kind: 'materials' | 'template';
+  kind: 'course' | 'materials' | 'template' | 'site' | 'schedule' | 'instructors';
   repo: string;
   text: string;
   screen?: string;
@@ -77,7 +106,14 @@ export interface Todo {
   /** Decision 0032: it blocks nothing, so it may be set aside; and it is. Absent on an older status. */
   optional?: boolean;
   set_aside?: boolean;
+  need?: Need;
+  /** A needed template to-do a live semester cites: its first hand-out, and the day it becomes a problem. */
+  needed_by?: string;
+  problem_from?: string;
 }
+
+/** A semester's to-do (decision 0034): a suggested item such as the site's home page (`site:home`). */
+export type SemesterTodo = Todo;
 
 export interface SemesterStatus {
   org: string;
@@ -95,6 +131,9 @@ export interface SemesterStatus {
   ended?: boolean;
   stages: Record<string, StageState>;
   stage_why?: Record<string, string>;
+  stage_need?: Record<string, Need>;
+  todo?: SemesterTodo[];
+  verdict?: VerdictState;
   archive_date: string | null;
 }
 
@@ -153,6 +192,8 @@ export interface Operation {
 export interface Status {
   schema: 'dsl.status/1';
   inputs: Record<string, string | null>;
+  /** The semester file's horizon (decision 0034); absent in the course file and on an older status. */
+  horizon?: Horizon;
   course?: CourseStatus;
   semester?: SemesterStatus;
   problems?: Problem[];
