@@ -56,7 +56,7 @@ function useFork(org: string, repo: string, want: boolean): ForkState | undefine
 export const newTabIf = (leaves: boolean) => (leaves ? { target: '_blank', rel: 'noopener' } : {});
 
 /** The buttons after a file's name: source, online, local; `setup` is the Profile the list read. */
-export function FileButtons({ org, link, setup }: { org: string; link: FileLink; setup: Setup | null }) {
+function FileButtons({ org, link, setup }: { org: string; link: FileLink; setup: Setup | null }) {
   const env = useEnv();
   const at = inOrg(org, link);
   const edit = !!at && editableFile(at.path);

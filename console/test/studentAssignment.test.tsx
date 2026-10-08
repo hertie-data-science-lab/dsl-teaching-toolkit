@@ -31,7 +31,7 @@ const facts = (assignments: SemesterAssignment[]): SemesterFacts => ({
 });
 const mine = (over: Partial<Mine> = {}): Mine => ({ units: { a1: { slug: 'a1', repo: 'a1-octo', team: null, members: null, shared: false } }, gradebook: null, auditor: false, ...over });
 const page = (a: SemesterAssignment, m: Mine | null, over: { studentView?: boolean; unknownRole?: boolean; now?: number } = {}) =>
-  <AssignmentPage slug={a.slug} org={ORG} facts={facts([a])} mine={m} now={over.now ?? NOW} studentView={over.studentView ?? false} unknownRole={over.unknownRole} receipts={{}} login={LOGIN} hint="About this assignment." />;
+  <AssignmentPage slug={a.slug} org={ORG} facts={facts([a])} mine={m} now={over.now ?? NOW} studentView={over.studentView ?? false} unknownRole={over.unknownRole} receipts={{}} login={LOGIN} />;
 const GROUP: SemesterAssignment = {
   ...A, slug: 'p', title: 'Project', subtitle: '', group: true, teamFormation: { closes: '2026-10-20T23:59:00', cap: 3 },
   teams: [{ name: 'team-x', members: 2, cap: 3 }, { name: 'team-y', members: 3, cap: 3 }],
@@ -144,13 +144,13 @@ describe('the assignment page', () => {
   it('lists the files its rows carry with their button row, before the brief', () => {
     const link = { name: 'data.csv', repo: 'materials', path: 'a1/data.csv', url: `https://github.com/${ORG}/materials/blob/main/a1/data.csv` };
     const row = { id: 'a1:handout', kind: 'assignment', when: '2026-09-28T09:00:00', allDay: false, title: 'Assignment 1', subtitle: '', details: '', assignment: 'a1', released: true, links: [link], tbc: false, readings: [], readingList: '', readingsPending: false, tabs: ['assignment'] };
-    const out = render(<AssignmentPage slug="a1" org={ORG} facts={{ ...facts([A]), rows: [row] }} mine={mine()} now={NOW} studentView={false} receipts={{}} login={LOGIN} hint="" />);
+    const out = render(<AssignmentPage slug="a1" org={ORG} facts={{ ...facts([A]), rows: [row] }} mine={mine()} now={NOW} studentView={false} receipts={{}} login={LOGIN} />);
     expect(out).toMatch(/<ul class="session-files">.*data\.csv.*source.*<\/ul><article class="a-brief">/);
     expect(render(page(A, mine()))).not.toContain('session-files');
   });
 
   it('names an unknown assignment and links back to the list', () => {
-    const out = render(<AssignmentPage slug="nope" org={ORG} facts={facts([A])} mine={null} now={NOW} studentView={false} receipts={{}} login={LOGIN} hint="" />);
+    const out = render(<AssignmentPage slug="nope" org={ORG} facts={facts([A])} mine={null} now={NOW} studentView={false} receipts={{}} login={LOGIN} />);
     expect(out).toContain('This semester has no assignment nope.');
     expect(out).toContain(`href="?semester=${ORG}#assignments"`);
   });
