@@ -1,6 +1,7 @@
 // The student's Schedule (decision 0011 rule 2): every row of the semester by week, the
-// student's own state on assignment rows, the released files and readings, and the archive
-// notice at the bottom, its only place besides its own row (decision 0035 rule 12).
+// student's own state on assignment rows (linking the assignment's page), the released files
+// and readings, and the archive notice at the bottom, its only place besides its own row
+// (decision 0035 rule 12).
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import { dayKey, fmtDay, fmtTime, sortKey } from '../model/format';
@@ -8,7 +9,7 @@ import { isMarked, type Mine } from '../model/mine';
 import { weekGroups } from '../model/schedule';
 import { MY_STATE_WORD, instant, myState, sortedRows, type ScheduleRow, type SemesterFacts } from '../model/student';
 import { ROW_CLASS, ROW_WORD, termOfFacts } from '../model/week';
-import { studentHref } from '../router';
+import { assignmentHref, studentHref } from '../router';
 import { Md } from '../ui/bits';
 import { FileChips } from './StudentFiles';
 
@@ -87,7 +88,7 @@ export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; 
                     ) : r.readingsPending ? <span class="t-readings footnote">Readings to come.</span> : null}
                   </span>
                   <span class="st">
-                    {st ? <a class="st-chip" href={studentHref(org, 'assignments')}>{MY_STATE_WORD[st]}</a> : null}
+                    {a && st ? <a class="st-chip" href={assignmentHref(org, a.slug)}>{MY_STATE_WORD[st]}</a> : null}
                     {yours?.repo ? <span class="st-chip">yours</span> : null}
                     {files.length ? <FileChips org={org} repos={facts.materialsRepos} links={files} /> : !r.released ? <span class="st-chip">not released yet</span> : null}
                   </span>
