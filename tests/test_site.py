@@ -2910,10 +2910,36 @@ def test_a_broken_opencourse_yml_stops_the_hosting_not_the_sync(
     monkeypatch.setattr(
         site, "_publish_policies", lambda *a: _policy("lectures/**/*.html")
     )
-    monkeypatch.setattr(site, "_mirror_public", _never_cloned)
+    seen = []
+    monkeypatch.setattr(
+        site,
+        "_mirror_public",
+        lambda wd, org, policies, withhold=(), renames=None: (
+            seen.append(withhold) or {"materials": frozenset({"x.html"})}
+        ),
+    )
     plan = _plan(monkeypatch, tmp_path, _one_deploy(), trees={"materials": ()})
     assert "materials.md" in plan.files
     assert "no copy is hosted" in capsys.readouterr().err
+    # The mirror still runs, to delete (`withhold=None`), and nothing it says is linked.
+    assert seen == [None]
+    assert "/files/" not in plan.files["_data/materials.yml"]
+
+
+def test_an_unreadable_opencourse_yml_still_unpublishes(monkeypatch, origins, tmp_path):
+    # Only the COPY half waits for a readable opencourse.yml: a file whose pattern was
+    # removed leaves `files/` on this sync, with no clone, and nothing is linked.
+    tree = {"lectures/01_a/slides.html": "deck", "labs/01_a/lab.html": "lab"}
+    _hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, _policy("**/*.html")
+    )
+    assert len(served) == 2
+    monkeypatch.setattr(site, "clone", _never_cloned)
+    hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, _policy("lectures/**"), withhold=None
+    )
+    assert (hosted, served) == ({}, ["materials/lectures/01_a/slides.html"])
+    assert not (tmp_path / "site" / site.SITE_FILES_DIR / "materials" / "labs").exists()
 
 
 def test_a_repo_no_longer_released_into_loses_its_copies(

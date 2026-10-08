@@ -30,6 +30,7 @@ import shutil
 import stat
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from functools import cache
@@ -272,6 +273,42 @@ def _bundle_prefix(path: str) -> str:
     return f"{path.rsplit('.', 1)[0]}_files/"
 
 
+def _matched(
+    paths: tuple[str, ...],
+    specs: tuple[GitIgnoreSpec, ...],
+    allowed: Callable[[str], bool],
+) -> set[str]:
+    """The paths a policy makes public and `allowed` lets through: rendered formats, plus
+    each matched deck's bundle (`_public_selection`)."""
+    matched = {
+        path
+        for path in paths
+        if file_ext(path) in RENDERED_EXTENSIONS
+        and any(spec.check_file(path).include for spec in specs)
+        and allowed(path)
+    }
+    for path in list(matched):
+        if file_ext(path) in DECK_EXTENSIONS:
+            prefix = _bundle_prefix(path)
+            matched |= {a for a in paths if a.startswith(prefix) and allowed(a)}
+    return matched
+
+
+def _prune(served: Path, keep: set[str]) -> None:
+    """Delete every file under `served` that is not in `keep`, and the directories that
+    leaves empty."""
+    if not served.is_dir():
+        return
+    for path in sorted(served.rglob("*"), reverse=True):
+        if path.is_dir() and not path.is_symlink():
+            if not any(path.iterdir()):
+                path.rmdir()
+        elif path.relative_to(served).as_posix() not in keep:
+            path.unlink()
+    if not any(served.iterdir()):
+        served.rmdir()
+
+
 def _public_selection(
     src: Path,
     repo: str,
@@ -314,19 +351,8 @@ def _public_selection(
     def allowed(path: str) -> bool:
         return publishable(path) and not (ignore and withheld(path))
 
-    matched = {
-        path
-        for path in paths
-        if file_ext(path) in RENDERED_EXTENSIONS
-        and any(spec.check_file(path).include for spec in specs)
-        and allowed(path)
-    }
-    for path in list(matched):
-        if file_ext(path) in DECK_EXTENSIONS:
-            prefix = _bundle_prefix(path)
-            matched |= {a for a in paths if a.startswith(prefix) and allowed(a)}
     keep = set()
-    for path in matched:
+    for path in _matched(paths, specs, allowed):
         try:
             st = (src / path).lstat()
         except OSError:
@@ -347,7 +373,7 @@ def _mirror_public(
     site_wd: Path,
     semester_org: str,
     policies: dict[str, tuple[GitIgnoreSpec, ...]],
-    withhold: tuple[str, ...] = (),
+    withhold: tuple[str, ...] | None = (),
     renames: Renames | None = None,
 ) -> Hosted:
     """Copy every publicly declared file of this semester's content repos into the site's
@@ -364,7 +390,10 @@ def _mirror_public(
     `policies` (the plan stopped releasing into it) goes too.
 
     `withhold` is `opencourse.yml`'s list and `renames` the plan's `_deploy_sources`
-    (`_public_selection`).
+    (`_public_selection`). `withhold=None` is an `opencourse.yml` that could not be read:
+    then only the deletion half runs - stale repos, repos with nothing declared, and every
+    copy the policy no longer matches go, with no clone - and nothing is copied or linked,
+    because what the file would withhold is unknown.
 
     Logs name repos and paths only: `policies` covers the release plan's declared
     destinations, never a student's repo."""
@@ -385,6 +414,11 @@ def _mirror_public(
                 shutil.rmtree(served)
             continue
         _branch, paths = _repo_tree(semester_org, repo)
+        if withhold is None:
+            # A superset of what a readable file would keep: whatever is outside it was
+            # unpublished, and has to go now rather than when the file is fixed.
+            _prune(served, _matched(paths, policies[repo], publishable))
+            continue
         with tempfile.TemporaryDirectory() as work:
             src = Path(work) / repo
             if not clone(semester_org, repo, src, shallow=True):
@@ -1432,7 +1466,8 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # `opencourse.yml`'s `withhold` is a deny filter here too: what the course keeps
         # off its open-courseware site is never hosted publicly on this one. Read only
         # when something is declared public, and a file that cannot be read stops the
-        # hosting (the last sync's copies stand, linked from nothing), never the sync.
+        # copying (the last sync's copies stand, linked from nothing), never the sync -
+        # nor the deletions: an unpublished file still leaves `files/`.
         policies = _publish_policies(course_org, sched, content_repos)
         hosted: Hosted = {}
         if any(policies.values()):
@@ -1443,6 +1478,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
                     f"{course_org}/.github/opencourse.yml could not be read, so no copy "
                     f"is hosted on this sync: {exc}"
                 )
+                _mirror_public(site_wd, semester_org, policies, None)
             else:
                 hosted = _mirror_public(
                     site_wd,
