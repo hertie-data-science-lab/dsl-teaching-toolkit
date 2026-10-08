@@ -9,7 +9,7 @@ import { isMarked, markEntry, parseGradebook, readMine, readReceipts, unitOf, ty
 import { FRESH_MS, SiteSource, cutoffFrom, instant, myState, startOfDay, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
 import { StudentScreen } from '../src/screens/Student';
-import { AssignmentsView, MarksView } from '../src/screens/StudentAssignments';
+import { AssignmentsView, YourMarks } from '../src/screens/StudentAssignments';
 import { InstructorsView } from '../src/screens/StudentInstructors';
 import { ArchiveNotice, ScheduleView } from '../src/screens/StudentSchedule';
 import { WeekList } from '../src/screens/StudentWeek';
@@ -243,35 +243,41 @@ describe('the screens', () => {
 
   it('Assignments shows my repo, team, receipts, dates and late rule, and the hand-in place for external work', async () => {
     const receipts = { 'assignment-2-octo-student': { url: 'https://github.com/r/1', last: { text: 'Recorded `abc1234`.', when: '2026-09-30T00:00:00Z' }, body: '', thread: [] } };
-    const v = <AssignmentsView org={ORG} facts={await demoFacts()} mine={await mineFixture()} now={NOW} studentView={false} receipts={receipts} />;
+    const v = <AssignmentsView org={ORG} facts={await demoFacts()} mine={await mineFixture()} now={NOW} studentView={false} receipts={receipts} login={LOGIN} />;
     const out = render(v);
     const t = text(v);
     expect(out).toContain(`href="https://github.com/${ORG}/assignment-2-octo-student"`);
-    expect(t).toContain('Late cutoff Fri 9 Oct 23:59');
-    expect(t).toContain('Late work 10% per day, up to 10 days');
+    expect(t).toContain('Late work: 10% per day, up to 10 days (until Fri 9 Oct 23:59).');
     expect(t).toContain('Recorded abc1234');
-    expect(t).toContain('You have no team yet: join or create one');
+    expect(t).toContain('Not in a team yet');
+    expect(render(v)).toContain('aria-expanded="false">Join or create a team</button>');
+    expect(t).toContain('returned 21 / 25');
     expect(out).toContain('href="https://moodle.hertie-school.org/mod/assign/view.php?id=424242"');
     expect(t).toContain('Shared repo assignment-6-submissions');
-    expect(t).toContain('marks returned');
   });
 
   it('Assignments in the Student view shows no one’s repo', async () => {
-    const t = text(<AssignmentsView org={ORG} facts={await demoFacts()} mine={null} now={NOW} studentView />);
+    const t = text(<AssignmentsView org={ORG} facts={await demoFacts()} mine={null} now={NOW} studentView login={LOGIN} />);
     expect(t).toContain('A student’s repo, team and receipts show here.');
+    expect(t).toContain('A student’s marks show here');
+    expect(t).toContain('A student joins or creates a team here');
+    expect(render(<AssignmentsView org={ORG} facts={await demoFacts()} mine={null} now={NOW} studentView login={LOGIN} />)).not.toContain('aria-expanded');
     expect(t).not.toContain('octo-student');
   });
 
-  it('Marks shows each final grade, penalty, overall and per-question feedback, and team feedback', async () => {
-    const v = <MarksView org={ORG} login={LOGIN} facts={await demoFacts()} gradebook={parseGradebook(GRADES)} studentView={false} />;
+  it('Your marks shows each final grade, penalty, overall and per-question feedback, and team feedback', async () => {
+    const v = <YourMarks org={ORG} login={LOGIN} facts={await demoFacts()} gradebook={parseGradebook(GRADES)} />;
     const t = text(v);
     expect(t).toContain('Assignment 2: Classification and evaluation 21 / 25');
     expect(t).toContain('Q1 9');
     expect(t).toContain('Team feedback A convincing model card.');
-    expect(t).toContain('Late penalty -30%');
+    // A mark still being worked out (no final grade) is not listed yet.
+    expect(t).not.toContain('Referee reports');
     expect(render(v)).toContain(`href="https://github.com/${ORG}/grades-${LOGIN}"`);
-    expect(text(<MarksView org={ORG} login={LOGIN} facts={await demoFacts()} gradebook={null} studentView={false} />)).toContain('No marks yet');
-    expect(text(<MarksView org={ORG} login={LOGIN} facts={await demoFacts()} gradebook={parseGradebook(GRADES)} studentView />)).not.toContain('21');
+    const late = text(<YourMarks org={ORG} login={LOGIN} facts={await demoFacts()} gradebook={parseGradebook(GRADES.replace("penalty: -30%", "penalty: -30%\n    final_grade: '14'"))} />);
+    expect(late).toContain('Assignment 6: Referee reports 14 -30%');
+    expect(late).toContain('Days late 3 Late penalty -30%');
+    expect(text(<YourMarks org={ORG} login={LOGIN} facts={await demoFacts()} gradebook={null} />)).toContain('No marks were returned to you');
   });
 
   it('Instructors shows the cards, with initials where the picture cannot load', async () => {

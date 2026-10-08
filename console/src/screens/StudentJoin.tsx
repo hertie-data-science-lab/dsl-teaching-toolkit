@@ -1,4 +1,5 @@
-// Join: the Join course and Join team forms, filled in the console, and what the semester's
+// Join: the Join course and Join team forms, filled in the console (Join team in place on an
+// assignment's page, decision 0035 rule 8), and what the semester's
 // automation answered. The console opens the issue itself, through the API, with the body the
 // seeded form would write under a hidden first line (`JOIN_MARKERS`): GitHub drops the form's
 // routing label on an issue an account without push creates that way, so the join repo's
@@ -15,7 +16,7 @@ import { invitationUrl } from '../model/discovery';
 import { fmtWhen } from '../model/format';
 import { readable, type Mine } from '../model/mine';
 import { JOIN_MARKERS, JOIN_REPO } from '../model/names';
-import type { SemesterFacts } from '../model/student';
+import type { SemesterAssignment, TeamRoom } from '../model/student';
 import { DEFAULT_TIMEZONE, ORG_NAME_RE } from '../model/policy';
 import { closesWords, formingAt } from '../model/week';
 import { CheckLine, Crumbs, Md } from '../ui/bits';
@@ -88,7 +89,9 @@ const POLL_MS = 15000;
 const POLL_FOR_MS = 5 * 60 * 1000;
 
 /** Your requests, read now and every 15 s (up to 5 min, not while the tab is hidden) while one still waits for the automation. `sent` changes when the console has just opened one. */
-export function JoinRequests({ org, sent = 0 }: { org: string; sent?: number }) {
+/** `level`: the heading's level, 4 inside an assignment's team step. */
+export function JoinRequests({ org, sent = 0, level = 2 }: { org: string; sent?: number; level?: 2 | 4 }) {
+  const H = level === 4 ? 'h4' : 'h2';
   const env = useEnv();
   const [asked, setAsked] = useState<Asked[] | null>(null);
   const [pending, setPending] = useState(false);
@@ -109,7 +112,7 @@ export function JoinRequests({ org, sent = 0 }: { org: string; sent?: number }) 
   }, [org, tick, sent, !!env]);
   return (
     <section class="panel section" aria-labelledby="h-asked">
-      <div class="a-head"><h2 id="h-asked">Your requests</h2><button class="textlink" type="button" onClick={() => setTick(tick + 1)}>Check again</button></div>
+      <div class="a-head"><H id="h-asked">Your requests</H><button class="textlink" type="button" onClick={() => setTick(tick + 1)}>Check again</button></div>
       <AskedList asked={asked} org={org} invitePending={pending} />
     </section>
   );
@@ -160,44 +163,35 @@ function SendRequest({ org, title, body, ready, fallback, label, onSent }: { org
   );
 }
 
-/** `tz` and `now` decide which formations are still open and how their close reads. */
-export function TeamForm({ org, assignments, mine, onSent, tz = DEFAULT_TIMEZONE, now = Date.now() }: { org: string; assignments: SemesterFacts['assignments']; mine: Mine | null; onSent?: () => void; tz?: string; now?: number }) {
-  const open = assignments.filter((a) => formingAt(a.teamFormation, now, tz));
-  const [slug, setSlug] = useState(open[0]?.slug ?? '');
+/** The Join team form for one assignment, in place on its page (decision 0035 rule 8). `picked` is a team chosen from the teams table; `tz` and `now` decide whether formation is still open and how its close reads. */
+export function TeamForm({ org, a, mine, onSent, picked = '', tz = DEFAULT_TIMEZONE, now = Date.now() }: { org: string; a: SemesterAssignment; mine: Mine | null; onSent?: () => void; picked?: string; tz?: string; now?: number }) {
   const [action, setAction] = useState<'join' | 'create'>('join');
-  const [team, setTeam] = useState('');
-  if (!open.length) return <p class="footnote">No assignment is forming teams now.</p>;
-  const a = open.find((x) => x.slug === slug) ?? open[0];
+  const [team, setTeam] = useState(picked);
+  useEffect(() => {
+    if (!picked) return;
+    setAction('join');
+    setTeam(picked);
+  }, [picked]);
+  if (!formingAt(a.teamFormation, now, tz)) return <p class="footnote">Team formation for {a.title} is closed.</p>;
   const current = mine?.units[a.slug]?.team;
   const bad = team.trim() !== '' && !TEAM_NAME.test(team.trim());
   const ready = team.trim() !== '' && !bad;
-  const pick = (name: string) => {
-    setAction('join');
-    setTeam(name);
-  };
   return (
     <form class="stack" onSubmit={(e) => e.preventDefault()}>
-      <TeamList a={a} current={current ?? null} onPick={pick} picked={action === 'join' ? team.trim() : ''} />
-      <div class="field">
-        <label for="j-asg">Assignment</label>
-        <select id="j-asg" value={a.slug} onChange={(e) => setSlug((e.target as HTMLSelectElement).value)}>
-          {open.map((x) => <option value={x.slug}>{x.title}{x.subtitle ? `: ${x.subtitle}` : ''}</option>)}
-        </select>
-        <p class="hint">
-          {a.teamFormation?.closes ? `Teams can form until ${closesWords(a.teamFormation.closes, tz)}. ` : ''}
-          {a.teamFormation?.cap ? `At most ${a.teamFormation.cap} in a team. ` : ''}
-          {current ? `You are in ${current}; joining or creating another moves you out of it.` : 'You have no team yet.'}
-        </p>
-      </div>
+      <p class="hint">
+        {a.teamFormation?.closes ? `Teams can form until ${closesWords(a.teamFormation.closes, tz)}. ` : ''}
+        {a.teamFormation?.cap ? `At most ${a.teamFormation.cap} in a team. ` : ''}
+        {current ? `You are in ${current}; joining or creating another moves you out of it.` : 'You have no team yet.'}
+      </p>
       <fieldset class="field">
         <legend class="label">Action</legend>
-        <label class="check"><input type="radio" name="j-act" checked={action === 'join'} onChange={() => setAction('join')} /><span>{TEAM_ACTIONS.join}</span></label>
-        <label class="check"><input type="radio" name="j-act" checked={action === 'create'} onChange={() => setAction('create')} /><span>Create a new team</span></label>
+        <label class="check"><input type="radio" name={`j-act-${a.slug}`} checked={action === 'join'} onChange={() => setAction('join')} /><span>{TEAM_ACTIONS.join}</span></label>
+        <label class="check"><input type="radio" name={`j-act-${a.slug}`} checked={action === 'create'} onChange={() => setAction('create')} /><span>{TEAM_ACTIONS.create}</span></label>
       </fieldset>
       <div class="field">
-        <label for="j-team">Team</label>
-        <input type="text" id="j-team" value={team} spellcheck={false} autocomplete="off" aria-invalid={bad ? 'true' : undefined} onInput={(e) => setTeam((e.target as HTMLInputElement).value)} placeholder="e.g. team-x" />
-        <p class="hint">{bad ? 'Letters, numbers and dashes only, starting with a letter or number.' : action === 'join' ? 'Spell it exactly as the team’s members do.' : 'A name nobody is using yet.'}</p>
+        <label for={`j-team-${a.slug}`}>Team</label>
+        <input type="text" id={`j-team-${a.slug}`} value={team} spellcheck={false} autocomplete="off" aria-invalid={bad ? 'true' : undefined} onInput={(e) => setTeam((e.target as HTMLInputElement).value)} placeholder="e.g. team-x" />
+        <p class="hint">{bad ? 'Letters, numbers and dashes only, starting with a letter or number.' : action === 'join' ? 'Type its name exactly as the table spells it, or pick it there.' : 'A name nobody is using yet.'}</p>
       </div>
       <SendRequest org={org} title="Join team" body={joinTeamBody(a.slug, action, team)} ready={ready} fallback={joinTeamUrl(org, a.slug, team)} label={action === 'join' ? 'Send: join this team' : 'Send: create this team'} onSent={onSent} />
       <p class="footnote">The request is an issue in the semester’s public join repo, opened as you. The automation answers it under Your requests.</p>
@@ -205,41 +199,36 @@ export function TeamForm({ org, assignments, mine, onSent, tz = DEFAULT_TIMEZONE
   );
 }
 
-/** The teams formed so far for `a`: name and headcount, those with room first; picking one fills in the form. */
-export function TeamList({ a, current, onPick, picked }: { a: SemesterFacts['assignments'][number]; current: string | null; onPick: (name: string) => void; picked: string }) {
-  if (!a.teams.length) return <p class="footnote">No team has formed for {a.title} yet: create the first one.</p>;
-  const cap = (t: { cap: number | null }) => t.cap ?? a.teamFormation?.cap ?? null;
-  const room = (t: { members: number; cap: number | null }) => cap(t) === null || t.members < cap(t)!;
+/**
+ * "Teams so far" for `a` (decision 0035 rule 8): name, headcount and places left (the 0.9.0
+ * table's "Team | Places left"), those with room first, yours marked. With `onPick` (the form
+ * is open) each team with room gets a Pick button that fills in the form.
+ */
+export function TeamList({ a, current, onPick, picked = '' }: { a: SemesterAssignment; current: string | null; onPick?: (name: string) => void; picked?: string }) {
+  if (!a.teams.length) return null;
+  const cap = (t: TeamRoom) => t.cap ?? a.teamFormation?.cap ?? null;
+  const room = (t: TeamRoom) => cap(t) === null || t.members < cap(t)!;
   const list = [...a.teams].sort((x, y) => Number(room(y)) - Number(room(x)) || x.name.localeCompare(y.name));
   return (
-    <div class="field">
-      <span class="label">Teams so far</span>
-      <ul class="plain-list team-list">
-        {list.map((t) => {
-          const mine = current !== null && t.name.toLowerCase() === current.toLowerCase();
-          return (
-            <li>
-              <b>{t.name}</b> <span class="footnote">{t.members}{cap(t) !== null ? ` of ${cap(t)}` : ''} {t.members === 1 && cap(t) === null ? 'member' : 'members'}{mine ? '; your team' : ''}</span>{' '}
-              {mine ? null : room(t) ? <button class="btn outline small" type="button" aria-pressed={picked === t.name} onClick={() => onPick(t.name)}>{picked === t.name ? 'Picked' : 'Pick'}</button> : <span class="chip">full</span>}
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
-export function JoinScreen({ org, facts, mine, studentView }: { org: string; facts: SemesterFacts; mine: Mine | null; studentView: boolean }) {
-  const [sent, setSent] = useState(0);
-  return (
-    <div class="stack">
-      <section class="panel section" aria-labelledby="h-team">
-        <h2 id="h-team">Join or create a team</h2>
-        {studentView ? <p class="footnote">A student forms teams here; the form opens the semester’s Join team issue.</p>
-          : mine?.auditor ? <p class="footnote">As an auditor you do not join a team.</p>
-          : <TeamForm org={org} assignments={facts.assignments} mine={mine} tz={facts.timezone || DEFAULT_TIMEZONE} onSent={() => setSent(sent + 1)} />}
-      </section>
-      {studentView ? null : <JoinRequests org={org} sent={sent} />}
+    <div class="table-wrap team-table">
+      <table class="grid">
+        <caption>Teams so far</caption>
+        <thead><tr><th>Team</th><th>Members</th><th>Places left</th>{onPick ? <th><span class="sr">Pick</span></th> : null}</tr></thead>
+        <tbody>
+          {list.map((t) => {
+            const mine = current !== null && t.name.toLowerCase() === current.toLowerCase();
+            const c = cap(t);
+            return (
+              <tr class={mine ? 'mine' : undefined}>
+                <td><b>{t.name}</b>{mine ? <span class="footnote"> (your team)</span> : null}</td>
+                <td>{t.members}{c !== null ? ` of ${c}` : ''}</td>
+                <td>{c === null ? '' : room(t) ? c - t.members : 'full'}</td>
+                {onPick ? <td>{mine || !room(t) ? null : <button class="btn outline small" type="button" aria-pressed={picked === t.name} onClick={() => onPick(t.name)}>{picked === t.name ? 'Picked' : 'Pick'}</button>}</td> : null}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -9,7 +9,7 @@ import { openDeck, type DeckDeps } from '../src/model/deckTab';
 import { ownerSlug, parseGradebook, readReceipts, unitOf } from '../src/model/mine';
 import { SiteSource, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { parseSearch } from '../src/router';
-import { MarksView } from '../src/screens/StudentAssignments';
+import { YourMarks } from '../src/screens/StudentAssignments';
 import { FakeGitHub, fileBody } from './fake';
 
 const ORG = 'hertie-dsl-demo-f2026';
@@ -75,10 +75,10 @@ describe('the renamed site', () => {
 describe('Marks', () => {
   const facts: SemesterFacts = { courseName: '', timezone: 'Europe/Berlin', rows: [], assignments: [], instructors: [], archive: null, latePolicy: [], materialsRepos: [], homeMarkdown: '', announcements: [], syllabus: null, courseDescription: '', previousOfferings: [] };
 
-  it('shows the semester total over an empty gradebook, and says no marks yet', () => {
-    const t = text(<MarksView org={ORG} login="octo" facts={facts} gradebook={parseGradebook('total: 88\nassignments: {}\n')} studentView={false} />);
+  it('says no marks were returned over an empty gradebook, and names the total the semester total', () => {
+    expect(text(<YourMarks org={ORG} login="octo" facts={facts} gradebook={parseGradebook('total: 88\nassignments: {}\n')} />)).toContain('No marks were returned to you in this semester.');
+    const t = text(<YourMarks org={ORG} login="octo" facts={facts} gradebook={parseGradebook('total: 88\nassignments: {a1: {final_grade: 9, max_points: 10}}\n')} />);
     expect(t).toContain('Semester total: 88');
-    expect(t).toContain('No marks yet');
     expect(t).not.toContain('Term total');
   });
 });
