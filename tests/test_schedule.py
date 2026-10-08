@@ -3122,9 +3122,14 @@ def test_assignment_pages_are_numbered_by_the_plan():
     assert pages[2].stem == "team-project"
     assert pages[3].stem == "07-capstone"
     assert pages[2].repo == "assignment-nets"
-    # Every page's link is the semester's Join screen in the student console.
+    # Each page's link is its own page in the student console, by schedule key.
     assert pages[2].url("Semester-F2026") == policy.console_link(
-        "Semester-F2026", "join"
+        "Semester-F2026", "assignment-project"
+    )
+    # A template the plan does not name links the console's Assignments list.
+    unnamed = schedule.AssignmentPage(None, "extra", "assignment-extra", None)
+    assert unnamed.url("Semester-F2026") == policy.console_link(
+        "Semester-F2026", "assignments"
     )
     assert set(schedule.assignment_pages_by_key(sched)) == set(sched.assignments)
 

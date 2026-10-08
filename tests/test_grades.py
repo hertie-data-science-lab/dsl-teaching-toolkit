@@ -2640,9 +2640,9 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
         "max_team_size": 5,
         "team_formation_window": "closed",
         "team_formation_closes": _CUTOFF.date(),
-        # Where the teams are listed: the semester's Join screen in the student console.
+        # Where the teams are listed: the assignment's page in the student console.
         "team_formation_page": "https://hertie-data-science-lab.github.io/"
-        "dsl-teaching-toolkit/?semester=SEMESTER#join",
+        "dsl-teaching-toolkit/?semester=SEMESTER#assignment-project",
     }
 
 
@@ -3115,10 +3115,10 @@ def test_the_preview_counts_feedback_on_an_undeclared_question(
     assert "WARNING: 1 unit(s) give feedback on a question" in capsys.readouterr().out
 
 
-def test_the_lock_keeps_the_fragment_of_the_join_screen_url():
-    # The page is the console's Join screen (`...?semester=x#join`): a `#` inside a value is
-    # not a comment, as in YAML, so the fragment survives the parse.
-    page = "https://console.example/?semester=x#join"
+def test_the_lock_keeps_the_fragment_of_the_assignment_page_url():
+    # The page is the assignment's page in the console (`...?semester=x#assignment-a`): a
+    # `#` inside a value is not a comment, as in YAML, so the fragment survives the parse.
+    page = "https://console.example/?semester=x#assignment-a"
     text = grades.team_lock_text({"a": ("self_select", 4, "open", "2026-10-04", page)})
     assert (
         grades.parse_team_lock(text + "# a comment\n")["a"]["team_formation_page"]

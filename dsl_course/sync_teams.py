@@ -67,7 +67,8 @@ PROJECT_TEAM_DESCRIPTION = "Project team (auto-managed from teams.csv)"
 # `secret`, not `closed`: GitHub shows every org member a "Request to join" button on a
 # visible team, which goes around the Join team form, mails the owners with no context, and
 # is undone by the next pruning sync if approved. A secret team is visible only to its own
-# members and to org owners; the student console's Join screen is where students see the teams.
+# members and to org owners; students see the teams on each assignment's page in the
+# student console.
 # A team made `closed` before this converges on its next `ensure_team`.
 PROJECT_TEAM_PRIVACY = "secret"
 
