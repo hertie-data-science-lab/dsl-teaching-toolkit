@@ -176,6 +176,14 @@ describe('release marks (decision 0034 §6)', () => {
     expect(markWord(marks([], rel('will_be_skipped', iso(NOW + 30 * DAY)))!)).toBe('not ready yet');
   });
 
+  it('marks a release by its earliest-biting problem, not the first listed', () => {
+    const later = p('schedule:s1:SOURCE_MISSING', 's1', { bites: 'later' });
+    const soon = p('number:lecture:s1', 's1', { bites: 'soon' });
+    expect(marks([later, soon])).toMatchObject({ bites: 'soon', problem: soon });
+    const now = p('schedule:s1:SOURCE_UNWRITTEN', 's1', { bites: 'now' });
+    expect(marks([later, soon, now])).toMatchObject({ bites: 'now', problem: now });
+  });
+
   it('counts held releases in the Schedule lede’s words', () => {
     expect(heldSentence('now', 1)).toBe('One release was skipped.');
     expect(heldSentence('now', 2)).toBe('2 releases were skipped.');

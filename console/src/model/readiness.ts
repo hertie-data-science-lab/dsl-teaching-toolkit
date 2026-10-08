@@ -203,17 +203,20 @@ export interface ReleaseMark {
   problem?: Problem;
 }
 
+/** Earliest first: the order a release's problems mark it by. */
+const BITE_ORDER: Record<Bites, number> = { now: 0, soon: 1, later: 2 };
+
 /**
  * Each held or late release's mark (decision 0034 §6), by release id, joined on the problem's
  * `release`: one map per [status, now], for the Schedule lede, its rows and entry sheet and the
- * Dashboard. A late release with no other problem (`LATE`) is late; a held one takes its
- * problem's time, else its own date's.
+ * Dashboard. A late release with no other problem (`LATE`) is late; a held one takes the time of
+ * its earliest-biting problem (now, then soon, then later), else its own date's.
  */
 export function releaseMarks(status: Status, tiered: Tiered[], now: number): Map<string, ReleaseMark> {
   const out = new Map<string, ReleaseMark>();
   for (const rel of status.releases ?? []) {
     if (rel.state !== 'will_be_skipped' && rel.state !== 'late') continue;
-    const own = tiered.find((x) => x.p.release === rel.id);
+    const own = tiered.filter((x) => x.p.release === rel.id).sort((a, b) => BITE_ORDER[a.b] - BITE_ORDER[b.b])[0];
     if (rel.state === 'late' && (!own || own.p.kind === 'LATE')) out.set(rel.id, { bites: 'now', late: true, problem: own?.p });
     else out.set(rel.id, { bites: own?.b ?? bitesAt(rel.when, status.horizon, now), late: false, problem: own?.p });
   }
