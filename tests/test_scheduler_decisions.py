@@ -89,7 +89,7 @@ def test_an_archived_semester_releases_nothing_that_is_due():
 
 def test_an_unwritten_syllabus_is_named(monkeypatch):
     stub = f"# Syllabus\n\n{gh_contents.STUB_MARK}\n"
-    monkeypatch.setattr(scheduler, "get_file_content", lambda org, repo, path: stub)
+    monkeypatch.setattr(gh_contents, "get_file_content", lambda org, repo, path: stub)
     release = Release(
         label="seed-syllabus",
         when=PAST,

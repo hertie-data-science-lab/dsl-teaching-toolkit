@@ -1075,6 +1075,14 @@ def is_withheld_stub(path: str, text: str) -> bool:
     return is_untouched_stub(text)
 
 
+def root_stub_unwritten(org: str, repo: str, path: str) -> bool:
+    """Whether `repo`'s root stub `path` (one of `WITHHELD_ROOT_STUBS`) is there and still
+    the placeholder (`is_withheld_stub`): the one probe the scheduler and the status run,
+    one read."""
+    text = get_file_content(org, repo, path)
+    return text is not None and is_withheld_stub(path, text)
+
+
 def _decoded(encoded: str) -> str:
     """The Contents API's base64 payload as text, byte for byte.
 
