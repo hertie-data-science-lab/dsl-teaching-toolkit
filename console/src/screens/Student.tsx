@@ -1,8 +1,9 @@
 // The student shell's screens (decision 0011 rule 2), the semester site's tabs (decision 0035
-// rule 3): Home, This week, Schedule, one tab per kind, Assignments, All materials and
-// Instructors of one semester, each title with its `?` (decision 0029 rule 5), the side nav
-// with the semester's kind tabs, and the course banner's week line and dates (rule 2). Each
-// screen lives in its own `Student<Screen>.tsx`. The semester's shared facts come
+// rule 3): Home, This week, Schedule, one tab per kind, Assignments (with each assignment's own
+// page, `#assignment-<slug>`, rule 6), All materials and Instructors of one semester, each
+// title with its `?` (decision 0029 rule 5), the side nav with the semester's kind tabs, and
+// the course banner's week line and dates (rule 2). Each screen lives in its own
+// `Student<Screen>.tsx`. The semester's shared facts come
 // through `StudentData` (the engine's public `student-status.json`, else the site); the
 // student's own repos, team, role, receipts and marks come from GitHub with their own token
 // (`model/mine.ts`). In an instructor's Student view (rule 7) the same screens render with the
@@ -26,7 +27,8 @@ import { Hint } from '../ui/Hint';
 import { useLoad } from '../ui/load';
 import { Ext } from '../ui/icons';
 import { CourseBanner, StudentNav } from '../ui/shell';
-import { AssignmentsView, MarksView } from './StudentAssignments';
+import { AssignmentPage } from './StudentAssignment';
+import { AssignmentsView, YourMarks } from './StudentAssignments';
 import { HomeView } from './StudentHome';
 import { KindView } from './StudentKind';
 import { InstructorsView } from './StudentInstructors';
@@ -45,8 +47,8 @@ export interface StudentProps {
   now?: number;
 }
 
-/** The screen a hash names (a kind tab's whether or not the semester has it), Home for anything else. */
-export const studentScreen = (key: string) => (STUDENT_SCREENS.some(([k]) => k === key) || /^kind-[\w-]+$/.test(key) ? key : 'home');
+/** The screen a hash names (a kind tab's whether or not the semester has it, an assignment's page), Home for anything else. */
+export const studentScreen = (key: string) => (STUDENT_SCREENS.some(([k]) => k === key) || key === 'assignment' || /^kind-[\w-]+$/.test(key) ? key : 'home');
 
 /** A semester's shared facts, read once per session (`studentData`); none for an archived semester. */
 function useFacts(semester: Semester) {
@@ -85,10 +87,13 @@ export const STUDENT_HINTS: Record<string, string> = {
   home: 'The course’s own page: news, the syllabus, who teaches it.',
   week: 'What is due, handed out or released this week, and news from your instructors.',
   schedule: 'Every session, assignment and due date of the semester, with its files and readings once they are released.',
-  assignments: 'Your repo, team, deadlines and Submission receipts for each assignment. Receipts are comments the automation leaves in your repo when it collects your work.',
+  assignments: 'Every assignment of the semester, open while you can hand it in: your marks first once any are returned, then each assignment’s repo, team, deadlines and Submission receipts. Each title opens the assignment’s own page.',
   materials: 'The files your instructors have released to this semester, read with your own account.',
   instructors: 'Who teaches this semester.',
 };
+
+/** An assignment page's `?` (`#assignment-<slug>`, decision 0035 rule 6). */
+export const ASSIGNMENT_HINT = 'When it is due, how to hand it in, your repo and team, the brief, and your mark once returned. Receipts are comments the automation leaves in your repo when it collects your work.';
 
 /** A kind tab's `?`. */
 export const kindHint = (label: string) => `${label} by session, with their files once they are released.`;
@@ -117,8 +122,10 @@ export function StudentBanner({ root, screen, semester, studentView, chip, now =
   );
 }
 
-export function StudentScreen({ semester, screen, studentView, entry, now = Date.now() }: StudentProps) {
+export function StudentScreen({ semester, screen: asked, studentView, entry, now = Date.now() }: StudentProps) {
   const facts = useFacts(semester);
+  // An assignment's page carries its own head; with no slug, or in an archived semester, it is the list.
+  const screen = asked === 'assignment' && (!entry || semester.archived) ? 'assignments' : asked;
   const f = facts.kind === 'ready' ? facts.value : null;
   // A kind tab's label from the policy; its key until the facts are read (or for a kind the semester lacks).
   const key = screen.startsWith('kind-') ? screen.slice(5) : '';
@@ -131,7 +138,7 @@ export function StudentScreen({ semester, screen, studentView, entry, now = Date
   return (
     <>
       {studentView ? <StudentViewBanner /> : null}
-      <div class="page-head"><div><h2 class="h1">{label}{hint ? <> <Hint>{hint}</Hint></> : null}</h2></div></div>
+      {screen === 'assignment' ? null : <div class="page-head"><div><h2 class="h1">{label}{hint ? <> <Hint>{hint}</Hint></> : null}</h2></div></div>}
       {semester.archived ? <ArchivedSemester semester={semester} studentView={studentView} /> : <SemesterBody semester={semester} screen={screen} studentView={studentView} entry={entry} now={now} />}
     </>
   );
@@ -145,7 +152,7 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
   const mine = useLoad(env && f && !studentView ? () => readMine(env.client, org, env.user.login, f.assignments) : null, [org, f]);
   const m: Mine | null = mine.kind === 'ready' ? mine.value : null;
   // The Submission receipts issues feed Assignments and This week's "your instructors updated files" line.
-  const threads = screen === 'week' || screen === 'assignments';
+  const threads = screen === 'week' || screen === 'assignments' || screen === 'assignment';
   const receipts = useLoad<Record<string, Receipts | null>>(env && f && m && threads && !m.auditor ? () => readAllReceipts(env.client, org, f.assignments, m) : null, [org, f, m, threads]);
   const login = env?.user.login ?? '';
   // The visit is stored only once the threads it is compared against were read.
@@ -166,7 +173,8 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
   const hasThreads = !!m && f.assignments.some((a) => a.privateRepo && m.units[a.slug]?.repo);
   const body =
     screen === 'schedule' ? <ScheduleView facts={f} mine={m} now={now} org={org} />
-    : screen === 'assignments' ? <AssignmentsView org={org} facts={f} mine={m} now={now} studentView={studentView} receipts={hasThreads ? rc : {}} unknownRole={unknownRole} />
+    : screen === 'assignments' ? <AssignmentsView org={org} facts={f} mine={m} now={now} studentView={studentView} receipts={hasThreads ? rc : {}} unknownRole={unknownRole} login={login} />
+    : screen === 'assignment' ? <AssignmentPage slug={entry ?? ''} org={org} facts={f} mine={m} now={now} studentView={studentView} receipts={hasThreads ? rc : {}} unknownRole={unknownRole} login={login} hint={ASSIGNMENT_HINT} />
     : screen === 'materials' ? <div class="stack"><MaterialsView org={org} repos={f.materialsRepos} entry={entry} />{entry ? null : <ReadingsView org={org} facts={f} now={now} />}</div>
     : screen === 'instructors' ? <InstructorsView facts={f} org={org} />
     : screen === 'home' ? <HomeView facts={f} org={org} now={now} />
@@ -176,7 +184,7 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
     <div class="stack">
       {screen === 'week' && f.generatedAt ? <p class="footnote updated">Updated {ago(f.generatedAt, now)}</p> : null}
       {m?.auditor ? <AuditorNote /> : null}
-      {['week', 'schedule', 'assignments'].includes(screen) ? mineNote : null}
+      {['week', 'schedule', 'assignments', 'assignment'].includes(screen) ? mineNote : null}
       {body}
     </div>
   );
@@ -237,10 +245,7 @@ export function ArchivedSemester({ semester, studentView = false }: { semester: 
           <ul class="plain-list">{repos.map(([a, r]) => <li><a href={repoUrl(org, r)} target="_blank" rel="noopener">{r} <Ext /></a> <span class="footnote">{a.title}{m.units[a.slug].team ? `, team ${m.units[a.slug].team}` : ''}; read-only</span></li>)}</ul>
         ) : <p class="footnote">No assignment repo of yours was found in this semester.</p>}
       </section>
-      <section class="section" aria-labelledby="h-history-marks">
-        <h2 id="h-history-marks">Your marks</h2>
-        <MarksView org={org} login={env.user.login} facts={facts} gradebook={m.gradebook} studentView={false} auditor={m.auditor} />
-      </section>
+      <YourMarks org={org} login={env.user.login} facts={facts} gradebook={m.gradebook} auditor={m.auditor} />
     </div>
   );
 }

@@ -84,8 +84,8 @@ describe('the semester dates and when the file was written', () => {
     expect(formingAt(a.teamFormation, Date.parse('2026-11-09T23:59:00+01:00'), tz)).toBe(false);
     expect(closesWords('2026-11-09 23:59', tz)).toBe('Mon 9 Nov 23:59');
     expect(closesWords('26th Oct', tz)).toBe('26th Oct');
-    expect(html(<TeamForm org={ORG} assignments={[a]} mine={null} tz={tz} now={NOW} />)).toContain('Teams can form until Mon 9 Nov 23:59.');
-    expect(html(<TeamForm org={ORG} assignments={[a]} mine={null} tz={tz} now={after} />)).toContain('No assignment is forming teams now.');
+    expect(html(<TeamForm org={ORG} a={a} mine={null} tz={tz} now={NOW} />)).toContain('Teams can form until Mon 9 Nov 23:59.');
+    expect(html(<TeamForm org={ORG} a={a} mine={null} tz={tz} now={after} />)).toContain(`Team formation for ${a.title} is closed.`);
   });
 
   it('give the week as the instructor’s banner counts it: none before week 1, the last after the end', () => {

@@ -22,7 +22,7 @@ import { OpsSession } from './ops/session';
 import { ArchiveScreen } from './screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
 import { takeInstallReturn } from './wizards/drafts';
-import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, wizardOf } from './router';
+import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, studentNavKey, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseHeaderActions, CourseScreen, TemplateScreen, courseOf, semesterChip, templateTitle } from './screens/Course';
@@ -188,7 +188,7 @@ export function App({ state: s }: { state: AppState }) {
         <Topbar user={user} title={stu.studentView ? 'Student view (preview)' : title} titleHref={stu.studentView ? back : undefined} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} guide={guide} />
         <div class="shell">
           <aside class="sidenav" id="sidenav-wrap" aria-label="Semester navigation">
-            <StudentSideNav root={root} semesters={semesters} semester={stu.semester} current={key} studentView={stu.studentView} now={s.now.value} />
+            <StudentSideNav root={root} semesters={semesters} semester={stu.semester} current={studentNavKey(key)} studentView={stu.studentView} now={s.now.value} />
           </aside>
           <main id="view" tabindex={-1}>
             {estate.invited?.length ? <Invitations invited={estate.invited} kind={estate.kind} /> : null}

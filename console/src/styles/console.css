@@ -884,6 +884,32 @@ fieldset.field { border: 0; margin: 0; padding: 0; }
 .plain-list .plain-list { margin-top: 4px; padding-left: 14px; gap: 2px; }
 .team-list li { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
 .shape-note { margin: 8px 0 0; }
+/* An assignment: its card on the Assignments tab and its own page (decision 0035 rule 6) */
+.a-card > summary.a-sum { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; cursor: pointer; list-style: none; }
+.a-card > summary.a-sum::-webkit-details-marker { display: none; }
+.a-card > summary.a-sum::before { content: ""; align-self: center; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; flex: none; }
+.a-card[open] > summary.a-sum::before { transform: rotate(45deg); }
+.a-card[open] > summary.a-sum { margin-bottom: 12px; }
+.a-sum h2 { margin: 0; flex: 1 1 auto; }
+.a-sum h2 span { display: block; font-family: var(--font-body); font-weight: 400; font-size: 14px; color: var(--muted); }
+.a-sum .a-due { font-size: 13.5px; color: var(--ink-2); }
+.a-body { display: grid; gap: 12px; }
+.a-dates p { margin: 0 0 2px; }
+.a-page-head .kicker { margin: 0 0 2px; font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }
+.callout { border: 1px solid var(--rule); border-left: 4px solid var(--asg-ink); border-radius: 10px; padding: 12px 16px; background: var(--surface-2); }
+.callout > p { margin: 0 0 8px; }
+.callout .kv { margin-top: 10px; }
+.callout.team-step-form { border-left-color: var(--term-ink); }
+.a-step { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 15.5px; margin: 0 0 8px; }
+.a-step[aria-disabled='true'] { opacity: 0.55; }
+.step-num { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--ink-2); color: var(--surface); font-size: 12.5px; }
+.team-table { margin: 4px 0 10px; }
+.team-table caption { text-align: left; font-family: var(--font-display); font-weight: 600; font-size: 13.5px; padding-bottom: 4px; }
+.team-table tr.mine td { background: var(--asg-bg); }
+.a-mark { border-top: 1px solid var(--rule); padding-top: 12px; }
+.a-mark .a-head h3 { margin: 0; }
+.fb h4 { font-size: 14.5px; margin: 0 0 4px; }
+.your-marks .table-wrap { margin-bottom: 8px; }
 .receipt.r-patch { border-left-color: var(--amber-ink); }
 .cmd { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 8px; }
 .reading-list { font-size: 13.5px; margin-top: 4px; }

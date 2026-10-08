@@ -14,12 +14,12 @@ import type { KeyStore } from '../src/auth/types';
 import { SiteSource, homeText, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
 import { ArchivedSemester, AuditorNote } from '../src/screens/Student';
-import { AssignmentsView, MarksView } from '../src/screens/StudentAssignments';
+import { AssignmentsView, YourMarks } from '../src/screens/StudentAssignments';
 import { InstructorsView } from '../src/screens/StudentInstructors';
 import { ScheduleView } from '../src/screens/StudentSchedule';
 import { WeekList } from '../src/screens/StudentWeek';
 import { HomeView } from '../src/screens/StudentHome';
-import { AskedList, JoinScreen, TeamList, joinTeamUrl } from '../src/screens/StudentJoin';
+import { AskedList, TeamList, joinTeamUrl } from '../src/screens/StudentJoin';
 import { ReadingsView, materialHref } from '../src/screens/StudentMaterials';
 import { SetupView, forkOf } from '../src/screens/StudentSetup';
 import { cloneCommand, joinPath, vscodeFolder } from '../src/model/open';
@@ -107,14 +107,16 @@ describe('2. teams with room, pick to join', () => {
     const a3 = (await byslug())['assignment-3-project'];
     const picked: string[] = [];
     const t = text(<TeamList a={a3} current={null} onPick={(n) => picked.push(n)} picked="" />);
-    expect(t).toMatch(/team-latency 1 of 3 members Pick team-full 3 of 3 members full/);
+    expect(t).toMatch(/Teams so far Team Members Places left Pick team-latency 1 of 3 2 Pick team-full 3 of 3 full $/);
     const btn = findButton(TeamList({ a: a3, current: null, onPick: (n) => picked.push(n), picked: '' }));
     btn.props.onClick();
     expect(picked).toEqual(['team-latency']);
     expect(text(<TeamList a={a3} current={null} onPick={() => {}} picked="team-latency" />)).toContain('Picked');
     expect(new URL(joinTeamUrl(ORG, a3.slug, 'team-latency')).searchParams.get('team')).toBe('team-latency');
-    expect(text(<TeamList a={{ ...a3, teams: [] }} current={null} onPick={() => {}} picked="" />)).toContain('No team has formed for Assignment 3 Project yet');
-    expect(text(<TeamList a={a3} current="team-latency" onPick={() => {}} picked="" />)).toContain('your team');
+    expect(render(<TeamList a={{ ...a3, teams: [] }} current={null} />)).toBe('');
+    expect(text(<TeamList a={a3} current="team-latency" onPick={() => {}} picked="" />)).toContain('team-latency (your team) 1 of 3 2 team-full');
+    // Without onPick (the form is folded, or formation has closed) there is no Pick.
+    expect(text(<TeamList a={a3} current={null} />)).not.toContain('Pick');
   });
 });
 
@@ -241,8 +243,9 @@ describe('4. the auditor', () => {
     expect(a).toContain('As an auditor you hand in no work for this assignment.');
     expect(a).not.toContain('Your repo');
     expect(a).not.toContain('join or create one');
-    expect(text(<MarksView org={ORG} login={LOGIN} facts={f} gradebook={null} studentView={false} auditor />)).toContain('As an auditor you get no marks');
-    expect(text(<JoinScreen org={ORG} facts={f} mine={m} studentView={false} />)).toContain('As an auditor you do not join a team.');
+    expect(a).not.toContain('Join or create a team');
+    expect(a).not.toContain('Your marks');
+    expect(text(<YourMarks org={ORG} login={LOGIN} facts={f} gradebook={null} auditor />)).toContain('As an auditor you got no marks');
     const week = weekItems(f, m, NOW).map((i) => i.kind);
     expect(week).not.toContain('teams');
     expect(week).not.toContain('marks');
@@ -407,7 +410,7 @@ describe('10. the small fields', () => {
     expect(sched).toContain(`href="${materialHref(ORG, 'materials', 'lectures/01_deep-learning-in-public-policy/Session1_E1394_DL_preLecture.pdf')}"`);
     expect(sched).toContain('>Lab_Session_3.ipynb<');
     const t = text(<AssignmentsView org={ORG} facts={f} mine={mine()} now={NOW} studentView={false} receipts={{}} />);
-    expect(t).toContain('Out of 25 points');
+    expect(t).toContain('Worth 25 points');
     expect(t).toMatch(/Due [^)]*\(TBC\)/);
     expect(t).not.toContain('Late work in this course');
   });
@@ -502,7 +505,8 @@ describe('14. archived semesters as history', () => {
   });
 
   it('the history shows marks read-only from the gradebook', async () => {
-    const t = text(<MarksView org={ORG} login={LOGIN} facts={await facts()} gradebook={parseGradebook(GRADES)} studentView={false} />);
-    expect(t).toContain('21 / 25');
+    const t = text(<YourMarks org={ORG} login={LOGIN} facts={await facts()} gradebook={parseGradebook(GRADES)} />);
+    expect(t).toContain('Your marks Assignment Mark Late penalty Assignment 2: Classification and evaluation 21 / 25');
+    expect(t).toContain('Clear evaluation');
   });
 });

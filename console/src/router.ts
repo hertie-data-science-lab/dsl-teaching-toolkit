@@ -8,7 +8,8 @@
 // (`?cohort=<org>` or `?course=<org>`: `?semester=` is taken by the student screens), so a
 // link from a fault mail can name both. `?semester=<org>` opens that semester's student screens:
 // a student's own, or an instructor's Student view. `?join=<org>` opens the Join course form
-// of a semester the person is not a member of yet.
+// of a semester the person is not a member of yet. In the student screens `#assignment-<slug>`
+// is that assignment's own page (decision 0035 rule 6).
 
 import { semesterOver } from './model/catalogue';
 import { ORG_NAME_RE } from './model/policy';
@@ -212,6 +213,9 @@ export function studentScreens(facts?: SemesterFacts | null): [string, string][]
   const at = STUDENT_SCREENS.findIndex(([k]) => k === 'schedule') + 1;
   return [...STUDENT_SCREENS.slice(0, at), ...kindTabs(facts), ...STUDENT_SCREENS.slice(at)];
 }
+
+/** The nav key a student screen lights up: an assignment's page (`#assignment-<slug>`) is under Assignments. */
+export const studentNavKey = (screen: string) => (screen === 'assignment' ? 'assignments' : screen);
 
 /** The link to a semester's student screens: its Home unless a screen is named. */
 export const studentHref = (org: string, screen = 'home') => `?semester=${org}#${screen}`;
