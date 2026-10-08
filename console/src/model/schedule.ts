@@ -87,7 +87,6 @@ export interface Row {
   details: string; // markdown, as the site shows it
   tbc: boolean;
   show: boolean;
-  fault: boolean;
 }
 
 /** Whether `status` names `entry` as needing a number (decision 0020: a `number:*` problem). */
@@ -105,12 +104,12 @@ export function scheduleRows(status: Status, sched: Schedule | null, now: number
     const e = sched?.releases[r.id];
     rows.push({
       entry: r.id, block: 'releases', type: r.kind ?? 'release', when: r.when, ident: releaseIdent(r), name: r.title,
-      state: RELEASE_WORD[r.state] ?? r.state, details: e?.details ?? '', tbc: r.tbc, show: r.show_on_site, fault: r.state === 'will_be_skipped',
+      state: RELEASE_WORD[r.state] ?? r.state, details: e?.details ?? '', tbc: r.tbc, show: r.show_on_site,
     });
   }
   for (const a of status.assignments ?? []) {
     const e = sched?.assignments[a.slug];
-    const base = { entry: a.slug, block: 'assignments' as Block, ident: assignmentIdent(a.slug, 'Assignment', a.number), name: a.title, state: ASSIGNMENT_WORD[a.state] ?? a.state, details: e?.details ?? '', tbc: e?.tbc ?? false, show: e?.show ?? true, fault: a.problem };
+    const base = { entry: a.slug, block: 'assignments' as Block, ident: assignmentIdent(a.slug, 'Assignment', a.number), name: a.title, state: ASSIGNMENT_WORD[a.state] ?? a.state, details: e?.details ?? '', tbc: e?.tbc ?? false, show: e?.show ?? true };
     if (a.handout) rows.push({ ...base, type: 'handout', when: a.handout });
     if (a.due) rows.push({ ...base, type: 'due', when: a.due });
   }
@@ -118,13 +117,13 @@ export function scheduleRows(status: Status, sched: Schedule | null, now: number
     for (const ev of sched.events)
       rows.push({
         entry: ev.id, block: 'events', type: ev.kind === 'exam' ? 'exam' : 'special_event', when: ev.when, ident: ev.kind === 'exam' ? 'Exam' : 'Event',
-        name: ev.title, state: ev.when ? (past(ev.when) ? 'past' : 'upcoming') : 'upcoming', details: ev.details, tbc: ev.tbc, show: ev.show, fault: false,
+        name: ev.title, state: ev.when ? (past(ev.when) ? 'past' : 'upcoming') : 'upcoming', details: ev.details, tbc: ev.tbc, show: ev.show,
       });
-    if (sched.start) rows.push({ entry: 'semester', block: 'events', type: 'term', when: sched.start, ident: 'Semester', name: 'Starts', state: past(sched.start) ? 'past' : 'upcoming', details: '', tbc: false, show: true, fault: false });
-    if (sched.end) rows.push({ entry: 'semester', block: 'events', type: 'term', when: sched.end, ident: 'Semester', name: 'Ends', state: past(sched.end) ? 'past' : 'upcoming', details: '', tbc: false, show: true, fault: false });
+    if (sched.start) rows.push({ entry: 'semester', block: 'events', type: 'term', when: sched.start, ident: 'Semester', name: 'Starts', state: past(sched.start) ? 'past' : 'upcoming', details: '', tbc: false, show: true });
+    if (sched.end) rows.push({ entry: 'semester', block: 'events', type: 'term', when: sched.end, ident: 'Semester', name: 'Ends', state: past(sched.end) ? 'past' : 'upcoming', details: '', tbc: false, show: true });
   }
   const archive = sched?.archive?.when ?? status.semester?.archive_date ?? null;
-  if (archive) rows.push({ entry: 'archive', block: 'events', type: 'archive', when: archive, ident: 'Archive', name: sched?.archive?.title || 'Semester archived', state: 'scheduled', details: (sched?.archive?.details ?? '').replace('{date}', archive), tbc: false, show: sched?.archive?.show ?? true, fault: false });
+  if (archive) rows.push({ entry: 'archive', block: 'events', type: 'archive', when: archive, ident: 'Archive', name: sched?.archive?.title || 'Semester archived', state: 'scheduled', details: (sched?.archive?.details ?? '').replace('{date}', archive), tbc: false, show: sched?.archive?.show ?? true });
   // TBC with no date sorts at the end of the semester, as the site does.
   rows.sort((a, b) => (a.when ? sortKey(a.when, tz) : '9999') .localeCompare(b.when ? sortKey(b.when, tz) : '9999'));
   return rows;

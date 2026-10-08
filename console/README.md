@@ -206,7 +206,12 @@ what the banner does not: the exams and the archive date.
 The semester Dashboard's week strip filters its agenda only: This week on load, any set of
 weeks picked, none picked for all of them; the agenda panel's heading names the selection
 ("Planned this week", "Planned in weeks 3 and 5", "Planned, all weeks"). A red number on a week
-counts its problems now or soon.
+counts its problems now or soon; a hollow one its later problems (a week with both shows the red
+one), and the legend shows both. A release row, on the expanded strip, in the agenda and on the
+Schedule page alike, marks the problem that holds it (`problemForRelease`, `releaseMark`): now, a
+red `!`, "was skipped" and Fix; soon, the same with "will be skipped"; later, a dotted "not ready
+yet", the same Fix and a muted stripe, with no red; late with no other problem (`LATE`), a red
+`!`, "late" and its Details. Fix goes where the problem card's does.
 
 ## Student screens and their sources
 

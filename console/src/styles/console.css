@@ -164,6 +164,7 @@ main { min-width: 0; }
 button.wk { font: inherit; text-align: left; cursor: pointer; align-content: start; }
 .wk[aria-pressed="true"] { opacity: 1; border-color: var(--link); box-shadow: 0 0 0 2px var(--link); }
 .wk .wk-count { position: absolute; top: -7px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: var(--bad); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 11px; display: grid; place-items: center; line-height: 1; }
+.wk .wk-count.later { background: var(--surface); color: var(--muted); border: 1.5px solid var(--idle); }
 .wk-timeline { display: grid; gap: 12px; padding-top: 12px; }
 .wk-timeline .week-h { font-size: 14px; margin: 0 0 6px; }
 .wk-empty { font-size: 12.5px; color: var(--muted); margin: 0; padding: 2px 0; border-top: 1px solid var(--rule); }
@@ -175,6 +176,8 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .strip-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); margin-top: 10px; }
 .strip-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .strip-legend .m { width: 16px; height: 5px; border-radius: 2px; display: inline-block; }
+.strip-legend .lg-count { min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: var(--bad); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 11px; display: inline-grid; place-items: center; line-height: 1; }
+.strip-legend .lg-count.later { background: var(--surface); color: var(--muted); border: 1.5px solid var(--idle); }
 @media (max-width: 640px) { .wk .wk-d { display: none; } .wk { min-height: 64px; padding: 5px 3px; } .wk .wk-n { font-size: 12px; } .term-strip { gap: 2px; } }
 
 /* ================= problems ================= */
@@ -395,6 +398,9 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 .trow.current { box-shadow: inset 0 0 0 2px var(--ink); position: relative; z-index: 1; }
 .trow.fault { box-shadow: inset 5px 0 0 var(--bad); }
 .trow.fault.current { box-shadow: inset 5px 0 0 var(--bad), inset 0 0 0 2px var(--ink); }
+.trow.later { box-shadow: inset 5px 0 0 var(--idle); }
+.trow.later.current { box-shadow: inset 5px 0 0 var(--idle), inset 0 0 0 2px var(--ink); }
+.trow.later .ttl, .trow.later .k { opacity: 0.8; }
 .trow.removed { opacity: 0.55; }
 .trow.removed .ttl { text-decoration: line-through; }
 .trow.removed .st .textlink { text-decoration: underline; opacity: 1; }
@@ -402,6 +408,10 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 :root[data-theme="dark"] .st-chip { background: rgba(255,255,255,0.1); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .st-chip { background: rgba(255,255,255,0.1); } }
 .st-chip.skip { background: var(--bad); color: #fff; }
+.st-chip.later { background: transparent; border: 1.5px dotted var(--idle); color: var(--ink-2); }
+/* A release row's red `!` (decision 0034), on the timeline and the agenda alike. */
+.st .ex, .week .actions .ex { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 999px; background: var(--bad); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 11px; }
+.trow .st .btn.small { min-height: 26px; font-size: 12px; padding: 0 10px; }
 .st-note { font-size: 12.5px; font-weight: 600; color: var(--bad-ink); }
 .trow .btn.small { min-height: 30px; font-size: 12.5px; padding: 1px 10px; background: var(--surface); color: var(--ink); border-color: var(--ink-2); }
 .today-line { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; padding: 4px 14px; font-family: var(--font-display); font-size: 12px; font-weight: 700; color: var(--ink); background: var(--surface); }

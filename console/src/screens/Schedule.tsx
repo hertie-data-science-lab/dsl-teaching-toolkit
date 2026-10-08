@@ -19,12 +19,12 @@ import { keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, sched
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
 import { TIMEZONES } from '../tiers/course';
-import { EditFile, Lives, Md, ProblemCards, ghUrl } from '../ui/bits';
+import { EditFile, Lives, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
-import { repoWords, templateReadinessIn } from '../model/readiness';
+import { releaseMark, repoWords, templateReadinessIn, type ReleaseMark } from '../model/readiness';
 import { Check } from '../ui/icons';
-import { NOTHING_TO_RELEASE, releaseRef } from './Cohort';
+import { NOTHING_TO_RELEASE, markClass, releaseRef, rowMark } from './Cohort';
 import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -513,7 +513,13 @@ function View(p: ReadyProps) {
   const counts: Record<Block, number> = { releases: 0, assignments: 0, events: 0 };
   const seen = new Set<string>();
   for (const r of rows) if (r.entry !== 'semester' && r.entry !== 'archive' && !seen.has(`${r.block}:${r.entry}`)) { seen.add(`${r.block}:${r.entry}`); counts[r.block]++; }
-  const skipped = (status.releases ?? []).filter((r) => r.state === 'will_be_skipped').length;
+  // The lede counts the held releases in their time words (decision 0034): was skipped, will be skipped, not ready yet.
+  const held = (status.releases ?? []).map((r) => releaseMark(status, r, now)).filter((m) => m && !m.late);
+  const heldLine = (['now', 'soon', 'later'] as const).map((b) => {
+    const n = held.filter((m) => m!.bites === b).length;
+    const one = n === 1;
+    return !n ? '' : `${one ? 'One release' : `${n} releases`} ${b === 'now' ? (one ? 'was skipped' : 'were skipped') : b === 'soon' ? 'will be skipped as it stands' : one ? 'is not ready yet' : 'are not ready yet'}.`;
+  }).filter(Boolean).join(' ');
   const nowKey = sortKey(new Date(now).toISOString(), tz);
   let todayDone = false;
   const items = [];
@@ -526,14 +532,15 @@ function View(p: ReadyProps) {
     const rel = r.block === 'releases' ? (status.releases ?? []).find((x) => x.id === r.entry) : undefined;
     const gone = !!removed[r.entry];
     const ref = rel ? releaseRef(rel, tz, year) : null;
+    const m = rowMark(status, r, now);
     const st = gone ? (
       <><span>Removed.</span><button class="textlink" type="button" style="min-height:0;padding:0" onClick={() => { const n = { ...removed }; delete n[r.entry]; setRemoved(n); }}>Undo</button></>
-    ) : r.fault && r.block === 'releases' ? <><span class="st-chip skip">will be skipped</span><span class="st-note">{needsANumber(status, r.entry) ? 'Give it a number first' : 'Fix the folder first'}</span></>
+    ) : m ? <><ReleaseMarks m={m} entry={r.entry} />{m.late ? <a class="textlink" href={`#release-${r.entry}`}>Details</a> : null}</>
       : rel && !ref ? <><span class="st-note">{NOTHING_TO_RELEASE}</span><a class="textlink" href={`#schedule-${r.entry}`}>Edit</a></>
       : ref && rel?.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small" label="Release early" /></>
       : <span class="st-chip">{r.state}</span>;
     items.push(
-      <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${r.fault && r.block === 'releases' ? ' fault' : ''}${key === r.entry ? ' current' : ''}${gone ? ' removed' : ''}`} data-entry={r.entry}>
+      <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === r.entry ? ' current' : ''}${gone ? ' removed' : ''}`} data-entry={r.entry}>
         <span class="k">{TYPE_LABEL[r.type] ?? r.type}</span>
         <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'TBC'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}{r.tbc ? ' (TBC)' : ''}</span> : r.tbc && r.when ? <span>(TBC)</span> : null}</span>
         <span class="ttl"><a href={`#schedule-${r.entry}`}><b>{r.ident}</b>: {r.name}</a></span>
@@ -583,7 +590,7 @@ function View(p: ReadyProps) {
             <div>
               <div class="eyebrow">{eyebrow}</div>
               <h2 id="entry-title">{title}</h2>
-              {rel ? <div style="margin-top:6px"><span class={`chip ${rel.state === 'will_be_skipped' ? 'bad' : rel.state === 'released' ? 'ok' : ''}`}>{RELEASE_WORD[rel.state]}</span></div> : null}
+              {rel ? <div style="margin-top:6px"><StateChip state={rel.state} m={releaseMark(status, rel, now)} /></div> : null}
             </div>
             {close}
           </div>
@@ -633,7 +640,7 @@ function View(p: ReadyProps) {
       <div class="page-head">
         <div>
           <h2 class="h1">Schedule <Hint doc="07-schedule-releases.md">The schedule drives everything automatic: releases, hand outs, collection and the student site’s calendar. Dates are in the semester’s timezone.</Hint></h2>
-          <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {skipped ? `${skipped === 1 ? 'One release' : `${skipped} releases`} will be skipped as it stands.` : 'Every release has its folder.'}</p>
+          <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {heldLine || 'Every release has its folder.'}</p>
         </div>
         <div class="actions"><CheckNow p={p} label="Check" /><a class="btn outline" href="#schedule-new">Add entry</a></div>
       </div>
@@ -689,6 +696,12 @@ export function ScheduleScreen(p: CohortProps) {
 
 // --------------------------------------------------------------------------- S11
 
+/** A release's state chip: a held or late one in its time word (red now or soon, dotted later), else its state. */
+function StateChip({ state, m }: { state: Release['state']; m: ReleaseMark | null }) {
+  const cls = m ? (m.bites === 'later' ? 'suggest' : 'bad') : state === 'released' ? 'ok' : '';
+  return <span class={`chip ${cls}`}>{m ? m.word : RELEASE_WORD[state]}</span>;
+}
+
 function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const { status, now, rel } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
@@ -721,7 +734,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
             : st === 'will_be_skipped' ? 'Fix it in the schedule entry (Edit entry); automation releases it at its time once fixed.'
             : st === 'late' ? 'Reason codes tell you whether the source, the schedule or the scheduler was at fault.'
             : 'Nothing to do; it goes out at the scheduled time. You can release it early.'}</Hint></h2>
-          <p class="lede"><span class={`chip ${st === 'will_be_skipped' ? 'bad' : st === 'released' ? 'ok' : ''}`}>{RELEASE_WORD[st]}</span>{fmtWhen(rel.when, tz, year)}</p>
+          <p class="lede"><StateChip state={st} m={releaseMark(status, rel, now)} />{fmtWhen(rel.when, tz, year)}</p>
         </div>
         <div class="actions"><a class="btn quiet" href={`#schedule-${rel.id}`}>Edit entry</a></div>
       </div>

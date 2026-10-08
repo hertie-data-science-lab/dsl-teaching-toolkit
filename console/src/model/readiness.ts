@@ -243,3 +243,45 @@ export function templateReadinessIn(status: Status | undefined, repo: string, no
 export function repoWords(r: RepoReadiness): string {
   return r.state === 'problem' ? 'Has a problem' : r.state === 'ready' ? 'Ready' : `Not ready: ${missingClause(r.missing ?? '')}`;
 }
+
+// --------------------------------------------------------------------------- a release row's mark
+
+/** A schedule label as the engine slugs it into a problem id (`status_json._slugify`). */
+const slugOf = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'file';
+
+/**
+ * The problem a release stands on: its `schedule:<entry>:...` problem (a folder not found, a
+ * placeholder left out, `LATE`), else the `number:<kind>:<entry>` one holding it for a number.
+ * Its kind and duplicate-number problems do not stop the release, so they are not it.
+ */
+export function problemForRelease(status: Status | undefined, releaseId: string): Problem | undefined {
+  const slug = slugOf(releaseId);
+  const own = (status?.problems ?? []).filter((p) => p.scope === 'semester');
+  return own.find((p) => p.id.startsWith(`schedule:${slug}:`))
+    ?? own.find((p) => p.id.startsWith('number:') && p.id.endsWith(`:${slug}`) && p.fix?.entry === releaseId);
+}
+
+/** A held release's chip by when its problem bites (decision 0034's time words). */
+export const SKIP_WORD: Record<Bites, string> = { now: 'was skipped', soon: 'will be skipped', later: 'not ready yet' };
+
+/** What a release row marks: its chip word, when it bites, and the problem (absent on a status that names none). */
+export interface ReleaseMark {
+  word: string;
+  bites: Bites;
+  /** Late with nothing else to say why: the row links its Details, not a Fix. */
+  late: boolean;
+  problem?: Problem;
+}
+
+/**
+ * A release row's mark (decision 0034 §6), or null for one with nothing to fix. A late release
+ * with no other problem (`schedule:<entry>:LATE`) is "late"; a held one takes its problem's
+ * time word: was skipped (now), will be skipped (soon), not ready yet (later).
+ */
+export function releaseMark(status: Status, rel: { id: string; state: string; when: string | null }, now: number): ReleaseMark | null {
+  if (rel.state !== 'will_be_skipped' && rel.state !== 'late') return null;
+  const problem = problemForRelease(status, rel.id);
+  if (rel.state === 'late' && (!problem || problem.id.endsWith(':LATE'))) return { word: 'late', bites: 'now', late: true, problem };
+  const bites = bitesOf(problem ?? { id: '', scope: 'semester', stage: '', text: '', stops: '', when: rel.when ?? undefined }, status.horizon, now);
+  return { word: SKIP_WORD[bites], bites, late: false, problem };
+}
