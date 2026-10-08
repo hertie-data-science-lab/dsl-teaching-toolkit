@@ -90,19 +90,23 @@ from .discovery import (
     list_org_repos,
     org_meta,
     read_semester_registry,
+    semester_is_live,
 )
 from .faults import NOT_MIGRATED, ConfigFault, FaultKind, Unusable
 from .gh_commits import last_commit_at
 from .gh_contents import (
+    WITHHELD_ROOT_STUBS,
     file_exists,
     get_file_content,
     is_untouched_stub,
+    is_withheld_stub,
     line_of,
     repo_path_shas,
     repo_tree,
     top_level,
 )
 from .gh_teams import get_team_members
+from .log import log_err
 from .materials import (
     ASSETS_KIND,
     DEFAULT_SYLLABUS,
@@ -116,6 +120,7 @@ from .materials import (
     publishable,
 )
 from .materials import read as read_materials
+from .opencourse import OPENCOURSE_FILE, OPENCOURSE_REPO
 from .opencourse import read as read_opencourse
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
@@ -161,6 +166,21 @@ PREREQUISITES = {
     "K6": ("K2",),
 }
 DONE, TODO, BLOCKED, PROBLEM = "done", "todo", "blocked", "problem"
+# Decision 0034: every setup step, repo check and to-do is needed (without it automation
+# cannot act, or a student gets something wrong) or suggested (everything else).
+NEEDED, SUGGESTED = "needed", "suggested"
+COURSE_STAGE_NEED = {
+    s: NEEDED if s in ("C1", "C2", "C3") else SUGGESTED for s in COURSE_STAGES
+}
+SEMESTER_STAGE_NEED = {s: SUGGESTED if s == "K7" else NEEDED for s in SEMESTER_STAGES}
+# When a problem bites (`problems[].bites`): its moment has passed or it has none, it
+# falls inside the horizon, or it lies beyond. Only `now` and `soon` mark a stage or a
+# verdict; `later` is "coming up". The digest's mail ladder is a separate clock.
+NOW_, SOON, LATER = "now", "soon", "later"
+# The horizon: this semester week and the next (the semester strip's own unit).
+HORIZON_WEEKS = 2
+# The container verdict (`course.verdict`, `semester.verdict`).
+FIXING, NOT_READY, READY = "fixing", "not_ready", "ready"
 # What a blocked stage is waiting for, named by the prerequisite it waits on.
 WAITING_FOR = {
     "C1": "the course org",
@@ -273,6 +293,9 @@ class SemesterFacts:
     # `{source repo: its materials.yml folder aliases}` - what an undeclared kind is
     # inferred through.
     aliases: dict[str, dict[str, str]] = field(default_factory=dict)
+    # `{(source repo, root stub path): still the placeholder}` for every copy the plan
+    # makes of a root SYLLABUS.md / README.md: the release leaves such a copy out.
+    stubs: dict[tuple[str, str], bool] = field(default_factory=dict)
     site_home: str | None = None
     site_last_update: datetime | None = None
     config_last_update: datetime | None = None
@@ -567,13 +590,17 @@ def problem_from_fault(
     org: str,
     now: datetime,
     handouts: dict[str, datetime | None] | None = None,
+    slug_handouts: Mapping[str, datetime | None] | None = None,
 ) -> dict:
     """One `problems[]` entry for one fault. `org` is where the fault's file is when the
     fault does not say otherwise (the semester, for everything in semester-config).
 
     `when` is the instant the fault bites: the fault's own `fires` (a release, a hand-out),
     except a template's, which bites at the first hand-out that consumes the template -
-    `handouts`, by template; undated without one.
+    `handouts`, by template; an assignments.yml value's, at its assignment's hand-out -
+    `slug_handouts`, by schedule key; and visibility drift's, which stands now. Undated
+    without one. An undated source fault is `bites: later` (decision 0034); every other
+    problem's `bites` is set off `when` by the caller, who knows the horizon.
 
     The fix pointer names the repo, path and line to edit and the console screen that
     edits it; a file on a branch other than `main` (a template's `solution`) says which."""
@@ -632,10 +659,178 @@ def problem_from_fault(
         "fix": fix,
     }
     # The week the console's strip counts it under. Absent for a fault no date pins.
-    when = (handouts or {}).get(entry) if filed.kind == "template" else fault.fires
+    if filed.kind == "template":
+        when = (handouts or {}).get(entry)
+    elif filed is _HANDED_OUT_SETTING:
+        when = None  # visibility drift: it already stands
+    elif filed.kind == "assignments":
+        # A value in one assignment's block bites at that assignment's hand-out; a
+        # file-level fault (it does not parse, `defaults:`) stands now.
+        when = (slug_handouts or {}).get(entry)
+    else:
+        when = fault.fires
     if when is not None:
         problem["when"] = when.isoformat()
+    elif fault.is_source:
+        # Decision 0034: a deliberately undated entry (TBC, hand-out by hand) puts
+        # nothing at risk yet - nothing fires until it has a date.
+        problem["bites"] = LATER
     return problem
+
+
+def horizon(start: date | None, end: date | None, today: date) -> tuple[date, date]:
+    """`(from, to)`, both days included: the current semester week and the next, by the
+    semester's own weeks (seven days from `semester_start`). Before the start, week 1 is
+    the current one; `to` never passes the end, and after it both are the end. With either
+    date unset, the two weeks from today."""
+    span = timedelta(days=7 * HORIZON_WEEKS - 1)
+    if start is None or end is None or end < start:
+        return today, today + span
+    first = start + timedelta(days=7 * max((today - start).days // 7, 0))
+    return min(first, end), min(first + span, end)
+
+
+def bites(when: datetime | None, now: datetime, until: date | None, tz) -> str:
+    """`now` once the moment has passed or there is none, `soon` up to the horizon's last
+    day (`until`, in the semester's zone `tz`), `later` beyond it or with no horizon."""
+    if when is None or when <= now:
+        return NOW_
+    if until is not None and when.astimezone(tz).date() <= until:
+        return SOON
+    return LATER
+
+
+def _tier(
+    problems: list[dict], now: datetime, until: date | None = None, tz=UTC
+) -> list[dict]:
+    """Set `bites` on each problem that has none yet, off its `when`."""
+    for p in problems:
+        if "bites" not in p:
+            when = datetime.fromisoformat(p["when"]) if p.get("when") else None
+            p["bites"] = bites(when, now, until, tz)
+    return problems
+
+
+def _biting(problems: list[dict]) -> list[dict]:
+    """The problems that mark a stage and a verdict: `now` and `soon`."""
+    return [p for p in problems if p.get("bites", NOW_) != LATER]
+
+
+def _distinct(problems: list[dict]) -> list[dict]:
+    """One problem per id: the course block inside a semester's file sees the course's
+    own problems twice, once rolled up from the semester."""
+    seen: dict[str, dict] = {}
+    for p in problems:
+        seen.setdefault(p["id"], p)
+    return list(seen.values())
+
+
+def problem_from(handout: date, start: date | None, end: date | None) -> date:
+    """The first day a moment on `handout` falls inside the horizon (`horizon`): the start
+    of the semester week before its own; with no semester dates, thirteen days before."""
+    if start is None or end is None or end < start:
+        return handout - timedelta(days=7 * HORIZON_WEEKS - 1)
+    week = (handout - start).days // 7
+    return start + timedelta(days=7 * (week - HORIZON_WEEKS + 1))
+
+
+@dataclass(frozen=True)
+class Moment:
+    """When a course template is first needed: its first citing hand-out (None: cited only
+    by an assignment with no hand-out date), when its problems bite, and the first day they
+    would (`problem_from`)."""
+
+    when: datetime | None
+    bites: str
+    problem_from: date | None = None
+
+
+def template_moments(sched: schedule.Schedule, now: datetime) -> dict[str, Moment]:
+    """`{template repo: Moment}` for one semester, off its schedule's hand-outs and its own
+    horizon. A template cited only by an undated assignment is `later`."""
+    tz = ZoneInfo(sched.timezone)
+    _, until = horizon(
+        sched.semester_start, sched.semester_end, now.astimezone(tz).date()
+    )
+    out = {}
+    for repo, when in _handouts(sched).items():
+        if when is None:
+            out[repo] = Moment(None, LATER)
+            continue
+        out[repo] = Moment(
+            when,
+            bites(when, now, until, tz),
+            problem_from(
+                when.astimezone(tz).date(), sched.semester_start, sched.semester_end
+            ),
+        )
+    return out
+
+
+def _handouts(sched: schedule.Schedule) -> dict[str, datetime | None]:
+    """`{template repo: the first hand-out that cites it}` in one schedule."""
+    out: dict[str, datetime | None] = {}
+    for a in sched.assignments.values():
+        dates = [d for d in (out.get(a.course_source_repo), a.handout_datetime) if d]
+        out[a.course_source_repo] = min(dates, default=None)
+    return out
+
+
+_URGENCY = (NOW_, SOON, LATER)
+
+
+def merge_moments(many: list[dict[str, Moment]]) -> dict[str, Moment]:
+    """Several semesters' `template_moments` as one: per template, the earliest hand-out
+    (with its `problem_from`) and the most urgent tier any citing semester gives it."""
+    out: dict[str, Moment] = {}
+    for moments in many:
+        for repo, m in moments.items():
+            was = out.get(repo)
+            if was is None:
+                out[repo] = m
+                continue
+            first = min(
+                (x for x in (was, m) if x.when is not None),
+                key=lambda x: x.when,
+                default=was,
+            )
+            tier = min(was.bites, m.bites, key=_URGENCY.index)
+            out[repo] = Moment(first.when, tier, first.problem_from)
+    return out
+
+
+def _date_templates(problems: list[dict], moments: Mapping[str, Moment] | None) -> None:
+    """Decision 0034: a course template's problem bites at the first hand-out that cites
+    it. `when` and `bites` come off `moments` (by template repo); a template nothing cites
+    is `later`."""
+    for p in problems:
+        if p["scope"] != "course" or not p["id"].startswith("template:"):
+            continue
+        m = (moments or {}).get(p["fix"].get("entry") or "", Moment(None, LATER))
+        p.pop("when", None)
+        if m.when is not None:
+            p["when"] = m.when.isoformat()
+        p["bites"] = m.bites
+
+
+def verdict(
+    problems: list[dict], needed: list[str], suggestions: int, waiting: int = 0
+) -> dict:
+    """Decision 0034's container verdict: `fixing` while a `now` or `soon` problem
+    stands, else `not_ready` while a needed setup stage is open (`needed`: their
+    sentences, in stage order; `missing` names the first), else `ready`. `coming_up`
+    counts the `later` problems, which never enter the verdict, and `waiting` more: the
+    needed to-dos that are not problems yet."""
+    distinct = _distinct(problems)
+    biting = _biting(distinct)
+    state = FIXING if biting else NOT_READY if needed else READY
+    return {
+        "state": state,
+        "problems": len(biting),
+        "missing": needed[0] if needed else None,
+        "suggestions": suggestions,
+        "coming_up": len(distinct) - len(biting) + waiting,
+    }
 
 
 def _unique_ids(problems: list[dict]) -> list[dict]:
@@ -653,12 +848,13 @@ def stage_why(
     states: dict[str, str], todo: dict[str, str | None], problems: list[dict]
 ) -> dict[str, str]:
     """One sentence per stage that is not done, saying why: the problems standing
-    against it, the prerequisite it waits for, or what its own predicate still lacks
-    (`todo`, the sentence each predicate returns when it is not met)."""
+    against it (`now` or `soon`), the prerequisite it waits for, or what its own predicate
+    still lacks (`todo`, the sentence each predicate returns when it is not met)."""
     out: dict[str, str] = {}
+    standing = _biting(_distinct(problems))
     for stage, state in states.items():
         if state == PROBLEM:
-            n = sum(p["stage"] == stage for p in problems)
+            n = sum(p["stage"] == stage for p in standing)
             out[stage] = f"{n} problem{' needs' if n == 1 else 's need'} fixing."
         elif state == BLOCKED:
             pre = next(p for p in PREREQUISITES[stage] if states.get(p) != DONE)
@@ -672,8 +868,9 @@ def _stage_states(
     stages: tuple[str, ...], done: dict[str, bool], problems: list[dict]
 ) -> dict[str, str]:
     """`done | todo | blocked | problem` per stage. A problem targeting a stage wins over
-    everything; otherwise a stage whose prerequisite is not done is blocked."""
-    flagged = {p["stage"] for p in problems}
+    everything, when it bites `now` or `soon` (decision 0034: a `later` one is coming up,
+    not wrong yet); otherwise a stage whose prerequisite is not done is blocked."""
+    flagged = {p["stage"] for p in _biting(problems)}
     out: dict[str, str] = {}
     for stage in stages:
         if stage in flagged:
@@ -765,28 +962,36 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
     syllabus, the weekly plan it carries, and the withheld patterns. Every folder has a
     kind since decision 0031 (supporting files by default), so there is no check that
     each is mapped: `kindless_problems` names the folders the new default hid.
-    `blocks` marks the checks `ready` needs; `why` names what is missing, None once the
-    check is done; `kind_folder` carries `detail`, the folders found per content kind."""
+    `need` (decision 0034): only a content-kind folder is needed - the syllabus is
+    suggested, since releases run without it; `blocks` is the same fact, kept for the
+    console that reads it. `why` names what is missing, None once the check is done;
+    `kind_folder` carries `detail`, the folders found per content kind."""
     rows = (
         (
             "kind_folder",
             "At least one folder of a content kind",
-            True,
+            NEEDED,
             bool(_shown_folders(m)),
             _kind_folder_why(_released_folders(m)),
         ),
-        ("syllabus", "Syllabus written", True, _syllabus_written(m), _syllabus_why(m)),
+        (
+            "syllabus",
+            "Syllabus written",
+            SUGGESTED,
+            _syllabus_written(m),
+            _syllabus_why(m),
+        ),
         (
             "sessions",
             "Weekly plan in the syllabus",
-            False,
+            SUGGESTED,
             _plan_written(m),
             _plan_why(m),
         ),
         (
             "withheld",
             "Withheld patterns reviewed",
-            False,
+            SUGGESTED,
             _reviewed(m.releaseignore),
             "Nothing is withheld from students yet; review the withheld patterns.",
         ),
@@ -797,20 +1002,44 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
             "label": label,
             "done": done,
             "why": None if done else why,
-            "blocks": blocks,
+            "need": need,
+            "blocks": need == NEEDED,
             **({"detail": _kinds_found(m)} if cid == "kind_folder" else {}),
         }
-        for cid, label, blocks, done, why in rows
+        for cid, label, need, done, why in rows
     ]
 
 
 def materials_state(m: MaterialsFacts) -> str:
     """C4, per repo: `problem` until the migration gives it the topic; `ready` once every
-    blocking check of `materials_checks` is done."""
+    needed check of `materials_checks` is done."""
     if not m.topic:
         return PROBLEM
-    blocking = (c for c in materials_checks(m) if c["blocks"])
-    return "ready" if all(c["done"] for c in blocking) else TODO
+    needed = (c for c in materials_checks(m) if c["need"] == NEEDED)
+    return "ready" if all(c["done"] for c in needed) else TODO
+
+
+def _nearest_materials_why(materials: list[MaterialsFacts]) -> str:
+    """C4's sentence while no materials repo is ready (decision 0034): the first unmet
+    needed check of the repo nearest to ready (fewest unmet, then by name), named by its
+    repo - never "no repo is ready"."""
+    unmet = {
+        m.repo: [
+            c for c in materials_checks(m) if c["need"] == NEEDED and not c["done"]
+        ]
+        for m in materials
+        if m.topic
+    }
+    if not unmet:
+        return "No materials repo is ready yet."
+    repo = min(unmet, key=lambda r: (len(unmet[r]), r))
+    first = unmet[repo][0]["id"] if unmet[repo] else None
+    if first == "kind_folder":
+        m = next(m for m in materials if m.repo == repo)
+        if not _released_folders(m):
+            return f"{repo} has no lectures/, labs/ or readings/ folder yet."
+        return f"{repo} has only supporting files so far."
+    return f"{repo} is not ready yet."
 
 
 def materials_problem(m: MaterialsFacts, org: str) -> dict:
@@ -1097,8 +1326,10 @@ def course_admin_count(meta: dict) -> int:
     )
 
 
-# The course stages a new semester needs done (decision 0019); C4-C6 are listed, optional.
-REQUIRED_COURSE_STAGES = COURSE_STAGES[:3]
+# The course stages a new semester needs done (decision 0019); C4-C6 are suggested.
+REQUIRED_COURSE_STAGES = tuple(
+    s for s in COURSE_STAGES if COURSE_STAGE_NEED[s] == NEEDED
+)
 # `dsl-course.yml`'s list of optional setup steps and to-dos the course has set aside
 # (decision 0032).
 SET_ASIDE_KEY = "set_aside"
@@ -1123,32 +1354,77 @@ def stage_set_aside(stages: dict[str, str], aside: frozenset[str]) -> dict[str, 
     }
 
 
-def course_ready(stages: dict[str, str], problems: list[dict]) -> bool:
-    """Ready for a new semester: C1-C3 done and no course-scope problem standing."""
-    return all(stages[s] == DONE for s in REQUIRED_COURSE_STAGES) and not any(
-        p["scope"] == "course" for p in problems
-    )
+def course_verdict(
+    stages: dict[str, str],
+    why: dict[str, str],
+    todo: list[dict],
+    problems: list[dict],
+    set_aside: Mapping[str, bool],
+) -> dict:
+    """The course's `verdict` (decision 0034) over its course-scope problems, its needed
+    stages (C1-C3) and the suggested items not set aside. The course has no "coming up":
+    a needed to-do (a brief not written) carries `needed_by` / `problem_from` for the
+    citing semester's Coming up, so the course verdict has no `coming_up`."""
+    needed = [
+        why[s]
+        for s, state in stages.items()
+        if COURSE_STAGE_NEED[s] == NEEDED and state not in (DONE, PROBLEM)
+    ]
+    suggestions = sum(
+        COURSE_STAGE_NEED[s] == SUGGESTED and state != DONE and not set_aside.get(s)
+        for s, state in stages.items()
+    ) + sum(t["need"] == SUGGESTED and not t["set_aside"] for t in todo)
+    out = verdict([p for p in problems if p["scope"] == "course"], needed, suggestions)
+    del out["coming_up"]
+    return out
+
+
+def website_problem(org: str) -> dict:
+    """C6: `opencourse.yml` does not parse while the public website is on (decision 0034):
+    the daily update stands still and students see a stale site."""
+    return {
+        "id": f"website:{_slugify(OPENCOURSE_FILE)}:WEBSITE",
+        "scope": "course",
+        "stage": "C6",
+        "text": f"The public website settings file ({OPENCOURSE_FILE}) does not parse.",
+        "stops": "The public website is not updated until it parses.",
+        "fix": {
+            "repo": f"{org}/{OPENCOURSE_REPO}",
+            "path": OPENCOURSE_FILE,
+            "line": None,
+            "screen": "website",
+            "entry": None,
+        },
+    }
 
 
 def render_course(
-    facts: CourseFacts, now: datetime, rolled_up: list[dict] = ()
+    facts: CourseFacts,
+    now: datetime,
+    rolled_up: list[dict] = (),
+    moments: Mapping[str, Moment] | None = None,
 ) -> tuple[dict, list[dict]]:
     """`(the course block, the course-side problems)`. `rolled_up` is the course-scope
     problems a semester has already built from its own view of the templates it cites, so the
     course block inside a semester's file marks the same stages its problem list does.
+    `moments` dates the template problems and to-dos (`template_moments`): this semester's hand-outs
+    inside a semester's file, every live semester's in the course file; a template no
+    semester cites is `later`. Every other course problem has no moment: `now`.
 
     Stage predicates (lifecycle, course stages):
     - C1 the org resolves;
     - C2 `.github` holds dsl-course.yml and its seeded workflows;
-    - C3 dsl-course.yml names the course, its code and description, and one course admin;
+    - C3 dsl-course.yml names the course and its code, and one course admin;
     - C4 any materials repo `ready` (decision 0022: the others are to-dos);
     - C5 any template `ready`;
     - C6 `opencourse.yml` turns the public website on and its repo exists.
-    `ready` (decision 0019) is C1-C3 done and no course-scope problem standing: a new
-    semester can start. Materials, templates and the website are listed but optional:
-    `dsl-course.yml`'s `set_aside:` may list them (decision 0032), and `stage_set_aside`
-    marks those still not done."""
+    C1-C3 are needed, C4-C6 suggested (`stage_need`, decision 0034); the description is a
+    suggested to-do. `verdict` rolls them up with the `now`/`soon` course problems and the
+    to-dos; `ready` is its `ready`. A suggested stage may be set aside in `dsl-course.yml`'s
+    `set_aside:` (decision 0032), and `stage_set_aside` marks those still not done."""
     problems = [problem_from_fault(f, facts.org, now) for f in facts.faults]
+    if facts.website_unusable and facts.website_on:
+        problems.append(website_problem(facts.org))
     problems += [
         materials_problem(m, facts.org) for m in facts.materials if not m.topic
     ]
@@ -1157,22 +1433,30 @@ def render_course(
         problems += template_problems(t, facts.org)
     for t in facts.templates:
         problems += [problem_from_fault(f, facts.org, now) for f in t.faults]
+    _date_templates(problems, moments)
+    _tier(problems, now)
     meta = facts.meta
     aside = set_aside_ids(meta)
     todo = course_checks(facts)
     done = {stage: todo[stage] is None for stage in COURSE_STAGES}
-    standing = [*problems, *rolled_up]
+    standing = _distinct([*rolled_up, *problems])
     stages = _stage_states(COURSE_STAGES, done, standing)
+    why = stage_why(stages, todo, standing)
+    set_aside = stage_set_aside(stages, aside)
+    todos = course_todo(facts, aside, moments)
+    judged = course_verdict(stages, why, todos, standing, set_aside)
     block = {
         "org": facts.org,
         "name": str(meta.get("course_name") or ""),
         "code": str(meta.get("course_code") or ""),
         "stages": stages,
-        "stage_why": stage_why(stages, todo, standing),
-        # Decision 0032: which stages may be set aside, and which are.
-        "stage_optional": {s: s not in REQUIRED_COURSE_STAGES for s in stages},
-        "stage_set_aside": stage_set_aside(stages, aside),
-        "ready": course_ready(stages, standing),
+        "stage_why": why,
+        "stage_need": dict(COURSE_STAGE_NEED),
+        # Decision 0032, derived from `stage_need`: which stages may be set aside, and are.
+        "stage_optional": {s: COURSE_STAGE_NEED[s] == SUGGESTED for s in stages},
+        "stage_set_aside": set_aside,
+        "verdict": judged,
+        "ready": judged["state"] == READY,
         "materials": [
             {
                 "repo": m.repo,
@@ -1191,66 +1475,102 @@ def render_course(
             for t in facts.templates
         ],
         "semesters": list(facts.registry),
-        "todo": course_todo(facts, aside),
+        "todo": todos,
     }
     return block, problems
 
 
-def course_todo(facts: CourseFacts, aside: frozenset[str] = frozenset()) -> list[dict]:
+def _todo(need: str, aside: frozenset[str], **entry) -> dict:
+    """One to-do: `need`, plus the two fields decision 0032 reads - `optional` (it is
+    suggested) and `set_aside` (a suggested one the course lists)."""
+    return {
+        **entry,
+        "need": need,
+        "optional": need == SUGGESTED,
+        "set_aside": need == SUGGESTED and entry["id"] in aside,
+    }
+
+
+def course_todo(
+    facts: CourseFacts,
+    aside: frozenset[str] = frozenset(),
+    moments: Mapping[str, Moment] | None = None,
+) -> list[dict]:
     """Decision 0022 rule 3: work started and not finished, one entry per missing item -
-    every unmet check of a materials repo (the non-blocking ones of a ready repo too) and
-    every template whose brief is the placeholder or whose starter is not in place.
-    Materials first, then by repo, then check order. Never a problem: a repo without its
-    topic is the migration's problem, not a to-do.
-    Decision 0032: `optional` is a to-do that blocks nothing (a materials check that does
-    not block `ready`); `set_aside` is an optional one whose id is in `aside`. A required
-    to-do's id in `aside` is ignored."""
+    every unmet check of a materials repo (the suggested ones of a ready repo too), every
+    template whose brief is the placeholder or whose starter is not in place, and the
+    course's description. Course first, then materials, then by repo, then check order.
+    Never a problem: a repo without its topic is the migration's problem, not a to-do.
+    `need` (decision 0034): a materials check's own; a template's brief and starter are
+    needed; the description is suggested. A needed to-do's id in `aside` is ignored.
+    A template's to-do carries, while a semester cites the template with a date
+    (`moments`), `needed_by` (the first hand-out) and `problem_from` (the day it enters
+    the horizon and would become a problem)."""
     out = []
+    if not facts.meta.get("course_description") and facts.meta:
+        out.append(
+            _todo(
+                SUGGESTED,
+                aside,
+                id="course:description",
+                kind="course",
+                repo=".github",
+                text="Course details have no description yet.",
+                screen="details",
+            )
+        )
     for m in facts.materials:
         if not m.topic:
             continue
         out += [
-            {
-                "id": f"materials:{_slugify(m.repo)}:{c['id']}",
-                "kind": "materials",
-                "repo": m.repo,
-                "text": c["why"],
-                "screen": "materials",
-                "entry": m.repo,
-                "optional": not c["blocks"],
-            }
+            _todo(
+                c["need"],
+                aside,
+                id=f"materials:{_slugify(m.repo)}:{c['id']}",
+                kind="materials",
+                repo=m.repo,
+                text=c["why"],
+                screen="materials",
+                entry=m.repo,
+            )
             for c in materials_checks(m)
             if not c["done"]
         ]
     out += [
-        {
-            "id": f"template:{_slugify(t.repo)}:brief",
-            "kind": "template",
-            "repo": t.repo,
-            "text": f"The brief ({README_FILE}) is not written yet.",
-            "screen": "template",
-            "entry": t.repo,
-            "optional": False,
-        }
+        _todo(
+            NEEDED,
+            aside,
+            id=f"template:{_slugify(t.repo)}:brief",
+            kind="template",
+            repo=t.repo,
+            text=f"The brief ({README_FILE}) is not written yet.",
+            screen="template",
+            entry=t.repo,
+        )
         for t in facts.templates
         if t.topic and not _written(t.readme)
     ]
     out += [
-        {
-            "id": f"template:{_slugify(t.repo)}:starter",
-            "kind": "template",
-            "repo": t.repo,
-            "text": text,
-            "screen": "template",
-            "entry": t.repo,
-            "optional": False,
-        }
+        _todo(
+            NEEDED,
+            aside,
+            id=f"template:{_slugify(t.repo)}:starter",
+            kind="template",
+            repo=t.repo,
+            text=text,
+            screen="template",
+            entry=t.repo,
+        )
         for t in facts.templates
         if t.topic and (text := t.starter_todo)
     ]
     for e in out:
-        e["set_aside"] = e["optional"] and e["id"] in aside
-    return sorted(out, key=lambda e: (e["kind"] != "materials", e["repo"]))
+        m = (moments or {}).get(e["repo"]) if e["kind"] == "template" else None
+        if m is not None and m.when is not None:
+            e["needed_by"] = m.when.isoformat()
+            e["problem_from"] = _iso(m.problem_from)
+    order = {"course": 0, "materials": 1, "template": 2}
+    return sorted(out, key=lambda e: (order[e["kind"]], e["repo"]))
 
 
 def course_checks(facts: CourseFacts) -> dict[str, str | None]:
@@ -1267,15 +1587,13 @@ def course_checks(facts: CourseFacts) -> dict[str, str | None]:
         out["C2"] = "The course's .github has no workflows yet."
     if not all(meta.get(k) for k in ("course_name", "course_code")):
         out["C3"] = "Course details have no course name or code yet."
-    elif not meta.get("course_description"):
-        out["C3"] = "Course details have no description yet."
     elif course_admin_count(meta) == 0:
         out["C3"] = "No course admin is declared in course details yet."
     # Decision 0022 rule 2: done once ANY repo is ready; the rest are to-dos.
     if not facts.materials:
         out["C4"] = "There is no materials repo yet."
     elif not any(materials_state(m) == "ready" for m in facts.materials):
-        out["C4"] = "No materials repo is ready yet."
+        out["C4"] = _nearest_materials_why(facts.materials)
     if not facts.templates:
         out["C5"] = "There is no assignment template yet."
     elif not any(template_state(t) == "ready" for t in facts.templates):
@@ -1652,32 +1970,6 @@ def _staff_counts(people: dict[str, list[dict]] | None) -> tuple[int, int]:
     return active("instructors"), active("teaching_assistants")
 
 
-def _no_email_problem(
-    semester_org: str, people: dict[str, list[dict]] | None
-) -> list[dict]:
-    """K3's "every entry has an email" as a problem: a count, never the handles."""
-    missing = sync_faculty.without_email(people or {}, date.today().isoformat())
-    if not missing:
-        return []
-    return [
-        {
-            "id": "people:staff:NO_EMAIL",
-            "scope": "semester",
-            "stage": "K3",
-            "text": f"{len(missing)} instructor entr{'y' if len(missing) == 1 else 'ies'} in "
-            f"instructors.yml ha{'s' if len(missing) == 1 else 've'} no email.",
-            "stops": "They are not told about problems in this semester.",
-            "fix": {
-                "repo": f"{semester_org}/{schedule.CONFIG_REPO}",
-                "path": sync_faculty.SEMESTER_PEOPLE_PATH,
-                "line": None,
-                "screen": "instructors",
-                "entry": None,
-            },
-        }
-    ]
-
-
 def faculty_window_faults(
     sched: schedule.Schedule, windows: list[team_formation.Window] | None
 ) -> list[ConfigFault]:
@@ -1724,25 +2016,169 @@ def semester_checks(
         out["K4"] = "The schedule has no semester start or end date yet."
     elif not (sched.releases or sched.assignments):
         out["K4"] = "The schedule plans no releases or assignments yet."
-    unsent = sum(not s.code_sent_at.strip() for s in students)
+    # Decision 0034: the codes not sent yet are the Students panel's meter, the site's
+    # home page and the archive date are suggested to-dos (`semester_todo`).
     if not students:
         out["K5"] = "The roster has no students yet."
-    elif unsent:
-        out["K5"] = (
-            f"{unsent} student{' has' if unsent == 1 else 's have'} not been sent a "
-            f"code yet."
-        )
     if site not in facts.listing:
         out["K6"] = "The semester has no student site yet."
-    elif not _written(facts.site_home):
-        out["K6"] = "The student site's home page is still the placeholder."
-    if not facts.archived:
-        when = sched.archive.when if sched.archive else None
-        out["K7"] = (
-            f"Not archived yet; the schedule archives it on {_day(when)}."
-            if when
-            else "Not archived yet; the schedule sets no archive date."
+    if not facts.archived and not (sched.archive and sched.archive.when):
+        out["K7"] = "Not archived yet; the schedule sets no archive date."
+    return out
+
+
+def semester_todo(
+    facts: SemesterFacts, aside: frozenset[str] = frozenset()
+) -> list[dict]:
+    """Decision 0034: the semester's suggested to-dos - the student site's home page still
+    the placeholder, no archive date in the schedule, instructor entries with no email (a
+    count, never a handle). None of them stops automation or misleads a student."""
+    out = []
+    site = pages_repo(facts.org)
+    if site in facts.listing and not _written(facts.site_home):
+        out.append(
+            _todo(
+                SUGGESTED,
+                aside,
+                id="site:home",
+                kind="site",
+                repo=site,
+                text="The student site's home page is still the placeholder.",
+                screen="site",
+            )
         )
+    sched = facts.sched
+    if (
+        not facts.archived
+        and schedule.SCHEDULE_PATH in facts.config_paths
+        and not sched.unparseable
+        and not (sched.archive and sched.archive.when)
+    ):
+        out.append(
+            _todo(
+                SUGGESTED,
+                aside,
+                id="schedule:archive_date",
+                kind="schedule",
+                repo=schedule.CONFIG_REPO,
+                text="The schedule sets no archive date.",
+                screen="schedule",
+            )
+        )
+    missing = sync_faculty.without_email(facts.people or {}, date.today().isoformat())
+    if missing:
+        n = len(missing)
+        out.append(
+            _todo(
+                SUGGESTED,
+                aside,
+                id="instructors:email",
+                kind="instructors",
+                repo=schedule.CONFIG_REPO,
+                text=f"{n} instructor entr{'y' if n == 1 else 'ies'} in "
+                f"{sync_faculty.SEMESTER_PEOPLE_PATH} ha{'s' if n == 1 else 've'} no "
+                f"email, so they are not told about problems.",
+                screen="instructors",
+            )
+        )
+    return out
+
+
+def semester_verdict(
+    stages: dict[str, str],
+    why: dict[str, str],
+    todo: list[dict],
+    problems: list[dict],
+    waiting: int = 0,
+) -> dict:
+    """The semester's `verdict` (decision 0034) over every problem in its file, its needed
+    stages (K1-K6; `missing` comes from these only) and its suggested to-dos. K7, the one
+    suggested stage, is open exactly while its to-do `schedule:archive_date` is, so only
+    the to-do counts. `waiting`: the course's needed template to-dos this semester's
+    schedule cites, coming up beside the `later` problems."""
+    needed = [
+        why[s]
+        for s, state in stages.items()
+        if SEMESTER_STAGE_NEED[s] == NEEDED and state not in (DONE, PROBLEM)
+    ]
+    suggestions = sum(t["need"] == SUGGESTED and not t["set_aside"] for t in todo)
+    return verdict(problems, needed, suggestions, waiting)
+
+
+def late_problems(
+    facts: SemesterFacts, releases: list[dict], skip: set[str]
+) -> list[dict]:
+    """Decision 0034: a release whose moment has passed and that has not gone out, with no
+    other problem to say why (`skip`: the entries a source, stub or number problem already
+    names) - a missed run, a failed one. Stands now."""
+    out = []
+    late = {r["id"] for r in releases if r["state"] == "late"}
+    for r in facts.sched.releases:
+        if r.label not in late or r.label in skip or _slugify(r.label) in skip:
+            continue
+        due = [
+            d.deploy_datetime or r.when
+            for d in r.deploy
+            if (d.deploy_datetime or r.when) is not None and not _dest_present(facts, d)
+        ]
+        moment = min(due)
+        out.append(
+            {
+                "id": f"schedule:{_slugify(r.label)}:LATE",
+                "scope": "semester",
+                "stage": "K4",
+                "text": f"{r.label} was due {_day(moment)} and has not gone out.",
+                "stops": "Students do not have it yet; release it now.",
+                "fix": _schedule_fix(facts.org, r.label, None),
+                "when": moment.isoformat(),
+            }
+        )
+    return out
+
+
+def unwritten_problems(
+    facts: SemesterFacts, course_org: str, now: datetime
+) -> list[dict]:
+    """`SOURCE_UNWRITTEN` (decision 0034): a copy of a root SYLLABUS.md / README.md that is
+    still the placeholder, which the release leaves out (`scheduler._stub_decisions`).
+    Dated at the copy's moment; a copy already at its destination is past caring."""
+    out = []
+    for r in facts.sched.releases:
+        for d in r.deploy:
+            path = d.course_source_path.strip("/")
+            if not facts.stubs.get((d.course_source_repo, path)):
+                continue
+            if _dest_present(facts, d):
+                continue
+            when = d.deploy_datetime or r.when
+            if when is None:
+                stops = "The release has no date yet."
+            elif when <= now:
+                stops = f"The release on {_day(when)} left it out."
+            else:
+                stops = f"The release on {_day(when)} will leave it out."
+            problem = {
+                "id": f"schedule:{_slugify(r.label)}:SOURCE_UNWRITTEN",
+                "scope": "semester",
+                "stage": "K4",
+                "text": (
+                    f"Release {r.label} cites {path} in {d.course_source_repo}, which "
+                    f"is still the placeholder."
+                ),
+                "stops": stops,
+                "fix": {
+                    "repo": f"{course_org}/{d.course_source_repo}",
+                    "path": path,
+                    "line": None,
+                    "screen": "materials",
+                    "entry": d.course_source_repo,
+                },
+            }
+            if when is not None:
+                problem["when"] = when.isoformat()
+            else:
+                problem["bites"] = LATER
+            out.append(problem)
     return out
 
 
@@ -1769,10 +2205,14 @@ def course_inputs(course: CourseFacts) -> dict[str, str | None]:
     }
 
 
-def render_course_file(course: CourseFacts, now: datetime) -> dict:
+def render_course_file(
+    course: CourseFacts, now: datetime, moments: Mapping[str, Moment] | None = None
+) -> dict:
     """The COURSE document, for the public `.github`: counts, repo names and the problems
-    that already stand in `.github`'s own digest issue. Nothing about a person."""
-    block, problems = render_course(course, now)
+    that already stand in `.github`'s own digest issue. Nothing about a person. `moments`:
+    the live semesters' hand-outs per template (`merge_moments`), which date the template
+    problems and to-dos; the course itself has no weeks, so no `horizon`."""
+    block, problems = render_course(course, now, moments=moments)
     return {
         "schema": STATUS_SCHEMA,
         "inputs": course_inputs(course),
@@ -1786,17 +2226,24 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
 
     Problems: every fault in the semester's own files, the course's own two files (every
     semester pays for those), and the templates THIS semester's schedule cites - a template
-    fault is shown on every semester it will affect, tagged `scope: course`.
+    fault is shown on every semester it will affect, tagged `scope: course`. Each carries
+    `bites` (decision 0034): `now`, `soon` (inside `horizon`) or `later`.
 
     Stage predicates (lifecycle, semester stages):
     - K1 the org resolves;
     - K2 semester-config, join and the site repo exist, and the course registry lists it;
-    - K3 instructors.yml is read, grants at least one instructor, and every entry has an email;
+    - K3 instructors.yml is read and grants at least one instructor;
     - K4 schedule.yml parses, the term's start and end are set, and it plans something;
-    - K5 the roster has rows and every row has been sent a code;
-    - K6 the site repo exists and its home page is written;
-    - K7 semester-config is archived.
+    - K5 the roster has rows;
+    - K6 the site repo exists;
+    - K7 the schedule sets an archive date, or semester-config is archived.
+    K1-K6 are needed, K7 suggested (`stage_need`). The suggested to-dos (`todo`) are the
+    site's home page, the archive date and instructor emails. `verdict` rolls it all up.
     `live` is the finished marker's opposite (`discovery.semester_is_live`), not K1-K5."""
+    sched = facts.sched
+    tz = ZoneInfo(sched.timezone)
+    today = now.astimezone(tz).date()
+    since, until = horizon(sched.semester_start, sched.semester_end, today)
     faults = [
         *facts.schedule_faults,
         *facts.people_faults,
@@ -1804,41 +2251,54 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
         *facts.teams_faults,
         *facts.sheet_faults,
     ]
-    handouts: dict[str, datetime | None] = {}
-    for a in facts.sched.assignments.values():
-        dates = [
-            d for d in (handouts.get(a.course_source_repo), a.handout_datetime) if d
-        ]
-        handouts[a.course_source_repo] = min(dates, default=None)
-    problems = [problem_from_fault(f, facts.org, now, handouts) for f in faults]
+    handouts = _handouts(sched)
+    slugs = {k: a.handout_datetime for k, a in sched.assignments.items()}
+    moments = template_moments(sched, now)
+    problems = [problem_from_fault(f, facts.org, now, handouts, slugs) for f in faults]
     problems += [problem_from_fault(f, course.org, now) for f in course.faults]
+    if course.website_unusable and course.website_on:
+        problems.append(website_problem(course.org))
     problems += [
         problem_from_fault(f, course.org, now, handouts) for f in facts.template_faults
     ]
-    problems += _no_email_problem(facts.org, facts.people)
     problems += number_problems(facts, now)
     problems += kindless_entry_problems(facts)
+    problems += unwritten_problems(facts, course.org, now)
     problems += [
         materials_problem(m, course.org) for m in course.materials if not m.topic
     ]
     problems += [p for m in course.materials for p in kindless_problems(m, course.org)]
     problems += [p for t in course.templates for p in template_problems(t, course.org)]
-    problems = _unique_ids(problems)
+    releases = render_releases(facts, facts.schedule_faults, now)
+    # A late release some other problem already explains is not told twice: a source,
+    # schedule or number problem names its entry, a stub problem its id.
+    named = {
+        p["fix"].get("entry")
+        for p in problems
+        if p["id"].startswith(("schedule:", "number:")) and p["fix"].get("entry")
+    } | {p["id"].split(":")[1] for p in problems if p["id"].startswith("schedule:")}
+    problems += late_problems(facts, releases, named)
+    _date_templates(problems, moments)
+    problems = _unique_ids(_tier(problems, now, until, tz))
     course_block, _ = render_course(
-        course, now, [p for p in problems if p["scope"] == "course"]
+        course, now, [p for p in problems if p["scope"] == "course"], moments
     )
 
-    sched = facts.sched
     students = facts.students or []
     instructors, tas = _staff_counts(facts.people)
     site = pages_repo(facts.org)
-    todo = semester_checks(facts, course, instructors)
-    done = {stage: todo[stage] is None for stage in SEMESTER_STAGES}
+    checks = semester_checks(facts, course, instructors)
+    done = {stage: checks[stage] is None for stage in SEMESTER_STAGES}
     stages = _stage_states(SEMESTER_STAGES, done, problems)
-    today = now.astimezone(ZoneInfo(sched.timezone)).date()
+    why = stage_why(stages, checks, problems)
+    todo = semester_todo(facts, set_aside_ids(course.meta))
+    # The course's needed template to-dos this semester's schedule cites: coming up here.
+    waiting = sum(
+        t["need"] == NEEDED and t["kind"] == "template" and t["repo"] in handouts
+        for t in course_block["todo"]
+    )
     week, weeks = semester_weeks(sched.semester_start, sched.semester_end, today)
     tag = semester_of(facts.org)
-    releases = render_releases(facts, facts.schedule_faults, now)
     assignments = render_assignments(facts, problems, now)
     stale = facts.site_last_update is None or (
         facts.config_last_update is not None
@@ -1847,6 +2307,8 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     return {
         "schema": STATUS_SCHEMA,
         "inputs": semester_inputs(facts, course),
+        # Decision 0034: this semester week and the next; a problem dated inside is `soon`.
+        "horizon": {"from": since.isoformat(), "to": until.isoformat()},
         "course": course_block,
         "semester": {
             "org": facts.org,
@@ -1863,7 +2325,10 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             and sched.semester_end is not None
             and sched.semester_end < today,
             "stages": stages,
-            "stage_why": stage_why(stages, todo, problems),
+            "stage_why": why,
+            "stage_need": dict(SEMESTER_STAGE_NEED),
+            "verdict": semester_verdict(stages, why, todo, problems, waiting),
+            "todo": todo,
             "archive_date": _iso(sched.archive.when if sched.archive else None),
         },
         "problems": problems,
@@ -1993,10 +2458,23 @@ def gather_course(course_org: str) -> CourseFacts:
     try:
         oc = read_opencourse(course_org)
     except Unusable:
-        oc = None
+        # Decision 0034: a file that does not parse is a problem while the website is on -
+        # published already, or the file still says `enabled: true`.
         facts.website_unusable = True
-    facts.website_on = bool(oc and oc.enabled)
+        facts.website_on = facts.public_site or _declares_on(course_org)
+    else:
+        facts.website_on = bool(oc and oc.enabled)
     return facts
+
+
+def _declares_on(course_org: str) -> bool:
+    """Whether an `opencourse.yml` that does not validate still says `enabled: true`."""
+    text = get_file_content(course_org, OPENCOURSE_REPO, OPENCOURSE_FILE)
+    try:
+        data = yaml.safe_load(text or "")
+    except yaml.YAMLError:
+        return False
+    return isinstance(data, dict) and data.get("enabled") is True
 
 
 def _starter_facts(org: str, t: TemplateFacts, config: str | None) -> None:
@@ -2130,6 +2608,17 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
             branch = default_branch(semester_org, repo, fallback="main")
             facts.dest_branches[repo] = branch
             facts.dest_paths[repo] = set(repo_tree(semester_org, repo, branch))
+    # The root stubs the plan copies, each read once: a placeholder is left out.
+    for repo, path in sorted(
+        {
+            (d.course_source_repo, d.course_source_path.strip("/"))
+            for r in sched.releases
+            for d in r.deploy
+            if d.course_source_path.strip("/") in WITHHELD_ROOT_STUBS
+        }
+    ):
+        text = get_file_content(course_org, repo, path)
+        facts.stubs[(repo, path)] = text is not None and is_withheld_stub(path, text)
     site = pages_repo(semester_org)
     if site in facts.listing:
         facts.site_home = get_file_content(semester_org, site, SITE_HOME)
@@ -2154,7 +2643,23 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
 def collect_course(course_org: str, now: datetime | None = None) -> dict:
     """The course document (`dsl.status/1`), for `.github/.system/status.json`."""
     now = now or datetime.now(UTC)
-    return render_course_file(gather_course(course_org), now)
+    course = gather_course(course_org)
+    return render_course_file(course, now, gather_moments(course.registry, now))
+
+
+def gather_moments(semesters: list[str], now: datetime) -> dict[str, Moment]:
+    """Decision 0034: when each course template is first needed, across the course's live
+    semesters (`template_moments`, merged). A semester that is archived, or whose schedule
+    cannot be read, cites nothing: its templates fall back to `later`."""
+    many = []
+    for org in semesters:
+        try:
+            if not semester_is_live(org):
+                continue
+            many.append(template_moments(schedule.load(org), now))
+        except (RuntimeError, Unusable, yaml.YAMLError) as exc:
+            log_err(f"  ! could not read {org}'s schedule ({type(exc).__name__})")
+    return merge_moments(many)
 
 
 def collect_semester(

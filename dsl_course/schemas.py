@@ -19,7 +19,15 @@ import json
 import sys
 from pathlib import Path
 
-from . import materials, opencourse, policy, records, releaseignore, student_status
+from . import (
+    materials,
+    opencourse,
+    policy,
+    records,
+    releaseignore,
+    status_json,
+    student_status,
+)
 from .central import TIERS
 from .course import (
     ASSIGNMENT_TYPES,
@@ -215,6 +223,11 @@ ASSIGNMENT_STATES = (
 )
 RELEASE_STATES = ("planned", "will_be_skipped", "released", "late")
 PROBLEM_SCOPES = ("course", "semester")
+# Decision 0034, off the engine's own constants.
+NEEDS = (status_json.NEEDED, status_json.SUGGESTED)
+BITES = (status_json.NOW_, status_json.SOON, status_json.LATER)
+VERDICTS = (status_json.FIXING, status_json.NOT_READY, status_json.READY)
+TODO_KINDS = ("course", "materials", "template", "site", "schedule", "instructors")
 
 
 def status_schema() -> dict:
@@ -222,6 +235,23 @@ def status_schema() -> dict:
     `tests/test_status_json.py` validates its render against this. No automation
     heartbeat - it moves every tick, and the console reads it off the run list."""
     stages = {"type": "object", "additionalProperties": _enum(STAGE_STATES)}
+    # Decision 0034, per stage id: needed or suggested. Every 0034 field is optional in
+    # the schema, so the console still reads a file the previous engine wrote.
+    stage_need = {"type": "object", "additionalProperties": _enum(NEEDS)}
+    count = {"type": "integer"}
+    # The container verdict the console words ("Needs fixing: n problems", "Not ready:
+    # <missing>", "Ready", "· n suggestions", "· Coming up: n not ready yet").
+    verdict = _obj(
+        {
+            "state": _enum(VERDICTS),
+            "problems": count,
+            "missing": {"type": ["string", "null"]},
+            "suggestions": count,
+            "coming_up": count,
+        },
+        # `coming_up`: the semester's only (the course has no Coming up).
+        ("state", "problems", "missing", "suggestions"),
+    )
     # Why each stage that is not done is not: one sentence per stage id. Optional.
     stage_why = {"type": "object", "additionalProperties": _str()}
     flags = {"type": "object", "additionalProperties": {"type": "boolean"}}
@@ -264,6 +294,8 @@ def status_schema() -> dict:
             "label": _str(),
             "done": {"type": "boolean"},
             "why": nullable,
+            "need": _enum(NEEDS),
+            # Derived from `need` (needed), kept until the console reads `need` only.
             "blocks": {"type": "boolean"},
             "detail": {"type": "array", "items": kind_found},
         },
@@ -277,18 +309,24 @@ def status_schema() -> dict:
         },
         ("repo", "state"),
     )
-    # Work started and not finished (decision 0022 rule 3): never a problem. `optional`:
-    # it blocks nothing, so it may be set aside; `set_aside`: it is (decision 0032).
+    # Work started and not finished (decision 0022 rule 3): never a problem. `need`
+    # (decision 0034); `optional` is `need: suggested`, kept until the console reads
+    # `need`; `set_aside`: a suggested one the course lists (decision 0032). A needed
+    # template to-do a live semester cites: `needed_by` (its first hand-out) and
+    # `problem_from` (the day that hand-out enters the horizon).
     todo = _obj(
         {
             "id": _str(),
-            "kind": _enum(("materials", "template")),
+            "kind": _enum(TODO_KINDS),
             "repo": _str(),
             "text": _str(),
             "screen": _str(),
             "entry": _str(),
+            "need": _enum(NEEDS),
             "optional": {"type": "boolean"},
             "set_aside": {"type": "boolean"},
+            "needed_by": _str(),
+            "problem_from": _str(),
         },
         ("id", "kind", "repo", "text"),
     )
@@ -299,9 +337,13 @@ def status_schema() -> dict:
             "code": _str(),
             "stages": stages,
             "stage_why": stage_why,
-            # Decision 0032, per stage id: may it be set aside, and is it.
+            "stage_need": stage_need,
+            # Decision 0032, per stage id: may it be set aside (derived from
+            # `stage_need`), and is it.
             "stage_optional": flags,
             "stage_set_aside": flags,
+            "verdict": verdict,
+            # `verdict.state == "ready"`, kept until the console reads the verdict.
             "ready": {"type": "boolean"},
             "materials": {"type": "array", "items": materials_state},
             "templates": {"type": "array", "items": template_state},
@@ -326,6 +368,10 @@ def status_schema() -> dict:
             "ended": {"type": "boolean"},
             "stages": stages,
             "stage_why": stage_why,
+            "stage_need": stage_need,
+            "verdict": verdict,
+            # Suggested to-dos: the site's home page, the archive date, emails.
+            "todo": {"type": "array", "items": todo},
             "archive_date": nullable,
         },
         ("org", "stages", "live"),
@@ -341,6 +387,9 @@ def status_schema() -> dict:
             "fix": fix,
             # When the fault bites (ISO); absent for a fault no date pins.
             "when": _str(),
+            # Decision 0034: `now` (passed, or no moment), `soon` (inside `horizon`),
+            # `later` (beyond it, or a deliberately undated entry).
+            "bites": _enum(BITES),
         },
         ("id", "scope", "stage", "text"),
     )
@@ -423,13 +472,15 @@ def status_schema() -> dict:
             "solution_shown",
         ),
     )
-    count = {"type": "integer"}
     return _doc(
         STATUS_SCHEMA,
         _obj(
             {
                 "schema": {"type": "string", "enum": [STATUS_SCHEMA]},
                 "inputs": {"type": "object", "additionalProperties": nullable},
+                # Decision 0034: the semester's current week and the next, as ISO days
+                # (both included). Absent from the course file.
+                "horizon": _obj({"from": _str(), "to": _str()}, ("from", "to")),
                 "course": course,
                 "semester": semester,
                 "problems": {"type": "array", "items": problem},
