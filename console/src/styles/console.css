@@ -1042,3 +1042,7 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .kind-tab .session-title { font-size: 18px; margin: 0 0 6px; }
 .kind-tab .session-files-label { margin: 8px 0 2px; }
 .kind-tab .session-files { margin: 0; padding-left: 20px; }
+/* Profile's Your repos sections (decision 0035 rule 9): a fold per live semester. */
+.your-repos > summary h2 { margin: 0; font-size: 17px; color: var(--ink); }
+.your-repos .your-repo { display: grid; gap: 8px; }
+.your-repos .your-repo h3 { margin: 0; font-size: 15px; }

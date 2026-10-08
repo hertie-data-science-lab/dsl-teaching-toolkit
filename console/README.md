@@ -238,7 +238,7 @@ Each screen reads with the student's own account:
 | Assignments | dates (TBC), late cutoff, late rule, points, how to hand in, solution shown, the shape note, the brief (a fold, rendered by GitHub) | `<slug>-<handle>`, a team repo they can push to, the drop box; their team (from the repo, else from `GET /user/teams` by the `<slug>-` prefix, so a drop-box or external group finds it too) and its members; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos): its body, the newest receipt, a patch note as "pull before you continue", every comment in a fold; the CONTRIBUTIONS.md ask on a team repo; for a student-choice repo after the cutoff, the Settings link to make it public |
 | Marks | assignment titles | `grades-<handle>/grades.yml`: final grade, score (per question when given), penalty, feedback overall and per question, team and team feedback, a term total if present |
 | Materials | the materials repos; each session's readings | the repo's recursive tree (supporting folders such as `data/` and `img/` last, folded, under "Supporting files"); each file read when opened |
-| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, every 30 s after the first minute, for up to 5 minutes of the tab being shown, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decision 0027) |
+| Profile: Your repos in <course>, <semester> (one section per live semester they study, the first open; a folded one reads nothing until opened) | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, every 30 s after the first minute, for up to 5 minutes of the tab being shown, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decisions 0027, 0035 rule 9) |
 | Join | assignments forming teams, and each one's teams so far (name, headcount, cap; never who) with a Pick that fills in the team | their own Join course / Join team issues in `join` and the automation's last reply; after "You joined", the invitation's accept link |
 
 Marks, Join and Set up are no longer in the nav (decision 0035 rules 7-9): what their rows
@@ -312,7 +312,7 @@ per team; `/user/teams` is read once per session, not per semester. This week an
 add two calls per private repo (receipts issue, comments). These student reads are reused for
 a minute (`MINE_FRESH_MS`), so moving between screens does not repeat them. A brief or the home text is
 rendered once per page load (one `/markdown` call, a brief only when its fold opens); a
-site-hosted card picture is one call. Set up adds one call per materials repo. A file costs
+site-hosted card picture is one call. Each Your repos section in Profile adds one call per materials repo, a fork answer the file buttons then reuse for the session. A file costs
 one call, a markdown file or notebook two (its rendering is kept by blob sha for the session), an HTML page one per bundle file it uses (at most
 80); file bytes are kept by blob sha (up to 64 MB), so reopening costs nothing. **Home's This
 week costs all of that again for each semester shown**: its site read, the repo list,
