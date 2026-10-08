@@ -2,7 +2,10 @@
 // a file opened in the console from the private copy with the student's own token, and the
 // readings of each session. Nothing is published anywhere; see model/materials.ts for how
 // each kind is shown. Top folders that only support the rest (data, images, code a notebook
-// loads) come last, folded, as "Supporting files" (decision 0029 rule 6).
+// loads) come last, folded, as "Supporting files" (decision 0029 rule 6). The tree stays on
+// screen while a file is open (decision 0035 rule 11): in a left column on wide screens, above
+// the file on narrow ones, the open file marked; each file row carries the button row
+// (`StudentFiles.tsx`, rule 10).
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import { useEffect, useState } from 'preact/hooks';
@@ -14,14 +17,14 @@ import { fmtDay } from '../model/format';
 import { ASSETS_KIND, aliasKind } from '../model/materialsRules';
 import { showFile, type Shown } from '../model/materials';
 import { sortedRows, type SemesterFacts } from '../model/student';
-import { studentHref } from '../router';
 import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
 import { FileHead, FolderHead } from '../ui/FileTree';
 import { Ext } from '../ui/icons';
 import { useLoad } from '../ui/load';
+import { FileLinkItem, materialHref, useYourSetup } from './StudentFiles';
 
-/** The route entry for a file: `<repo>/<path>`. */
-export const materialHref = (org: string, repo: string, path: string) => `${studentHref(org, 'materials')}-${encodeURIComponent(`${repo}/${path}`)}`;
+// The route entry for a file lives with the file links (`StudentFiles.tsx`), so they import nothing from here.
+export { materialHref };
 
 /** `<repo>/<path>` back into its parts, for a repo among `repos`. */
 export function splitEntry(entry: string, repos: string[]): { repo: string; path: string } | null {
@@ -44,9 +47,9 @@ export function MaterialsView({ org, repos, entry }: { org: string; repos: strin
     const tree = trees.value.find(([r]) => r === at.repo)?.[1] ?? [];
     const e = tree.find((t) => t.path === at.path && t.type === 'blob');
     return (
-      <div class="stack">
-        <p><a class="textlink" href={studentHref(org, 'materials')}>All materials</a></p>
-        {e ? <FileView org={org} repo={at.repo} entry={e} tree={tree} /> : <p class="footnote">{at.path} is not in {at.repo}.</p>}
+      <div class="materials-split">
+        <nav class="materials-tree" aria-label="All materials"><MaterialsTree org={org} trees={trees.value} current={at} /></nav>
+        <div class="materials-file">{e ? <FileView org={org} repo={at.repo} entry={e} tree={tree} /> : <p class="footnote">{at.path} is not in {at.repo}.</p>}</div>
       </div>
     );
   }
@@ -61,18 +64,21 @@ export function MaterialsView({ org, repos, entry }: { org: string; repos: strin
  */
 export const isSupport = (n: TreeNode) => !!n.children && aliasKind(n.name) === ASSETS_KIND;
 
-export function MaterialsTree({ org, trees }: { org: string; trees: (readonly [string, TreeEntry[] | null])[] }) {
+/** Every repo's tree; `current`, the file open beside it, is marked and its folders open. */
+export function MaterialsTree({ org, trees, current }: { org: string; trees: (readonly [string, TreeEntry[] | null])[]; current?: { repo: string; path: string } | null }) {
+  const setup = useYourSetup();
   const shown = trees.filter(([, t]) => t !== null);
   if (!shown.length) return <p class="footnote">Nothing has been released yet, or you cannot read the materials: that needs the semester’s student team, which joining gives you.</p>;
   return (
     <div class="stack">
       {shown.map(([repo, tree]) => {
         const files = tree!.filter((t) => t.type === 'blob').map((t) => t.path);
+        const here = current?.repo === repo ? current.path : null;
         const node = (n: TreeNode, depth: number): preact.JSX.Element =>
           n.children ? (
-            <li class="ft-dir"><details open={depth === 0 && !n.name.endsWith('_files')}><summary><FolderHead name={n.name} /></summary><ul>{n.children.map((c) => node(c, depth + 1))}</ul></details></li>
+            <li class="ft-dir"><details open={(depth === 0 && !n.name.endsWith('_files')) || !!here?.startsWith(`${n.path}/`)}><summary><FolderHead name={n.name} /></summary><ul>{n.children.map((c) => node(c, depth + 1))}</ul></details></li>
           ) : (
-            <li class="ft-file"><FileHead name={n.name}><a class="ft-name" href={materialHref(org, repo, n.path)}>{n.name}</a></FileHead></li>
+            <li class={`ft-file${here === n.path ? ' current' : ''}`}><FileHead name={n.name}><FileLinkItem org={org} repos={[repo]} link={{ name: n.name, repo, path: n.path, url: ghUrl(org, repo, n.path, 'HEAD') }} setup={setup} cls="ft-name" current={here === n.path} /></FileHead></li>
           );
         const top = buildTree(files);
         const support = top.filter(isSupport);
@@ -82,7 +88,7 @@ export function MaterialsTree({ org, trees }: { org: string; trees: (readonly [s
             <h2>{repo}</h2>
             {main.length ? <ul class="file-tree">{main.map((n) => node(n, 0))}</ul> : files.length ? null : <p class="footnote">Nothing released yet.</p>}
             {support.length ? (
-              <details class="fold supporting">
+              <details class="fold supporting" open={!!here && support.some((n) => here.startsWith(`${n.path}/`))}>
                 <summary>Supporting files</summary>
                 <ul class="file-tree">{support.map((n) => node(n, 1))}</ul>
               </details>
@@ -90,7 +96,7 @@ export function MaterialsTree({ org, trees }: { org: string; trees: (readonly [s
           </section>
         );
       })}
-      <p class="footnote">Every file opens here, read with your own account: nothing is published.</p>
+      {current ? null : <p class="footnote">Every file opens here, read with your own account: nothing is published.</p>}
     </div>
   );
 }

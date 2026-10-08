@@ -25,7 +25,7 @@ import { STUDENT_HINTS, StudentBanner, StudentScreen } from '../src/screens/Stud
 import { ScheduleView } from '../src/screens/StudentSchedule';
 import { AskedList, TeamForm } from '../src/screens/StudentJoin';
 import { MaterialsTree } from '../src/screens/StudentMaterials';
-import { RECHECK_FOR_MS, RECHECK_MS, SetupView } from '../src/screens/StudentSetup';
+import { RECHECK_FOR_MS, RECHECK_MS, RepoChecks } from '../src/screens/StudentSetup';
 import { FakeGitHub, fileBody } from './fake';
 import FILE from './fixtures/student-status.json?raw';
 
@@ -240,7 +240,7 @@ describe('live checks', () => {
     fakeIntervals();
     let fork = false;
     const f = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, () => (fork ? ok(forked) : notFound()));
-    const el = await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, f);
+    const el = await mount(<RepoChecks org={ORG} facts={facts} mine={mine} />, f);
     expect(el.textContent).toContain('Fork materials');
     expect(el.textContent).toContain('Check again');
     const first = checks(f);
@@ -262,7 +262,7 @@ describe('live checks', () => {
   it('slows down after a minute, stops re-checking after 5 minutes and on leaving the page; Check again starts it again', async () => {
     fakeIntervals();
     const f = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, notFound);
-    const el = await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, f);
+    const el = await mount(<RepoChecks org={ORG} facts={facts} mine={mine} />, f);
     const first = checks(f);
     for (let t = 0; t < RECHECK_FOR_MS / RECHECK_MS + 3; t++) await tickBy(RECHECK_MS);
     const capped = checks(f);
@@ -284,13 +284,13 @@ describe('live checks', () => {
   it('does not re-check a repo of the name that is not the fork, or after a read that failed', async () => {
     fakeIntervals();
     const other = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, () => ok({ ...forked, fork: false, parent: undefined }));
-    await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, other);
+    await mount(<RepoChecks org={ORG} facts={facts} mine={mine} />, other);
     expect(root!.querySelector('.check-line.warn')!.textContent).toContain('that is not a fork');
     await tickBy(RECHECK_MS * 2);
     expect(checks(other)).toBe(1);
     render(null, root!);
     const failing = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, () => new Response('{"message":"Server Error"}', { status: 500 }));
-    await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, failing);
+    await mount(<RepoChecks org={ORG} facts={facts} mine={mine} />, failing);
     const after = checks(failing);
     await tickBy(RECHECK_MS * 2);
     expect(checks(failing)).toBe(after);

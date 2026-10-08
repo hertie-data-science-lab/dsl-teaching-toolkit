@@ -21,7 +21,8 @@ import { WeekList } from '../src/screens/StudentWeek';
 import { HomeView } from '../src/screens/StudentHome';
 import { AskedList, TeamList, joinTeamUrl } from '../src/screens/StudentJoin';
 import { ReadingsView, materialHref } from '../src/screens/StudentMaterials';
-import { SetupView, forkOf } from '../src/screens/StudentSetup';
+import { forkOf } from '../src/model/fork';
+import { RepoChecks } from '../src/screens/StudentSetup';
 import { cloneCommand, joinPath, vscodeFolder } from '../src/model/open';
 import { Invitations } from '../src/screens/Home';
 import { GhMd } from '../src/ui/rendered';
@@ -441,7 +442,7 @@ describe('11. the instructors', () => {
   });
 });
 
-describe('12. Set up', () => {
+describe('12. Your repos (Profile)', () => {
   it('checks the fork: forked, none, or a same-named repo that is not the fork', async () => {
     const fake = new FakeGitHub()
       .on('GET', `/repos/${LOGIN}/materials`, { name: 'materials', fork: true, parent: { full_name: `${ORG}/materials` }, html_url: `https://github.com/${LOGIN}/materials` })
@@ -460,16 +461,13 @@ describe('12. Set up', () => {
     expect(cloneCommand('https://github.com/jane/materials', '', 'materials')).toBe('git clone https://github.com/jane/materials.git');
   });
 
-  it('lists the student’s own assignment repos with an Open button each, and nothing personal in the Student view', async () => {
+  it('lists the student’s own assignment repos with an Open button each', async () => {
     const f = await facts();
-    const html = render(<SetupView org={ORG} facts={f} mine={mine()} studentView={false} />);
-    expect(text(<SetupView org={ORG} facts={f} mine={mine()} studentView={false} />)).toContain('assignment-2-octo-student');
+    const html = render(<RepoChecks org={ORG} facts={f} mine={mine()} />);
+    expect(text(<RepoChecks org={ORG} facts={f} mine={mine()} />)).toContain('assignment-2-octo-student');
     // The clone command lives only in the Open menu's Clone ?, not in a block on the page.
     expect(html).not.toContain('<pre');
     expect(html).toContain('class="split small"');
-    const sv = text(<SetupView org={ORG} facts={f} mine={null} studentView />);
-    expect(sv).toContain('A student checks here that they have forked each materials repo');
-    expect(sv).not.toContain('git clone');
   });
 });
 

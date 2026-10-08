@@ -236,12 +236,12 @@ Each screen reads with the student's own account:
 | Schedule | rows by semester week (week 1 from `semester_start`, as the Dashboard counts; one group each for before and after the semester), coloured by kind; TBC dates; row details; file chips that open each file; readings (files, reading list, "to come") | their state on hand-out and due rows; rows for their repos marked |
 | A kind tab (`#kind-<kind>`) | the rows the kind's tab names (the engine's `tabs`, so a lecture whose readings shipped is on Readings too, with only its reading files), dated by date then undated, off-schedule ones included; heading, details, reading list, files, "not released yet", the pending readings note; the kind's own event (an exam) last | none |
 | Assignments (`#assignments`: "Your marks" first, then a card per assignment in due order, open while the student can hand it in; each title opens the assignment's own page `#assignment-<slug>`, the 0.9.0 site's page; the card's body is the page's) | the 0.9.0 page's blocks in its order and wording: released or hands-out day, due, points; the team steps while formation is open (1 Form your team: the sentence, "Teams so far" as Team, Members, Places left, never who; 2 Open your submission repo); the hand-in callout with the shape sentence, the cutoff sentence and "Late work: <rule> (until <cutoff>)."; the brief (folded on a card); the shape note; before the hand-out, the pending sentence | `<slug>-<handle>`, a team repo they can push to, the drop box, with the Open button; their team (from the repo, else from `GET /user/teams` by the `<slug>-` prefix, so a drop-box or external group finds it too) and its members; "Join or create a team" unfolds the Join team form for that assignment, with their requests under it; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos): its body, the newest receipt, a patch note as "pull before you continue", every comment in a fold; the CONTRIBUTIONS.md ask on a team repo; for a student-choice repo after the cutoff, the Settings link to make it public; `grades-<handle>/grades.yml`: the state chip reads the mark ("returned 18 / 20"), "Your marks" (mark, penalty, semester total, gradebook link), and on the page the mark with submitted, days late, penalty, feedback overall and per question, team and team feedback |
-| Materials | the materials repos; each session's readings | the repo's recursive tree (supporting folders such as `data/` and `img/` last, folded, under "Supporting files"); each file read when opened |
-| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, every 30 s after the first minute, for up to 5 minutes of the tab being shown, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decision 0027) |
+| All materials | the materials repos; each session's readings | each repo's recursive tree (supporting folders such as `data/` and `img/` last, folded, under "Supporting files"), each file row with its button row; each file read when opened, the tree staying beside it (a 280px column, above the file below 860px) with the open file marked (decision 0035 rule 11) |
+| Profile: Your repos in <course>, <semester> (one section per live semester they study, the first open; a folded one reads nothing until opened) | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, every 30 s after the first minute, for up to 5 minutes of the tab being shown, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decisions 0027, 0035 rule 9) |
 
 Marks, Join and Set up are no longer in the nav (decision 0035 rules 7-9): marks and team
-joining live in Assignments, and what the Set up row describes moves into Profile. `#marks` and `#join` open Assignments, `#setup`
-Profile.
+joining live in Assignments, Set up in Profile. `#marks` and `#join` open Assignments,
+`#setup` Profile.
 | Instructors | the cards, with an email only where the instructor chose to show it | none (a picture hosted on the semester site is read through the API and shown as `data:`) |
 
 Every screen also reads the person's role: `GET /orgs/{org}/teams/auditors/memberships/{login}`
@@ -274,6 +274,16 @@ of the student's own is read.
 
 An **archived semester** is history: the student's own repos (read-only) and their marks from
 the gradebook, from the same reads as a live one. No operation runs against it.
+
+**Every file link** on the student screens (schedule rows, kind tabs, All materials, the
+assignment page's files; the Updates box keeps names only) is the file's name, opening it in
+the console when it lives in a materials repo, else on GitHub, then a row of buttons (decision
+0035 rule 10): `source` (the GitHub blob), `online` (github.dev, in the student's fork when they
+forked the repo, else the org's) and `local` (the editor from Profile, at
+`<semester folder>/<repo>/<path>`). `online` and `local` only for a file an editor opens (not
+pdf, pptx, docx, xlsx, zip); `local` only once Profile has a folder and VS Code or an editor
+link with `{path}` (GitHub Desktop opens repos, not files). Whether the student forked a repo is
+read once per session, when a row first needs it, and Profile's fork check refreshes it.
 
 **Materials** open inside the console from the private copy: markdown and notebooks through
 GitHub's markdown endpoint (one call; its HTML is sanitised by GitHub), notebook outputs as
@@ -310,7 +320,7 @@ per team; `/user/teams` is read once per session, not per semester. This week an
 add two calls per private repo (receipts issue, comments). These student reads are reused for
 a minute (`MINE_FRESH_MS`), so moving between screens does not repeat them. A brief or the home text is
 rendered once per page load (one `/markdown` call, a brief only when its fold opens); a
-site-hosted card picture is one call. Set up adds one call per materials repo. A file costs
+site-hosted card picture is one call. Each Your repos section in Profile adds one call per materials repo, a fork answer the file buttons then reuse for the session. A file costs
 one call, a markdown file or notebook two (its rendering is kept by blob sha for the session), an HTML page one per bundle file it uses (at most
 80); file bytes are kept by blob sha (up to 64 MB), so reopening costs nothing. **Home's This
 week costs all of that again for each semester shown**: its site read, the repo list,

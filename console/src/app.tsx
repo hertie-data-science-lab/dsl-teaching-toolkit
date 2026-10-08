@@ -243,7 +243,8 @@ export function App({ state: s }: { state: AppState }) {
   } else if (screen === 'help') {
     body = <HelpScreen />;
   } else if (screen === 'profile') {
-    body = <SetupScreen org={ctx.course?.org} courses={[...courses.map((c) => ({ org: c.org, name: c.name })), ...semesters.map((k) => ({ org: k.org, name: k.courseName || k.termLabel }))]} />;
+    body = <SetupScreen org={ctx.course?.org} courses={[...courses.map((c) => ({ org: c.org, name: c.name })), ...semesters.map((k) => ({ org: k.org, name: k.courseName || k.termLabel }))]}
+      semesters={semesters.filter((k) => !k.archived && !semesterOver(k, s.now.value))} />;
   } else if (screen === 'home') {
     body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {

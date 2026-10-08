@@ -1,75 +1,68 @@
-// Set up: working on the materials and the assignments on the student's own machine
-// (decision 0027 rule 4). The console checks, with the student's token, whether they have
-// forked each materials repo (`GET /repos/{login}/{repo}`, which the public site never
-// could); each fork and each of the student's assignment repos then gets the same Open
-// button the instructors have. The folder and editor come from Profile, one for both roles:
-// a fork goes in its semester's folder, beside the assignment repos. While a read says a repo
-// is not forked yet, the check runs again by itself (`poll`): on coming back to the tab, every
-// 10 s and every 30 s after the first minute, for up to 5 minutes of the tab being shown;
-// "Check again" checks now and starts that again. A repo of the name that is not the fork, or
-// a read that failed, waits for "Check again".
+// Your repos, one section of Profile per live semester the person studies (decision 0035
+// rule 9; before it, the student Set up page of decision 0027 rule 4). The console checks, with
+// the student's token, whether they have forked each materials repo (`GET /repos/{login}/{repo}`,
+// which the public site never could); each fork and each of the student's assignment repos
+// then gets the same Open button the instructors have, in the semester's folder from Profile.
+// While a read says a repo is not forked yet, the check runs again by itself (`poll`): on
+// coming back to the tab, every 10 s and every 30 s after the first minute, for up to 5 minutes
+// of the tab being shown; "Check again" checks now and starts that again. A repo of the name
+// that is not the fork, or a read that failed, waits for "Check again". A section reads its
+// semester (facts, then the student's own repos) only once it is opened. The fork answers are
+// kept for the session (`model/fork.ts`), which the file button row reads too (rule 10).
 
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import type { GitHubClient } from '../github/client';
 import { poll } from '../github/poll';
-import type { Mine } from '../model/mine';
-import { yourSetup } from '../model/prefs';
+import { semesterName, type Semester } from '../model/discovery';
+import { forkOf, noteFork, type ForkState } from '../model/fork';
+import { readMine, type Mine } from '../model/mine';
 import type { SemesterFacts } from '../model/student';
 import { CheckLine, Loading, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
+import { useLoad } from '../ui/load';
 import { OpenButton } from '../ui/OpenButton';
-
-export type ForkState = { kind: 'forked'; url: string } | { kind: 'none' } | { kind: 'other'; url: string };
-
-/** Whether `login` has a fork of `org/repo` under the same name: a repo of that name that is not its fork is `other`. */
-export async function forkOf(client: GitHubClient, login: string, org: string, repo: string): Promise<ForkState> {
-  const r = await client.getRepo(login, repo);
-  if (!r) return { kind: 'none' };
-  return r.fork && r.parent?.full_name.toLowerCase() === `${org}/${repo}`.toLowerCase() ? { kind: 'forked', url: r.html_url } : { kind: 'other', url: r.html_url };
-}
+import { studentData } from './Student';
 
 /** How often the fork check runs again while a repo is not forked, slower after a minute, and for how long. */
 export const RECHECK_MS = 10000;
 const RECHECK_LATER = { after: 60 * 1000, every: 30 * 1000 };
 export const RECHECK_FOR_MS = 5 * 60 * 1000;
 
-export function SetupView({ org, facts, mine, studentView }: { org: string; facts: SemesterFacts; mine: Mine | null; studentView: boolean }) {
+/** The fork check of each materials repo, then the Open button of each assignment repo. */
+export function RepoChecks({ org, facts, mine }: { org: string; facts: Pick<SemesterFacts, 'materialsRepos'>; mine: Mine | null }) {
   const env = useEnv();
   const login = env?.user.login ?? '';
   // Each press of Check again checks now and starts a new 5-minute round of re-checks.
   const [round, setRound] = useState(0);
   const repos = facts.materialsRepos;
   // The last answer stays shown while the check runs again, so a re-check does not flash.
-  const [forks, setForks] = useState<ForkState[] | null>(null);
+  const [found, setFound] = useState<ForkState[] | null>(null);
   useEffect(() => {
-    if (!env || studentView) return;
+    if (!env) return;
     const stop = new AbortController();
     void poll(async () => {
       const v = await Promise.all(repos.map((r) => forkOf(env.client, login, org, r)));
       if (stop.signal.aborted) return true;
-      setForks(v);
+      repos.forEach((r, i) => noteFork(env.client, login, org, r, v[i]));
+      setFound(v);
       return !v.some((f) => f.kind === 'none');
     }, {
       every: RECHECK_MS, backoff: RECHECK_LATER, maxMs: RECHECK_FOR_MS, maxMisses: 1, signal: stop.signal,
-      onMiss: () => setForks((v) => v ?? repos.map(() => ({ kind: 'none' as const }))),
+      onMiss: () => setFound((v) => v ?? repos.map(() => ({ kind: 'none' as const }))),
     });
     return () => stop.abort();
   }, [org, repos.join(','), round, !!env]);
   const checkAgain = () => setRound((r) => r + 1);
-  if (studentView) return <p class="footnote">A student checks here that they have forked each materials repo. Each fork and assignment repo then gets an Open button, using the folder and editor from their Profile.</p>;
   const own = mine ? Object.values(mine.units).filter((u) => u.repo) : [];
   return (
     <div class="stack">
-      {yourSetup(login)?.folder.trim() ? null : <p><a href="?#profile">Set your folder and editor in Profile</a></p>}
       {repos.map((repo, i) => {
-        const f = forks?.[i] ?? null;
-        const upstream = ghUrl(org, repo);
+        const f = found?.[i] ?? null;
         return (
-          <section class="panel section" aria-label={repo}>
-            <h2>{repo}</h2>
-            {!forks ? <Loading what="Checking your fork" />
+          <section class="your-repo" aria-label={repo}>
+            <h3>{repo}</h3>
+            {!found ? <Loading what="Checking your fork" />
               : f?.kind === 'forked' ? (
                 <>
                   <CheckLine cls="ok">
@@ -82,7 +75,7 @@ export function SetupView({ org, facts, mine, studentView }: { org: string; fact
                 <>
                   {f?.kind === 'other' ? <CheckLine cls="warn">You have a repo named <a href={f.url} target="_blank" rel="noopener">{login}/{repo} <Ext /></a> that is not a fork of this semester’s; fork under another name, or rename that one.</CheckLine> : null}
                   <p class="actions">
-                    <a class="btn small" href={`${upstream}/fork`} target="_blank" rel="noopener">Fork {repo} <Ext /></a>
+                    <a class="btn small" href={`${ghUrl(org, repo)}/fork`} target="_blank" rel="noopener">Fork {repo} <Ext /></a>
                     <button class="textlink" type="button" onClick={checkAgain}>Check again</button>
                   </p>
                 </>
@@ -91,8 +84,8 @@ export function SetupView({ org, facts, mine, studentView }: { org: string; fact
         );
       })}
       {own.length ? (
-        <section class="panel section" aria-labelledby="h-own">
-          <h2 id="h-own">Your assignment repos</h2>
+        <section class="your-repo" aria-labelledby={`h-own-${org}`}>
+          <h3 id={`h-own-${org}`}>Your assignment repos</h3>
           <ul class="rows">
             {own.map((u) => (
               <li>
@@ -104,5 +97,35 @@ export function SetupView({ org, facts, mine, studentView }: { org: string; fact
         </section>
       ) : null}
     </div>
+  );
+}
+
+/** One semester's repos: read once the section is opened. */
+function SemesterRepos({ org }: { org: string }) {
+  const env = useEnv();
+  const load = useLoad(
+    env
+      ? async () => {
+          const f = await studentData(env.client).facts(org);
+          // A role that cannot be read still leaves the fork check.
+          return { f, m: f ? await readMine(env.client, org, env.user.login, f.assignments).catch(() => null) : null };
+        }
+      : null,
+    [org],
+  );
+  if (load.kind === 'loading') return <Loading what="Reading your repos" />;
+  if (load.kind === 'failed') return <CheckLine cls="bad">The semester could not be read: {load.error}</CheckLine>;
+  if (!load.value.f) return <p class="footnote">This semester publishes no materials yet.</p>;
+  return <RepoChecks org={org} facts={load.value.f} mine={load.value.m} />;
+}
+
+/** "Your repos in <course>, <semester>": folded until opened, `open` for the first one. */
+export function YourRepos({ semester, open = false }: { semester: Semester; open?: boolean }) {
+  const [shown, setShown] = useState(open);
+  return (
+    <details class="panel section fold your-repos" open={open} onToggle={(e) => (e.currentTarget as HTMLDetailsElement).open && setShown(true)}>
+      <summary><h2>Your repos in {semesterName(semester)}</h2></summary>
+      {shown ? <SemesterRepos org={semester.org} /> : null}
+    </details>
   );
 }
