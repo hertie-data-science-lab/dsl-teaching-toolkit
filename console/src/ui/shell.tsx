@@ -13,7 +13,7 @@ import { problemCount } from '../model/readiness';
 import { STUDENT_SCREENS, studentHref } from '../router';
 import type { Loaded } from '../model/status';
 import { Crumbs, ghUrl } from './bits';
-import { Bldg, Ext, Gh, Pin } from './icons';
+import { Bldg, Ext, Gh, HertieMark, Pin } from './icons';
 
 function initials(u: GhUser): string {
   const n = (u.name || u.login).split(/\s+/).filter(Boolean);
@@ -48,7 +48,8 @@ function useTheme(): [boolean, () => void] {
 }
 
 /**
- * The app-level bar (decision 0021): the product name (a Home link) with the view, the person
+ * The app-level bar (decision 0021): the Hertie mark and the product name (a Home link,
+ * decision 0035 rule 2) with the view, the person
  * (a link to Profile), Guide, theme, Sign out. Nothing course- or semester-specific; the Menu
  * button only where there is a side nav to open. Its links start `?`: app-level pages are about
  * no course or semester, so they clear the query. With `titleHref` (an instructor previewing a
@@ -73,7 +74,7 @@ export function Topbar({ user, onSignOut, navOpen = false, onMenu, title, titleH
     <header class="topbar">
       <div class="topbar-inner">
         {user && onMenu ? <button class="pill-ghost menu-btn" type="button" aria-expanded={navOpen} aria-controls="sidenav-wrap" onClick={onMenu}>Menu</button> : null}
-        <a class="app-name" href="?#home">DSL Teaching Console{user && title && !titleHref ? <small>{title}</small> : null}</a>
+        <a class="app-name" href="?#home"><HertieMark />DSL Teaching Console{user && title && !titleHref ? <small>{title}</small> : null}</a>
         {user && title && titleHref ? <a class="app-view" href={titleHref}><span class="long">{title}</span><span class="short">Preview</span></a> : null}
         <div class="topbar-right">
           {user ? (

@@ -1,4 +1,5 @@
-// The mockup's icon set, as components.
+// The mockup's icon set, as components, and the Hertie mark the top bar carries (decision 0035
+// rule 2).
 
 export const Check = () => (
   <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.2 6.4l2.4 2.4 5.2-5.6" /></svg>
@@ -39,4 +40,23 @@ export const Folder = ({ open = false }: { open?: boolean }) => (
 /** A file in the file tree. */
 export const File = () => (
   <svg class="ft-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3" /></svg>
+);
+
+/**
+ * The Hertie School mark (the site theme's `assets/images/logo.png`) as inline SVG, crisp and
+ * transparent in both themes (decision 0035 rule 2): six pillars under a lintel, a crown over
+ * the middle two; the middle pillars and the crown red, the rest grey. Drawn in the
+ * original's 900-unit coordinates, cropped to the mark.
+ */
+export const HertieMark = () => (
+  <svg class="hertie-mark" viewBox="140 230 632 403" height="26" aria-hidden="true">
+    <g fill="#8f8578">
+      {[140, 250, 618, 728].map((x) => <rect x={x} y="345" width="44" height="288" />)}
+      <rect x="140" y="288" width="630" height="27" />
+    </g>
+    <g fill="#b2001e">
+      {[360, 508].map((x) => <rect x={x} y="345" width="44" height="288" />)}
+      <rect x="360" y="230" width="192" height="28" />
+    </g>
+  </svg>
 );
