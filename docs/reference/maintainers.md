@@ -167,7 +167,8 @@ Things whose *literal spelling* is depended on from outside Python:
   public website's one declaration (decision 0016): `enabled`, `source_repo`,
   `readings_mode`, `include_lectures`, `withhold` (`.releaseignore` syntax,
   `releaseignore.deny_lines`). The Publish website operation and the daily cron read
-  it and nothing else; `enabled: false` stops both. Seeded CREATE-ONLY and INSTRUCTOR-OWNED
+  it and nothing else (the semester site sync reads its `withhold` alone); `enabled:
+  false` stops both. Seeded CREATE-ONLY and INSTRUCTOR-OWNED
   by Bootstrap Course Org (off), schema in `console/schemas/opencourse.schema.json`. A
   site repo's `_publish-config.yml` is retired: the migration seeds `opencourse.yml` from it
   and a publish deletes it. A materials repo's `publish.yml` is NOT the open site's: it is
