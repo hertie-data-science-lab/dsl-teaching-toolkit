@@ -20,8 +20,9 @@ Nodes render via `_includes/materials_entry.html`, nested as deep as the release
 its header before editing. Sections are open by default when there are few enough to scan.
 {% endcomment %}
 {%- comment -%}
-Course-level documents first, unheaded: the syllabus and the README are not a section, and
-keying them by the repo they sit in listed each of them once per content repo.
+Course-level documents first, unheaded: the syllabus and the README are not a section. A
+name two content repos both hold is listed once per repo, as `<repo>/<name>` (site.py
+`_materials_index`), since they are two files.
 
 Through `file_link.html`, like every other file on the site: these are index entries with
 the same three fields as any leaf of the tree below, and rendering them by hand is how the
