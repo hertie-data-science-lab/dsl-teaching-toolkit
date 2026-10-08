@@ -1,12 +1,11 @@
 name: console-pages
 
 # Build the Instructor Console (console/) and publish it to GitHub Pages at
-# https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/, from main. The
-# feature/instructor-console trigger serves the console's build-out only: remove it once that
-# branch has merged to main.
+# https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/, from main. The second
+# branch is the current preview loop (decision 0034); drop it once that branch has merged.
 on:
   push:
-    branches: [main, feature/instructor-console]
+    branches: [main, feature/readiness-0034]
     paths: [console/**, .github/workflows/console-pages.yml]
   workflow_dispatch:
 
