@@ -96,8 +96,8 @@ export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, 
     const session = r.kind === 'lecture' || r.kind === 'lab';
     const shipped = r.released && r.links.length > 0;
     const look = { label: r.kind, cls: r.kind === 'lab' ? 'lab' : 'lec' };
-    if (r.kind === 'due' && ahead) add({ at, when: r.when, kind: 'due', text: `${what} is due`, screen: 'assignments' });
-    else if (r.kind === 'assignment' && at >= recent && at < end) add({ at, when: r.when, kind: 'hand_out', text: at <= now ? `${what} was handed out` : `${what} is handed out`, screen: 'assignments' });
+    if (r.kind === 'due' && ahead) add({ at, when: r.when, kind: 'due', text: `${what} is due`, screen: r.assignment ? `assignment-${r.assignment}` : 'assignments' });
+    else if (r.kind === 'assignment' && at >= recent && at < end) add({ at, when: r.when, kind: 'hand_out', text: at <= now ? `${what} was handed out` : `${what} is handed out`, screen: r.assignment ? `assignment-${r.assignment}` : 'assignments' });
     else if (session && ahead) add({ at, when: r.when, kind: 'release', ...look, text: shipped ? `${what}: materials released` : what, screen: shipped ? 'materials' : 'schedule' });
     else if (session && shipped && at >= recent && at < start) add({ at, when: r.when, kind: 'release', ...look, text: `${what}: materials released`, screen: 'materials' });
     else if (r.kind === 'exam' && ahead) add({ at, when: r.when, kind: 'exam', text: what, screen: 'schedule' });
@@ -111,14 +111,14 @@ export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, 
   const since = lastVisit ?? recent;
   for (const p of auditor ? [] : patches) {
     const at = Date.parse(p.when);
-    if (at > since && at <= now) add({ at, when: p.when, kind: 'patch', text: `Your instructors updated files in your ${titles.get(p.slug) ?? p.slug} repo: pull before you continue`, screen: 'assignments' });
+    if (at > since && at <= now) add({ at, when: p.when, kind: 'patch', text: `Your instructors updated files in your ${titles.get(p.slug) ?? p.slug} repo: pull before you continue`, screen: `assignment-${p.slug}` });
   }
   const updated = auditor ? null : mine?.gradebook?.updated;
   if (updated) {
     const at = Date.parse(updated);
     const marked = facts.assignments.filter((a) => isMarked(mine!.gradebook, a.slug));
     if (at >= recent && at <= now && marked.length) {
-      add({ at, when: updated, kind: 'marks', text: `Marks returned (${marked.map((a) => a.title).join(', ')})`, screen: 'marks' });
+      add({ at, when: updated, kind: 'marks', text: `Marks returned (${marked.map((a) => a.title).join(', ')})`, screen: marked.length === 1 ? `assignment-${marked[0].slug}` : 'assignments' });
     }
   }
   for (const a of facts.assignments) {
@@ -129,7 +129,7 @@ export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, 
       when: '',
       kind: 'teams',
       text: `Team formation is open for ${a.title}${a.teamFormation!.closes ? ` until ${closesWords(a.teamFormation!.closes, tz)}` : ''}`,
-      screen: 'join',
+      screen: `assignment-${a.slug}`,
       note: mine && !u?.team ? 'you have no team yet' : undefined,
     });
   }

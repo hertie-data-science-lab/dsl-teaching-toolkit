@@ -291,10 +291,10 @@ export function TeamsTab(p: TabProps) {
     <>
       <div class="page-head">
         <div>
-          <h2 class="h1">{assignmentTitle(a)} <Hint doc="09-release-assignment-to-cohort.md">Students form their own teams on the Join screen until the window closes; you can assign the rest here. Students without a team get no repo at hand out.</Hint></h2>
+          <h2 class="h1">{assignmentTitle(a)} <Hint doc="09-release-assignment-to-cohort.md">Students form their own teams on the assignment’s page until the window closes; you can assign the rest here. Students without a team get no repo at hand out.</Hint></h2>
           <p class="lede">{joined.length - free.length} of {joined.length} joined students in {cur.teams.length} teams; {free.length} without a team.{notJoined ? ` ${notJoined} students have not joined yet and cannot be placed.` : ''}</p>
         </div>
-        <div class="actions"><a class="btn outline" href={studentHref(p.cohort.org, 'join')}>Join screen, as students see it</a></div>
+        <div class="actions"><a class="btn outline" href={studentHref(p.cohort.org, `assignment-${teamsKey}`)}>Assignment page, as students see it</a></div>
       </div>
       {p.tabs}
       <div class="stack">
@@ -303,11 +303,11 @@ export function TeamsTab(p: TabProps) {
             <h2>Window</h2>
             <p>
               <span class={`chip ${window === 'open' ? 'ok' : ''}`}>{window === 'open' ? 'Open' : window === 'pending' ? 'Not open yet' : window === 'closed' ? 'Closed' : assigned ? 'You assign' : 'Never opens'}</span>{' '}
-              {window === 'open' ? `Students can form and join teams on the Join screen until ${fmtDay(closes, tz, year)}.`
+              {window === 'open' ? `Students can form and join teams on the assignment’s page until ${fmtDay(closes, tz, year)}.`
                 : window === 'pending' ? `Opens at hand out, ${fmtDay(opens, tz, year)}.`
                 : window === 'closed' ? 'Only you can change teams now.'
                 : assigned ? 'You assign every team here; students cannot form their own.'
-                : 'This assignment is handed out by hand, so students cannot form teams on the Join screen; assign them here.'}
+                : 'This assignment is handed out by hand, so students cannot form teams on the assignment’s page; assign them here.'}
             </p>
             {assigned ? null : <p class="footnote">The window runs from hand out until the late cutoff: the due date plus the late window.</p>}
             {window === 'open' && free.length ? <div class="actions"><OpButtons def={teamsWindow(cohortScope(p), asgRef(a, true), fmtDay(closes, tz, year))} small label={`Email ${free.length} without a team`} /></div> : null}

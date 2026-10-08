@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { Semester } from '../src/model/discovery';
 import { parseGradebook, type Mine } from '../src/model/mine';
 import type { SemesterAssignment, SemesterFacts } from '../src/model/student';
+import { weekItems } from '../src/model/week';
 import { parseHash, studentNavKey } from '../src/router';
 import { StudentScreen, studentScreen } from '../src/screens/Student';
 import { AssignmentPage, stateWord } from '../src/screens/StudentAssignment';
@@ -188,4 +189,10 @@ describe('the route', () => {
     expect(render(<StudentScreen semester={{ ...sem, archived: true }} screen="assignment" entry="a1" studentView={false} now={NOW} />)).toMatch(/<h2 class="h1">Assignments /);
   });
 
+  it('This week’s lines about one assignment open its page', () => {
+    const f = { ...facts([GROUP]), rows: [{ id: 'p:due', kind: 'due', when: '2026-10-12T23:59:00', allDay: false, title: 'Project', subtitle: '', details: '', assignment: 'p', released: true, links: [], tbc: false, readings: [], readingList: '', readingsPending: false, tabs: ['due'] }] };
+    const gb = parseGradebook("assignments:\n  p:\n    final_grade: '9'\n", '2026-10-07T08:00:00Z');
+    const lines = weekItems(f, mine({ units: {}, gradebook: gb }), NOW, [{ slug: 'p', when: '2026-10-08T08:00:00Z' }]);
+    expect(Object.fromEntries(lines.map((l) => [l.kind, l.screen]))).toEqual({ due: 'assignment-p', teams: 'assignment-p', marks: 'assignment-p', patch: 'assignment-p' });
+  });
 });
