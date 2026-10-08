@@ -11,8 +11,9 @@ One row's block, shared by every tab page so they read identically. The order is
   3. links    - the files, last. They used to sit up beside the heading, where they
                 crowded the title and made the description read as an afterthought.
 
-How a file link renders - the name, and the row of buttons after it - is `file_link.html`,
-shared with the Updates box.
+How a file link renders - the name to the hosted copy where there is one, and the row of
+`source | render | online | local` buttons after it - is `file_link.html`, shared with the
+Updates box and the All Materials tree.
 
 `include.section`, when given, is the singular section noun ("lecture", "lab", "reading")
 that selects which of the entry's links belong to this page, matched against each link's
@@ -36,7 +37,7 @@ keeps its name: it is a contract with the dsl-jekyll-theme, not a description of
 {%- capture links -%}
 {%- for link in entry.links -%}
 {%- if include.section == blank or link.section == include.section -%}
-<li>{% include file_link.html name=link.name url=link.url %}</li>
+<li>{% include file_link.html name=link.name url=link.url view_url=link.view_url %}</li>
 {%- endif -%}
 {%- endfor -%}
 {%- endcapture -%}

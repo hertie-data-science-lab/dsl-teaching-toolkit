@@ -1811,8 +1811,8 @@ class AssignmentPage(NamedTuple):
 
     def url(self, semester_org: str) -> str:
         """Where a student sees this assignment's teams and joins one: the semester's Join
-        screen in the student console (the site has no assignment pages, decision 0011
-        rule 5), else the semester site's home."""
+        screen in the student console, else the semester site's home. (The site's own
+        assignment page, `<stem>.html`, lists the teams too: decision 0035 rule 1.)"""
         return (
             policy.console_link(semester_org, "join")
             or f"https://{pages_repo(semester_org)}/"

@@ -13,7 +13,7 @@ import re
 import shutil
 import tempfile
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from functools import cache
@@ -65,25 +65,28 @@ _THEME_CONFIG = {
 }
 
 # The collections the shipped templates read (`site.lectures`, `site.assignments`,
-# `site.events`, `site.announcements`). A multi-line block rather than a scalar, so
-# `_upsert_config` writes it whole; a CONTRACT of templates/site/ rather than a
-# preference, and a site missing it builds green into empty pages - the worst way for
-# this to be wrong. `assignments` is data only: its entries are schedule rows, not pages.
+# `site.events`, `site.announcements`) and the layout an assignment page gets. Both are
+# multi-line blocks rather than scalars, so `_upsert_config` writes them whole; both are
+# a CONTRACT of templates/site/ rather than a preference, and a site missing either
+# builds green into empty pages - the worst way for this to be wrong.
 _COLLECTIONS_BLOCK = """collections:
   events:
     output: true
   lectures:
     output: true
   assignments:
-    output: false
+    output: true
   announcements:
     output: false
 """
 
-# No collection has a default layout any more: the one there was, `assignment`, rendered
-# the assignment pages a semester site no longer has (decision 0011 rule 5). Written as an
-# empty list rather than dropped, so a site synced before this loses the stale block.
-_DEFAULTS_BLOCK = "defaults: []\n"
+_DEFAULTS_BLOCK = """defaults:
+  - scope:
+      path: ""
+      type: "assignments"
+    values:
+      layout: "assignment"
+"""
 
 
 def slug(text: str) -> str:
@@ -98,6 +101,13 @@ def q(value: str) -> str:
     return " ".join(value.replace("\\", "\\\\").replace('"', "'").split())
 
 
+def liquid_raw(text: str) -> str:
+    """Fence faculty-written text that is inlined verbatim into a Jekyll document. A `{{`
+    or `{%` in it would otherwise run as Liquid, and a malformed tag fails the whole build;
+    `{% raw %}` renders it literally."""
+    return f"{{% raw %}}\n{text}\n{{% endraw %}}"
+
+
 def block(key: str, text: str) -> str:
     """A multi-line front-matter value as a YAML literal block - faculty-written text (a
     reading list) inlined verbatim, rather than folded onto one line by `q`.
@@ -106,7 +116,7 @@ def block(key: str, text: str) -> str:
     indentation from its first non-empty line, so a list that happens to start indented
     would make every following line look like the end of the block and break the whole
     file. Tabs are expanded for the same reason. Front matter is data, not a Liquid
-    template, so a `{{` in the text needs no fence.
+    template, so unlike the body route (`liquid_raw`) a `{{` in the text needs no fence.
 
     Always at column zero. A caller that needs the block nested under a parent key shifts
     the whole thing with `textwrap.indent` - a uniform shift, so the `|2` indicator still
@@ -161,13 +171,16 @@ def site_readme(org: str, semester: bool) -> str:
         f"| Path | Holds |\n"
         f"| --- | --- |\n"
         f"| `_lectures/` | one page per session and lab |\n"
-        f"| `_assignments/` | each assignment's hand-out and due rows |\n"
+        f"| `_assignments/` | one page per assignment, with its hand-out and due rows |\n"
         f"| `_events/` | exams, semester dates, display-only rows |\n"
         f"| `_data/people.yml` | the instructor cards |\n"
         f"| `_data/nav.yml` | the nav bar |\n"
         + (
-            "| `_data/materials.yml` | the syllabus the home page pins |\n"
+            "| `_data/materials.yml` | the syllabus the home page pins and the All "
+            "Materials index |\n"
             "| `_data/console.yml` | the banner's link to the student console |\n"
+            "| `files/` | the hosted copies of what the course's `publish.yml` makes "
+            "public |\n"
             if semester
             else ""
         )
@@ -175,7 +188,7 @@ def site_readme(org: str, semester: bool) -> str:
         + "| `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders |\n"
         + "| `.github/workflows/deploy.yml` | the Pages build |\n"
         + "| `_config.yml` | the course identity keys, the pinned theme, and the "
-        "`collections:` the layouts need |\n\n"
+        "`collections:`/`defaults:` the layouts need |\n\n"
         "Each collection is CLEARED and rewritten on every sync, so a file you add to one "
         "disappears on the next run. The tab pages are rewritten too - they are generated "
         "wrappers, so put your own words in `index.md`, or in a page of your own linked "
@@ -266,8 +279,8 @@ def _upsert_config(text: str, key: str, body: str) -> str:
     return new if n else text.rstrip("\n") + "\n\n" + written
 
 
-# The session pages. Their CONTENT is a layout in templates/site/ (`_layouts/kind.html`,
-# `materials.html`, `assignments.html`; the open-courseware site's `lectures.html`,
+# The tab pages. Their CONTENT is a layout in templates/site/ (`_layouts/kind.html`,
+# `assignments.html`, `materials.html`, `profile.html`; the open-courseware site's `lectures.html`,
 # `labs.html`, `readings.html`), so these are the front matter that points at one plus the
 # page's own intro line. Owned here, not left to the site template, because a template edit only
 # reaches orgs created after it - the rendering used to live as inline Liquid in each site
@@ -327,25 +340,52 @@ _PUBLIC_ROW_PAGES = (
     ),
 )
 
-# The pages and templates of the sections a semester site no longer has (decision 0011
-# rule 5: a public calendar only). The pages go only where the sync wrote them; the
-# templates and the hosted copies were always the sync's.
+# The tabs a semester site carries after its kind tabs (decision 0035 rule 1: the 0.9.0
+# site's Assignments, All Materials and Your Profile, restored).
+_SEMESTER_PAGES = (
+    _ThemePage(
+        "assignments.md",
+        "assignments",
+        "Assignments",
+        "/assignments/",
+        "fas fa-user-graduate",
+        # The layout says "No assignments yet." when the collection is empty, so this line
+        # is only ever shown beside an actual list.
+        "Assignments repos are only accessible to enrolled students.",
+    ),
+    _ThemePage(
+        "materials.md",
+        "materials",
+        "All Materials",
+        "/materials/",
+        "fas fa-folder-open",
+        # Deliberately not "everything released": a semester org also holds each student's
+        # private submission repo, which this must never list. See `site._indexable_repos`.
+        "All released course material so far; only accessible to enrolled "
+        "students/auditors.",
+    ),
+    _ThemePage(
+        "profile.md",
+        "profile",
+        "Your Profile",
+        "/profile/",
+        "fas fa-user-cog",
+        # The same slot as every other page's access rule, and this page has one of its
+        # own: it is the only page that holds anything of the reader's, and it holds it
+        # where nobody else - faculty included - can reach it.
+        "Saved in your local browser only.",
+    ),
+)
+
+# A page the sync wrote for a tab the PUBLIC site no longer has (its Assignments tab).
 _RETIRED_PAGES = re.compile(
     r"\A---\nlayout: (assignments|materials|profile)\ntitle: .*\npermalink: /"
 )
-RETIRED_TEMPLATES = (
-    "_layouts/assignment.html",
-    "_layouts/materials.html",
-    "_layouts/profile.html",
-    "_includes/materials_entry.html",
-    "_includes/open_in.html",
-)
-HOSTED_COPIES_DIR = "files"
 
 
 def retired_pages(site_wd: Path, names: Iterable[str]) -> tuple[str, ...]:
-    """Those of `names` that are a retired section's page the sync wrote (never one
-    somebody wrote by hand)."""
+    """Those of `names` that are a retired tab's page the sync wrote (never one somebody
+    wrote by hand)."""
     pages = []
     for name in names:
         try:
@@ -357,16 +397,8 @@ def retired_pages(site_wd: Path, names: Iterable[str]) -> tuple[str, ...]:
     return tuple(pages)
 
 
-def retired_sections(site_wd: Path) -> tuple[str, ...]:
-    """For a semester site's `SitePlan.retire`: its Assignments, All Materials and Your
-    Profile tabs (when the sync wrote them), the templates only they used, and the hosted
-    copies under `files/`."""
-    pages = retired_pages(site_wd, ("assignments.md", "materials.md", "profile.md"))
-    return (*pages, *RETIRED_TEMPLATES, HOSTED_COPIES_DIR)
-
-
 def console_yaml(semester_org: str) -> str:
-    """`_data/console.yml`: where the banner on every page sends a reader - this
+    """`_data/console.yml`: where the banner sends a reader - this
     semester's screens in the student console (the policy's `console_url`), or nothing when
     the institution runs none."""
     url = policy.console_link(semester_org)
@@ -467,11 +499,11 @@ def retired_kind_pages(present: Iterable[str], site_wd: Path) -> tuple[str, ...]
 
 
 def _site_pages(semester: bool, kinds: Iterable[str] = ()) -> tuple[_ThemePage, ...]:
-    """The pages this kind of site gets, in nav order: a semester site's kind tabs; the
-    public site's fixed row pages and its `/materials/` readings page (no Assignments:
-    a public site lists none)."""
+    """The pages this kind of site gets, in nav order: a semester site's kind tabs, then
+    Assignments, All Materials and Your Profile; the public site's fixed row pages and its
+    `/materials/` readings page (no Assignments: a public site lists none)."""
     if semester:
-        return kind_pages(kinds)
+        return (*kind_pages(kinds), *_SEMESTER_PAGES)
     return (*_PUBLIC_ROW_PAGES, _PUBLIC_MATERIALS_PAGE)
 
 
@@ -824,13 +856,20 @@ def _singular(label: str) -> str:
 
 @dataclass(frozen=True)
 class Link:
-    """One file link on a site row: the name a reader clicks, the `url` behind it, and
-    the file's or folder's `path` in its repo (the student file names it; the site's
-    front matter does not)."""
+    """One file link on a site row: the name a reader clicks, the `url` behind it, the
+    file's or folder's `path` in its repo (the student file names it; the site's front
+    matter does not), and - only when the semester site hosts a public copy of that file -
+    the `view_url` of the copy.
+
+    The templates tell the two destinations apart: the name opens `view_url` where there
+    is one (the rendered copy, which is the whole point of publishing it) and `url`
+    otherwise, with `url` shown beside it as `source`. Empty by default, because on every
+    site that publishes nothing every link has exactly one destination."""
 
     name: str
     url: str
     path: str = ""
+    view_url: str = ""
 
 
 def links_block(sections: list[tuple[str, list[Link]]]) -> str:
@@ -847,6 +886,9 @@ def links_block(sections: list[tuple[str, list[Link]]]) -> str:
     was showing; and a file genuinely named `reading - notes.pdf` released into `lectures/`
     matched both pages. A field the templates can test is the same routing without either.
 
+    `view_url:` is written only when the link has one, so a course that publishes nothing
+    gets the same three lines per link it has always got.
+
     Escaping is per FIELD, not over the pair: `q` escapes `\` and `"`, and a filename
     carrying a backslash (`\sigma.pdf`) is an invalid YAML escape that fails the whole
     Jekyll build."""
@@ -855,13 +897,14 @@ def links_block(sections: list[tuple[str, list[Link]]]) -> str:
         for link in links:
             rows.append(
                 f"    - url: {link.url}\n"
+                + (f"      view_url: {link.view_url}\n" if link.view_url else "")
                 + f'      name: "{q(link.name)}"\n'
                 + f'      section: "{q(_singular(label))}"'
             )
     return ("links:\n" + "\n".join(rows)) if rows else "links: []"
 
 
-def _ext(name: str) -> str:
+def file_ext(name: str) -> str:
     """A file name's extension, lowercased and without the dot ('' when it has none). Not
     `Path().suffix`, which would call the whole of `Makefile` an extension-less name but
     read `figure-1` in `figure-1.tar.gz` inconsistently with the allowlist faculty write."""
@@ -873,10 +916,49 @@ def gh_url(org: str, repo: str, branch: str, kind: str, path: str) -> str:
     return f"https://github.com/{org}/{repo}/{kind}/{branch}/{quote(path)}"
 
 
-def file_link(semester_org: str, repo: str, branch: str, path: str, name: str) -> Link:
-    """One released file as a link to its GitHub blob. The semester site hosts no copies
-    (decision 0011 rule 5): the student console opens files from the private repo."""
-    return Link(name, gh_url(semester_org, repo, branch, "blob", path), path)
+# Semester content repo -> the paths the semester site hosts a copy of under `files/<repo>/`
+# (`site._mirror_public`). The ONE record of what is hosted: every renderer reads it, so a
+# page cannot link a rendered copy that was never made.
+Hosted = Mapping[str, frozenset[str]]
+
+# Where a semester site serves the hosted copies, under its root. `files/`, never
+# `<repo>/`: `/materials/` is the All Materials page's own permalink, and a semester whose
+# content repo is called `materials` would otherwise take that page's URL.
+SITE_FILES_DIR = "files"
+
+# What is worth linking a hosted copy for - a rendered deck (html), plus pdf, on which the
+# browser opens its own viewer. Everything else (`ipynb`, `md`, `csv`) GitHub already
+# renders, so a second copy would only be a second place for it to go stale.
+DECK_EXTENSIONS = frozenset({"html", "htm"})
+RENDERED_EXTENSIONS = DECK_EXTENSIONS | {"pdf"}
+
+
+def view_url(semester_org: str, repo: str, path: str) -> str:
+    """Where the semester site serves its own copy of one published file. Absolute: the
+    templates prepend `site.baseurl` to anything without a scheme."""
+    return f"https://{pages_repo(semester_org)}/{SITE_FILES_DIR}/{repo}/{quote(path)}"
+
+
+def file_link(
+    semester_org: str,
+    repo: str,
+    branch: str,
+    path: str,
+    name: str,
+    hosted: Hosted | None = None,
+) -> Link:
+    """One released file as a link: the GitHub blob it always has, plus the site's own
+    hosted copy when the mirror actually made one AND a browser would render it
+    (`RENDERED_EXTENSIONS`). It reads what was COPIED rather than re-deciding what should
+    have been - a page cannot link a copy that does not exist."""
+    view = (
+        view_url(semester_org, repo, path)
+        if hosted
+        and file_ext(path) in RENDERED_EXTENSIONS
+        and path in hosted.get(repo, ())
+        else ""
+    )
+    return Link(name, gh_url(semester_org, repo, branch, "blob", path), path, view)
 
 
 # The link name for the escape hatch out of an allowlist: whatever the list does not
@@ -937,7 +1019,7 @@ def shape_links(
     sorted), files before folders, for a stable diff."""
     blobs = [b for b in blobs if not has_never_material_component(b.name)]
     if allow:
-        return [b for b in blobs if _ext(b.name) in allow] + [
+        return [b for b in blobs if file_ext(b.name) in allow] + [
             Link(_BROWSE_ALL, tree_base, base)
         ]
     files = [b for b in blobs if "/" not in b.name]
@@ -965,26 +1047,28 @@ def landed_links(
     path: str,
     allow: frozenset[str],
     readings: bool,
+    hosted: Hosted | None = None,
 ) -> tuple[list[Link], list[str]] | None:
     """(links, reading-list overlays) for what a copy into `repo/path` has landed, or None
     while nothing has: a file is one link, a folder its files as GitHub shows them
     (`shape_links`), the repo root the whole repo. `blobs` is every file of the repo,
     sorted. `readings` takes the reading-list overlay (`READINGS.md`) out of the links:
-    the row inlines its text. The ONE listing rule: the semester site and the student
-    file both read it."""
+    the row inlines its text. `hosted` (the semester site's alone) adds each hosted
+    copy's `view_url`. The ONE listing rule: the semester site and the student file both
+    read it."""
     path = "" if is_repo_root(path) else path.strip("/")
     if path and path in blobs:
         name = path.rsplit("/", 1)[-1]
         if readings and is_reading_overlay(name):
             return [], [path]
-        return [file_link(org, repo, branch, path, name)], []
+        return [file_link(org, repo, branch, path, name, hosted)], []
     prefix = f"{path}/" if path else ""
     inside = [b for b in blobs if b.startswith(prefix)]
     if not inside:
         return None
     overlays = [b for b in inside if readings and is_reading_overlay(b)]
     files = [
-        file_link(org, repo, branch, b, b[len(prefix) :])
+        file_link(org, repo, branch, b, b[len(prefix) :], hosted)
         for b in inside
         if b not in overlays
     ]

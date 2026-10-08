@@ -1052,14 +1052,13 @@ def review_plan(texts: dict[str, str]) -> list[str]:
 
 
 # ------------------------------------------------------------------ public website
-# Decision 0016: `publish.yml` in a materials repo is retired (the semester site is a
-# calendar, and the public website never read it), and the public website's settings move
-# from the `_publish-config.yml` a publish left in the site repo into the course's
-# `.github/opencourse.yml`. The step deletes every `publish.yml` and seeds `opencourse.yml`
-# once; the next publish deletes the old settings file.
-RETIRED_PUBLISH_FILE = "publish.yml"
+# Decision 0016: the public website's settings move from the `_publish-config.yml` a
+# publish left in the site repo into the course's `.github/opencourse.yml`. The step seeds
+# `opencourse.yml` once; the next publish deletes the old settings file. A materials repo's
+# `publish.yml` is left alone: it is the semester site's hosted-copy opt-in again
+# (decision 0035 rule 1).
 RETIRED_PUBLISH_CONFIG = "_publish-config.yml"
-PUBLISH_COMMIT = "migrate: retire publish.yml"
+PUBLISH_COMMIT = "migrate: seed opencourse.yml"
 
 
 def opencourse_from(config: str | None) -> OpenCourse:
@@ -3126,14 +3125,6 @@ class Course:
         )
 
     # public website ----------------------------------------------------------
-    def publish_files(self) -> list[str]:
-        """The materials repos that still carry a `publish.yml`."""
-        return [
-            repo
-            for repo in self.materials_repos()
-            if get_file_content(self.org, repo, RETIRED_PUBLISH_FILE) is not None
-        ]
-
     def opencourse_missing(self) -> bool:
         return get_file_content(self.org, ".github", OPENCOURSE_FILE) is None
 
@@ -3143,7 +3134,7 @@ class Course:
         )
 
     def website_done(self) -> bool:
-        return not self.publish_files() and not self.opencourse_missing()
+        return not self.opencourse_missing()
 
     def website_plan(self) -> list[str]:
         out = []
@@ -3158,27 +3149,17 @@ class Course:
                     else "off (no earlier publish settings)"
                 )
             )
-        out += [
-            f"{repo}/{RETIRED_PUBLISH_FILE}: deleted (retired)"
-            for repo in self.publish_files()
-        ]
         return out
 
-    def retire_publish(self) -> bool:
-        """Seed `opencourse.yml` (create-only: only while it is missing), then delete
-        every `publish.yml`."""
-        seeded = not self.opencourse_missing() or move_files(
+    def seed_opencourse(self) -> bool:
+        """Seed `opencourse.yml`, create-only: only while it is missing. A materials repo's
+        `publish.yml` is not touched (decision 0035 rule 1)."""
+        return not self.opencourse_missing() or move_files(
             self.org,
             ".github",
             {},
             PUBLISH_COMMIT,
             files={OPENCOURSE_FILE: opencourse_text(self.opencourse_seed()).encode()},
-        )
-        return seeded and all(
-            move_files(
-                self.org, repo, {}, PUBLISH_COMMIT, delete=[RETIRED_PUBLISH_FILE]
-            )
-            for repo in self.publish_files()
         )
 
     # re-render ---------------------------------------------------------------
@@ -3354,12 +3335,9 @@ class Course:
                 "public website",
                 done=self.website_done,
                 plan=self.website_plan,
-                do=self.retire_publish,
+                do=self.seed_opencourse,
                 verify=self.website_done,
-                rollback=(
-                    f"git revert the '{PUBLISH_COMMIT}' commit in each materials repo "
-                    f"and in {dotgithub}"
-                ),
+                rollback=f"git revert the '{PUBLISH_COMMIT}' commit in {dotgithub}",
             ),
             Step(
                 "assignment topic",

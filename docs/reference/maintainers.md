@@ -167,11 +167,13 @@ Things whose *literal spelling* is depended on from outside Python:
   public website's one declaration (decision 0016): `enabled`, `source_repo`,
   `readings_mode`, `include_lectures`, `withhold` (`.releaseignore` syntax,
   `releaseignore.deny_lines`). The Publish website operation and the daily cron read
-  it and nothing else; `enabled: false` stops both. Seeded CREATE-ONLY and INSTRUCTOR-OWNED
+  it and nothing else (the semester site sync reads its `withhold` alone); `enabled:
+  false` stops both. Seeded CREATE-ONLY and INSTRUCTOR-OWNED
   by Bootstrap Course Org (off), schema in `console/schemas/opencourse.schema.json`. A
-  materials repo's `publish.yml` and the site repo's `_publish-config.yml` are retired: the
-  migration deletes the first and seeds `opencourse.yml` from the second; a publish deletes
-  the second.
+  site repo's `_publish-config.yml` is retired: the migration seeds `opencourse.yml` from it
+  and a publish deletes it. A materials repo's `publish.yml` is NOT the open site's: it is
+  the semester site's opt-in list of files to host publicly under `files/` (decision 0035;
+  `site._mirror_public`), and `withhold` here is an extra deny filter on those copies.
 - **`course.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
   and the dest's DEFAULT branch is what students, the website and `propagate` read. The
   release commits onto `upstream` and merges it into the default one; a conflict aborts the
@@ -977,8 +979,8 @@ Promote.
 | materials `MAINTAINING.md`, `SYLLABUS.md.sample`, `SYLLABUS.sessions.md` | `.system/MAINTAINING.md`, `.system/SYLLABUS.md.sample`, `.system/SYLLABUS.sessions.md` (no longer written: the weekly plan now goes between markers in the syllabus itself, decision 0031); a whole-repo release skips `.system/` | every `course-materials-*` repo |
 | a `course-materials-*` name as the mark of a materials repo | the `dsl-materials` topic (the name stays the scaffold's default) | course org; the course step "materials topic" adds it |
 | an `assignment-*` name on a GitHub template as the mark of an assignment template; `assignment-<n>-<semester>`, CLI `scaffold assignment --number`, `--semester`, `--copy-from` | the `dsl-assignment` topic; `assignment-<name>`, `--name` (decision 0014: the number is the schedule entry's, access follows the schedule's citations) | course org; the course step "assignment topic" adds the topic (live templates keep their names); an untopicked one is NOT_MIGRATED in status.json |
-| a materials repo's `publish.yml`; the public site repo's `_publish-config.yml` | the course's `.github/opencourse.yml` (decision 0016) | every materials repo; the course step "public website" deletes each `publish.yml` and seeds `opencourse.yml` from `_publish-config.yml` (else off); the next publish deletes `_publish-config.yml` |
-| semester site Assignments, All Materials and Your Profile tabs, assignment pages, hosted copies under `files/`, team lists and member digests | none: the site is a public calendar (decision 0011 rule 5); the student console reads `student-status.json` | the site sync removes them (`site_repo.retired_sections`) |
+| the public site repo's `_publish-config.yml` | the course's `.github/opencourse.yml` (decision 0016) | the course step "public website" seeds `opencourse.yml` from `_publish-config.yml` (else off); the next publish deletes `_publish-config.yml`. A materials repo's `publish.yml` stays: it is the semester site's hosted-copy opt-in (decision 0035) |
+| semester site Assignments, All Materials and Your Profile tabs, assignment pages, hosted copies under `files/`, team lists and member digests (removed under decision 0011 rule 5) | restored as at 0.9.0 (decision 0035 rule 1), beside the kind tabs and the console banner; hosted copies follow a materials repo's `publish.yml`. Team members are published pseudonymously, as at 0.9.0: `site.member_digest` is SHA-256 of `<semester org>:<handle, lower-cased>` - salted with the org name, which is public, so a digest only resists casual reading; never a handle. `opencourse.yml`'s `withhold` is matched against the semester copy's paths, which equal the source's only while a release keeps paths unchanged; a broken `opencourse.yml` stops the hosting on that sync (no copy linked), never the sync itself | every semester site, on its next sync |
 | semester site rows keyed by the `NN_` folder ordinal; the `readings` section | one row per shown `releases:` entry, of its kind, numbered by `number:`, else the label (never a position, decision 0020); numbered readings joined to the lecture of that number, others their own row (`schedule_plan.site_rows`, decision 0013); unplanned kind folders as undated tab rows; tabs per kind; the pinned syllabus by `materials.yml` declaration, else the old root-file rule | every semester site, on its next sync |
 | semester topic `dsl-cohort` on an ARCHIVED semester | kept for ever: archived semesters are never migrated, and every sweep skips them (`discovery.semester_is_live`, `seed.refresh`) | - |
 | console op ids `cohort.check`, `cohort.preview_automation`, `cohort.archive`, `cohort.bootstrap`; op scope `cohort` | `semester.*`; scope `semester` | `console/schemas/ops.json` |
@@ -1075,7 +1077,7 @@ and the run settings out, recorded first in `.github/.system/migration-run-keys.
 the semesters, re-read with `parse_grading_spec` - course-owned, so here rather than per
 semester), template starter (`starter:` written into each live template's
 `grading_config.yml` from its answer markers, decision 0028),
-materials files, public website (every materials repo's `publish.yml` deleted; `.github/opencourse.yml`
+materials files, public website (`.github/opencourse.yml`
 seeded, create-only, from the site repo's `_publish-config.yml` when there is one - on, with its
 settings - else off), re-render (Refresh
 actions from the checkout, the course's own repos only -

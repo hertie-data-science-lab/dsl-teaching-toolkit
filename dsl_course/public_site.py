@@ -46,7 +46,6 @@ from .repos import (
 )
 from .site_repo import (
     PUBLISH_CONFIG,
-    RETIRED_TEMPLATES,
     ROW_NOUN,
     Link,
     SitePlan,
@@ -396,12 +395,10 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                 # writes its front matter before any site sees it.
                 **site_templates(),
             },
-            # The Assignments tab a public site no longer has, templates this toolkit no
-            # longer ships (a semester site's retired sections), and the settings file an
+            # The Assignments tab a public site no longer has, and the settings file an
             # older publish kept here: `opencourse.yml` holds them now.
             retire=(
                 *retired_pages(site_wd, ("assignments.md",)),
-                *RETIRED_TEMPLATES,
                 PUBLISH_CONFIG,
             ),
             commit=f"site: publish public course site from {source_repo}",

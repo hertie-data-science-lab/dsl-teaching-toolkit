@@ -219,6 +219,20 @@
     }
 }
 
+/* `· source` after a file the site hosts its own rendered copy of - the file's home on
+   GitHub, inside a sentence. The UPDATES box only: everywhere else a file link carries the
+   full `.file-btns` row below, but a row of buttons inside a bullet of prose would swamp
+   the bullet. Quieter than the name it follows, because the name is what a student opens.
+   */
+.file-actions {
+    font-size: 0.85em;
+    opacity: 0.7;
+
+    a {
+        white-space: nowrap;
+    }
+}
+
 /* The site's quiet aside - a line that explains rather than instructs, and steps back
    from the text it sits with. */
 %quiet-note {
@@ -226,8 +240,11 @@
     color: $grey-color-dark;
 }
 
-/* The row of buttons beside a file link (_includes/file_link.html): `source`, the file on
-   GitHub.
+/* The row of buttons beside a file link - `source | render | online | local`, the same
+   file wherever it can be had. `source` and `render` are written in Liquid
+   (_includes/file_link.html); `online` and `local` are appended by script once the browser
+   holds the profile they need (_includes/open_in.html), so a first visit shows the first
+   two alone.
 
    Outlined rather than filled, and small: this is the SAME button as the ones on
    /profile/, but a session page carries a dozen file rows and the All Materials tree
