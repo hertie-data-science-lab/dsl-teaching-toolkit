@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { verdictWords } from '../src/model/format';
 import {
-  bitesOf, displayChecks, displayTodos, materialsReadiness, needOf, problemCount, repoWords, stepNeed, stepState, templateReadiness, verdictOf, type VerdictItem,
+  bitesOf, displayChecks, displayTodos, materialsReadiness, needOf, problemCount, problemForRelease, releaseMark, repoWords, stepNeed, stepState, templateReadiness, verdictOf, type VerdictItem,
 } from '../src/model/readiness';
 import type { MaterialsCheck, Problem, Status, Todo } from '../src/model/types';
 import example from './fixtures/status.example.json';
@@ -125,5 +125,30 @@ describe('the status schema (contract B)', () => {
       semester: { ...STATUS.semester!, stage_need: { K7: 'suggested' }, todo: [{ id: 'site:home', kind: 'site', repo: 'site', text: 'The home page is still the placeholder.', screen: 'site', need: 'suggested' }], verdict: { state: 'fixing', problems: 1, missing: null, suggestions: 1, coming_up: 2 } },
     };
     expect(validateStatus(next)).toEqual([]);
+  });
+});
+
+describe('problemForRelease and releaseMark (decision 0034 §6)', () => {
+  const p = (id: string, entry: string, over: Partial<Problem> = {}): Problem => ({ ...at(NOW + 2 * DAY), id, fix: { repo: 'o/r', path: 'schedule.yml', line: 1, screen: 'schedule', entry }, ...over });
+  const status = (problems: Problem[]): Status => ({ ...STATUS, problems });
+
+  it('joins a release to the problem that holds it: its schedule id (whatever its fix names), else its own number problem', () => {
+    const unwritten = p('schedule:lecture_03:SOURCE_UNWRITTEN', 'course-materials');
+    expect(problemForRelease(status([p('kinds:lecture_03', 'lecture_03'), unwritten]), 'lecture_03')).toBe(unwritten);
+    const number = p('number:lecture:guest', 'guest');
+    expect(problemForRelease(status([p('number:lecture:4', 'guest'), number]), 'guest')).toBe(number);
+    expect(problemForRelease(status([p('kinds:guest', 'guest')]), 'guest')).toBeUndefined();
+  });
+
+  it('words a held release by when its problem bites, and a late one with no fault as late', () => {
+    const rel = (state: string) => ({ id: 's1', state, when: new Date(NOW + 2 * DAY).toISOString() });
+    expect(releaseMark(status([]), rel('planned'), NOW)).toBeNull();
+    expect(releaseMark(status([p('schedule:s1:SOURCE_MISSING', 's1', { when: new Date(NOW - DAY).toISOString() })]), rel('late'), NOW)).toMatchObject({ word: 'was skipped', bites: 'now', late: false });
+    expect(releaseMark(status([p('schedule:s1:SOURCE_MISSING', 's1')]), rel('will_be_skipped'), NOW)).toMatchObject({ word: 'will be skipped', bites: 'soon' });
+    expect(releaseMark(status([p('schedule:s1:SOURCE_MISSING', 's1', { bites: 'later' })]), rel('will_be_skipped'), NOW)).toMatchObject({ word: 'not ready yet', bites: 'later' });
+    expect(releaseMark(status([p('schedule:s1:LATE', 's1')]), rel('late'), NOW)).toMatchObject({ word: 'late', bites: 'now', late: true });
+    // A status that names no problem: late is late; a held one is worded by its own date.
+    expect(releaseMark(status([]), rel('late'), NOW)).toMatchObject({ word: 'late', late: true });
+    expect(releaseMark(status([]), { ...rel('will_be_skipped'), when: new Date(NOW + 30 * DAY).toISOString() }, NOW)).toMatchObject({ word: 'not ready yet' });
   });
 });

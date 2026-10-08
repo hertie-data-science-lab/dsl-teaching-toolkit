@@ -26,6 +26,7 @@ import { OutcomeView } from '../src/ops/Panel';
 import { ScreenBoundary } from '../src/ui/boundary';
 import { Footer, Sidenav, Topbar } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
+import { heldStatus } from './heldReleases';
 
 const STATUS = example as unknown as Status;
 const NOW = Date.parse('2026-09-23T10:00:00+02:00');
@@ -208,7 +209,9 @@ describe('S6 schedule and S11 release', () => {
     const out = html(<ScheduleScreen {...props()} />);
     expect(out).toContain('<span>Details</span>');
     expect(out).toContain('<i>random forests</i>');
-    expect(out).toContain('st-chip skip');
+    // s5 is beyond the horizon: not ready yet, dotted, with its Fix.
+    expect(out).toContain('<span class="st-chip later">not ready yet</span><a class="textlink" href="#schedule-s5">Fix</a>');
+    expect(out).not.toContain('st-chip skip');
     expect(out).toContain('<b>Exam</b>: Midterm');
     expect(out).toContain('<b>Lecture 5</b>: Trees and ensembles');
     expect(out).toContain('<b>Assignment 2</b>: Regression');
@@ -216,7 +219,7 @@ describe('S6 schedule and S11 release', () => {
   });
   it('opens the entry a Fix link points to', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
-    expect(out).toContain('trow lec fault current');
+    expect(out).toContain('trow lec later current');
     expect(out).toContain('class="entry"');
     expect(out).toMatch(/<option value="course-materials-f2026" selected>/);
     expect(out).toContain('id="e-d0-folder" list="folders-0" value="lectures/05_trees"');
@@ -242,7 +245,8 @@ describe('S6 schedule and S11 release', () => {
   it('renders a release with its source, destination and problem', () => {
     const t = text(<ReleaseScreen {...props({ entry: 's5' })} />);
     expect(t).toContain('Lecture 5 : Trees and ensembles');
-    expect(t).toContain('will be skipped');
+    // Beyond the horizon: the chip says not ready yet, dotted, not red.
+    expect(html(<ReleaseScreen {...props({ entry: 's5' })} />)).toContain('<span class="chip suggest">not ready yet</span>');
     expect(t).toContain(`${COURSE_ORG}/course-materials-f2026/lectures/05_trees`);
     expect(t).toContain(`${COHORT_ORG}/materials/lectures/05_trees`);
     // Said once: the chip and the problem card; the hint explains the page, the actions do not repeat the fix.
@@ -691,7 +695,8 @@ describe('explicit numbers (decision 0020)', () => {
   it('shows an entry with no number by its kind alone, says why it is skipped, and asks for the number', () => {
     const out = html(<ScheduleScreen {...props({ loaded: numbered, files: guestFiles, entry: 'guest' })} />);
     expect(out).toContain('<b>Lecture</b>: ');
-    expect(out).toContain('Give it a number first</span>');
+    // Fri 25 Sep is inside the horizon: a red `!`, will be skipped, and Fix to the entry.
+    expect(out).toContain('<span class="ex" aria-hidden="true">!</span><span class="st-chip skip">will be skipped</span><a class="btn small" href="#schedule-guest">Fix</a>');
     expect(out).toContain('Give it a number first; it cannot be released until it has one.');
     // Said once in the sheet: no problem card repeating it.
     expect(out).not.toContain('Give guest a number.');
@@ -712,5 +717,22 @@ describe('an announcement file', () => {
     const f = announcementFile('2026-10-05', 'Room change: B2.01');
     expect(readAnnouncement(f.content)).toEqual({ date: '2026-10-05', text: 'Room change: B2.01' });
     expect(readAnnouncement('---\r\ndate: 2026-10-05\r\n---\r\nNo class today.\r\n')).toEqual({ date: '2026-10-05', text: 'No class today.' });
+  });
+});
+
+describe('schedule chips by time (decision 0034 §6)', () => {
+  it('says was skipped, will be skipped, not ready yet and late, with the lede counting only the red', () => {
+    const loaded: Loaded = { kind: 'ready', sha: 's', stale: [], status: heldStatus(STATUS, COHORT_ORG) };
+    const out = html(<ScheduleScreen {...props({ loaded })} />);
+    const st = (id: string) => out.split(`data-entry="${id}"`)[1].split('</li>')[0].split('<span class="st">')[1];
+    expect(st('s2')).toBe('<span class="ex" aria-hidden="true">!</span><span class="st-chip skip">was skipped</span><a class="btn small" href="#schedule-s2">Fix</a></span>');
+    expect(st('s4')).toBe('<span class="ex" aria-hidden="true">!</span><span class="st-chip skip">will be skipped</span><a class="btn small" href="#schedule-s4">Fix</a></span>');
+    expect(st('s5')).toBe('<span class="st-chip later">not ready yet</span><a class="textlink" href="#schedule-s5">Fix</a></span>');
+    expect(st('s3')).toBe('<span class="ex" aria-hidden="true">!</span><span class="st-chip skip">late</span><a class="textlink" href="#release-s3">Details</a></span>');
+    expect(out).toContain('<li class="trow lec later" data-entry="s5">');
+    expect(text(<ScheduleScreen {...props({ loaded })} />)).toContain('One release was skipped. One release will be skipped as it stands. One release is not ready yet.');
+    // The entry sheet and the release page say it once, in the same word.
+    expect(html(<ScheduleScreen {...props({ loaded, entry: 's5' })} />)).toContain('<span class="chip suggest">not ready yet</span>');
+    expect(html(<ReleaseScreen {...props({ loaded, entry: 's2' })} />)).toContain('<span class="chip bad">was skipped</span>');
   });
 });

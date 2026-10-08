@@ -3,6 +3,7 @@
 import type { ComponentChildren } from 'preact';
 import { encPath } from '../github/client';
 import { PROBLEM_AREA, md, opLabel, ago } from '../model/format';
+import type { ReleaseMark } from '../model/readiness';
 import type { Operation, Outcome, Problem } from '../model/types';
 import { Alert, Check, Eye, Ext, Fail, Skip } from './icons';
 
@@ -119,6 +120,23 @@ export function fixHref(p: Problem): string | null {
   const f = p.fix;
   if (!f?.screen) return null;
   return `#${f.screen}${f.entry ? `-${f.entry}` : ''}`;
+}
+
+/**
+ * A release row's mark (decision 0034 §6): now or soon, a red `!`, the red time word and Fix;
+ * later, a dotted "not ready yet" and the same Fix; late, a red `!` and "late" (the caller links
+ * its Details). Fix goes where the problem card's does.
+ */
+export function ReleaseMarks({ m, entry }: { m: ReleaseMark; entry: string }) {
+  const red = m.bites !== 'later';
+  const href = (m.problem && fixHref(m.problem)) || `#schedule-${entry}`;
+  return (
+    <>
+      {red ? <span class="ex" aria-hidden="true">!</span> : null}
+      <span class={`st-chip ${red ? 'skip' : 'later'}`}>{m.word}</span>
+      {m.late ? null : <a class={red ? 'btn small' : 'textlink'} href={href}>Fix</a>}
+    </>
+  );
 }
 
 /** The problem cards. `cohort` marks the course's faults "(course)" on a semester's page. */

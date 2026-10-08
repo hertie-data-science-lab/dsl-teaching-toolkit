@@ -13,6 +13,7 @@ import { inWeeks, parseSchedule, scheduleRows, termOf, weekGroups, weekOf } from
 import type { Status } from '../src/model/types';
 import { CohortScreen, headerLine } from '../src/screens/Cohort';
 import example from './fixtures/status.example.json';
+import { heldStatus } from './heldReleases';
 
 const STATUS = example as unknown as Status;
 const TZ = 'Europe/Berlin';
@@ -153,8 +154,9 @@ describe('the Dashboard', () => {
     // One tabbed panel under the strip, Problems first and open (decision 0034).
     expect(tabs(h)).toEqual(['Problems', 'Coming up', 'Suggestions', 'Set aside', 'Setup']);
     expect(selectedTab(h)).toBe('Problems');
-    // An older status has no horizon: the next 7 days from now. s5 (8 Oct) is beyond them: not counted.
-    expect(cell(h, 5).querySelector('.wk-count')).toBeNull();
+    // An older status has no horizon: the next 7 days from now. s5 (8 Oct) is beyond them: a hollow count, not a red one.
+    expect(cell(h, 5).querySelector('.wk-count:not(.later)')).toBeNull();
+    expect(cell(h, 5).querySelector('.wk-count.later')!.textContent).toBe('1');
     expect(problemsText(h).some((t) => t!.includes('Session 5 cites'))).toBe(false);
     expect(h.querySelector('.p-any')!.textContent).toContain('Any time');
     expect(h.querySelector('.p-any')!.textContent).toContain('autograde: sometimes');
@@ -330,5 +332,57 @@ describe('the Dashboard and explicit numbers (decision 0020)', () => {
     expect(problemsText(h).some((t) => t!.includes('Give guest a number.'))).toBe(true);
     expect(h.textContent).toContain('Will be skipped: it has no number.');
     expect(h.querySelector('a[href="#schedule-guest"]')).not.toBeNull();
+  });
+});
+
+// ------------------------------------------------------------------ release marks by time (decision 0034 §6)
+
+describe('release rows by time (decision 0034 §6)', () => {
+  const marks = (li: Element) => ({
+    cls: li.className,
+    ex: !!li.querySelector('.ex'),
+    chip: li.querySelector('.st-chip')?.textContent,
+    chipCls: li.querySelector('.st-chip')?.className,
+    links: [...li.querySelectorAll('a.btn, a.textlink')].filter((a) => !a.closest('.ttl')).map((a) => `${a.textContent} ${a.getAttribute('href')} ${a.className}`),
+  });
+
+  it('marks the expanded strip: was skipped, will be skipped, not ready yet, late', () => {
+    const h = mount(heldStatus(STATUS, COHORT_ORG));
+    click(h.querySelector<HTMLButtonElement>('button.chev')!);
+    const row = (id: string) => h.querySelector(`.wk-timeline a[href="#schedule-${id}"]`)!.closest('li')!;
+    expect(marks(row('s2'))).toEqual({ cls: 'trow lec fault', ex: true, chip: 'was skipped', chipCls: 'st-chip skip', links: ['Fix #schedule-s2 btn small'] });
+    expect(marks(row('s4'))).toEqual({ cls: 'trow lec fault', ex: true, chip: 'will be skipped', chipCls: 'st-chip skip', links: ['Fix #schedule-s4 btn small'] });
+    // Later: muted stripe, dotted chip, the same Fix as a text link, and no red anywhere.
+    expect(marks(row('s5'))).toEqual({ cls: 'trow lec later', ex: false, chip: 'not ready yet', chipCls: 'st-chip later', links: ['Fix #schedule-s5 textlink'] });
+    expect(marks(row('s3'))).toEqual({ cls: 'trow lec fault', ex: true, chip: 'late', chipCls: 'st-chip skip', links: ['Details #release-s3 textlink'] });
+  });
+
+  it('marks the agenda rows the same way, and keeps the late sentence', () => {
+    const h = mount(heldStatus(STATUS, COHORT_ORG));
+    click(cell(h, 3)); // all weeks
+    const row = (id: string) => h.querySelector(`.grid-2 .panel a[href="#release-${id}"]`)!.closest('li')!;
+    expect(marks(row('s2'))).toMatchObject({ ex: true, chip: 'was skipped', links: ['Fix #schedule-s2 btn small', 'Details #release-s2 textlink'] });
+    expect(marks(row('s4'))).toMatchObject({ ex: true, chip: 'will be skipped', links: ['Fix #schedule-s4 btn small', 'Details #release-s4 textlink'] });
+    expect(row('s4').textContent).toContain('Will be skipped: its folder was not found.');
+    expect(marks(row('s5'))).toMatchObject({ ex: false, chip: 'not ready yet', chipCls: 'st-chip later', links: ['Fix #schedule-s5 textlink', 'Details #release-s5 textlink'] });
+    expect(row('s5').textContent).toContain('Not ready yet: its folder was not found.');
+    expect(marks(row('s3'))).toMatchObject({ ex: true, chip: 'late', links: ['Details #release-s3 textlink'] });
+    expect(row('s3').textContent).toContain('Late: due Mon 21 Sep, not released yet.');
+  });
+
+  it('counts the strip red for now and soon, hollow for later, red where a week has both', () => {
+    const s = heldStatus(STATUS, COHORT_ORG);
+    const later = { ...s.problems![0], id: 'schedule:s9:SOURCE_MISSING', bites: 'later' as const, when: '2026-10-02T10:00:00+02:00' };
+    const h = mount({ ...s, problems: [later, ...s.problems!] });
+    const badge = (w: number) => { const b = cell(h, w).querySelector('.wk-count'); return b ? `${b.className} ${b.textContent}` : null; };
+    expect(badge(2)).toBe('wk-count 1');
+    expect(badge(3)).toBe('wk-count 1');
+    expect(badge(4)).toBe('wk-count 1');
+    expect(badge(5)).toBe('wk-count later 1');
+    expect(badge(6)).toBeNull();
+    expect(cell(h, 5).getAttribute('aria-label')).toContain('; 1 not ready yet');
+    const legend = h.querySelector('.strip-legend')!;
+    expect(legend.textContent).toContain('2problems');
+    expect(legend.querySelector('.lg-count.later')!.parentElement!.textContent).toBe('2not ready yet');
   });
 });

@@ -9,11 +9,11 @@ import type { Assignment, Problem, Status } from '../model/types';
 import { checkAccess, checkNow, releaseEarly, type ReleaseRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { Release } from '../model/types';
-import { OpsList, ProblemCards, fixHref, ghUrl } from '../ui/bits';
+import { OpsList, ProblemCards, ReleaseMarks, fixHref, ghUrl } from '../ui/bits';
 import { Verdict, readinessTabs, type Link, type SetupItem } from '../ui/SetupPanel';
 import { DashboardTabs, showTab } from '../ui/DashboardTabs';
 import { useSetAside } from './SetAside';
-import { bitesOf, horizonDays, needOf, shownSteps, standing, stepAside, stepNeed, stepState, todoAside, verdictOf } from '../model/readiness';
+import { bitesOf, comingUp, horizonDays, needOf, releaseMark, shownSteps, standing, stepAside, stepNeed, stepState, todoAside, verdictOf, type ReleaseMark } from '../model/readiness';
 import { Hint } from '../ui/Hint';
 import { MoreMenu, WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -78,15 +78,27 @@ export function headerLine(status: Status, sched: Schedule | null, rows: Row[], 
 const KIND_ORDER = ['lec', 'lab', 'asg', 'exam', 'evt', 'term'];
 const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', term: 'semester date' };
 
-/** Problems dated in each term week, for the strip's red counts. */
-export function problemCounts(problems: Problem[], term: Term, tz: string): Map<WeekKey, number> {
-  const n = new Map<WeekKey, number>();
-  for (const p of problems) if (p.when) { const w = weekOf(p.when, term, tz); n.set(w, (n.get(w) ?? 0) + 1); }
-  return n;
+/** A week's badge on the strip: how many problems, and whether they are all later (hollow). */
+export interface WeekCount { n: number; later: boolean }
+
+/**
+ * Each term week's badge (decision 0034 §6): red, the problems now or soon dated in it; else
+ * hollow, its later ones. A week with both shows the red one.
+ */
+export function problemCounts(status: Status, term: Term, tz: string, now: number): Map<WeekKey, WeekCount> {
+  const tally = (list: Problem[]) => {
+    const n = new Map<WeekKey, number>();
+    for (const p of list) if (p.when) { const w = weekOf(p.when, term, tz); n.set(w, (n.get(w) ?? 0) + 1); }
+    return n;
+  };
+  const out = new Map<WeekKey, WeekCount>();
+  for (const [w, n] of tally(comingUp(status, now))) out.set(w, { n, later: true });
+  for (const [w, n] of tally(standing(status, now))) out.set(w, { n, later: false });
+  return out;
 }
 
 export function TermStrip({ rows, term, tz, today, counts, selected, onToggle }: {
-  rows: Row[]; term: Term; tz: string; today: string; counts: Map<WeekKey, number>; selected: WeekKey[]; onToggle: (w: number) => void;
+  rows: Row[]; term: Term; tz: string; today: string; counts: Map<WeekKey, WeekCount>; selected: WeekKey[]; onToggle: (w: number) => void;
 }) {
   const thisWeek = weekOf(today, term, tz);
   const cells = [];
@@ -95,16 +107,16 @@ export function TermStrip({ rows, term, tz, today, counts, selected, onToggle }:
     const inWeek = rows.filter((r) => r.when && weekOf(r.when, term, tz) === w);
     const kinds = new Set(inWeek.map((r) => TYPE_CLASS[r.type] ?? 'evt'));
     const rw = inWeek.some((r) => r.block === 'events' && /reading week/i.test(r.name));
-    const n = counts.get(w) ?? 0;
+    const c = counts.get(w), n = c?.n ?? 0;
     const now = w === thisWeek;
     const past = typeof thisWeek === 'number' ? w < thisWeek : thisWeek === 'after';
     const words = KIND_ORDER.filter((k) => kinds.has(k)).map((k) => KIND_WORD[k]);
     const cls = `wk${past ? ' past' : ''}${now ? ' now' : ''}${rw ? ' rw' : ''}`;
     cells.push(
       <button type="button" class={cls} aria-pressed={selected.includes(w)} onClick={() => onToggle(w)}
-        aria-label={`Week ${w}, from ${fmtShort(ws)}${rw ? ', reading week' : ''}${words.length ? `: ${words.join(', ')}` : ''}${n ? `; ${n} problem${n > 1 ? 's' : ''}` : ''}${now ? '; this week' : ''}`}>
+        aria-label={`Week ${w}, from ${fmtShort(ws)}${rw ? ', reading week' : ''}${words.length ? `: ${words.join(', ')}` : ''}${n ? (c!.later ? `; ${n} not ready yet` : `; ${n} problem${n > 1 ? 's' : ''}`) : ''}${now ? '; this week' : ''}`}>
         {now ? <span class="today" style={`left:${Math.round(((Math.max(0, Math.min(6, daysBetween(ws, today))) + 0.5) / 7) * 100)}%`} aria-hidden="true" /> : null}
-        {n ? <span class="wk-count" aria-hidden="true">{n}</span> : null}
+        {n ? <span class={`wk-count${c!.later ? ' later' : ''}`} aria-hidden="true">{n}</span> : null}
         <span class="wk-n">{rw ? 'RW' : w}</span>
         <span class="wk-d">{fmtShort(ws)}</span>
         <span class="wk-marks">{KIND_ORDER.filter((k) => kinds.has(k) && !(rw && k === 'evt')).map((k) => <i class={`m ${k}`} />)}</span>
@@ -117,13 +129,23 @@ export function TermStrip({ rows, term, tz, today, counts, selected, onToggle }:
       <div class="strip-legend">
         <span><i class="m lec" />Lecture</span><span><i class="m lab" />Lab</span><span><i class="m asg" />Assignment</span>
         <span><i class="m exam" />Exam</span><span><i class="m evt" />Event</span><span><i class="m term" />Semester date</span>
+        <span><span class="lg-count" aria-hidden="true">2</span>problems</span><span><span class="lg-count later" aria-hidden="true">2</span>not ready yet</span>
       </div>
     </div>
   );
 }
 
+/** A release row's mark (decision 0034 §6); null for any other row, or a release with nothing to fix. */
+export function rowMark(status: Status, r: Row, now: number): ReleaseMark | null {
+  const rel = r.block === 'releases' ? (status.releases ?? []).find((x) => x.id === r.entry) : undefined;
+  return rel ? releaseMark(status, rel, now) : null;
+}
+
+/** A schedule row's stripe: red for a mark now or soon (or late), muted for a later one. */
+export const markClass = (m: ReleaseMark | null) => (!m ? '' : m.bites === 'later' ? ' later' : ' fault');
+
 /** The expanded strip: every week of the term, read-only; each entry opens the Schedule editor. */
-function Timeline({ rows, term, tz, year }: { rows: Row[]; term: Term; tz: string; year: number }) {
+function Timeline({ rows, term, tz, year, status, now }: { rows: Row[]; term: Term; tz: string; year: number; status: Status; now: number }) {
   return (
     <div class="wk-timeline">
       {weekGroups(rows, (r) => r.when, term, tz, 'all').map((g) => {
@@ -133,14 +155,17 @@ function Timeline({ rows, term, tz, year }: { rows: Row[]; term: Term; tz: strin
           <section aria-label={g.label}>
             <h3 class="week-h">{g.label}{from}</h3>
             <ul class="timeline">
-              {g.rows.map((r) => (
-                <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${r.fault && r.block === 'releases' ? ' fault' : ''}`}>
-                  <span class="k">{TYPE_LABEL[r.type] ?? r.type}</span>
-                  <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'TBC'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}</span> : null}</span>
-                  <span class="ttl"><a href={`#schedule-${r.entry}`}><b>{r.ident}</b>: {r.name}</a></span>
-                  <span class="st"><span class="st-chip">{r.fault && r.block === 'releases' ? 'will be skipped' : r.state}</span></span>
-                </li>
-              ))}
+              {g.rows.map((r) => {
+                const m = rowMark(status, r, now);
+                return (
+                  <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}`}>
+                    <span class="k">{TYPE_LABEL[r.type] ?? r.type}</span>
+                    <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'TBC'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}</span> : null}</span>
+                    <span class="ttl"><a href={`#schedule-${r.entry}`}><b>{r.ident}</b>: {r.name}</a></span>
+                    <span class="st">{m ? <><ReleaseMarks m={m} entry={r.entry} />{m.late ? <a class="textlink" href={`#release-${r.entry}`}>Details</a> : null}</> : <span class="st-chip">{r.state}</span>}</span>
+                  </li>
+                );
+              })}
             </ul>
           </section>
         );
@@ -163,10 +188,13 @@ function RowItem({ r, status, p }: { r: Row; status: Status; p: CohortProps }) {
   if (r.block === 'releases') {
     const rel = releases.find((x) => x.id === r.entry);
     const ref = rel && r.when ? releaseRef(rel, tz, Number(r.when.slice(0, 4))) : null;
+    const m = rowMark(status, r, p.now);
+    const held = m ? `${m.word.charAt(0).toUpperCase()}${m.word.slice(1)}` : '';
     chip = 'Release';
-    detail = rel && !rel.source ? `${NOTHING_TO_RELEASE}.` : rel?.state === 'will_be_skipped' ? (needsANumber(status, rel.id) ? 'Will be skipped: it has no number.' : 'Will be skipped: its folder was not found.') : rel?.state === 'released' ? 'Released.' : rel?.state === 'late' ? `Late: due ${fmtDay(rel.when, tz)}, not released yet.` : 'Goes to students at its time; the site row goes live.';
+    detail = rel && !rel.source ? `${NOTHING_TO_RELEASE}.` : rel?.state === 'will_be_skipped' ? (needsANumber(status, rel.id) ? `${held}: it has no number.` : `${held}: its folder was not found.`) : rel?.state === 'released' ? 'Released.' : rel?.state === 'late' ? `Late: due ${fmtDay(rel.when, tz)}, not released yet.` : 'Goes to students at its time; the site row goes live.';
     buttons = (
       <>
+        {m ? <ReleaseMarks m={m} entry={r.entry} /> : null}
         {ref && rel?.state === 'planned' ? <OpButtons def={releaseEarly(cohortScope(p), ref)} small label={`Release ${r.ident} early`} /> : null}
         <a class="textlink" href={`#release-${r.entry}`}>Details</a>
       </>
@@ -447,13 +475,13 @@ function Overview(p: ReadyProps) {
             {/* The chevron before the heading (decision 0031 rule 11), as in the side nav. */}
             <span class="lead">
               <button type="button" class="chev" aria-expanded={expanded} aria-controls="dash-weeks" aria-label={expanded ? 'Show the week strip' : 'Show every week as a list'} onClick={() => setExpanded(!expanded)}><span class="arrow" aria-hidden="true" /></button>
-              <h2>Semester <Hint label="About the weeks">Pick one or more weeks to show only what falls in them; unpick them all to show every week. A red number counts that week's problems.</Hint></h2>
+              <h2>Semester <Hint label="About the weeks">Pick one or more weeks to show only what falls in them; unpick them all to show every week. A red number counts that week's problems; a hollow one, what is not ready yet there and becomes a problem later.</Hint></h2>
             </span>
           </div>
           <div id="dash-weeks">
             {expanded
-              ? <Timeline rows={rows} term={term} tz={tz} year={year} />
-              : <TermStrip rows={rows} term={term} tz={tz} today={today} counts={problemCounts(problems, term, tz)} selected={selected} onToggle={toggle} />}
+              ? <Timeline rows={rows} term={term} tz={tz} year={year} status={status} now={now} />
+              : <TermStrip rows={rows} term={term} tz={tz} today={today} counts={problemCounts(status, term, tz, now)} selected={selected} onToggle={toggle} />}
           </div>
         </section>
         <div ref={aside.ref}>
