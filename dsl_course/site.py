@@ -1372,14 +1372,28 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # source repo the plan names). Copied before a single row is rendered, so every
         # page that links a hosted copy links one that exists.
         # `opencourse.yml`'s `withhold` is a deny filter here too: what the course keeps
-        # off its open-courseware site is never hosted publicly on this one.
-        opencourse = read_opencourse(course_org)
-        hosted = _mirror_public(
-            site_wd,
-            semester_org,
-            _publish_policies(course_org, sched, content_repos),
-            opencourse.withhold if opencourse else (),
-        )
+        # off its open-courseware site is never hosted publicly on this one. Read only
+        # when something is declared public, and a file that cannot be read stops the
+        # hosting (the last sync's copies stand, linked from nothing), never the sync.
+        policies = _publish_policies(course_org, sched, content_repos)
+        hosted: Hosted = {}
+        if any(policies.values()):
+            try:
+                opencourse = read_opencourse(course_org)
+            except RuntimeError as exc:
+                log_err(
+                    f"{course_org}/.github/opencourse.yml could not be read, so no copy "
+                    f"is hosted on this sync: {exc}"
+                )
+            else:
+                hosted = _mirror_public(
+                    site_wd,
+                    semester_org,
+                    policies,
+                    opencourse.withhold if opencourse else (),
+                )
+        else:
+            hosted = _mirror_public(site_wd, semester_org, policies)
         rows, present = _site_rows(semester_org, planned, allow, live, kinds, hosted)
         log_step(
             f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} row(s) "

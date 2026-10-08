@@ -27,6 +27,7 @@ from dsl_course import (
     site_repo,
 )
 from dsl_course import schedule as schedule_mod
+from dsl_course.faults import Unusable
 from dsl_course.opencourse import OpenCourse
 from dsl_course.schedule import (
     ArchiveRow,
@@ -2794,13 +2795,14 @@ def test_only_a_file_a_link_will_open_is_copied(monkeypatch, origins, tmp_path):
 
 def test_what_the_open_site_withholds_is_never_hosted(monkeypatch, origins, tmp_path):
     # `opencourse.yml`'s `withhold` is an extra deny filter: a file the course keeps off
-    # its open-courseware site is not hosted publicly on a semester site either, bundle
-    # and all.
+    # its open-courseware site is not hosted publicly on a semester site either. Nothing
+    # here is on the denylist, so the withhold alone is what keeps each one back: a whole
+    # deck, and the bundle of a deck that is itself hosted.
     tree = {
         "lectures/01_a/slides.html": "deck",
-        "lectures/02_b/exam-review.html": "deck",
-        "lectures/02_b/exam-review_files/fig.svg": "<svg/>",
-        "lectures/03_c/solutions/key.pdf": "key",
+        "lectures/01_a/slides_files/fig.svg": "<svg/>",
+        "lectures/02_b/draft.html": "deck",
+        "lectures/02_b/draft_files/fig.svg": "<svg/>",
     }
     hosted, served = _mirror(
         monkeypatch,
@@ -2808,10 +2810,15 @@ def test_what_the_open_site_withholds_is_never_hosted(monkeypatch, origins, tmp_
         tmp_path,
         tree,
         _policy("lectures/**"),
-        withhold=("*exam*", "solutions/"),
+        withhold=("draft*", "slides_files/"),
     )
     assert served == ["materials/lectures/01_a/slides.html"]
     assert hosted["materials"] == frozenset({"lectures/01_a/slides.html"})
+    # Without the withhold, all four would be hosted.
+    _hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, _policy("lectures/**")
+    )
+    assert len(served) == 4
 
 
 def test_the_sync_hands_the_open_sites_withhold_list_to_the_mirror(
@@ -2826,8 +2833,36 @@ def test_the_sync_hands_the_open_sites_withhold_list_to_the_mirror(
         "_mirror_public",
         lambda wd, org, policies, withhold=(): seen.append(withhold) or {},
     )
+    monkeypatch.setattr(
+        site, "_publish_policies", lambda *a: _policy("lectures/**/*.html")
+    )
     _plan(monkeypatch, tmp_path, _one_deploy(), trees={"materials": ()})
     assert seen == [("*exam*",)]
+
+
+def _broken_opencourse(org):
+    raise Unusable(".github/opencourse.yml is not valid YAML")
+
+
+def test_a_course_that_hosts_nothing_never_reads_opencourse_yml(monkeypatch, tmp_path):
+    # No publish.yml, so no withhold to apply: a broken opencourse.yml is the open
+    # site's problem and must not touch this sync.
+    monkeypatch.setattr(site, "read_opencourse", _broken_opencourse)
+    plan = _plan(monkeypatch, tmp_path, _one_deploy(), trees={"materials": ()})
+    assert "materials.md" in plan.files
+
+
+def test_a_broken_opencourse_yml_stops_the_hosting_not_the_sync(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setattr(site, "read_opencourse", _broken_opencourse)
+    monkeypatch.setattr(
+        site, "_publish_policies", lambda *a: _policy("lectures/**/*.html")
+    )
+    monkeypatch.setattr(site, "_mirror_public", _never_cloned)
+    plan = _plan(monkeypatch, tmp_path, _one_deploy(), trees={"materials": ()})
+    assert "materials.md" in plan.files
+    assert "no copy is hosted" in capsys.readouterr().err
 
 
 def test_a_repo_no_longer_released_into_loses_its_copies(
