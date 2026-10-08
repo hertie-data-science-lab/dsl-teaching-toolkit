@@ -8,3 +8,6 @@ course_orgs:
   - hertie-intro-to-data-science-c11
   - hertie-maths-data-science-C23
   - hertie-nlp-e1282
+  # Throwaway staging copies of NLP and Maths for the console preview; delete when done.
+  - DELETE-nlp-e1282
+  - DELETE-maths-C23
