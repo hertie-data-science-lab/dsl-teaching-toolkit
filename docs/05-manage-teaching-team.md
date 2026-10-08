@@ -102,7 +102,7 @@ Worked example: [`example-course/semester-org/instructors.yml`](../example-cours
 
 - **Time-boxed:** do nothing, or bring the `end` date forward.
 - **Immediately:** delete their entry (or set `end` to yesterday) and push. The dispatch on that push revokes within a minute or two.
-- **Do not use the GitHub Teams UI.** A hand-add to `course-admin`, `instructors` or `instructors-<semester>` is reverted by the next sync, and a hand-*removal* of someone still named in the config is re-added. The file is the truth. Assignment teams are secret, so only org owners see them there; the student console's Join screen lists them.
+- **Do not use the GitHub Teams UI.** A hand-add to `course-admin`, `instructors` or `instructors-<semester>` is reverted by the next sync, and a hand-*removal* of someone still named in the config is re-added. The file is the truth. Assignment teams are secret, so only org owners see them there; each assignment's page in the student console lists them.
 
 ## What the access actually reaches
 

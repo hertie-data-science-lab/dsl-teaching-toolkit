@@ -24,7 +24,7 @@ release anything there. Being a course admin, conversely, grants nothing central
 | **Admin**, course-wide | course org `.github/dsl-course.yml` → `people:` `course_admins` (or the `admin` input at bootstrap) | **course** - once, for all years | `course-admin` team on the course org **and mirrored into every semester org** |
 | **Push**, one year's content | that semester's `semester-config/instructors.yml` → `instructors` / `teaching_assistants` | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>` team |
 | **Read** on released materials | `semester-config/students.csv` | semester | `students` or `auditors` team (`role` column) |
-| **Write** on a shared project repo | `semester-config/teams.csv` | semester | `<assignment>-<team>` team (secret; the student console's Join screen is the list) |
+| **Write** on a shared project repo | `semester-config/teams.csv` | semester | `<assignment>-<team>` team (secret; the assignment's page in the student console is the list) |
 
 `course_admins` is deliberately **course-level**: a course director should not be re-declared each
 year, and their admin rights need to span every semester. Instructors and TAs are deliberately
