@@ -2597,8 +2597,8 @@ def test_a_late_release_with_no_other_problem_is_a_now_problem():
     (problem,) = [p for p in doc["problems"] if p["id"] == "schedule:s3:LATE"]
     assert problem["text"] == "s3 was due Thu 24 Sep and has not gone out."
     assert problem["bites"] == "now"
-    assert problem["fix"]["screen"] == "schedule"
-    assert problem["fix"]["entry"] == "s3"
+    # The fix is Release now on the release's own screen, not the schedule editor.
+    assert (problem["fix"]["screen"], problem["fix"]["entry"]) == ("release", "s3")
     assert doc["semester"]["stages"]["K4"] == "problem"
     # A late release some other problem explains is told once.
     doc = _render(

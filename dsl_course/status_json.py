@@ -2137,7 +2137,8 @@ def late_problems(
 ) -> list[dict]:
     """Decision 0034: a release whose moment has passed and that has not gone out, with no
     other problem to say why (`skip`: the entries another problem already holds back, its
-    `release`) - a missed run, a failed one. Stands now."""
+    `release`) - a missed run, a failed one. Stands now. Its fix is the release's own
+    screen (Details, Release now), not the schedule editor."""
     out = []
     late = {r["id"] for r in releases if r["state"] == "late"}
     for r in facts.sched.releases:
@@ -2157,7 +2158,7 @@ def late_problems(
                 "release": r.label,
                 "text": f"{r.label} was due {_day(moment)} and has not gone out.",
                 "stops": "Students do not have it yet; release it now.",
-                "fix": _schedule_fix(facts.org, r.label, None),
+                "fix": {**_schedule_fix(facts.org, r.label, None), "screen": "release"},
                 "when": moment.isoformat(),
             }
         )
