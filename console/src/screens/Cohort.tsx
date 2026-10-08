@@ -434,7 +434,7 @@ function Overview(p: ReadyProps) {
   const tiered = useMemo(() => tier(status, now), [status, now]);
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const problems = standing(tiered);
-  const aside = useSetAside({ org: p.course.org, files: p.files, write: p.course.write });
+  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.courseMigrated, write: p.course.write });
   const items = semesterItems(status, tiered, aside.list);
   const [tab, setTab] = useState('problems');
   const coming = comingRows(status, tiered);
