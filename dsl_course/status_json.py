@@ -1800,8 +1800,9 @@ def run_settings(spec: grades.GradingSpec) -> dict[str, dict]:
 def render_assignments(
     facts: SemesterFacts, problems: list[dict], now: datetime
 ) -> list[dict]:
-    """One row per assignment the schedule declares."""
-    flagged = _problem_entries(problems)
+    """One row per assignment the schedule declares. `problem`: a `now` or `soon` problem
+    names it or its template (a `later` one is coming up, not wrong yet)."""
+    flagged = _problem_entries(_biting(problems))
     templates = handed_out_assignments(list(facts.listing.values()))
     sheet_specs = {}
     for k, e in facts.sched.assignments.items():

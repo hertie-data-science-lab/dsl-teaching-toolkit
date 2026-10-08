@@ -397,6 +397,8 @@ def test_the_contract_example_marks_k5_now_and_k4_and_c5_once_they_near():
     assert doc["problems"][2]["bites"] == "soon"
     assert doc["course"]["stages"]["C5"] == "problem"
     assert doc["course"]["ready"] is False
+    assignment = next(a for a in doc["assignments"] if a["slug"] == "assignment-3")
+    assert assignment["problem"] is True
     # s5 has its own problem, so its passed moment is no second "late" one.
     assert len(doc["problems"]) == 3
     doc = _render(*_contract_scenario())
@@ -423,8 +425,9 @@ def test_the_contract_example_marks_k5_now_and_k4_and_c5_once_they_near():
     assert template["stops"] == "Marking uses the toolkit's default for that value."
     release = next(r for r in doc["releases"] if r["id"] == "s5")
     assert release["state"] == "will_be_skipped"
+    # Its template's problem is still coming up: the assignment is not flagged yet.
     assignment = next(a for a in doc["assignments"] if a["slug"] == "assignment-3")
-    assert assignment["problem"] is True
+    assert assignment["problem"] is False
 
 
 def _course_block(course: status_json.CourseFacts) -> dict:
@@ -1830,8 +1833,13 @@ def test_an_unnumbered_release_will_be_skipped_and_an_assignment_says_so():
     assert states["lecture-3"] == "planned"
     assert states["week-reading"] == "planned"
     rows = {a["slug"]: a for a in doc["assignments"]}
-    assert rows["project"]["number"] is None and rows["project"]["problem"]
+    # Its hand-out (20 Oct) is beyond the horizon: no problem yet, then one.
+    assert rows["project"]["number"] is None and not rows["project"]["problem"]
     assert rows["assignment-2"]["number"] == 2
+    near = _render(
+        semester=_semester(sched=_sched(UNNUMBERED), dest_paths={}), now=_at(14)
+    )
+    assert {a["slug"]: a for a in near["assignments"]}["project"]["problem"]
     numbers = {r["id"]: r["number"] for r in doc["releases"]}
     assert numbers["guest"] is None and numbers["lecture-3"] == 3
 
@@ -2873,3 +2881,12 @@ def test_builders_date_a_template_problem_and_tier_never_rewrites_when():
         "later",
         "later",
     ]
+
+
+def test_only_a_biting_problem_flags_its_assignment():
+    course = _course()
+    course.templates[1].main_edited = "trees.py"  # assignment-3, handed out 20 Oct
+    rows = {a["slug"]: a for a in _render(course)["assignments"]}
+    assert rows["assignment-3"]["problem"] is False
+    rows = {a["slug"]: a for a in _render(course, now=_at(14))["assignments"]}
+    assert rows["assignment-3"]["problem"] is True
