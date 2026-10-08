@@ -87,11 +87,12 @@ set in its own `schedule.yml` (default: the institution's, Europe/Berlin and 60 
 `course_name` / `course_code` / `course_description` are the fields that reach every
 semester website - a push here re-syncs them all: [11](11-configure-cohort-site.md).
 
-`set_aside` lists the optional items of the course overview's Setup & To do that nobody needs
-(the console writes it from the circle before each line; Bring back removes the id): setup steps
-`C4`-`C6` and the to-dos that block nothing (weekly plan in the syllabus, withheld patterns
-reviewed). A required step or to-do, an unknown id, or an item done anyway is ignored. Unset,
-nothing is set aside.
+`set_aside` lists the suggestions nobody needs, on the course's and every semester's
+Dashboard (the console writes it from the circle before each Suggestions line; Bring back
+removes the id): setup steps `C4`-`C6`, the suggested to-dos (syllabus and its weekly plan,
+withheld patterns reviewed, course description) and the semesters' suggested to-dos (site home
+page, archive date, instructor emails). A needed item, an unknown id, or an item done anyway is
+ignored. Unset, nothing is set aside.
 
 `site_link_extensions` narrows what each row **links** on the **semester** sites,
 never what it ships. Unset (the default), a row lists the files at the root of each folder it
