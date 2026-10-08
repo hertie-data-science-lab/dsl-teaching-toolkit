@@ -10,7 +10,7 @@ import { fmtWhen } from '../model/format';
 import { gradebookUrl, isMarked, type Gradebook, type Mine, type Receipts } from '../model/mine';
 import { instant, myState, type SemesterFacts } from '../model/student';
 import { Ext } from '../ui/icons';
-import { AssignmentBody, MarkBody, StateChip, assignmentHref } from './StudentAssignment';
+import { AssignmentBody, MarkBody, StateChip, assignmentFiles, assignmentHref } from './StudentAssignment';
 
 export function AssignmentsView({ org, facts, mine, now, studentView, receipts, login = '', unknownRole = false }: {
   org: string; facts: SemesterFacts; mine: Mine | null; now: number; studentView: boolean;
@@ -39,7 +39,7 @@ export function AssignmentsView({ org, facts, mine, now, studentView, receipts, 
               {auditor ? null : <StateChip st={st} entry={studentView ? undefined : mine?.gradebook?.entries[a.slug]} />}
               {a.due ? <span class="a-due">Due {fmtWhen(a.due, tz, year)}{a.tbc ? ' (TBC)' : ''}</span> : null}
             </summary>
-            <AssignmentBody org={org} a={a} mine={mine} now={now} tz={tz} studentView={studentView} unknownRole={unknownRole} receipts={receipts} login={login} />
+            <AssignmentBody org={org} a={a} mine={mine} now={now} tz={tz} studentView={studentView} unknownRole={unknownRole} receipts={receipts} login={login} files={assignmentFiles(facts, a.slug)} repos={facts.materialsRepos} />
           </details>
         );
       })}

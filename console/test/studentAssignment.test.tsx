@@ -130,6 +130,14 @@ describe('the assignment page', () => {
     expect(text(page(A, null, { studentView: true }))).not.toContain('Mark');
   });
 
+  it('lists the files its rows carry with their button row, before the brief', () => {
+    const link = { name: 'data.csv', repo: 'materials', path: 'a1/data.csv', url: `https://github.com/${ORG}/materials/blob/main/a1/data.csv` };
+    const row = { id: 'a1:handout', kind: 'assignment', when: '2026-09-28T09:00:00', allDay: false, title: 'Assignment 1', subtitle: '', details: '', assignment: 'a1', released: true, links: [link], tbc: false, readings: [], readingList: '', readingsPending: false, tabs: ['assignment'] };
+    const out = render(<AssignmentPage slug="a1" org={ORG} facts={{ ...facts([A]), rows: [row] }} mine={mine()} now={NOW} studentView={false} receipts={{}} login={LOGIN} hint="" />);
+    expect(out).toMatch(/<ul class="session-files">.*data\.csv.*source.*<\/ul><article class="a-brief">/);
+    expect(render(page(A, mine()))).not.toContain('session-files');
+  });
+
   it('names an unknown assignment and links back to the list', () => {
     const out = render(<AssignmentPage slug="nope" org={ORG} facts={facts([A])} mine={null} now={NOW} studentView={false} receipts={{}} login={LOGIN} hint="" />);
     expect(out).toContain('This semester has no assignment nope.');

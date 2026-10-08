@@ -12,7 +12,7 @@ import { hostOf } from '../model/cascade';
 import { fmtDay, fmtWhen } from '../model/format';
 import { isMarked, patchNotes, repoUrl, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
 import { DEFAULT_TIMEZONE } from '../model/policy';
-import { MY_STATE_WORD, STUDENT_CHOICE, myState, type MyState, type SemesterAssignment, type SemesterFacts } from '../model/student';
+import { MY_STATE_WORD, STUDENT_CHOICE, myState, type FileLink, type MyState, type SemesterAssignment, type SemesterFacts } from '../model/student';
 import { formingAt, closesWords } from '../model/week';
 import { studentHref } from '../router';
 import { Md } from '../ui/bits';
@@ -20,10 +20,14 @@ import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { GhMd, LazyFold } from '../ui/rendered';
+import { FileList } from './StudentFiles';
 import { JoinRequests, TeamForm, TeamList } from './StudentJoin';
 
 /** The link to an assignment's own page. */
 export const assignmentHref = (org: string, slug: string) => studentHref(org, `assignment-${slug}`);
+
+/** Files the semester's rows for `slug` (its hand-out and due rows) carry, if any: listed with their button row (rule 10). */
+export const assignmentFiles = (facts: SemesterFacts, slug: string): FileLink[] => facts.rows.filter((r) => r.assignment === slug).flatMap((r) => r.links);
 
 /** The state chip's words: the mark itself once returned ("returned 18 / 20"). */
 export function stateWord(st: MyState, e: MarkEntry | undefined): string {
@@ -50,6 +54,9 @@ export interface BodyProps {
   login: string;
   /** On the page the brief is shown; on a card it is folded. */
   page?: boolean;
+  /** The assignment's released files (`assignmentFiles`) and the materials repos they may open in. */
+  files?: FileLink[];
+  repos?: string[];
 }
 
 /** The repo the shape sentences name: the student's own once found, else the shape's name for it. */
@@ -82,7 +89,7 @@ function DateLines({ a, tz, year }: { a: SemesterAssignment; tz: string; year: n
   );
 }
 
-export function AssignmentBody({ org, a, mine, now, tz, studentView, unknownRole = false, receipts, login, page = false }: BodyProps) {
+export function AssignmentBody({ org, a, mine, now, tz, studentView, unknownRole = false, receipts, login, page = false, files = [], repos = [] }: BodyProps) {
   const year = new Date(now).getFullYear();
   const auditor = mine?.auditor === true || unknownRole;
   const own = !studentView && !auditor;
@@ -124,6 +131,7 @@ export function AssignmentBody({ org, a, mine, now, tz, studentView, unknownRole
         </section>
       )}
       {rc && rc.thread.length ? <ThreadView receipts={rc} tz={tz} year={year} /> : null}
+      {files.length ? <FileList org={org} repos={repos} links={files} /> : null}
       {brief ? (page ? <article class="a-brief">{brief}</article> : <LazyFold summary="The brief">{() => brief}</LazyFold>) : null}
       {a.shapeNote && a.handedOut && !auditor ? <p class="shape-note"><em>{a.shapeNote}</em></p> : null}
       {a.shape === STUDENT_CHOICE && past && u?.repo ? (
@@ -271,7 +279,7 @@ export function MarkBody({ e }: { e: MarkEntry }) {
 }
 
 /** `#assignment-<slug>`: the page, with its own head (kicker and title, the state chip). */
-export function AssignmentPage({ slug, facts, hint, ...rest }: Omit<BodyProps, 'a' | 'tz' | 'page'> & { slug: string; facts: SemesterFacts; hint: string }) {
+export function AssignmentPage({ slug, facts, hint, ...rest }: Omit<BodyProps, 'a' | 'tz' | 'page' | 'files' | 'repos'> & { slug: string; facts: SemesterFacts; hint: string }) {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const a = facts.assignments.find((x) => x.slug.toLowerCase() === slug.toLowerCase());
   if (!a) return <p class="footnote">This semester has no assignment {slug}. <a href={studentHref(rest.org, 'assignments')}>All assignments</a></p>;
@@ -287,7 +295,7 @@ export function AssignmentPage({ slug, facts, hint, ...rest }: Omit<BodyProps, '
         </div>
         {auditor ? null : <StateChip st={st} entry={own ? rest.mine?.gradebook?.entries[a.slug] : undefined} />}
       </div>
-      <AssignmentBody {...rest} a={a} tz={tz} page />
+      <AssignmentBody {...rest} a={a} tz={tz} page files={assignmentFiles(facts, a.slug)} repos={facts.materialsRepos} />
     </>
   );
 }
