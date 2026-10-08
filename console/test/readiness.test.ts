@@ -103,6 +103,8 @@ describe('the verdict (the engine’s)', () => {
     expect(verdictWords(v!)).toBe('Needs fixing: 2 problems · 2 suggestions');
     const sem = verdictOf({ state: 'fixing', problems: 1, missing: null, suggestions: 0, coming_up: 3 }, 'semester', 0, 7);
     expect(verdictWords(sem!)).toBe('Needs fixing: 1 problem in the next 7 days · 3 coming up');
+    // The console's own counts win, and a semester tags its suggestions too (as the CLI).
+    expect(verdictWords(verdictOf({ state: 'fixing', problems: 1, missing: null, suggestions: 0, coming_up: 3 }, 'semester', 2, 7, 1)!)).toBe('Needs fixing: 1 problem in the next 7 days · 1 coming up · 2 suggestions');
     const open = verdictOf({ state: 'not_ready', problems: 0, missing: 'No instructor is declared in instructors.yml yet.', suggestions: 0 }, 'semester', 0, 7);
     expect(verdictWords(open!)).toBe('Not set up: no instructor is declared in instructors.yml yet');
     expect(verdictWords(verdictOf({ state: 'ready', problems: 0, missing: null, suggestions: 0, coming_up: 1 }, 'semester', 0, 14)!)).toBe('On track: nothing to fix in the next 14 days · 1 coming up');

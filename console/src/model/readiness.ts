@@ -153,15 +153,19 @@ export function stepItems(
 /** The open suggestions not set aside: the verdict's "· n suggestions" tag, counted from the rows as shown. */
 export const suggestionsCount = (items: { need: Need; state: ItemState; aside?: boolean }[]) => items.filter((i) => isSuggestion(i.need, i.state) && !i.aside).length;
 
-/** A course's or semester's verdict as the console words it: the engine's, with the scope, the horizon's days and the suggestions counted here. */
+/** A course's or semester's verdict as the console words it: the engine's, with the scope, the horizon's days, and the suggestions and (a semester) what is coming up counted here. */
 export interface Verdict extends VerdictState {
   scope: 'course' | 'semester';
   days: number;
 }
 
-/** The engine's verdict for a scope, or null when its status carries none (one tick at most): no verdict line then. */
-export function verdictOf(v: VerdictState | undefined, scope: 'course' | 'semester', suggestions: number, days = 7): Verdict | null {
-  return v ? { ...v, scope, days, suggestions } : null;
+/**
+ * The engine's verdict for a scope, or null when its status carries none (one tick at most): no
+ * verdict line then. `suggestions` and `comingUp` are the console's own counts, so the line
+ * agrees with the tab badges.
+ */
+export function verdictOf(v: VerdictState | undefined, scope: 'course' | 'semester', suggestions: number, days = 7, comingUp?: number): Verdict | null {
+  return v ? { ...v, scope, days, suggestions, ...(comingUp === undefined ? {} : { coming_up: comingUp }) } : null;
 }
 
 // --------------------------------------------------------------------------- repos

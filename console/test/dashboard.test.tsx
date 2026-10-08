@@ -324,6 +324,14 @@ describe('the Dashboard and the horizon (decision 0034)', () => {
     expect(tabCount(fine, 'Setup')).toBe('✓');
   });
 
+  it('tags the verdict with what is coming up and the suggestions, counted as the tabs count them', () => {
+    // The engine's tick-time counts (9 coming up, 4 suggestions) are stale: the line follows the tabs.
+    const archive = { id: 'schedule:archive_date', kind: 'schedule' as const, check: 'archive_date', repo: 'semester-config', text: 'The schedule sets no archive date.', screen: 'schedule', need: 'suggested' as const, optional: true, set_aside: false };
+    const h = mount({ ...STATUS, semester: { ...STATUS.semester!, todo: [archive], verdict: { ...STATUS.semester!.verdict!, coming_up: 9, suggestions: 4 } } });
+    expect([...h.querySelectorAll('.verdict .vtag')].map((t) => t.textContent)).toEqual([`${tabCount(h, 'Coming up')} coming up`, `${tabCount(h, 'Suggestions')} suggestion`]);
+    expect(h.querySelector('.verdict')!.textContent).toBe('!Needs fixing: 1 problem in the next 7 days1 coming up1 suggestion');
+  });
+
   it('takes the engine’s bites over its own reading of when', () => {
     const h = mount({ ...STATUS, problems: [{ ...STATUS.problems![0], bites: 'soon' }] });
     expect(problemsText(h).some((t) => t!.includes('Session 5 cites'))).toBe(true);

@@ -439,7 +439,7 @@ function Overview(p: ReadyProps) {
   const [tab, setTab] = useState('problems');
   const coming = comingRows(status, tiered);
   const days = horizonDays(status.horizon);
-  const verdict = verdictOf(status.semester?.verdict, 'semester', suggestionsCount(items), days);
+  const verdict = verdictOf(status.semester?.verdict, 'semester', suggestionsCount(items), days, coming.length);
   const late = (status.releases ?? []).filter((r) => r.state === 'late');
   const s = status.students;
   const ops = useOperations(status.operations, p.cohort.org);
