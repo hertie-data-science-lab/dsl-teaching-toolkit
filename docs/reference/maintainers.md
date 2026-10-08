@@ -421,9 +421,10 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   description is the course to-do `course:description`. K5 is done once the roster has a
   row (codes sent is the Students panel's meter), K6 once the site repo exists, K7 once the
   schedule sets an archive date.
-- **Time.** `horizon` (both files) is a rolling window from the tick, `{days, from, to}`,
-  its length the one constant `status_json.PROBLEM_HORIZON` (7 days); each problem
-  carries `bites`: `now` (moment passed, or none), `soon` (at most 7 days off), `later`. Only `now`/`soon` mark a stage or a verdict. An
+- **Time.** `horizon` (both files) is `{days}`, the rolling window's length, off the one
+  constant `status_json.PROBLEM_HORIZON` (7 days); no tick time, so an unchanged state
+  still makes no commit. Each problem carries `bites`: `now` (moment passed, or none),
+  `soon` (at most 7 days off), `later`. Only `now`/`soon` mark a stage or a verdict. An
   undated source fault is `later`; a course template's problems take the first citing
   hand-out (`template_moments`: this semester's in a semester file; across every live
   semester in the course file, `gather_moments`; none -> `later`), and a needed template

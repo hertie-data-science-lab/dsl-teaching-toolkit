@@ -377,11 +377,7 @@ def test_the_contract_example_marks_k5_now_and_k4_and_c5_once_they_near():
     # stands now, while s5 (Thu 8 Oct) and assignment-3's hand-out (20 Oct) are coming
     # up: listed, `later`, and no stage marked.
     doc = _render(*_contract_scenario())
-    assert doc["horizon"] == {
-        "days": 7,
-        "from": "2026-09-23T09:00:00+00:00",
-        "to": "2026-09-30T09:00:00+00:00",
-    }
+    assert doc["horizon"] == {"days": 7}
     assert [p["bites"] for p in doc["problems"]] == ["later", "now", "later"]
     assert doc["semester"]["stages"]["K4"] == "done"
     assert doc["semester"]["stages"]["K5"] == "problem"
@@ -2430,11 +2426,7 @@ def test_an_operation_with_no_run_is_left_out():
 
 def test_the_horizon_is_the_next_seven_days_from_the_tick():
     assert status_json.PROBLEM_HORIZON == timedelta(days=7)
-    assert status_json.horizon(NOW) == {
-        "days": 7,
-        "from": "2026-09-23T09:00:00+00:00",
-        "to": "2026-09-30T09:00:00+00:00",
-    }
+    assert status_json.horizon() == {"days": 7}
     # Both files carry it.
     assert status_json.render_course_file(_course(), NOW)["horizon"]["days"] == 7
 
@@ -2469,8 +2461,6 @@ def test_the_horizon_ignores_the_semester_dates():
     assert status_json.bites(before + timedelta(days=8), before) == "later"
     after = datetime(2027, 1, 10, 9, 0, tzinfo=UTC)
     assert status_json.bites(after + timedelta(days=3), after) == "soon"
-    doc = _render(now=before)
-    assert doc["horizon"]["from"] == before.isoformat()
 
 
 def test_the_three_semester_verdicts():
@@ -2751,3 +2741,28 @@ def test_an_opencourse_file_that_does_not_parse_is_a_problem_while_the_site_is_o
     assert doc["problems"] == []
     assert doc["course"]["stages"]["C6"] == "todo"
     assert validate(doc, schemas.status_schema()) == []
+
+
+def test_two_ticks_of_the_same_facts_render_the_same_bytes():
+    # The no-churn contract: the file carries no tick time, so a render ten minutes on
+    # makes no commit - with a `soon` problem standing in both.
+    soon = ConfigFault(
+        "releases.s3",
+        f"{COURSE}/course-materials-f2026/lectures/03_trees does not exist",
+        datetime(2026, 9, 24, 10, 0, tzinfo=BERLIN),
+        field="course_source_path",
+        kind=FaultKind.MISSING_PATH,
+        file="schedule.yml",
+        repo="course-materials-f2026",
+        path="lectures/03_trees",
+    )
+    course, semester = _contract_scenario()
+    semester.schedule_faults = [soon, *semester.schedule_faults]
+    first = _render(course, semester, NOW)
+    assert "soon" in [p["bites"] for p in first["problems"]]
+    later = _render(course, semester, NOW + timedelta(minutes=10))
+    assert status_json.dumps(first) == status_json.dumps(later)
+    course_file = status_json.render_course_file(course, NOW)
+    assert status_json.dumps(course_file) == status_json.dumps(
+        status_json.render_course_file(course, NOW + timedelta(minutes=10))
+    )

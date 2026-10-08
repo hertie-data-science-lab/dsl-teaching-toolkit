@@ -478,12 +478,9 @@ def status_schema() -> dict:
             {
                 "schema": {"type": "string", "enum": [STATUS_SCHEMA]},
                 "inputs": {"type": "object", "additionalProperties": nullable},
-                # Decision 0034: the rolling window from the tick (ISO datetimes) and its
-                # length in days; a problem dated inside it is `soon`.
-                "horizon": _obj(
-                    {"days": {"type": "integer"}, "from": _str(), "to": _str()},
-                    ("days", "from", "to"),
-                ),
+                # Decision 0034: the rolling window's length in days; a problem dated
+                # within it of the tick is `soon`. No tick time: the file has no moment.
+                "horizon": _obj({"days": {"type": "integer"}}, ("days",)),
                 "course": course,
                 "semester": semester,
                 "problems": {"type": "array", "items": problem},

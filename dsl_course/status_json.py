@@ -679,14 +679,12 @@ def problem_from_fault(
     return problem
 
 
-def horizon(now: datetime) -> dict:
-    """`status.json`'s `horizon` (decision 0034, amended): the rolling window from this
-    tick, `PROBLEM_HORIZON` long. The one place its length reaches a reader."""
-    return {
-        "days": PROBLEM_HORIZON.days,
-        "from": now.isoformat(),
-        "to": (now + PROBLEM_HORIZON).isoformat(),
-    }
+def horizon() -> dict:
+    """`status.json`'s `horizon` (decision 0034, amended): the rolling window's length,
+    the one place it reaches a reader. No tick time: the file carries no moment of its
+    own, so an unchanged state renders the same bytes and makes no commit; a reader
+    counts the window from its own clock."""
+    return {"days": PROBLEM_HORIZON.days}
 
 
 def bites(when: datetime | None, now: datetime) -> str:
@@ -2191,7 +2189,7 @@ def render_course_file(
     return {
         "schema": STATUS_SCHEMA,
         "inputs": course_inputs(course),
-        "horizon": horizon(now),
+        "horizon": horizon(),
         "course": block,
         "problems": _unique_ids(problems),
     }
@@ -2282,7 +2280,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
         "schema": STATUS_SCHEMA,
         "inputs": semester_inputs(facts, course),
         # Decision 0034: the rolling window a problem dated inside is `soon` in.
-        "horizon": horizon(now),
+        "horizon": horizon(),
         "course": course_block,
         "semester": {
             "org": facts.org,
