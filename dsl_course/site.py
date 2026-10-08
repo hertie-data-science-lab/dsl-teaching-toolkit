@@ -73,8 +73,10 @@ from .grades import load_grading_spec, spoken_day, team_cap, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
 from .materials import ASSETS_KIND, publishable
 from .materials import read as read_materials
+from .opencourse import read as read_opencourse
 from .public_site import publish as publish_public_site
 from .readings import demote_headings
+from .releaseignore import excludes
 from .releaseignore import parse as parse_patterns
 from .repos import (
     default_branch,
@@ -91,6 +93,7 @@ from .schedule_plan import (
 )
 from .site_repo import (
     DECK_EXTENSIONS,
+    RENDERED_EXTENSIONS,
     SITE_FILES_DIR,
     Hosted,
     Link,
@@ -232,30 +235,48 @@ def _bundle_prefix(path: str) -> str:
 
 
 def _public_selection(
-    src: Path, repo: str, paths: tuple[str, ...], specs: tuple[GitIgnoreSpec, ...]
+    src: Path,
+    repo: str,
+    paths: tuple[str, ...],
+    specs: tuple[GitIgnoreSpec, ...],
+    withhold: tuple[str, ...] = (),
 ) -> frozenset[str]:
     """Which paths of `repo` the site can host, out of its released tree.
 
-    Everything a policy matches - last match wins WITHIN one policy, which is what makes
-    `!lectures/09_*/**` carve a session back out - plus the `<stem>_files/` bundle beside
-    each matched deck: a rendered deck without its bundle loads with no figures and no
-    styles. The denylist (`materials.publishable`) gates every candidate, bundles
-    included, and cannot be written around.
+    What a policy matches - last match wins WITHIN one policy, which is what makes
+    `!lectures/09_*/**` carve a session back out - and only where a link will open the
+    copy: a file a browser renders (`RENDERED_EXTENSIONS`, html/htm/pdf), plus the
+    `<stem>_files/` bundle beside each matched deck, without which it loads with no
+    figures and no styles. A matched `.ipynb`, `.md` or `.csv` is not copied: GitHub
+    already renders it, and nothing would link the copy.
+
+    Two deny filters gate every candidate, bundles included, and cannot be written
+    around: the denylist (`materials.publishable`), and `opencourse.yml`'s `withhold`
+    (`withhold`, matched against the path in this copy) - a file kept off the
+    open-courseware site is never hosted publicly here either.
 
     A file GitHub would refuse on a push is dropped with a warning rather than failing the
     sync. So is anything that is not a regular file - `lstat`, so a symlink is judged as
     the link it is rather than as what it points at - and anything the clone does not
     have. Judged over the same tree the links are built from (`_repo_tree`); the clone is
     only where the bytes and the sizes come from."""
+
+    def allowed(path: str) -> bool:
+        return publishable(path) and not (
+            withhold and excludes(src, src / path, withhold)
+        )
+
     matched = {
         path
         for path in paths
-        if publishable(path) and any(spec.check_file(path).include for spec in specs)
+        if file_ext(path) in RENDERED_EXTENSIONS
+        and any(spec.check_file(path).include for spec in specs)
+        and allowed(path)
     }
     for path in list(matched):
         if file_ext(path) in DECK_EXTENSIONS:
             prefix = _bundle_prefix(path)
-            matched |= {a for a in paths if a.startswith(prefix) and publishable(a)}
+            matched |= {a for a in paths if a.startswith(prefix) and allowed(a)}
     keep = set()
     for path in matched:
         try:
@@ -275,7 +296,10 @@ def _public_selection(
 
 
 def _mirror_public(
-    site_wd: Path, semester_org: str, policies: dict[str, tuple[GitIgnoreSpec, ...]]
+    site_wd: Path,
+    semester_org: str,
+    policies: dict[str, tuple[GitIgnoreSpec, ...]],
+    withhold: tuple[str, ...] = (),
 ) -> Hosted:
     """Copy every publicly declared file of this semester's content repos into the site's
     own `files/<repo>/` tree, and say what actually landed there.
@@ -287,12 +311,22 @@ def _mirror_public(
     Deleted and rebuilt per repo on every sync, which is what makes unpublishing work:
     removing a pattern removes the copy. Only ever AFTER a successful clone - a site
     republished with every rendered deck deleted because one clone failed is a worse
-    outage than a copy one sync stale.
+    outage than a copy one sync stale. A `files/<repo>/` whose repo is no longer a key of
+    `policies` (the plan stopped releasing into it) goes too.
+
+    `withhold` is `opencourse.yml`'s list (`_public_selection`).
 
     Logs name repos and paths only: `policies` covers the release plan's declared
     destinations, never a student's repo."""
     hosted: dict[str, frozenset[str]] = {}
     root = site_wd / SITE_FILES_DIR
+    if root.is_dir():
+        for stale in sorted(root.iterdir()):
+            if stale.name not in policies:
+                if stale.is_dir():
+                    shutil.rmtree(stale)
+                else:
+                    stale.unlink()
     for repo in sorted(policies):
         served = root / repo
         if not policies[repo]:
@@ -309,7 +343,7 @@ def _mirror_public(
                     "site are left as the last sync made them"
                 )
                 continue
-            keep = _public_selection(src, repo, paths, policies[repo])
+            keep = _public_selection(src, repo, paths, policies[repo], withhold)
             if served.exists():
                 shutil.rmtree(served)
             if not keep:
@@ -1338,8 +1372,14 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # What this course declares PUBLIC, per release destination (`publish.yml` in the
         # source repo the plan names). Copied before a single row is rendered, so every
         # page that links a hosted copy links one that exists.
+        # `opencourse.yml`'s `withhold` is a deny filter here too: what the course keeps
+        # off its open-courseware site is never hosted publicly on this one.
+        opencourse = read_opencourse(course_org)
         hosted = _mirror_public(
-            site_wd, semester_org, _publish_policies(course_org, sched, content_repos)
+            site_wd,
+            semester_org,
+            _publish_policies(course_org, sched, content_repos),
+            opencourse.withhold if opencourse else (),
         )
         rows, present = _site_rows(semester_org, planned, allow, live, kinds, hosted)
         log_step(

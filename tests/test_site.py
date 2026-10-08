@@ -27,6 +27,7 @@ from dsl_course import (
     site_repo,
 )
 from dsl_course import schedule as schedule_mod
+from dsl_course.opencourse import OpenCourse
 from dsl_course.schedule import (
     ArchiveRow,
     AssignmentEntry,
@@ -65,6 +66,13 @@ def _individual_by_default(monkeypatch):
     refuses. Individual is what an unanswered read gives anyway; the one test about the
     group shape sets its own."""
     monkeypatch.setattr(site, "load_grading_spec", lambda *a, **k: _spec(""))
+
+
+@pytest.fixture(autouse=True)
+def _no_opencourse(monkeypatch):
+    """The course's `opencourse.yml` (its `withhold` filters the hosted copies) is a
+    course-org read; a course without one is what every test here but its own wants."""
+    monkeypatch.setattr(site, "read_opencourse", lambda org: None)
 
 
 @pytest.fixture(autouse=True)
@@ -2511,7 +2519,9 @@ def _policy(*patterns: str) -> dict[str, tuple]:
     return {"materials": (site.parse_patterns("\n".join(patterns)),)}
 
 
-def _mirror(monkeypatch, origins, tmp_path, tree: dict[str, str], policies):
+def _mirror(
+    monkeypatch, origins, tmp_path, tree: dict[str, str], policies, withhold=()
+):
     """Mirror a faked semester repo into a site checkout; return (hosted, what it serves).
 
     Called twice by the tests that are about a SECOND sync: the semester repo is seeded on
@@ -2522,7 +2532,7 @@ def _mirror(monkeypatch, origins, tmp_path, tree: dict[str, str], policies):
         site, "_repo_tree", lambda org, repo: ("main", tuple(sorted(tree)))
     )
     site_wd = tmp_path / "site"
-    hosted = site._mirror_public(site_wd, "Semester-f2026", policies)
+    hosted = site._mirror_public(site_wd, "Semester-f2026", policies, withhold)
     served = site_wd / site.SITE_FILES_DIR
     return hosted, sorted(
         p.relative_to(served).as_posix() for p in served.rglob("*") if p.is_file()
@@ -2756,3 +2766,81 @@ def test_the_sync_writes_the_restored_tabs_and_the_materials_index(
         name in plan.retire
         for name in ("assignments.md", "materials.md", "profile.md", "files")
     )
+
+
+NOTEBOOK = '{"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}\n'
+
+
+def test_only_a_file_a_link_will_open_is_copied(monkeypatch, origins, tmp_path):
+    # A copy exists only where a `view_url` will point at it: html/htm/pdf, and a matched
+    # deck's bundle. A matched notebook, markdown file or csv is GitHub's to render, and
+    # nothing would link a copy of it.
+    tree = {
+        "lectures/01_a/slides.html": "deck",
+        "lectures/01_a/slides_files/data.csv": "a,b",
+        "lectures/01_a/notes.pdf": "pdf",
+        "lectures/01_a/lab.ipynb": NOTEBOOK,
+        "lectures/01_a/notes.md": "notes",
+        "lectures/01_a/data.csv": "a,b",
+    }
+    hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, _policy("**"))
+    assert served == [
+        "materials/lectures/01_a/notes.pdf",
+        "materials/lectures/01_a/slides.html",
+        "materials/lectures/01_a/slides_files/data.csv",
+    ]
+    assert set(hosted["materials"]) == {p.split("/", 1)[1] for p in served}
+
+
+def test_what_the_open_site_withholds_is_never_hosted(monkeypatch, origins, tmp_path):
+    # `opencourse.yml`'s `withhold` is an extra deny filter: a file the course keeps off
+    # its open-courseware site is not hosted publicly on a semester site either, bundle
+    # and all.
+    tree = {
+        "lectures/01_a/slides.html": "deck",
+        "lectures/02_b/exam-review.html": "deck",
+        "lectures/02_b/exam-review_files/fig.svg": "<svg/>",
+        "lectures/03_c/solutions/key.pdf": "key",
+    }
+    hosted, served = _mirror(
+        monkeypatch,
+        origins,
+        tmp_path,
+        tree,
+        _policy("lectures/**"),
+        withhold=("*exam*", "solutions/"),
+    )
+    assert served == ["materials/lectures/01_a/slides.html"]
+    assert hosted["materials"] == frozenset({"lectures/01_a/slides.html"})
+
+
+def test_the_sync_hands_the_open_sites_withhold_list_to_the_mirror(
+    monkeypatch, tmp_path
+):
+    seen = []
+    monkeypatch.setattr(
+        site, "read_opencourse", lambda org: OpenCourse(withhold=("*exam*",))
+    )
+    monkeypatch.setattr(
+        site,
+        "_mirror_public",
+        lambda wd, org, policies, withhold=(): seen.append(withhold) or {},
+    )
+    _plan(monkeypatch, tmp_path, _one_deploy(), trees={"materials": ()})
+    assert seen == [("*exam*",)]
+
+
+def test_a_repo_no_longer_released_into_loses_its_copies(
+    monkeypatch, origins, tmp_path
+):
+    # `files/<repo>/` is the sync's: once the plan stops releasing into a repo, its old
+    # copies would otherwise be served for ever, linked from nothing.
+    stale = tmp_path / "site" / site.SITE_FILES_DIR / "old-lectures" / "deck.html"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("deck")
+    tree = {"lectures/01_a/slides.html": "deck"}
+    _hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, _policy("lectures/**")
+    )
+    assert served == ["materials/lectures/01_a/slides.html"]
+    assert not stale.parent.exists()
