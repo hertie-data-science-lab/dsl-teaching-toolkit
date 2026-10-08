@@ -174,7 +174,9 @@ says only what the banner does not: the exams and the archive date.
 
 The Dashboard's week strip is its only filter: This week on load, any set of weeks picked,
 none picked for all of them. The Problems heading names the selection ("Problems in weeks 3
-and 5") with a "Show all weeks" link while a filter is on.
+and 5") with a "Show all weeks" link while a filter is on; the agenda panel's heading does the
+same ("Planned this week", "Planned in weeks 3 and 5", "Planned, all weeks"). The problem count
+in the page head is a button: it shows every week and moves to the Problems section.
 
 ## Student screens and their sources
 

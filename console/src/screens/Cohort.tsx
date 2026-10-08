@@ -223,6 +223,8 @@ function selectionName(selected: number[], thisWeek: number[]): string {
 }
 
 /** A selection's name as a sentence ends: "this week", "in week 5", "in weeks 3 and 5". */
+/** The agenda panel's heading: "Planned this week", "Planned in weeks 3 and 5", "Planned, all weeks". */
+const plannedHeading = (name: string) => (name === 'All weeks' ? 'Planned, all weeks' : `Planned ${inPhrase(name)}`);
 const inPhrase = (name: string) => (name === 'This week' ? 'this week' : name === 'All weeks' ? 'in any week' : `in ${name.charAt(0).toLowerCase()}${name.slice(1)}`);
 
 /**
@@ -290,6 +292,13 @@ function Overview(p: ReadyProps) {
     const h = pr && fixHref(pr);
     return h ? <a class="btn small" href={h}>Fix</a> : null;
   };
+  // The problem count in the head: every week's problems, and the page moves to them.
+  const showProblems = () => {
+    setSelected([]);
+    const el = document.getElementById('dash-problems');
+    el?.focus();
+    el?.scrollIntoView?.({ block: 'start' });
+  };
   const toggle = (w: number) => setSelected(selected.includes(w) ? selected.filter((k) => k !== w) : [...selected, w]);
   const name = selectionName(selected, thisWeek);
   const isThisWeek = name === 'This week';
@@ -305,7 +314,7 @@ function Overview(p: ReadyProps) {
             <button class="textlink" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>{showSetup ? 'Hide setup' : 'Show setup'}</button>
           </p>
         </div>
-        <div class="actions"><Probs n={problems.length} /><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
+        <div class="actions"><Probs n={problems.length} onClick={showProblems} /><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
       </div>
       <div class="stack">
         {showSetup ? (
@@ -331,7 +340,7 @@ function Overview(p: ReadyProps) {
               : <TermStrip rows={rows} term={term} tz={tz} today={today} counts={problemCounts(problems, term, tz)} selected={selected} onToggle={toggle} />}
           </div>
         </section>
-        <section class="section">
+        <section class="section" id="dash-problems" tabIndex={-1}>
           <div class="problems-head">
             <h2>{selected.length ? `Problems ${inPhrase(name)}` : 'Problems'}</h2>
             {selected.length ? <button class="textlink" type="button" onClick={() => setSelected([])}>Show all weeks</button> : null}
@@ -357,7 +366,7 @@ function Overview(p: ReadyProps) {
         </section>
         <div class="grid-2">
           <section class="panel section">
-            <div class="section-head"><h2>{name}</h2>{selected.length === 1 ? <span class="meta">{fmtDay(weekStart(term, selected[0]), tz).replace(/ \w+$/, '')} to {fmtDay(addDays(weekStart(term, selected[0]), 6), tz, year)}</span> : null}</div>
+            <div class="section-head"><h2>{plannedHeading(name)} <Hint label="About what is planned">Every release and deadline in the picked weeks, with its state. Late means its date has passed and it has not gone out. Pick weeks in the Semester strip above.</Hint></h2>{selected.length === 1 ? <span class="meta">{fmtDay(weekStart(term, selected[0]), tz).replace(/ \w+$/, '')} to {fmtDay(addDays(weekStart(term, selected[0]), 6), tz, year)}</span> : null}</div>
             <WeekRows status={status} p={p} rows={rows} term={term} selected={selected} name={name} />
             <p class="overdue">{late.length ? `${late.length} release${late.length > 1 ? 's are' : ' is'} late: ${late.map((r) => releaseIdent(r)).join(', ')}.` : 'Nothing overdue.'}</p>
           </section>

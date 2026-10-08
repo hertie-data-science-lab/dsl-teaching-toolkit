@@ -53,12 +53,11 @@ export function Crumbs({ items }: { items: { t: string; href?: string }[] }) {
   );
 }
 
-export function Probs({ n }: { n: number }) {
-  return n ? (
-    <span class="probs"><span class="count-badge">{n}</span>{n === 1 ? '1 problem' : `${n} problems`}</span>
-  ) : (
-    <span class="probs none">No problems</span>
-  );
+/** With `onClick`, a count above zero is a button that looks the same. */
+export function Probs({ n, onClick }: { n: number; onClick?: () => void }) {
+  if (!n) return <span class="probs none">No problems</span>;
+  const badge = <span class="probs"><span class="count-badge">{n}</span>{n === 1 ? '1 problem' : `${n} problems`}</span>;
+  return onClick ? <button type="button" class="probs-btn" title="Show every problem" onClick={onClick}>{badge}</button> : badge;
 }
 
 /** A disabled button for an action another work package builds, with the reason on hover. */

@@ -163,7 +163,7 @@ describe('the Dashboard', () => {
     click(cell(h, 5));
     expect(cell(h, 3).getAttribute('aria-pressed')).toBe('true');
     expect(cell(h, 5).getAttribute('aria-pressed')).toBe('true');
-    expect(h.textContent).toContain('Weeks 3 and 5');
+    expect(h.textContent).toContain('Planned in weeks 3 and 5');
     expect(problemsHead(h)).toBe('Problems in weeks 3 and 5');
     expect(problemsText(h).some((t) => t!.includes('Session 5 cites'))).toBe(true);
     const listed = h.querySelector('.grid-2 .panel')!.textContent!;
@@ -231,6 +231,29 @@ describe('the Dashboard', () => {
     click(showAll(h));
     expect(problemsHead(h)).toBe('Problems');
     expect(cell(h, 4).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('names the agenda panel for what it plans, with a ?', () => {
+    const h = mount();
+    const head = () => h.querySelector('.grid-2 .panel .section-head h2')!;
+    expect(head().textContent).toMatch(/^Planned this week \?/);
+    expect(head().querySelector('.hint-wrap')).not.toBeNull();
+    click(cell(h, 5));
+    expect(head().textContent).toMatch(/^Planned in weeks 3 and 5 /);
+    click(showAll(h));
+    expect(head().textContent).toMatch(/^Planned, all weeks /);
+  });
+
+  it('makes the problem count a button that shows every week and moves to the problems', () => {
+    const h = mount();
+    const badge = h.querySelector<HTMLButtonElement>('.page-head .actions button.probs-btn')!;
+    expect(badge.title).toBe('Show every problem');
+    expect(badge.querySelector('.probs .count-badge')).not.toBeNull();
+    expect(problemsHead(h)).toBe('Problems this week');
+    click(badge);
+    expect(problemsHead(h)).toBe('Problems');
+    expect(cell(h, 3).getAttribute('aria-pressed')).toBe('false');
+    expect(document.activeElement).toBe(h.querySelector('#dash-problems'));
   });
 
   it('never says no problems this week while the only ones are undated', () => {
