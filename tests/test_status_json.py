@@ -373,11 +373,15 @@ def test_a_healthy_semester_has_every_setup_stage_done_and_no_problems():
 
 
 def test_the_contract_example_marks_k5_now_and_k4_and_c5_once_they_near():
-    # Decision 0034: on Wed 23 Sep (week 3; the horizon runs to Sun 4 Oct) the roster
-    # header stands now, while s5 (Thu 8 Oct) and assignment-3's hand-out (20 Oct) are
-    # coming up: listed, `later`, and no stage marked.
+    # Decision 0034: on Wed 23 Sep (the horizon is the next 7 days) the roster header
+    # stands now, while s5 (Thu 8 Oct) and assignment-3's hand-out (20 Oct) are coming
+    # up: listed, `later`, and no stage marked.
     doc = _render(*_contract_scenario())
-    assert doc["horizon"] == {"from": "2026-09-21", "to": "2026-10-04"}
+    assert doc["horizon"] == {
+        "days": 7,
+        "from": "2026-09-23T09:00:00+00:00",
+        "to": "2026-09-30T09:00:00+00:00",
+    }
     assert [p["bites"] for p in doc["problems"]] == ["later", "now", "later"]
     assert doc["semester"]["stages"]["K4"] == "done"
     assert doc["semester"]["stages"]["K5"] == "problem"
@@ -390,13 +394,13 @@ def test_the_contract_example_marks_k5_now_and_k4_and_c5_once_they_near():
         "suggestions": 1,
         "coming_up": 2,
     }
-    # A week on, s5 is inside the horizon: K4 has a problem. The template's hand-out
+    # Eight days on, s5 is inside the horizon: K4 has a problem. The template's hand-out
     # (20 Oct) is still beyond it.
-    doc = _render(*_contract_scenario(), now=NOW + timedelta(days=7))
+    doc = _render(*_contract_scenario(), now=NOW + timedelta(days=8))
     assert [p["bites"] for p in doc["problems"]] == ["soon", "now", "later"]
     assert doc["semester"]["stages"]["K4"] == "problem"
     assert doc["course"]["stages"]["C5"] == "done"
-    # Two weeks on (week 5, horizon to 18 Oct) still later; three weeks on, soon.
+    # Three weeks on, the hand-out is six days off: soon.
     doc = _render(*_contract_scenario(), now=NOW + timedelta(days=21))
     assert doc["problems"][2]["bites"] == "soon"
     assert doc["course"]["stages"]["C5"] == "problem"
@@ -932,7 +936,7 @@ def test_the_course_file_carries_no_handle_email_or_student_repo():
     doc = status_json.render_course_file(course, NOW)
     text = json.dumps(doc)
     assert "admin1" not in text and "@x.edu" not in text
-    assert set(doc) == {"schema", "inputs", "course", "problems"}
+    assert set(doc) == {"schema", "inputs", "horizon", "course", "problems"}
     assert doc["course"]["stages"]["C3"] == "problem"
     assert doc["inputs"] == {
         "dsl-course.yml": "c0ffee",
@@ -1507,7 +1511,7 @@ def test_a_stage_that_is_not_done_says_why():
 
 
 def test_a_problem_or_a_prerequisite_is_the_why():
-    doc = _render(*_contract_scenario(), now=NOW + timedelta(days=7))
+    doc = _render(*_contract_scenario(), now=NOW + timedelta(days=8))
     assert doc["semester"]["stage_why"]["K4"] == "1 problem needs fixing."
     half = _semester(people=None)
     del half.listing["join"]
@@ -2424,29 +2428,15 @@ def test_an_operation_with_no_run_is_left_out():
 # ------------------------------------------------- need, time and verdicts (0034)
 
 
-@pytest.mark.parametrize(
-    ("today", "span"),
-    [
-        # Before the start, week 1 is the current one.
-        (date(2026, 8, 20), ("2026-09-07", "2026-09-20")),
-        # Wednesday of week 3: weeks 3 and 4.
-        (date(2026, 9, 23), ("2026-09-21", "2026-10-04")),
-        # The last day of week 3 is still week 3; its first day after is week 4.
-        (date(2026, 9, 27), ("2026-09-21", "2026-10-04")),
-        (date(2026, 9, 28), ("2026-09-28", "2026-10-11")),
-        # The last week: `to` never passes the end; after the end, both are the end.
-        (date(2026, 12, 16), ("2026-12-14", "2026-12-18")),
-        (date(2027, 1, 10), ("2026-12-18", "2026-12-18")),
-    ],
-)
-def test_the_horizon_is_this_semester_week_and_the_next(today, span):
-    got = status_json.horizon(date(2026, 9, 7), date(2026, 12, 18), today)
-    assert tuple(d.isoformat() for d in got) == span
-
-
-def test_the_horizon_without_semester_dates_is_two_weeks_from_today():
-    got = status_json.horizon(None, None, date(2026, 9, 23))
-    assert got == (date(2026, 9, 23), date(2026, 10, 6))
+def test_the_horizon_is_the_next_seven_days_from_the_tick():
+    assert status_json.PROBLEM_HORIZON == timedelta(days=7)
+    assert status_json.horizon(NOW) == {
+        "days": 7,
+        "from": "2026-09-23T09:00:00+00:00",
+        "to": "2026-09-30T09:00:00+00:00",
+    }
+    # Both files carry it.
+    assert status_json.render_course_file(_course(), NOW)["horizon"]["days"] == 7
 
 
 def _at(day: int, month: int = 10, hour: int = 10) -> datetime:
@@ -2454,27 +2444,33 @@ def _at(day: int, month: int = 10, hour: int = 10) -> datetime:
 
 
 @pytest.mark.parametrize(
-    ("when", "now", "tier"),
+    ("when", "tier"),
     [
-        (None, NOW, "now"),
+        (None, "now"),
         # Its moment has passed, or is this very instant.
-        (NOW - timedelta(minutes=1), NOW, "now"),
-        (NOW, NOW, "now"),
-        # The horizon's last day (Sun 4 Oct), late at night, is still soon...
-        (_at(4, hour=23), NOW, "soon"),
-        # ...and the next day is later.
-        (_at(5, hour=0), NOW, "later"),
-        # Before the semester starts the horizon is weeks 1-2: soon until Sun 20 Sep.
-        (_at(18, 9), datetime(2026, 8, 20, tzinfo=UTC), "soon"),
-        (_at(21, 9), datetime(2026, 8, 20, tzinfo=UTC), "later"),
-        # After the end, anything still ahead is later.
-        (_at(10, 1).replace(year=2027), datetime(2027, 1, 2, tzinfo=UTC), "later"),
+        (NOW - timedelta(minutes=1), "now"),
+        (NOW, "now"),
+        (NOW + timedelta(seconds=1), "soon"),
+        # Exactly seven days on is still soon; a second later is later.
+        (NOW + timedelta(days=7), "soon"),
+        (NOW + timedelta(days=7, seconds=1), "later"),
+        # The zone does not matter: one instant.
+        ((NOW + timedelta(days=7)).astimezone(BERLIN), "soon"),
     ],
 )
-def test_a_problem_bites_now_soon_or_later(when, now, tier):
-    today = now.astimezone(BERLIN).date()
-    _, until = status_json.horizon(date(2026, 9, 7), date(2026, 12, 18), today)
-    assert status_json.bites(when, now, until, BERLIN) == tier
+def test_a_problem_bites_now_soon_or_later(when, tier):
+    assert status_json.bites(when, NOW) == tier
+
+
+def test_the_horizon_ignores_the_semester_dates():
+    # Before the start and after the end alike: seven days from the tick.
+    before = datetime(2026, 8, 20, 9, 0, tzinfo=UTC)
+    assert status_json.bites(before + timedelta(days=7), before) == "soon"
+    assert status_json.bites(before + timedelta(days=8), before) == "later"
+    after = datetime(2027, 1, 10, 9, 0, tzinfo=UTC)
+    assert status_json.bites(after + timedelta(days=3), after) == "soon"
+    doc = _render(now=before)
+    assert doc["horizon"]["from"] == before.isoformat()
 
 
 def test_the_three_semester_verdicts():
@@ -2681,29 +2677,26 @@ def test_the_course_file_tiers_template_problems_by_the_earliest_citing_hand_out
     course.templates[1].faults = [_autograde_sometimes()]
     course.templates[1].readme = None
     later = status_json.template_moments(_sched(), NOW)
-    assert later["assignment-3-f2026"] == status_json.Moment(
-        _at(20), "later", date(2026, 10, 12)
-    )
+    assert later["assignment-3-f2026"] == status_json.Moment(_at(20), "later", _at(13))
     # A second live semester hands it out next week: the earliest, most urgent wins.
     soon = status_json.template_moments(
         _sched(SCHEDULE.replace("2026-10-20T10:00", "2026-09-30T10:00")), NOW
     )
     merged = status_json.merge_moments([later, soon])
     assert merged["assignment-3-f2026"] == status_json.Moment(
-        _at(30, 9), "soon", date(2026, 9, 21)
+        _at(30, 9), "soon", _at(23, 9)
     )
     doc = status_json.render_course_file(course, NOW, merged)
     (problem,) = doc["problems"]
     assert (problem["when"], problem["bites"]) == ("2026-09-30T10:00:00+02:00", "soon")
     assert doc["course"]["stages"]["C5"] == "problem"
-    assert "horizon" not in doc
     # The brief to-do says when it is needed and when it becomes a problem.
     brief = {t["id"]: t for t in doc["course"]["todo"]}[
         "template:assignment-3-f2026:brief"
     ]
     assert (brief["needed_by"], brief["problem_from"]) == (
         "2026-09-30T10:00:00+02:00",
-        "2026-09-21",
+        "2026-09-23T10:00:00+02:00",
     )
     # No live semester cites it: later, and no `needed_by`.
     doc = status_json.render_course_file(course, NOW)

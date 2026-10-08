@@ -177,8 +177,9 @@ SEMESTER_STAGE_NEED = {s: SUGGESTED if s == "K7" else NEEDED for s in SEMESTER_S
 # falls inside the horizon, or it lies beyond. Only `now` and `soon` mark a stage or a
 # verdict; `later` is "coming up". The digest's mail ladder is a separate clock.
 NOW_, SOON, LATER = "now", "soon", "later"
-# The horizon: this semester week and the next (the semester strip's own unit).
-HORIZON_WEEKS = 2
+# The horizon: a rolling window from the tick. The one constant; every other reader
+# (the console, the CLI's words) takes its length off `horizon.days`.
+PROBLEM_HORIZON = timedelta(days=7)
 # The container verdict (`course.verdict`, `semester.verdict`).
 FIXING, NOT_READY, READY = "fixing", "not_ready", "ready"
 # What a blocked stage is waiting for, named by the prerequisite it waits on.
@@ -678,36 +679,30 @@ def problem_from_fault(
     return problem
 
 
-def horizon(start: date | None, end: date | None, today: date) -> tuple[date, date]:
-    """`(from, to)`, both days included: the current semester week and the next, by the
-    semester's own weeks (seven days from `semester_start`). Before the start, week 1 is
-    the current one; `to` never passes the end, and after it both are the end. With either
-    date unset, the two weeks from today."""
-    span = timedelta(days=7 * HORIZON_WEEKS - 1)
-    if start is None or end is None or end < start:
-        return today, today + span
-    first = start + timedelta(days=7 * max((today - start).days // 7, 0))
-    return min(first, end), min(first + span, end)
+def horizon(now: datetime) -> dict:
+    """`status.json`'s `horizon` (decision 0034, amended): the rolling window from this
+    tick, `PROBLEM_HORIZON` long. The one place its length reaches a reader."""
+    return {
+        "days": PROBLEM_HORIZON.days,
+        "from": now.isoformat(),
+        "to": (now + PROBLEM_HORIZON).isoformat(),
+    }
 
 
-def bites(when: datetime | None, now: datetime, until: date | None, tz) -> str:
-    """`now` once the moment has passed or there is none, `soon` up to the horizon's last
-    day (`until`, in the semester's zone `tz`), `later` beyond it or with no horizon."""
+def bites(when: datetime | None, now: datetime) -> str:
+    """`now` once the moment has passed or there is none, `soon` up to `PROBLEM_HORIZON`
+    from now (that instant included), `later` beyond it."""
     if when is None or when <= now:
         return NOW_
-    if until is not None and when.astimezone(tz).date() <= until:
-        return SOON
-    return LATER
+    return SOON if when <= now + PROBLEM_HORIZON else LATER
 
 
-def _tier(
-    problems: list[dict], now: datetime, until: date | None = None, tz=UTC
-) -> list[dict]:
+def _tier(problems: list[dict], now: datetime) -> list[dict]:
     """Set `bites` on each problem that has none yet, off its `when`."""
     for p in problems:
         if "bites" not in p:
             when = datetime.fromisoformat(p["when"]) if p.get("when") else None
-            p["bites"] = bites(when, now, until, tz)
+            p["bites"] = bites(when, now)
     return problems
 
 
@@ -725,46 +720,26 @@ def _distinct(problems: list[dict]) -> list[dict]:
     return list(seen.values())
 
 
-def problem_from(handout: date, start: date | None, end: date | None) -> date:
-    """The first day a moment on `handout` falls inside the horizon (`horizon`): the start
-    of the semester week before its own; with no semester dates, thirteen days before."""
-    if start is None or end is None or end < start:
-        return handout - timedelta(days=7 * HORIZON_WEEKS - 1)
-    week = (handout - start).days // 7
-    return start + timedelta(days=7 * (week - HORIZON_WEEKS + 1))
-
-
 @dataclass(frozen=True)
 class Moment:
     """When a course template is first needed: its first citing hand-out (None: cited only
-    by an assignment with no hand-out date), when its problems bite, and the first day they
-    would (`problem_from`)."""
+    by an assignment with no hand-out date), when its problems bite, and the moment they
+    would (`problem_from`: the hand-out less `PROBLEM_HORIZON`)."""
 
     when: datetime | None
     bites: str
-    problem_from: date | None = None
+    problem_from: datetime | None = None
 
 
 def template_moments(sched: schedule.Schedule, now: datetime) -> dict[str, Moment]:
-    """`{template repo: Moment}` for one semester, off its schedule's hand-outs and its own
-    horizon. A template cited only by an undated assignment is `later`."""
-    tz = ZoneInfo(sched.timezone)
-    _, until = horizon(
-        sched.semester_start, sched.semester_end, now.astimezone(tz).date()
-    )
-    out = {}
-    for repo, when in _handouts(sched).items():
-        if when is None:
-            out[repo] = Moment(None, LATER)
-            continue
-        out[repo] = Moment(
-            when,
-            bites(when, now, until, tz),
-            problem_from(
-                when.astimezone(tz).date(), sched.semester_start, sched.semester_end
-            ),
-        )
-    return out
+    """`{template repo: Moment}` for one semester, off its schedule's hand-outs. A template
+    cited only by an undated assignment is `later`."""
+    return {
+        repo: Moment(when, bites(when, now), when - PROBLEM_HORIZON)
+        if when is not None
+        else Moment(None, LATER)
+        for repo, when in _handouts(sched).items()
+    }
 
 
 def _handouts(sched: schedule.Schedule) -> dict[str, datetime | None]:
@@ -1504,8 +1479,8 @@ def course_todo(
     `need` (decision 0034): a materials check's own; a template's brief and starter are
     needed; the description is suggested. A needed to-do's id in `aside` is ignored.
     A template's to-do carries, while a semester cites the template with a date
-    (`moments`), `needed_by` (the first hand-out) and `problem_from` (the day it enters
-    the horizon and would become a problem)."""
+    (`moments`), `needed_by` (the first hand-out) and `problem_from` (`needed_by` less
+    `PROBLEM_HORIZON`: when it would become a problem)."""
     out = []
     if not facts.meta.get("course_description") and facts.meta:
         out.append(
@@ -2211,11 +2186,12 @@ def render_course_file(
     """The COURSE document, for the public `.github`: counts, repo names and the problems
     that already stand in `.github`'s own digest issue. Nothing about a person. `moments`:
     the live semesters' hand-outs per template (`merge_moments`), which date the template
-    problems and to-dos; the course itself has no weeks, so no `horizon`."""
+    problems and to-dos."""
     block, problems = render_course(course, now, moments=moments)
     return {
         "schema": STATUS_SCHEMA,
         "inputs": course_inputs(course),
+        "horizon": horizon(now),
         "course": block,
         "problems": _unique_ids(problems),
     }
@@ -2241,9 +2217,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     site's home page, the archive date and instructor emails. `verdict` rolls it all up.
     `live` is the finished marker's opposite (`discovery.semester_is_live`), not K1-K5."""
     sched = facts.sched
-    tz = ZoneInfo(sched.timezone)
-    today = now.astimezone(tz).date()
-    since, until = horizon(sched.semester_start, sched.semester_end, today)
+    today = now.astimezone(ZoneInfo(sched.timezone)).date()
     faults = [
         *facts.schedule_faults,
         *facts.people_faults,
@@ -2279,7 +2253,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     } | {p["id"].split(":")[1] for p in problems if p["id"].startswith("schedule:")}
     problems += late_problems(facts, releases, named)
     _date_templates(problems, moments)
-    problems = _unique_ids(_tier(problems, now, until, tz))
+    problems = _unique_ids(_tier(problems, now))
     course_block, _ = render_course(
         course, now, [p for p in problems if p["scope"] == "course"], moments
     )
@@ -2307,8 +2281,8 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     return {
         "schema": STATUS_SCHEMA,
         "inputs": semester_inputs(facts, course),
-        # Decision 0034: this semester week and the next; a problem dated inside is `soon`.
-        "horizon": {"from": since.isoformat(), "to": until.isoformat()},
+        # Decision 0034: the rolling window a problem dated inside is `soon` in.
+        "horizon": horizon(now),
         "course": course_block,
         "semester": {
             "org": facts.org,

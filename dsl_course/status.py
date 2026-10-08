@@ -173,19 +173,21 @@ def _transport_detail() -> tuple[bool, str]:
 
 
 def verdict_line(data: dict[str, dict]) -> str:
-    """Decision 0034's verdict in the console's words: "Needs fixing: n problems" while a
-    fault row stands, else "Not ready: <first needed row> is not set yet", else "Ready";
-    then "· n suggestions" while suggested rows are unset."""
+    """Decision 0034's semester verdict in the console's words: "Needs fixing: n problems
+    in the next 7 days" while a fault row stands, else "Not ready: <first needed row> is
+    not set yet", else "On track: nothing to fix in the next 7 days"; then "· n
+    suggestions" while suggested rows are unset. The days are the engine's horizon."""
     rows = [data[i] for i in ITEMS if i in data]
     problems = sum(r["status"] == ATTENTION for r in rows)
     missing = [r["label"] for r in rows if r["status"] == "missing"]
     suggestions = sum(r["status"] == "optional" for r in rows)
+    window = f"in the next {plural(status_json.PROBLEM_HORIZON.days, 'day')}"
     if problems:
-        line = f"Needs fixing: {plural(problems, 'problem')}"
+        line = f"Needs fixing: {plural(problems, 'problem')} {window}"
     elif missing:
         line = f"Not ready: {missing[0]} is not set yet"
     else:
-        line = "Ready"
+        line = f"On track: nothing to fix {window}"
     if suggestions:
         line += f" · {plural(suggestions, 'suggestion')}"
     return line

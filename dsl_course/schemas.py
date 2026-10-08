@@ -313,7 +313,7 @@ def status_schema() -> dict:
     # (decision 0034); `optional` is `need: suggested`, kept until the console reads
     # `need`; `set_aside`: a suggested one the course lists (decision 0032). A needed
     # template to-do a live semester cites: `needed_by` (its first hand-out) and
-    # `problem_from` (the day that hand-out enters the horizon).
+    # `problem_from` (that hand-out less the horizon's days), both ISO datetimes.
     todo = _obj(
         {
             "id": _str(),
@@ -478,9 +478,12 @@ def status_schema() -> dict:
             {
                 "schema": {"type": "string", "enum": [STATUS_SCHEMA]},
                 "inputs": {"type": "object", "additionalProperties": nullable},
-                # Decision 0034: the semester's current week and the next, as ISO days
-                # (both included). Absent from the course file.
-                "horizon": _obj({"from": _str(), "to": _str()}, ("from", "to")),
+                # Decision 0034: the rolling window from the tick (ISO datetimes) and its
+                # length in days; a problem dated inside it is `soon`.
+                "horizon": _obj(
+                    {"days": {"type": "integer"}, "from": _str(), "to": _str()},
+                    ("days", "from", "to"),
+                ),
                 "course": course,
                 "semester": semester,
                 "problems": {"type": "array", "items": problem},

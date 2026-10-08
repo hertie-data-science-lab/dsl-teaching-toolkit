@@ -421,13 +421,13 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   description is the course to-do `course:description`. K5 is done once the roster has a
   row (codes sent is the Students panel's meter), K6 once the site repo exists, K7 once the
   schedule sets an archive date.
-- **Time.** `horizon` (semester file only) is this semester week and the next
-  (`status_json.horizon`); each problem carries `bites`: `now` (moment passed, or none),
-  `soon` (inside the horizon), `later`. Only `now`/`soon` mark a stage or a verdict. An
+- **Time.** `horizon` (both files) is a rolling window from the tick, `{days, from, to}`,
+  its length the one constant `status_json.PROBLEM_HORIZON` (7 days); each problem
+  carries `bites`: `now` (moment passed, or none), `soon` (at most 7 days off), `later`. Only `now`/`soon` mark a stage or a verdict. An
   undated source fault is `later`; a course template's problems take the first citing
   hand-out (`template_moments`: this semester's in a semester file; across every live
   semester in the course file, `gather_moments`; none -> `later`), and a needed template
-  to-do carries `needed_by` / `problem_from`. assignments.yml values bite at their
+  to-do carries `needed_by` and `problem_from` (`needed_by` less the horizon). assignments.yml values bite at their
   assignment's hand-out; visibility drift and a late release with no other problem
   (`schedule:<entry>:LATE`) stand now; a cited root stub still the placeholder is
   `schedule:<entry>:SOURCE_UNWRITTEN` at the release's moment; `opencourse.yml` that does
@@ -437,7 +437,9 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   `problems` counts them), else `not_ready` (a needed stage open; `missing` is its
   sentence), else `ready`; `suggestions` counts open suggested items not set aside. The
   semester's `coming_up` counts its `later` problems and the needed template to-dos its
-  schedule cites; the course has none. `status.py`'s checklist prints the same words.
+  schedule cites; the course has none. `status.py`'s checklist prints the semester's
+  words ("Needs fixing: n problems in the next 7 days" / "On track: nothing to fix in the
+  next 7 days").
 
 Decision 0032: the course block carries `stage_set_aside` (per stage id) and each `todo[]`
 entry `set_aside`. `set_aside` comes from `dsl-course.yml`'s `set_aside:` list

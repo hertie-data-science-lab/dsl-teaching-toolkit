@@ -75,9 +75,10 @@ def test_render_markdown_missing_status_uses_add_link_text():
 
 def test_the_verdict_line_uses_the_consoles_words():
     # Decision 0034: one scheme for the console and the CLI.
-    assert status.verdict_line(_data()) == "Ready"
+    ready = "On track: nothing to fix in the next 7 days"
+    assert status.verdict_line(_data()) == ready
     md = status.render_markdown("Course", "Semester-f2026", _data())
-    assert "**Ready**" in md and "| Done |" in md
+    assert f"**{ready}**" in md and "| Done |" in md
     unset = _data(
         C7={**_ROW, "label": "Instructors", "status": "missing"},
         C4={**_ROW, "status": "optional"},
@@ -88,7 +89,7 @@ def test_the_verdict_line_uses_the_consoles_words():
     md = status.render_markdown("Course", "Semester-f2026", unset)
     assert "| Not done yet |" in md and "| optional |" in md
     broken = _data(C8={**_ROW, "status": status.ATTENTION}, C7=unset["C7"])
-    assert status.verdict_line(broken) == "Needs fixing: 1 problem"
+    assert status.verdict_line(broken) == "Needs fixing: 1 problem in the next 7 days"
 
 
 def test_instructors_course_admins_and_mail_are_needed():
