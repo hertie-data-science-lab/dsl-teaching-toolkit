@@ -53,11 +53,12 @@ from .log import CLIParser, Summary, add_preview_flag, log_err, log_ok, log_step
 from .repos import default_branch
 
 ITEMS = ("B1", "B6", "B7", "B8", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9")
-# Rows whose input is marked `[required]` in docs/DEPLOYMENT-CHECKLIST.md;
-# everything else is optional
-# (synthesised/skipped when absent), so an absent optional item is "optional", not
+# The needed rows (decision 0034: without them automation cannot act, or a student gets
+# something wrong): the course's name, a course admin (else Sync empties course-admin),
+# the mail transport (else Send codes and Distribute mail nobody), the roster, and an
+# instructor. Everything else is suggested, so an absent one is "optional", not
 # "missing" - the status view shouldn't cry wolf over things that never block the pipeline.
-REQUIRED = {"B1", "C2"}
+REQUIRED = {"B1", "B6", "B8", "C2", "C7"}
 
 
 # --------------------------------------------------------------------------- pure core
@@ -86,6 +87,7 @@ def _row(
     status = "ok" if present else ("missing" if item_id in REQUIRED else "optional")
     return {
         "label": label,
+        "need": "needed" if item_id in REQUIRED else "suggested",
         "org": org,
         "repo": repo,
         "path": path,
@@ -170,17 +172,39 @@ def _transport_detail() -> tuple[bool, str]:
     return usable, detail + _maintainer_note()
 
 
+def verdict_line(data: dict[str, dict]) -> str:
+    """Decision 0034's verdict in the console's words: "Needs fixing: n problems" while a
+    fault row stands, else "Not ready: <first needed row> is not set yet", else "Ready";
+    then "· n suggestions" while suggested rows are unset."""
+    rows = [data[i] for i in ITEMS if i in data]
+    problems = sum(r["status"] == ATTENTION for r in rows)
+    missing = [r["label"] for r in rows if r["status"] == "missing"]
+    suggestions = sum(r["status"] == "optional" for r in rows)
+    if problems:
+        line = f"Needs fixing: {plural(problems, 'problem')}"
+    elif missing:
+        line = f"Not ready: {missing[0]} is not set yet"
+    else:
+        line = "Ready"
+    if suggestions:
+        line += f" · {plural(suggestions, 'suggestion')}"
+    return line
+
+
 def render_markdown(course_org: str, semester_org: str, data: dict[str, dict]) -> str:
-    """One markdown table, in `docs/DEPLOYMENT-CHECKLIST.md`'s B/C order, each
-    row linking straight to the file to fix if something's missing."""
+    """The verdict, then one markdown table, in `docs/DEPLOYMENT-CHECKLIST.md`'s B/C
+    order, each row linking straight to the file to fix if something's missing. The
+    item states are the console's (decision 0034)."""
     icon = {
-        "ok": "OK",
-        "missing": "MISSING",
-        "optional": "not set (optional)",
-        ATTENTION: "ATTENTION",
+        "ok": "Done",
+        "missing": "Not done yet",
+        "optional": "optional",
+        ATTENTION: "Has a problem",
     }
     lines = [
         f"## Status: {semester_org} (course: {course_org})",
+        "",
+        f"**{verdict_line(data)}**",
         "",
         "| Item | Status | Detail | |",
         "| --- | --- | --- | --- |",
@@ -245,7 +269,8 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
         ".github",
         "dsl-course.yml",
         course_branch,
-        has_people_block,
+        # Needed: at least one active course admin, not merely the block.
+        has_people_block and n_admins > 0,
         # No people: block does NOT "fall back to GitHub teams" - sync_faculty reconciles
         # course-admin with prune=True whenever dsl-course.yml is present, so an absent
         # block reconciles the team to empty.
