@@ -1458,7 +1458,8 @@ def render_course(
         problems += template_todo_problems(t, facts.org, moments)
     for t in facts.templates:
         problems += [problem_from_fault(f, facts.org, now, moments) for f in t.faults]
-    _tier(problems, now)
+    # Ids made unique before `_distinct`, so two faults with one base id both count.
+    problems = _unique_ids(_tier(problems, now))
     meta = facts.meta
     aside = set_aside_ids(meta)
     checks = {m.repo: materials_checks(m) for m in facts.materials}
@@ -2247,7 +2248,7 @@ def render_course_file(
         "inputs": course_inputs(course),
         "horizon": horizon(),
         "course": block,
-        "problems": _unique_ids(problems),
+        "problems": problems,
     }
 
 

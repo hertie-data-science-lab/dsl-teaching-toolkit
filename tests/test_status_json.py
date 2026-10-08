@@ -2890,3 +2890,17 @@ def test_only_a_biting_problem_flags_its_assignment():
     assert rows["assignment-3"]["problem"] is False
     rows = {a["slug"]: a for a in _render(course, now=_at(14))["assignments"]}
     assert rows["assignment-3"]["problem"] is True
+
+
+def test_two_course_faults_with_one_base_id_both_count_in_the_course_file():
+    twice = [
+        ConfigFault("course_code", f"`course_code` problem {n}", file="dsl-course.yml")
+        for n in (1, 2)
+    ]
+    doc = status_json.render_course_file(_course(faults=twice), NOW)
+    assert [p["id"] for p in doc["problems"]] == [
+        "course:course_code:COURSE",
+        "course:course_code:COURSE:2",
+    ]
+    assert doc["course"]["stage_why"]["C3"] == "2 problems need fixing."
+    assert doc["course"]["verdict"]["problems"] == 2
