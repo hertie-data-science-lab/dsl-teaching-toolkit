@@ -118,7 +118,6 @@ CONTRACT_EXAMPLE = {
             "K4": "problem",
             "K5": "problem",
             "K6": "done",
-            "K7": "todo",
         },
         "archive_date": "2027-01-31",
     },
@@ -361,12 +360,9 @@ def test_a_healthy_semester_has_every_setup_stage_done_and_no_problems():
     assert doc["problems"] == []
     assert doc["course"]["stages"] == dict.fromkeys(status_json.COURSE_STAGES, "done")
     assert doc["course"]["ready"] is True
-    stages = doc["semester"]["stages"]
-    assert {
-        k: stages[k] for k in ("K1", "K2", "K3", "K4", "K5", "K6")
-    } == dict.fromkeys(("K1", "K2", "K3", "K4", "K5", "K6"), "done")
-    # Archiving is the end of the term, not a setup step a healthy semester has done.
-    assert stages["K7"] == "todo"
+    assert doc["semester"]["stages"] == dict.fromkeys(
+        status_json.SEMESTER_STAGES, "done"
+    )
     assert doc["semester"]["live"] is True
     assert doc["semester"]["label"] == "Fall 2026"
     assert (doc["semester"]["week"], doc["semester"]["weeks"]) == (3, 15)
@@ -623,7 +619,7 @@ def test_gather_lists_a_template_without_the_topic_as_not_migrated(monkeypatch):
     monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(status_json, "org_meta", lambda org: {})
     monkeypatch.setattr(status_json, "read_semester_registry", lambda org, f: [])
-    monkeypatch.setattr(status_json, "read_opencourse", lambda org: None)
+    monkeypatch.setattr(status_json, "load_opencourse", lambda org: None)
     monkeypatch.setattr(
         status_json.sync_faculty, "read_course_config", lambda org, faults: None
     )
@@ -649,7 +645,7 @@ def test_gather_raises_no_problem_for_an_archived_template_without_the_topic(
     monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(status_json, "org_meta", lambda org: {})
     monkeypatch.setattr(status_json, "read_semester_registry", lambda org, f: [])
-    monkeypatch.setattr(status_json, "read_opencourse", lambda org: None)
+    monkeypatch.setattr(status_json, "load_opencourse", lambda org: None)
     monkeypatch.setattr(
         status_json.sync_faculty, "read_course_config", lambda org, faults: None
     )
@@ -675,24 +671,24 @@ def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
     present = {"E1282_syllabus.pdf": "file", "lectures": "dir"}
     monkeypatch.setattr(status_json, "top_level", lambda org, repo: present)
     facts = status_json._materials_facts(COURSE, "nlp-materials")
-    assert status_json.materials_state(facts) == "ready"
+    checks = status_json.materials_checks(facts)
+    assert status_json.materials_state(facts, checks) == "ready"
     del present["E1282_syllabus.pdf"]
     facts = status_json._materials_facts(COURSE, "nlp-materials")
+    checks = status_json.materials_checks(facts)
     # Decision 0034: the syllabus is suggested, so the repo is still ready.
-    assert status_json.materials_state(facts) == "ready"
-    (syllabus,) = [
-        c for c in status_json.materials_checks(facts) if c["id"] == "syllabus"
-    ]
+    assert status_json.materials_state(facts, checks) == "ready"
+    (syllabus,) = [c for c in checks if c["id"] == "syllabus"]
     assert (syllabus["done"], syllabus["need"]) == (False, "suggested")
     assert syllabus["why"] == "There is no E1282_syllabus.pdf yet."
 
 
-def test_an_archived_semester_is_not_live_and_k7_is_done():
+def test_an_archived_semester_is_not_live_and_asks_for_no_archive_date():
     semester = _semester()
     semester.listing["semester-config"] = repo_row("semester-config", archived=True)
     doc = _render(semester=semester)
     assert doc["semester"]["live"] is False
-    assert doc["semester"]["stages"]["K7"] == "done"
+    assert "schedule:archive_date" not in [t["id"] for t in doc["semester"]["todo"]]
 
 
 def test_this_week_runs_from_local_midnight_for_seven_days():
@@ -1191,7 +1187,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     for module in (status_json, schedule, grades):
         monkeypatch.setattr(module, "get_file_content", content)
     monkeypatch.setattr(status_json, "read_materials", lambda org, repo: Declared())
-    monkeypatch.setattr(status_json, "read_opencourse", lambda org: None)
+    monkeypatch.setattr(status_json, "load_opencourse", lambda org: None)
     schedule._schedule_text.cache_clear()
     monkeypatch.setattr(status_json, "list_org_repos", lambda org: listings[org])
     monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
@@ -1262,7 +1258,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     (m,) = course["course"]["materials"]
     assert (m["repo"], m["state"]) == ("course-materials-f2026", "ready")
     # Read off the one tree: its folder has a kind; no withhold list, no session list.
-    assert [c["id"] for c in m["checks"] if not c["done"]] == ["sessions", "withheld"]
+    assert [c["id"] for c in m["checks"] if not c["done"]] == ["syllabus", "withheld"]
 
 
 def test_every_render_validates_against_the_exported_schema():
@@ -1521,10 +1517,16 @@ def test_a_problem_or_a_prerequisite_is_the_why():
     assert doc["semester"]["stage_why"]["K2"] == "Waiting for the semester org."
 
 
-def test_the_archive_stage_says_when():
+def test_the_archive_date_is_a_suggested_to_do_not_a_stage():
+    # Decision 0034 (simplify): K7 is retired; the to-do is the only representation.
     doc = _render()
-    assert doc["semester"]["stage_why"]["K7"] == (
-        "Not archived yet; the schedule sets no archive date."
+    assert "K7" not in doc["semester"]["stages"]
+    assert "K7" not in doc["semester"]["stage_need"]
+    (todo,) = [t for t in doc["semester"]["todo"] if t["id"] == "schedule:archive_date"]
+    assert (todo["check"], todo["need"], todo["text"]) == (
+        "archive_date",
+        "suggested",
+        "The schedule sets no archive date.",
     )
 
 
@@ -1847,14 +1849,10 @@ def _unmet(m: status_json.MaterialsFacts) -> list[str]:
         ({}, [], "ready"),
         # No syllabus, or the stub: no weekly plan in it either. Decision 0034: the
         # syllabus is suggested (releases run without it), so the repo is ready.
-        ({"syllabus": None}, ["syllabus", "sessions"], "ready"),
-        (
-            {"syllabus": "<!-- dsl-stub: syllabus -->"},
-            ["syllabus", "sessions"],
-            "ready",
-        ),
+        ({"syllabus": None}, ["syllabus"], "ready"),
+        ({"syllabus": "<!-- dsl-stub: syllabus -->"}, ["syllabus"], "ready"),
         # A PDF syllabus that is there counts as written; its plan is pasted by hand.
-        ({"syllabus": ""}, ["sessions"], "ready"),
+        ({"syllabus": ""}, ["syllabus"], "ready"),
         # No folder at all: none of a known kind.
         ({"folders": ()}, ["kind_folder"], "todo"),
         # A folder no kind names is supporting files (decision 0031): it blocks nothing.
@@ -1868,7 +1866,7 @@ def _unmet(m: status_json.MaterialsFacts) -> list[str]:
         # The two non-blocking lines never stop ready.
         (
             {"syllabus": "# Syllabus", "releaseignore": None},
-            ["sessions", "withheld"],
+            ["syllabus", "withheld"],
             "ready",
         ),
         ({"topic": False}, [], "problem"),
@@ -1878,25 +1876,34 @@ def test_the_materials_checklist_and_its_state(over, unmet, state):
     base = {"syllabus": PLANNED, "releaseignore": "solutions/\n"}
     m = _materials("course-materials-f2026", **{**base, **over})
     assert _unmet(m) == unmet
-    assert status_json.materials_state(m) == state
+    assert status_json.materials_state(m, status_json.materials_checks(m)) == state
 
 
 # A written syllabus carrying the weekly plan's marked block.
 PLANNED = f"# Syllabus\n\n## Weekly plan\n\n{PLAN_START}\n### Session 1\n{PLAN_END}\n"
 
 
-def test_the_weekly_plan_line_reads_the_markers_in_the_syllabus():
+def test_the_one_syllabus_check_names_its_unmet_parts():
+    # Decision 0034 (simplify): the syllabus and its weekly plan are ONE check.
     def why(syllabus):
         (c,) = [
             c
             for c in status_json.materials_checks(_materials("m", syllabus))
-            if c["id"] == "sessions"
+            if c["id"] == "syllabus"
         ]
         return c["why"]
 
     assert why(PLANNED) is None
-    assert why("# Syllabus") == "The weekly plan is not in SYLLABUS.md yet."
-    assert why(None) == "The weekly plan is not in SYLLABUS.md yet."
+    assert why("# Syllabus") == (
+        "The weekly plan (written from the schedule) is not in SYLLABUS.md yet."
+    )
+    assert why("<!-- dsl-stub: syllabus -->") == (
+        "SYLLABUS.md is still the placeholder, and the weekly plan (written from the "
+        "schedule) is not in it yet."
+    )
+    stub_with_plan = f"<!-- dsl-stub: syllabus -->\n{PLANNED}"
+    assert why(stub_with_plan) == "SYLLABUS.md is still the placeholder."
+    assert why(None) == "There is no SYLLABUS.md yet."
     # A PDF syllabus cannot be written into: it is pasted by hand.
     assert (
         why("") == "SYLLABUS.md is not Markdown: copy the weekly plan and paste it in."
@@ -1904,20 +1911,19 @@ def test_the_weekly_plan_line_reads_the_markers_in_the_syllabus():
 
 
 def test_the_checklist_order_and_what_blocks():
-    # Folder kinds first, then the syllabus, the weekly plan right after it, and the
-    # withheld patterns. No "every folder has a kind": since decision 0031 each has one.
+    # Folder kinds first, then the syllabus with its weekly plan, and the withheld
+    # patterns. No "every folder has a kind": since decision 0031 each has one.
     checks = status_json.materials_checks(_materials("m", None))
     assert [(c["id"], c["need"], c["blocks"]) for c in checks] == [
         ("kind_folder", "needed", True),
         ("syllabus", "suggested", False),
-        ("sessions", "suggested", False),
         ("withheld", "suggested", False),
     ]
     # A done check carries no why; an unmet one names what is missing.
-    assert [c["why"] is None for c in checks] == [True, False, False, False]
+    assert [c["why"] is None for c in checks] == [True, False, False]
     assert checks[1]["why"] == "There is no SYLLABUS.md yet."
     assert checks[0]["label"] == "At least one folder of a content kind"
-    assert checks[2]["label"] == "Weekly plan in the syllabus"
+    assert checks[1]["label"] == "Syllabus"
 
 
 def test_kind_folder_lists_the_content_kinds_found_with_their_folders():
@@ -2170,15 +2176,17 @@ def test_the_todo_list_is_every_unmet_check_and_every_unwritten_brief():
     doc = status_json.render_course_file(course, NOW)
     todo = doc["course"]["todo"]
     assert [t["id"] for t in todo] == [
-        "materials:course-materials-a:sessions",
+        "materials:course-materials-a:syllabus",
         "materials:course-materials-b:syllabus",
-        "materials:course-materials-b:sessions",
         "materials:course-materials-b:withheld",
         "template:assignment-2:brief",
     ]
+    # Every to-do names its check (decision 0034, simplify).
+    assert [t["check"] for t in todo] == ["syllabus", "syllabus", "withheld", "brief"]
     assert todo[-1] == {
         "id": "template:assignment-2:brief",
         "kind": "template",
+        "check": "brief",
         "repo": "assignment-2",
         "text": "The brief (README.md) is not written yet.",
         "screen": "template",
@@ -2189,7 +2197,7 @@ def test_the_todo_list_is_every_unmet_check_and_every_unwritten_brief():
     }
     assert todo[1]["text"] == "There is no SYLLABUS.md yet."
     assert (todo[1]["screen"], todo[1]["entry"]) == ("materials", "course-materials-b")
-    # To-dos never enter the problem list.
+    # No dated hand-out cites the template: the to-do is no problem.
     assert doc["problems"] == []
     assert validate(doc, schemas.status_schema()) == []
 
@@ -2227,7 +2235,6 @@ def test_optional_setup_steps_and_to_dos_are_marked_and_required_ones_are_not():
     need = {t["id"]: (t["need"], t["optional"]) for t in block["todo"]}
     assert need == {
         "materials:course-materials-b:syllabus": ("suggested", True),
-        "materials:course-materials-b:sessions": ("suggested", True),
         "materials:course-materials-b:withheld": ("suggested", True),
         "template:assignment-2:brief": ("needed", False),
     }
@@ -2259,8 +2266,8 @@ def test_set_aside_marks_only_optional_items_that_are_not_done():
         "materials:course-materials-b:syllabus",
         "materials:course-materials-b:withheld",
     ]
-    # A set-aside item is no suggestion: only the weekly plan and C5 are left.
-    assert block["verdict"]["suggestions"] == 2
+    # A set-aside item is no suggestion: only C5 is left.
+    assert block["verdict"]["suggestions"] == 1
     # Setting aside changes no stage, no verdict, no problem.
     plain = status_json.render_course_file(_aside(course, []), NOW)
     assert block["stages"] == plain["course"]["stages"]
@@ -2315,6 +2322,7 @@ def test_a_template_with_a_starter_to_do_is_not_ready_and_lists_it():
     assert doc["course"]["todo"][-1] == {
         "id": "template:assignment-1:starter",
         "kind": "template",
+        "check": "starter",
         "repo": "assignment-1",
         "text": "Derive has not been run yet.",
         "screen": "template",
@@ -2467,7 +2475,6 @@ def test_the_three_semester_verdicts():
     archive = SCHEDULE + "archive:\n  event_datetime: 2027-01-31T00:00\n"
     healthy = {"sched": _sched(archive), "students": [_student("ada"), _student("bob")]}
     doc = _render(semester=_semester(**healthy))
-    assert doc["semester"]["stages"]["K7"] == "done"
     assert doc["semester"]["verdict"] == {
         "state": "ready",
         "problems": 0,
@@ -2523,7 +2530,7 @@ def test_the_three_course_verdicts():
     assert (block["verdict"]["state"], block["verdict"]["problems"]) == ("fixing", 1)
 
 
-def test_k5_k6_and_k7_are_done_once_their_needed_part_is():
+def test_k5_and_k6_are_done_once_their_needed_part_is():
     # Codes not sent are the Students panel's meter, not a setup sentence.
     archive = SCHEDULE + "archive:\n  event_datetime: 2027-01-31T00:00\n"
     doc = _render(
@@ -2534,8 +2541,8 @@ def test_k5_k6_and_k7_are_done_once_their_needed_part_is():
         )
     )
     semester = doc["semester"]
-    assert {k: semester["stages"][k] for k in ("K5", "K6", "K7")} == dict.fromkeys(
-        ("K5", "K6", "K7"), "done"
+    assert {k: semester["stages"][k] for k in ("K5", "K6")} == dict.fromkeys(
+        ("K5", "K6"), "done"
     )
     assert "K5" not in semester["stage_why"]
     assert "code" not in json.dumps(semester["stage_why"])
@@ -2547,13 +2554,11 @@ def test_k5_k6_and_k7_are_done_once_their_needed_part_is():
         "site",
         f"{SEMESTER}.github.io",
     )
-    assert semester["stage_need"] == {
-        **dict.fromkeys(("K1", "K2", "K3", "K4", "K5", "K6"), "needed"),
-        "K7": "suggested",
-    }
-    # No archive date: K7 open, and its to-do is the one suggestion it counts as.
+    assert semester["stage_need"] == dict.fromkeys(
+        ("K1", "K2", "K3", "K4", "K5", "K6"), "needed"
+    )
+    # No archive date: its to-do is the one suggestion.
     doc = _render()
-    assert doc["semester"]["stages"]["K7"] == "todo"
     assert [t["id"] for t in doc["semester"]["todo"]] == ["schedule:archive_date"]
     assert doc["semester"]["verdict"]["suggestions"] == 1
 
@@ -2600,6 +2605,34 @@ def test_a_late_release_with_no_other_problem_is_a_now_problem():
     assert validate(doc, schemas.status_schema()) == []
 
 
+def test_every_problem_carries_its_kind_and_the_release_it_holds_back():
+    # Decision 0034 (simplify): structured join fields, never parsed out of `id`.
+    doc = _render(
+        semester=_semester(
+            dest_paths={"materials": {"lectures"}}, schedule_faults=[_missing_s5()]
+        ),
+        now=NOW + timedelta(days=2),
+    )
+    by_id = {p["id"]: p for p in doc["problems"]}
+    assert {i: (p["kind"], p.get("release")) for i, p in by_id.items()} == {
+        "schedule:s5:SOURCE_MISSING": ("SOURCE_MISSING", "s5"),
+        "schedule:s3:LATE": ("LATE", "s3"),
+    }
+    # A number problem holds its entry while something is still to copy or hand out.
+    numbers = {p["id"]: p for p in _numbers_render()["problems"]}
+    assert (
+        numbers["number:lecture:guest"]["kind"],
+        numbers["number:lecture:guest"]["release"],
+    ) == ("NOT_NUMBERED", "guest")
+    assert numbers["number:assignment:project"]["release"] == "project"
+    # A duplicate number holds nothing back.
+    (duplicate,) = [p for p in numbers.values() if p["kind"] == "DUPLICATE_NUMBER"]
+    assert "release" not in duplicate
+    # Every problem in both files has a kind.
+    assert all(p["kind"] for p in doc["problems"] + list(numbers.values()))
+    assert validate(doc, schemas.status_schema()) == []
+
+
 SYLLABUS_RELEASE = SCHEDULE.replace(
     "assignments:\n",
     """  syllabus:
@@ -2616,7 +2649,8 @@ def test_a_cited_placeholder_stub_is_a_source_unwritten_problem():
     stub = ("course-materials-f2026", "SYLLABUS.md")
     facts = _semester(sched=_sched(SYLLABUS_RELEASE), stubs={stub: True})
     doc = _render(semester=facts)
-    (problem,) = [p for p in doc["problems"] if p["id"].endswith("SOURCE_UNWRITTEN")]
+    (problem,) = [p for p in doc["problems"] if p["kind"] == "SOURCE_UNWRITTEN"]
+    assert problem["release"] == "syllabus"
     assert problem["text"] == (
         "Release syllabus cites SYLLABUS.md in course-materials-f2026, which is still "
         "the placeholder."
@@ -2628,7 +2662,7 @@ def test_a_cited_placeholder_stub_is_a_source_unwritten_problem():
     doc = _render(
         semester=_semester(sched=_sched(SYLLABUS_RELEASE), stubs={stub: False})
     )
-    assert not [p for p in doc["problems"] if p["id"].endswith("SOURCE_UNWRITTEN")]
+    assert not [p for p in doc["problems"] if p["kind"] == "SOURCE_UNWRITTEN"]
 
 
 def test_assignments_values_bite_at_their_hand_out_and_drift_stands_now():
@@ -2666,52 +2700,80 @@ def test_the_course_file_tiers_template_problems_by_the_earliest_citing_hand_out
     course = _course()
     course.templates[1].faults = [_autograde_sometimes()]
     course.templates[1].readme = None
-    later = status_json.template_moments(status_json._handouts(_sched()), NOW)
-    assert later["assignment-3-f2026"] == status_json.Moment(_at(20), "later", _at(13))
-    # A second live semester hands it out next week: the earliest, most urgent wins.
-    soon = status_json.template_moments(
-        status_json._handouts(
-            _sched(SCHEDULE.replace("2026-10-20T10:00", "2026-09-30T10:00"))
-        ),
-        NOW,
+    later = status_json._handouts(_sched())
+    assert later["assignment-3-f2026"] == status_json.Moment(_at(20), "assignment-3")
+    # A second live semester hands it out next week: the earliest wins.
+    soon = status_json._handouts(
+        _sched(SCHEDULE.replace("2026-10-20T10:00", "2026-09-30T10:00"))
     )
     merged = status_json.merge_moments([later, soon])
     assert merged["assignment-3-f2026"] == status_json.Moment(
-        _at(30, 9), "soon", _at(23, 9)
+        _at(30, 9), "assignment-3"
     )
     doc = status_json.render_course_file(course, NOW, merged)
-    (problem,) = doc["problems"]
-    assert (problem["when"], problem["bites"]) == ("2026-09-30T10:00:00+02:00", "soon")
+    # The brief to-do a dated hand-out cites is a problem too (decision 0034, simplify).
+    brief, fault = doc["problems"]
+    assert (brief["id"], brief["kind"], brief["stage"]) == (
+        "template:assignment-3-f2026:brief",
+        "BRIEF",
+        "C5",
+    )
+    assert brief["stops"] == (
+        "The hand-out on Wed 30 Sep would give students a placeholder brief."
+    )
+    for p in (brief, fault):
+        assert (p["when"], p["bites"]) == ("2026-09-30T10:00:00+02:00", "soon")
     assert doc["course"]["stages"]["C5"] == "problem"
-    # The brief to-do says when it is needed and when it becomes a problem.
-    brief = {t["id"]: t for t in doc["course"]["todo"]}[
+    # The to-do stays, undated.
+    todo = {t["id"]: t for t in doc["course"]["todo"]}[
         "template:assignment-3-f2026:brief"
     ]
-    assert (brief["needed_by"], brief["problem_from"]) == (
-        "2026-09-30T10:00:00+02:00",
-        "2026-09-23T10:00:00+02:00",
-    )
-    # No live semester cites it: later, and no `needed_by`.
+    assert set(todo) == {
+        "id",
+        "kind",
+        "check",
+        "repo",
+        "text",
+        "screen",
+        "entry",
+        "need",
+        "optional",
+        "set_aside",
+    }
+    # No live semester cites it: the fault is later, and the to-do no problem.
     doc = status_json.render_course_file(course, NOW)
     (problem,) = doc["problems"]
     assert "when" not in problem and problem["bites"] == "later"
-    brief = {t["id"]: t for t in doc["course"]["todo"]}[
-        "template:assignment-3-f2026:brief"
-    ]
-    assert "needed_by" not in brief
     assert doc["course"]["verdict"]["state"] == "ready"
     assert validate(doc, schemas.status_schema()) == []
 
 
-def test_the_semester_counts_the_needed_template_to_dos_it_cites_as_coming_up():
+def test_a_cited_template_to_do_is_a_problem_on_the_semester_and_comes_up():
     course = _course()
     course.templates[1].readme = None  # assignment-3's brief, handed out 20 Oct
+    course.templates[1].starter_todo = "Derive has not been run yet."
     course.templates.append(status_json.TemplateFacts("assignment-9", None))
     doc = _render(course)
-    assert doc["semester"]["verdict"]["coming_up"] == 1
+    template = [p for p in doc["problems"] if p["stage"] == "C5"]
+    assert [(p["id"], p["kind"], p["release"], p["bites"]) for p in template] == [
+        ("template:assignment-3-f2026:brief", "BRIEF", "assignment-3", "later"),
+        ("template:assignment-3-f2026:starter", "STARTER", "assignment-3", "later"),
+    ]
+    assert template[1]["text"] == "Derive has not been run yet."
+    assert template[1]["stops"] == (
+        "The hand-out on Tue 20 Oct would give students a starter out of step with "
+        "the solution."
+    )
+    # Coming up is the later problems, every scope; nothing is uncited's.
+    assert doc["semester"]["verdict"]["coming_up"] == 2
     assert doc["semester"]["verdict"]["state"] == "ready"
     # The course has no Coming up of its own.
     assert "coming_up" not in doc["course"]["verdict"]
+    # Inside its horizon, it is fixing.
+    doc = _render(course, now=_at(14))
+    assert doc["semester"]["verdict"]["state"] == "fixing"
+    assert doc["course"]["stages"]["C5"] == "problem"
+    assert validate(doc, schemas.status_schema()) == []
 
 
 def test_gather_moments_reads_each_semesters_status_once(monkeypatch):
@@ -2741,8 +2803,10 @@ def test_gather_moments_reads_each_semesters_status_once(monkeypatch):
     assert reads == [(org, "semester-config", ".system/status.json") for org in files]
     assert set(moments) == {"assignment-2-f2026", "assignment-3-f2026"}
     # Already handed out: its problems stand now; the other is three weeks off.
-    assert moments["assignment-2-f2026"].bites == "now"
-    assert moments["assignment-3-f2026"].bites == "later"
+    assert status_json.bites(moments["assignment-2-f2026"].when, NOW) == "now"
+    assert status_json.bites(moments["assignment-3-f2026"].when, NOW) == "later"
+    # The course file knows the instant, not the semester's entry.
+    assert moments["assignment-3-f2026"].release is None
     # A file from before the field, or a semester not live, cites nothing.
     old = json.loads(json.dumps(live))
     del old["semester"]["template_moments"]

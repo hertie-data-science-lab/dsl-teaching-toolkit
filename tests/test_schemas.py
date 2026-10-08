@@ -174,7 +174,6 @@ CONTRACT_STATUS = {
             "K4": "problem",
             "K5": "problem",
             "K6": "done",
-            "K7": "todo",
         },
         "archive_date": "2027-01-31",
     },

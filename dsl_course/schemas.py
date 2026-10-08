@@ -228,6 +228,19 @@ NEEDS = (status_json.NEEDED, status_json.SUGGESTED)
 BITES = (status_json.NOW_, status_json.SOON, status_json.LATER)
 VERDICTS = (status_json.FIXING, status_json.NOT_READY, status_json.READY)
 TODO_KINDS = ("course", "materials", "template", "site", "schedule", "instructors")
+# The check a to-do is for: a materials check's id, else the template's, course's or
+# semester's own.
+TODO_CHECKS = (
+    "kind_folder",
+    "syllabus",
+    "withheld",
+    "brief",
+    "starter",
+    "description",
+    "home",
+    "archive_date",
+    "email",
+)
 
 
 def status_schema() -> dict:
@@ -309,15 +322,15 @@ def status_schema() -> dict:
         },
         ("repo", "state"),
     )
-    # Work started and not finished (decision 0022 rule 3): never a problem. `need`
-    # (decision 0034); `optional` is `need: suggested`, kept until the console reads
-    # `need`; `set_aside`: a suggested one the course lists (decision 0032). A needed
-    # template to-do a live semester cites: `needed_by` (its first hand-out) and
-    # `problem_from` (that hand-out less the horizon's days), both ISO datetimes.
+    # Work started and not finished (decision 0022 rule 3). `need` (decision 0034);
+    # `optional` is `need: suggested`, kept until the console reads `need`; `set_aside`:
+    # a suggested one the course lists (decision 0032); `check`: what it is the to-do of.
+    # A needed template to-do a dated hand-out cites is a problem as well.
     todo = _obj(
         {
             "id": _str(),
             "kind": _enum(TODO_KINDS),
+            "check": _enum(TODO_CHECKS),
             "repo": _str(),
             "text": _str(),
             "screen": _str(),
@@ -325,8 +338,6 @@ def status_schema() -> dict:
             "need": _enum(NEEDS),
             "optional": {"type": "boolean"},
             "set_aside": {"type": "boolean"},
-            "needed_by": _str(),
-            "problem_from": _str(),
         },
         ("id", "kind", "repo", "text"),
     )
@@ -382,8 +393,12 @@ def status_schema() -> dict:
         {
             "id": _str(),
             "scope": _enum(PROBLEM_SCOPES),
-            # A setup stage (C1-C6, K1-K7) or a running phase (`marking`); never null.
+            # A setup stage (C1-C6, K1-K6) or a running phase (`marking`); never null.
             "stage": _str(),
+            # Decision 0034: its code (`SOURCE_MISSING`, `LATE`, `BRIEF`, ...), and the
+            # schedule entry it holds back, when it holds one.
+            "kind": _str(),
+            "release": _str(),
             "text": _str(),
             "stops": _str(),
             "fix": fix,

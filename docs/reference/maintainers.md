@@ -413,32 +413,38 @@ and a shut window's are kept.
 Decision 0034 (need, time, verdict), all computed by the engine so the console holds no copy:
 - **Need.** Every stage (`stage_need`), materials check and to-do (`need`) is `needed`
   (without it automation cannot act, or a student gets something wrong) or `suggested`. C1-C3
-  and K1-K6 are needed; C4-C6 and K7 suggested. Of a materials repo's checks only the
-  content-kind folder is needed (the syllabus is suggested); a template's brief and starter
-  are needed. `blocks`, `optional`, `stage_optional` and `course.ready` stay, derived, for one
+  and K1-K6 are needed; C4-C6 suggested (there is no K7: the archive date is a to-do only).
+  Of a materials repo's checks only the content-kind folder is needed; the syllabus and its
+  weekly plan are ONE suggested check, `syllabus`. A template's brief and starter are
+  needed. `blocks`, `optional`, `stage_optional` and `course.ready` stay, derived, for one
   release. The semester's suggested to-dos (`semester.todo[]`) are `site:home`,
   `schedule:archive_date` and `instructors:email` (a count, never a handle); the course
-  description is the course to-do `course:description`. K5 is done once the roster has a
-  row (codes sent is the Students panel's meter), K6 once the site repo exists, K7 once the
-  schedule sets an archive date.
+  description is the course to-do `course:description`. Every to-do names its `check`
+  (`kind_folder`, `syllabus`, `withheld`, `brief`, `starter`, `description`, `home`,
+  `archive_date`, `email`). K5 is done once the roster has a row (codes sent is the Students
+  panel's meter), K6 once the site repo exists.
 - **Time.** `horizon` (both files) is `{days}`, the rolling window's length, off the one
   constant `status_json.PROBLEM_HORIZON` (7 days); no tick time, so an unchanged state
   still makes no commit. Each problem carries `bites`: `now` (moment passed, or none),
-  `soon` (at most 7 days off), `later`. Only `now`/`soon` mark a stage or a verdict. An
-  undated source fault is `later`; a course template's problems take the first citing
-  hand-out (`template_moments`: this semester's in a semester file; in the course file,
-  every running semester's, none -> `later`), and a needed template to-do carries
-  `needed_by` and `problem_from` (`needed_by` less the horizon). assignments.yml values
-  bite at their assignment's hand-out; visibility drift and a late release with no other problem
-  (`schedule:<entry>:LATE`) stand now; a cited root stub still the placeholder is
-  `schedule:<entry>:SOURCE_UNWRITTEN` at the release's moment; `opencourse.yml` that does
-  not parse is a `now` problem while the website is on. The digest's mail ladder is a
-  separate clock and unchanged.
+  `soon` (at most 7 days off), `later`, set in ONE place (`status_json._tier`; builders set
+  only `when`). Only `now`/`soon` mark a stage or a verdict. Each problem also carries
+  `kind` (its code: `SOURCE_MISSING`, `LATE`, `BRIEF`, ...) and, when it holds a schedule
+  entry back, `release` (that entry's id): readers join on these, never on `id`. An
+  undated source fault or stub is `later`; a course template's problems (stage C5) take
+  the first citing hand-out (`semester.template_moments`: this semester's in a semester
+  file; in the course file, every running semester's, none -> `later`). A needed template
+  to-do a dated hand-out cites is ALSO a problem, on the semester and the course file:
+  `template:<repo>:brief` / `:starter`, kind `BRIEF` / `STARTER`, `when` the hand-out
+  (`release` its assignment, in the semester file); the to-do stays in `course.todo[]`.
+  assignments.yml values bite at their assignment's hand-out; visibility drift and a late
+  release with no other problem (`schedule:<entry>:LATE`) stand now; a cited root stub
+  still the placeholder is `schedule:<entry>:SOURCE_UNWRITTEN` at the release's moment;
+  `opencourse.yml` that does not parse is a `now` problem while the website is on. The
+  digest's mail ladder is a separate clock and unchanged.
 - **Verdict.** `course.verdict` / `semester.verdict`: `fixing` (a `now`/`soon` problem;
   `problems` counts them), else `not_ready` (a needed stage open; `missing` is its
   sentence), else `ready`; `suggestions` counts open suggested items not set aside. The
-  semester's `coming_up` counts its `later` problems and the needed template to-dos its
-  schedule cites; the course has none. `status.py`'s checklist prints the semester's
+  semester's `coming_up` counts its `later` problems, every scope; the course has none. `status.py`'s checklist prints the semester's
   words ("Needs fixing: n problems in the next 7 days" / "On track: nothing to fix in the
   next 7 days").
 - **Call budget.** The course tick dates its template problems off each registered

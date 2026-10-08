@@ -446,6 +446,20 @@
           "items": {
             "additionalProperties": false,
             "properties": {
+              "check": {
+                "enum": [
+                  "kind_folder",
+                  "syllabus",
+                  "withheld",
+                  "brief",
+                  "starter",
+                  "description",
+                  "home",
+                  "archive_date",
+                  "email"
+                ],
+                "type": "string"
+              },
               "entry": {
                 "type": "string"
               },
@@ -470,14 +484,8 @@
                 ],
                 "type": "string"
               },
-              "needed_by": {
-                "type": "string"
-              },
               "optional": {
                 "type": "boolean"
-              },
-              "problem_from": {
-                "type": "string"
               },
               "repo": {
                 "type": "string"
@@ -654,6 +662,12 @@
             "type": "object"
           },
           "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "release": {
             "type": "string"
           },
           "scope": {
@@ -864,6 +878,20 @@
           "items": {
             "additionalProperties": false,
             "properties": {
+              "check": {
+                "enum": [
+                  "kind_folder",
+                  "syllabus",
+                  "withheld",
+                  "brief",
+                  "starter",
+                  "description",
+                  "home",
+                  "archive_date",
+                  "email"
+                ],
+                "type": "string"
+              },
               "entry": {
                 "type": "string"
               },
@@ -888,14 +916,8 @@
                 ],
                 "type": "string"
               },
-              "needed_by": {
-                "type": "string"
-              },
               "optional": {
                 "type": "boolean"
-              },
-              "problem_from": {
-                "type": "string"
               },
               "repo": {
                 "type": "string"
