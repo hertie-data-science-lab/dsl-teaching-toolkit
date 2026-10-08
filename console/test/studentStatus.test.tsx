@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { GitHubClient } from '../src/github/client';
 import { JOIN_MARKERS, STUDENT_STATUS_PATH } from '../src/model/names';
-import { StatusFileSource, factsFromStatus } from '../src/model/student';
+import { SiteSource, StatusFileSource, factsFromStatus } from '../src/model/student';
 import { isJoinRequest, joinCourseBody, joinTeamBody } from '../src/screens/StudentJoin';
 import { FakeGitHub, fileBody } from './fake';
 
@@ -56,6 +56,55 @@ describe('student-status.json', () => {
   it('shows an email only where the file carries one', () => {
     const cards = factsFromStatus(DOC).instructors;
     expect(cards.map((c) => [c.role, c.email])).toEqual([['instructor', 'shown@hertie-school.org'], ['teaching_assistant', '']]);
+  });
+
+  it('carries the landing page’s description and previous offerings (decision 0035 rule 13)', () => {
+    const f = factsFromStatus(DOC);
+    expect(f.courseDescription).toBe('Neural networks, from scratch.');
+    expect(f.previousOfferings).toEqual([{ title: 'Fall 2025', url: 'https://hertie-dl-f2025.github.io/' }]);
+    // Only an http(s) link is a link; a missing title is the URL.
+    const odd = factsFromStatus({ ...DOC, previous_offerings: [{ title: 'x', url: 'javascript:alert(1)' }, { title: '', url: 'https://a.b/' }] });
+    expect(odd.previousOfferings).toEqual([{ title: 'https://a.b/', url: 'https://a.b/' }]);
+  });
+
+  it('puts each row on the kind tabs the site lists it on, and says which kinds have a tab', () => {
+    const f = factsFromStatus(DOC);
+    const by = Object.fromEntries(f.rows.map((r) => [r.id, r.tabs]));
+    expect(by.lecture_01).toEqual(['lecture', 'readings']);
+    expect(by.lecture_02).toEqual(['lecture']);
+    expect(by.midterm).toEqual(['exam']);
+    expect(f.kinds?.lecture.tab).toBe(true);
+    expect(f.kinds?.exam.tab).toBe(true);
+    expect(f.kinds?.assignment.tab).toBe(false);
+  });
+
+  it('reads an older file without the new fields', () => {
+    const kinds = Object.fromEntries(Object.entries(DOC.kinds as Record<string, Record<string, unknown>>).map(([k, v]) => [k, { label: v.label, colour: v.colour, background: v.background }]));
+    const rows = (DOC.rows as Record<string, unknown>[]).map(({ tabs: _, ...r }) => r);
+    const { course_description: _d, previous_offerings: _p, ...rest } = DOC;
+    const f = factsFromStatus({ ...rest, kinds, rows });
+    expect(f.rows.find((r) => r.id === 'lecture_01')!.tabs).toEqual(['lecture']);
+    expect(f.kinds?.readings.tab).toBe(true);
+    expect(f.kinds?.exam.tab).toBe(false);
+    expect(f.courseDescription).toBe('');
+    expect(f.previousOfferings).toEqual([]);
+  });
+
+  it('reads the same facts from the site when there is no file', async () => {
+    const SITE = `${ORG}.github.io`;
+    const files: Record<string, string> = {
+      '_config.yml': 'course_name: Deep Learning\ncourse_description: Neural networks.\n',
+      '_data/people.yml': 'instructors: []\n',
+      '_data/previous_offering.yml': 'offerings:\n  - title: Fall 2025\n    url: https://hertie-dl-f2025.github.io/\n',
+      '_lectures/lecture-01.md': '---\nkind: lecture\ndate: 2026-09-08T10:00:00\ntitle: "Lecture 1"\ntabs: [lecture, readings]\nlinks: []\n---\n',
+      '_lectures/lab-01.md': '---\nkind: lab\ndate: 2026-09-09T10:00:00\ntitle: "Lab 1"\nlinks: []\n---\n',
+    };
+    const fake = new FakeGitHub().on('GET', `/repos/${ORG}/${SITE}/contents/_lectures`, ['lecture-01.md', 'lab-01.md'].map((n) => ({ name: n, path: `_lectures/${n}`, sha: n, type: 'file' })));
+    for (const [p, t] of Object.entries(files)) fake.on('GET', `/repos/${ORG}/${SITE}/contents/${p}`, fileBody(p, t));
+    const f = (await new SiteSource(client(fake)).facts(ORG))!;
+    expect(f.courseDescription).toBe('Neural networks.');
+    expect(f.previousOfferings).toEqual([{ title: 'Fall 2025', url: 'https://hertie-dl-f2025.github.io/' }]);
+    expect(Object.fromEntries(f.rows.map((r) => [r.id, r.tabs]))).toEqual({ 'lecture-01': ['lecture', 'readings'], 'lab-01': ['lab'] });
   });
 
   it('reads the file once, and falls back to the site for a semester without one', async () => {

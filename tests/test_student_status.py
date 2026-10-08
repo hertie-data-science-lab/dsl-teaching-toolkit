@@ -190,11 +190,20 @@ def _extra(facts: SemesterFacts) -> student_status.StudentFacts:
         cards=student_status.people_cards(INSTRUCTORS, semester=True),
         home=facts.site_home or "",
         announcements=[{"when": "2026-09-20", "title": "Room change", "details": "B1"}],
+        previous_offerings=[
+            {"title": "Fall 2025", "url": "https://hertie-dl-f2025.github.io/"}
+        ],
     )
 
 
 def _course() -> CourseFacts:
-    return CourseFacts(org=COURSE, meta={"course_name": "Deep Learning"})
+    return CourseFacts(
+        org=COURSE,
+        meta={
+            "course_name": "Deep Learning",
+            "course_description": "Neural networks, from scratch.",
+        },
+    )
 
 
 def _render(now: datetime = NOW) -> dict:
@@ -230,6 +239,7 @@ ALLOWED = (
     | {f"instructors[].{k}" for k in student_status.INSTRUCTOR_KEYS}
     | {f"announcements[].{k}" for k in student_status.ANNOUNCEMENT_KEYS}
     | {f"syllabus.{k}" for k in student_status.SYLLABUS_KEYS}
+    | {f"previous_offerings[].{k}" for k in student_status.OFFERING_KEYS}
     | {f"kinds.*.{k}" for k in student_status.KIND_KEYS}
     | {f"kinds.{k['key']}" for k in student_status.policy.kinds()}
 )
@@ -434,7 +444,73 @@ def test_hand_out_due_exam_and_term_rows():
 def test_kinds_come_from_the_policy():
     kinds = _render()["kinds"]
     assert kinds["lecture"]["label"] == "Lecture"
-    assert set(kinds["lecture"]) == {"label", "colour", "background"}
+    assert set(kinds["lecture"]) == {"label", "colour", "background", "tab"}
+
+
+def test_a_kind_has_a_tab_unless_the_engine_makes_its_rows():
+    kinds = _render()["kinds"]
+    assert kinds["lecture"]["tab"] and kinds["readings"]["tab"] and kinds["exam"]["tab"]
+    assert not kinds["assignment"]["tab"] and not kinds["term"]["tab"]
+
+
+def test_a_row_is_on_the_tabs_the_site_lists_it_on():
+    # The site's own rule (`site_repo.row_tabs`): a lecture carrying readings, landed or
+    # pending, is on the Readings tab too; every other row is on its kind's tab alone.
+    rows = {r["id"]: r for r in _render()["rows"]}
+    assert rows["lecture_01"]["tabs"] == ["lecture", "readings"]
+    assert rows["lecture_02"]["tabs"] == ["lecture"]
+    assert rows["midterm"]["tabs"] == ["exam"]
+    assert rows["assignment-1:due"]["tabs"] == ["due"]
+    facts = _facts()
+    facts.dest_paths["materials"] -= {
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+    }
+    doc = student_status.render(_course(), facts, _extra(facts), NOW)
+    lec = next(r for r in doc["rows"] if r["id"] == "lecture_01")
+    assert lec["readings_pending"] and lec["tabs"] == ["lecture", "readings"]
+
+
+def test_the_course_description_and_the_previous_offerings():
+    doc = _render()
+    assert doc["course_description"] == "Neural networks, from scratch."
+    assert doc["previous_offerings"] == [
+        {"title": "Fall 2025", "url": "https://hertie-dl-f2025.github.io/"}
+    ]
+    bare = CourseFacts(org=COURSE, meta={})
+    facts = _facts()
+    assert (
+        student_status.render(bare, facts, _extra(facts), NOW)["course_description"]
+        == ""
+    )
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("", []),
+        ("offerings: []\n", []),
+        ("offerings: [oops\n", []),
+        ("- a list\n", []),
+        ("offerings: nope\n", []),
+        (
+            (
+                "offerings:\n"
+                "  - title: Fall 2025\n    url: https://x.github.io/\n"
+                "  - url: http://y.example/\n"
+                "  - title: No link\n"
+                "  - title: Bad\n    url: javascript:alert(1)\n"
+                "  - just text\n"
+            ),
+            [
+                {"title": "Fall 2025", "url": "https://x.github.io/"},
+                {"title": "http://y.example/", "url": "http://y.example/"},
+            ],
+        ),
+    ],
+)
+def test_previous_offerings_are_read_without_failing(text, expected):
+    assert student_status.previous_offerings(text) == expected
 
 
 def test_home_text_fills_the_course_keys_and_drops_other_liquid():
@@ -473,6 +549,7 @@ def test_gather_reads_briefs_only_for_what_is_out(monkeypatch):
             "README.md": README_1,
             "readings/01_intro/READINGS.md": "prose",
             "_announcements/2026-09-20-room.md": "---\ndate: 2026-09-20\ntitle: Room\n---\nB1\n",
+            "_data/previous_offering.yml": "offerings:\n  - title: F25\n    url: https://a.b/\n",
         }.get(path, "")
 
     monkeypatch.setattr(student_status, "get_file_content", content)
@@ -499,6 +576,7 @@ def test_gather_reads_briefs_only_for_what_is_out(monkeypatch):
     assert extra.overlays == {("materials", "readings/01_intro/READINGS.md"): "prose"}
     assert extra.syllabus == ("materials", "SYLLABUS.md")
     assert extra.caps == {"assignment-2-project": 3}
+    assert extra.previous_offerings == [{"title": "F25", "url": "https://a.b/"}]
 
 
 def test_the_console_reads_a_fresh_render():

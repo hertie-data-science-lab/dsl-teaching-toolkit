@@ -384,7 +384,7 @@ def status_schema() -> dict:
             # Suggested to-dos: the site's home page, the archive date, emails.
             "todo": {"type": "array", "items": todo},
             "archive_date": nullable,
-            # Each cited template's first hand-out (ISO, null: undated), for the course.
+            # Each cited template's first hand-out still to come (ISO, null: undated).
             "template_moments": {"type": "object", "additionalProperties": nullable},
         },
         ("org", "stages", "live"),

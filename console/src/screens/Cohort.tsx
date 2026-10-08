@@ -13,7 +13,7 @@ import { OpsList, ProblemCards, ReleaseMarks, fixHref, ghUrl } from '../ui/bits'
 import { Verdict, readinessTabs, type Link, type SetupItem } from '../ui/SetupPanel';
 import { DashboardTabs, showTab } from '../ui/DashboardTabs';
 import { useSetAside } from './SetAside';
-import { horizonDays, problemFromDay, releaseMarks, standing, stepItems, suggestionsCount, tier, todoAside, verdictOf, type ReleaseMark, type Tiered } from '../model/readiness';
+import { horizonDays, problemFromDay, releaseMarks, standing, stepItems, suggestionsCount, tier, todoAside, verdictOf, verdictTab, type ReleaseMark, type Tiered } from '../model/readiness';
 import { Hint } from '../ui/Hint';
 import { MoreMenu, WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -354,9 +354,8 @@ export interface ComingRow {
  * ones it cites included. Each becomes a problem once inside the horizon.
  */
 export function comingRows(status: Status, tiered: Tiered[]): ComingRow[] {
-  const tz = tzOf(status);
   return tiered.filter((x) => x.b === 'later').map(({ p }) => ({
-    key: p.id, when: p.when, from: p.when ? problemFromDay(p.when, status.horizon, tz) : undefined, text: p.text, href: fixHref(p) ?? '#schedule', link: 'Fix',
+    key: p.id, when: p.when, from: p.when ? problemFromDay(p.when, status.horizon) : undefined, text: p.text, href: fixHref(p) ?? '#schedule', link: 'Fix',
   }));
 }
 
@@ -435,12 +434,14 @@ function Overview(p: ReadyProps) {
   const tiered = useMemo(() => tier(status, now), [status, now]);
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const problems = standing(tiered);
-  const aside = useSetAside({ org: p.course.org, files: p.files, write: p.course.write });
+  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.courseMigrated, write: p.course.write });
   const items = semesterItems(status, tiered, aside.list);
-  const [tab, setTab] = useState('problems');
   const coming = comingRows(status, tiered);
   const days = horizonDays(status.horizon);
-  const verdict = verdictOf(status.semester?.verdict, 'semester', suggestionsCount(items), days);
+  const verdict = verdictOf(status.semester?.verdict, 'semester', suggestionsCount(items), days, coming.length);
+  // The tab the verdict points at, until one is picked.
+  const [picked, setTab] = useState<string | null>(null);
+  const tab = picked ?? verdictTab(verdict);
   const late = (status.releases ?? []).filter((r) => r.state === 'late');
   const s = status.students;
   const ops = useOperations(status.operations, p.cohort.org);
@@ -459,7 +460,7 @@ function Overview(p: ReadyProps) {
         <div class="actions"><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
       </div>
       {/* The verdict is the page's one problem count, and its link to the Problems tab (decision 0034). */}
-      <Verdict v={verdict} onOpen={() => showTab(setTab, 'problems')} />
+      <Verdict v={verdict} onOpen={() => showTab(setTab, verdictTab(verdict))} />
       <div class="stack">
         <section class="panel section">
           <div class="section-head">

@@ -433,9 +433,11 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   `kind` (its code: `SOURCE_MISSING`, `LATE`, `BRIEF`, ...) and, when it holds a schedule
   entry back, `release` (that entry's id): readers join on these, never on `id`. An
   undated source fault or stub is `later`; a course template's problems (stage C5) take
-  the first citing hand-out (`semester.template_moments`: this semester's in a semester
-  file; in the course file, every running semester's, none -> `later`). A needed template
-  to-do a dated hand-out cites is ALSO a problem, on the semester and the course file:
+  the first citing hand-out still to come (`semester.template_moments`: this semester's in
+  a semester file; in the course file, every running semester's, none -> `later`). A
+  hand-out that has happened (its semester template exists, or its date has passed) never
+  dates one: the copies it made are fixed one by one. A needed template to-do a future
+  dated hand-out cites is ALSO a problem, on the semester and the course file:
   `template:<repo>:brief` / `:starter`, kind `BRIEF` / `STARTER`, `when` the hand-out
   (`release` its assignment, in the semester file); the to-do stays in `course.todo[]`.
   assignments.yml values bite at their assignment's hand-out; visibility drift and a late
@@ -451,7 +453,7 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   next 7 days").
 - **Call budget.** The course tick dates its template problems off each registered
   semester's own `status.json` (`semester.template_moments`, each cited template's first
-  hand-out): ONE read per semester in `semesters.yml` (which lists names only, so an
+  hand-out still to come): ONE read per semester in `semesters.yml` (which lists names only, so an
   archived one costs its read too; its frozen file is passed over by its end date), never
   a schedule or an archived-repo probe (`gather_moments`). It is one tick behind a
   schedule edit: the course sees it once that semester's tick has rewritten its file. The

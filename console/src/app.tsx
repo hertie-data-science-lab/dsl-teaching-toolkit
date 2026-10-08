@@ -39,14 +39,14 @@ import { NewCohortScreen } from './screens/NewCohort';
 import { NewCourseScreen } from './screens/NewCourse';
 import { NewMaterialsScreen } from './screens/NewMaterials';
 import { MigrationUnknownScreen, NotMigratedScreen } from './screens/NotMigrated';
-import { StudentBanner, StudentScreen, forgetStudentData, studentScreen } from './screens/Student';
+import { StudentBanner, StudentScreen, StudentSideNav, forgetStudentData, studentScreen } from './screens/Student';
 import { JoinCourseScreen } from './screens/StudentJoin';
 import type { CohortProps, CourseProps } from './screens/types';
 import { Loading, ghUrl } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
 import { forgetRendered } from './ui/rendered';
 import { forgetShown } from './model/materials';
-import { CourseBanner, Footer, Sidenav, StudentNav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
+import { CourseBanner, Footer, Sidenav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
 import { fmtDay } from './model/format';
 import { DEFAULT_TIMEZONE } from './model/policy';
 import type { SemesterStatus } from './model/types';
@@ -99,7 +99,7 @@ export function App({ state: s }: { state: AppState }) {
     };
   }, []);
 
-  // A semester's student screens keep their own `#setup` (Set up); only instructor links rename.
+  // A semester's student screens rename their own old hashes (`#marks`, `#join` to Assignments).
   // Until discovery answers, a `?semester=` URL is taken as the student screens' (nothing is
   // rewritten yet); after, only when the person holds a role in that semester.
   const asked = parseSearch(s.search.value);
@@ -188,7 +188,7 @@ export function App({ state: s }: { state: AppState }) {
         <Topbar user={user} title={stu.studentView ? 'Student view (preview)' : title} titleHref={stu.studentView ? back : undefined} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} guide={guide} />
         <div class="shell">
           <aside class="sidenav" id="sidenav-wrap" aria-label="Semester navigation">
-            <StudentNav root={root} semesters={semesters} semester={stu.semester} current={key} studentView={stu.studentView} now={s.now.value} />
+            <StudentSideNav root={root} semesters={semesters} semester={stu.semester} current={key} studentView={stu.studentView} now={s.now.value} />
           </aside>
           <main id="view" tabindex={-1}>
             {estate.invited?.length ? <Invitations invited={estate.invited} kind={estate.kind} /> : null}
@@ -212,6 +212,8 @@ export function App({ state: s }: { state: AppState }) {
   const aboutCourse = !!ctx.course && !APP_SCREENS.includes(screen) && wiz?.name !== 'new-course';
   const semesterPage = !!ctx.cohort && !!ctx.course?.write && !wiz && !APP_SCREENS.includes(screen) && !(screen in COURSE_SCREENS);
   const courseLeft = aboutCourse ? s.leftovers('course', ctx.course!.org, nav) : [];
+  // The course's names are current: what a save to its files (Set aside, details) waits for.
+  const courseMigrated = Array.isArray(courseLeft) && !courseLeft.length;
   const semLeft = semesterPage ? s.leftovers('semester', ctx.cohort!.org, nav) : [];
   const failed = courseLeft === 'failed' ? { what: 'course' as const, org: ctx.course!.org } : semLeft === 'failed' ? { what: 'semester' as const, org: ctx.cohort!.org } : null;
   const pending = courseLeft === undefined || semLeft === undefined;
@@ -254,7 +256,7 @@ export function App({ state: s }: { state: AppState }) {
         name={ctx.course.name} semester={ctx.cohort ? { org: ctx.cohort.org, termLabel: ctx.cohort.termLabel } : undefined} />
     );
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
-    const cp: CourseProps = { migrated: Array.isArray(courseLeft) && !courseLeft.length, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
+    const cp: CourseProps = { migrated: courseMigrated, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
     body = wiz?.name === 'new-semester' ? <NewCohortScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-assignment' ? <NewAssignmentScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-materials' ? <NewMaterialsScreen {...cp} />
@@ -274,7 +276,7 @@ export function App({ state: s }: { state: AppState }) {
   } else {
     const cp: CohortProps = {
       course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry, tab: route.tab,
-      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template,
+      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template, courseMigrated,
     };
     const screens: Record<string, () => preact.JSX.Element> = {
       dashboard: () => <CohortScreen {...cp} />,

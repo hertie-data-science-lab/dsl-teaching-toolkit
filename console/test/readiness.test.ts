@@ -29,8 +29,12 @@ describe('bitesAt', () => {
     expect(bitesAt(iso(NOW + 15 * DAY), { days: 14 }, NOW)).toBe('later');
   });
   it('says the day a moment’s problem starts to count', () => {
-    expect(problemFromDay('2026-11-04T10:00:00+01:00', undefined, 'Europe/Berlin')).toBe('2026-10-28');
-    expect(problemFromDay('2026-11-04T10:00:00+01:00', { days: 14 }, 'Europe/Berlin')).toBe('2026-10-21');
+    expect(problemFromDay('2026-11-04T10:00:00+01:00', undefined)).toBe('2026-10-28');
+    expect(problemFromDay('2026-11-04T10:00:00+01:00', { days: 14 })).toBe('2026-10-21');
+    // The day boundary is the moment's own offset, not UTC's or the machine's.
+    expect(problemFromDay('2026-11-04T00:30:00+01:00', undefined)).toBe('2026-10-28');
+    expect(problemFromDay('2026-11-04T23:30:00-05:00', undefined)).toBe('2026-10-28');
+    expect(problemFromDay('2026-11-04T00:30', undefined)).toBe('2026-10-28');
   });
 });
 
@@ -59,6 +63,14 @@ describe('normalise (contract C)', () => {
     expect(n.course!.todo!.map((t) => t.need)).toEqual(['suggested', 'needed']);
     expect(n.course!.stage_need).toMatchObject({ C3: 'needed', C6: 'suggested' });
     expect(n.semester!.stage_need).toMatchObject({ K1: 'needed', K6: 'needed' });
+  });
+  it('takes a course block with no materials or templates list (nor todo, problems or semester todo)', () => {
+    const { materials: _m, templates: _p, todo: _t, ...course } = STATUS.course!;
+    const bare = normalise({ ...STATUS, problems: undefined, course: course as typeof STATUS.course, semester: { ...STATUS.semester!, todo: undefined } }, NOW);
+    expect(bare.course!.materials).toEqual([]);
+    expect(bare.course!.templates).toEqual([]);
+    expect(bare.course!.todo).toBeUndefined();
+    expect(bare.problems).toBeUndefined();
   });
   it('passes a status today’s engine wrote through unchanged', () => {
     const now = normalise(n, NOW);
@@ -91,6 +103,8 @@ describe('the verdict (the engine’s)', () => {
     expect(verdictWords(v!)).toBe('Needs fixing: 2 problems · 2 suggestions');
     const sem = verdictOf({ state: 'fixing', problems: 1, missing: null, suggestions: 0, coming_up: 3 }, 'semester', 0, 7);
     expect(verdictWords(sem!)).toBe('Needs fixing: 1 problem in the next 7 days · 3 coming up');
+    // The console's own counts win, and a semester tags its suggestions too (as the CLI).
+    expect(verdictWords(verdictOf({ state: 'fixing', problems: 1, missing: null, suggestions: 0, coming_up: 3 }, 'semester', 2, 7, 1)!)).toBe('Needs fixing: 1 problem in the next 7 days · 1 coming up · 2 suggestions');
     const open = verdictOf({ state: 'not_ready', problems: 0, missing: 'No instructor is declared in instructors.yml yet.', suggestions: 0 }, 'semester', 0, 7);
     expect(verdictWords(open!)).toBe('Not set up: no instructor is declared in instructors.yml yet');
     expect(verdictWords(verdictOf({ state: 'ready', problems: 0, missing: null, suggestions: 0, coming_up: 1 }, 'semester', 0, 14)!)).toBe('On track: nothing to fix in the next 14 days · 1 coming up');
@@ -166,6 +180,14 @@ describe('release marks (decision 0034 §6)', () => {
     // A status that names no problem: late is late; a held one is worded by its own date.
     expect(marks([], rel('late'))).toMatchObject({ late: true });
     expect(markWord(marks([], rel('will_be_skipped', iso(NOW + 30 * DAY)))!)).toBe('not ready yet');
+  });
+
+  it('marks a release by its earliest-biting problem, not the first listed', () => {
+    const later = p('schedule:s1:SOURCE_MISSING', 's1', { bites: 'later' });
+    const soon = p('number:lecture:s1', 's1', { bites: 'soon' });
+    expect(marks([later, soon])).toMatchObject({ bites: 'soon', problem: soon });
+    const now = p('schedule:s1:SOURCE_UNWRITTEN', 's1', { bites: 'now' });
+    expect(marks([later, soon, now])).toMatchObject({ bites: 'now', problem: now });
   });
 
   it('counts held releases in the Schedule lede’s words', () => {

@@ -598,8 +598,8 @@ def problem_from_fault(
     `kind` is its code; `release` the schedule entry it holds back, when it holds one.
 
     `when` is the instant the fault bites: the fault's own `fires` (a release, a hand-out),
-    except a template's, which bites at the first hand-out that consumes the template -
-    `moments`, by template; an assignments.yml value's, at its assignment's hand-out -
+    except a template's, which bites at the first hand-out still to come that consumes the
+    template - `moments`, by template (none left: undated, `later`); an assignments.yml value's, at its assignment's hand-out -
     `slug_handouts`, by schedule key; and visibility drift's, which stands now. Undated
     without one; an undated source fault, and a course template's no dated hand-out
     cites, is marked `UNDATED_LATER`. `_tier` sets `bites`.
@@ -740,18 +740,26 @@ def _distinct(problems: list[dict]) -> list[dict]:
 
 @dataclass(frozen=True)
 class Moment:
-    """When a course template is first needed: its first dated citing hand-out (None:
-    cited only by an assignment with no hand-out date), and that assignment's schedule
-    key (`release`; None in the course file, which sees only the instant)."""
+    """When a course template is next needed: its first dated citing hand-out still to
+    come (None: cited only by an assignment with no hand-out date), and that assignment's
+    schedule key (`release`; None in the course file, which sees only the instant). A
+    hand-out that has happened is never a moment: the template can no longer change what
+    it gave out (the copies are fixed one by one)."""
 
     when: datetime | None
     release: str | None = None
 
 
-def _handouts(sched: schedule.Schedule) -> dict[str, Moment]:
-    """`{template repo: the first hand-out that cites it}` in one schedule."""
+def _handouts(
+    sched: schedule.Schedule, templates: frozenset[str], now: datetime
+) -> dict[str, Moment]:
+    """`{template repo: the first hand-out still to come that cites it}` in one schedule.
+    An assignment already out (`handed_out`: its semester template exists, or its
+    `handout_datetime` has passed) cites nothing here."""
     out: dict[str, Moment] = {}
     for slug, a in sched.assignments.items():
+        if handed_out(schedule.semester_name(slug, a), a, templates, now):
+            continue
         was = out.get(a.course_source_repo)
         when = a.handout_datetime
         if was is None or (when is not None and (was.when is None or when < was.when)):
@@ -1258,9 +1266,10 @@ def template_todo_problems(
     t: TemplateFacts, org: str, moments: Mapping[str, Moment] | None
 ) -> list[dict]:
     """Decision 0034: a template's needed to-do (`brief`, `starter`) is a problem once a
-    dated hand-out cites the template - `when` is that hand-out (`moments`), `release` its
-    assignment where the file knows it; `_tier` decides whether it bites yet. The to-do
-    stays in `course.todo[]` as well."""
+    dated hand-out still to come cites the template - `when` is that hand-out (`moments`),
+    `release` its assignment where the file knows it; `_tier` decides whether it bites
+    yet. A hand-out that has happened never dates one (`_handouts`): with none to come,
+    the to-do is only a to-do. It stays in `course.todo[]` either way."""
     m = (moments or {}).get(t.repo)
     if not t.topic or m is None or m.when is None:
         return []
@@ -2281,7 +2290,9 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
         *facts.teams_faults,
         *facts.sheet_faults,
     ]
-    moments = _handouts(sched)
+    moments = _handouts(
+        sched, handed_out_assignments(list(facts.listing.values())), now
+    )
     slugs = {k: a.handout_datetime for k, a in sched.assignments.items()}
     problems = [problem_from_fault(f, facts.org, now, moments, slugs) for f in faults]
     problems += [problem_from_fault(f, course.org, now) for f in course.faults]
@@ -2350,8 +2361,8 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "verdict": semester_verdict(stages, why, todo, problems),
             "todo": todo,
             "archive_date": _iso(sched.archive.when if sched.archive else None),
-            # Decision 0034: each cited template's first hand-out here, which the course
-            # tick reads to date its template problems (`gather_moments`).
+            # Decision 0034: each cited template's first hand-out still to come here,
+            # which the course tick reads to date its template problems (`gather_moments`).
             "template_moments": {repo: _iso(m.when) for repo, m in moments.items()},
         },
         "problems": problems,
@@ -2688,7 +2699,8 @@ def gather_moments(semesters: list[str], now: datetime) -> dict[str, Moment]:
 
 def _moments_from_status(doc: object, now: datetime) -> dict[str, Moment]:
     """The template moments a semester's `status.json` records, or none when it is not a
-    running semester's (not live, or past its end) or carries none."""
+    running semester's (not live, or past its end) or carries none. A recorded moment
+    that has passed since the file was written is dropped: that hand-out has happened."""
     semester = doc.get("semester") if isinstance(doc, dict) else None
     if not isinstance(semester, dict) or not semester.get("live"):
         return {}
@@ -2699,6 +2711,9 @@ def _moments_from_status(doc: object, now: datetime) -> dict[str, Moment]:
         moments = {
             str(repo): Moment(datetime.fromisoformat(when) if when else None)
             for repo, when in raw.items()
+        }
+        moments = {
+            repo: m for repo, m in moments.items() if m.when is None or m.when > now
         }
     except (KeyError, TypeError, ValueError, AttributeError):
         return {}

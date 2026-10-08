@@ -181,7 +181,7 @@ describe('the student tree', () => {
     expect(h.textContent).toContain('Spring 2026 archived');
     act(() => spring.click());
     const links = [...h.querySelectorAll(`#${spring.getAttribute('aria-controls')} a`)];
-    expect(links.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([['Statistics I', `?semester=${stats.org}#week`]]);
+    expect(links.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([['Statistics I', `?semester=${stats.org}#home`]]);
     // No third level: a past term's course is a plain link.
     expect(h.querySelector(`#${spring.getAttribute('aria-controls')} .chev`)).toBeNull();
     expect(h.querySelector('.switcher, .popmenu')).toBeNull();
@@ -196,7 +196,7 @@ describe('the student tree', () => {
     const live = [...h.querySelectorAll<HTMLElement>('li')].find((li) => li.querySelector(':scope > .row .nav-dot'))!;
     const liveLink = live.querySelector(':scope > .row > a')!;
     expect(liveLink.textContent).toBe('Fall 2026 (live)');
-    expect(liveLink.getAttribute('href')).toBe(`?semester=${dl.org}#week`);
+    expect(liveLink.getAttribute('href')).toBe(`?semester=${dl.org}#home`);
     const t = h.textContent!;
     expect(t.indexOf('Fall 2026')).toBeLessThan(t.indexOf('Past semesters'));
     // The group lists only the past terms.
