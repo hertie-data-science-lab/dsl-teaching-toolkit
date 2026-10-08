@@ -14,7 +14,9 @@ import { CheckLine, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
-import { StateChip, Whys, courseView } from './Course';
+import { courseView } from './Course';
+import { RepoChip, RepoWhy } from '../ui/SetupPanel';
+import { materialsReadiness, templateReadiness } from '../model/readiness';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
 
@@ -105,8 +107,8 @@ export function MaterialsIndexScreen(p: CourseProps) {
                 const term = termLabel(m.repo);
                 return (
                   <li>
-                    <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" />{term ? <span class="chip term">{term}</span> : null}</span>
-                    <Whys m={m} />
+                    <span class="r-title">{m.repo} <RepoChip r={materialsReadiness(m)} />{term ? <span class="chip term">{term}</span> : null}</span>
+                    <RepoWhy r={materialsReadiness(m)} />
                     {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
                   </li>
@@ -158,7 +160,8 @@ export function TemplatesIndexScreen(p: CourseProps) {
         {templates.length ? (
           <ul class="rows">
             {templates.map((t) => {
-              const bad = t.state === 'problem';
+              const r = templateReadiness(t, v.course?.todo ?? [], v.tiered.filter((x) => x.p.fix?.entry === t.repo).map((x) => ({ text: x.p.text, b: x.b })));
+              const bad = r.state === 'problem';
               const f = files.file(course.org, t.repo, 'grading_config.yml', 'solution');
               const y = f.kind === 'ready' ? new YamlText(f.text) : null;
               const cfg = y && !y.errors.length ? obj(y.toJS()) : {};
@@ -167,9 +170,9 @@ export function TemplatesIndexScreen(p: CourseProps) {
               const used = usedIn(p, t.repo);
               return (
                 <li>
-                  <span class="r-title">{templateName(title)} <StateChip state={t.state} todo="Not written yet" /></span>
+                  <span class="r-title">{templateName(title)} <RepoChip r={r} /></span>
                   <span class={`r-sub${bad ? ' flag' : ''}`}>
-                    {bad ? `${v.problems.find((x) => x.fix?.entry === t.repo)?.stops ?? 'Has a problem.'} ` : t.state !== 'ready' ? 'The brief (README.md) is not written yet. ' : ''}
+                    {bad ? `${v.problems.find((x) => x.fix?.entry === t.repo)?.stops ?? 'Has a problem.'} ` : r.missing ? `${r.missing} ` : ''}
                     {how.length ? `${how.join(', ')}. ` : ''}
                     <span class="slug">{t.repo}</span>
                   </span>

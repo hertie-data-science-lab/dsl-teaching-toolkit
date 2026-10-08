@@ -2,14 +2,18 @@
 
 import { useState } from 'preact/hooks';
 import {
-  ASSIGNMENT_WORD, TYPE_CLASS, TYPE_LABEL, addDays, ago, assignmentTitle, daysBetween, fmtDate, fmtDay, fmtDays, fmtShort, fmtTime, fmtWhen, releaseIdent,
+  ASSIGNMENT_WORD, TYPE_CLASS, TYPE_LABEL, addDays, ago, assignmentIdent, assignmentTitle, dayKey, daysBetween, fmtDate, fmtDay, fmtDays, fmtShort, fmtTime, fmtWhen, releaseIdent,
 } from '../model/format';
-import { inWeeks, needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekRank, weekStart, type Row, type Schedule, type Term, type WeekKey, termOf } from '../model/schedule';
+import { needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekStart, type Row, type Schedule, type Term, type WeekGroup, type WeekKey, termOf } from '../model/schedule';
 import type { Assignment, Problem, Status } from '../model/types';
 import { checkAccess, checkNow, releaseEarly, type ReleaseRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { Release } from '../model/types';
-import { Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
+import { OpsList, ProblemCards, fixHref, ghUrl } from '../ui/bits';
+import { Verdict, readinessTabs, type Link, type SetupItem } from '../ui/SetupPanel';
+import { DashboardTabs, showTab } from '../ui/DashboardTabs';
+import { useSetAside } from './SetAside';
+import { bitesOf, horizonDays, needOf, shownSteps, standing, stepAside, stepNeed, stepState, todoAside, verdictOf } from '../model/readiness';
 import { Hint } from '../ui/Hint';
 import { MoreMenu, WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -160,7 +164,7 @@ function RowItem({ r, status, p }: { r: Row; status: Status; p: CohortProps }) {
     const rel = releases.find((x) => x.id === r.entry);
     const ref = rel && r.when ? releaseRef(rel, tz, Number(r.when.slice(0, 4))) : null;
     chip = 'Release';
-    detail = rel && !rel.source ? `${NOTHING_TO_RELEASE}.` : rel?.state === 'will_be_skipped' ? (needsANumber(status, rel.id) ? 'Will be skipped: it has no number.' : 'Will be skipped: its folder was not found.') : rel?.state === 'released' ? 'Released.' : 'Goes to students at its time; the site row goes live.';
+    detail = rel && !rel.source ? `${NOTHING_TO_RELEASE}.` : rel?.state === 'will_be_skipped' ? (needsANumber(status, rel.id) ? 'Will be skipped: it has no number.' : 'Will be skipped: its folder was not found.') : rel?.state === 'released' ? 'Released.' : rel?.state === 'late' ? `Late: due ${fmtDay(rel.when, tz)}, not released yet.` : 'Goes to students at its time; the site row goes live.';
     buttons = (
       <>
         {ref && rel?.state === 'planned' ? <OpButtons def={releaseEarly(cohortScope(p), ref)} small label={`Release ${r.ident} early`} /> : null}
@@ -228,14 +232,144 @@ const plannedHeading = (name: string) => (name === 'All weeks' ? 'Planned, all w
 const inPhrase = (name: string) => (name === 'This week' ? 'this week' : name === 'All weeks' ? 'in any week' : `in ${name.charAt(0).toLowerCase()}${name.slice(1)}`);
 
 /**
- * The problems a selection shows. This week also shows what is overdue: dated before it, in
- * its own group. Every other selection is strict. Undated problems always show.
+ * The Problems tab (decision 0034, amended): every problem now or soon, whatever weeks the strip
+ * picks. Overdue (its moment passed), the next `days` days, then Any time (undated).
  */
-export function problemGroups(problems: Problem[], selected: number[], isThisWeek: boolean, term: Term, tz: string): { overdue: Problem[]; dated: Problem[]; undated: Problem[]; elsewhere: number } {
-  const { dated, undated } = inWeeks(problems, (x) => x.when, selected, term, tz);
-  const overdue = isThisWeek ? problems.filter((x) => x.when && weekRank(weekOf(x.when, term, tz), term) < selected[0]) : [];
-  const elsewhere = problems.filter((x) => x.when).length - dated.length - overdue.length;
-  return { overdue, dated, undated, elsewhere };
+export function problemGroups(list: Problem[], now: number, days: number): { key: string; label: string; rows: Problem[] }[] {
+  const overdue = list.filter((p) => p.when && Date.parse(p.when) <= now);
+  const next = list.filter((p) => p.when && Date.parse(p.when) > now);
+  const any = list.filter((p) => !p.when);
+  return [
+    { key: 'overdue', label: 'Overdue', rows: overdue },
+    { key: 'next', label: `Next ${days} days`, rows: next },
+    { key: 'any', label: 'Any time', rows: any },
+  ].filter((g) => g.rows.length);
+}
+
+// ------------------------------------------------------------------ Setup & To do (decision 0034)
+
+/** The semester's setup steps (K1-K7). K1-K6 are needed; K7 suggested. */
+export const SEMESTER_STEPS: { id: string; name: string }[] = [
+  { id: 'K1', name: 'Semester org read' },
+  { id: 'K2', name: 'Semester set up on GitHub' },
+  { id: 'K3', name: 'Instructors declared' },
+  { id: 'K4', name: 'Schedule written' },
+  { id: 'K5', name: 'Students on the roster' },
+  { id: 'K6', name: 'Student site' },
+  { id: 'K7', name: 'Archive' },
+];
+
+/** The step each one waits for (the engine's `PREREQUISITES`). */
+const K_WAITS: Record<string, string> = { K2: 'K1', K3: 'K2', K4: 'K2', K5: 'K2', K6: 'K2' };
+
+const K_HINT: Record<string, string> = {
+  K1: 'The console and automation can read the semester’s GitHub org.',
+  K2: 'The semester’s repos exist (semester-config, join and the student site) and the course lists the semester.',
+  K3: 'At least one instructor in instructors.yml, on the Instructors page.',
+  K4: 'schedule.yml with the semester’s start and end and at least one release or assignment.',
+  K5: 'At least one student on the roster (students.csv).',
+  K6: 'The student site’s repo exists.',
+  K7: 'When the semester freezes: its repos are archived on the archive date.',
+};
+
+/** Where an open semester step, or a to-do on a screen, is done. */
+const SCREEN_LINK: Record<string, Link> = {
+  instructors: { href: '#instructors', label: 'Edit instructors' },
+  schedule: { href: '#schedule', label: 'Edit schedule' },
+  students: { href: '#students', label: 'Open roster' },
+  site: { href: '#site', label: 'Edit site' },
+  archive: { href: '#archive', label: 'Archive' },
+};
+const K_SCREEN: Record<string, string> = { K3: 'instructors', K4: 'schedule', K5: 'students', K6: 'site', K7: 'archive' };
+
+/** A semester to-do's line, by its id (contract B); else its sentence. */
+const TODO_LABEL: Record<string, string> = { 'site:home': 'Site home page written', 'schedule:archive_date': 'Archive date declared', 'instructors:email': 'Instructor emails' };
+
+/** The semester's Setup & To do rows: each step (less one a to-do says the same as), then each to-do. */
+export function semesterItems(status: Status, now: number, list: string[] | null = null): SetupItem[] {
+  const s = status.semester;
+  if (!s) return [];
+  const tiered = (status.problems ?? []).map((p) => ({ p, b: bitesOf(p, status.horizon, now) }));
+  const todo = s.todo ?? [];
+  const name = (id: string) => SEMESTER_STEPS.find((k) => k.id === id)?.name ?? id;
+  const steps: SetupItem[] = SEMESTER_STEPS.filter((k) => shownSteps([k.id], todo).length).map(({ id, name: label }) => {
+    const own = tiered.filter((x) => x.p.stage === id);
+    const state = stepState(s.stages[id], own.map((x) => x.b));
+    const first = own.find((x) => x.b !== 'later')?.p;
+    const why = s.stage_why?.[id];
+    return {
+      id, label, kind: 'step', need: stepNeed(s, id), state, hint: K_HINT[id], hintLabel: 'About this step',
+      why: state === 'done' ? undefined : state === 'problem' ? first?.text ?? why : why ?? (state === 'open' ? 'Not done yet.' : undefined),
+      link: state === 'open' ? (K_SCREEN[id] ? SCREEN_LINK[K_SCREEN[id]] : { href: ghUrl(s.org), label: 'Open on GitHub', ext: true }) : undefined,
+      fix: state === 'problem' && first ? fixHref(first) ?? undefined : undefined,
+      waitsFor: K_WAITS[id] ? name(K_WAITS[id]) : undefined,
+      aside: stepAside(s, id, list),
+    };
+  });
+  const todos: SetupItem[] = todo.map((t) => ({
+    id: t.id, label: TODO_LABEL[t.id] ?? t.text, kind: 'todo', need: needOf(t), state: 'open',
+    why: TODO_LABEL[t.id] ? t.text : undefined,
+    link: t.screen ? SCREEN_LINK[t.screen] ?? { href: `#${t.screen}${t.entry ? `-${t.entry}` : ''}`, label: 'Open' } : undefined,
+    aside: todoAside(t, list),
+  }));
+  return [...steps, ...todos];
+}
+
+/** One line of the semester's Coming up: a `later` problem, or a needed to-do of a template this semester hands out. */
+export interface ComingRow {
+  key: string;
+  when?: string;
+  /** The day it becomes a problem (yyyy-mm-dd): `days` before `when`, or the engine's `problem_from`. */
+  from?: string;
+  text: string;
+  href: string;
+  link: string;
+}
+
+/**
+ * What this semester needs later (decision 0034, amended): every `later` problem, and each needed
+ * to-do of a template it hands out beyond the horizon. Each becomes a problem once inside it.
+ */
+export function comingRows(status: Status, now: number, courseOrg: string): ComingRow[] {
+  const tz = tzOf(status);
+  const days = horizonDays(status.horizon);
+  const from = (iso: string) => dayKey(new Date(Date.parse(iso) - days * 864e5).toISOString(), tz);
+  const later: ComingRow[] = (status.problems ?? []).filter((p) => bitesOf(p, status.horizon, now) === 'later')
+    .map((p) => ({ key: p.id, when: p.when, from: p.when ? from(p.when) : undefined, text: p.text, href: fixHref(p) ?? '#schedule', link: 'Fix' }));
+  const beyond = (iso: string) => bitesOf({ id: '', scope: 'semester', stage: '', text: '', stops: '', when: iso }, status.horizon, now) === 'later';
+  const todos: ComingRow[] = (status.course?.todo ?? []).filter((t) => t.kind === 'template' && needOf(t) === 'needed').flatMap((t) =>
+    (status.assignments ?? []).filter((a) => a.template === t.repo && a.handout && beyond(a.handout)).map((a) => ({
+      key: `${t.id}:${a.slug}`, when: a.handout!, from: t.problem_from ? dayKey(t.problem_from, tz) : from(a.handout!), text: `${assignmentIdent(a.slug, a.title, a.number)} hand-out: ${t.text}`, href: `?course=${courseOrg}#template-${t.repo}`, link: 'Open settings',
+    })));
+  return [...later, ...todos];
+}
+
+/** Coming up by week, in order; what no date pins last, as No date yet. */
+export function comingGroups(rows: ComingRow[], term: Term, tz: string): WeekGroup<ComingRow>[] {
+  const dated = rows.filter((r) => r.when), undated = rows.filter((r) => !r.when);
+  const groups = weekGroups(dated, (r) => r.when, term, tz, [...new Set(dated.map((r) => weekOf(r.when!, term, tz)))]);
+  return undated.length ? [...groups, { key: 'none', label: 'No date yet', rows: undated }] : groups;
+}
+
+/** The Coming up fold's body: by week, each week saying when its items become problems. */
+export function ComingUp({ rows, term, tz, year }: { rows: ComingRow[]; term: Term; tz: string; year: number }) {
+  return (
+    <>
+      {comingGroups(rows, term, tz).map((g) => {
+        const from = g.rows.map((r) => r.from).filter((x): x is string => !!x).sort()[0];
+        return (
+          <section aria-label={g.label}>
+            <h3 class="week-h">{g.label}{g.from || from ? <span>{g.from ? ` from ${fmtShort(g.from)}` : ''}{from ? ` · problems from ${fmtShort(from)}` : ''}</span> : null}</h3>
+            <ul>
+              {g.rows.map((r) => (
+                <li key={r.key}><b>{r.when ? fmtDay(r.when, tz, year) : 'No date'}</b><span>{r.text}</span><a class="textlink" href={r.href}>{r.link}</a></li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </>
+  );
 }
 
 export function StudentCounts({ status }: { status: Status }) {
@@ -276,33 +410,24 @@ function Overview(p: ReadyProps) {
   const rows = scheduleRows(status, sched, now, tz);
   const term = termOf(status, sched, today);
   const current = weekOf(today, term, tz);
-  const [showSetup, setShowSetup] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const thisWeek = thisWeekOf(current);
   // The weeks the page is filtered to, picked in the strip; empty is all weeks. This week on load.
   const [selected, setSelected] = useState<number[]>(thisWeek);
-  const problems = status.problems ?? [];
-  const stages = status.semester?.stages ?? {};
-  const amber = Object.values(stages).filter((s) => s === 'problem').length;
+  // Problems now or soon (decision 0034): the verdict, the strip's counts and the Problems tab; later ones are Coming up.
+  const problems = standing(status, now);
+  const aside = useSetAside({ org: p.course.org, files: p.files, write: p.course.write });
+  const items = semesterItems(status, now, aside.list);
+  const [tab, setTab] = useState('problems');
+  const coming = comingRows(status, now, p.course.org);
+  const days = horizonDays(status.horizon);
+  const verdict = verdictOf(items, (status.problems ?? []).map((x) => bitesOf(x, status.horizon, now)), 'semester', coming.length, days);
   const late = (status.releases ?? []).filter((r) => r.state === 'late');
   const s = status.students;
   const ops = useOperations(status.operations, p.cohort.org);
-  const fixOf = (stage: string) => {
-    const pr = problems.find((x) => x.stage === stage);
-    const h = pr && fixHref(pr);
-    return h ? <a class="btn small" href={h}>Fix</a> : null;
-  };
-  // The problem count in the head: every week's problems, and the page moves to them.
-  const showProblems = () => {
-    setSelected([]);
-    const el = document.getElementById('dash-problems');
-    el?.focus();
-    el?.scrollIntoView?.({ block: 'start' });
-  };
   const toggle = (w: number) => setSelected(selected.includes(w) ? selected.filter((k) => k !== w) : [...selected, w]);
   const name = selectionName(selected, thisWeek);
-  const isThisWeek = name === 'This week';
-  const shown = problemGroups(problems, selected, isThisWeek, term, tz);
+  const shown = problemGroups(problems, now, days);
   return (
     <>
       <div class="page-head">
@@ -310,22 +435,13 @@ function Overview(p: ReadyProps) {
           <h2 class="h1">Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h2>
           <p class="lede">
             <span>{headerLine(status, sched, rows, tz, year)}</span>
-            {amber ? <span class="amber">Setup done, but {amber} {amber > 1 ? 'stages have a problem' : 'stage has a problem'}.</span> : <span>Setup complete.</span>}
-            <button class="textlink" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>{showSetup ? 'Hide setup' : 'Show setup'}</button>
           </p>
         </div>
-        <div class="actions"><Probs n={problems.length} onClick={showProblems} /><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
+        <div class="actions"><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
       </div>
+      {/* The verdict is the page's one problem count, and its link to the Problems tab (decision 0034). */}
+      <Verdict v={status.semester ? verdict : null} onOpen={() => showTab(setTab, 'problems')} />
       <div class="stack">
-        {showSetup ? (
-          <section class="panel section">
-            <div class="section-head"><h2>Setup</h2><Legend /></div>
-            <Rail scope="cohort" stages={stages} problems={problems} acts={{
-              K3: <a class="btn small quiet" href="#instructors">Instructors</a>, K4: fixOf('K4'), K5: fixOf('K5'),
-              K6: <a class="btn small quiet" href="#site">Site</a>, K7: <a class="btn small quiet" href="#archive">Archive</a>,
-            }} />
-          </section>
-        ) : null}
         <section class="panel section">
           <div class="section-head">
             {/* The chevron before the heading (decision 0031 rule 11), as in the side nav. */}
@@ -340,30 +456,36 @@ function Overview(p: ReadyProps) {
               : <TermStrip rows={rows} term={term} tz={tz} today={today} counts={problemCounts(problems, term, tz)} selected={selected} onToggle={toggle} />}
           </div>
         </section>
-        <section class="section" id="dash-problems" tabIndex={-1}>
-          <div class="problems-head">
-            <h2>{selected.length ? `Problems ${inPhrase(name)}` : 'Problems'}</h2>
-            {selected.length ? <button class="textlink" type="button" onClick={() => setSelected([])}>Show all weeks</button> : null}
-            <span class="footnote">What will not happen until you fix it.</span>
-          </div>
-          {!problems.length ? <ProblemCards list={[]} cohort /> : null}
-          {shown.overdue.length ? (
-            <div class="p-overdue">
-              <h3 class="week-h">Overdue</h3>
-              <ProblemCards list={shown.overdue} cohort />
-            </div>
-          ) : null}
-          {shown.dated.length ? <ProblemCards list={shown.dated} cohort /> : null}
-          {!shown.overdue.length && !shown.dated.length && shown.elsewhere ? (
-            <p class="footnote">No problems {inPhrase(name)}. {shown.elsewhere} in other weeks.</p>
-          ) : null}
-          {shown.undated.length ? (
-            <div class="p-anytime">
-              <h3 class="week-h">Any time</h3>
-              <ProblemCards list={shown.undated} cohort />
-            </div>
-          ) : null}
-        </section>
+        <div ref={aside.ref}>
+          <DashboardTabs selected={tab} onSelect={setTab} tabs={[
+            {
+              key: 'problems', label: 'Problems', count: problems.length || 'done', bad: true,
+              body: (
+                <>
+                  <p class="footnote">What will not happen until you fix it: overdue, and the next {days} days.</p>
+                  {!problems.length ? <ProblemCards list={[]} cohort /> : null}
+                  {shown.map((g) => (
+                    <div class={`p-${g.key}`}>
+                      <h3 class="week-h">{g.label}</h3>
+                      <ProblemCards list={g.rows} cohort />
+                    </div>
+                  ))}
+                </>
+              ),
+            },
+            {
+              key: 'coming', label: 'Coming up', count: coming.length,
+              body: coming.length ? (
+                <>
+                  <p class="footnote">Needed later, by week. Each item becomes a problem {days} days before the date it is needed by, and is listed here until then.</p>
+                  <ComingUp rows={coming} term={term} tz={tz} year={year} />
+                </>
+              ) : <p class="footnote">Nothing is needed later.</p>,
+            },
+            ...readinessTabs({ items, scope: 'semester', busy: aside.busy, onCircle: aside.onCircle, onBack: aside.onBack(items) }),
+          ]} />
+          {aside.after}
+        </div>
         <div class="grid-2">
           <section class="panel section">
             <div class="section-head"><h2>{plannedHeading(name)} <Hint label="About what is planned">Every release and deadline in the picked weeks, with its state. Late means its date has passed and it has not gone out. Pick weeks in the Semester strip above.</Hint></h2>{selected.length === 1 ? <span class="meta">{fmtDay(weekStart(term, selected[0]), tz).replace(/ \w+$/, '')} to {fmtDay(addDays(weekStart(term, selected[0]), 6), tz, year)}</span> : null}</div>

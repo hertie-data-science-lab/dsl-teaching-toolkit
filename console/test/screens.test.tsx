@@ -14,7 +14,8 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { CohortScreen } from '../src/screens/Cohort';
-import { CourseHeaderActions, CourseScreen, SETTLING_COLUMNS, SetupList, TemplateScreen, overviewHeights, readyWords, semesterChip, setupComplete, splitColumns, stepLink } from '../src/screens/Course';
+import { CourseHeaderActions, CourseScreen, SETTLING_COLUMNS, TemplateScreen, courseItems, overviewHeights, semesterChip, splitColumns, stepLink } from '../src/screens/Course';
+import { ItemRow, type SetupItem } from '../src/ui/SetupPanel';
 import { HomeScreen, ReadonlyScreen, SignInScreen } from '../src/screens/Home';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
@@ -117,7 +118,8 @@ describe('S1 home', () => {
     const ro: Course = { ...course, org: 'hertie-ids-c11', name: 'Intro to Data Science', write: false, cohorts: [{ org: 'hertie-ids-f2026', term: 'f2026', termLabel: 'Fall 2026' }] };
     const out = html(<HomeScreen courses={[course, ro]} cohortStates={{ [COHORT_ORG]: ready }} now={NOW} user={{ login: 'a-example', id: 1, name: null, email: null, avatar_url: '' }} />);
     expect(out).toContain('Machine Learning, Fall 2026');
-    expect(out).toContain('2 problems');
+    // Counted now or soon only (decision 0034): s5 on 8 Oct is more than 7 days off, so it waits.
+    expect(out).toContain('1 problem');
     expect(out).toContain('Week 3 of 15');
     expect(out).toContain('you are a course admin');
     expect(out).toContain('Session 3: Trees');
@@ -139,13 +141,17 @@ describe('S4 cohort overview', () => {
     expect(t).toContain('Dashboard ? What this semester has planned');
     expect(t).toContain('Exam 22 Oct. Archive 31 Jan 2027.');
     expect(t).not.toContain('Week 3 of 15');
-    expect(t).toContain('Setup done, but 2 stages have a problem');
+    // The verdict replaces the setup sentence, and is the page's one problem count (no badge in the head).
+    expect(t).toContain('Needs fixing: 1 problem in the next 7 days 1 coming up');
+    expect(t).not.toContain('Setup complete.');
+    expect(out).not.toContain('class="probs');
     expect(out).toContain('class="term-strip"');
     expect((out.match(/class="wk[ "]/g) ?? []).length).toBe(15);
     expect(out).toContain('wk now');
-    // This week on load: the s5 problem (week 5) is counted on its cell, not listed.
-    expect(t).not.toContain('Session 5 cites folder lectures/05_trees');
-    expect(out).toMatch(/aria-label="Week 5, from 5 Oct[^"]*; 1 problem"/);
+    // A status with no horizon reads the next 7 days (contract C, amended): s5 (8 Oct) is coming up, not counted.
+    expect(out).not.toMatch(/aria-label="Week 5, from 5 Oct[^"]*; 1 problem"/);
+    expect(out).toContain('<div class="ptab ptab-coming" role="tabpanel" id="dash-panel-coming" aria-labelledby="dash-tab-coming" hidden>');
+    expect(t).toContain('Session 5 cites folder lectures/05_trees');
     expect(out).toContain('href="#template-assignment-3-f2026"');
     expect(t).toContain('(course)');
     expect(t).toContain('Assignment 2: Regression');
@@ -188,7 +194,9 @@ describe('S16 and S10 assignments', () => {
     expect(out).toContain('Late cutoff');
     expect(out).toContain('Update every copy');
     expect(out).toContain('Collect now');
-    expect(out).toContain('Assignment template ready.');
+    // Its template is not in the course's status: no state words are invented, only the link.
+    expect(out).not.toContain('Assignment template ready.');
+    expect(out).toContain('Assignment template settings');
   });
   it('says when an assignment is not in the status', () => {
     expect(text(<AssignmentScreen {...props({ entry: 'assignment-9' })} />)).toContain('No assignment called assignment-9');
@@ -237,7 +245,9 @@ describe('S6 schedule and S11 release', () => {
     expect(t).toContain('will be skipped');
     expect(t).toContain(`${COURSE_ORG}/course-materials-f2026/lectures/05_trees`);
     expect(t).toContain(`${COHORT_ORG}/materials/lectures/05_trees`);
-    expect(t).toContain('Fix the folder');
+    // Said once: the chip and the problem card; the hint explains the page, the actions do not repeat the fix.
+    expect(t).toContain('Fix it in the schedule entry');
+    expect(t).not.toContain('Fix the folder');
   });
   const unstaged: Loaded = {
     kind: 'ready', sha: 's', stale: [],
@@ -365,10 +375,10 @@ describe('S2 course and S17 template', () => {
   it('shows problems, templates, materials, details and cohorts', () => {
     const t = text(<CourseScreen {...cp} />);
     // C1-C3 are done; the template's problem is what holds the course back.
-    expect(t).toContain('Not ready: a problem below needs fixing.');
+    expect(t).toContain('Needs fixing: 1 problem');
     expect(t).not.toMatch(/\b0 (setup steps|problems)/);
-    expect(t).toContain('Setup steps are the one-time things a course needs; to-dos are work started but not finished. Problems, on the right, are things that broke. Optional items can be set aside: click the circle before them.');
-    expect(t).toContain('Unfinished work is a to-do on the left, not a problem.');
+    expect(t).toContain('One-time setup: what the course needs before a semester can start. Done stays done.');
+    expect(t).toContain('If you would rather skip one, click the circle before it to set it aside.');
     expect(t).toContain('Students get only what a semester releases or hands out');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).toContain('assignment-3-f2026');
@@ -377,6 +387,8 @@ describe('S2 course and S17 template', () => {
     expect(t).toContain('up to 5, ');
     expect(t).not.toContain('this course’s default');
     expect(t).toContain('Fall 2026');
+    // A semester's problems are on its own Dashboard: no roll-up here (decision 0034).
+    expect(t).not.toContain('Session 5 cites');
   });
   const base = STATUS.course!;
   const withWhy = {
@@ -392,54 +404,51 @@ describe('S2 course and S17 template', () => {
     templates: [],
     ready: false,
   } as typeof base;
-  it('puts the verdict under the page note with a tick or a red cross, not in the page head', () => {
+  const tab = (out: string, key: string) => out.slice(out.indexOf(`id="dash-panel-${key}"`), out.indexOf('</div>', out.indexOf(`id="dash-panel-${key}"`)));
+  it('puts the verdict under the page note: a red ! while a problem stands, a tick once ready', () => {
     const out = html(<CourseScreen {...cp} />);
-    expect(out).toContain('<p class="verdict bad"><svg');
-    expect(out).toContain('<span>Not ready: a problem below needs fixing.</span></p>');
+    expect(out).toContain('<p class="verdict bad"><span class="ex" aria-hidden="true">!</span><button type="button" class="verdict-btn" title="Show the problems">Needs fixing: 1 problem</button>');
     expect(out).not.toContain('class="lede"');
     expect(out.indexOf('class="page-note"')).toBeLessThan(out.indexOf('class="verdict'));
     // Above the read-only banner too: the verdict sits directly under the note.
     const ro = html(<CourseScreen {...cp} course={{ ...course, write: false }} />);
     expect(ro.indexOf('class="verdict')).toBeLessThan(ro.indexOf('class="ro-banner"'));
-    const fine: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, ready: true } }, sha: 's', stale: [] };
+    const fine: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...base, stages: { ...base.stages, C5: 'done' } } }, sha: 's', stale: [] };
     const ok = html(<CourseScreen {...cp} loaded={fine} />);
     expect(ok).toContain('<p class="verdict ok"><svg');
-    expect(ok).toContain('<span>Ready for a new semester.</span>');
+    // C6 and the weekly plan are open suggestions: the only tag.
+    expect(text(<CourseScreen {...cp} loaded={fine} />)).toContain('Ready for a new semester 2 suggestions');
   });
-  it('lists the to-dos under Setup & To do as a checklist like Initial setup, each with where it is done', () => {
+  it('opens on the Problems tab, then Suggestions, Set aside and Setup', () => {
     const out = html(<CourseScreen {...cp} />);
-    expect(out).toContain('Setup &amp; To do');
-    expect(out).toContain('<summary><span class="fold-title">Initial setup</span>');
-    expect(out).toContain('<summary><span class="fold-title">To do</span><span class="cnt">1 open</span></summary>');
-    const todo = out.slice(out.indexOf('>To do</span>'), out.indexOf('</details>', out.indexOf('>To do</span>')));
-    // The same markup as the setup list: an open line, its check's label and ?, why and the link.
-    // With write access the circle is a button that asks whether the line can be set aside (decision 0032).
-    expect(todo).toContain('<ul class="setup"><li class="open"><button class="s-mark s-circle" type="button" title="Set aside…" aria-label="Set aside Weekly plan in the syllabus…" aria-haspopup="dialog"></button>');
-    expect(todo).toContain('Weekly plan in the syllabus<span class="s-need slug">course-materials-f2026</span><span class="sr">: To do</span>');
-    expect(todo).toContain('Every session with its date and readings, built from the semester schedule');
-    expect(todo).toContain('<span class="s-why">The weekly plan is not in SYLLABUS.md yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a></span>');
-    const none: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [] } }, sha: 's', stale: [] };
-    expect(text(<CourseScreen {...cp} loaded={none} />)).toContain('Nothing to do.');
-    const tpl: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...base, todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.' }] } }, sha: 's', stale: [] };
-    const t = html(<CourseScreen {...cp} loaded={tpl} />);
-    expect(t).toContain('Brief written<span class="s-need slug">a</span>');
-    expect(t).toContain('href="#template-a" aria-label="Open a settings">Open settings</a>');
+    expect(out).toContain('<section class="panel section dash-tabs" id="dash-problems" tabindex="-1"><div class="ptabs" role="tablist">');
+    expect(out).toContain('aria-selected="true" aria-controls="dash-panel-problems">Problems<span class="n bad">1</span>');
+    expect(out).toContain('<span class="spacer" aria-hidden="true"></span><button type="button" role="tab" id="dash-tab-setup" data-key="setup" aria-selected="false" aria-controls="dash-panel-setup">Setup<span class="n">4 of 5</span>');
+    expect(out).not.toContain('Coming up');
   });
-  it('folds Initial setup once complete and keeps To do open while it has items', () => {
-    // The fixture's C5 has a problem: setup is open, and so is To do with its one item.
-    expect(setupComplete(base)).toBe(false);
-    expect((html(<CourseScreen {...cp} />).match(/<details class="fold setup-fold" open>/g) ?? []).length).toBe(2);
-    // Every step done but the website, still open: not complete (decision 0032 rule 5).
-    const done = { ...base, stages: { ...base.stages, C5: 'done' }, todo: [] } as typeof base;
-    expect(setupComplete(done)).toBe(false);
-    // Set aside, it no longer counts: complete, folded, and To do with nothing folds too.
-    const aside = { ...done, stage_set_aside: { ...done.stage_set_aside, C6: true } } as typeof base;
-    expect(setupComplete(aside)).toBe(true);
-    const f = new StaticFiles({ [`${COURSE_ORG}/.github/dsl-course.yml`]: 'course_name: Machine Learning\nset_aside: [C6]\n' });
-    const out = html(<CourseScreen {...cp} files={f} loaded={{ kind: 'ready', status: { ...STATUS, course: aside }, sha: 's', stale: [] }} />);
-    expect(out).not.toContain('<details class="fold setup-fold" open>');
-    expect(out).toContain('<summary><span class="fold-title">Initial setup</span><span class="cnt">Complete</span></summary>');
-    expect(out).toContain('<summary><span class="fold-title">To do</span><span class="cnt">Nothing to do</span></summary>');
+  it('lists suggestions on their tab and a needed to-do only on its repo’s row', () => {
+    const out = html(<CourseScreen {...cp} />);
+    const sug = tab(out, 'suggestions');
+    // A suggestion's circle is a button that asks whether to set it aside (decision 0032); the syllabus and its plan are one row.
+    expect(sug).toContain('<li class="open suggested"><button class="s-mark s-circle" type="button" title="Set aside…" aria-label="Set aside Syllabus…" aria-haspopup="dialog"></button>');
+    expect(sug).toContain('Syllabus<span class="s-need slug">course-materials-f2026</span><span class="s-opt">optional</span>');
+    expect(sug).toContain('One file, SYLLABUS.md, two parts');
+    expect(sug).toContain('<span class="s-why">The weekly plan is not in SYLLABUS.md yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a></span>');
+    const tpl: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...base, templates: [{ repo: 'a', slug: 'a', state: 'todo' }], todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.', optional: false }] } }, sha: 's', stale: [] };
+    const t = html(<CourseScreen {...cp} loaded={tpl} />);
+    expect(t).not.toContain('Brief written');
+    expect(t).toContain('<span class="chip notready">Not ready</span>');
+    expect(text(<CourseScreen {...cp} loaded={tpl} />)).toContain('The brief (README.md) is not written yet. a');
+    // The repo row shows its state only: its suggestions are on the Suggestions tab.
+    expect(t).not.toContain('chip suggest');
+  });
+  it('ticks Setup once every needed step is done, and says No problems on the course', () => {
+    const done = { ...base, stages: { ...base.stages, C5: 'done' } } as typeof base;
+    const out = html(<CourseScreen {...cp} loaded={{ kind: 'ready', status: { ...STATUS, problems: [], course: done }, sha: 's', stale: [] }} />);
+    expect(out).toContain('aria-controls="dash-panel-setup">Setup<span class="n ok" aria-label="done">');
+    expect(out).toContain('aria-controls="dash-panel-problems">Problems<span class="n ok" aria-label="done">');
+    expect(out).toContain('<div class="no-problems"><svg');
+    expect(out).toContain('No problems on the course.');
   });
   it('shows every course fact in Course details, the institution’s in grey', () => {
     const t = text(<CourseScreen {...cp} />);
@@ -473,8 +482,8 @@ describe('S2 course and S17 template', () => {
   });
   it('keeps only New semester in the head; the status line, Refresh and the course on GitHub sit under it', () => {
     const out = html(<CourseScreen {...cp} />);
-    // The head is the course banner's right side (decision 0031 rule 11); the screen starts under it.
-    expect(out).not.toContain('class="page-head"');
+    // The head is the course banner's right side (decision 0031 rule 11); the screen starts under it with its title, Dashboard.
+    expect(out).toContain('<div class="page-head"><div><h2 class="h1">Dashboard <span class="hint-wrap">');
     expect(out).not.toContain('<h1');
     const head = html(<CourseHeaderActions course={course} />);
     // Always the black primary button, ready or not.
@@ -503,99 +512,92 @@ describe('S2 course and S17 template', () => {
     expect(roSub).toContain('Course on GitHub');
     expect(roSub).not.toContain('Refresh');
   });
-  it('lays the overview out as two columns: Setup heads the left, Problems the right, materials then templates together', () => {
+  it('lays the dashboard out as the tabbed panel, then two columns: materials and templates head the left, Semesters the right', () => {
     const out = html(<CourseScreen {...cp} />);
     expect((out.match(/class="grid-2/g) ?? []).length).toBe(1);
+    expect(out.indexOf('id="dash-problems"')).toBeLessThan(out.indexOf('class="grid-2 cols"'));
     expect(out).not.toContain('<h2>Public website');
     const cols = out.slice(out.indexOf('class="grid-2 cols"'));
     const second = cols.indexOf('<div class="stack">', 1 + cols.indexOf('<div class="stack">'));
     const [left, right] = [cols.slice(0, second), cols.slice(second)];
-    expect(left.indexOf('<section class="panel section"><h2>Setup')).toBe(left.indexOf('<section'));
-    expect(right.indexOf('<section class="panel section" id="course-problems">')).toBe(right.indexOf('<section'));
+    expect(left.indexOf('<section class="panel section" id="sec-materials"')).toBe(left.indexOf('<section'));
+    expect(right.indexOf('<h2>Semesters</h2>')).toBeGreaterThan(-1);
     for (const h of ['<h2>Semesters</h2>', '<h2>Course details</h2>', '<h2>Recent activity</h2>', '<h2>Handout materials</h2>']) expect(cols).toContain(h);
-    // Handout materials and Assignment templates sit one after the other in one column.
-    const half = left.includes('id="sec-materials"') ? left : right;
-    expect(half.indexOf('id="sec-templates"')).toBeGreaterThan(half.indexOf('id="sec-materials"'));
-    expect(half.slice(half.indexOf('id="sec-materials"'), half.indexOf('id="sec-templates"')).match(/<section/g)).toHaveLength(1);
+    // Handout materials and Assignment templates sit one after the other.
+    expect(left.indexOf('id="sec-templates"')).toBeGreaterThan(left.indexOf('id="sec-materials"'));
+    expect(left.slice(left.indexOf('id="sec-materials"'), left.indexOf('id="sec-templates"')).match(/<section/g)).toHaveLength(1);
   });
   it('keeps the placement fixed while statuses load, and splits once every one has arrived', () => {
     const columns = (out: string) => {
       const cols = out.slice(out.indexOf('class="grid-2 cols"'));
       const second = cols.indexOf('<div class="stack">', 1 + cols.indexOf('<div class="stack">'));
-      const ids = (h: string) => ['<h2>Setup', 'id="course-problems"', '<h2>Semesters</h2>', '<h2>Course details</h2>', '<h2>Recent activity</h2>', 'id="sec-materials"'].filter((x) => h.includes(x));
+      const ids = (h: string) => ['id="sec-materials"', '<h2>Semesters</h2>', '<h2>Course details</h2>', '<h2>Recent activity</h2>'].filter((x) => h.includes(x));
       return [ids(cols.slice(0, second)), ids(cols.slice(second))];
     };
-    const settling = ['<h2>Setup', '<h2>Semesters</h2>', 'id="sec-materials"'];
-    // The course's own status and a semester's still loading: the fixed layout, whatever arrived.
+    const settling = ['id="sec-materials"', '<h2>Course details</h2>'];
     const loading = { ...cp, loaded: { kind: 'loading' } as Loaded };
     expect(columns(html(<CourseScreen {...loading} />))[0]).toEqual(settling);
     expect(columns(html(<CourseScreen {...cp} cohortStates={{ [COHORT_ORG]: { kind: 'loading' } }} />))[0]).toEqual(settling);
     // A semester not yet asked for counts as loading too.
     expect(columns(html(<CourseScreen {...cp} cohortStates={{}} />))[0]).toEqual(settling);
-    expect(SETTLING_COLUMNS[0]).toEqual(['setup', 'semesters', 'handouts']);
+    expect(SETTLING_COLUMNS[0]).toEqual(['handouts', 'details']);
     // Once all have arrived the split is the estimate's, and the same however late each came.
     const settled = columns(html(<CourseScreen {...cp} />));
     expect(columns(html(<CourseScreen {...cp} cohortStates={{ ...cp.cohortStates }} />))).toEqual(settled);
   });
   it('splits the panels so the two columns come out about even, materials and templates as one block', () => {
     const b = (key: string, h: number) => ({ key, h });
-    // Heights whose sums are all distinct: the one even split is 18 against 18.
-    expect(splitColumns([b('setup', 11), b('problems', 10), b('semesters', 1), b('details', 2), b('activity', 4), b('handouts', 8)])).toEqual([
-      ['setup', 'semesters', 'details', 'activity'],
-      ['problems', 'handouts'],
-    ]);
-    // A long Problems panel pulls everything else left; order within a column is kept.
-    expect(splitColumns([b('setup', 5), b('problems', 40), b('semesters', 6), b('details', 10), b('activity', 6), b('handouts', 12)])).toEqual([
-      ['setup', 'semesters', 'details', 'activity', 'handouts'],
-      ['problems'],
-    ]);
-    const hs = overviewHeights({ course: base, problems: 2, semesters: 2, description: '', activity: 1 });
-    expect(hs.map((x) => x.key)).toEqual(['setup', 'problems', 'semesters', 'details', 'activity', 'handouts']);
-    // Past four, more problems weigh nothing: a day's new fault does not reshuffle the page.
-    const weigh = (n: number) => overviewHeights({ course: base, problems: n, semesters: 2, description: '', activity: 1 })[1].h;
-    expect(weigh(9)).toBe(weigh(4));
-    // More to-dos make Setup & To do taller.
-    expect(overviewHeights({ course: { ...base, todo: [...base.todo!, ...base.todo!] }, problems: 2, semesters: 2, description: '', activity: 1 })[0].h).toBeGreaterThan(hs[0].h);
+    // Heights whose sums are all distinct: the one even split.
+    expect(splitColumns([b('handouts', 11), b('semesters', 10), b('details', 2), b('activity', 1)])).toEqual([['handouts', 'activity'], ['semesters', 'details']]);
+    // A long first block pulls everything else right; order within a column is kept.
+    expect(splitColumns([b('handouts', 40), b('semesters', 6), b('details', 10), b('activity', 6)])).toEqual([['handouts'], ['semesters', 'details', 'activity']]);
+    const hs = overviewHeights({ course: base, semesters: 2, description: '', activity: 1 });
+    expect(hs.map((x) => x.key)).toEqual(['handouts', 'semesters', 'details', 'activity']);
+    // More semesters make that panel taller.
+    expect(overviewHeights({ course: base, semesters: 5, description: '', activity: 1 })[1].h).toBeGreaterThan(hs[1].h);
   });
+  const rowsOf = (items: SetupItem[]) => html(<ul class="setup">{items.map((it) => <ItemRow it={it} />)}</ul>);
   it('renders the setup checklist from stage_why: ticks, the why and one link each', () => {
-    const out = html(<SetupList course={withWhy} />);
+    const items = courseItems(withWhy, [], []);
+    const out = rowsOf(items);
     expect((out.match(/class="done"/g) ?? []).length).toBe(2);
-    expect((out.match(/class="open"/g) ?? []).length).toBe(4);
+    // C3 is needed and open: a hollow circle with its why and link. C4-C6 are suggestions (decision 0034).
+    expect(out).toContain('<li class="open"><span class="s-mark" aria-hidden="true"></span><span class="s-name">Course details filled in<span class="sr">: Not done yet</span>');
     expect(out).toContain('Course details have no description yet.');
     expect(out).toContain('href="#details"');
     expect(out).toContain(`href="?course=${COURSE_ORG}#new-materials"`);
-    expect(out).toContain(`href="https://github.com/${COURSE_ORG}/.github"`); // C5 is blocked on C2
     expect(out).toContain('href="#website"');
-    expect((out.match(/<span class="s-need">required<\/span>/g) ?? []).length).toBe(3);
-    // Unmarked is optional: the website's own sentence says so.
-    expect(out).not.toContain('>optional</span>');
-    expect(out).toContain('<span class="sr">: To do</span>');
-    expect(out).toContain('<span class="sr">: Blocked</span>');
+    // A waiting step: a dash and what it waits for, no link.
+    expect(out).toContain('<li class="waiting suggested"><span class="s-mark" aria-hidden="true">–</span><span class="s-name">Assignment template<span class="s-opt">optional</span>');
+    expect(out).toContain('Waiting for the course to be set up.');
+    expect(out).not.toContain('required');
     // Done lines carry no link and no sentence.
     expect(out).not.toContain('Open on GitHub');
   });
-  it('links a problem step to its card and a blocked step to what it waits for', () => {
-    expect(stepLink('C5', base)).toEqual({ href: '#course-problems', label: 'See the problem' });
-    // C5 waits for C2 (set up on GitHub); C6 for C4, itself waiting for C2.
-    const waiting = { ...withWhy, stages: { ...withWhy.stages, C2: 'todo', C4: 'blocked', C6: 'blocked' } } as typeof base;
-    expect(stepLink('C5', waiting).label).toBe('Open .github');
-    expect(stepLink('C6', waiting).label).toBe('Open .github');
+  it('gives a step with a problem a red ! and its Fix, and every open step one link', () => {
+    const out = rowsOf(courseItems(base, [{ p: STATUS.problems![1], b: 'now' }], []));
+    expect(out).toContain('<li class="problem"><span class="s-mark problem" aria-hidden="true">!</span><span class="s-name">Assignment template<span class="sr">: Has a problem</span>');
+    expect(out).toContain('<span class="s-fix"><a class="btn small" href="#template-assignment-3-f2026">Fix</a></span>');
+    // A problem beyond the horizon is not red: the step reads as open (contract B).
+    expect(rowsOf(courseItems(base, [{ p: STATUS.problems![1], b: 'later' }], []))).not.toContain('class="problem"');
     expect(stepLink('C6', withWhy)).toEqual({ href: '#website', label: 'Set up the public website' });
     expect(stepLink('C4', { ...withWhy, materials: [{ repo: 'm', state: 'todo' }] }).label).toBe('Open handout materials');
-    expect(stepLink('C5', { ...withWhy, stages: { ...withWhy.stages, C5: 'todo' }, templates: [{ repo: 't', slug: 't', state: 'todo' }] }).label).toBe('Open templates');
-    expect(html(<SetupList course={base} />)).toContain('href="#course-problems">See the problem</a>');
-  });
-  it('says how many required steps are left, never a problem count', () => {
-    expect(readyWords(withWhy)).toBe('Not ready: 1 setup step left.');
-    expect(readyWords({ ...withWhy, stages: { ...withWhy.stages, C1: 'todo', C2: 'blocked' } })).toBe('Not ready: 3 setup steps left.');
-    expect(readyWords({ ...withWhy, ready: true })).toBe('Ready for a new semester.');
-    expect(readyWords(base)).toBe('Not ready: a problem below needs fixing.');
+    expect(stepLink('C5', { ...withWhy, templates: [{ repo: 't', slug: 't', state: 'todo' }] }).label).toBe('Open templates');
   });
   it('reads a semester as live, ended but not archived, or archived', () => {
     const sem = STATUS.semester!;
     expect(text(<>{semesterChip(sem)}</>).trim()).toBe('Live');
     expect(text(<>{semesterChip({ ...sem, ended: true })}</>).trim()).toBe('Ended, not archived');
     expect(text(<>{semesterChip({ ...sem, live: false, ended: false })}</>).trim()).toBe('Archived');
+  });
+  it('heads the template settings with its state and a needed checklist: never Ready while the brief is not written', () => {
+    const todo = { id: 'template:assignment-3-f2026:brief', kind: 'template' as const, repo: 'assignment-3-f2026', text: 'The brief (README.md) is not written yet.', need: 'needed' as const };
+    const st: Loaded = { kind: 'ready', sha: 's', stale: [], status: { ...STATUS, problems: [], course: { ...STATUS.course!, templates: [{ repo: 'assignment-3-f2026', slug: 'assignment-3-f2026', state: 'todo' }], todo: [todo] } } };
+    const out = html(<TemplateScreen {...cp} loaded={st} entry="assignment-3-f2026" />);
+    expect(out).toContain('<span class="chip notready">Not ready</span>');
+    expect(out).not.toContain('<span class="chip ok">Ready</span>');
+    expect(out).toContain('<p class="sub-h">Needed</p>');
+    expect(out).toContain('<li class="open"><span class="s-mark" aria-hidden="true"></span><span class="s-name">Brief written');
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
@@ -691,7 +693,8 @@ describe('explicit numbers (decision 0020)', () => {
     expect(out).toContain('<b>Lecture</b>: ');
     expect(out).toContain('Give it a number first</span>');
     expect(out).toContain('Give it a number first; it cannot be released until it has one.');
-    expect(out).toContain('Give guest a number.');
+    // Said once in the sheet: no problem card repeating it.
+    expect(out).not.toContain('Give guest a number.');
     expect(out).toContain('<input id="e-num" type="number" min="1" max="999" value style');
     expect(out).toContain('The number students see. Prefilled with the next one; change it if this is not the next lecture.');
   });
@@ -700,7 +703,7 @@ describe('explicit numbers (decision 0020)', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
     expect(out).toMatch(/<input id="e-num" type="number" min="1" max="999" value="5"/);
     const t = text(<ReleaseScreen {...props({ loaded: numbered, files: guestFiles, entry: 'guest' })} />);
-    expect(t).toContain('Automation will skip this until it has a number.');
+    expect(t).toContain('Give guest a number.');
   });
 });
 

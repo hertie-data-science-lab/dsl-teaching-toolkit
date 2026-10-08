@@ -93,21 +93,22 @@ describe('the course banner (decision 0031 rule 11)', () => {
     expect(el.querySelector('#view .course-banner .btn.small.quiet')?.textContent).toBe('Student view');
   });
 
-  it('heads the course overview with New semester and no semester line; Overview is the current page', async () => {
+  it('heads the course Dashboard with New semester and no semester line; Dashboard is the current page and the title', async () => {
     const el = await mount(`/?course=${course.org}#course`, migrated());
     await settle();
     const banner = el.querySelector('#view .course-banner')!;
     expect(banner.querySelector('h1')!.textContent).toContain('Machine Learning');
-    expect(banner.querySelector('h1 .hint-btn')).not.toBeNull();
     expect(banner.querySelector('.cb-side a.btn')?.textContent).toBe('New semester');
     expect(banner.querySelector('.cb-sem')).toBeNull();
     expect(el.querySelectorAll('h1')).toHaveLength(1);
-    expect(el.querySelector('#view .page-head')).toBeNull();
+    // Both pages are called Dashboard (decision 0034): the title and its ? sit under the banner.
+    expect(el.querySelector('#view .page-head h2')!.textContent).toContain('Dashboard');
+    expect(el.querySelector('#view .page-head h2 .hint-btn')).not.toBeNull();
     expect(crumbs(el)).toEqual([['All courses', '?#home'], ['Machine Learning', null]]);
     expect(el.querySelector('.sidenav .nav-anchor')?.getAttribute('aria-current')).toBeNull();
     const cur = el.querySelectorAll('.sidenav [aria-current]');
     expect(cur).toHaveLength(1);
-    expect(cur[0].textContent).toBe('Overview');
+    expect(cur[0].textContent).toBe('Dashboard');
   });
 
   it('heads Course details with the course banner, no right side, and the page title as an h2', async () => {

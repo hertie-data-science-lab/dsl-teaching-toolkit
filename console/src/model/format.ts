@@ -2,7 +2,8 @@
 // will_be_skipped, release.entry) never reach the screen except through these maps.
 
 import { DEFAULT_TIMEZONE } from './policy';
-import type { Assignment, AssignmentState, Release, ReleaseState, StageState } from './types';
+import type { Assignment, AssignmentState, Need, Release, ReleaseState } from './types';
+import { missingClause, type ItemState, type Verdict } from './readiness';
 import policy from '../../schemas/policy.json';
 
 /** `v` as text, blank for null and undefined. */
@@ -139,14 +140,40 @@ export function ago(iso: string | null | undefined, now: number): string {
   return `${Math.round(h / 24)} days ago`;
 }
 
-export const STAGE_WORD: Record<StageState, string> = { done: 'Done', todo: 'To do', blocked: 'Blocked', problem: 'Has a problem' };
+/** An item's state as a row says it (decision 0034): one set for setup steps, checks and to-dos alike. */
+const STATE_WORD: Record<ItemState, string> = { done: 'Done', open: 'Not done yet', waiting: 'Waiting', problem: 'Has a problem' };
 
-export const COHORT_STAGES: [string, string][] = [
-  ['K1', 'Org'], ['K2', 'Setup'], ['K3', 'Instructors'], ['K4', 'Schedule'], ['K5', 'Students'], ['K6', 'Site'], ['K7', 'Archive'],
-];
-export const COURSE_STAGES: [string, string][] = [
-  ['C1', 'Org'], ['C2', 'Setup'], ['C3', 'Details'], ['C4', 'Handout materials'], ['C5', 'Assignment templates'], ['C6', 'Website'],
-];
+/** "Done", "Not done yet", "Waiting for the schedule", "Has a problem"; a suggestion still open is "optional". */
+export function stateWord(state: ItemState, need: Need = 'needed', waitsFor?: string): string {
+  if (state === 'waiting') return waitsFor ? `Waiting for ${waitsFor}` : STATE_WORD.waiting;
+  return state === 'open' && need === 'suggested' ? 'optional' : STATE_WORD[state];
+}
+
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+
+/**
+ * A verdict's main words. Course (ready for a new semester?): "Needs fixing: 2 problems",
+ * "Not ready: <the first missing step>", "Ready for a new semester". Semester (the term's
+ * health over the horizon, a rolling 7 days): "Needs fixing: 2 problems in the next 7 days",
+ * "Not set up: <the first missing step>", "On track: nothing to fix in the next 7 days".
+ */
+export function verdictMain(v: Verdict): string {
+  const course = v.scope === 'course';
+  if (v.state === 'fixing') return `Needs fixing: ${plural(v.problems, 'problem')}${course ? '' : ` in the next ${v.days} days`}`;
+  if (v.state === 'not_ready') return `${course ? 'Not ready' : 'Not set up'}: ${missingClause(v.missing ?? '')}`;
+  return course ? 'Ready for a new semester' : `On track: nothing to fix in the next ${v.days} days`;
+}
+
+/** The muted tag after a verdict: on the course "3 suggestions", on the semester "12 coming up". */
+export function verdictTags(v: Verdict): string[] {
+  const n = v.scope === 'course' ? v.suggestions : v.coming_up;
+  return n ? [v.scope === 'course' ? plural(n, 'suggestion') : `${n} coming up`] : [];
+}
+
+/** The verdict as one line: "Ready for a new semester · 3 suggestions". */
+export function verdictWords(v: Verdict): string {
+  return [verdictMain(v), ...verdictTags(v)].join(' · ');
+}
 
 /** Where a problem sits, as the problem card's bold first word. */
 export const PROBLEM_AREA: Record<string, string> = {

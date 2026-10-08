@@ -5,6 +5,8 @@ import { readTable } from '../edit/csv';
 import { parseRoster } from '../model/people';
 import { ASSIGNMENT_WORD, assignmentIdent, assignmentTitle, fmtDay, fmtTime, fmtWhen } from '../model/format';
 import type { Assignment, AssignmentState, Status } from '../model/types';
+import { RepoChip } from '../ui/SetupPanel';
+import { standing, templateReadinessIn } from '../model/readiness';
 import { Check } from '../ui/icons';
 import { collect, handout, returnMarks, updateCopies, type AsgRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
@@ -165,7 +167,8 @@ function Overview(p: TabProps) {
     cur === 4 ? `${a.marks.filled} of ${a.marks.total} marked` : cur > 4 ? 'Done' : `Opens after ${fmtDay(a.grading_cutoff_datetime, tz, year)}`,
     cur === 5 ? 'Returned' : 'Opens after marks are returned',
   ];
-  const tplProblems = (status.problems ?? []).filter((x) => x.fix?.screen === 'template' && x.fix.entry === a.template);
+  const tpl = templateReadinessIn(status, a.template, p.now);
+  const tplProblems = tpl?.state === 'problem' ? standing(status, p.now).filter((x) => x.fix?.screen === 'template' && x.fix.entry === a.template) : [];
   const row = (cls: string, state: string, why: string, ops?: preact.ComponentChildren) => (
     <li class={cls}><span class="sa-state">{state}</span><div class="sa-body"><span class="sa-why">{why}</span>{ops}</div></li>
   );
@@ -221,11 +224,9 @@ function Overview(p: TabProps) {
           </section>
           <section class="panel section">
             <h2>Assignment template</h2>
-            {tplProblems.length ? (
-              <ProblemCards list={tplProblems} />
-            ) : (
-              <div class="check-line ok"><Check /><span><b>Assignment template ready.</b> Brief written; settings check out.</span></div>
-            )}
+            {/* The template's state in the one set of words (decision 0034): Ready, Not ready: <why>, Has a problem. */}
+            {tpl ? <p class="tpl-state"><RepoChip r={tpl} row /> {tpl.state === 'not_ready' ? tpl.missing : null}</p> : null}
+            {tplProblems.length ? <ProblemCards list={tplProblems} /> : null}
             <a class="textlink" href={`#template-${a.template}`}>Assignment template settings</a>
           </section>
         </div>

@@ -22,6 +22,7 @@ import { TIMEZONES } from '../tiers/course';
 import { EditFile, Lives, Md, ProblemCards, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
+import { repoWords, templateReadinessIn } from '../model/readiness';
 import { Check } from '../ui/icons';
 import { NOTHING_TO_RELEASE, releaseRef } from './Cohort';
 import { NotFound } from './Assignments';
@@ -241,6 +242,8 @@ export interface NewRun {
 
 function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; slug: string; state: string }[]; isNew: boolean; run: NewRun }) {
   const tpl = templates.find((t) => t.repo === d.template);
+  // The template's state in the one set of words (decision 0034).
+  const tplState = tpl ? templateReadinessIn(p.status, tpl.repo, p.now) : null;
   const key = d.id || assignmentKey(d.number);
   const af = assignmentsFile(p.files, p.cohort.org);
   const doc = af && af !== 'loading' ? af.doc : {};
@@ -262,8 +265,9 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: Ready
           {opts.map((o) => <option value={o.value} selected={o.value === d.template}>{o.label}</option>)}
         </select>
         {errors.template ? <Invalid>{errors.template}</Invalid>
-          : tpl && tpl.state !== 'ready' ? <Invalid>This assignment template has a problem. <a href={`#template-${tpl.repo}`}>Fix it on the assignment template</a></Invalid>
-          : d.template ? <span class="valid-msg"><Check />Assignment template ready</span> : null}
+          : tplState?.state === 'problem' ? <Invalid>Has a problem. <a href={`#template-${tpl!.repo}`}>Fix it on the assignment template</a></Invalid>
+          : tplState?.state === 'not_ready' ? <p class="hint">{repoWords(tplState)} <a href={`?course=${p.course.org}#template-${tpl!.repo}`}>Open the assignment template</a></p>
+          : d.template ? <span class="valid-msg"><Check />Ready</span> : null}
         <p class="why">Must exist and be ready.</p>
       </div>
       <NumberField d={d} set={set as Setter<ReleaseDraft | AssignmentDraft>} errors={errors} kind="assignment"
@@ -589,7 +593,8 @@ function View(p: ReadyProps) {
                 On the student site this row shows {two ? <><b>{ident}</b> on one line and “{siteTitle}” below it, without the colon.</> : <>only the bold title, <b>{siteTitle || (d.kind === 'archive' ? 'Semester archived' : '')}</b>.</>}
               </div>
             ) : null}
-            {probs.length ? <ProblemCards list={probs} /> : null}
+            {/* A release that will be skipped says so once: the chip above, and the folder check (or, for a missing number, the line below). */}
+            {probs.length && rel?.state !== 'will_be_skipped' ? <ProblemCards list={probs} /> : null}
             <div class="form">
               {d.kind !== 'semester' && d.kind !== 'archive' ? <div class="field"><span class="label">Identifier</span><div class="ident">{ident}<span>derived, as the student site does</span></div></div> : null}
               {d.kind === 'releases' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} inferred={inferredOf(d)} />
@@ -603,7 +608,7 @@ function View(p: ReadyProps) {
             {rel ? (
               !ref ? <div class="savebar"><span class="st-note">{NOTHING_TO_RELEASE}. Add a deploy above.</span></div>
               : rel.state === 'planned' ? <div class="savebar"><span class="footnote">Goes out at its time without you.</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small outline" label="Release early…" /></div>
-              : rel.state === 'will_be_skipped' ? <div class="savebar"><span class="st-note">{needsANumber(status, rel.id) ? 'Give it a number first; it cannot be released until it has one.' : 'Fix the folder first; it cannot be released until it exists.'}</span></div>
+              : rel.state === 'will_be_skipped' && needsANumber(status, rel.id) ? <div class="savebar"><span class="st-note">Give it a number first; it cannot be released until it has one.</span></div>
               : rel.state === 'released' ? <div class="savebar"><span class="footnote">Released.</span><a class="btn small quiet" href={`#release-${rel.id}`}>Release again…</a></div>
               : null
             ) : null}
@@ -713,7 +718,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         <div>
           <h2 class="h1"><b>{ident}</b>: {rel.title} <Hint doc="08-release-materials-to-cohort.md">{st === 'released'
             ? 'Edits students should see: push to the semester copy, or release again after fixing the course copy. Edits future semesters should keep: keep for future semesters.'
-            : st === 'will_be_skipped' ? (needsANumber(status, rel.id) ? 'Automation will skip this until it has a number.' : 'Automation will skip this until the folder exists.')
+            : st === 'will_be_skipped' ? 'Fix it in the schedule entry (Edit entry); automation releases it at its time once fixed.'
             : st === 'late' ? 'Reason codes tell you whether the source, the schedule or the scheduler was at fault.'
             : 'Nothing to do; it goes out at the scheduled time. You can release it early.'}</Hint></h2>
           <p class="lede"><span class={`chip ${st === 'will_be_skipped' ? 'bad' : st === 'released' ? 'ok' : ''}`}>{RELEASE_WORD[st]}</span>{fmtWhen(rel.when, tz, year)}</p>
@@ -740,7 +745,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
           {st === 'planned' ? <OpButtons def={releaseEarly(scope, ref)} label="Release early" />
             : st === 'released' ? <><OpButtons def={releaseAgain(scope, ref)} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" /></>
             : st === 'late' ? <OpButtons def={releaseNow(scope, ref)} label="Release now" />
-            : <a class="btn" href={`#schedule-${rel.id}`}>Fix the folder</a>}
+            : <span class="footnote">Nothing to run until the problem above is fixed.</span>}
         </div>
         <div class="savebar"><span class="footnote">After changing the course copy, the student site may need an update.</span><a class="btn small quiet" href="#site">Update site on the Site page</a></div>
       </section>
