@@ -38,6 +38,8 @@ export function homeUpdates(facts: SemesterFacts, now: number): Update[] {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const out: Update[] = [];
   for (const row of facts.rows) if (!isEventRow(row) && row.released) out.push({ at: instant(row.when, tz), row });
+  // Dated as the site dates it (site.py `_assignment_entry`): the hand-out, else, for an
+  // assignment handed out by hand with no scheduled hand-out, the due date, the only one known.
   for (const a of facts.assignments) {
     const when = a.handout ?? a.due;
     if (a.handedOut && when) out.push({ at: instant(when, tz), assignment: a });
@@ -101,10 +103,12 @@ export function HomeView({ facts, org, now }: { facts: SemesterFacts; org: strin
       ) : null}
       {instructors.length || assistants.length ? (
         <div class="home-people">
-          <section aria-labelledby="h-home-instructors">
-            <h2 id="h-home-instructors">Instructors</h2>
-            <ul class="people-grid">{instructors.map((c) => <PersonCard card={c} org={org} />)}</ul>
-          </section>
+          {instructors.length ? (
+            <section aria-labelledby="h-home-instructors">
+              <h2 id="h-home-instructors">Instructors</h2>
+              <ul class="people-grid">{instructors.map((c) => <PersonCard card={c} org={org} />)}</ul>
+            </section>
+          ) : null}
           {assistants.length ? (
             <section aria-labelledby="h-home-tas">
               <h2 id="h-home-tas">Teaching assistants</h2>

@@ -76,6 +76,13 @@ describe('Home', () => {
     expect([...at].sort((a, b) => a - b)).toEqual(at);
   });
 
+  it('shows only the teaching assistants when no instructor is listed', () => {
+    const d = doc({ instructors: DOC.instructors.filter((c: { role: string }) => c.role === 'teaching_assistant') });
+    const html = render(<HomeView facts={factsFromStatus(d)} org={ORG} now={NOW} />);
+    expect(html).not.toContain('>Instructors</h2>');
+    expect(html).toContain('>Teaching assistants</h2>');
+  });
+
   it('leaves out what the semester does not have', () => {
     const d = doc({ announcements: [], syllabus: null, home_markdown: '', instructors: [], rows: [], assignments: [], course_description: '', previous_offerings: [] });
     const html = render(<HomeView facts={factsFromStatus(d)} org={ORG} now={NOW} />);

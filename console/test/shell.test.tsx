@@ -82,7 +82,7 @@ describe('top bar', () => {
     expect(text(<Topbar user={null} />)).toContain('DSL Teaching Console');
     expect(render(<Topbar user={null} />)).not.toContain('<small>');
     const out = render(<Topbar user={user} title="Instructor view" onSignOut={() => {}} />);
-    expect(out).toContain('DSL Teaching Console<small>Instructor view</small>');
+    expect(out).toContain('DSL Teaching Console</span><small>Instructor view</small>');
   });
   it('links the person to Profile, with no Your setup pill and no course links', () => {
     const out = render(<Topbar user={user} title="Instructor view" onSignOut={() => {}} guide />);
@@ -104,7 +104,7 @@ describe('top bar', () => {
       expect(name).toMatch(/^<svg[^>]*fill="currentColor"/);
       expect(name).not.toMatch(/fill="#/);
       expect(name.match(/width="44"/g)).toHaveLength(6);
-      expect(name).toContain('</svg>DSL Teaching Console');
+      expect(name).toContain('</svg><span class="app-words">DSL Teaching Console</span>');
     }
   });
   it('shows Guide only to a person with an instructor role (decision 0029 rule 5)', () => {

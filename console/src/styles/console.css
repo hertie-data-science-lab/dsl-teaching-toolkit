@@ -27,6 +27,13 @@ code, .mono { font-family: var(--font-code); font-size: 0.86em; }
 .pill-ghost:hover { background: #fff; color: #BA0020; }
 .menu-btn { display: none; }
 @media (max-width: 860px) { .menu-btn { display: inline-flex; align-items: center; } .who-name, .app-name small { display: none; } }
+/* A phone: the mark alone stands for the name (kept for screen readers), and the pills tighten, so the bar fits from 360px up. */
+@media (max-width: 520px) {
+  .app-name { gap: 0; }
+  .app-name .app-words { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .topbar-inner, .topbar-right { gap: 6px; }
+  .pill-ghost { padding-inline: 8px; }
+}
 
 /* ================= shell and nav ================= */
 .shell { max-width: 1320px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 96px; display: grid; grid-template-columns: 228px minmax(0, 1fr); gap: 32px; }
@@ -1026,6 +1033,7 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .home .updates li > div, .home .updates li p { display: inline; margin: 0; }
 .home .updates li b + div { margin-left: 6px; }
 .home-people { display: grid; grid-template-columns: minmax(0, 35fr) minmax(0, 65fr); gap: 24px; align-items: start; }
+.home-people > :only-child { grid-column: 1 / -1; }
 .home-people .people-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 @media (max-width: 860px) { .home-people { grid-template-columns: minmax(0, 1fr); } }
 
