@@ -45,7 +45,9 @@ export function normalise(status: Status, now: number): Status {
   const course = status.course && {
     ...status.course,
     stage_need: stageNeed(status.course),
-    materials: status.course.materials.map((m) => ({ ...m, checks: m.checks?.map((c): MaterialsCheck => (c.need ? c : { ...c, need: needOf(c) })) })),
+    // A previous engine's course block may carry no materials or templates list.
+    materials: (status.course.materials ?? []).map((m) => ({ ...m, checks: m.checks?.map((c): MaterialsCheck => (c.need ? c : { ...c, need: needOf(c) })) })),
+    templates: status.course.templates ?? [],
     todo: todo(status.course.todo),
   };
   const semester: SemesterStatus | undefined = status.semester && { ...status.semester, stage_need: stageNeed(status.semester), todo: todo(status.semester.todo) };

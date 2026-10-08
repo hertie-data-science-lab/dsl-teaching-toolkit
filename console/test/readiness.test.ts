@@ -60,6 +60,14 @@ describe('normalise (contract C)', () => {
     expect(n.course!.stage_need).toMatchObject({ C3: 'needed', C6: 'suggested' });
     expect(n.semester!.stage_need).toMatchObject({ K1: 'needed', K6: 'needed' });
   });
+  it('takes a course block with no materials or templates list (nor todo, problems or semester todo)', () => {
+    const { materials: _m, templates: _p, todo: _t, ...course } = STATUS.course!;
+    const bare = normalise({ ...STATUS, problems: undefined, course: course as typeof STATUS.course, semester: { ...STATUS.semester!, todo: undefined } }, NOW);
+    expect(bare.course!.materials).toEqual([]);
+    expect(bare.course!.templates).toEqual([]);
+    expect(bare.course!.todo).toBeUndefined();
+    expect(bare.problems).toBeUndefined();
+  });
   it('passes a status today’s engine wrote through unchanged', () => {
     const now = normalise(n, NOW);
     expect(now).toEqual(n);
