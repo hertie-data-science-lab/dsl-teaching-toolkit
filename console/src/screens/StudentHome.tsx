@@ -9,7 +9,7 @@ import { assignmentHref } from '../router';
 import { Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import { GhMd } from '../ui/rendered';
-import { fileHref } from './StudentFiles';
+import { fileHref, newTabIf } from './StudentFiles';
 import { PersonCard } from './StudentInstructors';
 
 /** Display-only rows (the site's `_events`): never news, and on a kind tab only as the kind's own event. */
@@ -62,7 +62,7 @@ function Bullet({ u, facts, org }: { u: Update; facts: SemesterFacts; org: strin
         New {noun} {r.kind === 'readings' ? 'are' : 'is'} up: {r.title}
         {r.links.map((l) => {
           const h = fileHref(org, facts.materialsRepos, l);
-          return <> [<a href={h.href} {...(h.ext ? { target: '_blank', rel: 'noopener' } : {})}>{l.name || 'file'}</a>]</>;
+          return <> [<a href={h.href} {...newTabIf(h.ext)}>{l.name || 'file'}</a>]</>;
         })}
       </li>
     );
@@ -87,7 +87,7 @@ export function HomeView({ facts, org, now }: { facts: SemesterFacts; org: strin
           <ul>{updates.map((u) => <Bullet u={u} facts={facts} org={org} />)}</ul>
         </section>
       ) : null}
-      {syl ? <p class="syllabus-link"><a class="btn outline" href={syl.href} {...(syl.ext ? { target: '_blank', rel: 'noopener' } : {})}><b>Syllabus</b>{syl.ext ? <> <Ext /></> : null}</a></p> : null}
+      {syl ? <p class="syllabus-link"><a class="btn outline" href={syl.href} {...newTabIf(syl.ext)}><b>Syllabus</b>{syl.ext ? <> <Ext /></> : null}</a></p> : null}
       {description ? (
         <section aria-labelledby="h-description">
           <h2 id="h-description">Course description</h2>

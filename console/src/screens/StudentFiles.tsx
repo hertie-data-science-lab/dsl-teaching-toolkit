@@ -52,7 +52,8 @@ function useFork(org: string, repo: string, want: boolean): ForkState | undefine
   return fork?.key === key ? fork.state : undefined;
 }
 
-const newTab = (href: string) => (isWeb(href) ? { target: '_blank', rel: 'noopener' } : {});
+/** A link that leaves the console opens in a new tab. */
+export const newTabIf = (leaves: boolean) => (leaves ? { target: '_blank', rel: 'noopener' } : {});
 
 /** The buttons after a file's name: source, online, local; `setup` is the Profile the list read. */
 export function FileButtons({ org, link, setup }: { org: string; link: FileLink; setup: Setup | null }) {
@@ -71,7 +72,7 @@ export function FileButtons({ org, link, setup }: { org: string; link: FileLink;
       {edit ? (
         <a class="file-btn" href={fileOnline(forked ? login : org, at.repo, at.path, link.url)} target="_blank" rel="noopener" title={forked ? `Edit ${name} in your fork, in the browser` : `Edit ${name} in the browser`}>online</a>
       ) : null}
-      {local ? <a class="file-btn" href={local} {...newTab(local)} title={`Open ${name} in your editor`}>local</a> : null}
+      {local ? <a class="file-btn" href={local} {...newTabIf(isWeb(local))} title={`Open ${name} in your editor`}>local</a> : null}
     </span>
   );
 }
@@ -81,7 +82,7 @@ export function FileLinkItem({ org, repos, link, setup, cls, current }: { org: s
   const h = fileHref(org, repos, link);
   return (
     <span class="file-link">
-      <a class={cls} href={h.href} {...(h.ext ? { target: '_blank', rel: 'noopener' } : {})} {...(current ? { 'aria-current': 'page' as const } : {})}>{link.name || 'file'}</a>
+      <a class={cls} href={h.href} {...newTabIf(h.ext)} {...(current ? { 'aria-current': 'page' as const } : {})}>{link.name || 'file'}</a>
       <FileButtons org={org} link={link} setup={setup} />
     </span>
   );
