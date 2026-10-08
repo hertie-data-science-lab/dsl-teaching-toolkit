@@ -333,7 +333,9 @@ def _deploy(path, repo="materials", dest=None):
 def _landed(monkeypatch, deploy, readings=False, gh=_tree_gh):
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", gh)
-    return site._landed("Semester-f2026", deploy, frozenset(), readings, _NO_ALIASES)
+    return site._landed(
+        "Semester-f2026", deploy, frozenset(), readings, _NO_ALIASES, {}
+    )
 
 
 def test_a_landed_folder_links_its_files_and_folds_its_subfolders(monkeypatch):
@@ -409,7 +411,7 @@ _READINGS_TREE = (
 def test_a_readings_row_inlines_its_overlay_and_lists_everything_else(monkeypatch):
     monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", _READINGS_TREE))
     landed = site._landed(
-        "C", _deploy("readings/01_week-1"), frozenset(), True, _NO_ALIASES
+        "C", _deploy("readings/01_week-1"), frozenset(), True, _NO_ALIASES, {}
     )
     # Only the overlay is taken out: an uploaded `notes.md` or `refs.bib` is a reading.
     assert sorted(x.name for x in landed.links) == ["ch1.pdf", "notes.md", "refs.bib"]
@@ -420,7 +422,7 @@ def test_a_readings_row_inlines_its_overlay_and_lists_everything_else(monkeypatc
     assert site._reading_list("C", [landed]) == "### Week 1\n\n- Blitzstein."
     # Any other kind keeps the overlay as a file.
     other = site._landed(
-        "C", _deploy("readings/01_week-1"), frozenset(), False, _NO_ALIASES
+        "C", _deploy("readings/01_week-1"), frozenset(), False, _NO_ALIASES, {}
     )
     assert "READINGS.md" in [x.name for x in other.links] and not other.overlays
 
@@ -441,7 +443,7 @@ def _syllabus(monkeypatch, releases, tree, declared=None):
         site, "read_materials", lambda o, r: declared or materials.Declared()
     )
     return site._declared_syllabus(
-        "C", "S", Schedule(releases=releases), frozenset({"materials"})
+        "C", "S", Schedule(releases=releases), frozenset({"materials"}), {}
     )
 
 
@@ -612,11 +614,11 @@ def test_shape_links_matches_a_directory_component_and_ignores_case():
 
 
 def test_ext_reads_the_extension_not_a_dotted_directory():
-    assert site_repo._ext("notes.PDF") == "pdf"
-    assert site_repo._ext("Makefile") == ""
-    assert site_repo._ext("libs/remark-css/metropolis.css") == "css"
+    assert site_repo.file_ext("notes.PDF") == "pdf"
+    assert site_repo.file_ext("Makefile") == ""
+    assert site_repo.file_ext("libs/remark-css/metropolis.css") == "css"
     # A dot in a directory name is not the file's extension.
-    assert site_repo._ext("v1.2/README") == ""
+    assert site_repo.file_ext("v1.2/README") == ""
 
 
 def test_the_allowlist_never_leaves_a_public_file_unreachable(tmp_path):
@@ -706,8 +708,10 @@ def test_a_semester_gets_a_tab_per_kind_it_has_rows_of():
     )
     assert "permalink: /drop-ins/" in semester["drop-ins.md"]
     assert "title: Drop-ins" in semester["drop-ins.md"]
-    # A public calendar: no Assignments, All Materials or Your Profile tab.
-    assert not {"assignments.md", "materials.md", "profile.md"} & set(semester)
+    # The 0.9.0 tabs after the kind tabs (decision 0035 rule 1).
+    assert {"assignments.md", "materials.md", "profile.md"} <= set(semester)
+    assert "layout: profile" in semester["profile.md"]
+    assert "permalink: /materials/" in semester["materials.md"]
     assert "permalink: /other/" in site_repo.theme_pages(True, ["other"])["other.md"]
     assert "title: Other" in site_repo.theme_pages(True, ["other"])["other.md"]
     # A public course site keeps its own pages: /materials/ is its readings page.
@@ -782,11 +786,34 @@ def test_no_nav_tab_can_point_at_a_page_this_site_does_not_get():
     assert "/readings/" not in public  # a semester-only page, so a semester-only tab
 
 
-def test_a_semester_nav_is_home_schedule_and_the_kind_tabs():
+def test_a_semester_nav_is_the_kind_tabs_between_schedule_and_assignments():
     nav = site_repo.nav_yaml(semester=True, kinds=["readings", "lecture", "lab"])
-    names = [i["name"] for i in yaml.safe_load(nav)["items"]]
-    # The kind tabs in the policy's order, and nothing after them.
-    assert names == ["Home", "Schedule", "Lectures", "Labs", "Readings"]
+    items = yaml.safe_load(nav)["items"]
+    # The kind tabs in the policy's order, then the 0.9.0 site's own three - Your Profile
+    # last, because it is a setting rather than course content.
+    assert [i["name"] for i in items] == [
+        "Home",
+        "Schedule",
+        "Lectures",
+        "Labs",
+        "Readings",
+        "Assignments",
+        "All Materials",
+        "Your Profile",
+    ]
+    icons = {i["name"]: i["icon_class"] for i in items}
+    assert icons["Assignments"] == "fas fa-user-graduate"
+    assert icons["All Materials"] == "fas fa-folder-open"
+    assert icons["Your Profile"] == "fas fa-user-cog"
+
+
+def test_your_profile_is_a_semester_tab_only():
+    # The public open-courseware site has no repo a reader could fork.
+    assert "profile.md" not in site_repo.theme_pages(semester=False)
+    public = [
+        i["name"] for i in yaml.safe_load(site_repo.nav_yaml(semester=False))["items"]
+    ]
+    assert "Your Profile" not in public
 
 
 def test_details_keeps_the_paragraphs_of_a_multi_line_objective():
@@ -840,27 +867,13 @@ def test_a_planned_destination_links_only_where_something_exists(monkeypatch):
 def test_no_syllabus_means_no_key_at_all():
     # The home page shows no line rather than an empty one, so the key must be absent -
     # not present and blank.
-    assert "syllabus" not in (yaml.safe_load(site._home_data(None)) or {})
-    with_one = yaml.safe_load(site._home_data(Link("S.md", "u")))
-    assert with_one == {"syllabus": "u"}
-
-
-def test_the_sync_retires_the_sections_a_calendar_has_no_more(tmp_path):
-    # A semester site synced before decision 0011 rule 5 loses its Assignments, All
-    # Materials and Your Profile pages, their templates and its hosted copies - but a page
-    # someone made by hand under one of those names stays.
-    (tmp_path / "assignments.md").write_text(
-        "---\nlayout: assignments\ntitle: Assignments\npermalink: /assignments/\n---\n"
-    )
-    (tmp_path / "profile.md").write_text(
-        "---\nlayout: profile\ntitle: Your Profile\npermalink: /profile/\n---\n"
-    )
-    (tmp_path / "materials.md").write_text("---\ntitle: Our reading room\n---\nHi.\n")
-    retired = site_repo.retired_sections(tmp_path)
-    assert {"assignments.md", "profile.md"} <= set(retired)
-    assert "materials.md" not in retired
-    assert "files" in retired and "_includes/open_in.html" in retired
-    assert "_layouts/assignment.html" in retired
+    assert "syllabus" not in (yaml.safe_load(site._materials_index("C", [], {})) or {})
+    with_one = yaml.safe_load(site._materials_index("C", [], {}, Link("S.md", "u")))
+    assert with_one["syllabus"] == "u"
+    # A published syllabus is pinned as its hosted copy: the pin is one link.
+    hosted = Link("S.html", "u", "S.html", "https://c.github.io/files/m/S.html")
+    pinned = yaml.safe_load(site._materials_index("C", [], {}, hosted))
+    assert pinned["syllabus"] == "https://c.github.io/files/m/S.html"
 
 
 def test_a_public_site_has_no_assignments_tab(tmp_path):
@@ -936,3 +949,206 @@ def test_the_denylist_matches_by_name_at_any_depth_and_ignores_case():
     # ...and does not swallow a file that merely contains a denylisted word.
     assert not repos.has_denied_component("labs/01_lab/solutions-discussion.md")
     assert not repos.has_denied_component("labs/testing-guide.md")
+
+
+# ----------------------------------------------------- the All Materials index
+def test_the_index_applies_the_same_name_rule(monkeypatch):
+    # Same rule on the other page, which is the point of not having two.
+    repos = {"m": ("01_lab/.Rprofile", "01_lab/lab.R", "01_lab/.gitkeep")}
+    entry = _index(monkeypatch, repos)[0]["entries"][0]
+    assert entry["name"] == "01_lab/" and entry["files"] == 2
+    assert [e["name"] for e in entry["entries"]] == [".Rprofile", "lab.R"]
+
+
+def test_the_index_folds_away_a_junk_directory_entirely(monkeypatch):
+    # Not just the file: `__pycache__/` would otherwise be a directory entry of its own,
+    # nested and counted, on the page that shows the whole shape of what shipped.
+    repos = {"m": ("01_lab/__pycache__/helpers.cpython-312.pyc", "01_lab/lab.py")}
+    entry = _index(monkeypatch, repos)[0]["entries"][0]
+    assert entry["name"] == "01_lab/" and entry["files"] == 1
+    assert [e["name"] for e in entry["entries"]] == ["lab.py"]
+
+
+def _parse(monkeypatch, repos):
+    monkeypatch.setattr(
+        site, "_repo_tree", lambda o, r: ("main", tuple(sorted(repos[r])))
+    )
+    return yaml.safe_load(site._materials_index("Semester-f2026", list(repos), {}))
+
+
+def _index(monkeypatch, repos):
+    return _parse(monkeypatch, repos)["sections"]
+
+
+def _docs(monkeypatch, repos):
+    return [d["name"] for d in _parse(monkeypatch, repos).get("documents", [])]
+
+
+def test_root_documents_are_one_group_not_a_section_per_repo(monkeypatch):
+    # The syllabus and the README are course-level documents, not sections. Keying them by
+    # the repo they sit in listed each of them once per content repo - three READMEs on the
+    # live demo site, one under each of lectures, labs and readings.
+    repos = {
+        "labs": ("01_lab/lab.ipynb", "README.md", "SYLLABUS.md"),
+        "lectures": ("01_intro/deck.html", "README.md", "SYLLABUS.md"),
+    }
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", repos[r]))
+    got = yaml.safe_load(site._materials_index("C", sorted(repos), {}))
+    assert [d["name"] for d in got["documents"]] == ["README.md", "SYLLABUS.md"]
+    # ...and they are gone from the sections, which now hold only session folders.
+    assert [s["name"] for s in got["sections"]] == ["labs", "lectures"]
+    for section in got["sections"]:
+        assert [e["name"] for e in section["entries"]] == [
+            f"01_{'lab' if section['name'] == 'labs' else 'intro'}/"
+        ]
+
+
+def test_a_semester_with_only_root_documents_is_not_reported_as_empty(monkeypatch):
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ("SYLLABUS.md",)))
+    got = yaml.safe_load(site._materials_index("C", ["materials"], {}))
+    assert [d["name"] for d in got["documents"]] == ["SYLLABUS.md"]
+    assert got["sections"] == []
+
+
+def test_index_reads_a_repo_per_section_semester(monkeypatch):
+    got = {
+        s["name"]: [e["name"] for e in s["entries"]]
+        for s in _index(monkeypatch, DEMO_REPOS)
+    }
+    # The repo names the section and its ordinal folders are the entries. The root
+    # README.md is a course document, listed once rather than under a repo's heading.
+    assert got == {"lectures": ["01_introduction/"], "readings": ["01_introduction/"]}
+    assert _docs(monkeypatch, DEMO_REPOS) == ["README.md"]
+
+
+def test_index_reads_a_single_materials_repo_semester(monkeypatch):
+    sections = _index(monkeypatch, MATHS_REPOS)
+    got = {s["name"]: [e["name"] for e in s["entries"]] for s in sections}
+    # Each top-level directory is its own section here, and `datasets/` needs no ordinal
+    # anywhere to appear. The root SYLLABUS.md takes the repo's name.
+    #
+    # `.github/` shows up, which is the deliberate cost of filtering by a closed list of
+    # names rather than by dots: it cannot normally reach a semester repo at all
+    # (`deploy.ROOT_RELEASE_EXCLUDED` never releases a root `.github`), so if it is here it
+    # was released on purpose and saying so is right. The `.DS_Store` beside it is not -
+    # nobody released that, a file manager wrote it.
+    assert got == {
+        ".github": ["workflows/"],
+        "datasets": ["housing.csv"],
+        "labs": ["01_lab/"],
+        "lectures": ["01_lecture/"],
+    }
+    # The root files are course documents now, not a section named after the repo.
+    assert _docs(monkeypatch, MATHS_REPOS) == ["SYLLABUS.md"]
+
+
+def test_index_folds_a_directory_to_one_counted_link(monkeypatch):
+    lectures = next(
+        s for s in _index(monkeypatch, MATHS_REPOS) if s["name"] == "lectures"
+    )
+    entry = lectures["entries"][0]
+    # Never the directory's contents: one of these holds a couple of thousand files.
+    assert entry["name"] == "01_lecture/" and entry["files"] == 2
+    assert entry["url"].endswith("/tree/main/lectures/01_lecture")
+    assert lectures["files"] == 2
+
+
+def test_index_links_a_file_as_a_blob_and_counts_no_files(monkeypatch):
+    datasets = next(
+        s for s in _index(monkeypatch, MATHS_REPOS) if s["name"] == "datasets"
+    )
+    entry = datasets["entries"][0]
+    assert entry["url"].endswith("/blob/main/datasets/housing.csv")
+    assert "files" not in entry  # a file is not a folder with a count
+
+
+def test_index_nests_a_directory_instead_of_only_folding_it(monkeypatch):
+    # The All Materials tab shows the whole shape of what shipped, not just a count -
+    # unlike a session row's links (`_shape_links`), a folded subfolder's contents ARE
+    # reachable in the page itself, at any depth.
+    lectures = next(
+        s for s in _index(monkeypatch, MATHS_REPOS) if s["name"] == "lectures"
+    )
+    top = lectures["entries"][0]
+    assert top["name"] == "01_lecture/"
+    nested = {e["name"]: e for e in top["entries"]}
+    assert set(nested) == {"deck.html", "media/"}
+    assert "entries" not in nested["deck.html"] and "files" not in nested["deck.html"]
+    assert nested["deck.html"]["url"].endswith(
+        "/blob/main/lectures/01_lecture/deck.html"
+    )
+    media = nested["media/"]
+    assert media["files"] == 1
+    assert [e["name"] for e in media["entries"]] == ["img.png"]
+    assert media["entries"][0]["url"].endswith(
+        "/blob/main/lectures/01_lecture/media/img.png"
+    )
+
+
+def test_index_is_empty_yaml_when_nothing_is_released(monkeypatch):
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
+    assert yaml.safe_load(
+        site._materials_index("Semester-f2026", ["materials"], {})
+    ) == {"sections": []}
+    # And with no repos at all, without touching the tree.
+    assert yaml.safe_load(site._materials_index("Semester-f2026", [], {})) == {
+        "sections": []
+    }
+
+
+def test_index_puts_directories_before_files(monkeypatch):
+    # Both in ONE section, which needs the ordinal shape: a non-ordinal directory would
+    # become a section of its own rather than an entry beside the root file.
+    repos = {"m": ("01_zzz/a.txt", "01_zzz/aaa.md")}
+    entries = [e["name"] for e in _index(monkeypatch, repos)[0]["entries"]]
+    # A directory listing: the structure is what a reader scans first, unlike a session
+    # row, which leads with its deliverables.
+    assert entries == ["01_zzz/"]
+
+
+def test_index_gives_a_non_ordinal_directory_its_own_section(monkeypatch):
+    # The rule that makes both semester shapes work: an ordinal child means the REPO is the
+    # section, a non-ordinal one means the DIRECTORY is.
+    repos = {"m": ("handbook/rules.md", "aaa.md")}
+    sections = _index(monkeypatch, repos)
+    assert {s["name"]: [e["name"] for e in s["entries"]] for s in sections} == {
+        "handbook": ["rules.md"]
+    }
+    # ...and the root file is a course document, not a section named after the repo.
+    assert _docs(monkeypatch, repos) == ["aaa.md"]
+
+
+def test_the_all_materials_index_hides_what_should_never_have_shipped(monkeypatch):
+    # The catch-all index lists everything a release happened to carry, so it was the
+    # shortest route from "someone released a folder wholesale" to "the whole class has
+    # the answers".
+    repos = {
+        "labs": (
+            "01_lab/lab.ipynb",
+            "01_lab/solution/answers.ipynb",
+            "01_lab/grading.yml",
+            "01_lab/Tests/test_hidden.py",
+            ".env.production",
+            "README.md",
+        )
+    }
+    got = _parse(monkeypatch, repos)
+    assert [d["name"] for d in got["documents"]] == ["README.md"]
+    entries = got["sections"][0]["entries"]
+    assert [e["name"] for e in entries] == ["01_lab/"]
+    assert [e["name"] for e in entries[0]["entries"]] == ["lab.ipynb"]
+
+
+def test_the_index_links_a_hosted_copy_beside_the_file(monkeypatch):
+    # The same two destinations a row carries: the name opens the site's own copy where
+    # the course published one, and `url` stays the file on GitHub.
+    repos = {"m": ("01_a/deck.html", "01_a/notes.pdf")}
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", repos[r]))
+    got = yaml.safe_load(
+        site._materials_index("S", ["m"], {"m": frozenset({"01_a/deck.html"})})
+    )
+    files = {e["name"]: e for e in got["sections"][0]["entries"][0]["entries"]}
+    assert (
+        files["deck.html"]["view_url"] == "https://s.github.io/files/m/01_a/deck.html"
+    )
+    assert "view_url" not in files["notes.pdf"]

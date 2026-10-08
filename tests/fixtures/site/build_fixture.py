@@ -19,8 +19,10 @@ handed-out assignment with a declared `details:`, a pending one, one handed in o
 that is not out yet, one whose repos are public, one handed into a shared drop box, one
 group assignment inside its team-formation window, a dated exam and a TBC
 one, a special event, the two term boundaries, the archive row inside its notice window,
-and the banner to the student console. A semester site is a public calendar (decision
-0011 rule 5): no assignment pages, teams, hosted copies or All Materials index.
+the banner to the student console, two formed teams (one with room, one full), an All
+Materials index nested three directories deep, and - within the released lecture - a
+published file linked to the site's own hosted copy beside an unpublished one linked to
+GitHub (decision 0035 rule 1: the 0.9.0 site, restored).
 
     python3 tests/fixtures/site/build_fixture.py <dest>
 """
@@ -30,6 +32,7 @@ from __future__ import annotations
 import dataclasses
 import shutil
 import sys
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -107,6 +110,12 @@ TREE = (
     "labs/02_week-2/Lab_Session_2.ipynb",
 )
 
+# What this course's `publish.yml` declares, through the real parser: rendered decks and
+# nothing else - the shape a Quarto course takes. Lecture 1 therefore carries BOTH link
+# shapes, a published `slides.html` (whose `slides_files/` bundle follows it) beside an
+# unpublished `slides.pdf`, which is the pair the templates have to tell apart.
+PUBLISH_POLICY = {MATERIALS: (site.parse_patterns("lectures/**/*.html"),)}
+
 READINGS_MD = """# Session 1 readings
 
 ## Required
@@ -151,6 +160,26 @@ PEOPLE = {
 
 def _repo_tree(_org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     return "main", TREE if repo == MATERIALS else ()
+
+
+def _formed_teams(_org: str, _key: str) -> list[tuple[str, list[str]]]:
+    """Two teams for the assignment inside its team-formation window - one with room and
+    one full, so the built page carries both halves of the Places-left column."""
+    return [
+        ("team-alpha", ["ada-l", "bo-b"]),
+        ("team-bravo", ["cy-c", "di-d", "ed-e", "flo-f"]),
+    ]
+
+
+def _clone(_org: str, repo: str, dest, branch=None, shallow=False) -> bool:
+    """A `ghcli.clone` stand-in: the semester repo's released tree as real (tiny) files, so
+    the mirror has bytes to copy. Every path of TREE, whether published or not - the
+    policy is what decides, and that decision is the code under test."""
+    for rel in TREE if repo == MATERIALS else ():
+        f = Path(dest) / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(f"fixture {rel}\n", encoding="utf-8")
+    return True
 
 
 def _grading_spec(_org: str, repo: str, **_):
@@ -290,7 +319,7 @@ SCHEDULE = schedule.Schedule(
 )
 
 
-def _lectures() -> tuple[dict[str, str], list[str]]:
+def _lectures(hosted: site_repo.Hosted) -> tuple[dict[str, str], list[str]]:
     """The `_lectures` collection, through the sync's own row code, and the kinds it has."""
     return site._site_rows(
         SEMESTER_ORG,
@@ -298,6 +327,7 @@ def _lectures() -> tuple[dict[str, str], list[str]]:
         frozenset(),
         frozenset({MATERIALS}),
         schedule_plan._no_aliases,
+        hosted,
     )
 
 
@@ -438,19 +468,19 @@ def _events() -> dict[str, str]:
     }
 
 
-def collections() -> dict[str, dict[str, str]]:
+def collections(hosted: site_repo.Hosted) -> dict[str, dict[str, str]]:
     """The generated collections, front-matter stamp and all - exactly what
     `_sync_site_repo` writes into the site repo."""
     return {
-        "_lectures": _lectures()[0],
+        "_lectures": _lectures(hosted)[0],
         "_assignments": _assignments(),
         "_events": _events(),
     }
 
 
-def data_files() -> dict[str, str]:
+def data_files(hosted: site_repo.Hosted) -> dict[str, str]:
     """The generated `_data/*.yml`, keyed by repo-relative path."""
-    kinds = _lectures()[1]
+    kinds = _lectures(hosted)[1]
     return {
         "_data/kinds.yml": site_repo.kinds_yaml(),
         "_data/people.yml": site_repo.people_yaml(
@@ -459,8 +489,11 @@ def data_files() -> dict[str, str]:
             edit_at=f"{SEMESTER_ORG}/semester-config/instructors.yml",
         ),
         "_data/nav.yml": site_repo.nav_yaml(semester=True, kinds=kinds),
-        "_data/materials.yml": site._home_data(
-            site_repo.Link(
+        "_data/materials.yml": site._materials_index(
+            SEMESTER_ORG,
+            [MATERIALS],
+            hosted,
+            syllabus=site_repo.Link(
                 "SYLLABUS.md",
                 f"https://github.com/{SEMESTER_ORG}/{MATERIALS}/blob/main/SYLLABUS.md",
             ),
@@ -469,28 +502,42 @@ def data_files() -> dict[str, str]:
     }
 
 
-def generated() -> dict[str, dict[str, str] | dict[str, dict[str, str]]]:
+def generated(
+    site_wd: Path | None = None,
+) -> dict[str, dict[str, str] | dict[str, dict[str, str]]]:
     """Everything the sync writes, with the gh reads stubbed out and put back.
 
     Reassigning the module globals rather than passing fakes down: `_repo_tree` is
     memoised and `get_file_content` is imported into `site`'s namespace, so this is the
-    seam every caller below actually goes through."""
+    seam every caller below actually goes through.
+
+    `site_wd` is a real site checkout to mirror the public copies into, so `files/` holds
+    what a live sync would put there and the built site serves the very copy its rows
+    link. Without one the mirror still runs, into a throwaway directory: what the rows say
+    is hosted has to come from the REAL `_mirror_public` either way."""
     real_tree, real_content = site._repo_tree, site.get_file_content
     real_spec, real_materials = site.load_grading_spec, site.read_materials
+    real_clone, real_teams = site.clone, site._formed_teams
     site._repo_tree, site.get_file_content = _repo_tree, _get_file_content
     site.load_grading_spec = _grading_spec
     site.read_materials = lambda _org, _repo: materials.Declared()
+    site.clone, site._formed_teams = _clone, _formed_teams
     try:
+        with tempfile.TemporaryDirectory() as work:
+            hosted = site._mirror_public(
+                site_wd or Path(work), SEMESTER_ORG, PUBLISH_POLICY
+            )
         return {
-            "collections": collections(),
+            "collections": collections(hosted),
             "files": {
-                **data_files(),
-                **site_repo.theme_pages(semester=True, kinds=_lectures()[1]),
+                **data_files(hosted),
+                **site_repo.theme_pages(semester=True, kinds=_lectures(hosted)[1]),
             },
         }
     finally:
         site._repo_tree, site.get_file_content = real_tree, real_content
         site.load_grading_spec, site.read_materials = real_spec, real_materials
+        site.clone, site._formed_teams = real_clone, real_teams
 
 
 # The overlay the offline build layers on top of the generated `_config.yml`. The primary
@@ -516,7 +563,7 @@ def build(dest: Path) -> None:
         shutil.rmtree(dest)
     shutil.copytree(HERE / "base", dest)
 
-    out = generated()
+    out = generated(dest)
     # Written through the sync's OWN apply step, so the site CI builds is assembled the
     # way a real one is - config upsert, collection regeneration, front-matter stamp and
     # all - rather than by a second copy of it here that can drift out of step.
