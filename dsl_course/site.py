@@ -76,7 +76,7 @@ from .materials import read as read_materials
 from .opencourse import read as read_opencourse
 from .public_site import publish as publish_public_site
 from .readings import demote_headings
-from .releaseignore import excludes
+from .releaseignore import listed
 from .releaseignore import parse as parse_patterns
 from .repos import (
     default_branch,
@@ -232,6 +232,41 @@ def _publish_policies(
     }
 
 
+# A destination repo's copies as (path in the semester copy, path in the course source)
+# pairs, one per deploy into it (`_deploy_sources`).
+Renames = dict[str, tuple[tuple[str, str], ...]]
+
+
+def _deploy_sources(sched: schedule.Schedule) -> Renames:
+    """Each semester repo the schedule releases into, mapped to where each copy into it
+    came from: `(semester_dest_path, course_source_path)`, the destination as
+    `deploy_dest` resolves it. What turns a path in the semester copy back into the
+    path faculty wrote a pattern against, when a deploy renamed it on the way."""
+    out: dict[str, list[tuple[str, str]]] = {}
+    for release in sched.releases:
+        for d in release.deploy:
+            pair = (deploy_dest(d), d.course_source_path.strip("/"))
+            out.setdefault(d.semester_dest_repo, []).append(pair)
+    return {repo: tuple(pairs) for repo, pairs in out.items()}
+
+
+def _source_paths(path: str, renames: tuple[tuple[str, str], ...]) -> set[str]:
+    """Where `path` of a semester copy came from in the course source, through every
+    deploy that landed it (a copy may land inside another, so there can be several)."""
+    out = set()
+    for dest, source in renames:
+        if not dest:
+            rest = path
+        elif path == dest:
+            rest = ""
+        elif path.startswith(f"{dest}/"):
+            rest = path[len(dest) + 1 :]
+        else:
+            continue
+        out.add("/".join(p for p in (source, rest) if p))
+    return out
+
+
 def _bundle_prefix(path: str) -> str:
     """The `<stem>_files/` directory a rendered deck keeps its assets in, beside it."""
     return f"{path.rsplit('.', 1)[0]}_files/"
@@ -243,6 +278,7 @@ def _public_selection(
     paths: tuple[str, ...],
     specs: tuple[GitIgnoreSpec, ...],
     withhold: tuple[str, ...] = (),
+    renames: tuple[tuple[str, str], ...] = (),
 ) -> frozenset[str]:
     """Which paths of `repo` the site can host, out of its released tree.
 
@@ -255,8 +291,10 @@ def _public_selection(
 
     Two deny filters gate every candidate, bundles included, and cannot be written
     around: the denylist (`materials.publishable`), and `opencourse.yml`'s `withhold`
-    (`withhold`, matched against the path in this copy) - a file kept off the
-    open-courseware site is never hosted publicly here either.
+    (`withhold`) - a file kept off the open-courseware site is never hosted publicly here
+    either. `withhold` is written against SOURCE repo paths, so it is matched against the
+    path in this copy AND every source path a deploy landed it from (`renames`, this
+    repo's `_deploy_sources`): a deploy that renames a withheld folder hosts nothing.
 
     A file GitHub would refuse on a push is dropped with a warning rather than failing the
     sync. So is anything that is not a regular file - `lstat`, so a symlink is judged as
@@ -264,10 +302,17 @@ def _public_selection(
     have. Judged over the same tree the links are built from (`_repo_tree`); the clone is
     only where the bytes and the sizes come from."""
 
-    def allowed(path: str) -> bool:
-        return publishable(path) and not (
-            withhold and excludes(src, src / path, withhold)
+    ignore = listed(withhold) if withhold else None
+
+    def withheld(path: str) -> bool:
+        # Every name above a released blob is a directory, and the blob itself is not.
+        return any(
+            ignore.excludes(p, lambda rel, p=p: rel != p)
+            for p in {path, *_source_paths(path, renames)}
         )
+
+    def allowed(path: str) -> bool:
+        return publishable(path) and not (ignore and withheld(path))
 
     matched = {
         path
@@ -303,6 +348,7 @@ def _mirror_public(
     semester_org: str,
     policies: dict[str, tuple[GitIgnoreSpec, ...]],
     withhold: tuple[str, ...] = (),
+    renames: Renames | None = None,
 ) -> Hosted:
     """Copy every publicly declared file of this semester's content repos into the site's
     own `files/<repo>/` tree, and say what actually landed there.
@@ -317,7 +363,8 @@ def _mirror_public(
     outage than a copy one sync stale. A `files/<repo>/` whose repo is no longer a key of
     `policies` (the plan stopped releasing into it) goes too.
 
-    `withhold` is `opencourse.yml`'s list (`_public_selection`).
+    `withhold` is `opencourse.yml`'s list and `renames` the plan's `_deploy_sources`
+    (`_public_selection`).
 
     Logs name repos and paths only: `policies` covers the release plan's declared
     destinations, never a student's repo."""
@@ -346,7 +393,14 @@ def _mirror_public(
                     "site are left as the last sync made them"
                 )
                 continue
-            keep = _public_selection(src, repo, paths, policies[repo], withhold)
+            keep = _public_selection(
+                src,
+                repo,
+                paths,
+                policies[repo],
+                withhold,
+                (renames or {}).get(repo, ()),
+            )
             if served.exists():
                 shutil.rmtree(served)
             if not keep:
@@ -1395,6 +1449,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
                     semester_org,
                     policies,
                     opencourse.withhold if opencourse else (),
+                    _deploy_sources(sched),
                 )
         else:
             hosted = _mirror_public(site_wd, semester_org, policies)

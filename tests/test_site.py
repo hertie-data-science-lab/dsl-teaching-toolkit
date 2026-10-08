@@ -2521,7 +2521,13 @@ def _policy(*patterns: str) -> dict[str, tuple]:
 
 
 def _mirror(
-    monkeypatch, origins, tmp_path, tree: dict[str, str], policies, withhold=()
+    monkeypatch,
+    origins,
+    tmp_path,
+    tree: dict[str, str],
+    policies,
+    withhold=(),
+    renames=None,
 ):
     """Mirror a faked semester repo into a site checkout; return (hosted, what it serves).
 
@@ -2533,7 +2539,7 @@ def _mirror(
         site, "_repo_tree", lambda org, repo: ("main", tuple(sorted(tree)))
     )
     site_wd = tmp_path / "site"
-    hosted = site._mirror_public(site_wd, "Semester-f2026", policies, withhold)
+    hosted = site._mirror_public(site_wd, "Semester-f2026", policies, withhold, renames)
     served = site_wd / site.SITE_FILES_DIR
     return hosted, sorted(
         p.relative_to(served).as_posix() for p in served.rglob("*") if p.is_file()
@@ -2833,13 +2839,56 @@ def test_the_sync_hands_the_open_sites_withhold_list_to_the_mirror(
     monkeypatch.setattr(
         site,
         "_mirror_public",
-        lambda wd, org, policies, withhold=(): seen.append(withhold) or {},
+        lambda wd, org, policies, withhold=(), renames=None: (
+            seen.append((withhold, renames)) or {}
+        ),
     )
     monkeypatch.setattr(
         site, "_publish_policies", lambda *a: _policy("lectures/**/*.html")
     )
     _plan(monkeypatch, tmp_path, _one_deploy(), trees={"materials": ()})
-    assert seen == [("*exam*",)]
+    # And where each copy came from, so the withhold is matched on the source paths too.
+    assert seen == [(("*exam*",), {"materials": (("lectures/01_a", "lectures/01_a"),)})]
+
+
+def test_a_renamed_deploy_of_a_withheld_folder_hosts_nothing(
+    monkeypatch, origins, tmp_path
+):
+    # `withhold` is written against the SOURCE repo's paths. A deploy that renames the
+    # folder on its way into the semester must not carry it past the filter: the copy is
+    # judged on the path it came from as well as the path it landed at.
+    sched = Schedule(
+        releases=[
+            Release(
+                "s1",
+                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
+                deploy=[
+                    Deploy(
+                        "course-materials-f2026",
+                        "drafts/exam-review",
+                        "materials",
+                        "lectures/01_review",
+                    )
+                ],
+            )
+        ]
+    )
+    renames = site._deploy_sources(sched)
+    assert renames == {"materials": (("lectures/01_review", "drafts/exam-review"),)}
+    tree = {
+        "lectures/01_review/slides.html": "deck",
+        "lectures/01_review/slides_files/fig.svg": "<svg/>",
+    }
+    hosted, served = _mirror(
+        monkeypatch,
+        origins,
+        tmp_path,
+        tree,
+        _policy("lectures/**"),
+        withhold=("drafts/",),
+        renames=renames,
+    )
+    assert (hosted, served) == ({}, [])
 
 
 def _broken_opencourse(org):
