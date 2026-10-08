@@ -854,7 +854,7 @@ def materials_readme(org: str) -> str:
     a repo. The file is create-only, like every other instructor-owned file in the
     skeleton, so a wording fix reaches a repo that already exists only by writing it
     deliberately, after checking the placeholder is still untouched
-    (deploy.UNEDITED_README_MARKERS).
+    (gh_contents.UNEDITED_README_MARKERS).
 
     Release materials with the README toggle copies this file into the semester's materials
     repo, where enrolled students read it - so it is written for them. How the source repo
@@ -862,7 +862,7 @@ def materials_readme(org: str) -> str:
     """
     actions_table = _actions_table(org)
     return (
-        # Two lines below carry deploy.py's UNEDITED_README_MARKERS - the "Replace this
+        # Two lines below carry gh_contents.py's UNEDITED_README_MARKERS - the "Replace this
         # placeholder" note and FACULTY_ONLY_HEADING. A release refuses to ship a README
         # still holding BOTH, so edit this stub's wording freely but keep those two intact
         # (test_scaffold.py asserts the seeded file still trips the guard).

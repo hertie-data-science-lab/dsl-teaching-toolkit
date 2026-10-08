@@ -110,9 +110,9 @@ from .collect import (
     sync_sheet,
 )
 from .course import COURSE_ADMIN_TEAM, shared_repo, submission_repo
-from .deploy import WITHHELD_ROOT_STUBS, deploy_many, is_withheld_stub
+from .deploy import deploy_many
 from .faults import ConfigFault, FaultKind, Severity, Unusable
-from .gh_contents import get_file_content
+from .gh_contents import WITHHELD_ROOT_STUBS, get_file_content, is_withheld_stub
 from .ghcli import gh, start_budget
 from .grades import (
     grading_config_faults,
