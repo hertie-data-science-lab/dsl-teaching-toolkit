@@ -1046,3 +1046,11 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .your-repos > summary h2 { margin: 0; font-size: 17px; color: var(--ink); }
 .your-repos .your-repo { display: grid; gap: 8px; }
 .your-repos .your-repo h3 { margin: 0; font-size: 15px; }
+/* All materials with a file open (decision 0035 rule 11): the tree beside the file, above it when narrow. */
+.materials-split { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
+.materials-split > * { min-width: 0; }
+.materials-tree .panel { padding: 12px 14px; }
+.materials-tree h2 { font-size: 15px; }
+.file-tree .ft-file.current { background: var(--sunk); border-radius: 6px; }
+.file-tree .ft-file a[aria-current] { font-weight: 700; }
+@media (max-width: 860px) { .materials-split { grid-template-columns: minmax(0, 1fr); } }

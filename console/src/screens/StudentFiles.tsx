@@ -66,12 +66,12 @@ export function FileButtons({ org, link }: { org: string; link: FileLink }) {
   );
 }
 
-/** A file's name, linked, then its button row: the one file link of the student screens. */
-export function FileLinkItem({ org, repos, link, chip, current }: { org: string; repos: string[]; link: FileLink; chip?: boolean; current?: boolean }) {
+/** A file's name, linked (with the class `cls`; `current` for the file open beside it), then its button row: the one file link of the student screens. */
+export function FileLinkItem({ org, repos, link, cls, current }: { org: string; repos: string[]; link: FileLink; cls?: string; current?: boolean }) {
   const h = fileHref(org, repos, link);
   return (
     <span class="file-link">
-      <a class={chip ? 'st-chip' : undefined} href={h.href} {...(h.ext ? { target: '_blank', rel: 'noopener' } : {})} {...(current ? { 'aria-current': 'page' as const } : {})}>{link.name || 'file'}</a>
+      <a class={cls} href={h.href} {...(h.ext ? { target: '_blank', rel: 'noopener' } : {})} {...(current ? { 'aria-current': 'page' as const } : {})}>{link.name || 'file'}</a>
       <FileButtons org={org} link={link} />
     </span>
   );
@@ -79,7 +79,7 @@ export function FileLinkItem({ org, repos, link, chip, current }: { org: string;
 
 /** A row's files as chips, each with its button row (the schedule). */
 export function FileChips({ org, repos, links }: { org: string; repos: string[]; links: FileLink[] }) {
-  return <>{links.map((l) => <FileLinkItem org={org} repos={repos} link={l} chip />)}</>;
+  return <>{links.map((l) => <FileLinkItem org={org} repos={repos} link={l} cls="st-chip" />)}</>;
 }
 
 /** A row's files as a list, the site's `session-files`, each with its button row. */

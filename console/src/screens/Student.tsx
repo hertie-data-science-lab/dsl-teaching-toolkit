@@ -86,7 +86,7 @@ export const STUDENT_HINTS: Record<string, string> = {
   week: 'What is due, handed out or released this week, and news from your instructors.',
   schedule: 'Every session, assignment and due date of the semester, with its files and readings once they are released.',
   assignments: 'Your repo, team, deadlines and Submission receipts for each assignment. Receipts are comments the automation leaves in your repo when it collects your work.',
-  materials: 'The files your instructors have released to this semester, read with your own account.',
+  materials: 'Every file your instructors have released to this semester, read with your own account; each opens here, on GitHub, on github.dev or in your editor.',
   instructors: 'Who teaches this semester.',
 };
 
