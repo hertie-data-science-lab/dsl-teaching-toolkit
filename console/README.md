@@ -120,12 +120,14 @@ the instructor's (decision 0029): **This semester** (the live ones, each card wi
 "Next: ...") and **Past semesters** (archived, or past their last day; with no dates read yet,
 by the date their key implies), which a **Current only** checkbox in the page head hides (kept
 in this browser, per account). A student-only account with exactly one live semester (neither
-archived nor ended, judged by its key) lands on its This week instead; the side nav and the
+archived nor ended, judged by its key) lands on its Home instead; the side nav and the
 banner call an ended semester ended by the same rule. The top bar's Guide explains the
 instructor console, so only a person with an instructor role sees it.
 
-The mode picks the shell. `?semester=<org>` opens that semester's student screens (This
-week, Schedule, Assignments, Marks, Materials, Join, Instructors). For a
+The mode picks the shell. `?semester=<org>` opens that semester's student screens, the
+semester site's tabs (decision 0035 rule 3): Home, This week, Schedule, one tab per kind that
+has rows (Lectures, Labs, Readings, ...: the kinds whose policy entry has a tab, in policy
+order, labelled as the site labels them), Assignments, All materials, Instructors. For a
 semester the person teaches, that is the **Student view** (the Student view pill in the
 course banner): the same screens with the instructor's own identity and a note, never a
 student's repos or marks (rule 7). Its top bar reads "Student view (preview)", a link back to
@@ -143,10 +145,13 @@ three rows, the rest under "Older semesters (n)". A semester node carries its pr
 pages, else on a course page the newest live one; one at a time. Other courses are reached
 through All courses, and so are the person's own student semesters. A student's tree is
 inverted, since a student takes each course once: the open semester's term is the anchor, its
-courses the nodes (the open one expanded), another live term under them, and Past semesters
-below, each expanding to its courses as links. A Student view's tree is that one semester's.
+courses the nodes (each a link to its Home, the open one expanded to its tabs, each with the
+site's Font Awesome glyph drawn inline; its kind tabs once its `student-status.json` is read),
+another live term under them, and Past semesters below, each expanding to its courses as
+links. A Student view's tree is that one semester's.
 
-Every course and semester page, in either console, opens with the **course banner**: crumbs
+The top bar carries the Hertie mark before the console's name in both consoles (decision 0035
+rule 2), drawn as inline SVG. Every course and semester page, in either console, opens with the **course banner**: crumbs
 that follow the tree ("All courses › Course › Semester"; a student's "Your semesters ›
 Semester › Course", led by All courses for a person who also teaches), the course name as the page's one h1, and on a semester page the
 semester's line under it (its name, state, week and dates) with the Student view pill (or
@@ -233,6 +238,10 @@ Each screen reads with the student's own account:
 | Materials | the materials repos; each session's readings | the repo's recursive tree (supporting folders such as `data/` and `img/` last, folded, under "Supporting files"); each file read when opened |
 | Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, every 30 s after the first minute, for up to 5 minutes of the tab being shown, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decision 0027) |
 | Join | assignments forming teams, and each one's teams so far (name, headcount, cap; never who) with a Pick that fills in the team | their own Join course / Join team issues in `join` and the automation's last reply; after "You joined", the invitation's accept link |
+
+Marks, Join and Set up are no longer in the nav (decision 0035 rules 7-9): what their rows
+describe moves into Assignments and Profile. `#marks` and `#join` open Assignments, `#setup`
+Profile.
 | Instructors | the cards, with an email only where the instructor chose to show it | none (a picture hosted on the semester site is read through the API and shown as `data:`) |
 
 Every screen also reads the person's role: `GET /orgs/{org}/teams/auditors/memberships/{login}`
@@ -404,13 +413,14 @@ Hash tokens as in the design mockup: `#dashboard`, `#schedule-s5`, `#assignment-
 the schedule editor also opens `#schedule-new`, `#schedule-semester` and `#schedule-archive`.
 Renamed hashes redirect: `#cohort` and `#semester` to `#dashboard`, `#staff` to
 `#instructors`, `#new-cohort-<n>` to `#new-semester-<n>`, `#schedule-term` to
-`#schedule-semester`.
+`#schedule-semester`, `#setup` to `#profile`.
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
 opens a new assignment entry for that template; `?wizard=new-semester-3` adds a link back.
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
 The course or semester rides in the query string: `?cohort=<org>` or `?course=<org>`
 (`?semester=` opens the student screens).
-Student screens: `?semester=<org>#week` (and `#schedule`, `#assignments`, `#marks`,
-`#materials`, `#materials-<repo>/<path>` for an open file, `#setup`, `#join`, `#instructors`);
+Student screens: `?semester=<org>#home` (and `#week`, `#schedule`, `#kind-<kind>`,
+`#assignments`, `#materials`, `#materials-<repo>/<path>` for an open file, `#instructors`; a
+student's old `#marks` and `#join` redirect to `#assignments`, `#setup` to `#profile`);
 `?join=<org>` for Join course.

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The shell mounted on a real URL (decision 0021): Profile opens whatever semester the query
-// names, a student's `#setup` stays their Set up, and an instructor's `#setup` becomes `#profile`.
+// names, `#setup` becomes `#profile` for both, and a student's `#marks` and `#join` become `#assignments`.
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
@@ -47,10 +47,16 @@ describe('the shell on a real URL', () => {
     expect(location.hash).toBe('#profile');
   });
 
-  it('keeps a student’s #setup as their Set up, with no rewrite', async () => {
+  it('lands a student’s old #setup on Profile, and their #marks and #join on Assignments (decision 0035)', async () => {
     const el = await mount(`/?semester=${NLP.org}#setup`);
-    expect(el.querySelector('.sidenav [aria-current="page"]')?.textContent).toBe('Set up');
-    expect(location.hash).toBe('#setup');
+    expect(location.hash).toBe('#profile');
+    expect(el.querySelector('.sidenav')).toBeNull();
+    expect(el.querySelector('#view .field')).not.toBeNull();
+    for (const old of ['#marks', '#join']) {
+      const s = await mount(`/?semester=${NLP.org}${old}`);
+      expect(location.hash).toBe('#assignments');
+      expect(s.querySelector('.sidenav [aria-current="page"]')?.textContent).toBe('Assignments');
+    }
   });
 
   it('rewrites an instructor’s #setup to #profile and shows Profile', async () => {
@@ -77,7 +83,7 @@ describe('the course banner (decision 0031 rule 11)', () => {
     const banner = el.querySelector('#view .course-banner')!;
     expect(banner.querySelector('h1')?.textContent).toBe('Machine Learning');
     expect(banner.querySelector('.cb-sem .sem-title')?.textContent).toBe('Fall 2026');
-    expect(banner.querySelector(`.cb-side a[href="?semester=${cohort.org}#week"]`)?.textContent).toBe('Student view');
+    expect(banner.querySelector(`.cb-side a[href="?semester=${cohort.org}#home"]`)?.textContent).toBe('Student view');
     expect(banner.querySelector('.cb-side')!.textContent).toContain('Semester on GitHub');
     expect(el.querySelectorAll('h1')).toHaveLength(1);
     expect(el.querySelector('.topbar .app-view')).toBeNull();
@@ -136,7 +142,7 @@ describe('the course banner (decision 0031 rule 11)', () => {
   });
 
   it('for a real student the course is the h1, the crumbs go semester first, and there is no way to the instructor view', async () => {
-    const el = await mount(`/?semester=${NLP.org}#week`);
+    const el = await mount(`/?semester=${NLP.org}#home`);
     expect(el.querySelector('.topbar .app-view')).toBeNull();
     expect(el.querySelector('.topbar .app-name small')?.textContent).toBe('Student view');
     const banner = el.querySelector('.course-banner')!;
@@ -150,7 +156,7 @@ describe('the course banner (decision 0031 rule 11)', () => {
 
   it('links the course crumb on a student’s Schedule', async () => {
     const el = await mount(`/?semester=${NLP.org}#schedule`);
-    expect(crumbs(el).at(-1)).toEqual(['Natural Language Processing', `?semester=${NLP.org}#week`]);
+    expect(crumbs(el).at(-1)).toEqual(['Natural Language Processing', `?semester=${NLP.org}#home`]);
   });
 });
 

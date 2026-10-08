@@ -43,6 +43,8 @@ export interface ScheduleRow {
   readingList: string;
   /** The session has readings planned that are not released yet. */
   readingsPending: boolean;
+  /** The kind tabs the row is listed on (a lecture whose readings shipped is on readings too); `[kind]` when the source does not say. */
+  tabs: string[];
 }
 
 export interface FileLink {
@@ -139,6 +141,15 @@ export interface SemesterFacts {
   announcements: Announcement[];
   /** The released syllabus, pinned; null when none has been released. */
   syllabus: FileLink | null;
+  /** The course meta's description; '' when unset. */
+  courseDescription: string;
+  /** Earlier runs of the course (the site repo's `_data/previous_offering.yml`). */
+  previousOfferings: { title: string; url: string }[];
+  /**
+   * Every row a kind tab lists, in the engine's order (dated by date, then undated): `rows`
+   * plus the undated and off-schedule ones the schedule leaves out. Absent: `rows`.
+   */
+  tabRows?: ScheduleRow[];
   /** The institution's row kinds (label and colours), when the source carries them. */
   kinds?: Record<string, RowKind>;
   /** `semester_start` / `semester_end` (yyyy-mm-dd), when the source carries them: week 1 starts on `start`. */
@@ -152,7 +163,12 @@ export interface RowKind {
   label: string;
   colour: string;
   background: string;
+  /** The kind has a tab of its own (a system kind, the exam or the archive, does not). */
+  tab: boolean;
 }
+
+/** The kinds that had a tab before the status file said which do. */
+const TAB_KINDS = ['lecture', 'lab', 'readings'];
 
 /** Where a student's screens get the semester's shared facts. */
 export interface StudentData {
@@ -323,6 +339,7 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     readings: [] as FileLink[],
     readingList: '',
     readingsPending: fm.readings_pending === true,
+    tabs: [] as string[],
   };
   if (dir === '_assignments') {
     const slug = id.replace(/^\d+-/, '');
@@ -349,6 +366,7 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     links,
     readings: links.filter((_, i) => /^readings?$/.test(str(raw[i].section))),
     readingList: str(fm.reading_list).trim(),
+    tabs: Array.isArray(fm.tabs) ? fm.tabs.map(str) : [str(fm.kind) || str(fm.type) || 'lecture'],
   }];
 }
 
@@ -457,6 +475,8 @@ export class SiteSource implements StudentData {
       homeMarkdown: homeText(bodyOf(home?.text ?? ''), cfg),
       announcements,
       syllabus: syllabus ? { name: sp ? (sp.path.split('/').pop() ?? sp.path) : 'Syllabus', url: syllabus, ...(sp ?? {}) } : null,
+      courseDescription: str(cfg.course_description),
+      previousOfferings: [],
     };
   }
 }
@@ -478,7 +498,7 @@ function linkOf(l: Obj): FileLink {
 
 /** The status file as the screens' model. Readings are the same objects as the row's links they repeat, so a screen that shows the rest of the files can tell them apart. */
 export function factsFromStatus(doc: Obj): SemesterFacts {
-  const rows: ScheduleRow[] = arr(doc.rows).filter((r) => r.when && r.off_schedule !== true).map((r) => {
+  const all: (ScheduleRow & { onSchedule: boolean })[] = arr(doc.rows).map((r) => {
     const links = arr(r.links).map(linkOf);
     const readings = arr(r.readings).map((x) => links.find((l) => l.repo === str(x.repo) && l.path === str(x.path)) ?? linkOf(x));
     return {
@@ -496,8 +516,12 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
       readings,
       readingList: str(r.reading_list).trim(),
       readingsPending: r.readings_pending === true,
+      tabs: Array.isArray(r.tabs) ? r.tabs.map(str) : [str(r.kind)],
+      onSchedule: !!r.when && r.off_schedule !== true,
     };
   });
+  const tabRows: ScheduleRow[] = all.map(({ onSchedule: _, ...r }) => r);
+  const rows = tabRows.filter((_, i) => all[i].onSchedule);
   const assignments: SemesterAssignment[] = arr(doc.assignments).map((a) => {
     const tf = a.team_formation as Obj | null | undefined;
     const via = str(a.submit_via);
@@ -529,7 +553,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
   const syl = doc.syllabus as Obj | null | undefined;
   const syllabusPath = syl ? str(syl.path) : '';
   const kinds: Record<string, RowKind> = {};
-  for (const [k, v] of Object.entries((doc.kinds as Record<string, Obj> | undefined) ?? {})) kinds[k] = { label: str(v.label), colour: str(v.colour), background: str(v.background) };
+  for (const [k, v] of Object.entries((doc.kinds as Record<string, Obj> | undefined) ?? {})) kinds[k] = { label: str(v.label), colour: str(v.colour), background: str(v.background), tab: typeof v.tab === 'boolean' ? v.tab : TAB_KINDS.includes(k) };
   const org = str(doc.semester);
   return {
     courseName: str(doc.course_name),
@@ -547,6 +571,9 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
     announcements: arr(doc.announcements).map((a) => ({ when: str(a.when), title: str(a.title), details: str(a.details) })).sort((a, b) => instant(b.when) - instant(a.when)),
     syllabus: syl && syllabusPath ? { name: syllabusPath.split('/').pop() ?? syllabusPath, repo: str(syl.repo), path: syllabusPath, url: ghUrl(org, str(syl.repo), syllabusPath, 'HEAD') } : null,
     kinds,
+    courseDescription: str(doc.course_description),
+    previousOfferings: arr(doc.previous_offerings).map((o) => ({ title: str(o.title), url: str(o.url) })).filter((o) => o.title),
+    tabRows,
     ...(doc.semester_start ? { start: str(doc.semester_start) } : {}),
     ...(doc.semester_end ? { end: str(doc.semester_end) } : {}),
     ...(doc.generated_at ? { generatedAt: str(doc.generated_at) } : {}),

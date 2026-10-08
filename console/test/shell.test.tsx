@@ -1,5 +1,6 @@
 // The shell (decision 0021): the app-level top bar, two levels of navigation, the side nav
-// without wizards (decision 0031 rule 11), `#setup` landing on Profile, and the sign-in page's copy.
+// without wizards (decision 0031 rule 11), `#setup` landing on Profile, the Hertie mark, and the
+// sign-in page's copy.
 
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
@@ -22,11 +23,13 @@ const course: Course = { org: 'hertie-dsl-demo-course-e1234', name: 'Machine Lea
 const text = (v: preact.VNode) => render(v).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&rsquo;/g, '’').replace(/\s+/g, ' ');
 
 describe('router', () => {
-  it('lands an old #setup on Profile in the instructor screens, never in a student’s', () => {
+  it('lands an old #setup on Profile in both consoles, and a student’s #marks and #join on Assignments', () => {
     expect(parseHash('#setup')).toEqual({ screen: 'profile' });
     expect(movedHash('#setup')).toBe('#profile');
-    expect(parseHash('#setup', true)).toEqual({ screen: 'setup' });
-    expect(movedHash('#setup', true)).toBeNull();
+    expect(parseHash('#setup', true)).toEqual({ screen: 'profile' });
+    expect(movedHash('#setup', true)).toBe('#profile');
+    for (const old of ['#marks', '#join']) expect(movedHash(old, true)).toBe('#assignments');
+    expect(movedHash('#marks')).toBeNull();
     expect(movedHash('#profile')).toBeNull();
   });
   it('makes Home about no course or semester, whatever the query names', () => {
@@ -64,7 +67,7 @@ describe('two levels', () => {
     const out = app('', [nlp]);
     expect(out).toContain('<h1>All courses');
     expect(out).toContain('Your semesters');
-    expect(out).toContain(`?semester=${nlp.org}#week`);
+    expect(out).toContain(`?semester=${nlp.org}#home`);
     expect(out).not.toContain('course-banner');
   });
   it('keeps the side nav on Home', () => {

@@ -124,7 +124,7 @@ describe('the student banner and screens', () => {
     for (const screen of Object.keys(STUDENT_HINTS)) {
       const out = html(<StudentScreen semester={semester} screen={screen} studentView={false} now={NOW} />);
       expect(out).toMatch(/<h2 class="h1">[^<]+<span class="hint-wrap"><button class="hint-btn"/);
-      expect(out).toContain(STUDENT_HINTS[screen].replace(/’/g, '&rsquo;').slice(0, 30));
+      expect(out).toContain(STUDENT_HINTS[screen].slice(0, 30));
     }
     for (const t of Object.values(STUDENT_HINTS)) expect(t.split(/[.!?](\s|$)/).filter((x) => x.trim()).length).toBeLessThanOrEqual(2);
   });
@@ -154,7 +154,7 @@ describe('the student banner and screens', () => {
 });
 
 describe('the student shell', () => {
-  it('lands a student with one live semester on its This week, with its footer and no Guide', async () => {
+  it('lands a student with one live semester on its Home, with its footer and no Guide', async () => {
     const f = withFile();
     const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: client(f) });
     s.user.value = user;
@@ -163,7 +163,7 @@ describe('the student shell', () => {
     document.body.appendChild(root);
     await act(async () => render(<App state={s} />, root!));
     await settle();
-    expect(root.querySelector('#view h2.h1')?.textContent).toContain('This week');
+    expect(root.querySelector('#view h2.h1')?.textContent).toContain('Home');
     expect(root.querySelector('.site-footer h2')!.textContent).toBe('Deep Learning');
     expect(root.querySelector('.site-footer p')!.textContent).toBe('Fall 2026');
     expect([...root.querySelectorAll('.topbar a')].some((a) => a.textContent === 'Guide')).toBe(false);

@@ -407,7 +407,7 @@ describe('All courses', () => {
     expect(names(section(h, 'h-live'))).toEqual(['Natural Language Processing, Winter 2026']);
     await act(async () => boxOf(h, 'h-live').click());
     expect(head(h, 'h-live')).toContain('This semester (+1 other)');
-    expect(section(h, 'h-semesters').querySelector(`a[href="?semester=${studied.org}#week"]`)).not.toBeNull();
+    expect(section(h, 'h-semesters').querySelector(`a[href="?semester=${studied.org}#home"]`)).not.toBeNull();
   });
 
   it('shows no My courses switch while every course is yours, and reads nothing for a person with no course', async () => {

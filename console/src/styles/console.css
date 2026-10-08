@@ -56,6 +56,8 @@ code, .mono { font-family: var(--font-code); font-size: 0.86em; }
 .sidenav .leaf { margin-left: 22px; }
 .sidenav .lvl2 { padding-left: 44px; }
 .sidenav .lvl2 a { font-size: 13.5px; min-height: 30px; padding: 4px 10px; overflow-wrap: anywhere; }
+.sidenav .with-icon { display: inline-flex; align-items: center; gap: 8px; }
+.sidenav .fa-icon { width: 14px; height: 14px; flex: none; opacity: 0.75; }
 .sidenav .node-name { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
 .sidenav .nav-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
 .sidenav .past { color: var(--muted); }

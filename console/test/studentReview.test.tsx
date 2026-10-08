@@ -73,7 +73,7 @@ describe('the renamed site', () => {
 });
 
 describe('Marks', () => {
-  const facts: SemesterFacts = { courseName: '', timezone: 'Europe/Berlin', rows: [], assignments: [], instructors: [], archive: null, latePolicy: [], materialsRepos: [], homeMarkdown: '', announcements: [], syllabus: null };
+  const facts: SemesterFacts = { courseName: '', timezone: 'Europe/Berlin', rows: [], assignments: [], instructors: [], archive: null, latePolicy: [], materialsRepos: [], homeMarkdown: '', announcements: [], syllabus: null, courseDescription: '', previousOfferings: [] };
 
   it('shows the semester total over an empty gradebook, and says no marks yet', () => {
     const t = text(<MarksView org={ORG} login="octo" facts={facts} gradebook={parseGradebook('total: 88\nassignments: {}\n')} studentView={false} />);
