@@ -10,7 +10,8 @@ import { fmtWhen } from '../model/format';
 import { gradebookUrl, isMarked, type Gradebook, type Mine, type Receipts } from '../model/mine';
 import { instant, myState, type SemesterFacts } from '../model/student';
 import { Ext } from '../ui/icons';
-import { AssignmentBody, MarkBody, StateChip, assignmentFiles, assignmentHref } from './StudentAssignment';
+import { assignmentHref } from '../router';
+import { AssignmentBody, MarkBody, StateChip, assignmentFiles } from './StudentAssignment';
 
 export function AssignmentsView({ org, facts, mine, now, studentView, receipts, login = '', unknownRole = false }: {
   org: string; facts: SemesterFacts; mine: Mine | null; now: number; studentView: boolean;

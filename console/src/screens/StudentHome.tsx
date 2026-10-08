@@ -5,7 +5,7 @@
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import { instant, startOfDay, type Announcement, type ScheduleRow, type SemesterAssignment, type SemesterFacts } from '../model/student';
-import { studentHref } from '../router';
+import { assignmentHref } from '../router';
 import { Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import { GhMd } from '../ui/rendered';
@@ -67,7 +67,7 @@ function Bullet({ u, facts, org }: { u: Update; facts: SemesterFacts; org: strin
       </li>
     );
   }
-  if ('assignment' in u) return <li>New Assignment released: [<a href={studentHref(org, `assignment-${u.assignment.slug}`)}>{u.assignment.title}</a>]</li>;
+  if ('assignment' in u) return <li>New Assignment released: [<a href={assignmentHref(org, u.assignment.slug)}>{u.assignment.title}</a>]</li>;
   if ('archive' in u) return <li><Md src={u.archive} /></li>;
   return <li>{u.news.title ? <b>{u.news.title}</b> : null}{u.news.details ? <Md src={u.news.details} /> : null}</li>;
 }

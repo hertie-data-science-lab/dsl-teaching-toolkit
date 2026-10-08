@@ -23,9 +23,6 @@ import { GhMd, LazyFold } from '../ui/rendered';
 import { FileList } from './StudentFiles';
 import { JoinRequests, TeamForm, TeamList } from './StudentJoin';
 
-/** The link to an assignment's own page. */
-export const assignmentHref = (org: string, slug: string) => studentHref(org, `assignment-${slug}`);
-
 /** Files the semester's rows for `slug` (its hand-out and due rows) carry, if any: listed with their button row (rule 10). */
 export const assignmentFiles = (facts: SemesterFacts, slug: string): FileLink[] => facts.rows.filter((r) => r.assignment === slug).flatMap((r) => r.links);
 

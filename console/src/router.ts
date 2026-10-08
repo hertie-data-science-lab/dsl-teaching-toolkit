@@ -220,6 +220,9 @@ export const studentNavKey = (screen: string) => (screen === 'assignment' ? 'ass
 /** The link to a semester's student screens: its Home unless a screen is named. */
 export const studentHref = (org: string, screen = 'home') => `?semester=${org}#${screen}`;
 
+/** The link to an assignment's own page in a semester's student screens (decision 0035 rule 6). */
+export const assignmentHref = (org: string, slug: string) => studentHref(org, `assignment-${slug}`);
+
 /**
  * The semester whose student screens the URL asks for, when the person holds a role there: a
  * student sees their own; an instructor gets the Student view, the same screens with no
