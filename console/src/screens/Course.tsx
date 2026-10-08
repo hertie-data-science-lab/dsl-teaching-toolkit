@@ -1,51 +1,59 @@
 // S2 Course overview (a status board, decision 0025) and S17 Template settings (read).
 
 import { Fragment, type ComponentChildren } from 'preact';
-import { useRef, useState } from 'preact/hooks';
+import { useState } from 'preact/hooks';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 import { useEnv } from '../env';
-import { invalidText, saveText, useSave } from '../edit/save';
+import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
-import { KIND_LABEL, STAGE_WORD, ago, opLabel, templateName } from '../model/format';
+import { KIND_LABEL, ago, dayKey, fmtDay, fmtShort, opLabel, templateName } from '../model/format';
+import {
+  SYLLABUS_HINT, SYLLABUS_LABEL, bitesOf, displayChecks, horizonDays, displayTodos, materialsReadiness, needOf, problemCount, stepAside, stepNeed, stepState, templateReadiness, todoAside, verdictOf,
+  type Verdict as VerdictT,
+} from '../model/readiness';
 import { checkNow, derive, publishWebsite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
 import { courseBlock, institutionLayer, lateWord, resolve, valueWord, type Layers } from '../model/cascade';
-import { DEFAULT_FORMATS, POLICY } from '../model/policy';
+import { DEFAULT_FORMATS, DEFAULT_TIMEZONE, POLICY } from '../model/policy';
 import { formatsList, fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import { pick, type Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
-import type { CourseStatus, MaterialsCheck, MaterialsState, Operation, Outcome, Problem, SemesterStatus, Status, Todo } from '../model/types';
-import { nextEvent, nextEventWords, recentActivity, rollUpProblems, whoWord, type Activity } from '../model/status';
+import type { Bites, CourseStatus, MaterialsCheck, Operation, Outcome, Problem, SemesterStatus, Status, Todo } from '../model/types';
+import { nextEvent, nextEventWords, recentActivity, whoWord, type Activity } from '../model/status';
 import type { CohortRef } from '../model/discovery';
 import { outcomePath } from '../ops/adapter';
 import { validator } from '../model/validate';
-import { CheckLine, Lives, Loading, OpMark, ProblemCards, Probs, Soon, ghUrl, runUrl } from '../ui/bits';
+import { CheckLine, Lives, Loading, OpMark, ProblemCards, Probs, Soon, fixHref, ghUrl, runUrl } from '../ui/bits';
+import { ItemRow, RepoChip, RepoWhy, Verdict, readinessTabs, type Link, type SetupItem } from '../ui/SetupPanel';
+import { DASH_PANEL, DashboardTabs, showTab, type DashTab } from '../ui/DashboardTabs';
 import { Hint } from '../ui/Hint';
-import { Check, Ext, Fail } from '../ui/icons';
+import { Check, Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { formatError } from '../wizards/model';
 import { detailsOf, newestScope, websiteUrl } from './CourseEdit';
 import type { CourseProps } from './types';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from '../model/names';
-import { AsideFold, COURSE_FILE, Circle, SetAsideDialog, asideList, missingClause, setAsideText, stepAside, todoAside, type Ask } from './SetAside';
-import { REFRESH_HINT, courseScope, tzOf, yearOf } from './common';
+import { COURSE_FILE, asideList, useSetAside } from './SetAside';
+import { REFRESH_HINT, courseScope, todayOf, tzOf, yearOf } from './common';
 import { weekWords } from '../model/week';
 
-/** The course block and course-scoped problems: from the course's own status, else a semester's. */
-export function courseView(p: Pick<CourseProps, 'loaded' | 'cohortStates'>): { course: CourseStatus | null; problems: Problem[]; computed: boolean } {
-  if (p.loaded.kind === 'ready' && p.loaded.status.course)
-    return { course: p.loaded.status.course, problems: (p.loaded.status.problems ?? []).filter((x) => x.scope === 'course'), computed: true };
-  for (const l of Object.values(p.cohortStates))
-    if (l.kind === 'ready' && l.status.course)
-      return { course: l.status.course, problems: (l.status.problems ?? []).filter((x) => x.scope === 'course'), computed: true };
-  return { course: null, problems: [], computed: false };
+/** The course block and course-scoped problems, each with when it bites: from the course's own status, else a semester's. */
+export function courseView(p: Pick<CourseProps, 'loaded' | 'cohortStates'> & { now?: number }): { course: CourseStatus | null; problems: Problem[]; tiered: Tiered[]; computed: boolean } {
+  const from = (st: Status) => {
+    const tiered = (st.problems ?? []).filter((x) => x.scope === 'course').map((x) => ({ p: x, b: bitesOf(x, st.horizon, p.now ?? Date.now()) }));
+    return { course: st.course!, problems: tiered.filter((x) => x.b !== 'later').map((x) => x.p), tiered, computed: true };
+  };
+  if (p.loaded.kind === 'ready' && p.loaded.status.course) return from(p.loaded.status);
+  for (const l of Object.values(p.cohortStates)) if (l.kind === 'ready' && l.status.course) return from(l.status);
+  return { course: null, problems: [], tiered: [], computed: false };
 }
 
+/** A semester's problem count for its row: those now or soon. */
 function problemsOf(p: CourseProps, cohortOrg: string): number | null {
   const l = p.cohortStates[cohortOrg];
-  return l && l.kind === 'ready' ? (l.status.problems ?? []).length : null;
+  return l && l.kind === 'ready' ? problemCount(l.status, p.now) : null;
 }
 
 /** The course's live semesters whose status is read, newest first: what the overview rolls up. */
@@ -56,38 +64,22 @@ export function liveSemesters(p: Pick<CourseProps, 'course' | 'cohortStates'>): 
   });
 }
 
-/** The course's setup steps (C1-C6). The first three are what a new semester needs (decision 0019). */
-export const SETUP_STEPS: { id: string; name: string; need?: 'required' }[] = [
-  { id: 'C1', name: 'Course org read', need: 'required' },
-  { id: 'C2', name: 'Course set up on GitHub', need: 'required' },
-  { id: 'C3', name: 'Course details filled in', need: 'required' },
-  { id: 'C4', name: 'First handout materials repo' },
-  { id: 'C5', name: 'First assignment template' },
+/** The course's setup steps (C1-C6). C1-C3 are needed; C4-C6 suggested (decision 0034). */
+export const SETUP_STEPS: { id: string; name: string }[] = [
+  { id: 'C1', name: 'Course org read' },
+  { id: 'C2', name: 'Course set up on GitHub' },
+  { id: 'C3', name: 'Course details filled in' },
+  { id: 'C4', name: 'Handout materials repo' },
+  { id: 'C5', name: 'Assignment template' },
   { id: 'C6', name: 'Public website' },
 ];
-
-/** How many required setup steps are not done. */
-export function stepsLeft(c: CourseStatus): number {
-  return SETUP_STEPS.filter((s) => s.need === 'required' && c.stages[s.id] !== 'done').length;
-}
-
-/** The one-line readiness verdict: never a problem count. */
-export function readyWords(c: CourseStatus): string {
-  if (c.ready) return 'Ready for a new semester.';
-  const n = stepsLeft(c);
-  return n ? `Not ready: ${n === 1 ? '1 setup step' : `${n} setup steps`} left.` : 'Not ready: a problem below needs fixing.';
-}
 
 /** The step each one waits for (the engine's `PREREQUISITES`). */
 const WAITS_FOR: Record<string, string> = { C2: 'C1', C3: 'C2', C4: 'C2', C5: 'C2', C6: 'C4' };
 
-/** Where an open setup step is done: one link. A problem links to its card, so a fault is listed once;
- * a blocked step links to where the step it waits for is done. */
-export function stepLink(id: string, c: CourseStatus): { href: string; label: string; ext?: boolean } {
+/** Where an open setup step is done: one link. */
+export function stepLink(id: string, c: CourseStatus): Link {
   const org = c.org;
-  const state = c.stages[id];
-  if (state === 'problem') return { href: '#course-problems', label: 'See the problem' };
-  if (state === 'blocked' && WAITS_FOR[id]) return stepLink(WAITS_FOR[id], c);
   switch (id) {
     case 'C1': return { href: ghUrl(org), label: 'Open on GitHub', ext: true };
     case 'C2': return { href: ghUrl(org, COURSE_REPO), label: 'Open .github', ext: true };
@@ -108,76 +100,40 @@ const STEP_HINT: Record<string, string> = {
   C6: 'Optional: an open version of your materials for anyone on the internet.',
 };
 
-/** Initial setup is complete once every step not set aside is done (decision 0032 rule 5). */
-export function setupComplete(c: CourseStatus, list: string[] | null = null): boolean {
-  return SETUP_STEPS.every((s) => c.stages[s.id] === 'done' || stepAside(c, s.id, list));
-}
-
-/** Where a required step is done, for its can't-be-set-aside dialog: the step's own page, whatever its state. */
-const STEP_PAGE: Record<string, string> = { C1: 'Open on GitHub', C2: 'Open .github', C3: 'Open course details' };
-function stepPage(id: string, c: CourseStatus): { href: string; label: string; ext?: boolean } {
-  const own = stepLink(id, { ...c, stages: { ...c.stages, [id]: 'todo' } });
-  return { ...own, label: STEP_PAGE[id] ?? own.label };
-}
-
 const stepName = (id: string) => SETUP_STEPS.find((s) => s.id === id)?.name ?? id;
 
-/** What the circle before a setup step asks: may it be set aside, or why not. A required step that waits for
- * another names that one and opens its page; one with a problem sends to the problem (decision 0032 rule 4). */
-export function stepAsk(id: string, c: CourseStatus): Ask {
-  const label = stepName(id);
-  if (c.stage_optional?.[id]) return { kind: 'optional', id, label };
-  const first = 'A new semester needs this step first.';
-  const state = c.stages[id];
-  const pre = WAITS_FOR[id];
-  if (state === 'problem') return { kind: 'step', id, label, text: `${first} A problem stops it: fix that first.`, page: { href: '#course-problems', label: 'See the problem' } };
-  if (state === 'blocked' && pre) return { kind: 'step', id, label, text: `${first} It waits for ${stepName(pre)}.`, page: stepPage(pre, c) };
-  return { kind: 'step', id, label, text: `${first} Still missing: ${missingClause(c.stage_why?.[id] ?? 'Not done yet.')}.`, page: stepPage(id, c) };
+/** A course-scope problem with when it bites. */
+export type Tiered = { p: Problem; b: Bites };
+
+/** The next hand-out of a template in a live semester: when, the semester, and when it becomes a problem there. */
+export interface Handout {
+  when: string;
+  tz: string;
+  term: string;
+  /** The day it becomes a problem (yyyy-mm-dd): the horizon's days before the hand-out. */
+  from: string;
 }
 
-/** What the circle before a to-do asks. */
-export function todoAsk(t: Todo, c: CourseStatus): Ask {
-  const label = todoLine(t, c).label;
-  return t.optional ? { kind: 'optional', id: t.id, label } : { kind: 'todo', id: t.id, label, todo: t, href: todoHref(t) };
-}
-
-/** Setup: a calm checklist. A tick when done; else a grey line, why, and where to do it. Steps set aside are left out
- * (the panel lists them in its fold); `onCircle`, for a viewer with write access, makes an open line's circle a button. */
-export function SetupList({ course, list = null, onCircle }: { course: CourseStatus; list?: string[] | null; onCircle?: (id: string) => void }) {
-  return (
-    <ul class="setup">
-      {SETUP_STEPS.filter((s) => !stepAside(course, s.id, list)).map((s) => {
-        const state = course.stages[s.id] ?? 'todo';
-        const done = state === 'done';
-        const link = done ? null : stepLink(s.id, course);
-        // Only a status that says which steps are optional offers the circle.
-        const circle = !done && onCircle && course.stage_optional && s.id in course.stage_optional;
-        return (
-          <li class={done ? 'done' : 'open'}>
-            {circle ? <Circle label={s.name} onClick={() => onCircle(s.id)} /> : <span class="s-mark" aria-hidden="true">{done ? <Check /> : null}</span>}
-            <span class="s-name">{s.name}{s.need ? <span class="s-need">{s.need}</span> : null}<span class="sr">: {STAGE_WORD[state]}</span> <Hint label="About this step">{STEP_HINT[s.id]}</Hint></span>
-            {link ? (
-              <span class="s-why">
-                {course.stage_why?.[s.id] ?? 'Not done yet.'}{' '}
-                <a class="textlink" href={link.href} {...(link.ext ? { target: '_blank', rel: 'noopener' } : {})}>{link.label}{link.ext ? <Ext /> : null}</a>
-              </span>
-            ) : null}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-/** The readiness verdict under the page note: a tick when ready, a red cross when not. */
-export function Verdict({ course }: { course: CourseStatus | null }) {
-  if (!course) return <p class="verdict">Status not computed yet.</p>;
-  return <p class={`verdict ${course.ready ? 'ok' : 'bad'}`}>{course.ready ? <Check /> : <Fail />}<span>{readyWords(course)}</span></p>;
+/** Each template's earliest hand-out still to come, across the live semesters, as their statuses carry it. */
+export function nextHandouts(live: { ref: CohortRef; status: Status }[], now: number): Map<string, Handout> {
+  const out = new Map<string, Handout>();
+  for (const { ref, status } of live) {
+    const tz = tzOf(status);
+    for (const a of status.assignments ?? []) {
+      if (!a.handout || Date.parse(a.handout) <= now) continue;
+      const had = out.get(a.template);
+      if (had && Date.parse(had.when) <= Date.parse(a.handout)) continue;
+      const from = dayKey(new Date(Date.parse(a.handout) - horizonDays(status.horizon) * 864e5).toISOString(), tz);
+      out.set(a.template, { when: a.handout, tz, term: ref.termLabel, from });
+    }
+  }
+  return out;
 }
 
 /** Where a to-do is done: the repo's settings page. */
 export function todoHref(t: Todo): string {
-  return `#${t.kind === 'materials' ? 'materials' : 'template'}-${t.repo}`;
+  if (t.kind === 'materials' || t.kind === 'template') return `#${t.kind}-${t.repo}`;
+  return `#${t.screen ?? 'details'}${t.entry ? `-${t.entry}` : ''}`;
 }
 
 /** A template to-do's line and `?`, by the last part of its id (`template:<repo>:brief`). */
@@ -190,49 +146,51 @@ const TEMPLATE_TODO: Record<string, { label: string; hint: string }> = {
 export function todoLine(t: Todo, c: CourseStatus): { label: string; hint?: string } {
   const id = t.id.split(':').pop() ?? '';
   if (t.kind === 'template') return TEMPLATE_TODO[id] ?? { label: t.text };
+  if (id === 'syllabus' || id === 'sessions') return { label: SYLLABUS_LABEL, hint: SYLLABUS_HINT };
   const check = c.materials?.find((m) => m.repo === t.repo)?.checks?.find((k) => k.id === id);
   return { label: check?.label ?? t.text, hint: CHECK_HINT[id] };
 }
 
-/** The to-dos not set aside. */
-export function openTodos(c: CourseStatus, list: string[] | null = null): Todo[] {
-  return (c.todo ?? []).filter((t) => !todoAside(t, list));
+/** "Hands out Wed 4 Nov; a problem from 27 Oct.": a template to-do's hand-out, when a live semester cites the template. */
+function handoutWords(h: Handout | undefined, now: number): string | undefined {
+  if (!h) return undefined;
+  return `Hands out ${fmtDay(h.when, h.tz, yearOf(now, h.tz))}${h.from > todayOf(now, h.tz) ? `; a problem from ${fmtShort(h.from)}` : ''}.`;
 }
 
-/** The open to-dos as a checklist styled like Initial setup: a grey line, why, and where to do it. */
-export function TodoList({ course, list = null, onCircle }: { course: CourseStatus; list?: string[] | null; onCircle?: (t: Todo) => void }) {
-  const todo = openTodos(course, list);
-  if (!todo.length) return <p class="footnote">Nothing to do.</p>;
-  return (
-    <ul class="setup">
-      {todo.map((t) => {
-        const line = todoLine(t, course);
-        return (
-          <li class="open" key={t.id}>
-            {onCircle && typeof t.optional === 'boolean' ? <Circle label={line.label} onClick={() => onCircle(t)} /> : <span class="s-mark" aria-hidden="true" />}
-            <span class="s-name">{line.label}<span class="s-need slug">{t.repo}</span><span class="sr">: To do</span>{line.hint ? <> <Hint label="About this to-do">{line.hint}</Hint></> : null}</span>
-            <span class="s-why">
-              {line.label === t.text ? null : <>{t.text}{' '}</>}
-              <a class="textlink" href={todoHref(t)} aria-label={`Open ${t.repo} settings`}>Open settings</a>
-            </span>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-/** What stops a materials repo being ready: its unmet blocking checks. A ready repo has none. */
-export function materialsWhys(m: MaterialsState): string[] {
-  if (m.state === 'ready' || m.state === 'problem') return [];
-  const unmet = (m.checks ?? []).filter((c) => c.blocks && !c.done).map((c) => c.why ?? c.label);
-  return unmet.length ? unmet : ['Not ready yet.'];
-}
-
-/** The unmet checks under a materials row, one per line. */
-export function Whys({ m }: { m: MaterialsState }) {
-  const whys = materialsWhys(m);
-  return whys.length ? <ul class="r-sub unmet">{whys.map((w) => <li>{w}</li>)}</ul> : null;
+/**
+ * The course's Setup & To do items: each step, then each to-do. A step with a problem now or
+ * soon is a red row whose Fix opens the problem's screen; `list` is the set-aside ids as read.
+ */
+export function courseItems(c: CourseStatus, problems: Tiered[], list: string[] | null, next = new Map<string, Handout>(), now = 0): SetupItem[] {
+  const steps: SetupItem[] = SETUP_STEPS.map(({ id, name }) => {
+    const own = problems.filter((x) => x.p.stage === id);
+    const state = stepState(c.stages[id], own.map((x) => x.b));
+    const first = own.find((x) => x.b !== 'later')?.p;
+    const why = c.stage_why?.[id];
+    return {
+      id, label: name, kind: 'step', need: stepNeed(c, id), state, hint: STEP_HINT[id], hintLabel: 'About this step',
+      why: state === 'done' ? undefined : state === 'problem' ? first?.text ?? why : why ?? (state === 'open' ? 'Not done yet.' : undefined),
+      link: state === 'open' ? stepLink(id, c) : undefined,
+      fix: state === 'problem' && first ? fixHref(first) ?? undefined : undefined,
+      waitsFor: WAITS_FOR[id] ? stepName(WAITS_FOR[id]) : undefined,
+      aside: stepAside(c, id, list),
+    };
+  });
+  const todos: SetupItem[] = displayTodos(c.todo ?? []).map((t) => {
+    const line = t.ids.length > 1 ? { label: SYLLABUS_LABEL, hint: SYLLABUS_HINT } : todoLine(t, c);
+    // The engine's dates when it gives them (`needed_by`, `problem_from`), else the live semesters'.
+    const h = next.get(t.repo);
+    const when = t.kind !== 'template' ? undefined : t.needed_by ? handoutWords({ when: t.needed_by, tz: h?.tz ?? DEFAULT_TIMEZONE, term: h?.term ?? '', from: t.problem_from ? dayKey(t.problem_from, h?.tz ?? DEFAULT_TIMEZONE) : '' }, now) : handoutWords(h, now);
+    return {
+      id: t.id, ids: t.ids, label: line.label, kind: 'todo', need: needOf(t), state: 'open', repo: t.repo, hint: line.hint,
+      hintLabel: line.label === SYLLABUS_LABEL ? 'About the syllabus' : 'About this to-do',
+      why: line.label === t.text ? undefined : t.text,
+      when,
+      link: { href: todoHref(t), label: 'Open settings', aria: `Open ${t.repo} settings` },
+      aside: todoAside(t, list),
+    };
+  });
+  return [...steps, ...todos];
 }
 
 /** What each materials check is, for its `?`, in the checklist's order. */
@@ -243,33 +201,54 @@ const CHECK_HINT: Record<string, string> = {
   withheld: 'The whole repo is released as it stands unless a line here withholds it. Saving the list once, even empty, marks it reviewed.',
 };
 
+/** A repo's checklist split by need (decision 0034): "Needed", then "Suggested". */
+export function RepoChecklist({ items }: { items: SetupItem[] }) {
+  const needed = items.filter((i) => i.need === 'needed'), suggested = items.filter((i) => i.need === 'suggested');
+  return (
+    <>
+      {needed.length ? <><p class="sub-h">Needed</p><ul class="setup">{needed.map((it) => <ItemRow it={it} />)}</ul></> : null}
+      {suggested.length ? <><p class="sub-h">Suggested</p><ul class="setup">{suggested.map((it) => <ItemRow it={it} />)}</ul></> : null}
+    </>
+  );
+}
+
 /** A materials repo's whole checklist, ticks included: the settings screen's head. */
 export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
+  const items: SetupItem[] = displayChecks(checks).map((c) => ({
+    id: c.id, label: c.label, kind: 'step', need: needOf(c), state: c.done ? 'done' : 'open', why: c.done ? undefined : c.why ?? undefined, hint: c.id === 'syllabus' ? SYLLABUS_HINT : CHECK_HINT[c.id],
+    hintLabel: c.id === 'syllabus' ? 'About the syllabus' : 'About this check',
+  }));
+  const kinds = checks.find((c) => c.detail)?.detail;
   return (
-    <ul class="setup">
-      {checks.map((c) => (
-        <li class={c.done ? 'done' : 'open'}>
-          <span class="s-mark" aria-hidden="true">{c.done ? <Check /> : null}</span>
-          <span class="s-name">{c.label}{c.blocks ? <span class="s-need">required</span> : null}<span class="sr">: {c.done ? 'Done' : 'To do'}</span>{CHECK_HINT[c.id] ? <> <Hint label="About this check">{CHECK_HINT[c.id]}</Hint></> : null}</span>
-          {!c.done && c.why ? <span class="s-why">{c.why}</span> : null}
-          {c.detail ? (
-            <details class="fold s-kinds">
-              <summary>Kinds found</summary>
-              <ul class="fold-body">
-                {/* Every content kind: a tick and its folders when present, nothing when not. */}
-                {c.detail.map((d) => (
-                  <li class={d.folders.length ? 'found' : undefined}>
-                    <span class="k-mark" aria-hidden="true">{d.folders.length ? <Check /> : null}</span>
-                    <b>{KIND_LABEL[d.kind] ?? d.kind}</b>{d.folders.length ? `: ${d.folders.map((f) => `${f}/`).join(', ')}` : <span class="sr">: none</span>}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
-        </li>
-      ))}
-    </ul>
+    <>
+      <RepoChecklist items={items} />
+      {kinds ? (
+        <details class="fold s-kinds">
+          <summary>Kinds found</summary>
+          <ul class="fold-body">
+            {/* Every content kind: a tick and its folders when present, nothing when not. */}
+            {kinds.map((d) => (
+              <li class={d.folders.length ? 'found' : undefined}>
+                <span class="k-mark" aria-hidden="true">{d.folders.length ? <Check /> : null}</span>
+                <b>{KIND_LABEL[d.kind] ?? d.kind}</b>{d.folders.length ? `: ${d.folders.map((f) => `${f}/`).join(', ')}` : <span class="sr">: none</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </>
   );
+}
+
+/** A template's needed checklist (the brief, the student version), from the course's open to-dos. */
+export function templateItems(repo: string, todo: Todo[], starter: 'derived' | 'handwritten' | undefined, next: Handout | undefined, now: number): SetupItem[] {
+  const open = (k: string) => todo.find((t) => t.kind === 'template' && t.repo === repo && t.id.endsWith(`:${k}`));
+  const row = (k: 'brief' | 'starter', label: string): SetupItem => {
+    const t = open(k);
+    const when = k === 'brief' && t && next ? `${next.term} hands this out on ${fmtDay(next.when, next.tz, yearOf(now, next.tz))}${next.from > todayOf(now, next.tz) ? `; it becomes a problem there on ${fmtShort(next.from)}` : ''}.` : undefined;
+    return { id: k, label, kind: 'step', need: 'needed', state: t ? 'open' : 'done', why: t?.text, when, hint: TEMPLATE_TODO[k].hint, hintLabel: 'About this check' };
+  };
+  return [row('brief', TEMPLATE_TODO.brief.label), row('starter', starter === 'handwritten' ? 'Starter files on main' : TEMPLATE_TODO.starter.label)];
 }
 
 /** Each grading_config.yml text read so far -> its title, so a re-render parses no YAML. */
@@ -295,12 +274,7 @@ export function semesterChip(s: Pick<SemesterStatus, 'live' | 'ended'> | undefin
   return <span class="chip ok">Live</span>;
 }
 
-/** A template's or materials repo's state as a chip: only `problem` is bad; `todo` is neutral. */
-export function StateChip({ state, todo }: { state: string; todo: string }) {
-  return state === 'problem' ? <span class="chip bad">Has a problem</span> : state === 'ready' ? <span class="chip ok">Ready</span> : <span class="chip">{todo}</span>;
-}
-
-/** The `?` on the course overview's h1, in the course banner. */
+/** The `?` on the course dashboard's title (decision 0034: both pages are called Dashboard). */
 export function CourseHint() {
   return <Hint doc="02-add-materials-to-course.md">Materials are staged here privately until a release copies them in whole or in part to a semester. Selected materials can also be published on the course’s optional public website.</Hint>;
 }
@@ -436,16 +410,16 @@ export interface Block {
 }
 
 /**
- * The overview's two columns (decision 0031 rule 4): Setup & To do heads the left, Problems the
- * right, and every other block goes where the two columns come out closest in height, keeping
- * the given order within each. Deterministic, so the page does not reflow between renders; on
- * a tie the earlier block stays left.
+ * The dashboard's two columns under its tabbed panel (decision 0031 rule 4): the first block
+ * heads the left, the second the right, and every other block goes where the two columns come
+ * out closest in height, keeping the given order within each. Deterministic, so the page does
+ * not reflow between renders; on a tie the earlier block stays left.
  */
-export function splitColumns([setup, problems, ...rest]: Block[]): [string[], string[]] {
-  let best: [string[], string[]] = [[setup.key], [problems.key]];
+export function splitColumns([first, second, ...rest]: Block[]): [string[], string[]] {
+  let best: [string[], string[]] = [[first.key], [second.key]];
   let gap = Infinity;
   for (let mask = 0; mask < 1 << rest.length; mask++) {
-    const cols: [Block[], Block[]] = [[setup], [problems]];
+    const cols: [Block[], Block[]] = [[first], [second]];
     rest.forEach((b, i) => cols[(mask >> i) & 1].push(b));
     const [l, r] = cols.map((c) => c.reduce((n, b) => n + b.h, 0));
     if (Math.abs(l - r) < gap) [gap, best] = [Math.abs(l - r), [cols[0].map((b) => b.key), cols[1].map((b) => b.key)]];
@@ -453,112 +427,73 @@ export function splitColumns([setup, problems, ...rest]: Block[]): [string[], st
   return best;
 }
 
-/** How many problems count towards the Problems panel's estimated height. */
-const PROBLEMS_WEIGHED = 4;
-
-/** Until every status has loaded, the overview keeps this layout, so panels do not move as each arrives. */
-export const SETTLING_COLUMNS: [string[], string[]] = [['setup', 'semesters', 'handouts'], ['problems', 'details', 'activity']];
+/** Until every status has loaded, the dashboard keeps this layout, so panels do not move as each arrives. */
+export const SETTLING_COLUMNS: [string[], string[]] = [['handouts', 'details'], ['semesters', 'activity']];
 
 /** Whether the course's and every semester's status has finished loading (present, absent or failed). */
 export function statusesSettled(p: Pick<CourseProps, 'course' | 'loaded' | 'cohortStates'>): boolean {
   return p.loaded.kind !== 'loading' && p.course.cohorts.every((c) => p.cohortStates[c.org] && p.cohortStates[c.org].kind !== 'loading');
 }
 
-/** Each overview panel's height, estimated from what it lists: a heading and one or two lines a row. */
-export function overviewHeights(o: { course: CourseStatus | null; problems: number; semesters: number; description: string; activity: number; list?: string[] | null }): Block[] {
+/** Each panel's height, estimated from what it lists: a heading and one or two lines a row. */
+export function overviewHeights(o: { course: CourseStatus | null; semesters: number; description: string; activity: number }): Block[] {
   const HEAD = 3; // the heading and the panel's padding
   const c = o.course;
-  // The set-aside list the panel renders from (`asideList`), so the columns match what it shows.
-  const list = o.list ?? null;
-  const steps = c && !setupComplete(c, list) ? SETUP_STEPS.reduce((n, s) => n + (stepAside(c, s.id, list) ? 0 : c.stages[s.id] === 'done' ? 1 : 2), 0) : 0;
-  const todo = c ? openTodos(c, list).length : 0;
-  const materials = (c?.materials ?? []).reduce((n, m) => n + 1 + materialsWhys(m).length, 0);
+  const materials = (c?.materials ?? []).reduce((n, m) => n + 1 + (materialsReadiness(m).state === 'not_ready' ? 1 : 0), 0);
   return [
-    { key: 'setup', h: HEAD + (c ? 2 + steps + 2 * todo : 1) },
-    // Capped: a day's new problem must not reshuffle the page.
-    { key: 'problems', h: HEAD + 5 * Math.min(Math.max(1, o.problems), PROBLEMS_WEIGHED) },
+    { key: 'handouts', h: 2 * HEAD + Math.max(1, materials) + Math.max(1, 2 * (c?.templates?.length ?? 0)) },
     { key: 'semesters', h: HEAD + Math.max(1, 3 * o.semesters) },
     { key: 'details', h: HEAD + 9 + Math.ceil(o.description.length / 50) + 5 },
     { key: 'activity', h: HEAD + Math.max(1, 2 * o.activity) },
-    { key: 'handouts', h: 2 * HEAD + Math.max(1, materials) + Math.max(1, 2 * (c?.templates?.length ?? 0)) },
   ];
 }
 
-/** The Setup & To do panel: Initial setup and To do, each with its Set aside fold (decision 0032). The circle before an
- * open line asks whether it can be set aside; the answer is saved into dsl-course.yml through the same save path as
- * Course details, and Bring back removes the id at once. A read-only viewer gets neither. */
-export function SetupPanel({ p, c }: { p: CourseProps; c: CourseStatus | null }) {
-  const env = useEnv();
-  const { course } = p;
-  const [ask, setAsk] = useState<Ask | null>(null);
-  // Which fold the open dialog's line is in (0 Initial setup, 1 To do): where focus goes if that line moved.
-  const [from, setFrom] = useState(0);
-  const panel = useRef<HTMLElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const file = p.files.file(course.org, COURSE_REPO, COURSE_FILE);
-  const list = asideList(file);
-  const change = async (id: string, on: boolean) => {
-    setError('');
-    const refuse = (text: string) => setError(text);
-    if (!env) return refuse('Sign in to save.');
-    if (p.migrated === false) return refuse('Not saved: the console has not yet confirmed this course uses the current names.');
-    if (file.kind !== 'ready') return refuse(`Not saved: ${COURSE_FILE} is not read yet.`);
-    const out = setAsideText(file.text, id, on);
-    if ('error' in out) return refuse(out.error);
-    setBusy(true);
-    const ok = await saveText(env, { owner: course.org, repo: COURSE_REPO, path: COURSE_FILE }, out.text, file.sha, {
-      message: `course: ${on ? 'set aside' : 'bring back'} ${id}, from the DSL Teaching Console`,
-      statusRepo: [course.org, COURSE_REPO],
-      onCommit: () => {
-        setBusy(false);
-        setAsk(null);
-      },
-    }, (st) => setError(st.kind === 'bad' ? st.text : ''));
-    if (!ok) setBusy(false);
+/** The course's Setup & To do rows and its verdict, from the set-aside list as the console last read it. */
+export function courseReadiness(p: CourseProps, c: CourseStatus, tiered: Tiered[]): { list: string[] | null; items: SetupItem[]; verdict: VerdictT } {
+  const list = asideList(p.files.file(p.course.org, COURSE_REPO, COURSE_FILE));
+  const items = courseItems(c, tiered, list, nextHandouts(liveSemesters(p), p.now), p.now);
+  return { list, items, verdict: verdictOf(items, tiered.map((x) => x.b), 'course') };
+}
+
+/**
+ * The course Dashboard's tabbed panel (decisions 0032 and 0034): Problems (course-scope only),
+ * Suggestions, Set aside and Setup. The circle before a suggestion asks whether to set it aside;
+ * the answer is saved into dsl-course.yml through the same save path as Course details, and
+ * Bring back removes the id at once. A read-only viewer gets neither.
+ */
+export function CourseTabs({ p, c, tab, onTab }: { p: CourseProps; c: CourseStatus | null; tab?: string; onTab?: (key: string) => void }) {
+  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.migrated, write: p.course.write });
+  if (!c) return <section class="panel section dash-tabs" id={DASH_PANEL}><p class="footnote">Status not computed yet.</p></section>;
+  const v = courseView(p);
+  const { items } = courseReadiness(p, c, v.tiered);
+  const n = v.problems.length;
+  const problems: DashTab = {
+    key: 'problems', label: 'Problems', count: n || 'done', bad: true,
+    body: n ? <ProblemCards list={v.problems} /> : (
+      <>
+        <div class="no-problems"><Check /><span>No problems on the course.</span></div>
+        <p class="footnote">{COURSE_PROBLEMS_NOTE}</p>
+      </>
+    ),
   };
-  const write = course.write;
-  const close = () => {
-    setAsk(null);
-    setError('');
-  };
-  const steps = c ? SETUP_STEPS.filter((x) => !stepAside(c, x.id, list)) : [];
-  const stepRows = c ? SETUP_STEPS.filter((x) => stepAside(c, x.id, list)).map((x) => ({ id: x.id, label: x.name })) : [];
-  const open = c ? openTodos(c, list) : [];
-  const todoRows = c ? (c.todo ?? []).filter((t) => todoAside(t, list)).map((t) => ({ id: t.id, label: todoLine(t, c).label, repo: t.repo })) : [];
-  const back = write ? (id: string) => void change(id, false) : undefined;
   return (
-    <section class="panel section" ref={panel}>
-      <h2>Setup &amp; To do <Hint label="Setup, to-dos and problems">Setup steps are the one-time things a course needs; to-dos are work started but not finished. Problems, on the right, are things that broke.{write ? ' Optional items can be set aside: click the circle before them.' : ''}</Hint></h2>
-      {c ? (
-        <>
-          <details class="fold setup-fold" open={!setupComplete(c, list)}>
-            <summary><span class="fold-title">Initial setup</span><span class="cnt">{setupComplete(c, list) ? 'Complete' : `${steps.filter((x) => c.stages[x.id] === 'done').length} of ${steps.length} done`}</span></summary>
-            <SetupList course={c} list={list} onCircle={write ? (id) => (setFrom(0), setAsk(stepAsk(id, c))) : undefined} />
-            <AsideFold rows={stepRows} busy={busy} onBack={back} />
-          </details>
-          <details class="fold setup-fold" open={!!open.length}>
-            <summary><span class="fold-title">To do</span><span class="cnt">{open.length ? `${open.length} open` : 'Nothing to do'}</span></summary>
-            <TodoList course={c} list={list} onCircle={write ? (t) => (setFrom(1), setAsk(todoAsk(t, c))) : undefined} />
-            <AsideFold rows={todoRows} busy={busy} onBack={back} />
-          </details>
-          {error && !ask ? <CheckLine cls="bad">{error}</CheckLine> : null}
-          {ask ? <SetAsideDialog ask={ask} busy={busy} error={error} onSetAside={() => void change(ask.id, true)} onClose={close} fallback={() => {
-            const fold = panel.current?.querySelectorAll<HTMLElement>('.setup-fold')[from];
-            return fold?.querySelector<HTMLElement>('.aside-fold > summary') ?? fold?.querySelector<HTMLElement>(':scope > summary');
-          }} /> : null}
-        </>
-      ) : <p class="footnote">Status not computed yet.</p>}
-    </section>
+    <div ref={aside.ref}>
+      <DashboardTabs selected={tab} onSelect={onTab} tabs={[problems, ...readinessTabs({ items, scope: 'course', busy: aside.busy, onCircle: aside.onCircle, onBack: aside.onBack(items) })]} />
+      {aside.after}
+    </div>
   );
 }
+
+/** What the course's Problems tab holds, said once under its empty state. */
+export const COURSE_PROBLEMS_NOTE = 'A problem here is something on the course itself that automation cannot act on: a settings file that does not parse, an org setting. What each semester needs by when is on that semester’s dashboard.';
 
 export function CourseScreen(p: CourseProps) {
   const { course } = p;
   const env = useEnv();
   const v = courseView(p);
   const live = liveSemesters(p);
-  const problems = rollUpProblems(v.problems, live.map(({ ref, status }) => ({ org: ref.org, label: ref.termLabel, problems: status.problems ?? [] })));
+  const [tab, setTab] = useState('problems');
+  const verdict = v.course ? courseReadiness(p, v.course, v.tiered).verdict : null;
   const ops = courseOperations(p, live, env?.ops.runs.value ?? [], env?.user.login ?? '');
   // A previewed run published nothing: the age is the last real publish's.
   const lastPublish = recentActivity(ops.map((l) => l.filter((o) => o.op === 'course.publish_website' && o.conclusion !== 'previewed')), 1)[0];
@@ -571,16 +506,10 @@ export function CourseScreen(p: CourseProps) {
   const about = detailsOf(course.meta ?? {}).about;
   const description = typeof about.course_description === 'string' ? about.course_description.trim() : '';
   const fallback = (value: unknown, institution: string) => (value ? String(value) : <span class="footnote">{institution}, from the institution</span>);
-  // Every panel but the two anchors goes in whichever column keeps the two about even; the
-  // materials and templates panels travel as one block, so they stay together (0031 rule 4).
+  // Under the tabbed panel, two columns (0031 rule 4): Handout materials and Assignment templates
+  // (one block) head the left, Semesters the right, and the rest go where the columns come out
+  // closest in height. A semester's problems are on its own Dashboard (decision 0034).
   const panels: Record<string, ComponentChildren> = {
-    setup: <SetupPanel p={p} c={v.course} />,
-    problems: (
-      <section class="panel section" id="course-problems">
-        <div class="problems-head"><h2>Problems <Hint label="About course problems">Things that broke and need fixing: the course’s first, then each live semester’s, tagged with the semester. Unfinished work is a to-do on the left, not a problem.</Hint></h2>{problems.length ? <span class="count-badge" aria-label={`${problems.length} problems`}>{problems.length}</span> : null}</div>
-        {!v.computed && !live.length ? <p class="footnote">Status not computed yet.</p> : problems.length ? <ProblemCards list={problems} /> : <div class="no-problems"><Check /><span>No problems.</span></div>}
-      </section>
-    ),
     semesters: (
       <section class="panel section">
         <h2>Semesters</h2>
@@ -637,8 +566,8 @@ export function CourseScreen(p: CourseProps) {
             <ul class="rows">
               {v.course.materials.map((m) => (
                 <li>
-                  <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" /></span>
-                  <Whys m={m} />
+                  <span class="r-title">{m.repo} <RepoChip r={materialsReadiness(m)} row /></span>
+                  <RepoWhy r={materialsReadiness(m)} />
                   <span class="r-side"><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
                 </li>
               ))}
@@ -650,11 +579,12 @@ export function CourseScreen(p: CourseProps) {
           {v.course?.templates?.length ? (
             <ul class="rows">
               {v.course.templates.map((t) => {
-                const bad = t.state === 'problem';
+                const r = templateReadiness(t, v.course?.todo ?? [], v.tiered.filter((x) => x.p.fix?.entry === t.repo).map((x) => ({ text: x.p.text, b: x.b })));
+                const bad = r.state === 'problem';
                 return (
                   <li>
-                    <span class="r-title">{templateName(templateTitle(p.files, course.org, t.repo))} <StateChip state={t.state} todo="Not written yet" /></span>
-                    <span class={`r-sub${bad ? ' flag' : ''}`}>{bad ? v.problems.find((x) => x.fix?.entry === t.repo)?.stops ?? 'Has a problem.' : t.state === 'ready' ? 'Brief written. Settings check out.' : 'The brief (README.md) is not written yet.'} <span class="slug">{t.repo}</span></span>
+                    <span class="r-title">{templateName(templateTitle(p.files, course.org, t.repo))} <RepoChip r={r} row /></span>
+                    <span class={`r-sub${bad ? ' flag' : ''}`}>{bad ? v.problems.find((x) => x.fix?.entry === t.repo)?.stops ?? 'Has a problem.' : r.state === 'ready' ? 'Brief written. Settings check out.' : r.missing} <span class="slug">{t.repo}</span></span>
                     <span class="r-side"><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.repo}`}>{bad ? 'Fix' : 'Settings'}</a></span>
                   </li>
                 );
@@ -665,13 +595,15 @@ export function CourseScreen(p: CourseProps) {
       </>
     ),
   };
-  const [left, right] = statusesSettled(p) ? splitColumns(overviewHeights({ course: v.course, problems: problems.length, semesters: course.cohorts.length, description, activity: recentActivity(ops).length, list: asideList(p.files.file(course.org, COURSE_REPO, COURSE_FILE)) })) : SETTLING_COLUMNS;
+  const [left, right] = statusesSettled(p) ? splitColumns(overviewHeights({ course: v.course, semesters: course.cohorts.length, description, activity: recentActivity(ops).length })) : SETTLING_COLUMNS;
   return (
     <>
+      <div class="page-head"><div><h2 class="h1">Dashboard <CourseHint /></h2></div></div>
       <CourseSubActions course={course} loaded={p.loaded} files={p.files} now={p.now} computed={v.computed} />
       <p class="page-note">Materials and assignment templates are prepared here, for every semester. Students get only what a semester releases or hands out, from that semester’s page.</p>
-      <Verdict course={v.course} />
+      <Verdict v={verdict} onOpen={() => showTab(setTab, 'problems')} />
       {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
+      <CourseTabs p={p} c={v.course} tab={tab} onTab={setTab} />
       <div class="grid-2 cols">
         <div class="stack">{left.map((k) => <Fragment key={k}>{panels[k]}</Fragment>)}</div>
         <div class="stack">{right.map((k) => <Fragment key={k}>{panels[k]}</Fragment>)}</div>
@@ -731,6 +663,7 @@ export function TemplateScreen(p: CourseProps) {
   const gradingExists = file.kind !== 'absent';
   const tree = p.files.tree(course.org, repo);
   const problems = v.problems.filter((x) => x.fix?.entry === repo);
+  const tpl = v.course?.templates?.find((t) => t.repo === repo);
   const [values, setValues] = useState<Values | null>(null);
   const [qdraft, setQdraft] = useState<QuestionRow[] | null>(null);
   const [save, runSave, setSave] = useSave(env);
@@ -778,8 +711,9 @@ export function TemplateScreen(p: CourseProps) {
     <>
       <div class="page-head">
         <div><h2 class="h1">{heading} <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. These settings apply to every semester, and after hand out they reach students only through Update every copy.</Hint></h2><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
-        <div class="actions"><span class={`chip ${problems.length ? 'bad' : 'ok'}`}>{problems.length ? 'Has a problem' : 'Ready'}</span><OpenButton org={course.org} repo={repo} /></div>
+        <div class="actions">{tpl ? <RepoChip r={templateReadiness(tpl, v.course?.todo ?? [], v.tiered.filter((x) => x.p.fix?.entry === repo).map((x) => ({ text: x.p.text, b: x.b })))} /> : null}<OpenButton org={course.org} repo={repo} /></div>
       </div>
+      {tpl ? <section class="panel section" style="margin-bottom:18px"><RepoChecklist items={templateItems(repo, v.course?.todo ?? [], tpl.starter, nextHandouts(liveSemesters(p), p.now).get(repo), p.now)} /></section> : null}
       {problems.length ? <div style="margin-bottom:18px"><ProblemCards list={problems} /></div> : null}
       {file.kind === 'loading' ? <Loading what="Reading grading_config.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no grading_config.yml on the solution branch of {repo}.</CheckLine> : null}

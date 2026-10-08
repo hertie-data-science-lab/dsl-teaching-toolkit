@@ -9,6 +9,7 @@ import type { GhUser } from '../github/client';
 import type { Course, CohortRef, Semester } from '../model/discovery';
 import { semesterOver, termRank } from '../model/catalogue';
 import { knownAuditor } from '../model/mine';
+import { problemCount } from '../model/readiness';
 import { STUDENT_SCREENS, studentHref } from '../router';
 import type { Loaded } from '../model/status';
 import { Crumbs, ghUrl } from './bits';
@@ -237,7 +238,7 @@ export function NavTree({ root, rootCurrent = false, anchor, children }: { root:
 /**
  * The anchor: bold, a link when it has a page (a course), plain text when not (a student's
  * semester). It never carries aria-current: the page it opens is also the first leaf under it
- * (Overview), which does.
+ * (Dashboard), which does.
  */
 export function NavAnchor({ href, children }: { href?: string; children: ComponentChildren }) {
   return href ? <a class="nav-anchor" href={href}>{children}</a> : <span class="nav-anchor">{children}</span>;
@@ -262,10 +263,10 @@ function liveThenPast<T extends { org: string }>(list: T[], isLive: (x: T) => bo
   return { ordered: [...live, ...past], shown: Math.max(live.length, 3) };
 }
 
-/** A semester's problem count and whether it is archived, from its loaded status. */
-export function cohortFlags(l: Loaded | undefined): { problems: number | null; archived: boolean } {
+/** A semester's problem count (now or soon, decision 0034) and whether it is archived, from its loaded status. */
+export function cohortFlags(l: Loaded | undefined, now = Date.now()): { problems: number | null; archived: boolean } {
   if (!l || l.kind !== 'ready') return { problems: null, archived: false };
-  return { problems: (l.status.problems ?? []).length, archived: l.status.semester?.live === false };
+  return { problems: problemCount(l.status, now), archived: l.status.semester?.live === false };
 }
 
 /** The nine semester pages, in nav order. */
@@ -293,7 +294,7 @@ export type SubWanted = { materials: boolean; templates: boolean };
 
 /**
  * The instructor's side nav (decision 0031 rule 11): one course, anchored. The root link (All
- * courses), the course as the anchor (a link to its overview), the course's pages (Overview first,
+ * courses), the course as the anchor (a link to its dashboard), the course's pages (Dashboard first,
  * where the anchor goes, as a semester's Dashboard is where its name goes; Handout materials and
  * Assignment templates open on a page inside them, or with their chevron), then its semesters as
  * nodes: being set up first, every live one, then past ones newest first to three rows and the
@@ -338,7 +339,7 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
   // Semesters: live is neither archived nor past its end (the status's, else the key's).
   const flags = (k: CohortRef) => {
     const l = cohortStates[k.org];
-    const f = cohortFlags(l);
+    const f = cohortFlags(l, now);
     const sem = l?.kind === 'ready' ? l.status.semester : undefined;
     const over = f.archived || sem?.ended === true || semesterOver({ org: k.org, termLabel: k.termLabel, archived: f.archived }, now, sem?.end ?? undefined, sem?.timezone);
     return { ...f, over };
@@ -358,7 +359,8 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
         past: f.over,
         count: f.problems,
         what: `the ${k.termLabel} pages`,
-        pages: SEMESTER_PAGES.map(([key, t]) => ({ href: `${base}#${key}`, t, current: cohort?.org === k.org && key === current, count: key === 'dashboard' ? f.problems : null })),
+        // The count sits on the semester node only, not again on its Dashboard leaf.
+        pages: SEMESTER_PAGES.map(([key, t]) => ({ href: `${base}#${key}`, t, current: cohort?.org === k.org && key === current })),
       };
     }),
   ];
@@ -368,7 +370,7 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
       {course.write ? (
         <>
           <ul class="tree">
-            {leaf('course', `?course=${course.org}#course`, 'Overview')}
+            {leaf('course', `?course=${course.org}#course`, 'Dashboard')}
             {leaf('details', '#details', 'Course details')}
             {group('materials', '#materials', 'Handout materials', 'the handout materials repos')}
             {group('templates', '#templates', 'Assignment templates', 'the assignment templates')}
@@ -382,9 +384,9 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
           ) : null}
         </>
       ) : (
-        // Read only (decision 0032): the overview the course name opens, highlighted; the edit pages stay hidden.
+        // Read only (decision 0032): the dashboard the course name opens, highlighted; the edit pages stay hidden.
         <>
-          <ul class="tree">{leaf('course', `?course=${course.org}#course`, 'Overview')}</ul>
+          <ul class="tree">{leaf('course', `?course=${course.org}#course`, 'Dashboard')}</ul>
           <p class="footnote" style="padding:8px 10px">Read only: other pages need write access.</p>
         </>
       )}
@@ -474,7 +476,7 @@ export type Crumb = { t: string; href?: string };
  * semester page the semester's line under it (its name, the state chip, "Week N of M" and the
  * dates, each left out when not known) with the semester's links on the right: the Student view
  * pill on an instructor's page, "Back to instructor view" in a preview, and the semester on
- * GitHub. `side` is the course overview's (New semester); other course pages have none.
+ * GitHub. `side` is the course dashboard's (New semester); other course pages have none.
  */
 export function CourseBanner({ crumbs, name, hint, semester, side }: {
   crumbs: Crumb[];

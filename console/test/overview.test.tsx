@@ -8,11 +8,10 @@ import { bannerLine } from '../src/app';
 import { EnvCtx, type Env } from '../src/env';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
-import { nextEvent, nextEventWords, recentActivity, rollUpProblems, whoWord, type Activity } from '../src/model/status';
+import { nextEvent, nextEventWords, recentActivity, whoWord, type Activity } from '../src/model/status';
 import type { Loaded } from '../src/model/status';
 import type { Operation, Problem, Status } from '../src/model/types';
 import { CourseScreen, SiteLive, siteLiveState } from '../src/screens/Course';
-import { ProblemCards } from '../src/ui/bits';
 import example from './fixtures/status.example.json';
 
 const STATUS = example as unknown as Status;
@@ -31,27 +30,15 @@ const text = (v: preact.VNode) => render(v).replace(/<[^>]+>/g, ' ').replace(/&a
 const prob = (id: string, scope: 'course' | 'semester', stage = 'K4'): Problem => ({ id, scope, stage, text: `${id} broke.`, stops: 'Something stops.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', screen: 'schedule', entry: 's5' } });
 const op = (run_id: number, finished: string, o: Partial<Operation> = {}): Operation => ({ run_id, op: 'release.entry', conclusion: 'done', summary: '', finished, ...o });
 
-describe('Problems roll-up', () => {
-  it('lists the course’s first, then each live semester’s tagged, a repeated course fault once', () => {
-    const list = rollUpProblems([prob('tpl', 'course', 'C5')], [{ org: COHORT_ORG, label: 'Fall 2026', problems: [prob('tpl', 'course', 'C5'), prob('sched', 'semester')] }]);
-    expect(list.map((p) => [p.id, p.semester?.label])).toEqual([['tpl', undefined], ['sched', 'Fall 2026']]);
-  });
-
-  it('tags a semester’s card with a link to its Dashboard, and its Fix opens that semester', () => {
-    const out = render(<ProblemCards list={rollUpProblems([], [{ org: COHORT_ORG, label: 'Fall 2026', problems: [prob('sched', 'semester')] }])} />);
-    expect(out).toContain(`<a class="chip p-tag" href="?cohort=${COHORT_ORG}#dashboard">Fall 2026</a>`);
-    expect(out).toContain(`<a class="btn small" href="?cohort=${COHORT_ORG}#schedule-s5">Fix</a>`);
-    // An untagged card keeps its own page's link.
-    expect(render(<ProblemCards list={[prob('sched', 'semester')]} />)).toContain('<a class="btn small" href="#schedule-s5">Fix</a>');
-  });
-
-  it('counts every problem in the panel head and leaves archived semesters out', () => {
+describe('course problems (decision 0034)', () => {
+  it('lists the course’s own problems only: a semester’s are on its Dashboard, counted on its row', () => {
     const archived = ready({ ...STATUS, semester: { ...STATUS.semester!, live: false }, problems: [prob('gone', 'semester')] });
     const out = render(<CourseScreen course={course} loaded={{ kind: 'absent' }} cohortStates={{ [COHORT_ORG]: ready(STATUS), [OLD_ORG]: archived }} files={new StaticFiles()} now={NOW} />);
-    const panel = panelOf(out, 'id="course-problems"');
-    expect(panel).toContain('<span class="count-badge" aria-label="2 problems">2</span>');
-    expect(panel).toContain('>Fall 2026</a>');
+    const panel = panelOf(out, 'id="dash-problems"');
+    expect(panel).toContain('Marking of Assignment 3 cannot start.');
+    expect(panel).not.toContain('Session 5 cites');
     expect(panel).not.toContain('gone broke.');
+    expect(out).not.toContain('p-tag');
   });
 });
 

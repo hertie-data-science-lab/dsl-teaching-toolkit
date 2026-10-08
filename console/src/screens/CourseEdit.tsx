@@ -27,7 +27,9 @@ import { SaveBar } from '../ui/edit';
 import { PatternTree } from '../ui/PatternTree';
 import { Check, Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
-import { courseView, MaterialsChecklist, StateChip } from './Course';
+import { courseView, MaterialsChecklist } from './Course';
+import { ItemRow, RepoChip, RepoWhy } from '../ui/SetupPanel';
+import { materialsReadiness } from '../model/readiness';
 import { courseScope } from './common';
 import type { CourseProps } from './types';
 import { COURSE_REPO, OPENCOURSE_FILE } from '../model/names';
@@ -632,15 +634,14 @@ export function MaterialsScreen(p: CourseProps) {
     <>
       <div class="page-head">
         <div><h2 class="h1">{repo} <Hint doc="02-add-materials-to-course.md">Handout materials stay here, private to instructors, until a scheduled release copies them to a semester. Files withheld here never reach students.</Hint></h2><p class="lede">Handout materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
-        <div class="actions"><OpenButton org={course.org} repo={repo} quiet /></div>
+        <div class="actions">{m ? <RepoChip r={materialsReadiness(m)} /> : null}<OpenButton org={course.org} repo={repo} quiet /></div>
       </div>
       <div class="stack">
         {m?.checks?.length ? (
           <section class="panel section">
-            <div class="section-head"><h2>Checklist</h2><StateChip state={m.state} todo="Not ready yet" /></div>
             <MaterialsChecklist checks={m.checks} />
           </section>
-        ) : null}
+        ) : m ? <RepoWhy r={materialsReadiness(m)} /> : null}
         <section class="panel section">
           <h2>Syllabus <Hint label="About the syllabus">The syllabus is one file at the repo’s top level that the student site pins. Pick which file it is here; the default is SYLLABUS.md. The list shows this repo’s top-level Markdown files; pick the one that is your syllabus.</Hint></h2>
           <div class="field">
@@ -650,7 +651,10 @@ export function MaterialsScreen(p: CourseProps) {
             </select>
             <p class="hint">The Markdown file at the repo’s top level that the student site pins as the syllabus.</p>
           </div>
-          {m ? (sylDone ? <div class="check-line ok"><Check /><span>Written.</span></div> : sylFile.kind === 'ready' ? <CheckLine cls="bad">Still the template text. Students would see the placeholder at the first release.</CheckLine> : sylFile.kind === 'absent' ? <CheckLine cls="bad">There is no {syllabus} yet.</CheckLine> : <p class="footnote">Not ready yet.</p>) : <p class="footnote">Not checked yet.</p>}
+          {/* A suggestion (decision 0034): never red. Done, or the dotted optional row with what is missing. */}
+          {m ? (sylDone ? <div class="check-line ok"><Check /><span>Written.</span></div> : (
+            <ul class="setup"><ItemRow it={{ id: 'syllabus', label: 'Syllabus written', kind: 'step', need: 'suggested', state: 'open', why: sylFile.kind === 'absent' ? `There is no ${syllabus} yet.` : 'Still the template text. Students would see the placeholder at the first release.' }} /></ul>
+          )) : <p class="footnote">Not checked yet.</p>}
           <div class="actions"><EditFile org={course.org} repo={repo} path={syllabus} branch={branch} exists={sylFile.kind !== 'absent' || files.includes(syllabus)} /></div>
           {declared === null ? <CheckLine cls="bad">{MATERIALS_FILE} does not parse; fix it with Edit the file directly.</CheckLine> : null}
           <SaveBar state={sylSave} onSave={() => void saveMat({ syllabus: syllabus === DEFAULT_SYLLABUS ? '' : syllabus, kinds: baseKinds }, runSyl, setSylSave, () => setSyl(null))} small disabled={syl === null || syl === savedSyl || declared === null} file={matRef} />
