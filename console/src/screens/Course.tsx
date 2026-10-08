@@ -9,7 +9,7 @@ import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { KIND_LABEL, ago, fmtDay, fmtShort, opLabel, templateName } from '../model/format';
 import {
-  SYLLABUS_HINT, SYLLABUS_LABEL, dayAt, materialsReadiness, problemCount, problemFromDay, standing, stepItems, suggestionsCount, templateReadinessIn, tier, todoAside, verdictOf,
+  SYLLABUS_HINT, SYLLABUS_LABEL, dayAt, materialsReadiness, problemCount, problemFromDay, standing, stepItems, suggestionsCount, templateReadinessIn, tier, todoAside, verdictOf, verdictTab,
   type Tiered, type Verdict as VerdictT,
 } from '../model/readiness';
 import { checkNow, derive, publishWebsite } from '../ops/defs';
@@ -465,9 +465,11 @@ export function CourseScreen(p: CourseProps) {
   const v = useCourseView(p);
   const computed = v.course !== null;
   const live = liveSemesters(p);
-  const [tab, setTab] = useState('problems');
   const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.migrated, write: p.course.write });
   const ready = v.course ? courseReadiness(v.course, v.tiered, aside.list, p.now, v.horizon) : null;
+  // The tab the verdict points at, until one is picked.
+  const [picked, setTab] = useState<string | null>(null);
+  const tab = picked ?? verdictTab(ready?.verdict ?? null);
   const ops = courseOperations(p, live, env?.ops.runs.value ?? [], env?.user.login ?? '');
   // A previewed run published nothing: the age is the last real publish's.
   const lastPublish = recentActivity(ops.map((l) => l.filter((o) => o.op === 'course.publish_website' && o.conclusion !== 'previewed')), 1)[0];
@@ -578,7 +580,7 @@ export function CourseScreen(p: CourseProps) {
       <div class="page-head"><div><h2 class="h1">Dashboard <CourseHint /></h2></div></div>
       <CourseSubActions course={course} loaded={p.loaded} files={p.files} now={p.now} computed={computed} />
       <p class="page-note">Materials and assignment templates are prepared here, for every semester. Students get only what a semester releases or hands out, from that semester’s page.</p>
-      <Verdict v={ready?.verdict ?? null} onOpen={() => showTab(setTab, 'problems')} />
+      <Verdict v={ready?.verdict ?? null} onOpen={() => showTab(setTab, verdictTab(ready?.verdict ?? null))} />
       {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
       <CourseTabs items={ready?.items ?? null} problems={v.problems} aside={aside} tab={tab} onTab={setTab} />
       <div class="grid-2 cols">

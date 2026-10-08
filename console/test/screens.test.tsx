@@ -431,6 +431,12 @@ describe('S2 course and S17 template', () => {
     const { verdict: _v, ...noVerdict } = base;
     expect(html(<CourseScreen {...cp} loaded={{ ...fine, status: { ...STATUS, course: noVerdict } }} />)).not.toContain('class="verdict');
   });
+  it('opens on the Setup tab while the course is not ready, its verdict pointing there too', () => {
+    const notReady: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...base, stages: { ...base.stages, C3: 'todo', C5: 'done' }, verdict: { state: 'not_ready', problems: 0, missing: 'Course details have no description yet.', suggestions: 0 } } }, sha: 's', stale: [] };
+    const out = html(<CourseScreen {...cp} loaded={notReady} />);
+    expect(out).toContain('data-key="setup" aria-selected="true"');
+    expect(out).toContain('data-key="problems" aria-selected="false"');
+  });
   it('opens on the Problems tab, then Suggestions, Set aside and Setup', () => {
     const out = html(<CourseScreen {...cp} />);
     expect(out).toContain('<section class="panel section dash-tabs" id="dash-problems" tabindex="-1"><div class="ptabs" role="tablist">');

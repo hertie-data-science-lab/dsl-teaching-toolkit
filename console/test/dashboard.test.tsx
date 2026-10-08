@@ -344,6 +344,12 @@ describe('the Dashboard and the horizon (decision 0034)', () => {
     const h = mount(s);
     expect(h.querySelector('.verdict')!.textContent).toBe('Not set up: no instructor is declared in instructors.yml yet');
     expect(tabCount(h, 'Setup')).toBe('5 of 6');
+    // Not set up opens on Setup, and the verdict goes there; fixing and ready open on Problems.
+    expect(selectedTab(h)).toBe('Setup');
+    click(h.querySelector<HTMLButtonElement>('[role="tab"][data-key="problems"]')!);
+    click(h.querySelector<HTMLButtonElement>('.verdict button.verdict-btn')!);
+    expect(selectedTab(h)).toBe('Setup');
+    expect(selectedTab(mount())).toBe('Problems');
   });
 
   it('draws no verdict line for a status that carries none (the previous engine’s)', () => {

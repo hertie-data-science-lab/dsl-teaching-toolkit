@@ -168,6 +168,9 @@ export function verdictOf(v: VerdictState | undefined, scope: 'course' | 'semest
   return v ? { ...v, scope, days, suggestions, ...(comingUp === undefined ? {} : { coming_up: comingUp }) } : null;
 }
 
+/** The dashboard tab a verdict opens (and its button goes to): Setup while not set up, else Problems. */
+export const verdictTab = (v: Pick<VerdictState, 'state'> | null) => (v?.state === 'not_ready' ? 'setup' : 'problems');
+
 // --------------------------------------------------------------------------- repos
 
 /** One file, SYLLABUS.md, two parts; the engine checks them as one (`syllabus`). */
