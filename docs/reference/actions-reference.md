@@ -106,6 +106,10 @@ saved in the wrong format, a row naming somebody who is not on the roster: Sync 
 skips that semester and Send enrolment codes sends nothing, both stay green, and the fault is
 reported in that semester's own digest issue and emailed to whoever left it there - see above.
 
+**Scheduled release** (every 15 minutes) and **Sync membership** (hourly) run so often that a
+single failed run is usually a passing GitHub fault. They open the issue only when a run fails
+**twice in a row**; a failure after a good run says so in its log and waits for the next run.
+
 On the same throttle, the **toolkit maintainer is emailed** the run's URL and the last 30
 lines of the step that failed. A broken run is infrastructure rather than teaching, and the
 issue says so: nothing here is for instructors to do. The two channels fire together or

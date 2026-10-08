@@ -1702,6 +1702,195 @@ def test_a_failure_files_its_own_issue_rather_than_commenting_on_a_sibling(tmp_p
     assert _run_issue_step(opener, tmp_path / "y", _OPEN_ISSUES) == ["comment 11"]
 
 
+# Two strikes, and only for the two crons that fire often enough for a one-off GitHub blip to
+# reach course-admin and the maintainer: a FIRST failure files and mails only if the same job
+# also failed in the previous run. `{workflow: the jobs that wait}`.
+TWO_STRIKES = {
+    "scheduler": {"release", "autograde-report"},
+    "sync_membership": {"sync-auto"},
+}
+
+
+def _notice(name: str, job: str) -> dict:
+    steps = yaml.safe_load(ALL_RENDERED[name])["jobs"][job]["steps"]
+    return next(s for s in steps if s.get("id") == "notice")
+
+
+def _run_strike_step(
+    step: dict,
+    work: Path,
+    runs: list[dict] | None,
+    jobs: dict[int, list[dict]],
+    **env: str,
+) -> tuple[list[str], dict[str, str]]:
+    """Execute a notice step for real with no issue open, against a faked run history.
+
+    The fake `gh` routes by endpoint and applies the `--jq` filter itself, as gh does, so
+    what is under test is the step's own filters. `runs=None` makes the runs listing fail.
+    Returns the issue commands made and the step's outputs."""
+    if not shutil.which("jq"):  # pragma: no cover - present on every CI runner
+        pytest.skip("jq is what applies gh's --jq filter")
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "issues.json").write_text("[]")
+    if runs is not None:
+        (work / "runs.json").write_text(json.dumps({"workflow_runs": runs}))
+    for run_id, run_jobs in jobs.items():
+        (work / f"jobs-{run_id}.json").write_text(json.dumps({"jobs": run_jobs}))
+    fake = work / "gh"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'case "$1 $2" in\n'
+        '  "issue close"|"issue comment"|"issue create") echo "$2 $3" >>"$LOG"; exit 0 ;;\n'
+        "esac\n"
+        'case "$2" in\n'
+        '  */actions/workflows/scheduler.yml/runs*) data="$DIR/runs.json" ;;\n'
+        '  */actions/runs/*/jobs) id=${2%/jobs}; data="$DIR/jobs-${id##*/}.json" ;;\n'
+        '  *) data="$DIR/issues.json" ;;\n'
+        "esac\n"
+        "while [ $# -gt 0 ]; do\n"
+        '  [ "$1" = "--jq" ] && filter="$2"\n'
+        "  shift\n"
+        "done\n"
+        '[ -f "$data" ] || exit 1\n'
+        'jq -r "$filter" "$data"\n'
+    )
+    fake.chmod(0o755)
+    log = work / "gh.log"
+    log.write_text("")
+    outputs = work / "github_output"
+    outputs.write_text("")
+    subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env={
+            "PATH": f"{work}:{os.environ['PATH']}",
+            "LOG": str(log),
+            "DIR": str(work),
+            "GITHUB_OUTPUT": str(outputs),
+            "GITHUB_RUN_ID": "100",
+            "GITHUB_WORKFLOW_REF": "Course-Org/.github/.github/workflows/scheduler.yml@refs/heads/main",
+            "WORKFLOW": "Scheduled release",
+            "REPO": "Course-Org/.github",
+            "RUN_URL": "https://example.invalid/run/100",
+            **env,
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [line for line in log.read_text().splitlines() if line], _step_outputs(
+        outputs
+    )
+
+
+def _run(
+    run_id: int, event: str = "schedule", title: str = "Scheduled release"
+) -> dict:
+    return {"id": run_id, "event": event, "display_title": title}
+
+
+def _job(name: str, conclusion: str | None, ran: bool = True) -> dict:
+    return {
+        "name": name,
+        "conclusion": conclusion,
+        "steps": [{"name": "x"}] if ran else [],
+    }
+
+
+FILED = (["create --repo"], {"report": "true"})
+HELD = ([], {"report": "false"})
+
+
+@pytest.mark.parametrize("before, outcome", [("success", HELD), ("failure", FILED)])
+def test_a_frequent_cron_reports_only_the_second_failure_in_a_row(
+    tmp_path, before, outcome
+):
+    # One failed hourly Sync membership, green the next run, mailed course-admin and the
+    # maintainer about a GitHub blip. A first failure after a good run now waits; the
+    # second in a row files and mails exactly as before, both off `report`.
+    for name, job, job_name in [
+        ("scheduler", "release", "release"),
+        ("sync_membership", "sync-auto", "sync-auto"),
+    ]:
+        jobs = {100: [], 99: [_job(job_name, before)]}
+        got = _run_strike_step(
+            _notice(name, job), tmp_path / name, [_run(100), _run(99)], jobs
+        )
+        assert got == outcome, name
+
+
+def test_the_previous_run_is_the_last_unattended_one_whose_job_ran(tmp_path):
+    # Passed over: a button press (someone watched it), a run a semester's push scoped to
+    # one semester (it never reports on the course-wide issue), and a run whose release job
+    # was cancelled while it waited in the queue. The run before those failed, so this is
+    # the second strike.
+    runs = [
+        _run(100),
+        _run(99, event="workflow_dispatch"),
+        _run(
+            98, event="repository_dispatch", title=f"{course.SCOPED_RUN_TITLE} S-f2026"
+        ),
+        _run(97),
+        _run(96),
+    ]
+    jobs = {
+        99: [_job("release", "success")],
+        98: [_job("release", "success")],
+        97: [_job("release", "cancelled", ran=False)],
+        96: [_job("release", "failure")],
+    }
+    opener = _notice("scheduler", "release")
+    assert _run_strike_step(opener, tmp_path / "a", runs, jobs) == FILED
+    jobs[96] = [_job("release", "success")]
+    assert _run_strike_step(opener, tmp_path / "b", runs, jobs) == HELD
+
+
+def test_a_grading_leg_counts_strikes_for_its_own_semester(tmp_path):
+    # The legs fail independently, so a strike is THIS semester's leg in the previous run.
+    jobs = {
+        99: [
+            _job("release", "success"),
+            _job("autograde S-a2026", "failure"),
+            _job("autograde S-b2026", "success"),
+        ]
+    }
+    opener = _notice("scheduler", "autograde-report")
+    runs = [_run(100), _run(99)]
+    assert (
+        _run_strike_step(opener, tmp_path / "a", runs, jobs, SEMESTER="S-a2026")
+        == FILED
+    )
+    assert (
+        _run_strike_step(opener, tmp_path / "b", runs, jobs, SEMESTER="S-b2026") == HELD
+    )
+    # A semester with no leg anywhere in the history has nothing to compare: it reports.
+    assert (
+        _run_strike_step(opener, tmp_path / "c", runs, jobs, SEMESTER="S-c2026")
+        == FILED
+    )
+
+
+def test_a_failed_history_lookup_reports_rather_than_staying_quiet(tmp_path):
+    # Fail OPEN: the point of the issue is that somebody hears, so a lookup that cannot say
+    # "the last run was fine" never holds a report back.
+    opener = _notice("scheduler", "release")
+    assert _run_strike_step(opener, tmp_path / "a", None, {}) == FILED
+    # ...and a run whose jobs cannot be read is no evidence either.
+    assert _run_strike_step(opener, tmp_path / "b", [_run(100), _run(99)], {}) == FILED
+
+
+@pytest.mark.parametrize("name", sorted(UNATTENDED | {"console"}))
+def test_only_the_frequent_crons_wait_for_a_second_failure(name):
+    # Everything else is daily or pushed, so its first failure is worth a mail.
+    doc = yaml.safe_load(ALL_RENDERED[name])
+    waiting = {
+        job
+        for job, spec in doc["jobs"].items()
+        for s in spec.get("steps", [])
+        if s.get("id") == "notice" and "/actions/workflows/" in s["run"]
+    }
+    assert waiting == TWO_STRIKES.get(name, set())
+
+
 @pytest.mark.parametrize("name", sorted(UNATTENDED))
 def test_every_unattended_run_files_and_closes_its_own_failure_issue(name):
     doc = yaml.safe_load(ALL_RENDERED[name])
