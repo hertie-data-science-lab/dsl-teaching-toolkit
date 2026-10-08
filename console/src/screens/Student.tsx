@@ -87,7 +87,7 @@ export const STUDENT_HINTS: Record<string, string> = {
   home: 'The course’s own page: news, the syllabus, who teaches it.',
   week: 'What is due, handed out or released this week, and news from your instructors.',
   schedule: 'Every session, assignment and due date of the semester, with its files and readings once they are released.',
-  assignments: 'Every assignment of the semester, open while you can hand it in: your marks first once any are returned, then each assignment’s repo, team, deadlines and Submission receipts. Each title opens the assignment’s own page.',
+  assignments: 'Every assignment of the semester, open while you can hand it in: your marks first once any are returned, then each assignment’s repo, team, deadlines and Submission receipts. Each card links the assignment’s own page.',
   materials: 'Every file your instructors have released to this semester, read with your own account; each opens here, on GitHub, on github.dev or in your editor.',
   instructors: 'Who teaches this semester.',
 };

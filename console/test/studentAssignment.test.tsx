@@ -12,6 +12,7 @@ import { parseHash, studentNavKey } from '../src/router';
 import { StudentScreen, studentScreen } from '../src/screens/Student';
 import { AssignmentPage, stateWord } from '../src/screens/StudentAssignment';
 import { AssignmentsView } from '../src/screens/StudentAssignments';
+import { JoinRequests } from '../src/screens/StudentJoin';
 
 const ORG = 'hertie-dsl-demo-f2026';
 const LOGIN = 'octo';
@@ -45,7 +46,9 @@ describe('the Assignments tab', () => {
     const cards = [...out.matchAll(/<details class="panel section a-card"( open)? aria-label="([^"]+)"/g)].map((m) => `${m[2]}:${m[1] ? 'open' : 'closed'}`);
     // Due order; open and late window open, marking and not handed out folded.
     expect(cards).toEqual(['Assignment 0:closed', 'Assignment 2:open', 'Assignment 1:open', 'Assignment 3:closed']);
-    expect(out).toContain(`<a href="?semester=${ORG}#assignment-a1">Assignment 1</a>`);
+    // The summary holds no link (nested interactive); the body's first line does.
+    expect(out).toContain(`</summary><p class="a-open"><a href="?semester=${ORG}#assignment-a1">Open the page</a></p>`);
+    expect(out).not.toMatch(/<summary[^>]*>(?:(?!<\/summary>).)*<a /);
     expect(text(<AssignmentsView org={ORG} facts={facts([A])} mine={mine()} now={NOW} studentView={false} receipts={{}} login={LOGIN} />)).toMatch(/Assignment 1 Regression open Due Mon 12 Oct 23:59/);
     expect(out).not.toContain('Late work in this course');
   });
@@ -120,6 +123,14 @@ describe('the assignment page', () => {
     const unknown = text(page(A, null, { unknownRole: true }));
     expect(unknown).toContain('Could not read your role');
     expect(unknown).not.toContain('Clone it');
+    // Before the hand-out an auditor or an unread role is promised the brief, never a repo.
+    const before = { ...A, handedOut: false, brief: '', handout: '2026-10-20T09:00:00', due: '2026-11-01T23:59:00' };
+    for (const v of [page(before, mine({ auditor: true, units: {} })), page(before, null, { unknownRole: true })]) {
+      const t = text(v);
+      expect(t).toContain('Assignment 1 is not yet released - the brief appears here when it is.');
+      expect(t).not.toContain('repo appears');
+      expect(t).not.toContain(LOGIN);
+    }
   });
 
   it('shows the mark and its feedback once returned', () => {
@@ -150,12 +161,16 @@ describe('the team steps', () => {
     const none = mine({ units: { p: { slug: 'p', repo: null, team: null, members: null, shared: false } } });
     const out = render(page(GROUP, none));
     const t = text(page(GROUP, none));
-    expect(t).toContain('1 Form your team Not in a team yet You pick your own team for this assignment, of up to 3 people. Start a team or join one with Join or create a team - team formation closes on Tue 20 Oct 23:59. Your team’s submission repo appears once the team does.');
+    expect(t).toContain('1 Form your team Not in a team yet You pick your own team for this assignment, of up to 3 people. Start a team or join one with Join or create a team below - team formation closes on Tue 20 Oct 23:59. Your team’s submission repo appears once the team does.');
     expect(t).toContain('Teams so far Team Members Places left team-x 2 of 3 1 team-y 3 of 3 full');
     expect(out).toContain('aria-expanded="false">Join or create a team</button>');
+    expect(out).toContain('one with <b>Join or create a team</b> below');
+    // Unfolded, Your requests sits under the step at h4; on its own it stays an h2.
+    expect(render(<JoinRequests org={ORG} level={4} />)).toContain('<h4 id="h-asked">Your requests</h4>');
+    expect(render(<JoinRequests org={ORG} />)).toContain('<h2 id="h-asked">Your requests</h2>');
     // The form is folded: no assignment dropdown anywhere, no request sent.
     expect(out).not.toContain('<select');
-    expect(out).toMatch(/<h3 class="a-step" aria-disabled="true"><span class="step-num">2<\/span> Open your submission repo<span class="footnote a-step-hint"> Form or join a team first\.<\/span>/);
+    expect(out).toMatch(/<h3 class="a-step" data-team-state="missing"><span class="step-num">2<\/span> Open your submission repo<span class="footnote a-step-hint"> Form or join a team first\.<\/span>/);
     expect(t).toContain('Your work goes in your private repo p-<your-team> .');
     const inTeam = mine({ units: { p: { slug: 'p', repo: 'p-team-x', team: 'team-x', members: [LOGIN, 'b'], shared: false } } });
     const it2 = render(page(GROUP, inTeam));
@@ -182,7 +197,7 @@ describe('the team steps', () => {
     expect(out).not.toContain('team-found');
     expect(out).not.toContain('aria-expanded');
     expect(out).toContain('A student joins or creates a team here');
-    expect(out).not.toContain('aria-disabled');
+    expect(out).not.toContain('data-team-state');
   });
 });
 

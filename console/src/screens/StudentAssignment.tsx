@@ -68,9 +68,9 @@ function repoName(a: SemesterAssignment, u: Mine['units'][string] | undefined, h
 
 const PUBLIC = 'assignment-repo-public';
 
-/** The 0.9.0 pending sentence: what appears once the assignment is handed out. */
-function pendingSentence(a: SemesterAssignment, repo: string) {
-  const coming = a.submitVia === 'external' ? <>the brief appears here when it is</>
+/** The 0.9.0 pending sentence: what appears once the assignment is handed out. `guarded` (an auditor, or a role not read) is promised the brief only, never a repo. */
+function pendingSentence(a: SemesterAssignment, repo: string, guarded: boolean) {
+  const coming = guarded || a.submitVia === 'external' ? <>the brief appears here when it is</>
     : a.submitVia === 'shared_dropbox_repo' ? <>the <code>{a.slug}-submissions</code> drop box appears when it is</>
     : <>your {a.shape === PUBLIC ? 'public' : 'private'} <code>{repo}</code> repo appears when it is</>;
   return <p class="a-pending"><em><b>{a.title} is not yet released</b> - {coming}.</em></p>;
@@ -110,10 +110,10 @@ export function AssignmentBody({ org, a, mine, now, tz, studentView, unknownRole
       <DateLines a={a} tz={tz} year={year} />
       {steps ? <TeamSteps org={org} a={a} mine={own ? mine : null} studentView={studentView} tz={tz} now={now} /> : null}
       {!forming && a.group && a.teams.length && !auditor ? <TeamList a={a} current={u?.team ?? null} /> : null}
-      {!a.handedOut ? pendingSentence(a, repo) : (
+      {!a.handedOut ? pendingSentence(a, repo, auditor) : (
         <section class="callout callout-submit" aria-label="Hand in">
           {steps ? (
-            <h3 class="a-step" aria-disabled={own && !inTeam ? 'true' : undefined}>
+            <h3 class="a-step" data-team-state={own && !inTeam ? 'missing' : undefined}>
               <span class="step-num">2</span> Open your submission repo
               {own && !inTeam ? <span class="footnote a-step-hint"> Form or join a team first.</span> : null}
             </h3>
@@ -174,7 +174,7 @@ function TeamSteps({ org, a, mine, studentView, tz, now }: { org: string; a: Sem
       <h3 class="a-step"><span class="step-num">1</span> Form your team</h3>
       {studentView ? null : <p class="team-found">{team ? <>✓ You’re in team <b>{team}</b></> : 'Not in a team yet'}</p>}
       <p>
-        You pick your own team for this assignment{cap ? `, of up to ${cap} people` : ''}. Start a team or join one with Join or create a team{closes ? ` - team formation closes on ${closesWords(closes, tz)}` : ''}.
+        You pick your own team for this assignment{cap ? `, of up to ${cap} people` : ''}. Start a team or join one with <b>Join or create a team</b> below{closes ? ` - team formation closes on ${closesWords(closes, tz)}` : ''}.
         {a.submitVia === 'assignment_repo' ? ' Your team’s submission repo appears once the team does.' : ''}
       </p>
       {a.teams.length ? <TeamList a={a} current={team} onPick={open ? setPicked : undefined} picked={picked} />
@@ -185,7 +185,7 @@ function TeamSteps({ org, a, mine, studentView, tz, now }: { org: string; a: Sem
           {open ? (
             <div class="stack">
               <TeamForm org={org} a={a} mine={mine} tz={tz} now={now} picked={picked} onSent={() => setSent(sent + 1)} />
-              <JoinRequests org={org} sent={sent} />
+              <JoinRequests org={org} sent={sent} level={4} />
             </div>
           ) : null}
         </>

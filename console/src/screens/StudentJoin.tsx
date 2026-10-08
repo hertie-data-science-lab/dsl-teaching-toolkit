@@ -89,7 +89,9 @@ const POLL_MS = 15000;
 const POLL_FOR_MS = 5 * 60 * 1000;
 
 /** Your requests, read now and every 15 s (up to 5 min, not while the tab is hidden) while one still waits for the automation. `sent` changes when the console has just opened one. */
-export function JoinRequests({ org, sent = 0 }: { org: string; sent?: number }) {
+/** `level`: the heading's level, 4 inside an assignment's team step. */
+export function JoinRequests({ org, sent = 0, level = 2 }: { org: string; sent?: number; level?: 2 | 4 }) {
+  const H = level === 4 ? 'h4' : 'h2';
   const env = useEnv();
   const [asked, setAsked] = useState<Asked[] | null>(null);
   const [pending, setPending] = useState(false);
@@ -110,7 +112,7 @@ export function JoinRequests({ org, sent = 0 }: { org: string; sent?: number }) 
   }, [org, tick, sent, !!env]);
   return (
     <section class="panel section" aria-labelledby="h-asked">
-      <div class="a-head"><h2 id="h-asked">Your requests</h2><button class="textlink" type="button" onClick={() => setTick(tick + 1)}>Check again</button></div>
+      <div class="a-head"><H id="h-asked">Your requests</H><button class="textlink" type="button" onClick={() => setTick(tick + 1)}>Check again</button></div>
       <AskedList asked={asked} org={org} invitePending={pending} />
     </section>
   );

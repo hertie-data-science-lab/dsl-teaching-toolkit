@@ -1,6 +1,6 @@
 // The student's Assignments tab (decision 0035 rules 6-8): "Your marks" first once any mark is
 // returned, then every assignment as a card in due order, open while the student can hand it
-// in (open or in its late window) and folded otherwise. A card's title opens the assignment's
+// in (open or in its late window) and folded otherwise. A card's first line links the assignment's
 // own page (`StudentAssignment.tsx`), and its body is that page's. Marks and team joining live
 // here: there is no Marks or Join screen. Each assignment states its own late rule; there is no
 // course-wide late-work section.
@@ -35,10 +35,11 @@ export function AssignmentsView({ org, facts, mine, now, studentView, receipts, 
         return (
           <details class="panel section a-card" open={open} aria-label={a.title}>
             <summary class="a-sum">
-              <h2><a href={assignmentHref(org, a.slug)}>{a.title}</a>{a.subtitle ? <span>{a.subtitle}</span> : null}</h2>
+              <h2>{a.title}{a.subtitle ? <span>{a.subtitle}</span> : null}</h2>
               {auditor ? null : <StateChip st={st} entry={studentView ? undefined : mine?.gradebook?.entries[a.slug]} />}
               {a.due ? <span class="a-due">Due {fmtWhen(a.due, tz, year)}{a.tbc ? ' (TBC)' : ''}</span> : null}
             </summary>
+            <p class="a-open"><a href={assignmentHref(org, a.slug)}>Open the page</a></p>
             <AssignmentBody org={org} a={a} mine={mine} now={now} tz={tz} studentView={studentView} unknownRole={unknownRole} receipts={receipts} login={login} files={assignmentFiles(facts, a.slug)} repos={facts.materialsRepos} />
           </details>
         );

@@ -901,7 +901,7 @@ fieldset.field { border: 0; margin: 0; padding: 0; }
 .callout .kv { margin-top: 10px; }
 .callout.team-step-form { border-left-color: var(--term-ink); }
 .a-step { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 15.5px; margin: 0 0 8px; }
-.a-step[aria-disabled='true'] { opacity: 0.55; }
+.a-step[data-team-state='missing'] { opacity: 0.55; }
 .step-num { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--ink-2); color: var(--surface); font-size: 12.5px; }
 .team-table { margin: 4px 0 10px; }
 .team-table caption { text-align: left; font-family: var(--font-display); font-weight: 600; font-size: 13.5px; padding-bottom: 4px; }
