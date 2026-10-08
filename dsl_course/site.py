@@ -183,8 +183,10 @@ def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
 
     The policy is COURSE-level and lives in the source repo faculty actually edit, not in
     each semester's copy. Memoised for the run because `--all-semesters` asks the same
-    course the same question once per semester. Patterns go through the parser faculty's
-    `.releaseignore` goes through, so one syntax covers both directions of the question.
+    course the same question once per semester: `sync_site` leaves the memo alone, and
+    `main` clears it once the run's last semester is built. Patterns go through the
+    parser faculty's `.releaseignore` goes through, so one syntax covers both directions
+    of the question.
 
     A file that is absent or empty is "nothing public", and the mirror may then delete
     what an earlier sync copied. A file that does not PARSE, or whose `public:` is not a
@@ -1671,8 +1673,6 @@ def sync_site(course_org: str, semester_org: str) -> int:
     # clear ran on the rare path and never on the common one. Keys include the org, so this
     # is purely about memory, never staleness.
     _repo_tree.cache_clear()
-    # Cleared for memory, like the tree memo above: the key names the course org.
-    _publish_policy.cache_clear()
     return sync_site_repo(semester_org, build)
 
 
@@ -1756,6 +1756,9 @@ def main() -> int:
     except (RuntimeError, yaml.YAMLError) as exc:
         log_err(str(exc))
         return 1
+    finally:
+        # The end of the build: every semester of this run has read the course's policy.
+        _publish_policy.cache_clear()
 
 
 if __name__ == "__main__":

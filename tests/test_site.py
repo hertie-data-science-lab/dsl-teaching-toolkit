@@ -1190,6 +1190,7 @@ def _plan(
     handed_out=(),
     declared=None,
     content=lambda *a, **k: "",
+    yaml_file=lambda *a: {},
 ):
     """Run sync_site against a faked org and return the SitePlan it built. `trees` is each
     semester content repo's released tree (`{repo: (path, ...)}`, default: none);
@@ -1214,7 +1215,7 @@ def _plan(
     monkeypatch.setattr(
         site, "discover_release_sources", lambda org, repos: list(sources)
     )
-    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    monkeypatch.setattr(site, "yaml_file", yaml_file)
     monkeypatch.setattr(site.schedule, "load", lambda org: sched)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(
@@ -2758,6 +2759,34 @@ def test_a_policy_that_does_not_parse_stops_the_sync(monkeypatch):
     monkeypatch.setattr(site, "yaml_file", lambda *a: {"public": "lectures/**"})
     with pytest.raises(RuntimeError, match="must be a list of patterns"):
         site._publish_policies("Course-Org", _one_deploy(), ["materials"])
+
+
+def test_every_semester_of_one_run_reuses_the_courses_policy(monkeypatch, tmp_path):
+    # `--all-semesters` builds each semester in one process: the course's publish.yml is
+    # read once for the run, and `main` drops the memo when the run ends.
+    asked = []
+
+    def yaml_file(org, repo, path):
+        asked.append(path)
+        return {"public": ["lectures/**"]} if path == site.PUBLISH_FILE else {}
+
+    monkeypatch.setattr(site, "_mirror_public", lambda *a, **k: {})
+    for _semester in range(2):
+        _plan(
+            monkeypatch,
+            tmp_path,
+            _one_deploy(),
+            trees={"materials": ()},
+            yaml_file=yaml_file,
+        )
+    assert asked.count(site.PUBLISH_FILE) == 1
+
+    monkeypatch.setattr(
+        "sys.argv", ["site", "sync", "--course-org", "C", "--all-semesters"]
+    )
+    monkeypatch.setattr(site, "live_semesters", lambda org: [])
+    assert site.main() == 0
+    assert site._publish_policy.cache_info().currsize == 0
 
 
 def test_a_file_github_would_refuse_is_skipped_rather_than_failing_the_sync(
