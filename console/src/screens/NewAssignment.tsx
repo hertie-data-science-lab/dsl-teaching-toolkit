@@ -36,7 +36,7 @@ import {
 } from '../wizards/model';
 import { allOk, checkFree, checkTemplate, readSource, useLive, type Check, type SourceBranch, type SourceRead } from '../wizards/verify';
 import { Checks, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
-import { Questions, STARTER_DOC, courseView } from './Course';
+import { Questions, STARTER_DOC, courseOf } from './Course';
 import { courseScope } from './common';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
@@ -211,7 +211,7 @@ function ImportPicker({ src, read, busy, lines, set }: { src: SourceRepo; read: 
 export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const { course, step: asked } = p;
   const env = useEnv();
-  const status = courseView(p).course;
+  const status = courseOf(p);
   const templates = (status?.templates ?? []).map((t) => t.repo);
   const [d, set, clear] = useDraft<NaDraft>(`new-assignment:${course.org}`, () => ({ v: initialValues(course.meta), verified: {} }));
   const v = d.v;

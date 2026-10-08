@@ -7,7 +7,7 @@ import { compileAll, matchRules } from '../edit/glob';
 import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
-import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
+import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
   assignmentKey, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft,
@@ -22,7 +22,7 @@ import { TIMEZONES } from '../tiers/course';
 import { EditFile, Lives, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
-import { releaseMark, repoWords, templateReadinessIn, type ReleaseMark } from '../model/readiness';
+import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
 import { Check } from '../ui/icons';
 import { NOTHING_TO_RELEASE, markClass, releaseRef, rowMark } from './Cohort';
 import { NotFound } from './Assignments';
@@ -240,10 +240,10 @@ export interface NewRun {
   errors: Record<string, string>;
 }
 
-function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; slug: string; state: string }[]; isNew: boolean; run: NewRun }) {
+function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; slug: string; state: string }[]; isNew: boolean; run: NewRun; tiered: Tiered[] }) {
   const tpl = templates.find((t) => t.repo === d.template);
   // The template's state in the one set of words (decision 0034).
-  const tplState = tpl ? templateReadinessIn(p.status, tpl.repo, p.now) : null;
+  const tplState = tpl ? templateReadinessIn(p.status.course, tpl.repo, tiered) : null;
   const key = d.id || assignmentKey(d.number);
   const af = assignmentsFile(p.files, p.cohort.org);
   const doc = af && af !== 'loading' ? af.doc : {};
@@ -392,6 +392,9 @@ function identOf(d: Draft, row: Row | undefined, kind: string): string {
 function View(p: ReadyProps) {
   const { status, now } = p;
   const env = useEnv();
+  // Every problem with its time, and each held or late release's mark, once per render (decision 0034).
+  const tiered = useMemo(() => tier(status, now), [status, now]);
+  const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const tz = tzOf(status), year = yearOf(now, tz);
   const scope = cohortScope(p);
   const [filters, setFilters] = useState<Record<Block, boolean>>({ releases: true, assignments: true, events: true });
@@ -514,12 +517,9 @@ function View(p: ReadyProps) {
   const seen = new Set<string>();
   for (const r of rows) if (r.entry !== 'semester' && r.entry !== 'archive' && !seen.has(`${r.block}:${r.entry}`)) { seen.add(`${r.block}:${r.entry}`); counts[r.block]++; }
   // The lede counts the held releases in their time words (decision 0034): was skipped, will be skipped, not ready yet.
-  const held = (status.releases ?? []).map((r) => releaseMark(status, r, now)).filter((m) => m && !m.late);
-  const heldLine = (['now', 'soon', 'later'] as const).map((b) => {
-    const n = held.filter((m) => m!.bites === b).length;
-    const one = n === 1;
-    return !n ? '' : `${one ? 'One release' : `${n} releases`} ${b === 'now' ? (one ? 'was skipped' : 'were skipped') : b === 'soon' ? 'will be skipped as it stands' : one ? 'is not ready yet' : 'are not ready yet'}.`;
-  }).filter(Boolean).join(' ');
+  const held = [...marks.values()].filter((m) => !m.late);
+  const heldLine = (['now', 'soon', 'later'] as const).map((b) => [b, held.filter((m) => m.bites === b).length] as const)
+    .filter(([, n]) => n).map(([b, n]) => heldSentence(b, n)).join(' ');
   const nowKey = sortKey(new Date(now).toISOString(), tz);
   let todayDone = false;
   const items = [];
@@ -532,7 +532,7 @@ function View(p: ReadyProps) {
     const rel = r.block === 'releases' ? (status.releases ?? []).find((x) => x.id === r.entry) : undefined;
     const gone = !!removed[r.entry];
     const ref = rel ? releaseRef(rel, tz, year) : null;
-    const m = rowMark(status, r, now);
+    const m = rowMark(marks, r);
     const st = gone ? (
       <><span>Removed.</span><button class="textlink" type="button" style="min-height:0;padding:0" onClick={() => { const n = { ...removed }; delete n[r.entry]; setRemoved(n); }}>Undo</button></>
     ) : m ? <><ReleaseMarks m={m} entry={r.entry} />{m.late ? <a class="textlink" href={`#release-${r.entry}`}>Details</a> : null}</>
@@ -590,7 +590,7 @@ function View(p: ReadyProps) {
             <div>
               <div class="eyebrow">{eyebrow}</div>
               <h2 id="entry-title">{title}</h2>
-              {rel ? <div style="margin-top:6px"><StateChip state={rel.state} m={releaseMark(status, rel, now)} /></div> : null}
+              {rel ? <div style="margin-top:6px"><StateChip state={rel.state} m={marks.get(rel.id) ?? null} /></div> : null}
             </div>
             {close}
           </div>
@@ -605,7 +605,7 @@ function View(p: ReadyProps) {
             <div class="form">
               {d.kind !== 'semester' && d.kind !== 'archive' ? <div class="field"><span class="label">Identifier</span><div class="ident">{ident}<span>derived, as the student site does</span></div></div> : null}
               {d.kind === 'releases' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} inferred={inferredOf(d)} />
-                : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
+                : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} tiered={tiered} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
                 : d.kind === 'events' ? <EventForm d={d} set={set} errors={errors} />
                 : d.kind === 'semester' ? <SemesterForm d={d} set={set} errors={errors} />
                 : <ArchiveForm d={d} set={set} errors={errors} />}
@@ -699,12 +699,13 @@ export function ScheduleScreen(p: CohortProps) {
 /** A release's state chip: a held or late one in its time word (red now or soon, dotted later), else its state. */
 function StateChip({ state, m }: { state: Release['state']; m: ReleaseMark | null }) {
   const cls = m ? (m.bites === 'later' ? 'suggest' : 'bad') : state === 'released' ? 'ok' : '';
-  return <span class={`chip ${cls}`}>{m ? m.word : RELEASE_WORD[state]}</span>;
+  return <span class={`chip ${cls}`}>{m ? markWord(m) : RELEASE_WORD[state]}</span>;
 }
 
 function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const { status, now, rel } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
+  const mark = useMemo(() => releaseMarks(status, tier(status, now), now).get(rel.id) ?? null, [status, now, rel.id]);
   const ident = releaseIdent(rel);
   const st = rel.state;
   const scope = cohortScope(p);
@@ -722,7 +723,8 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
       </>
     );
   }
-  const problems = (status.problems ?? []).filter((x) => x.fix?.entry === rel.id);
+  // The problems that hold it back, joined on `release` (a placeholder stub's fix names its repo, not the entry).
+  const problems = releaseProblems(status, rel);
   const last = (status.operations ?? []).find((o) => o.op.startsWith('release.') && o.summary.includes(`${ident}:`));
   const dest = rel.dest?.repo || DEFAULT_DEST_REPO, destPath = rel.dest?.path || ref.source.path;
   return (
@@ -734,7 +736,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
             : st === 'will_be_skipped' ? 'Fix it in the schedule entry (Edit entry); automation releases it at its time once fixed.'
             : st === 'late' ? 'Reason codes tell you whether the source, the schedule or the scheduler was at fault.'
             : 'Nothing to do; it goes out at the scheduled time. You can release it early.'}</Hint></h2>
-          <p class="lede"><StateChip state={st} m={releaseMark(status, rel, now)} />{fmtWhen(rel.when, tz, year)}</p>
+          <p class="lede"><StateChip state={st} m={mark} />{fmtWhen(rel.when, tz, year)}</p>
         </div>
         <div class="actions"><a class="btn quiet" href={`#schedule-${rel.id}`}>Edit entry</a></div>
       </div>

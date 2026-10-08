@@ -2,8 +2,8 @@
 // will_be_skipped, release.entry) never reach the screen except through these maps.
 
 import { DEFAULT_TIMEZONE } from './policy';
-import type { Assignment, AssignmentState, Need, Release, ReleaseState } from './types';
-import { missingClause, type ItemState, type Verdict } from './readiness';
+import type { Assignment, AssignmentState, Bites, Need, Release, ReleaseState } from './types';
+import type { ItemState, ReleaseMark, RepoReadiness, Verdict } from './readiness';
 import policy from '../../schemas/policy.json';
 
 /** `v` as text, blank for null and undefined. */
@@ -140,16 +140,29 @@ export function ago(iso: string | null | undefined, now: number): string {
   return `${Math.round(h / 24)} days ago`;
 }
 
-/** An item's state as a row says it (decision 0034): one set for setup steps, checks and to-dos alike. */
+// ------------------------------------------------------------------ readiness words (decision 0034)
+
+/** "1 file", "3 files": a count with its noun. */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** A suggestion's word on its row. */
+export const OPTIONAL = 'optional';
+/** A `later` problem's word: the strip's hollow count, its legend, a release row's dotted chip. */
+export const NOT_READY_YET = 'not ready yet';
+
+/** An item's state as a row says it: one set for setup steps, checks and to-dos alike. */
 const STATE_WORD: Record<ItemState, string> = { done: 'Done', open: 'Not done yet', waiting: 'Waiting', problem: 'Has a problem' };
 
-/** "Done", "Not done yet", "Waiting for the schedule", "Has a problem"; a suggestion still open is "optional". */
-export function stateWord(state: ItemState, need: Need = 'needed', waitsFor?: string): string {
-  if (state === 'waiting') return waitsFor ? `Waiting for ${waitsFor}` : STATE_WORD.waiting;
-  return state === 'open' && need === 'suggested' ? 'optional' : STATE_WORD[state];
+/** "Done", "Not done yet", "Waiting", "Has a problem"; a suggestion still open is "optional". */
+export function stateWord(state: ItemState, need: Need = 'needed'): string {
+  return state === 'open' && need === 'suggested' ? OPTIONAL : STATE_WORD[state];
 }
 
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+/** A sentence as the tail of "Not ready: ...": first letter lower-case, no full stop. */
+export function missingClause(why: string): string {
+  const s = why.trim().replace(/\.$/, '');
+  return s ? s[0].toLowerCase() + s.slice(1) : 'not done yet';
+}
 
 /**
  * A verdict's main words. Course (ready for a new semester?): "Needs fixing: 2 problems",
@@ -166,7 +179,7 @@ export function verdictMain(v: Verdict): string {
 
 /** The muted tag after a verdict: on the course "3 suggestions", on the semester "12 coming up". */
 export function verdictTags(v: Verdict): string[] {
-  const n = v.scope === 'course' ? v.suggestions : v.coming_up;
+  const n = v.scope === 'course' ? v.suggestions : v.coming_up ?? 0;
   return n ? [v.scope === 'course' ? plural(n, 'suggestion') : `${n} coming up`] : [];
 }
 
@@ -175,9 +188,35 @@ export function verdictWords(v: Verdict): string {
   return [verdictMain(v), ...verdictTags(v)].join(' · ');
 }
 
+/** A repo's chip words: Has a problem, Not ready, Ready. */
+export const REPO_CHIP: Record<RepoReadiness['state'], string> = { problem: 'Has a problem', not_ready: 'Not ready', ready: 'Ready' };
+
+/** A repo's state in words, the same everywhere: "Ready", "Not ready: <why>", "Has a problem". */
+export function repoWords(r: RepoReadiness): string {
+  return r.state === 'not_ready' ? `${REPO_CHIP.not_ready}: ${missingClause(r.missing ?? '')}` : REPO_CHIP[r.state];
+}
+
+/**
+ * A held release in its time words (decision 0034): the row's chip, and the Schedule lede's
+ * sentence for one or several ("One release was skipped.", "3 releases are not ready yet.").
+ */
+export const SKIP_WORD: Record<Bites, { chip: string; one: string; many: string }> = {
+  now: { chip: 'was skipped', one: 'was skipped', many: 'were skipped' },
+  soon: { chip: 'will be skipped', one: 'will be skipped as it stands', many: 'will be skipped as it stands' },
+  later: { chip: NOT_READY_YET, one: `is ${NOT_READY_YET}`, many: `are ${NOT_READY_YET}` },
+};
+
+/** A release row's chip word: "late", or its held time word. */
+export const markWord = (m: ReleaseMark) => (m.late ? 'late' : SKIP_WORD[m.bites].chip);
+
+/** The Schedule lede's count of held releases at one time: "One release was skipped.", "2 releases will be skipped as it stands." */
+export function heldSentence(b: Bites, n: number): string {
+  return n === 1 ? `One release ${SKIP_WORD[b].one}.` : `${n} releases ${SKIP_WORD[b].many}.`;
+}
+
 /** Where a problem sits, as the problem card's bold first word. */
 export const PROBLEM_AREA: Record<string, string> = {
-  K1: 'Org', K2: 'Setup', K3: 'Instructors', K4: 'Schedule', K5: 'Roster', K6: 'Site', K7: 'Archive',
+  K1: 'Org', K2: 'Setup', K3: 'Instructors', K4: 'Schedule', K5: 'Roster', K6: 'Site',
   C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Handout materials', C5: 'Template', C6: 'Public website',
 };
 

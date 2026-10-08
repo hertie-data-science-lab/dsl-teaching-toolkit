@@ -13,7 +13,7 @@ import { useDraft } from '../wizards/drafts';
 import { contentTerms, materialsArgs, materialsRepo } from '../wizards/model';
 import { allOk, checkFree, checkRepoExists, useLive, type Check } from '../wizards/verify';
 import { Checks, Verified } from '../wizards/Wizard';
-import { courseView } from './Course';
+import { courseOf } from './Course';
 import { courseScope } from './common';
 import type { CourseProps } from './types';
 
@@ -21,7 +21,7 @@ export function NewMaterialsScreen(p: CourseProps) {
   const { course, now } = p;
   const env = useEnv();
   const terms = contentTerms(course.cohorts.map((c) => c.term), now);
-  const repos = (courseView(p).course?.materials ?? []).map((m) => m.repo);
+  const repos = (courseOf(p)?.materials ?? []).map((m) => m.repo);
   const [d, set, clear] = useDraft<{ v: Values; submitted?: string }>(`new-materials:${course.org}`, () => ({ v: { term: terms[0] } }));
   const tiers = newMaterials(terms.includes(String(d.v.term)) ? terms : [String(d.v.term), ...terms], repos);
   const v = effective(tiers, d.v);

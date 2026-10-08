@@ -2,7 +2,7 @@
 
 import type { ComponentChildren } from 'preact';
 import { encPath } from '../github/client';
-import { PROBLEM_AREA, md, opLabel, ago } from '../model/format';
+import { PROBLEM_AREA, ago, markWord, md, opLabel, plural } from '../model/format';
 import type { ReleaseMark } from '../model/readiness';
 import type { Operation, Outcome, Problem } from '../model/types';
 import { Alert, Check, Eye, Ext, Fail, Skip } from './icons';
@@ -56,7 +56,7 @@ export function Crumbs({ items }: { items: { t: string; href?: string }[] }) {
 /** A problem count (now or soon, `problemCount`): Home's cards and the course's Semesters rows. */
 export function Probs({ n }: { n: number }) {
   if (!n) return <span class="probs none">No problems</span>;
-  return <span class="probs"><span class="count-badge">{n}</span>{n === 1 ? '1 problem' : `${n} problems`}</span>;
+  return <span class="probs"><span class="count-badge">{n}</span>{plural(n, 'problem')}</span>;
 }
 
 /** A disabled button for an action another work package builds, with the reason on hover. */
@@ -133,7 +133,7 @@ export function ReleaseMarks({ m, entry }: { m: ReleaseMark; entry: string }) {
   return (
     <>
       {red ? <span class="ex" aria-hidden="true">!</span> : null}
-      <span class={`st-chip ${red ? 'skip' : 'later'}`}>{m.word}</span>
+      <span class={`st-chip ${red ? 'skip' : 'later'}`}>{markWord(m)}</span>
       {m.late ? null : <a class={red ? 'btn small' : 'textlink'} href={href}>Fix</a>}
     </>
   );

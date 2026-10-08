@@ -288,6 +288,9 @@ describe('the Dashboard and the horizon (decision 0034)', () => {
   it('neither counts nor lists a later problem: it waits in Coming up, by week, with when it becomes a problem', () => {
     const h = mount();
     expect(tabCount(h, 'Coming up')).toBe('1');
+    // Only the current tab's body renders: Coming up's once picked.
+    expect(h.querySelector('#dash-panel-coming')!.textContent).toBe('');
+    click(h.querySelector<HTMLButtonElement>('[role="tab"][data-key="coming"]')!);
     const coming = h.querySelector('#dash-panel-coming')!;
     expect(coming.querySelector('.week-h')!.textContent).toBe('Week 5 from 5 Oct · problems from 1 Oct');
     expect(coming.querySelector('li')!.textContent).toContain('Session 5 cites folder lectures/05_trees');
@@ -295,10 +298,25 @@ describe('the Dashboard and the horizon (decision 0034)', () => {
     expect(coming.textContent).toContain('Each item becomes a problem 7 days before the date it is needed by');
   });
 
+  it('lists a template brief a later hand-out cites in Coming up: the engine’s later problem, no to-do of its own', () => {
+    const brief = {
+      id: 'template:assignment-3-f2026:brief', scope: 'course' as const, stage: 'C5', kind: 'BRIEF', release: 'assignment-3', when: '2026-10-20T10:00:00+02:00',
+      text: 'The brief (README.md) is not written yet.', stops: 'The hand-out on Tue 20 Oct would give students a placeholder brief.',
+      fix: { repo: `${COURSE_ORG}/assignment-3-f2026`, path: '', line: null, screen: 'template', entry: 'assignment-3-f2026' },
+    };
+    const h = mount({ ...STATUS, problems: [...STATUS.problems!, brief] });
+    expect(tabCount(h, 'Coming up')).toBe('2');
+    click(h.querySelector<HTMLButtonElement>('[role="tab"][data-key="coming"]')!);
+    const rows = [...h.querySelectorAll('#dash-panel-coming li')];
+    expect(rows.map((li) => li.querySelector('a')!.getAttribute('href'))).toEqual(['#schedule-s5', '#template-assignment-3-f2026']);
+    expect(h.querySelector('#dash-panel-coming')!.textContent).toContain('Week 7 from 19 Oct · problems from 13 Oct');
+  });
+
   it('says the term’s health over the horizon, with what is coming up, and prints the engine’s days', () => {
     const h = mount();
     expect(h.querySelector('.verdict')!.textContent).toBe('!Needs fixing: 1 problem in the next 7 days1 coming up');
-    const fine = mount({ ...STATUS, horizon: { days: 14 }, problems: [{ ...STATUS.problems![0], when: '2026-11-08T10:00:00+01:00' }], semester: { ...STATUS.semester!, stages: { ...STATUS.semester!.stages, K4: 'done', K5: 'done' } } });
+    // The verdict is the engine's (decision 0034, simplify): the console words it.
+    const fine = mount({ ...STATUS, horizon: { days: 14 }, problems: [{ ...STATUS.problems![0], when: '2026-11-08T10:00:00+01:00' }], semester: { ...STATUS.semester!, stages: { ...STATUS.semester!.stages, K4: 'done', K5: 'done' }, verdict: { state: 'ready', problems: 0, missing: null, suggestions: 0, coming_up: 1 } } });
     expect(fine.querySelector('.verdict')!.className).toBe('verdict ok');
     expect(fine.querySelector('.verdict')!.textContent).toBe('On track: nothing to fix in the next 14 days1 coming up');
     // One-time setup is not in the verdict or the lede: the tick on the Setup tab says it.
@@ -313,10 +331,19 @@ describe('the Dashboard and the horizon (decision 0034)', () => {
   });
 
   it('names a semester that is not set up by its first missing step', () => {
-    const s: Status = { ...STATUS, problems: [], semester: { ...STATUS.semester!, stages: { ...STATUS.semester!.stages, K3: 'todo', K4: 'done', K5: 'done' }, stage_why: { K3: 'No instructor is declared in instructors.yml yet.' } } };
+    const why = 'No instructor is declared in instructors.yml yet.';
+    const s: Status = { ...STATUS, problems: [], semester: { ...STATUS.semester!, stages: { ...STATUS.semester!.stages, K3: 'todo', K4: 'done', K5: 'done' }, stage_why: { K3: why }, verdict: { state: 'not_ready', problems: 0, missing: why, suggestions: 0, coming_up: 0 } } };
     const h = mount(s);
     expect(h.querySelector('.verdict')!.textContent).toBe('Not set up: no instructor is declared in instructors.yml yet');
     expect(tabCount(h, 'Setup')).toBe('5 of 6');
+  });
+
+  it('draws no verdict line for a status that carries none (the previous engine’s)', () => {
+    const { verdict: _v, ...semester } = STATUS.semester!;
+    const h = mount({ ...STATUS, semester });
+    expect(h.querySelector('.verdict')).toBeNull();
+    // The rest of the page is there.
+    expect(selectedTab(h)).toBe('Problems');
   });
 });
 

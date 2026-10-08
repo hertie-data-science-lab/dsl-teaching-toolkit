@@ -10,8 +10,8 @@ import { Check } from './icons';
 export interface DashTab {
   key: string;
   label: string;
-  /** A number (red with `bad`), or `done` for the green tick. */
-  count: number | string | 'done';
+  /** A number (red with `bad`), a short text, or `done` for the green tick. */
+  count: number | string;
   bad?: boolean;
   /** After the spacer, at the right. */
   right?: boolean;
@@ -41,9 +41,10 @@ export function DashboardTabs({ tabs, selected, onSelect }: { tabs: DashTab[]; s
         <span class="spacer" aria-hidden="true" />
         {tabs.filter((t) => t.right).map(tab)}
       </div>
+      {/* Only the current tab's body renders; the others stay as empty panels for `aria-controls`. */}
       {tabs.map((t) => (
         <div class={`ptab ptab-${t.key}`} role="tabpanel" id={`dash-panel-${t.key}`} aria-labelledby={`dash-tab-${t.key}`} hidden={t.key !== cur}>
-          {t.body}
+          {t.key === cur ? t.body : null}
         </div>
       ))}
     </section>

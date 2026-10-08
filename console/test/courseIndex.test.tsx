@@ -179,7 +179,7 @@ describe('materials settings file tree', () => {
     expect((out.match(/<li class="done">/g) ?? []).length).toBe(2);
     // The syllabus and its weekly plan are one row (decision 0034).
     expect(out).toContain('<li class="open suggested"><span class="s-mark" aria-hidden="true"></span><span class="s-name">Syllabus<span class="s-opt">optional</span>');
-    expect(out).toContain('<span class="s-why">The weekly plan is not in SYLLABUS.md yet.</span>');
+    expect(out).toContain('<span class="s-why">The weekly plan (written from the schedule) is not in SYLLABUS.md yet.</span>');
     expect(out).not.toContain('required');
   });
   it('saves a withhold list that withholds nothing with the reviewed mark, Save enabled', () => {
@@ -356,8 +356,8 @@ describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () 
 
   it('gives every line a ?, and folds the kinds found under the content-kind line', () => {
     const out = render(<MaterialsChecklist checks={checks} />);
-    // The syllabus and its weekly plan share one row and one ?.
-    expect(out.match(/aria-label="About this check"/g)).toHaveLength(checks.length - 2);
+    // The syllabus (one check with its weekly plan) has its own ?.
+    expect(out.match(/aria-label="About this check"/g)).toHaveLength(checks.length - 1);
     expect(out.match(/aria-label="About the syllabus"/g)).toHaveLength(1);
     expect(out).toContain('A repo with nothing of a content kind has nothing to release.');
     expect(out).toContain('Saving the list once, even empty, marks it reviewed.');

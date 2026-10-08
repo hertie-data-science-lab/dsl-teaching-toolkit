@@ -9,6 +9,7 @@ import schema from '../../schemas/status.schema.json';
 import type { GitHubClient, Tree } from '../github/client';
 import { assignmentIdent, fmtDay, releaseIdent } from './format';
 import { DEFAULT_TIMEZONE } from './policy';
+import { normalise } from './readiness';
 import { sameHandle } from './people';
 import { instant } from './student';
 import type { Operation, Status } from './types';
@@ -70,7 +71,8 @@ export async function loadStatus(client: GitHubClient, owner: string, repo: stri
     }
     const errors = validateStatus(data);
     if (errors.length) return { kind: 'invalid', errors };
-    const status = data as Status;
+    // A file the previous engine wrote gets its readiness fields here, once (contract C).
+    const status = normalise(data as Status, Date.now());
     const stale = tree ? staleInputs(status.inputs, tree) : [];
     return { kind: 'ready', status, sha: file.sha, stale };
   } catch (e) {

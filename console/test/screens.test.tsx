@@ -15,7 +15,9 @@ import type { Status } from '../src/model/types';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { CohortScreen } from '../src/screens/Cohort';
 import { CourseHeaderActions, CourseScreen, SETTLING_COLUMNS, TemplateScreen, courseItems, overviewHeights, semesterChip, splitColumns, stepLink } from '../src/screens/Course';
-import { ItemRow, type SetupItem } from '../src/ui/SetupPanel';
+import { ItemRow, readinessTabs, type SetupItem } from '../src/ui/SetupPanel';
+import { DashboardTabs } from '../src/ui/DashboardTabs';
+import { tier } from '../src/model/readiness';
 import { HomeScreen, ReadonlyScreen, SignInScreen } from '../src/screens/Home';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
@@ -152,7 +154,8 @@ describe('S4 cohort overview', () => {
     // A status with no horizon reads the next 7 days (contract C, amended): s5 (8 Oct) is coming up, not counted.
     expect(out).not.toMatch(/aria-label="Week 5, from 5 Oct[^"]*; 1 problem"/);
     expect(out).toContain('<div class="ptab ptab-coming" role="tabpanel" id="dash-panel-coming" aria-labelledby="dash-tab-coming" hidden>');
-    expect(t).toContain('Session 5 cites folder lectures/05_trees');
+    // Only the current tab's body renders: s5 waits in Coming up, unrendered until picked.
+    expect(t).not.toContain('Session 5 cites folder lectures/05_trees');
     expect(out).toContain('href="#template-assignment-3-f2026"');
     expect(t).toContain('(course)');
     expect(t).toContain('Assignment 2: Regression');
@@ -381,8 +384,6 @@ describe('S2 course and S17 template', () => {
     // C1-C3 are done; the template's problem is what holds the course back.
     expect(t).toContain('Needs fixing: 1 problem');
     expect(t).not.toMatch(/\b0 (setup steps|problems)/);
-    expect(t).toContain('One-time setup: what the course needs before a semester can start. Done stays done.');
-    expect(t).toContain('If you would rather skip one, click the circle before it to set it aside.');
     expect(t).toContain('Students get only what a semester releases or hands out');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).toContain('assignment-3-f2026');
@@ -408,7 +409,11 @@ describe('S2 course and S17 template', () => {
     templates: [],
     ready: false,
   } as typeof base;
-  const tab = (out: string, key: string) => out.slice(out.indexOf(`id="dash-panel-${key}"`), out.indexOf('</div>', out.indexOf(`id="dash-panel-${key}"`)));
+  /** The course panel with one tab picked, as the Dashboard builds it: only that tab's body renders. */
+  const panel = (c: typeof base, key: string, write = true) => {
+    const items = courseItems(c, tier({ ...STATUS, course: c }, NOW, 'course'), null, NOW);
+    return html(<DashboardTabs selected={key} tabs={readinessTabs({ items, scope: 'course', onCircle: write ? () => {} : undefined })} />);
+  };
   it('puts the verdict under the page note: a red ! while a problem stands, a tick once ready', () => {
     const out = html(<CourseScreen {...cp} />);
     expect(out).toContain('<p class="verdict bad"><span class="ex" aria-hidden="true">!</span><button type="button" class="verdict-btn" title="Show the problems">Needs fixing: 1 problem</button>');
@@ -417,11 +422,14 @@ describe('S2 course and S17 template', () => {
     // Above the read-only banner too: the verdict sits directly under the note.
     const ro = html(<CourseScreen {...cp} course={{ ...course, write: false }} />);
     expect(ro.indexOf('class="verdict')).toBeLessThan(ro.indexOf('class="ro-banner"'));
-    const fine: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...base, stages: { ...base.stages, C5: 'done' } } }, sha: 's', stale: [] };
+    const fine: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...base, stages: { ...base.stages, C5: 'done' }, verdict: { state: 'ready', problems: 0, missing: null, suggestions: 2 } } }, sha: 's', stale: [] };
     const ok = html(<CourseScreen {...cp} loaded={fine} />);
     expect(ok).toContain('<p class="verdict ok"><svg');
     // C6 and the weekly plan are open suggestions: the only tag.
     expect(text(<CourseScreen {...cp} loaded={fine} />)).toContain('Ready for a new semester 2 suggestions');
+    // A status with no verdict (the previous engine's, one tick at most): no verdict line.
+    const { verdict: _v, ...noVerdict } = base;
+    expect(html(<CourseScreen {...cp} loaded={{ ...fine, status: { ...STATUS, course: noVerdict } }} />)).not.toContain('class="verdict');
   });
   it('opens on the Problems tab, then Suggestions, Set aside and Setup', () => {
     const out = html(<CourseScreen {...cp} />);
@@ -431,13 +439,16 @@ describe('S2 course and S17 template', () => {
     expect(out).not.toContain('Coming up');
   });
   it('lists suggestions on their tab and a needed to-do only on its repo’s row', () => {
-    const out = html(<CourseScreen {...cp} />);
-    const sug = tab(out, 'suggestions');
+    const sug = panel(base, 'suggestions');
     // A suggestion's circle is a button that asks whether to set it aside (decision 0032); the syllabus and its plan are one row.
     expect(sug).toContain('<li class="open suggested"><button class="s-mark s-circle" type="button" title="Set aside…" aria-label="Set aside Syllabus…" aria-haspopup="dialog"></button>');
     expect(sug).toContain('Syllabus<span class="s-need slug">course-materials-f2026</span><span class="s-opt">optional</span>');
     expect(sug).toContain('One file, SYLLABUS.md, two parts');
-    expect(sug).toContain('<span class="s-why">The weekly plan is not in SYLLABUS.md yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a></span>');
+    expect(sug).toContain('<span class="s-why">The weekly plan (written from the schedule) is not in SYLLABUS.md yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a></span>');
+    expect(sug).toContain('If you would rather skip one, click the circle before it to set it aside.');
+    expect(panel(base, 'setup')).toContain('One-time setup: what the course needs before a semester can start. Done stays done.');
+    // Only the picked tab's body renders.
+    expect(sug).not.toContain('One-time setup');
     const tpl: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...base, templates: [{ repo: 'a', slug: 'a', state: 'todo' }], todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.', optional: false }] } }, sha: 's', stale: [] };
     const t = html(<CourseScreen {...cp} loaded={tpl} />);
     expect(t).not.toContain('Brief written');
@@ -582,8 +593,8 @@ describe('S2 course and S17 template', () => {
     const out = rowsOf(courseItems(base, [{ p: STATUS.problems![1], b: 'now' }], []));
     expect(out).toContain('<li class="problem"><span class="s-mark problem" aria-hidden="true">!</span><span class="s-name">Assignment template<span class="sr">: Has a problem</span>');
     expect(out).toContain('<span class="s-fix"><a class="btn small" href="#template-assignment-3-f2026">Fix</a></span>');
-    // A problem beyond the horizon is not red: the step reads as open (contract B).
-    expect(rowsOf(courseItems(base, [{ p: STATUS.problems![1], b: 'later' }], []))).not.toContain('class="problem"');
+    // A problem beyond the horizon flags no stage (the engine's `_stage_states`): the step is open, not red.
+    expect(rowsOf(courseItems({ ...base, stages: { ...base.stages, C5: 'todo' } }, [{ p: STATUS.problems![1], b: 'later' }], []))).not.toContain('class="problem"');
     expect(stepLink('C6', withWhy)).toEqual({ href: '#website', label: 'Set up the public website' });
     expect(stepLink('C4', { ...withWhy, materials: [{ repo: 'm', state: 'todo' }] }).label).toBe('Open handout materials');
     expect(stepLink('C5', { ...withWhy, templates: [{ repo: 't', slug: 't', state: 'todo' }] }).label).toBe('Open templates');
@@ -595,7 +606,7 @@ describe('S2 course and S17 template', () => {
     expect(text(<>{semesterChip({ ...sem, live: false, ended: false })}</>).trim()).toBe('Archived');
   });
   it('heads the template settings with its state and a needed checklist: never Ready while the brief is not written', () => {
-    const todo = { id: 'template:assignment-3-f2026:brief', kind: 'template' as const, repo: 'assignment-3-f2026', text: 'The brief (README.md) is not written yet.', need: 'needed' as const };
+    const todo = { id: 'template:assignment-3-f2026:brief', kind: 'template' as const, check: 'brief', repo: 'assignment-3-f2026', text: 'The brief (README.md) is not written yet.', need: 'needed' as const };
     const st: Loaded = { kind: 'ready', sha: 's', stale: [], status: { ...STATUS, problems: [], course: { ...STATUS.course!, templates: [{ repo: 'assignment-3-f2026', slug: 'assignment-3-f2026', state: 'todo' }], todo: [todo] } } };
     const out = html(<TemplateScreen {...cp} loaded={st} entry="assignment-3-f2026" />);
     expect(out).toContain('<span class="chip notready">Not ready</span>');
@@ -687,7 +698,7 @@ describe('explicit numbers (decision 0020)', () => {
     status: {
       ...STATUS,
       releases: [...(STATUS.releases ?? []), { id: 'guest', when: '2026-09-25T10:00:00+02:00', kind: 'lecture', number: null, title: '', state: 'will_be_skipped', source: { repo: 'course-materials-f2026', path: 'lectures/03_regularisation' }, dest: { repo: 'materials', path: 'lectures/03_regularisation' }, show_on_site: true, tbc: false }],
-      problems: [...(STATUS.problems ?? []), { id: 'number:lecture:guest', scope: 'semester', stage: 'K4', text: 'Give guest a number.', stops: 'The release on Fri 25 Sep will be skipped.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', line: 14, screen: 'schedule', entry: 'guest' }, when: '2026-09-25T10:00:00+02:00' }],
+      problems: [...(STATUS.problems ?? []), { id: 'number:lecture:guest', scope: 'semester', stage: 'K4', kind: 'NOT_NUMBERED', release: 'guest', text: 'Give guest a number.', stops: 'The release on Fri 25 Sep will be skipped.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', line: 14, screen: 'schedule', entry: 'guest' }, when: '2026-09-25T10:00:00+02:00' }],
     },
   };
   const guestFiles = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: GUEST }, {}, TREE);

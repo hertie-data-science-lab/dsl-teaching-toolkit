@@ -157,38 +157,44 @@ how old that file's facts are ("Updated 3 h ago"). The footer names the course a
 semester. On a phone the preview's top-bar link reads "Preview".
 
 Both **Dashboards**, the course's and each semester's, share one model of readiness (decision
-0034, `model/readiness.ts`; every screen reads `need`, `bites`, `horizon` and the verdict
-through it, never the raw field). Every item has a need (needed or suggested: on a status the
-previous engine wrote, from `blocks`, a to-do's `optional` or `stage_optional`), a state (done,
-open, has a problem, waiting) and, for a problem with a date, a time: `now` (passed or
-undated), `soon` (within the horizon, `horizon.days`, 7 by default, from the console's
-clock) or `later`. The engine's `problems[].bites` wins when present. Only now and soon are red
-and counted (`problemCount`): the nav, Home's cards, the course's Semesters rows and the
-Dashboards all show that one number. Rows mark their state: a tick, a red `!` with Fix, a
-hollow circle (needed), a dotted circle and "optional" (a suggestion), a dash and "Waiting for
-<step>". No colour bar and no legend.
+0034, `model/readiness.ts`). The engine writes every field; `normalise` runs once, at load
+(`loadStatus`), and fills `bites`, `need` and `stage_need` on a status the previous engine
+wrote (from `when` and the horizon, `blocks`, a to-do's `optional`, `stage_optional`); every
+helper and screen after it trusts the fields. Every item has a need (needed or suggested), a
+state (done, open, has a problem, waiting) and, for a problem, a time: `now` (passed or
+undated), `soon` (within `horizon.days`, 7 by default) or `later`. A screen tiers the problems
+once per render (`tier`, memoised on the status and the clock) and hands the list to every
+consumer: the strip's counts, the panel's rows, the Problems and Coming up tabs and the release
+marks. Only now and soon are red and counted (`problemCount`): the nav, Home's cards, the
+course's Semesters rows and the Dashboards all show that one number. Screens join problems on
+their structured fields, never on `id`: `kind` (the code) and `release` (the schedule entry a
+problem holds back). Rows mark their state: a tick, a red `!` with Fix, a hollow circle
+(needed), a dotted circle and "optional" (a suggestion), a dash and the engine's "Waiting for
+<step>". No colour bar and no legend. The words (verdicts, chips, time words) live in
+`model/format.ts`.
 
-Each Dashboard opens with its **verdict line**, computed in the console from those fields. The
-course's: "Needs fixing: n problems", "Not ready: <the first needed setup step open>" or "Ready
+Each Dashboard opens with its **verdict line**: the engine's `verdict` (state, problem count,
+the first missing needed item, coming up), worded by the console, with the suggestions tag
+counted from the rows and the set-aside list as last read. A status with no `verdict` (the
+previous engine's, one tick at most) shows no verdict line. The course's: "Needs fixing: n problems", "Not ready: <the first needed setup step open>" or "Ready
 for a new semester", tagged "· n suggestions". The semester's is the term's health over the
 horizon: "Needs fixing: n problems in the next 7 days", "Not set up: <the first needed step
 open>" or "On track: nothing to fix in the next 7 days", tagged "· n coming up". Its words are
 a button to the Problems tab; there is no separate problem badge in the page head.
 
 Under it (on a semester, under the week strip) sits one **tabbed panel** (`ui/DashboardTabs`,
-`id="dash-problems"`), Problems first and selected: Problems (a red count, or a green tick when
+`id="dash-problems"`; only the current tab's body renders), Problems first and selected: Problems (a red count, or a green tick when
 none), on a semester Coming up, then Suggestions, Set aside, and Setup at the right (a green
 tick once every needed step is done, else "n of m"). On the course, Problems lists the course's
 own problems now or soon (a settings file that does not parse, a template's problem); a
 semester's problems are on its own Dashboard, counted on its Semesters row. On a semester,
 Problems groups the problems now or soon as Overdue, Next 7 days and Any time, whatever weeks
-the strip picks; Coming up lists the later ones by week, with the day each becomes a problem,
-and the needed to-dos of the templates this semester hands out beyond the horizon. Suggestions
-lists the suggested setup steps and to-dos; the syllabus and its weekly plan, two engine
-checks, are one row "Syllabus". For a viewer with write access the circle before a suggestion
-is a button (decisions 0032 and 0034, `useSetAside`): it asks, then writes the id (both ids for
-the Syllabus row) into the course's `dsl-course.yml` `set_aside:` through the Course details
-save path, and the line moves to Set aside, with Bring back. A needed item has no circle. A
+the strip picks; Coming up lists the later ones by week (a template's brief or starter a later
+hand-out cites among them, as the engine writes it), with the day each becomes a problem.
+Suggestions lists the suggested setup steps and to-dos; the syllabus and its weekly plan are one
+engine check, "Syllabus". For a viewer with write access the circle before a suggestion is a
+button (decisions 0032 and 0034, `useSetAside`): it asks, then writes the id into the course's
+`dsl-course.yml` `set_aside:` through the Course details save path, and the line moves to Set aside, with Bring back. A needed item has no circle. A
 needed to-do is never listed in the panel: it shows once, at its point of need, the repo's row
 ("Not ready" and the first missing needed item) and its settings checklist, split into Needed
 and Suggested.

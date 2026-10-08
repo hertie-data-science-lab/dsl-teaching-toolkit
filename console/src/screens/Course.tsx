@@ -1,16 +1,16 @@
 // S2 Course overview (a status board, decision 0025) and S17 Template settings (read).
 
 import { Fragment, type ComponentChildren } from 'preact';
-import { useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
-import { KIND_LABEL, ago, dayKey, fmtDay, fmtShort, opLabel, templateName } from '../model/format';
+import { KIND_LABEL, ago, fmtDay, fmtShort, opLabel, templateName } from '../model/format';
 import {
-  SYLLABUS_HINT, SYLLABUS_LABEL, bitesOf, displayChecks, horizonDays, displayTodos, materialsReadiness, needOf, problemCount, stepAside, stepNeed, stepState, templateReadiness, todoAside, verdictOf,
-  type Verdict as VerdictT,
+  SYLLABUS_HINT, SYLLABUS_LABEL, materialsReadiness, problemCount, problemFromDay, standing, stepItems, suggestionsCount, templateReadiness, tier, todoAside, verdictOf,
+  type Tiered, type Verdict as VerdictT,
 } from '../model/readiness';
 import { checkNow, derive, publishWebsite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
@@ -20,13 +20,13 @@ import { DEFAULT_FORMATS, DEFAULT_TIMEZONE, POLICY } from '../model/policy';
 import { formatsList, fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import { pick, type Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
-import type { Bites, CourseStatus, MaterialsCheck, Operation, Outcome, Problem, SemesterStatus, Status, Todo } from '../model/types';
+import type { CourseStatus, MaterialsCheck, Operation, Outcome, Problem, SemesterStatus, Status, Todo } from '../model/types';
 import { nextEvent, nextEventWords, recentActivity, whoWord, type Activity } from '../model/status';
 import type { CohortRef } from '../model/discovery';
 import { outcomePath } from '../ops/adapter';
 import { validator } from '../model/validate';
 import { CheckLine, Lives, Loading, OpMark, ProblemCards, Probs, Soon, fixHref, ghUrl, runUrl } from '../ui/bits';
-import { ItemRow, RepoChip, RepoWhy, Verdict, readinessTabs, type Link, type SetupItem } from '../ui/SetupPanel';
+import { ItemRow, RepoChip, RepoWhy, TemplateSub, Verdict, readinessTabs, type Link, type SetupItem } from '../ui/SetupPanel';
 import { DASH_PANEL, DashboardTabs, showTab, type DashTab } from '../ui/DashboardTabs';
 import { Hint } from '../ui/Hint';
 import { Check, Ext } from '../ui/icons';
@@ -35,20 +35,38 @@ import { formatError } from '../wizards/model';
 import { detailsOf, newestScope, websiteUrl } from './CourseEdit';
 import type { CourseProps } from './types';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from '../model/names';
-import { COURSE_FILE, asideList, useSetAside } from './SetAside';
+import { useSetAside } from './SetAside';
 import { REFRESH_HINT, courseScope, todayOf, tzOf, yearOf } from './common';
 import { weekWords } from '../model/week';
 
-/** The course block and course-scoped problems, each with when it bites: from the course's own status, else a semester's. */
-export function courseView(p: Pick<CourseProps, 'loaded' | 'cohortStates'> & { now?: number }): { course: CourseStatus | null; problems: Problem[]; tiered: Tiered[]; computed: boolean } {
-  const from = (st: Status) => {
-    const tiered = (st.problems ?? []).filter((x) => x.scope === 'course').map((x) => ({ p: x, b: bitesOf(x, st.horizon, p.now ?? Date.now()) }));
-    return { course: st.course!, problems: tiered.filter((x) => x.b !== 'later').map((x) => x.p), tiered, computed: true };
-  };
-  if (p.loaded.kind === 'ready' && p.loaded.status.course) return from(p.loaded.status);
-  for (const l of Object.values(p.cohortStates)) if (l.kind === 'ready' && l.status.course) return from(l.status);
-  return { course: null, problems: [], tiered: [], computed: false };
+/** The status that carries the course block: the course's own, else a semester's. */
+function courseStatus(p: Pick<CourseProps, 'loaded' | 'cohortStates'>): Status | null {
+  if (p.loaded.kind === 'ready' && p.loaded.status.course) return p.loaded.status;
+  for (const l of Object.values(p.cohortStates)) if (l.kind === 'ready' && l.status.course) return l.status;
+  return null;
 }
+
+/** The course block, for a caller that needs no problems; null until a status carries it. */
+export const courseOf = (p: Pick<CourseProps, 'loaded' | 'cohortStates'>): CourseStatus | null => courseStatus(p)?.course ?? null;
+
+/** The course block and its course-scope problems with when each bites (`tiered`), and those now or soon (`problems`). */
+export interface CourseView {
+  course: CourseStatus | null;
+  tiered: Tiered[];
+  problems: Problem[];
+}
+
+export function courseView(p: Pick<CourseProps, 'loaded' | 'cohortStates'>, now: number): CourseView {
+  const st = courseStatus(p);
+  const tiered = tier(st ?? undefined, now, 'course');
+  return { course: st?.course ?? null, tiered, problems: standing(tiered) };
+}
+
+/** `courseView` once per render. */
+export const useCourseView = (p: Pick<CourseProps, 'loaded' | 'cohortStates' | 'now'>): CourseView => useMemo(() => courseView(p, p.now), [p.loaded, p.cohortStates, p.now]);
+
+/** A template's problems in a course view. */
+const templateProblems = (v: CourseView, repo: string) => v.tiered.filter((x) => x.p.fix?.entry === repo);
 
 /** A semester's problem count for its row: those now or soon. */
 function problemsOf(p: CourseProps, cohortOrg: string): number | null {
@@ -74,9 +92,6 @@ export const SETUP_STEPS: { id: string; name: string }[] = [
   { id: 'C6', name: 'Public website' },
 ];
 
-/** The step each one waits for (the engine's `PREREQUISITES`). */
-const WAITS_FOR: Record<string, string> = { C2: 'C1', C3: 'C2', C4: 'C2', C5: 'C2', C6: 'C4' };
-
 /** Where an open setup step is done: one link. */
 export function stepLink(id: string, c: CourseStatus): Link {
   const org = c.org;
@@ -100,43 +115,13 @@ const STEP_HINT: Record<string, string> = {
   C6: 'Optional: an open version of your materials for anyone on the internet.',
 };
 
-const stepName = (id: string) => SETUP_STEPS.find((s) => s.id === id)?.name ?? id;
-
-/** A course-scope problem with when it bites. */
-export type Tiered = { p: Problem; b: Bites };
-
-/** The next hand-out of a template in a live semester: when, the semester, and when it becomes a problem there. */
-export interface Handout {
-  when: string;
-  tz: string;
-  term: string;
-  /** The day it becomes a problem (yyyy-mm-dd): the horizon's days before the hand-out. */
-  from: string;
-}
-
-/** Each template's earliest hand-out still to come, across the live semesters, as their statuses carry it. */
-export function nextHandouts(live: { ref: CohortRef; status: Status }[], now: number): Map<string, Handout> {
-  const out = new Map<string, Handout>();
-  for (const { ref, status } of live) {
-    const tz = tzOf(status);
-    for (const a of status.assignments ?? []) {
-      if (!a.handout || Date.parse(a.handout) <= now) continue;
-      const had = out.get(a.template);
-      if (had && Date.parse(had.when) <= Date.parse(a.handout)) continue;
-      const from = dayKey(new Date(Date.parse(a.handout) - horizonDays(status.horizon) * 864e5).toISOString(), tz);
-      out.set(a.template, { when: a.handout, tz, term: ref.termLabel, from });
-    }
-  }
-  return out;
-}
-
 /** Where a to-do is done: the repo's settings page. */
 export function todoHref(t: Todo): string {
   if (t.kind === 'materials' || t.kind === 'template') return `#${t.kind}-${t.repo}`;
   return `#${t.screen ?? 'details'}${t.entry ? `-${t.entry}` : ''}`;
 }
 
-/** A template to-do's line and `?`, by the last part of its id (`template:<repo>:brief`). */
+/** A template to-do's line and `?`, by its check. */
 const TEMPLATE_TODO: Record<string, { label: string; hint: string }> = {
   brief: { label: 'Brief written', hint: 'The README.md students get as their instructions. Still the template text until you write it.' },
   starter: { label: 'Student version derived', hint: 'Derive builds the starter students get by blanking the marked answers. Run it after every change to the solution.' },
@@ -144,48 +129,41 @@ const TEMPLATE_TODO: Record<string, { label: string; hint: string }> = {
 
 /** A to-do's line and `?`: a materials one reads as the same check on its settings checklist. */
 export function todoLine(t: Todo, c: CourseStatus): { label: string; hint?: string } {
-  const id = t.id.split(':').pop() ?? '';
-  if (t.kind === 'template') return TEMPLATE_TODO[id] ?? { label: t.text };
-  if (id === 'syllabus' || id === 'sessions') return { label: SYLLABUS_LABEL, hint: SYLLABUS_HINT };
-  const check = c.materials?.find((m) => m.repo === t.repo)?.checks?.find((k) => k.id === id);
-  return { label: check?.label ?? t.text, hint: CHECK_HINT[id] };
+  const check = t.check ?? '';
+  if (t.kind === 'template') return TEMPLATE_TODO[check] ?? { label: t.text };
+  if (check === 'syllabus') return { label: SYLLABUS_LABEL, hint: SYLLABUS_HINT };
+  const row = c.materials?.find((m) => m.repo === t.repo)?.checks?.find((k) => k.id === check);
+  return { label: row?.label ?? t.text, hint: CHECK_HINT[check] };
 }
 
-/** "Hands out Wed 4 Nov; a problem from 27 Oct.": a template to-do's hand-out, when a live semester cites the template. */
-function handoutWords(h: Handout | undefined, now: number): string | undefined {
-  if (!h) return undefined;
-  return `Hands out ${fmtDay(h.when, h.tz, yearOf(now, h.tz))}${h.from > todayOf(now, h.tz) ? `; a problem from ${fmtShort(h.from)}` : ''}.`;
+/**
+ * "Hands out Wed 4 Nov; a problem from 28 Oct.": a template to-do's hand-out, from its problem
+ * (`BRIEF` / `STARTER`) when a dated hand-out cites the template; none while it is a problem now.
+ */
+export function handoutWords(tiered: Tiered[], repo: string, check: string, now: number): string | undefined {
+  const x = tiered.find((t) => t.p.fix?.entry === repo && t.p.kind === check.toUpperCase() && t.b !== 'now' && t.p.when);
+  if (!x) return undefined;
+  const tz = DEFAULT_TIMEZONE, when = x.p.when!;
+  const from = problemFromDay(when, undefined, tz);
+  return `Hands out ${fmtDay(when, tz, yearOf(now, tz))}${from > todayOf(now, tz) ? `; a problem from ${fmtShort(from)}` : ''}.`;
 }
+
+/** Where an open course step is done, and what it is (its `?`). */
+const STEP_OPTS = (c: CourseStatus) => ({ hint: STEP_HINT, link: (id: string) => stepLink(id, c), fixHref });
 
 /**
  * The course's Setup & To do items: each step, then each to-do. A step with a problem now or
  * soon is a red row whose Fix opens the problem's screen; `list` is the set-aside ids as read.
  */
-export function courseItems(c: CourseStatus, problems: Tiered[], list: string[] | null, next = new Map<string, Handout>(), now = 0): SetupItem[] {
-  const steps: SetupItem[] = SETUP_STEPS.map(({ id, name }) => {
-    const own = problems.filter((x) => x.p.stage === id);
-    const state = stepState(c.stages[id], own.map((x) => x.b));
-    const first = own.find((x) => x.b !== 'later')?.p;
-    const why = c.stage_why?.[id];
+export function courseItems(c: CourseStatus, tiered: Tiered[], list: string[] | null, now = 0): SetupItem[] {
+  const steps = stepItems(c, SETUP_STEPS, tiered, list, STEP_OPTS(c));
+  const todos: SetupItem[] = (c.todo ?? []).map((t) => {
+    const line = todoLine(t, c);
     return {
-      id, label: name, kind: 'step', need: stepNeed(c, id), state, hint: STEP_HINT[id], hintLabel: 'About this step',
-      why: state === 'done' ? undefined : state === 'problem' ? first?.text ?? why : why ?? (state === 'open' ? 'Not done yet.' : undefined),
-      link: state === 'open' ? stepLink(id, c) : undefined,
-      fix: state === 'problem' && first ? fixHref(first) ?? undefined : undefined,
-      waitsFor: WAITS_FOR[id] ? stepName(WAITS_FOR[id]) : undefined,
-      aside: stepAside(c, id, list),
-    };
-  });
-  const todos: SetupItem[] = displayTodos(c.todo ?? []).map((t) => {
-    const line = t.ids.length > 1 ? { label: SYLLABUS_LABEL, hint: SYLLABUS_HINT } : todoLine(t, c);
-    // The engine's dates when it gives them (`needed_by`, `problem_from`), else the live semesters'.
-    const h = next.get(t.repo);
-    const when = t.kind !== 'template' ? undefined : t.needed_by ? handoutWords({ when: t.needed_by, tz: h?.tz ?? DEFAULT_TIMEZONE, term: h?.term ?? '', from: t.problem_from ? dayKey(t.problem_from, h?.tz ?? DEFAULT_TIMEZONE) : '' }, now) : handoutWords(h, now);
-    return {
-      id: t.id, ids: t.ids, label: line.label, kind: 'todo', need: needOf(t), state: 'open', repo: t.repo, hint: line.hint,
+      id: t.id, label: line.label, kind: 'todo', need: t.need ?? 'needed', state: 'open', repo: t.repo, hint: line.hint,
       hintLabel: line.label === SYLLABUS_LABEL ? 'About the syllabus' : 'About this to-do',
       why: line.label === t.text ? undefined : t.text,
-      when,
+      when: t.kind === 'template' && t.check ? handoutWords(tiered, t.repo, t.check, now) : undefined,
       link: { href: todoHref(t), label: 'Open settings', aria: `Open ${t.repo} settings` },
       aside: todoAside(t, list),
     };
@@ -197,7 +175,6 @@ export function courseItems(c: CourseStatus, problems: Tiered[], list: string[] 
 const CHECK_HINT: Record<string, string> = {
   kind_folder: 'A repo with nothing of a content kind has nothing to release.',
   syllabus: 'The file the student site pins as the syllabus. Still the template text until you write it.',
-  sessions: 'Every session with its date and readings, built from the semester schedule. Write puts it into your syllabus. Optional.',
   withheld: 'The whole repo is released as it stands unless a line here withholds it. Saving the list once, even empty, marks it reviewed.',
 };
 
@@ -214,8 +191,8 @@ export function RepoChecklist({ items }: { items: SetupItem[] }) {
 
 /** A materials repo's whole checklist, ticks included: the settings screen's head. */
 export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
-  const items: SetupItem[] = displayChecks(checks).map((c) => ({
-    id: c.id, label: c.label, kind: 'step', need: needOf(c), state: c.done ? 'done' : 'open', why: c.done ? undefined : c.why ?? undefined, hint: c.id === 'syllabus' ? SYLLABUS_HINT : CHECK_HINT[c.id],
+  const items: SetupItem[] = checks.map((c) => ({
+    id: c.id, label: c.label, kind: 'step', need: c.need ?? 'needed', state: c.done ? 'done' : 'open', why: c.done ? undefined : c.why ?? undefined, hint: c.id === 'syllabus' ? SYLLABUS_HINT : CHECK_HINT[c.id],
     hintLabel: c.id === 'syllabus' ? 'About the syllabus' : 'About this check',
   }));
   const kinds = checks.find((c) => c.detail)?.detail;
@@ -241,11 +218,10 @@ export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
 }
 
 /** A template's needed checklist (the brief, the student version), from the course's open to-dos. */
-export function templateItems(repo: string, todo: Todo[], starter: 'derived' | 'handwritten' | undefined, next: Handout | undefined, now: number): SetupItem[] {
-  const open = (k: string) => todo.find((t) => t.kind === 'template' && t.repo === repo && t.id.endsWith(`:${k}`));
+export function templateItems(repo: string, todo: Todo[], starter: 'derived' | 'handwritten' | undefined, tiered: Tiered[], now: number): SetupItem[] {
   const row = (k: 'brief' | 'starter', label: string): SetupItem => {
-    const t = open(k);
-    const when = k === 'brief' && t && next ? `${next.term} hands this out on ${fmtDay(next.when, next.tz, yearOf(now, next.tz))}${next.from > todayOf(now, next.tz) ? `; it becomes a problem there on ${fmtShort(next.from)}` : ''}.` : undefined;
+    const t = todo.find((x) => x.kind === 'template' && x.repo === repo && x.check === k);
+    const when = t ? handoutWords(tiered, repo, k, now) : undefined;
     return { id: k, label, kind: 'step', need: 'needed', state: t ? 'open' : 'done', why: t?.text, when, hint: TEMPLATE_TODO[k].hint, hintLabel: 'About this check' };
   };
   return [row('brief', TEMPLATE_TODO.brief.label), row('starter', starter === 'handwritten' ? 'Starter files on main' : TEMPLATE_TODO.starter.label)];
@@ -448,11 +424,10 @@ export function overviewHeights(o: { course: CourseStatus | null; semesters: num
   ];
 }
 
-/** The course's Setup & To do rows and its verdict, from the set-aside list as the console last read it. */
-export function courseReadiness(p: CourseProps, c: CourseStatus, tiered: Tiered[]): { list: string[] | null; items: SetupItem[]; verdict: VerdictT } {
-  const list = asideList(p.files.file(p.course.org, COURSE_REPO, COURSE_FILE));
-  const items = courseItems(c, tiered, list, nextHandouts(liveSemesters(p), p.now), p.now);
-  return { list, items, verdict: verdictOf(items, tiered.map((x) => x.b), 'course') };
+/** The course's Setup & To do rows and its verdict, from the set-aside list as the console last read it (`aside.list`). */
+export function courseReadiness(c: CourseStatus, tiered: Tiered[], list: string[] | null, now: number): { items: SetupItem[]; verdict: VerdictT | null } {
+  const items = courseItems(c, tiered, list, now);
+  return { items, verdict: verdictOf(c.verdict, 'course', suggestionsCount(items)) };
 }
 
 /**
@@ -461,15 +436,12 @@ export function courseReadiness(p: CourseProps, c: CourseStatus, tiered: Tiered[
  * the answer is saved into dsl-course.yml through the same save path as Course details, and
  * Bring back removes the id at once. A read-only viewer gets neither.
  */
-export function CourseTabs({ p, c, tab, onTab }: { p: CourseProps; c: CourseStatus | null; tab?: string; onTab?: (key: string) => void }) {
-  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.migrated, write: p.course.write });
-  if (!c) return <section class="panel section dash-tabs" id={DASH_PANEL}><p class="footnote">Status not computed yet.</p></section>;
-  const v = courseView(p);
-  const { items } = courseReadiness(p, c, v.tiered);
-  const n = v.problems.length;
+export function CourseTabs({ items, problems: list, aside, tab, onTab }: { items: SetupItem[] | null; problems: Problem[]; aside: ReturnType<typeof useSetAside>; tab?: string; onTab?: (key: string) => void }) {
+  if (!items) return <section class="panel section dash-tabs" id={DASH_PANEL}><p class="footnote">Status not computed yet.</p></section>;
+  const n = list.length;
   const problems: DashTab = {
     key: 'problems', label: 'Problems', count: n || 'done', bad: true,
-    body: n ? <ProblemCards list={v.problems} /> : (
+    body: n ? <ProblemCards list={list} /> : (
       <>
         <div class="no-problems"><Check /><span>No problems on the course.</span></div>
         <p class="footnote">{COURSE_PROBLEMS_NOTE}</p>
@@ -490,10 +462,12 @@ export const COURSE_PROBLEMS_NOTE = 'A problem here is something on the course i
 export function CourseScreen(p: CourseProps) {
   const { course } = p;
   const env = useEnv();
-  const v = courseView(p);
+  const v = useCourseView(p);
+  const computed = v.course !== null;
   const live = liveSemesters(p);
   const [tab, setTab] = useState('problems');
-  const verdict = v.course ? courseReadiness(p, v.course, v.tiered).verdict : null;
+  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.migrated, write: p.course.write });
+  const ready = v.course ? courseReadiness(v.course, v.tiered, aside.list, p.now) : null;
   const ops = courseOperations(p, live, env?.ops.runs.value ?? [], env?.user.login ?? '');
   // A previewed run published nothing: the age is the last real publish's.
   const lastPublish = recentActivity(ops.map((l) => l.filter((o) => o.op === 'course.publish_website' && o.conclusion !== 'previewed')), 1)[0];
@@ -564,33 +538,36 @@ export function CourseScreen(p: CourseProps) {
           <div class="section-head"><h2>Handout materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New handout materials</a></div>
           {v.course?.materials?.length ? (
             <ul class="rows">
-              {v.course.materials.map((m) => (
-                <li>
-                  <span class="r-title">{m.repo} <RepoChip r={materialsReadiness(m)} row /></span>
-                  <RepoWhy r={materialsReadiness(m)} />
-                  <span class="r-side"><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
-                </li>
-              ))}
+              {v.course.materials.map((m) => {
+                const r = materialsReadiness(m);
+                return (
+                  <li>
+                    <span class="r-title">{m.repo} <RepoChip r={r} row /></span>
+                    <RepoWhy r={r} />
+                    <span class="r-side"><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
+                  </li>
+                );
+              })}
             </ul>
-          ) : <p class="footnote">{v.computed ? 'No materials repos yet.' : 'Materials appear once the course has been checked.'}</p>}
+          ) : <p class="footnote">{computed ? 'No materials repos yet.' : 'Materials appear once the course has been checked.'}</p>}
         </section>
         <section class="panel section" id="sec-templates">
           <div class="section-head"><h2>Assignment templates</h2><a class="btn small outline" href={`?course=${course.org}#new-assignment-1`}>New assignment</a></div>
           {v.course?.templates?.length ? (
             <ul class="rows">
               {v.course.templates.map((t) => {
-                const r = templateReadiness(t, v.course?.todo ?? [], v.tiered.filter((x) => x.p.fix?.entry === t.repo).map((x) => ({ text: x.p.text, b: x.b })));
+                const r = templateReadiness(t, v.course?.todo ?? [], templateProblems(v, t.repo));
                 const bad = r.state === 'problem';
                 return (
                   <li>
                     <span class="r-title">{templateName(templateTitle(p.files, course.org, t.repo))} <RepoChip r={r} row /></span>
-                    <span class={`r-sub${bad ? ' flag' : ''}`}>{bad ? v.problems.find((x) => x.fix?.entry === t.repo)?.stops ?? 'Has a problem.' : r.state === 'ready' ? 'Brief written. Settings check out.' : r.missing} <span class="slug">{t.repo}</span></span>
+                    <TemplateSub r={r} repo={t.repo} stops={v.problems.find((x) => x.fix?.entry === t.repo)?.stops} />
                     <span class="r-side"><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.repo}`}>{bad ? 'Fix' : 'Settings'}</a></span>
                   </li>
                 );
               })}
             </ul>
-          ) : <p class="footnote">{v.computed ? 'No assignment templates yet.' : 'Assignment templates appear once the course has been checked.'}</p>}
+          ) : <p class="footnote">{computed ? 'No assignment templates yet.' : 'Assignment templates appear once the course has been checked.'}</p>}
         </section>
       </>
     ),
@@ -599,11 +576,11 @@ export function CourseScreen(p: CourseProps) {
   return (
     <>
       <div class="page-head"><div><h2 class="h1">Dashboard <CourseHint /></h2></div></div>
-      <CourseSubActions course={course} loaded={p.loaded} files={p.files} now={p.now} computed={v.computed} />
+      <CourseSubActions course={course} loaded={p.loaded} files={p.files} now={p.now} computed={computed} />
       <p class="page-note">Materials and assignment templates are prepared here, for every semester. Students get only what a semester releases or hands out, from that semester’s page.</p>
-      <Verdict v={verdict} onOpen={() => showTab(setTab, 'problems')} />
+      <Verdict v={ready?.verdict ?? null} onOpen={() => showTab(setTab, 'problems')} />
       {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
-      <CourseTabs p={p} c={v.course} tab={tab} onTab={setTab} />
+      <CourseTabs items={ready?.items ?? null} problems={v.problems} aside={aside} tab={tab} onTab={setTab} />
       <div class="grid-2 cols">
         <div class="stack">{left.map((k) => <Fragment key={k}>{panels[k]}</Fragment>)}</div>
         <div class="stack">{right.map((k) => <Fragment key={k}>{panels[k]}</Fragment>)}</div>
@@ -658,7 +635,7 @@ export function TemplateScreen(p: CourseProps) {
   const env = useEnv();
   // The entry is the template's repo name (`status.json` `course.templates[].slug` is the repo).
   const repo = entry ?? '';
-  const v = courseView(p);
+  const v = useCourseView(p);
   const file = p.files.file(course.org, repo, 'grading_config.yml', 'solution');
   const gradingExists = file.kind !== 'absent';
   const tree = p.files.tree(course.org, repo);
@@ -711,9 +688,9 @@ export function TemplateScreen(p: CourseProps) {
     <>
       <div class="page-head">
         <div><h2 class="h1">{heading} <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. These settings apply to every semester, and after hand out they reach students only through Update every copy.</Hint></h2><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
-        <div class="actions">{tpl ? <RepoChip r={templateReadiness(tpl, v.course?.todo ?? [], v.tiered.filter((x) => x.p.fix?.entry === repo).map((x) => ({ text: x.p.text, b: x.b })))} /> : null}<OpenButton org={course.org} repo={repo} /></div>
+        <div class="actions">{tpl ? <RepoChip r={templateReadiness(tpl, v.course?.todo ?? [], templateProblems(v, repo))} /> : null}<OpenButton org={course.org} repo={repo} /></div>
       </div>
-      {tpl ? <section class="panel section" style="margin-bottom:18px"><RepoChecklist items={templateItems(repo, v.course?.todo ?? [], tpl.starter, nextHandouts(liveSemesters(p), p.now).get(repo), p.now)} /></section> : null}
+      {tpl ? <section class="panel section" style="margin-bottom:18px"><RepoChecklist items={templateItems(repo, v.course?.todo ?? [], tpl.starter, v.tiered, p.now)} /></section> : null}
       {problems.length ? <div style="margin-bottom:18px"><ProblemCards list={problems} /></div> : null}
       {file.kind === 'loading' ? <Loading what="Reading grading_config.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no grading_config.yml on the solution branch of {repo}.</CheckLine> : null}

@@ -9,9 +9,8 @@ export type ReleaseState = 'planned' | 'will_be_skipped' | 'released' | 'late';
 export type Conclusion = 'done' | 'nothing_to_do' | 'skipped' | 'previewed' | 'failed';
 
 /**
- * Decision 0034. Every field below is optional: a status the previous engine wrote lacks them,
- * and `model/readiness.ts` derives each one then (contract C). Screens read them only through
- * that module.
+ * Decision 0034. Every field below is optional in the schema: a status the previous engine wrote
+ * lacks them, and `readiness.normalise` fills `bites` and `need` once, at load (contract C).
  */
 export type Need = 'needed' | 'suggested';
 /** When a problem bites: past or undated (`now`), inside the horizon (`soon`), beyond it (`later`). */
@@ -51,6 +50,10 @@ export interface Problem {
   /** When the fault bites (ISO); absent for a fault no date pins. */
   when?: string;
   bites?: Bites;
+  /** Its code (`SOURCE_MISSING`, `LATE`, `BRIEF`, ...): what a screen joins on, never the id. */
+  kind?: string;
+  /** The schedule entry it holds back, when it holds one. */
+  release?: string;
 }
 
 export interface CourseStatus {
@@ -72,7 +75,7 @@ export interface CourseStatus {
   /** `starter`: how main is written (decision 0028), the key or the engine's reading of the markers. */
   templates: { repo: string; slug: string; state: string; starter?: 'derived' | 'handwritten' }[];
   semesters: string[];
-  /** Work started and not finished (decision 0022): never a problem. */
+  /** Work started and not finished (decision 0022); a needed template one a dated hand-out cites is a problem as well. */
   todo?: Todo[];
 }
 
@@ -107,9 +110,8 @@ export interface Todo {
   optional?: boolean;
   set_aside?: boolean;
   need?: Need;
-  /** A needed template to-do a live semester cites: its first hand-out, and the day it becomes a problem. */
-  needed_by?: string;
-  problem_from?: string;
+  /** The check it is the to-do of: a materials check's id, or `brief`, `starter`, `description`, `home`, `archive_date`, `email`. */
+  check?: string;
 }
 
 /** A semester's to-do (decision 0034): a suggested item such as the site's home page (`site:home`). */

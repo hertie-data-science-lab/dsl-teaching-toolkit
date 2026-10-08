@@ -6,7 +6,7 @@ import { parseRoster } from '../model/people';
 import { ASSIGNMENT_WORD, assignmentIdent, assignmentTitle, fmtDay, fmtTime, fmtWhen } from '../model/format';
 import type { Assignment, AssignmentState, Status } from '../model/types';
 import { RepoChip } from '../ui/SetupPanel';
-import { standing, templateReadinessIn } from '../model/readiness';
+import { templateReadinessIn, tier } from '../model/readiness';
 import { Check } from '../ui/icons';
 import { collect, handout, returnMarks, updateCopies, type AsgRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
@@ -167,8 +167,9 @@ function Overview(p: TabProps) {
     cur === 4 ? `${a.marks.filled} of ${a.marks.total} marked` : cur > 4 ? 'Done' : `Opens after ${fmtDay(a.grading_cutoff_datetime, tz, year)}`,
     cur === 5 ? 'Returned' : 'Opens after marks are returned',
   ];
-  const tpl = templateReadinessIn(status, a.template, p.now);
-  const tplProblems = tpl?.state === 'problem' ? standing(status, p.now).filter((x) => x.fix?.screen === 'template' && x.fix.entry === a.template) : [];
+  const tiered = tier(status, p.now);
+  const tpl = templateReadinessIn(status.course, a.template, tiered);
+  const tplProblems = tpl?.state === 'problem' ? tiered.filter((x) => x.b !== 'later' && x.p.fix?.screen === 'template' && x.p.fix.entry === a.template).map((x) => x.p) : [];
   const row = (cls: string, state: string, why: string, ops?: preact.ComponentChildren) => (
     <li class={cls}><span class="sa-state">{state}</span><div class="sa-body"><span class="sa-why">{why}</span>{ops}</div></li>
   );

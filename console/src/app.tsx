@@ -25,7 +25,7 @@ import { takeInstallReturn } from './wizards/drafts';
 import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
-import { CourseHeaderActions, CourseScreen, TemplateScreen, courseView, semesterChip, templateTitle } from './screens/Course';
+import { CourseHeaderActions, CourseScreen, TemplateScreen, courseOf, semesterChip, templateTitle } from './screens/Course';
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from './screens/CourseIndex';
 import { HomeScreen, Invitations, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { InstructorsScreen, StudentsScreen } from './screens/People';
@@ -342,7 +342,7 @@ export function bannerLine(sem: SemesterStatus | undefined): { chip?: preact.Com
  */
 export function subPages(course: Course, loaded: Loaded, cohortStates: Record<string, Loaded>, files: Files, want: SubWanted & { titles: boolean }): CourseSubPages | undefined {
   if (!course.write) return undefined;
-  const c = courseView({ loaded, cohortStates }).course;
+  const c = courseOf({ loaded, cohortStates });
   if (!c) return undefined;
   const materials = c.materials ?? [], templates = c.templates ?? [];
   const repos = want.materials ? files.repos(course.org) : null;

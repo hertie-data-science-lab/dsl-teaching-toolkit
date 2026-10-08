@@ -5,8 +5,8 @@
 // "optional" (a suggestion), a dash and "Waiting for <step>". No colour bar, no legend.
 
 import type { DashTab } from './DashboardTabs';
-import { stateWord, verdictMain, verdictTags } from '../model/format';
-import { isSuggestion, setupComplete, type ItemState, type RepoReadiness, type Verdict as VerdictT } from '../model/readiness';
+import { OPTIONAL, REPO_CHIP, plural, stateWord, verdictMain, verdictTags } from '../model/format';
+import { isSuggestion, type ItemState, type RepoReadiness, type Verdict as VerdictT } from '../model/readiness';
 import type { Need } from '../model/types';
 import { Hint } from './Hint';
 import { Check, Ext } from './icons';
@@ -38,13 +38,9 @@ export interface SetupItem {
   link?: Link;
   /** A problem's Fix. */
   fix?: string;
-  /** The step a waiting one waits for, by name. */
-  waitsFor?: string;
   /** A sentence after the why: when it matters ("Hands out Wed 4 Nov."). */
   when?: string;
   aside?: boolean;
-  /** The ids a set-aside writes: more than one for a merged row (the syllabus and its weekly plan). */
-  ids?: string[];
 }
 
 /** The circle before a suggestion: a button that asks whether to set it aside. */
@@ -63,15 +59,15 @@ export function ItemRow({ it, onCircle }: { it: SetupItem; onCircle?: (it: Setup
   const suggested = isSuggestion(it.need, it.state);
   const cls = `${it.state}${suggested ? ' suggested' : ''}`;
   const link = it.link;
-  const why = it.state === 'waiting' ? (it.why ?? `Waiting for ${it.waitsFor ?? 'another step'}.`) : it.why;
+  const why = it.state === 'waiting' ? it.why ?? 'Waiting for another step.' : it.why;
   return (
     <li class={cls} key={it.id}>
       <Mark it={it} onCircle={onCircle} />
       <span class="s-name">
         {it.label}
         {it.repo ? <span class="s-need slug">{it.repo}</span> : null}
-        {suggested ? <span class="s-opt">optional</span> : null}
-        {suggested ? null : <span class="sr">: {stateWord(it.state, it.need, it.waitsFor)}</span>}
+        {suggested ? <span class="s-opt">{OPTIONAL}</span> : null}
+        {suggested ? null : <span class="sr">: {stateWord(it.state, it.need)}</span>}
         {it.hint ? <> <Hint label={it.hintLabel ?? 'About this item'}>{it.hint}</Hint></> : null}
         {it.state === 'problem' && it.fix ? <span class="s-fix"><a class="btn small" href={it.fix}>Fix</a></span> : null}
       </span>
@@ -116,6 +112,8 @@ export function readinessTabs({ items, scope, onCircle, onBack, busy = false }: 
   const g = groups(items);
   const done = g.setup.filter((i) => i.state === 'done').length;
   const course = scope === 'course';
+  // Complete once every needed step is done (a suggestion or a set-aside one never holds it open).
+  const complete = done === g.setup.length;
   return [
     {
       key: 'suggestions', label: 'Suggestions', count: g.suggestions.length,
@@ -140,7 +138,7 @@ export function readinessTabs({ items, scope, onCircle, onBack, busy = false }: 
       ) : <p class="footnote">Nothing set aside. Suggestions you choose to pass move here; bring one back at any time.</p>,
     },
     {
-      key: 'setup', label: 'Setup', right: true, count: setupComplete(items) ? 'done' : `${done} of ${g.setup.length}`,
+      key: 'setup', label: 'Setup', right: true, count: complete ? 'done' : `${done} of ${g.setup.length}`,
       body: (
         <>
           <ul class="setup">{g.setup.map((it) => <ItemRow it={it} />)}</ul>
@@ -157,7 +155,8 @@ export function readinessTabs({ items, scope, onCircle, onBack, busy = false }: 
  * dashboard's one problem count (decision 0034, amended).
  */
 export function Verdict({ v, onOpen }: { v: VerdictT | null; onOpen?: () => void }) {
-  if (!v) return <p class="verdict">Status not computed yet.</p>;
+  // No verdict in the status (the previous engine's, one tick at most): no line at all.
+  if (!v) return null;
   const cls = v.state === 'fixing' ? 'bad' : v.state === 'ready' ? 'ok' : 'open';
   const words = verdictMain(v);
   return (
@@ -169,12 +168,14 @@ export function Verdict({ v, onOpen }: { v: VerdictT | null; onOpen?: () => void
   );
 }
 
+const CHIP_CLASS: Record<RepoReadiness['state'], string> = { problem: 'bad', ready: 'ok', not_ready: 'notready' };
+
 /** A repo's state as chips (decision 0034): Has a problem, Not ready or Ready; on its settings head also a dotted "n suggestions" (a `row` shows the state alone). */
 export function RepoChip({ r, row = false }: { r: RepoReadiness; row?: boolean }) {
   return (
     <>
-      {r.state === 'problem' ? <span class="chip bad">Has a problem</span> : r.state === 'ready' ? <span class="chip ok">Ready</span> : <span class="chip notready">Not ready</span>}
-      {r.suggestions && !row ? <span class="chip suggest">{r.suggestions} suggestion{r.suggestions === 1 ? '' : 's'}</span> : null}
+      <span class={`chip ${CHIP_CLASS[r.state]}`}>{REPO_CHIP[r.state]}</span>
+      {r.suggestions && !row ? <span class="chip suggest">{plural(r.suggestions, 'suggestion')}</span> : null}
     </>
   );
 }
@@ -182,5 +183,22 @@ export function RepoChip({ r, row = false }: { r: RepoReadiness; row?: boolean }
 /** The line under a repo that is not ready: its first missing needed item. */
 export function RepoWhy({ r }: { r: RepoReadiness }) {
   return r.state === 'not_ready' && r.missing ? <span class="r-sub">{r.missing}</span> : null;
+}
+
+/**
+ * A template row's sub-line, on the course Dashboard and the Templates page alike: what its
+ * standing problem stops, what it still needs, or that it is ready; then how it is worked (the
+ * Templates page) and its repo.
+ */
+export function TemplateSub({ r, repo, stops, how }: { r: RepoReadiness; repo: string; stops?: string; how?: string }) {
+  const bad = r.state === 'problem';
+  const say = bad ? stops ?? 'Has a problem.' : r.state === 'ready' ? (how ? '' : 'Brief written. Settings check out.') : r.missing;
+  return (
+    <span class={`r-sub${bad ? ' flag' : ''}`}>
+      {say ? `${say} ` : ''}
+      {how ? `${how} ` : ''}
+      <span class="slug">{repo}</span>
+    </span>
+  );
 }
 

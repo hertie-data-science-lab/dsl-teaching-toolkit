@@ -27,7 +27,7 @@ import { SaveBar } from '../ui/edit';
 import { PatternTree } from '../ui/PatternTree';
 import { Check, Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
-import { courseView, MaterialsChecklist } from './Course';
+import { courseOf, MaterialsChecklist } from './Course';
 import { ItemRow, RepoChip, RepoWhy } from '../ui/SetupPanel';
 import { materialsReadiness } from '../model/readiness';
 import { courseScope } from './common';
@@ -169,7 +169,7 @@ export function WebsiteSwitch(p: CourseProps) {
   const known = file.kind === 'ready' || file.kind === 'absent';
   const flip = async (on: boolean) => {
     if (!known) return;
-    const repos = (courseView(p).course?.materials ?? []).map((m) => m.repo);
+    const repos = (courseOf(p)?.materials ?? []).map((m) => m.repo);
     const out = websiteFileAfter(file.kind === 'ready' ? file.text : null, before, { ...before, enabled: on, source_repo: before.source_repo || (on ? newestRepo(repos) : null) || '' });
     if ('error' in out) return setSave({ kind: 'bad', text: out.error });
     setPending(on);
@@ -420,9 +420,9 @@ export function Fact({ label, value }: { label: string; value: unknown }) {
 export function WebsiteScreen(p: CourseProps) {
   const { course } = p;
   const env = useEnv();
-  const v = courseView(p);
-  const repos = (v.course?.materials ?? []).map((m) => m.repo);
-  const published = v.course?.stages?.C6 === 'done';
+  const c = courseOf(p);
+  const repos = (c?.materials ?? []).map((m) => m.repo);
+  const published = c?.stages?.C6 === 'done';
   const file = p.files.file(course.org, COURSE_REPO, OPENCOURSE_FILE);
   const y = file.kind === 'ready' ? new YamlText(file.text) : null;
   const before = websiteOf(y && !y.errors.length ? obj(y.toJS()) : {});
@@ -573,8 +573,8 @@ export function MaterialsScreen(p: CourseProps) {
   const { course, entry } = p;
   const repo = entry ?? '';
   const env = useEnv();
-  const v = courseView(p);
-  const m = v.course?.materials?.find((x) => x.repo === repo);
+  const m = courseOf(p)?.materials?.find((x) => x.repo === repo);
+  const r = m ? materialsReadiness(m) : null;
   const tree = p.files.tree(course.org, repo);
   const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir).map((x) => x.path) : [];
   const ignFile = p.files.file(course.org, repo, '.releaseignore');
@@ -634,14 +634,14 @@ export function MaterialsScreen(p: CourseProps) {
     <>
       <div class="page-head">
         <div><h2 class="h1">{repo} <Hint doc="02-add-materials-to-course.md">Handout materials stay here, private to instructors, until a scheduled release copies them to a semester. Files withheld here never reach students.</Hint></h2><p class="lede">Handout materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
-        <div class="actions">{m ? <RepoChip r={materialsReadiness(m)} /> : null}<OpenButton org={course.org} repo={repo} quiet /></div>
+        <div class="actions">{r ? <RepoChip r={r} /> : null}<OpenButton org={course.org} repo={repo} quiet /></div>
       </div>
       <div class="stack">
         {m?.checks?.length ? (
           <section class="panel section">
             <MaterialsChecklist checks={m.checks} />
           </section>
-        ) : m ? <RepoWhy r={materialsReadiness(m)} /> : null}
+        ) : r ? <RepoWhy r={r} /> : null}
         <section class="panel section">
           <h2>Syllabus <Hint label="About the syllabus">The syllabus is one file at the repo’s top level that the student site pins. Pick which file it is here; the default is SYLLABUS.md. The list shows this repo’s top-level Markdown files; pick the one that is your syllabus.</Hint></h2>
           <div class="field">
