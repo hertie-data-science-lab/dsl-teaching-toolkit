@@ -366,6 +366,8 @@ def _row(
         "readings": readings or [],
         "reading_list": reading_list,
         "readings_pending": readings_pending,
+        # Event rows (exam, due, hand-out, semester dates) sit on their own kind's tab
+        # only, as the site's kind.html lists site.events by kind.
         "tabs": tabs or [kind],
     }
 
@@ -740,7 +742,9 @@ def _announcements(org: str, site: str) -> list[dict]:
 def previous_offerings(text: str) -> list[dict]:
     """The `offerings:` of the site repo's `_data/previous_offering.yml`, as the landing page
     lists them: each a title and an http(s) URL. Instructor-owned: a file that does not
-    parse, or an entry without a URL, is skipped, not fatal; a missing title is the URL."""
+    parse, or an entry without a URL, is skipped, not fatal; a missing title is the URL.
+    The http(s)-only filter is deliberately stricter than the site's `home.html`, which
+    renders every entry: the console turns each into a link."""
     try:
         data = yaml.safe_load(text or "")
     except yaml.YAMLError:

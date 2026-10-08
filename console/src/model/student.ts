@@ -147,7 +147,7 @@ export interface SemesterFacts {
   announcements: Announcement[];
   /** The released syllabus, pinned; null when none has been released. */
   syllabus: FileLink | null;
-  /** The institution's row kinds (label and colours), when the source carries them. */
+  /** The institution's row kinds (label, colours and whether the kind has a tab), when the source carries them. A kind's tab shows only when the semester has rows of that kind (the engine's `kind_pages(present)`). */
   kinds?: Record<string, RowKind>;
   /** The course's one-line blurb (`course_description` in dsl-course.yml); absent or '' when unset. */
   courseDescription?: string;
