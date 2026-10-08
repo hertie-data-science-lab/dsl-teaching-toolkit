@@ -1,6 +1,6 @@
 // The student's Schedule (decision 0011 rule 2): every row of the semester by week, the
 // student's own state on assignment rows, the released files and readings, and the archive
-// notice.
+// notice at the bottom, its only place besides its own row (decision 0035 rule 12).
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import { dayKey, fmtDay, fmtTime, sortKey } from '../model/format';
@@ -53,7 +53,8 @@ function rowWeeks(rows: ScheduleRow[], facts: SemesterFacts, tz: string): { labe
 export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; mine: Mine | null; now: number; org: string }) {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const rows = sortedRows(facts.rows, tz);
-  if (!rows.length) return <p class="footnote">The schedule has no entries yet.</p>;
+  const archive = facts.archive ? <ArchiveNotice when={facts.archive} tz={tz} now={now} /> : null;
+  if (!rows.length) return <div class="stack"><p class="footnote">The schedule has no entries yet.</p>{archive}</div>;
   const year = new Date(now).getFullYear();
   const byAssignment = new Map(facts.assignments.map((a) => [a.slug, a]));
   const nowKey = sortKey(new Date(now).toISOString(), tz);
@@ -99,6 +100,7 @@ export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; 
           </ul>
         </section>
       ))}
+      {archive}
     </div>
   );
 }

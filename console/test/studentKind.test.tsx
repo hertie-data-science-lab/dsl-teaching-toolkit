@@ -1,11 +1,14 @@
 // A kind tab (decision 0035 rule 5): the rows its tab names, dated then undated, the kind's
-// own event last; Readings shows only reading files and the pending note.
+// own event last; Readings shows only reading files and the pending note. The archive notice
+// is Schedule's alone.
 
 import { readFileSync } from 'node:fs';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import { factsFromStatus } from '../src/model/student';
+import { HomeView } from '../src/screens/StudentHome';
 import { KindView, kindRows } from '../src/screens/StudentKind';
+import { ScheduleView } from '../src/screens/StudentSchedule';
 
 const DOC = JSON.parse(readFileSync(new URL('./fixtures/student-status.json', import.meta.url), 'utf8'));
 const ORG = DOC.semester as string;
@@ -58,5 +61,17 @@ describe('a kind tab', () => {
 
   it('says so when nothing is there', () => {
     expect(text(<KindView facts={facts()} kind="lab" org={ORG} now={NOW} />)).toBe('Nothing released yet.');
+  });
+});
+
+describe('the archive notice (decision 0035 rule 12)', () => {
+  it('sits at the bottom of Schedule only', () => {
+    const f = factsFromStatus(DOC);
+    const sched = text(<ScheduleView facts={f} mine={null} now={NOW} org={ORG} />);
+    expect(sched).toMatch(/Archive\. This semester is archived on [^.]+: every repository in it becomes read-only\.[^]*$/);
+    expect(sched.indexOf('Archive.')).toBeGreaterThan(sched.indexOf('Semester ends'));
+    expect(text(<ScheduleView facts={{ ...f, rows: [] }} mine={null} now={NOW} org={ORG} />)).toContain('Archive.');
+    expect(text(<HomeView facts={f} org={ORG} now={NOW} />)).not.toContain('Archive.');
+    expect(text(<KindView facts={f} kind="lecture" org={ORG} now={NOW} />)).not.toContain('Archive.');
   });
 });

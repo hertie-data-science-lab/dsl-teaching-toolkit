@@ -31,7 +31,7 @@ import { HomeView } from './StudentHome';
 import { KindView } from './StudentKind';
 import { InstructorsView } from './StudentInstructors';
 import { MaterialsView, ReadingsView } from './StudentMaterials';
-import { ArchiveNotice, ScheduleView } from './StudentSchedule';
+import { ScheduleView } from './StudentSchedule';
 import { WeekList } from './StudentWeek';
 
 export interface StudentProps {
@@ -175,7 +175,6 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
   return (
     <div class="stack">
       {screen === 'week' && f.generatedAt ? <p class="footnote updated">Updated {ago(f.generatedAt, now)}</p> : null}
-      {f.archive ? <ArchiveNotice when={f.archive} tz={tz} now={now} /> : null}
       {m?.auditor ? <AuditorNote /> : null}
       {['week', 'schedule', 'assignments'].includes(screen) ? mineNote : null}
       {body}
