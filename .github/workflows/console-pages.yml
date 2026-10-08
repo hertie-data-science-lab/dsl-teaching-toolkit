@@ -1,7 +1,7 @@
 name: console-pages
 
 # Build the Instructor Console (console/) and publish it to GitHub Pages at
-# https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/, from main. The second
+# https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/, from main. The other
 # branches are the current preview loops (decisions 0034, 0035); drop each once it has merged.
 on:
   push:
