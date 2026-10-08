@@ -743,6 +743,11 @@ def test_every_page_states_its_own_access_rule():
     # auditors read released materials, so the materials pages name them
     assert "enrolled students & auditors." in semester["lectures.md"]
     assert "enrolled students & auditors." in semester["readings.md"]
+    # All Materials links the hosted copies too, which are public: the note says so.
+    assert (
+        "All released course material so far; only accessible to enrolled "
+        "students/auditors, except files the course hosts publicly (the render button)."
+    ) in semester["materials.md"]
     # The public open-courseware site publishes the same files on purpose, so it claims no
     # gate anywhere.
     for page in site_repo.theme_pages(semester=False).values():
