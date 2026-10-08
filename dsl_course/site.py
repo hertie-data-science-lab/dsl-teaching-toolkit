@@ -123,6 +123,7 @@ from .site_repo import (
     theme_pages,
     yaml_file,
 )
+from .student_status import _brief as read_brief
 
 
 def _semester_start(semester_org: str) -> date:
@@ -1172,15 +1173,11 @@ def _assignment_entry(
     repo_fm = "".join(f"{ln}\n" for ln in repo_lines)
     repo_due = "".join(f"    {ln}\n" for ln in repo_lines)
     if out:
-        readme = get_file_content(course_org, repo, "README.md") or ""
+        heading, brief = read_brief(
+            get_file_content(course_org, repo, "README.md") or ""
+        )
         if not subtitle:
-            heading = next(
-                (ln[2:] for ln in readme.splitlines() if ln.startswith("# ")), ""
-            )
             subtitle = row_name(heading, title)
-        brief = "\n".join(
-            ln for ln in readme.splitlines() if not ln.startswith("# ")
-        ).strip()
         flags = ""
         # The page's body is the brief, and nothing else.
         body = liquid_raw(brief or "Assignment brief.")

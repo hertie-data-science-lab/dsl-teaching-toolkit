@@ -502,13 +502,35 @@ def event_rows(facts: SemesterFacts) -> list[dict]:
     return out
 
 
+# A fenced code block's opening (and closing) line: three or more backticks or tildes,
+# indented by up to three spaces.
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
 def _brief(readme: str) -> tuple[str, str]:
-    """(heading, body) of a template README: the `# ` heading names it, the rest is the
-    brief."""
+    """(heading, body) of a template README: its leading `# ` heading names it, everything
+    else is the brief. The ONE reading of a brief - the student console's and the
+    semester site's assignment page (`site._assignment_entry`) both come from here.
+
+    Only that one line goes: a later `# ` heading is the brief's own, and a `# ` line
+    inside a fenced code block is code (a shell or Python comment), not a heading."""
     lines = readme.splitlines()
-    heading = next((ln[2:].strip() for ln in lines if ln.startswith("# ")), "")
-    body = "\n".join(ln for ln in lines if not ln.startswith("# ")).strip()
-    return heading, body
+    fence = ""
+    for i, ln in enumerate(lines):
+        opened = _FENCE.match(ln)
+        if fence:
+            if (
+                opened
+                and opened.group(1)[0] == fence[0]
+                and len(opened.group(1)) >= len(fence)
+            ):
+                fence = ""
+        elif opened:
+            fence = opened.group(1)
+        elif ln.startswith("# "):
+            body = "\n".join(lines[:i] + lines[i + 1 :]).strip()
+            return ln[2:].strip(), body
+    return "", readme.strip()
 
 
 def render_assignments(

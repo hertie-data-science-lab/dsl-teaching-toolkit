@@ -352,6 +352,23 @@ def test_a_passed_handout_inlines_the_brief(monkeypatch):
     assert "The brief." in out
 
 
+def test_the_page_keeps_a_code_comment_in_the_brief(monkeypatch):
+    # The site reads the brief as the student console does (`student_status._brief`):
+    # a `# ` comment inside a fenced block is code, not the README's heading.
+    readme = "# Assignment 1\n\nRun this:\n\n```bash\n# install the deps\npip install -r requirements.txt\n```\n\n# Part 2\nMore."
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: readme)
+    out = site._assignment_entry(
+        "Course",
+        "Semester-f2026",
+        "assignment-1",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+    )
+    assert "# install the deps" in out and "# Part 2" in out
+    assert "# Assignment 1" not in out
+
+
 def test_a_manual_handout_releases_the_brief_with_no_date_pinned(monkeypatch):
     # The manual button's documented mode pins no handout_datetime at all, so the plan
     # cannot say this went out - the frozen semester template repo it creates is what says

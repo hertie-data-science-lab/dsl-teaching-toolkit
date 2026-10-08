@@ -321,6 +321,17 @@ def test_the_brief_its_name_and_the_shape_note_wait_for_the_hand_out():
     assert "Secret heading" not in student_status.dumps(_render()).decode()
 
 
+def test_the_brief_loses_only_its_leading_heading():
+    # A `# ` line inside a fenced code block is a comment in the code, and a later `# `
+    # heading is the brief's own: only the one that names the assignment goes.
+    readme = "# Assignment 1\n\nRun this:\n\n```bash\n# install the deps\npip install -r requirements.txt\n```\n\n# Part 2\nMore."
+    heading, body = student_status._brief(readme)
+    assert heading == "Assignment 1"
+    assert "# install the deps" in body and "# Part 2" in body
+    assert not body.startswith("# Assignment 1")
+    assert student_status._brief("No heading here.") == ("", "No heading here.")
+
+
 def test_a_hidden_assignment_is_on_no_public_surface():
     doc = _render()
     assert "assignment-4" not in {a["slug"] for a in doc["assignments"]}
