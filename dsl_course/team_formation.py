@@ -451,7 +451,7 @@ def _render(
     this is the one mail about it a student ever gets, and `assignment-2` is what the plan
     calls it rather than what the site and the brief do.
 
-    `page_url` is the assignment's page on the semester site, which lists the teams that
+    `page_url` is the assignment's page in the student console, which lists the teams that
     exist, and the sentence pointing at it goes ONLY when there is one to point at. A
     course org whose templates could not be listed gets a shorter mail rather than a link
     to the wrong page.
@@ -507,7 +507,7 @@ def message(
     The name therefore appears in the BODY and nowhere else - not in a log line, not in the
     dry run's sample, and not in a subject that a mail client shows in a list.
 
-    `page` is the assignment's page on the semester site (`schedule.assignment_pages`): its
+    `page` is the assignment's page in the student console (`schedule.assignment_pages`): its
     number names the assignment, and its URL is the list of teams."""
     return _render(
         greeting(name),

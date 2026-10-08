@@ -136,7 +136,7 @@ ASSIGNMENT_FIELD_END = "# dsl:assignment-field:end"
 
 def open_formations(lock_text: str) -> dict[str, str]:
     """The assignments in a semester's `assignments.lock.yml` whose team-formation window is
-    OPEN, sorted, each with its page on the semester site (`team_formation_page`, "" where
+    OPEN, sorted, each with its page in the student console (`team_formation_page`, "" where
     the lock carries none).
 
     A filter over `grades.parse_team_lock`, which lives beside the writer of that file: the
@@ -161,20 +161,24 @@ def open_formations(lock_text: str) -> dict[str, str]:
 # rewording here would silently stop the splice.
 TEAM_LIST_SENTENCE = (
     "The teams that already exist, and how much room each has left, are listed in the "
-    "student console, under Join."
+    "student console, under Assignments."
 )
 
 
 def _team_list_header(opened: Mapping[str, str]) -> str:
-    """The header sentence, linking the page a student can actually open: the semester's
-    Join screen in the student console, one for every assignment (`AssignmentPage.url`). A
+    """The header sentence, linking the page a student can actually open
+    (`AssignmentPage.url`): the one open assignment's own page in the student console, or,
+    with several open, the console's Assignments list, which carries each one's teams. A
     header that knows no link is the template's own."""
-    url = next((u for u in opened.values() if u), "")
-    if not url:
+    urls = list(dict.fromkeys(u for u in opened.values() if u))
+    if not urls:
         return TEAM_LIST_SENTENCE
+    url = urls[0]
+    if len(urls) > 1 and "#" in url:
+        url = f"{url.partition('#')[0]}#assignments"
     return (
         "The teams that already exist, and how much room each has left, are listed in "
-        f"[the student console, under Join]({url})."
+        f"[the student console, under Assignments]({url})."
     )
 
 
@@ -191,7 +195,7 @@ def join_team_form(opened: Mapping[str, str]) -> str:
     render, which would take the Join-team route away from a semester entirely rather than
     merely leave it awkward.
 
-    `opened`'s values link each assignment's page on the semester site from the header ("" =
+    `opened`'s values link each assignment's page in the student console from the header ("" =
     not known; the lock's `team_formation_page`). The form tells a student to type a
     team's name "exactly as that page spells it", so a page they cannot reach in one click
     is an instruction they cannot follow."""

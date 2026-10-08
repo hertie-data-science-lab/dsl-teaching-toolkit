@@ -1810,11 +1810,13 @@ class AssignmentPage(NamedTuple):
         return f"{self.number:02d}-{self.name}"
 
     def url(self, semester_org: str) -> str:
-        """Where a student sees this assignment's teams and joins one: the semester's Join
-        screen in the student console, else the semester site's home. (The site's own
+        """Where a student sees this assignment's teams and joins one: its own page in the
+        student console (`#assignment-<key>`, decision 0035 rule 8), the Assignments list
+        for an entry the plan does not name, else the semester site's home. (The site's own
         assignment page, `<stem>.html`, lists the teams too: decision 0035 rule 1.)"""
+        screen = f"assignment-{self.key}" if self.key else "assignments"
         return (
-            policy.console_link(semester_org, "join")
+            policy.console_link(semester_org, screen)
             or f"https://{pages_repo(semester_org)}/"
         )
 
