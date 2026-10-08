@@ -410,13 +410,61 @@ problems are the teaching team's to fix: students still without a team at an OPE
 window are left out (`status_json.faculty_window_faults`; the schedule digest still lists them),
 and a shut window's are kept.
 
-Decision 0032: the course block carries `stage_optional` and `stage_set_aside` (per stage id), and
-each `todo[]` entry `optional` and `set_aside`. Optional is the engine's rule alone (C4-C6; a
-to-do that blocks nothing, i.e. a materials check with `blocks: false`), so the console holds no
-copy. `set_aside` comes from `dsl-course.yml`'s `set_aside:` list (`status_json.set_aside_ids`),
-read at the edge: any other shape or an unknown id sets nothing aside and is never a fault; a
-required or done item's id is ignored. Setting aside changes no stage, no `ready`, no problem.
-Forward-only: no migration, an absent key means nothing is set aside.
+Decision 0034 (need, time, verdict), all computed by the engine so the console holds no copy:
+- **Need.** Every stage (`stage_need`), materials check and to-do (`need`) is `needed`
+  (without it automation cannot act, or a student gets something wrong) or `suggested`. C1-C3
+  and K1-K6 are needed; C4-C6 suggested (there is no K7: the archive date is a to-do only).
+  Of a materials repo's checks only the content-kind folder is needed; the syllabus and its
+  weekly plan are ONE suggested check, `syllabus`. A template's brief and starter are
+  needed. `blocks`, `optional`, `stage_optional` and `course.ready` stay, derived, for one
+  release. The semester's suggested to-dos (`semester.todo[]`) are `site:home`,
+  `schedule:archive_date` and `instructors:email` (a count, never a handle); the course
+  description is the course to-do `course:description`. Every to-do names its `check`
+  (`kind_folder`, `syllabus`, `withheld`, `brief`, `starter`, `description`, `home`,
+  `archive_date`, `email`). K5 is done once the roster has a row (codes sent is the Students
+  panel's meter), K6 once the site repo exists.
+- **Time.** `horizon` (both files) is `{days}`, the rolling window's length, off the one
+  constant `status_json.PROBLEM_HORIZON` (7 days); no tick time, so an unchanged state
+  still makes no commit. Each problem carries `bites`: `now` (moment passed, or none),
+  `soon` (at most 7 days off), `later`, set in ONE place (`status_json._tier`; builders set
+  only `when`). Only `now`/`soon` mark a stage or a verdict. Each problem also carries
+  `kind` (its code: `SOURCE_MISSING`, `LATE`, `BRIEF`, ...) and, when it holds a schedule
+  entry back, `release` (that entry's id): readers join on these, never on `id`. An
+  undated source fault or stub is `later`; a course template's problems (stage C5) take
+  the first citing hand-out still to come (`semester.template_moments`: this semester's in
+  a semester file; in the course file, every running semester's, none -> `later`). A
+  hand-out that has happened (its semester template exists, or its date has passed) never
+  dates one: the copies it made are fixed one by one. A needed template to-do a future
+  dated hand-out cites is ALSO a problem, on the semester and the course file:
+  `template:<repo>:brief` / `:starter`, kind `BRIEF` / `STARTER`, `when` the hand-out
+  (`release` its assignment, in the semester file); the to-do stays in `course.todo[]`.
+  assignments.yml values bite at their assignment's hand-out; visibility drift and a late
+  release with no other problem (`schedule:<entry>:LATE`) stand now; a cited root stub
+  still the placeholder is `schedule:<entry>:SOURCE_UNWRITTEN` at the release's moment;
+  `opencourse.yml` that does not parse is a `now` problem while the website is on. The
+  digest's mail ladder is a separate clock and unchanged.
+- **Verdict.** `course.verdict` / `semester.verdict`: `fixing` (a `now`/`soon` problem;
+  `problems` counts them), else `not_ready` (a needed stage open; `missing` is its
+  sentence), else `ready`; `suggestions` counts open suggested items not set aside. The
+  semester's `coming_up` counts its `later` problems, every scope; the course has none. `status.py`'s checklist prints the semester's
+  words ("Needs fixing: n problems in the next 7 days" / "On track: nothing to fix in the
+  next 7 days").
+- **Call budget.** The course tick dates its template problems off each registered
+  semester's own `status.json` (`semester.template_moments`, each cited template's first
+  hand-out still to come): ONE read per semester in `semesters.yml` (which lists names only, so an
+  archived one costs its read too; its frozen file is passed over by its end date), never
+  a schedule or an archived-repo probe (`gather_moments`). It is one tick behind a
+  schedule edit: the course sees it once that semester's tick has rewritten its file. The
+  semester tick adds at most the root stubs its releases cite (SYLLABUS.md, README.md),
+  usually already read by the course gather. `tests/test_status_budget.py` holds both
+  counts.
+
+Decision 0032: the course block carries `stage_set_aside` (per stage id) and each `todo[]`
+entry `set_aside`. `set_aside` comes from `dsl-course.yml`'s `set_aside:` list
+(`status_json.set_aside_ids`), read at the edge: any other shape or an unknown id sets nothing
+aside and is never a fault; a needed or done item's id is ignored. Setting aside changes no
+stage, no problem; a set-aside item is no suggestion. Forward-only: no migration, an absent
+key means nothing is set aside.
 
 `.system/student-status.json` (`dsl.student-status/2`, `student_status`) is written by the same
 `status.write`, for a live semester, into the SEMESTER org's public `.github`: what the student

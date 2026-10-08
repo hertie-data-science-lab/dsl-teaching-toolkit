@@ -18,6 +18,7 @@ from urllib.parse import unquote
 
 import yaml
 
+from .course import FACULTY_ONLY_HEADING
 from .faults import ConfigFault, Unusable, header_fault
 from .ghcli import (
     ALL,
@@ -1042,6 +1043,44 @@ STUB_MARKS = (
 def is_untouched_stub(text: str) -> bool:
     """Whether `text` is still a stub this toolkit seeded, rather than faculty writing."""
     return any(m in text for m in STUB_MARKS)
+
+
+# Root documents this toolkit seeds as stubs for faculty to write over. Released once
+# written; withheld while still ours, because shipping either as-is publishes faculty
+# instructions and empty tables to students as their course overview or their syllabus.
+#
+# The syllabus joined this the moment the site began PINNING it on the landing page: an
+# unwritten stub would otherwise be the most prominent link on the course's front page.
+WITHHELD_ROOT_STUBS = ("README.md", "SYLLABUS.md")
+
+UNEDITED_README_MARKERS = ("**Replace this placeholder.**", FACULTY_ONLY_HEADING)
+
+
+def is_withheld_stub(path: str, text: str) -> bool:
+    """Whether a copy is one of the root stubs this toolkit seeds, still unwritten.
+
+    The ROOT file only - `path` must be exactly one of `WITHHELD_ROOT_STUBS`, not merely end
+    in it. A `README.md` inside a session folder is the faculty's own writing about that
+    session, and these stubs only ever exist at the repo root.
+
+    Two tests, because the two files are marked differently: `SYLLABUS.md` carries the
+    `dsl-stub:` mark every seeded stub now carries, while the README predates it and is
+    recognised by its own placeholder text - both markers required there, so a real overview
+    that happens to quote the stub still ships."""
+    name = path.strip("/")
+    if name not in WITHHELD_ROOT_STUBS:
+        return False
+    if name == "README.md":
+        return all(marker in text for marker in UNEDITED_README_MARKERS)
+    return is_untouched_stub(text)
+
+
+def root_stub_unwritten(org: str, repo: str, path: str) -> bool:
+    """Whether `repo`'s root stub `path` (one of `WITHHELD_ROOT_STUBS`) is there and still
+    the placeholder (`is_withheld_stub`): the one probe the scheduler and the status run,
+    one read."""
+    text = get_file_content(org, repo, path)
+    return text is not None and is_withheld_stub(path, text)
 
 
 def _decoded(encoded: str) -> str:

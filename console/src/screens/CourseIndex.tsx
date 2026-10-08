@@ -14,7 +14,9 @@ import { CheckLine, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
-import { StateChip, Whys, courseView } from './Course';
+import { courseOf, useCourseView } from './Course';
+import { RepoChip, RepoWhy, TemplateSub } from '../ui/SetupPanel';
+import { materialsReadiness, templateReadinessIn } from '../model/readiness';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
 
@@ -84,10 +86,10 @@ export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; 
 
 export function MaterialsIndexScreen(p: CourseProps) {
   const { course, files } = p;
-  const v = courseView(p);
-  const materials = v.course?.materials ?? [];
+  const c = courseOf(p);
+  const materials = c?.materials ?? [];
   const repos = files.repos(course.org);
-  const known = [...materials.map((m) => m.repo), ...(v.course?.templates ?? []).map((t) => t.repo)];
+  const known = [...materials.map((m) => m.repo), ...(c?.templates ?? []).map((t) => t.repo)];
   const others = repos.kind === 'ready' ? otherRepos(course.org, repos.repos, known) : [];
   return (
     <>
@@ -103,17 +105,18 @@ export function MaterialsIndexScreen(p: CourseProps) {
               {materials.map((m) => {
                 const gh = repoOf(files, course.org, m.repo);
                 const term = termLabel(m.repo);
+                const r = materialsReadiness(m);
                 return (
                   <li>
-                    <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" />{term ? <span class="chip term">{term}</span> : null}</span>
-                    <Whys m={m} />
+                    <span class="r-title">{m.repo} <RepoChip r={r} />{term ? <span class="chip term">{term}</span> : null}</span>
+                    <RepoWhy r={r} />
                     {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
                   </li>
                 );
               })}
             </ul>
-          ) : <p class="footnote">{v.computed ? 'No handout materials repos yet.' : 'Handout materials appear once the course has been checked.'}</p>}
+          ) : <p class="footnote">{c ? 'No handout materials repos yet.' : 'Handout materials appear once the course has been checked.'}</p>}
         </section>
         <section class="panel section">
           <h2>Other repos</h2>
@@ -145,7 +148,7 @@ export const VERSIONS_HINT =
 
 export function TemplatesIndexScreen(p: CourseProps) {
   const { course, files } = p;
-  const v = courseView(p);
+  const v = useCourseView(p);
   const templates = v.course?.templates ?? [];
   return (
     <>
@@ -158,7 +161,8 @@ export function TemplatesIndexScreen(p: CourseProps) {
         {templates.length ? (
           <ul class="rows">
             {templates.map((t) => {
-              const bad = t.state === 'problem';
+              const r = templateReadinessIn(v.course, t.repo, v.tiered)!;
+              const bad = r.state === 'problem';
               const f = files.file(course.org, t.repo, 'grading_config.yml', 'solution');
               const y = f.kind === 'ready' ? new YamlText(f.text) : null;
               const cfg = y && !y.errors.length ? obj(y.toJS()) : {};
@@ -167,19 +171,15 @@ export function TemplatesIndexScreen(p: CourseProps) {
               const used = usedIn(p, t.repo);
               return (
                 <li>
-                  <span class="r-title">{templateName(title)} <StateChip state={t.state} todo="Not written yet" /></span>
-                  <span class={`r-sub${bad ? ' flag' : ''}`}>
-                    {bad ? `${v.problems.find((x) => x.fix?.entry === t.repo)?.stops ?? 'Has a problem.'} ` : t.state !== 'ready' ? 'The brief (README.md) is not written yet. ' : ''}
-                    {how.length ? `${how.join(', ')}. ` : ''}
-                    <span class="slug">{t.repo}</span>
-                  </span>
+                  <span class="r-title">{templateName(title)} <RepoChip r={r} /></span>
+                  <TemplateSub r={r} repo={t.repo} stops={v.problems.find((x) => x.fix?.entry === t.repo)?.stops} how={how.length ? `${how.join(', ')}.` : undefined} />
                   <span class="r-used">{used.length ? `Used in ${used.join(', ')}` : 'Not used in a semester yet'}</span>
                   <span class="r-side"><OpenButton org={course.org} repo={t.repo} small quiet /><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.repo}`}>{bad ? 'Fix' : 'Settings'}</a></span>
                 </li>
               );
             })}
           </ul>
-        ) : <p class="footnote">{v.computed ? 'No assignment templates yet.' : 'Templates appear once the course has been checked.'}</p>}
+        ) : <p class="footnote">{v.course ? 'No assignment templates yet.' : 'Templates appear once the course has been checked.'}</p>}
       </section>
     </>
   );

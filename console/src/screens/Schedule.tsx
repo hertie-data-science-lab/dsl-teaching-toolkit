@@ -7,7 +7,7 @@ import { compileAll, matchRules } from '../edit/glob';
 import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
-import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
+import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
   assignmentKey, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft,
@@ -19,11 +19,12 @@ import { keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, sched
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
 import { TIMEZONES } from '../tiers/course';
-import { EditFile, Lives, Md, ProblemCards, ghUrl } from '../ui/bits';
+import { EditFile, Lives, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
+import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
 import { Check } from '../ui/icons';
-import { NOTHING_TO_RELEASE, releaseRef } from './Cohort';
+import { NOTHING_TO_RELEASE, markClass, releaseRef, rowMark } from './Cohort';
 import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -239,8 +240,10 @@ export interface NewRun {
   errors: Record<string, string>;
 }
 
-function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; slug: string; state: string }[]; isNew: boolean; run: NewRun }) {
+function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; slug: string; state: string }[]; isNew: boolean; run: NewRun; tiered: Tiered[] }) {
   const tpl = templates.find((t) => t.repo === d.template);
+  // The template's state in the one set of words (decision 0034).
+  const tplState = tpl ? templateReadinessIn(p.status.course, tpl.repo, tiered) : null;
   const key = d.id || assignmentKey(d.number);
   const af = assignmentsFile(p.files, p.cohort.org);
   const doc = af && af !== 'loading' ? af.doc : {};
@@ -262,8 +265,9 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: Ready
           {opts.map((o) => <option value={o.value} selected={o.value === d.template}>{o.label}</option>)}
         </select>
         {errors.template ? <Invalid>{errors.template}</Invalid>
-          : tpl && tpl.state !== 'ready' ? <Invalid>This assignment template has a problem. <a href={`#template-${tpl.repo}`}>Fix it on the assignment template</a></Invalid>
-          : d.template ? <span class="valid-msg"><Check />Assignment template ready</span> : null}
+          : tplState?.state === 'problem' ? <Invalid>Has a problem. <a href={`#template-${tpl!.repo}`}>Fix it on the assignment template</a></Invalid>
+          : tplState?.state === 'not_ready' ? <p class="hint">{repoWords(tplState)} <a href={`?course=${p.course.org}#template-${tpl!.repo}`}>Open the assignment template</a></p>
+          : d.template ? <span class="valid-msg"><Check />Ready</span> : null}
         <p class="why">Must exist and be ready.</p>
       </div>
       <NumberField d={d} set={set as Setter<ReleaseDraft | AssignmentDraft>} errors={errors} kind="assignment"
@@ -388,6 +392,9 @@ function identOf(d: Draft, row: Row | undefined, kind: string): string {
 function View(p: ReadyProps) {
   const { status, now } = p;
   const env = useEnv();
+  // Every problem with its time, and each held or late release's mark, once per render (decision 0034).
+  const tiered = useMemo(() => tier(status, now), [status, now]);
+  const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const tz = tzOf(status), year = yearOf(now, tz);
   const scope = cohortScope(p);
   const [filters, setFilters] = useState<Record<Block, boolean>>({ releases: true, assignments: true, events: true });
@@ -509,7 +516,10 @@ function View(p: ReadyProps) {
   const counts: Record<Block, number> = { releases: 0, assignments: 0, events: 0 };
   const seen = new Set<string>();
   for (const r of rows) if (r.entry !== 'semester' && r.entry !== 'archive' && !seen.has(`${r.block}:${r.entry}`)) { seen.add(`${r.block}:${r.entry}`); counts[r.block]++; }
-  const skipped = (status.releases ?? []).filter((r) => r.state === 'will_be_skipped').length;
+  // The lede counts the held releases in their time words (decision 0034): was skipped, will be skipped, not ready yet.
+  const held = [...marks.values()].filter((m) => !m.late);
+  const heldLine = (['now', 'soon', 'later'] as const).map((b) => [b, held.filter((m) => m.bites === b).length] as const)
+    .filter(([, n]) => n).map(([b, n]) => heldSentence(b, n)).join(' ');
   const nowKey = sortKey(new Date(now).toISOString(), tz);
   let todayDone = false;
   const items = [];
@@ -522,14 +532,15 @@ function View(p: ReadyProps) {
     const rel = r.block === 'releases' ? (status.releases ?? []).find((x) => x.id === r.entry) : undefined;
     const gone = !!removed[r.entry];
     const ref = rel ? releaseRef(rel, tz, year) : null;
+    const m = rowMark(marks, r);
     const st = gone ? (
       <><span>Removed.</span><button class="textlink" type="button" style="min-height:0;padding:0" onClick={() => { const n = { ...removed }; delete n[r.entry]; setRemoved(n); }}>Undo</button></>
-    ) : r.fault && r.block === 'releases' ? <><span class="st-chip skip">will be skipped</span><span class="st-note">{needsANumber(status, r.entry) ? 'Give it a number first' : 'Fix the folder first'}</span></>
+    ) : m ? <><ReleaseMarks m={m} entry={r.entry} />{m.late ? <a class="textlink" href={`#release-${r.entry}`}>Details</a> : null}</>
       : rel && !ref ? <><span class="st-note">{NOTHING_TO_RELEASE}</span><a class="textlink" href={`#schedule-${r.entry}`}>Edit</a></>
       : ref && rel?.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small" label="Release early" /></>
       : <span class="st-chip">{r.state}</span>;
     items.push(
-      <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${r.fault && r.block === 'releases' ? ' fault' : ''}${key === r.entry ? ' current' : ''}${gone ? ' removed' : ''}`} data-entry={r.entry}>
+      <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === r.entry ? ' current' : ''}${gone ? ' removed' : ''}`} data-entry={r.entry}>
         <span class="k">{TYPE_LABEL[r.type] ?? r.type}</span>
         <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'TBC'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}{r.tbc ? ' (TBC)' : ''}</span> : r.tbc && r.when ? <span>(TBC)</span> : null}</span>
         <span class="ttl"><a href={`#schedule-${r.entry}`}><b>{r.ident}</b>: {r.name}</a></span>
@@ -579,7 +590,7 @@ function View(p: ReadyProps) {
             <div>
               <div class="eyebrow">{eyebrow}</div>
               <h2 id="entry-title">{title}</h2>
-              {rel ? <div style="margin-top:6px"><span class={`chip ${rel.state === 'will_be_skipped' ? 'bad' : rel.state === 'released' ? 'ok' : ''}`}>{RELEASE_WORD[rel.state]}</span></div> : null}
+              {rel ? <div style="margin-top:6px"><StateChip state={rel.state} m={marks.get(rel.id) ?? null} /></div> : null}
             </div>
             {close}
           </div>
@@ -589,11 +600,12 @@ function View(p: ReadyProps) {
                 On the student site this row shows {two ? <><b>{ident}</b> on one line and “{siteTitle}” below it, without the colon.</> : <>only the bold title, <b>{siteTitle || (d.kind === 'archive' ? 'Semester archived' : '')}</b>.</>}
               </div>
             ) : null}
-            {probs.length ? <ProblemCards list={probs} /> : null}
+            {/* A release that will be skipped says so once: the chip above, and the folder check (or, for a missing number, the line below). */}
+            {probs.length && rel?.state !== 'will_be_skipped' ? <ProblemCards list={probs} /> : null}
             <div class="form">
               {d.kind !== 'semester' && d.kind !== 'archive' ? <div class="field"><span class="label">Identifier</span><div class="ident">{ident}<span>derived, as the student site does</span></div></div> : null}
               {d.kind === 'releases' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} inferred={inferredOf(d)} />
-                : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
+                : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} tiered={tiered} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
                 : d.kind === 'events' ? <EventForm d={d} set={set} errors={errors} />
                 : d.kind === 'semester' ? <SemesterForm d={d} set={set} errors={errors} />
                 : <ArchiveForm d={d} set={set} errors={errors} />}
@@ -603,7 +615,7 @@ function View(p: ReadyProps) {
             {rel ? (
               !ref ? <div class="savebar"><span class="st-note">{NOTHING_TO_RELEASE}. Add a deploy above.</span></div>
               : rel.state === 'planned' ? <div class="savebar"><span class="footnote">Goes out at its time without you.</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small outline" label="Release early…" /></div>
-              : rel.state === 'will_be_skipped' ? <div class="savebar"><span class="st-note">{needsANumber(status, rel.id) ? 'Give it a number first; it cannot be released until it has one.' : 'Fix the folder first; it cannot be released until it exists.'}</span></div>
+              : rel.state === 'will_be_skipped' && needsANumber(status, rel.id) ? <div class="savebar"><span class="st-note">Give it a number first; it cannot be released until it has one.</span></div>
               : rel.state === 'released' ? <div class="savebar"><span class="footnote">Released.</span><a class="btn small quiet" href={`#release-${rel.id}`}>Release again…</a></div>
               : null
             ) : null}
@@ -628,7 +640,7 @@ function View(p: ReadyProps) {
       <div class="page-head">
         <div>
           <h2 class="h1">Schedule <Hint doc="07-schedule-releases.md">The schedule drives everything automatic: releases, hand outs, collection and the student site’s calendar. Dates are in the semester’s timezone.</Hint></h2>
-          <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {skipped ? `${skipped === 1 ? 'One release' : `${skipped} releases`} will be skipped as it stands.` : 'Every release has its folder.'}</p>
+          <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {heldLine || 'Every release has its folder.'}</p>
         </div>
         <div class="actions"><CheckNow p={p} label="Check" /><a class="btn outline" href="#schedule-new">Add entry</a></div>
       </div>
@@ -684,9 +696,16 @@ export function ScheduleScreen(p: CohortProps) {
 
 // --------------------------------------------------------------------------- S11
 
+/** A release's state chip: a held or late one in its time word (red now or soon, dotted later), else its state. */
+function StateChip({ state, m }: { state: Release['state']; m: ReleaseMark | null }) {
+  const cls = m ? (m.bites === 'later' ? 'suggest' : 'bad') : state === 'released' ? 'ok' : '';
+  return <span class={`chip ${cls}`}>{m ? markWord(m) : RELEASE_WORD[state]}</span>;
+}
+
 function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const { status, now, rel } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
+  const mark = useMemo(() => releaseMarks(status, tier(status, now), now).get(rel.id) ?? null, [status, now, rel.id]);
   const ident = releaseIdent(rel);
   const st = rel.state;
   const scope = cohortScope(p);
@@ -704,7 +723,8 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
       </>
     );
   }
-  const problems = (status.problems ?? []).filter((x) => x.fix?.entry === rel.id);
+  // The problems that hold it back, joined on `release` (a placeholder stub's fix names its repo, not the entry).
+  const problems = releaseProblems(status, rel);
   const last = (status.operations ?? []).find((o) => o.op.startsWith('release.') && o.summary.includes(`${ident}:`));
   const dest = rel.dest?.repo || DEFAULT_DEST_REPO, destPath = rel.dest?.path || ref.source.path;
   return (
@@ -713,10 +733,10 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         <div>
           <h2 class="h1"><b>{ident}</b>: {rel.title} <Hint doc="08-release-materials-to-cohort.md">{st === 'released'
             ? 'Edits students should see: push to the semester copy, or release again after fixing the course copy. Edits future semesters should keep: keep for future semesters.'
-            : st === 'will_be_skipped' ? (needsANumber(status, rel.id) ? 'Automation will skip this until it has a number.' : 'Automation will skip this until the folder exists.')
+            : st === 'will_be_skipped' ? 'Fix it in the schedule entry (Edit entry); automation releases it at its time once fixed.'
             : st === 'late' ? 'Reason codes tell you whether the source, the schedule or the scheduler was at fault.'
             : 'Nothing to do; it goes out at the scheduled time. You can release it early.'}</Hint></h2>
-          <p class="lede"><span class={`chip ${st === 'will_be_skipped' ? 'bad' : st === 'released' ? 'ok' : ''}`}>{RELEASE_WORD[st]}</span>{fmtWhen(rel.when, tz, year)}</p>
+          <p class="lede"><StateChip state={st} m={mark} />{fmtWhen(rel.when, tz, year)}</p>
         </div>
         <div class="actions"><a class="btn quiet" href={`#schedule-${rel.id}`}>Edit entry</a></div>
       </div>
@@ -740,7 +760,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
           {st === 'planned' ? <OpButtons def={releaseEarly(scope, ref)} label="Release early" />
             : st === 'released' ? <><OpButtons def={releaseAgain(scope, ref)} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" /></>
             : st === 'late' ? <OpButtons def={releaseNow(scope, ref)} label="Release now" />
-            : <a class="btn" href={`#schedule-${rel.id}`}>Fix the folder</a>}
+            : <span class="footnote">Nothing to run until the problem above is fixed.</span>}
         </div>
         <div class="savebar"><span class="footnote">After changing the course copy, the student site may need an update.</span><a class="btn small quiet" href="#site">Update site on the Site page</a></div>
       </section>

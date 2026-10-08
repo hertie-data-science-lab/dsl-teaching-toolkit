@@ -368,6 +368,8 @@ So the sources are checked against the course org in two places: **Validate sche
 
 **Validate schedule never goes red for a missing source either.** Its red X means one thing - an entry you wrote is not in your plan - and it clears when the file next parses cleanly. A missing source gets its own channel: annotations on the commit, and the digest issue below.
 
+**The console's Dashboard counts only what is near.** A missing source is a *problem* (red, counted in the verdict line "Needs fixing: n problems in the next 7 days") once its date is within the next 7 days, or has passed. Until then it sits under **Coming up**, by week, with the day it becomes a problem. An entry with no date yet waits there too, under "No date yet". The digest's mail ladder above is unchanged.
+
 ### The digest issue
 
 One issue per semester, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduler. It carries everything wrong with this file - a source nobody has staged, an entry the parser had to drop, a file that does not parse at all, a group assignment whose teams have not all formed (which stays listed after the window shuts, until you fix it):

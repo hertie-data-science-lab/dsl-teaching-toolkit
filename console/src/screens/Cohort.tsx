@@ -1,15 +1,19 @@
 // S4 Semester overview (Dashboard, decision 0015).
 
-import { useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import {
-  ASSIGNMENT_WORD, TYPE_CLASS, TYPE_LABEL, addDays, ago, assignmentTitle, daysBetween, fmtDate, fmtDay, fmtDays, fmtShort, fmtTime, fmtWhen, releaseIdent,
+  ASSIGNMENT_WORD, NOT_READY_YET, TYPE_CLASS, TYPE_LABEL, addDays, ago, assignmentTitle, daysBetween, fmtDate, fmtDay, fmtDays, fmtShort, fmtTime, fmtWhen, markWord, plural, releaseIdent,
 } from '../model/format';
-import { inWeeks, needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekRank, weekStart, type Row, type Schedule, type Term, type WeekKey, termOf } from '../model/schedule';
+import { needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekStart, type Row, type Schedule, type Term, type WeekGroup, type WeekKey, termOf } from '../model/schedule';
 import type { Assignment, Problem, Status } from '../model/types';
 import { checkAccess, checkNow, releaseEarly, type ReleaseRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { Release } from '../model/types';
-import { Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
+import { OpsList, ProblemCards, ReleaseMarks, fixHref, ghUrl } from '../ui/bits';
+import { Verdict, readinessTabs, type Link, type SetupItem } from '../ui/SetupPanel';
+import { DashboardTabs, showTab } from '../ui/DashboardTabs';
+import { useSetAside } from './SetAside';
+import { horizonDays, problemFromDay, releaseMarks, standing, stepItems, suggestionsCount, tier, todoAside, verdictOf, verdictTab, type ReleaseMark, type Tiered } from '../model/readiness';
 import { Hint } from '../ui/Hint';
 import { MoreMenu, WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -74,15 +78,27 @@ export function headerLine(status: Status, sched: Schedule | null, rows: Row[], 
 const KIND_ORDER = ['lec', 'lab', 'asg', 'exam', 'evt', 'term'];
 const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', term: 'semester date' };
 
-/** Problems dated in each term week, for the strip's red counts. */
-export function problemCounts(problems: Problem[], term: Term, tz: string): Map<WeekKey, number> {
-  const n = new Map<WeekKey, number>();
-  for (const p of problems) if (p.when) { const w = weekOf(p.when, term, tz); n.set(w, (n.get(w) ?? 0) + 1); }
-  return n;
+/** A week's badge on the strip: how many problems, and whether they are all later (hollow). */
+export interface WeekCount { n: number; later: boolean }
+
+/**
+ * Each term week's badge (decision 0034 §6): red, the problems now or soon dated in it; else
+ * hollow, its later ones. A week with both shows the red one.
+ */
+export function problemCounts(tiered: Tiered[], term: Term, tz: string): Map<WeekKey, WeekCount> {
+  const tally = (later: boolean) => {
+    const n = new Map<WeekKey, number>();
+    for (const { p, b } of tiered) if (p.when && (b === 'later') === later) { const w = weekOf(p.when, term, tz); n.set(w, (n.get(w) ?? 0) + 1); }
+    return n;
+  };
+  const out = new Map<WeekKey, WeekCount>();
+  for (const [w, n] of tally(true)) out.set(w, { n, later: true });
+  for (const [w, n] of tally(false)) out.set(w, { n, later: false });
+  return out;
 }
 
 export function TermStrip({ rows, term, tz, today, counts, selected, onToggle }: {
-  rows: Row[]; term: Term; tz: string; today: string; counts: Map<WeekKey, number>; selected: WeekKey[]; onToggle: (w: number) => void;
+  rows: Row[]; term: Term; tz: string; today: string; counts: Map<WeekKey, WeekCount>; selected: WeekKey[]; onToggle: (w: number) => void;
 }) {
   const thisWeek = weekOf(today, term, tz);
   const cells = [];
@@ -91,16 +107,16 @@ export function TermStrip({ rows, term, tz, today, counts, selected, onToggle }:
     const inWeek = rows.filter((r) => r.when && weekOf(r.when, term, tz) === w);
     const kinds = new Set(inWeek.map((r) => TYPE_CLASS[r.type] ?? 'evt'));
     const rw = inWeek.some((r) => r.block === 'events' && /reading week/i.test(r.name));
-    const n = counts.get(w) ?? 0;
+    const c = counts.get(w), n = c?.n ?? 0;
     const now = w === thisWeek;
     const past = typeof thisWeek === 'number' ? w < thisWeek : thisWeek === 'after';
     const words = KIND_ORDER.filter((k) => kinds.has(k)).map((k) => KIND_WORD[k]);
     const cls = `wk${past ? ' past' : ''}${now ? ' now' : ''}${rw ? ' rw' : ''}`;
     cells.push(
       <button type="button" class={cls} aria-pressed={selected.includes(w)} onClick={() => onToggle(w)}
-        aria-label={`Week ${w}, from ${fmtShort(ws)}${rw ? ', reading week' : ''}${words.length ? `: ${words.join(', ')}` : ''}${n ? `; ${n} problem${n > 1 ? 's' : ''}` : ''}${now ? '; this week' : ''}`}>
+        aria-label={`Week ${w}, from ${fmtShort(ws)}${rw ? ', reading week' : ''}${words.length ? `: ${words.join(', ')}` : ''}${n ? (c!.later ? `; ${n} ${NOT_READY_YET}` : `; ${plural(n, 'problem')}`) : ''}${now ? '; this week' : ''}`}>
         {now ? <span class="today" style={`left:${Math.round(((Math.max(0, Math.min(6, daysBetween(ws, today))) + 0.5) / 7) * 100)}%`} aria-hidden="true" /> : null}
-        {n ? <span class="wk-count" aria-hidden="true">{n}</span> : null}
+        {n ? <span class={`wk-count${c!.later ? ' later' : ''}`} aria-hidden="true">{n}</span> : null}
         <span class="wk-n">{rw ? 'RW' : w}</span>
         <span class="wk-d">{fmtShort(ws)}</span>
         <span class="wk-marks">{KIND_ORDER.filter((k) => kinds.has(k) && !(rw && k === 'evt')).map((k) => <i class={`m ${k}`} />)}</span>
@@ -113,13 +129,23 @@ export function TermStrip({ rows, term, tz, today, counts, selected, onToggle }:
       <div class="strip-legend">
         <span><i class="m lec" />Lecture</span><span><i class="m lab" />Lab</span><span><i class="m asg" />Assignment</span>
         <span><i class="m exam" />Exam</span><span><i class="m evt" />Event</span><span><i class="m term" />Semester date</span>
+        <span><span class="lg-count" aria-hidden="true">2</span>problems</span><span><span class="lg-count later" aria-hidden="true">2</span>{NOT_READY_YET}</span>
       </div>
     </div>
   );
 }
 
+/** The marks of the held and late releases (`releaseMarks`), by release id: one map per [status, now]. */
+export type Marks = Map<string, ReleaseMark>;
+
+/** A release row's mark (decision 0034 §6); null for any other row, or a release with nothing to fix. */
+export const rowMark = (marks: Marks, r: Row): ReleaseMark | null => (r.block === 'releases' ? marks.get(r.entry) ?? null : null);
+
+/** A schedule row's stripe: red for a mark now or soon (or late), muted for a later one. */
+export const markClass = (m: ReleaseMark | null) => (!m ? '' : m.bites === 'later' ? ' later' : ' fault');
+
 /** The expanded strip: every week of the term, read-only; each entry opens the Schedule editor. */
-function Timeline({ rows, term, tz, year }: { rows: Row[]; term: Term; tz: string; year: number }) {
+function Timeline({ rows, term, tz, year, marks }: { rows: Row[]; term: Term; tz: string; year: number; marks: Marks }) {
   return (
     <div class="wk-timeline">
       {weekGroups(rows, (r) => r.when, term, tz, 'all').map((g) => {
@@ -129,14 +155,17 @@ function Timeline({ rows, term, tz, year }: { rows: Row[]; term: Term; tz: strin
           <section aria-label={g.label}>
             <h3 class="week-h">{g.label}{from}</h3>
             <ul class="timeline">
-              {g.rows.map((r) => (
-                <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${r.fault && r.block === 'releases' ? ' fault' : ''}`}>
-                  <span class="k">{TYPE_LABEL[r.type] ?? r.type}</span>
-                  <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'TBC'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}</span> : null}</span>
-                  <span class="ttl"><a href={`#schedule-${r.entry}`}><b>{r.ident}</b>: {r.name}</a></span>
-                  <span class="st"><span class="st-chip">{r.fault && r.block === 'releases' ? 'will be skipped' : r.state}</span></span>
-                </li>
-              ))}
+              {g.rows.map((r) => {
+                const m = rowMark(marks, r);
+                return (
+                  <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}`}>
+                    <span class="k">{TYPE_LABEL[r.type] ?? r.type}</span>
+                    <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'TBC'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}</span> : null}</span>
+                    <span class="ttl"><a href={`#schedule-${r.entry}`}><b>{r.ident}</b>: {r.name}</a></span>
+                    <span class="st">{m ? <><ReleaseMarks m={m} entry={r.entry} />{m.late ? <a class="textlink" href={`#release-${r.entry}`}>Details</a> : null}</> : <span class="st-chip">{r.state}</span>}</span>
+                  </li>
+                );
+              })}
             </ul>
           </section>
         );
@@ -153,16 +182,30 @@ export function releaseRef(r: Release, tz: string, year: number): ReleaseRef | n
 /** The line a release with no deploy block shows instead of its actions. */
 export const NOTHING_TO_RELEASE = 'Nothing to release yet: this entry has no deploy block';
 
-function RowItem({ r, status, p }: { r: Row; status: Status; p: CohortProps }) {
+/** The agenda's sentence for a release: what holds it back, or what happens to it. */
+function releaseDetail(status: Status, rel: Release | undefined, m: ReleaseMark | null, tz: string): string {
+  if (!rel) return 'Goes to students at its time; the site row goes live.';
+  if (!rel.source) return `${NOTHING_TO_RELEASE}.`;
+  if ((status.problems ?? []).some((x) => x.release === rel.id && x.kind === 'SOURCE_UNWRITTEN') && rel.state !== 'released') return 'Not ready yet: its file is still the placeholder.';
+  const held = m ? markWord(m).replace(/^./, (c) => c.toUpperCase()) : '';
+  if (rel.state === 'will_be_skipped') return needsANumber(status, rel.id) ? `${held}: it has no number.` : `${held}: its folder was not found.`;
+  if (rel.state === 'released') return 'Released.';
+  if (rel.state === 'late') return `Late: due ${fmtDay(rel.when, tz)}, not released yet.`;
+  return 'Goes to students at its time; the site row goes live.';
+}
+
+function RowItem({ r, status, p, marks }: { r: Row; status: Status; p: CohortProps; marks: Marks }) {
   const tz = tzOf(status), releases = status.releases ?? [];
   let chip = TYPE_LABEL[r.type] ?? r.type, cls = TYPE_CLASS[r.type] ?? 'evt', detail = '', buttons = null;
   if (r.block === 'releases') {
     const rel = releases.find((x) => x.id === r.entry);
     const ref = rel && r.when ? releaseRef(rel, tz, Number(r.when.slice(0, 4))) : null;
+    const m = rowMark(marks, r);
     chip = 'Release';
-    detail = rel && !rel.source ? `${NOTHING_TO_RELEASE}.` : rel?.state === 'will_be_skipped' ? (needsANumber(status, rel.id) ? 'Will be skipped: it has no number.' : 'Will be skipped: its folder was not found.') : rel?.state === 'released' ? 'Released.' : 'Goes to students at its time; the site row goes live.';
+    detail = releaseDetail(status, rel, m, tz);
     buttons = (
       <>
+        {m ? <ReleaseMarks m={m} entry={r.entry} /> : null}
         {ref && rel?.state === 'planned' ? <OpButtons def={releaseEarly(cohortScope(p), ref)} small label={`Release ${r.ident} early`} /> : null}
         <a class="textlink" href={`#release-${r.entry}`}>Details</a>
       </>
@@ -189,17 +232,17 @@ function RowItem({ r, status, p }: { r: Row; status: Status; p: CohortProps }) {
 }
 
 /** What the selected weeks hold, grouped by week when more than one is shown. */
-function WeekRows({ status, p, rows, term, selected, name }: { status: Status; p: CohortProps; rows: Row[]; term: Term; selected: number[]; name: string }) {
+function WeekRows({ status, p, rows, term, selected, name, marks }: { status: Status; p: CohortProps; rows: Row[]; term: Term; selected: number[]; name: string; marks: Marks }) {
   const tz = tzOf(status), year = yearOf(p.now, tz);
   const groups = weekGroups(rows, (r) => r.when, term, tz, selected.length ? selected : 'all').filter((g) => g.rows.length);
   if (!groups.length) return <p class="footnote">Nothing scheduled {inPhrase(name)}.</p>;
-  if (groups.length === 1 && selected.length === 1) return <ul class="week">{groups[0].rows.map((r) => <RowItem r={r} status={status} p={p} />)}</ul>;
+  if (groups.length === 1 && selected.length === 1) return <ul class="week">{groups[0].rows.map((r) => <RowItem r={r} status={status} p={p} marks={marks} />)}</ul>;
   return (
     <>
       {groups.map((g) => (
         <div class="wk-group">
           <h3 class="week-h">{g.label}{g.from ? <span> from {fmtDay(g.from, tz, year)}</span> : null}</h3>
-          <ul class="week">{g.rows.map((r) => <RowItem r={r} status={status} p={p} />)}</ul>
+          <ul class="week">{g.rows.map((r) => <RowItem r={r} status={status} p={p} marks={marks} />)}</ul>
         </div>
       ))}
     </>
@@ -223,17 +266,125 @@ function selectionName(selected: number[], thisWeek: number[]): string {
 }
 
 /** A selection's name as a sentence ends: "this week", "in week 5", "in weeks 3 and 5". */
+/** The agenda panel's heading: "Planned this week", "Planned in weeks 3 and 5", "Planned, all weeks". */
+const plannedHeading = (name: string) => (name === 'All weeks' ? 'Planned, all weeks' : `Planned ${inPhrase(name)}`);
 const inPhrase = (name: string) => (name === 'This week' ? 'this week' : name === 'All weeks' ? 'in any week' : `in ${name.charAt(0).toLowerCase()}${name.slice(1)}`);
 
 /**
- * The problems a selection shows. This week also shows what is overdue: dated before it, in
- * its own group. Every other selection is strict. Undated problems always show.
+ * The Problems tab (decision 0034, amended): every problem now or soon, whatever weeks the strip
+ * picks. Overdue (its moment passed), the next `days` days, then Any time (undated).
  */
-export function problemGroups(problems: Problem[], selected: number[], isThisWeek: boolean, term: Term, tz: string): { overdue: Problem[]; dated: Problem[]; undated: Problem[]; elsewhere: number } {
-  const { dated, undated } = inWeeks(problems, (x) => x.when, selected, term, tz);
-  const overdue = isThisWeek ? problems.filter((x) => x.when && weekRank(weekOf(x.when, term, tz), term) < selected[0]) : [];
-  const elsewhere = problems.filter((x) => x.when).length - dated.length - overdue.length;
-  return { overdue, dated, undated, elsewhere };
+export function problemGroups(list: Problem[], now: number, days: number): { key: string; label: string; rows: Problem[] }[] {
+  const overdue = list.filter((p) => p.when && Date.parse(p.when) <= now);
+  const next = list.filter((p) => p.when && Date.parse(p.when) > now);
+  const any = list.filter((p) => !p.when);
+  return [
+    { key: 'overdue', label: 'Overdue', rows: overdue },
+    { key: 'next', label: `Next ${days} days`, rows: next },
+    { key: 'any', label: 'Any time', rows: any },
+  ].filter((g) => g.rows.length);
+}
+
+// ------------------------------------------------------------------ Setup & To do (decision 0034)
+
+/** The semester's setup steps (K1-K6), all needed. The archive date is a to-do. */
+export const SEMESTER_STEPS: { id: string; name: string }[] = [
+  { id: 'K1', name: 'Semester org read' },
+  { id: 'K2', name: 'Semester set up on GitHub' },
+  { id: 'K3', name: 'Instructors declared' },
+  { id: 'K4', name: 'Schedule written' },
+  { id: 'K5', name: 'Students on the roster' },
+  { id: 'K6', name: 'Student site' },
+];
+
+const K_HINT: Record<string, string> = {
+  K1: 'The console and automation can read the semester’s GitHub org.',
+  K2: 'The semester’s repos exist (semester-config, join and the student site) and the course lists the semester.',
+  K3: 'At least one instructor in instructors.yml, on the Instructors page.',
+  K4: 'schedule.yml with the semester’s start and end and at least one release or assignment.',
+  K5: 'At least one student on the roster (students.csv).',
+  K6: 'The student site’s repo exists.',
+};
+
+/** Where an open semester step, or a to-do on a screen, is done. */
+const SCREEN_LINK: Record<string, Link> = {
+  instructors: { href: '#instructors', label: 'Edit instructors' },
+  schedule: { href: '#schedule', label: 'Edit schedule' },
+  students: { href: '#students', label: 'Open roster' },
+  site: { href: '#site', label: 'Edit site' },
+};
+const K_SCREEN: Record<string, string> = { K3: 'instructors', K4: 'schedule', K5: 'students', K6: 'site' };
+
+/** A semester to-do's line, by its check; its sentence goes under it. */
+const TODO_LABEL: Record<string, string> = { home: 'Site home page written', archive_date: 'Archive date declared', email: 'Instructor emails' };
+
+/** The semester's Setup & To do rows: each step, then each to-do. */
+export function semesterItems(status: Status, tiered: Tiered[], list: string[] | null = null): SetupItem[] {
+  const s = status.semester;
+  if (!s) return [];
+  const steps = stepItems(s, SEMESTER_STEPS, tiered, list, {
+    hint: K_HINT, fixHref,
+    link: (id) => (K_SCREEN[id] ? SCREEN_LINK[K_SCREEN[id]] : { href: ghUrl(s.org), label: 'Open on GitHub', ext: true }),
+  });
+  const todos: SetupItem[] = (s.todo ?? []).map((t) => {
+    const label = t.check ? TODO_LABEL[t.check] : undefined;
+    return {
+      id: t.id, label: label ?? t.text, kind: 'todo', need: t.need ?? 'needed', state: 'open',
+      why: label ? t.text : undefined,
+      link: t.screen ? SCREEN_LINK[t.screen] ?? { href: `#${t.screen}${t.entry ? `-${t.entry}` : ''}`, label: 'Open' } : undefined,
+      aside: todoAside(t, list),
+    };
+  });
+  return [...steps, ...todos];
+}
+
+/** One line of the semester's Coming up: a `later` problem. */
+export interface ComingRow {
+  key: string;
+  when?: string;
+  /** The day it becomes a problem (yyyy-mm-dd): the horizon's days before `when`. */
+  from?: string;
+  text: string;
+  href: string;
+  link: string;
+}
+
+/**
+ * What this semester needs later (decision 0034): every `later` problem, the course's template
+ * ones it cites included. Each becomes a problem once inside the horizon.
+ */
+export function comingRows(status: Status, tiered: Tiered[]): ComingRow[] {
+  return tiered.filter((x) => x.b === 'later').map(({ p }) => ({
+    key: p.id, when: p.when, from: p.when ? problemFromDay(p.when, status.horizon) : undefined, text: p.text, href: fixHref(p) ?? '#schedule', link: 'Fix',
+  }));
+}
+
+/** Coming up by week, in order; what no date pins last, as No date yet. */
+export function comingGroups(rows: ComingRow[], term: Term, tz: string): WeekGroup<ComingRow>[] {
+  const dated = rows.filter((r) => r.when), undated = rows.filter((r) => !r.when);
+  const groups = weekGroups(dated, (r) => r.when, term, tz, [...new Set(dated.map((r) => weekOf(r.when!, term, tz)))]);
+  return undated.length ? [...groups, { key: 'none', label: 'No date yet', rows: undated }] : groups;
+}
+
+/** The Coming up fold's body: by week, each week saying when its items become problems. */
+export function ComingUp({ rows, term, tz, year }: { rows: ComingRow[]; term: Term; tz: string; year: number }) {
+  return (
+    <>
+      {comingGroups(rows, term, tz).map((g) => {
+        const from = g.rows.map((r) => r.from).filter((x): x is string => !!x).sort()[0];
+        return (
+          <section aria-label={g.label}>
+            <h3 class="week-h">{g.label}{g.from || from ? <span>{g.from ? ` from ${fmtShort(g.from)}` : ''}{from ? ` · problems from ${fmtShort(from)}` : ''}</span> : null}</h3>
+            <ul>
+              {g.rows.map((r) => (
+                <li key={r.key}><b>{r.when ? fmtDay(r.when, tz, year) : 'No date'}</b><span>{r.text}</span><a class="textlink" href={r.href}>{r.link}</a></li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </>
+  );
 }
 
 export function StudentCounts({ status }: { status: Status }) {
@@ -274,26 +425,29 @@ function Overview(p: ReadyProps) {
   const rows = scheduleRows(status, sched, now, tz);
   const term = termOf(status, sched, today);
   const current = weekOf(today, term, tz);
-  const [showSetup, setShowSetup] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const thisWeek = thisWeekOf(current);
   // The weeks the page is filtered to, picked in the strip; empty is all weeks. This week on load.
   const [selected, setSelected] = useState<number[]>(thisWeek);
-  const problems = status.problems ?? [];
-  const stages = status.semester?.stages ?? {};
-  const amber = Object.values(stages).filter((s) => s === 'problem').length;
+  // Every problem with its time, once per render (decision 0034): now or soon are the strip's red
+  // counts and the Problems tab; later ones are Coming up.
+  const tiered = useMemo(() => tier(status, now), [status, now]);
+  const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
+  const problems = standing(tiered);
+  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.courseMigrated, write: p.course.write });
+  const items = semesterItems(status, tiered, aside.list);
+  const coming = comingRows(status, tiered);
+  const days = horizonDays(status.horizon);
+  const verdict = verdictOf(status.semester?.verdict, 'semester', suggestionsCount(items), days, coming.length);
+  // The tab the verdict points at, until one is picked.
+  const [picked, setTab] = useState<string | null>(null);
+  const tab = picked ?? verdictTab(verdict);
   const late = (status.releases ?? []).filter((r) => r.state === 'late');
   const s = status.students;
   const ops = useOperations(status.operations, p.cohort.org);
-  const fixOf = (stage: string) => {
-    const pr = problems.find((x) => x.stage === stage);
-    const h = pr && fixHref(pr);
-    return h ? <a class="btn small" href={h}>Fix</a> : null;
-  };
   const toggle = (w: number) => setSelected(selected.includes(w) ? selected.filter((k) => k !== w) : [...selected, w]);
   const name = selectionName(selected, thisWeek);
-  const isThisWeek = name === 'This week';
-  const shown = problemGroups(problems, selected, isThisWeek, term, tz);
+  const shown = problemGroups(problems, now, days);
   return (
     <>
       <div class="page-head">
@@ -301,64 +455,61 @@ function Overview(p: ReadyProps) {
           <h2 class="h1">Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h2>
           <p class="lede">
             <span>{headerLine(status, sched, rows, tz, year)}</span>
-            {amber ? <span class="amber">Setup done, but {amber} {amber > 1 ? 'stages have a problem' : 'stage has a problem'}.</span> : <span>Setup complete.</span>}
-            <button class="textlink" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>{showSetup ? 'Hide setup' : 'Show setup'}</button>
           </p>
         </div>
-        <div class="actions"><Probs n={problems.length} /><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
+        <div class="actions"><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
       </div>
+      {/* The verdict is the page's one problem count, and its link to the Problems tab (decision 0034). */}
+      <Verdict v={verdict} onOpen={() => showTab(setTab, verdictTab(verdict))} />
       <div class="stack">
-        {showSetup ? (
-          <section class="panel section">
-            <div class="section-head"><h2>Setup</h2><Legend /></div>
-            <Rail scope="cohort" stages={stages} problems={problems} acts={{
-              K3: <a class="btn small quiet" href="#instructors">Instructors</a>, K4: fixOf('K4'), K5: fixOf('K5'),
-              K6: <a class="btn small quiet" href="#site">Site</a>, K7: <a class="btn small quiet" href="#archive">Archive</a>,
-            }} />
-          </section>
-        ) : null}
         <section class="panel section">
           <div class="section-head">
             {/* The chevron before the heading (decision 0031 rule 11), as in the side nav. */}
             <span class="lead">
               <button type="button" class="chev" aria-expanded={expanded} aria-controls="dash-weeks" aria-label={expanded ? 'Show the week strip' : 'Show every week as a list'} onClick={() => setExpanded(!expanded)}><span class="arrow" aria-hidden="true" /></button>
-              <h2>Semester <Hint label="About the weeks">Pick one or more weeks to show only what falls in them; unpick them all to show every week. A red number counts that week's problems.</Hint></h2>
+              <h2>Semester <Hint label="About the weeks">Pick one or more weeks to show only what falls in them; unpick them all to show every week. A red number counts that week's problems; a hollow one, what is not ready yet there and becomes a problem later.</Hint></h2>
             </span>
           </div>
           <div id="dash-weeks">
             {expanded
-              ? <Timeline rows={rows} term={term} tz={tz} year={year} />
-              : <TermStrip rows={rows} term={term} tz={tz} today={today} counts={problemCounts(problems, term, tz)} selected={selected} onToggle={toggle} />}
+              ? <Timeline rows={rows} term={term} tz={tz} year={year} marks={marks} />
+              : <TermStrip rows={rows} term={term} tz={tz} today={today} counts={problemCounts(tiered, term, tz)} selected={selected} onToggle={toggle} />}
           </div>
         </section>
-        <section class="section">
-          <div class="problems-head">
-            <h2>{selected.length ? `Problems ${inPhrase(name)}` : 'Problems'}</h2>
-            {selected.length ? <button class="textlink" type="button" onClick={() => setSelected([])}>Show all weeks</button> : null}
-            <span class="footnote">What will not happen until you fix it.</span>
-          </div>
-          {!problems.length ? <ProblemCards list={[]} cohort /> : null}
-          {shown.overdue.length ? (
-            <div class="p-overdue">
-              <h3 class="week-h">Overdue</h3>
-              <ProblemCards list={shown.overdue} cohort />
-            </div>
-          ) : null}
-          {shown.dated.length ? <ProblemCards list={shown.dated} cohort /> : null}
-          {!shown.overdue.length && !shown.dated.length && shown.elsewhere ? (
-            <p class="footnote">No problems {inPhrase(name)}. {shown.elsewhere} in other weeks.</p>
-          ) : null}
-          {shown.undated.length ? (
-            <div class="p-anytime">
-              <h3 class="week-h">Any time</h3>
-              <ProblemCards list={shown.undated} cohort />
-            </div>
-          ) : null}
-        </section>
+        <div ref={aside.ref}>
+          <DashboardTabs selected={tab} onSelect={setTab} tabs={[
+            {
+              key: 'problems', label: 'Problems', count: problems.length || 'done', bad: true,
+              body: (
+                <>
+                  <p class="footnote">What will not happen until you fix it: overdue, and the next {days} days.</p>
+                  {!problems.length ? <ProblemCards list={[]} cohort /> : null}
+                  {shown.map((g) => (
+                    <div class={`p-${g.key}`}>
+                      <h3 class="week-h">{g.label}</h3>
+                      <ProblemCards list={g.rows} cohort />
+                    </div>
+                  ))}
+                </>
+              ),
+            },
+            {
+              key: 'coming', label: 'Coming up', count: coming.length,
+              body: coming.length ? (
+                <>
+                  <p class="footnote">Needed later, by week. Each item becomes a problem {days} days before the date it is needed by, and is listed here until then.</p>
+                  <ComingUp rows={coming} term={term} tz={tz} year={year} />
+                </>
+              ) : <p class="footnote">Nothing is needed later.</p>,
+            },
+            ...readinessTabs({ items, scope: 'semester', busy: aside.busy, onCircle: aside.onCircle, onBack: aside.onBack(items) }),
+          ]} />
+          {aside.after}
+        </div>
         <div class="grid-2">
           <section class="panel section">
-            <div class="section-head"><h2>{name}</h2>{selected.length === 1 ? <span class="meta">{fmtDay(weekStart(term, selected[0]), tz).replace(/ \w+$/, '')} to {fmtDay(addDays(weekStart(term, selected[0]), 6), tz, year)}</span> : null}</div>
-            <WeekRows status={status} p={p} rows={rows} term={term} selected={selected} name={name} />
+            <div class="section-head"><h2>{plannedHeading(name)} <Hint label="About what is planned">Every release and deadline in the picked weeks, with its state. Late means its date has passed and it has not gone out. Pick weeks in the Semester strip above.</Hint></h2>{selected.length === 1 ? <span class="meta">{fmtDay(weekStart(term, selected[0]), tz).replace(/ \w+$/, '')} to {fmtDay(addDays(weekStart(term, selected[0]), 6), tz, year)}</span> : null}</div>
+            <WeekRows status={status} p={p} rows={rows} term={term} selected={selected} name={name} marks={marks} />
             <p class="overdue">{late.length ? `${late.length} release${late.length > 1 ? 's are' : ' is'} late: ${late.map((r) => releaseIdent(r)).join(', ')}.` : 'Nothing overdue.'}</p>
           </section>
           <section class="panel section">

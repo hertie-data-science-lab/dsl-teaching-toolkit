@@ -47,13 +47,15 @@ from .access import (
     repo_team_permissions,
 )
 from .course import (
-    FACULTY_ONLY_HEADING,
     INSTRUCTORS_TEAM,
     UPSTREAM_BRANCH,
     is_repo_root,
 )
 from .fs import copy_tree, union_deny
-from .gh_contents import is_untouched_stub
+from .gh_contents import (
+    WITHHELD_ROOT_STUBS,
+    is_withheld_stub,
+)
 from .ghcli import GIT_ENV, clone, git
 from .log import (
     CLIParser,
@@ -95,16 +97,6 @@ NEVER_COPIED = frozenset({".git"})
 # what "give me everything" means, not a ban.
 ROOT_RELEASE_EXCLUDED = frozenset({".github", SYSTEM_DIR})
 
-# Root documents this toolkit seeds as stubs for faculty to write over. Released once
-# written; withheld while still ours, because shipping either as-is publishes faculty
-# instructions and empty tables to students as their course overview or their syllabus.
-#
-# The syllabus joined this the moment the site began PINNING it on the landing page: an
-# unwritten stub would otherwise be the most prominent link on the course's front page.
-WITHHELD_ROOT_STUBS = ("README.md", "SYLLABUS.md")
-
-UNEDITED_README_MARKERS = ("**Replace this placeholder.**", FACULTY_ONLY_HEADING)
-
 
 def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
     """Say what was withheld and how to fix it - visibly, but WITHOUT failing the release.
@@ -138,25 +130,6 @@ def _warn_ignored_source(course_org: str, repo: str, path: str) -> None:
         "Everything else in this release shipped. Drop the pattern that matches it, or "
         "release a path that is not excluded."
     )
-
-
-def is_withheld_stub(path: str, text: str) -> bool:
-    """Whether a copy is one of the root stubs this toolkit seeds, still unwritten.
-
-    The ROOT file only - `path` must be exactly one of `WITHHELD_ROOT_STUBS`, not merely end
-    in it. A `README.md` inside a session folder is the faculty's own writing about that
-    session, and these stubs only ever exist at the repo root.
-
-    Two tests, because the two files are marked differently: `SYLLABUS.md` carries the
-    `dsl-stub:` mark every seeded stub now carries, while the README predates it and is
-    recognised by its own placeholder text - both markers required there, so a real overview
-    that happens to quote the stub still ships."""
-    name = path.strip("/")
-    if name not in WITHHELD_ROOT_STUBS:
-        return False
-    if name == "README.md":
-        return all(marker in text for marker in UNEDITED_README_MARKERS)
-    return is_untouched_stub(text)
 
 
 def _resolve_within(base: Path, rel: str) -> Path | None:

@@ -134,11 +134,12 @@ console is in instructor mode for anyone who teaches somewhere, and in student m
 
 The **side nav** is one tree in both consoles (decision 0031 rule 11), with the chevron before
 what it expands. An instructor's is anchored on the open course: "All courses" above it, the
-course name (a link to its overview), the course's pages (Overview first, where the name
-goes, as a semester's Dashboard is where its name goes; a read-only course shows only Overview),
+course name (a link to its Dashboard), the course's pages (Dashboard first, where the name
+goes, as a semester's Dashboard is where its name goes; a read-only course shows only Dashboard),
 then its semesters as nodes: being set up
 first, every live one (a green dot), then past ones ("ended" or "archived") newest first to
-three rows, the rest under "Older semesters (n)". The open semester is expanded to its nine
+three rows, the rest under "Older semesters (n)". A semester node carries its problem count
+(now or soon only, `problemCount`); its Dashboard leaf does not repeat it. The open semester is expanded to its nine
 pages, else on a course page the newest live one; one at a time. Other courses are reached
 through All courses, and so are the person's own student semesters. A student's tree is
 inverted, since a student takes each course once: the open semester's term is the anchor, its
@@ -149,32 +150,74 @@ Every course and semester page, in either console, opens with the **course banne
 that follow the tree ("All courses › Course › Semester"; a student's "Your semesters ›
 Semester › Course", led by All courses for a person who also teaches), the course name as the page's one h1, and on a semester page the
 semester's line under it (its name, state, week and dates) with the Student view pill (or
-"Back to instructor view") and the semester on GitHub on the right. The overview's banner is
-its head, with New semester; the page's own title is an h2 under the banner, with its `?`. A
+"Back to instructor view") and the semester on GitHub on the right. The course Dashboard's banner
+carries New semester; each page's own title is an h2 under the banner, with its `?`. A
 student's banner takes the week and the dates from `student-status.json`, and This week says
 how old that file's facts are ("Updated 3 h ago"). The footer names the course and the
 semester. On a phone the preview's top-bar link reads "Preview".
 
-The **course overview** is a status board in two columns. Setup & To do heads the left: two
-folds, Initial setup (folded once every step not set aside is done) and To do (open while it
-has items), the same checklist with a `?` on each line. For a viewer with write access the circle
-before an open line is a button (decision 0032): an optional item (the engine's `stage_optional`
-or a to-do's `optional`) can be set aside, which writes its id into `dsl-course.yml`'s
-`set_aside:` through the Course details save path and moves it to a "Set aside (n)" fold at the
-end of its section, with Bring back; a required one says why it cannot be and where it is done. Problems heads the right (the
-course's, then each live semester's, tagged). The other panels, Semesters (each with its next
-automatic event), Course details (with the public website's indicator and Publish button),
-Recent activity (the last five operations across the course and its live semesters; who ran
-each comes from its outcome file) and Handout materials followed by Assignment templates as one
-block, go wherever the two columns come out closest in height (`splitColumns`, from each
-panel's estimated height, problems counted up to four). Until the course's and every semester's
-status has loaded the columns keep a fixed layout (`SETTLING_COLUMNS`), so panels do not move as
-each arrives. The Dashboard's line under its title
-says only what the banner does not: the exams and the archive date.
+Both **Dashboards**, the course's and each semester's, share one model of readiness (decision
+0034, `model/readiness.ts`). The engine writes every field; `normalise` runs once, at load
+(`loadStatus`), and fills `bites`, `need` and `stage_need` on a status the previous engine
+wrote (from `when` and the horizon, `blocks`, a to-do's `optional`, `stage_optional`); every
+helper and screen after it trusts the fields. Every item has a need (needed or suggested), a
+state (done, open, has a problem, waiting) and, for a problem, a time: `now` (passed or
+undated), `soon` (within `horizon.days`, 7 by default) or `later`. A screen tiers the problems
+once per render (`tier`, memoised on the status and the clock) and hands the list to every
+consumer: the strip's counts, the panel's rows, the Problems and Coming up tabs and the release
+marks. Only now and soon are red and counted (`problemCount`): the nav, Home's cards, the
+course's Semesters rows and the Dashboards all show that one number. Screens join problems on
+their structured fields, never on `id`: `kind` (the code) and `release` (the schedule entry a
+problem holds back). Rows mark their state: a tick, a red `!` with Fix, a hollow circle
+(needed), a dotted circle and "optional" (a suggestion), a dash and the engine's "Waiting for
+<step>". No colour bar and no legend. The words (verdicts, chips, time words) live in
+`model/format.ts`.
 
-The Dashboard's week strip is its only filter: This week on load, any set of weeks picked,
-none picked for all of them. The Problems heading names the selection ("Problems in weeks 3
-and 5") with a "Show all weeks" link while a filter is on.
+Each Dashboard opens with its **verdict line**: the engine's `verdict` (state, problem count,
+the first missing needed item, coming up), worded by the console, with the suggestions tag
+counted from the rows and the set-aside list as last read. A status with no `verdict` (the
+previous engine's, one tick at most) shows no verdict line. The course's: "Needs fixing: n problems", "Not ready: <the first needed setup step open>" or "Ready
+for a new semester", tagged "· n suggestions". The semester's is the term's health over the
+horizon: "Needs fixing: n problems in the next 7 days", "Not set up: <the first needed step
+open>" or "On track: nothing to fix in the next 7 days", tagged "· n coming up". Its words are
+a button to the Problems tab; there is no separate problem badge in the page head.
+
+Under it (on a semester, under the week strip) sits one **tabbed panel** (`ui/DashboardTabs`,
+`id="dash-problems"`; only the current tab's body renders), Problems first and selected: Problems (a red count, or a green tick when
+none), on a semester Coming up, then Suggestions, Set aside, and Setup at the right (a green
+tick once every needed step is done, else "n of m"). On the course, Problems lists the course's
+own problems now or soon (a settings file that does not parse, a template's problem); a
+semester's problems are on its own Dashboard, counted on its Semesters row. On a semester,
+Problems groups the problems now or soon as Overdue, Next 7 days and Any time, whatever weeks
+the strip picks; Coming up lists the later ones by week (a template's brief or starter a later
+hand-out cites among them, as the engine writes it), with the day each becomes a problem.
+Suggestions lists the suggested setup steps and to-dos; the syllabus and its weekly plan are one
+engine check, "Syllabus". For a viewer with write access the circle before a suggestion is a
+button (decisions 0032 and 0034, `useSetAside`): it asks, then writes the id into the course's
+`dsl-course.yml` `set_aside:` through the Course details save path, and the line moves to Set aside, with Bring back. A needed item has no circle. A
+needed to-do is never listed in the panel: it shows once, at its point of need, the repo's row
+("Not ready" and the first missing needed item) and its settings checklist, split into Needed
+and Suggested.
+
+Under the course's tabbed panel, the other panels, Handout materials followed by Assignment
+templates (one block, heading the left), Semesters (heading the right; each with its next
+automatic event and its count), Course details (with the public website's indicator and Publish
+button) and Recent activity (the last five operations across the course and its live
+semesters; who ran each comes from its outcome file), go wherever the two columns come out
+closest in height (`splitColumns`, from each panel's estimated height). Until the course's and
+every semester's status has loaded the columns keep a fixed layout (`SETTLING_COLUMNS`), so
+panels do not move as each arrives. The semester Dashboard's line under its title says only
+what the banner does not: the exams and the archive date.
+
+The semester Dashboard's week strip filters its agenda only: This week on load, any set of
+weeks picked, none picked for all of them; the agenda panel's heading names the selection
+("Planned this week", "Planned in weeks 3 and 5", "Planned, all weeks"). A red number on a week
+counts its problems now or soon; a hollow one its later problems (a week with both shows the red
+one), and the legend shows both. A release row, on the expanded strip, in the agenda and on the
+Schedule page alike, marks the problem that holds it (`problemForRelease`, `releaseMark`): now, a
+red `!`, "was skipped" and Fix; soon, the same with "will be skipped"; later, a dotted "not ready
+yet", the same Fix and a muted stripe, with no red; late with no other problem (`LATE`), a red
+`!`, "late" and its Details. Fix goes where the problem card's does.
 
 ## Student screens and their sources
 

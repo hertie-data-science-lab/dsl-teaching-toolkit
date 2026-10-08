@@ -38,14 +38,14 @@
     //
     //   lecture        #f2dede  label #a94442   red
     //   lab            #dff0d8  label #3c763d   green
-    //   assignment     #d9edf7  label #31708f   blue
-    //   due            #d9edf7  label #31708f   blue (one assignment category:
+    //   assignment     #d6e6f7  label #1f5fa8   blue
+    //   due            #d6e6f7  label #1f5fa8   blue (one assignment category:
     //                                           the same hue as the row that puts
     //                                           the assignment out, told apart by
     //                                           the "Assignment due" label)
-    //   exam           #f0f1f2  label #5a5f66   grey
+    //   exam           #e6e8ec  label #2b2f36   grey
     //   special_event  #fbf2d5  label #7d6230   amber
-    //   term_date      #e5dcf0  label #59468f   violet
+    //   term_date      #ead9f6  label #7b3fb8   violet
     //
     // All backgrounds sit at the same pale tonal level, so body text (#111) and
     // links keep >5:1 contrast on every row; each label clears 4.5:1 on its own
@@ -61,15 +61,15 @@
     }
 
     .table-row-assignment {
-        background-color: #d9edf7;
+        background-color: #d6e6f7;
     }
 
     .table-row-due {
-        background-color: #d9edf7;
+        background-color: #d6e6f7;
     }
 
     .table-row-exam {
-        background-color: #f0f1f2;
+        background-color: #e6e8ec;
     }
 
     .table-row-special_event {
@@ -77,7 +77,7 @@
     }
 
     .table-row-term_date {
-        background-color: #e5dcf0;
+        background-color: #ead9f6;
     }
 
     .col-1 {

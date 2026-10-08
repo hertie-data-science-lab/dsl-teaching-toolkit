@@ -30,18 +30,18 @@
     },
     "exam": {
       "label": "Exam",
-      "colour": "#5a5f66",
-      "background": "#f0f1f2"
+      "colour": "#2b2f36",
+      "background": "#e6e8ec"
     },
     "assignment": {
       "label": "Assignment",
-      "colour": "#31708f",
-      "background": "#d9edf7"
+      "colour": "#1f5fa8",
+      "background": "#d6e6f7"
     },
     "term": {
       "label": "Semester",
-      "colour": "#59468f",
-      "background": "#e5dcf0"
+      "colour": "#7b3fb8",
+      "background": "#ead9f6"
     },
     "archive": {
       "label": "Archive",

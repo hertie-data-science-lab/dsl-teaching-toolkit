@@ -73,6 +73,33 @@ def test_render_markdown_missing_status_uses_add_link_text():
     assert "[add](https://x/edit)" in md
 
 
+def test_the_verdict_line_uses_the_consoles_words():
+    # Decision 0034: one scheme for the console and the CLI.
+    ready = "On track: nothing to fix in the next 7 days"
+    assert status.verdict_line(_data()) == ready
+    md = status.render_markdown("Course", "Semester-f2026", _data())
+    assert f"**{ready}**" in md and "| Done |" in md
+    unset = _data(
+        C7={**_ROW, "label": "Instructors", "status": "missing"},
+        C4={**_ROW, "status": "optional"},
+    )
+    assert status.verdict_line(unset) == (
+        "Not ready: Instructors is not set yet · 1 suggestion"
+    )
+    md = status.render_markdown("Course", "Semester-f2026", unset)
+    assert "| Not done yet |" in md and "| optional |" in md
+    broken = _data(C8={**_ROW, "status": status.ATTENTION}, C7=unset["C7"])
+    assert status.verdict_line(broken) == "Needs fixing: 1 problem in the next 7 days"
+
+
+def test_instructors_course_admins_and_mail_are_needed():
+    assert {"B1", "B6", "B8", "C2", "C7"} == status.REQUIRED
+    row = status._row("C7", "Instructors", "o", "r", "p", "main", False, "")
+    assert (row["status"], row["need"]) == ("missing", "needed")
+    row = status._row("C4", "Teams", "o", "r", "p", "main", False, "")
+    assert (row["status"], row["need"]) == ("optional", "suggested")
+
+
 def test_markdown_mode_keeps_loader_chatter_off_stdout(monkeypatch, capsys):
     # The workflow appends stdout to $GITHUB_STEP_SUMMARY of a PUBLIC repo, and the
     # loaders log lines that can name instructors.yml entries. Only the rendered table may
@@ -285,7 +312,7 @@ def test_a_fault_row_links_the_issue_list_in_both_states(monkeypatch):
         "Semester-f2026",
         _data(C9={**_ROW, "status": status.ATTENTION, "link_text": "open"}),
     )
-    assert "ATTENTION" in md and "[open](https://x/edit)" in md
+    assert "Has a problem" in md and "[open](https://x/edit)" in md
 
 
 def test_c3_points_at_the_grading_sheets_folder(monkeypatch):

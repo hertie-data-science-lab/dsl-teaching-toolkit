@@ -9,9 +9,10 @@ import schema from '../../schemas/status.schema.json';
 import type { GitHubClient, Tree } from '../github/client';
 import { assignmentIdent, fmtDay, releaseIdent } from './format';
 import { DEFAULT_TIMEZONE } from './policy';
+import { normalise } from './readiness';
 import { sameHandle } from './people';
 import { instant } from './student';
-import type { Operation, Problem, Status } from './types';
+import type { Operation, Status } from './types';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from './names';
 import { validator } from './validate';
 
@@ -70,7 +71,8 @@ export async function loadStatus(client: GitHubClient, owner: string, repo: stri
     }
     const errors = validateStatus(data);
     if (errors.length) return { kind: 'invalid', errors };
-    const status = data as Status;
+    // A file the previous engine wrote gets its readiness fields here, once (contract C).
+    const status = normalise(data as Status, Date.now());
     const stale = tree ? staleInputs(status.inputs, tree) : [];
     return { kind: 'ready', status, sha: file.sha, stale };
   } catch (e) {
@@ -129,21 +131,6 @@ export class StatusStore {
 }
 
 // --------------------------------------------------------------------------- course overview
-
-/** A problem on the course overview; a semester's carries that semester, for its tag and links. */
-export type TaggedProblem = Problem & { semester?: { org: string; label: string } };
-
-/**
- * The overview's Problems: the course's first, then each live semester's, tagged. A semester
- * repeats the course faults it will pay for (`scope: course`); one already listed is left out.
- */
-export function rollUpProblems(course: Problem[], semesters: { org: string; label: string; problems: Problem[] }[]): TaggedProblem[] {
-  const seen = new Set(course.map((p) => p.id));
-  const own = semesters.flatMap((s) =>
-    s.problems.filter((p) => !(p.scope === 'course' && seen.has(p.id))).map((p) => ({ ...p, semester: { org: s.org, label: s.label } })),
-  );
-  return [...course, ...own];
-}
 
 /** One automatic event: what ("Assignment 2"), the event word ("hand out") and when. */
 export interface NextEvent {

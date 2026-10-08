@@ -39,7 +39,8 @@ export interface WeekLine {
   tz?: string;
 }
 
-const DAY = 864e5;
+/** One day in milliseconds. */
+export const DAY = 864e5;
 
 /** The kinds a site row has that the status types share (the schedule's palette and words). */
 const SHARED_ROW_KINDS = ['lecture', 'lab', 'due', 'exam', 'special_event'];

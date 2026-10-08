@@ -25,7 +25,7 @@ import { takeInstallReturn } from './wizards/drafts';
 import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
-import { CourseHeaderActions, CourseHint, CourseScreen, TemplateScreen, courseView, semesterChip, templateTitle } from './screens/Course';
+import { CourseHeaderActions, CourseScreen, TemplateScreen, courseOf, semesterChip, templateTitle } from './screens/Course';
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from './screens/CourseIndex';
 import { HomeScreen, Invitations, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { InstructorsScreen, StudentsScreen } from './screens/People';
@@ -212,6 +212,8 @@ export function App({ state: s }: { state: AppState }) {
   const aboutCourse = !!ctx.course && !APP_SCREENS.includes(screen) && wiz?.name !== 'new-course';
   const semesterPage = !!ctx.cohort && !!ctx.course?.write && !wiz && !APP_SCREENS.includes(screen) && !(screen in COURSE_SCREENS);
   const courseLeft = aboutCourse ? s.leftovers('course', ctx.course!.org, nav) : [];
+  // The course's names are current: what a save to its files (Set aside, details) waits for.
+  const courseMigrated = Array.isArray(courseLeft) && !courseLeft.length;
   const semLeft = semesterPage ? s.leftovers('semester', ctx.cohort!.org, nav) : [];
   const failed = courseLeft === 'failed' ? { what: 'course' as const, org: ctx.course!.org } : semLeft === 'failed' ? { what: 'semester' as const, org: ctx.cohort!.org } : null;
   const pending = courseLeft === undefined || semLeft === undefined;
@@ -254,7 +256,7 @@ export function App({ state: s }: { state: AppState }) {
         name={ctx.course.name} semester={ctx.cohort ? { org: ctx.cohort.org, termLabel: ctx.cohort.termLabel } : undefined} />
     );
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
-    const cp: CourseProps = { migrated: Array.isArray(courseLeft) && !courseLeft.length, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
+    const cp: CourseProps = { migrated: courseMigrated, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
     body = wiz?.name === 'new-semester' ? <NewCohortScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-assignment' ? <NewAssignmentScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-materials' ? <NewMaterialsScreen {...cp} />
@@ -265,16 +267,16 @@ export function App({ state: s }: { state: AppState }) {
       : screen === 'materials' ? <MaterialsIndexScreen {...cp} />
       : screen === 'templates' ? <TemplatesIndexScreen {...cp} />
       : <CourseScreen {...cp} />;
-    // The overview: the banner is its head, with New semester; other course pages have no right side.
+    // The course dashboard: the banner carries New semester; other course pages have no right side.
     const overview = !wiz && !['template', 'details', 'website', 'materials', 'templates'].includes(screen);
     banner = (
       <CourseBanner crumbs={[home, { t: ctx.course.name, href: overview ? undefined : `?course=${ctx.course.org}#course` }]} name={ctx.course.name}
-        hint={overview ? <CourseHint /> : undefined} side={overview ? <CourseHeaderActions course={ctx.course} /> : undefined} />
+        side={overview ? <CourseHeaderActions course={ctx.course} /> : undefined} />
     );
   } else {
     const cp: CohortProps = {
       course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry, tab: route.tab,
-      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template,
+      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template, courseMigrated,
     };
     const screens: Record<string, () => preact.JSX.Element> = {
       dashboard: () => <CohortScreen {...cp} />,
@@ -342,7 +344,7 @@ export function bannerLine(sem: SemesterStatus | undefined): { chip?: preact.Com
  */
 export function subPages(course: Course, loaded: Loaded, cohortStates: Record<string, Loaded>, files: Files, want: SubWanted & { titles: boolean }): CourseSubPages | undefined {
   if (!course.write) return undefined;
-  const c = courseView({ loaded, cohortStates }).course;
+  const c = courseOf({ loaded, cohortStates });
   if (!c) return undefined;
   const materials = c.materials ?? [], templates = c.templates ?? [];
   const repos = want.materials ? files.repos(course.org) : null;

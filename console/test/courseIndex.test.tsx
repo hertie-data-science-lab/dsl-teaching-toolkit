@@ -10,7 +10,8 @@ import type { Files } from '../src/model/files';
 import { StaticFiles } from './staticFiles';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
-import { CourseScreen, MaterialsChecklist, materialsWhys } from '../src/screens/Course';
+import { CourseScreen, MaterialsChecklist } from '../src/screens/Course';
+import { materialsReadiness } from '../src/model/readiness';
 import { HomeScreen } from '../src/screens/Home';
 import { MaterialsScreen, WebsiteScreen, folderKinds, kindChoices, resetLabel, writeHolds } from '../src/screens/CourseEdit';
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from '../src/screens/CourseIndex';
@@ -121,27 +122,30 @@ describe('index screens', () => {
     expect(t).not.toContain('old-thing');
     expect(render(<MaterialsIndexScreen {...cp()} />)).toContain(`href="#materials-${MAT}"`);
   });
-  it('says why a materials repo is not ready: its unmet required checks, one per line', () => {
+  it('says why a materials repo is not ready: its first missing needed check, and counts its suggestions', () => {
     const m = STATUS.course!.materials[0];
-    // Ready: no list, though a non-required line is still open.
-    expect(materialsWhys(m)).toEqual([]);
+    // Ready: no sentence, and the open weekly plan is a suggestion.
+    expect(materialsReadiness(m)).toEqual({ state: 'ready', missing: null, suggestions: 1 });
     const checks = m.checks!.map((c) => (c.id === 'syllabus' || c.id === 'kind_folder' ? { ...c, done: false, why: `${c.id} is missing.` } : c));
     const todo = { ...m, state: 'todo', checks };
-    expect(materialsWhys(todo)).toEqual(['kind_folder is missing.', 'syllabus is missing.']);
+    // An older status: the syllabus still blocks, so it is needed; the first missing needed check names it.
+    expect(materialsReadiness(todo).missing).toBe('kind_folder is missing.');
     const st: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...STATUS.course!, materials: [todo] } }, sha: 's', stale: [] };
-    for (const v of [<MaterialsIndexScreen {...cp({ loaded: st })} />, <CourseScreen {...cp({ loaded: st })} />])
-      expect(render(v)).toContain('<ul class="r-sub unmet"><li>kind_folder is missing.</li><li>syllabus is missing.</li></ul>');
-    // The ready fixture shows the chip and no sentence.
+    for (const v of [<MaterialsIndexScreen {...cp({ loaded: st })} />, <CourseScreen {...cp({ loaded: st })} />]) {
+      expect(render(v)).toContain('<span class="chip notready">Not ready</span>');
+      expect(render(v)).toContain('<span class="r-sub">kind_folder is missing.</span>');
+    }
+    // The ready fixture shows the chip and a dotted count of its suggestions.
     const out = render(<MaterialsIndexScreen {...cp()} />);
-    expect(out).toContain('<span class="chip ok">Ready</span>');
-    expect(out).not.toContain('r-sub unmet');
+    expect(out).toContain('<span class="chip ok">Ready</span><span class="chip suggest">1 suggestion</span>');
     expect(out).not.toContain('Syllabus written');
   });
-  it('shows a template still being written neutrally, not as a problem', () => {
-    const st: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...STATUS.course!, templates: [{ repo: 'assignment-regression', slug: 'assignment-regression', state: 'todo' }] } }, sha: 's', stale: [] };
+  it('shows a template still being written as Not ready, not as a problem', () => {
+    const st: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...STATUS.course!, templates: [{ repo: 'assignment-regression', slug: 'assignment-regression', state: 'todo' }] } }, sha: 's', stale: [] };
     for (const v of [<TemplatesIndexScreen {...cp({ loaded: st })} />, <CourseScreen {...cp({ loaded: st })} />]) {
       const out = render(v);
-      expect(out).toContain('<span class="chip">Not written yet</span>');
+      expect(out).toContain('<span class="chip notready">Not ready</span>');
+      expect(out).toContain('The brief (README.md) is not written yet.');
       expect(out).toContain('href="#template-assignment-regression">Settings');
       expect(out).not.toContain('href="#template-assignment-regression">Fix');
     }
@@ -167,13 +171,16 @@ describe('index screens', () => {
 });
 
 describe('materials settings file tree', () => {
-  it('heads the settings with the full checklist, ticks included', () => {
+  it('heads the settings with the checklist by need, ticks included, and the chips in the page head', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
-    expect(out).toContain('<h2>Checklist</h2><span class="chip ok">Ready</span>');
-    expect((out.match(/<li class="done">/g) ?? []).length).toBe(3);
-    expect(out).toContain('Weekly plan in the syllabus<span class="sr">: To do</span>');
-    expect(out).toContain('<span class="s-why">The weekly plan is not in SYLLABUS.md yet.</span>');
-    expect((out.match(/<span class="s-need">required<\/span>/g) ?? []).length).toBe(2);
+    expect(out).toContain('<span class="chip ok">Ready</span><span class="chip suggest">1 suggestion</span>');
+    expect(out).toContain('<p class="sub-h">Needed</p>');
+    expect(out).toContain('<p class="sub-h">Suggested</p>');
+    expect((out.match(/<li class="done">/g) ?? []).length).toBe(2);
+    // The syllabus and its weekly plan are one row (decision 0034).
+    expect(out).toContain('<li class="open suggested"><span class="s-mark" aria-hidden="true"></span><span class="s-name">Syllabus<span class="s-opt">optional</span>');
+    expect(out).toContain('<span class="s-why">The weekly plan (written from the schedule) is not in SYLLABUS.md yet.</span>');
+    expect(out).not.toContain('required');
   });
   it('saves a withhold list that withholds nothing with the reviewed mark, Save enabled', () => {
     expect(withMark('')).toBe(`${REVIEWED_MARK}\n`);
@@ -240,16 +247,16 @@ describe('course nav and overview', () => {
     expect(t).toContain('Fall 2026 Live Fall 2026');
     expect(t).not.toContain(OLD_ORG);
   });
-  it('rolls up the course’s problems, then each live semester’s, and gives each semester its count', () => {
+  it('lists the course’s problems and gives each semester its count, now or soon only', () => {
     const t = text(<CourseScreen {...cp({ loaded: ready })} />);
     expect(t).toContain('Problems');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).not.toContain('Everything automatic will happen on time');
     expect(t).toContain('Fall 2025');
-    expect(t).toContain('2 problems');
+    expect(t).toMatch(/\d problems?/);
     const calm: Loaded = { kind: 'ready', status: { ...STATUS, problems: [] }, sha: 's', stale: [] };
     const none = text(<CourseScreen {...cp({ loaded: calm, cohortStates: { [COHORT_ORG]: calm, [OLD_ORG]: archived } })} />);
-    expect(none).toContain('No problems.');
+    expect(none).toContain('No problems on the course.');
   });
   it('a semester with no problems reads No problems, with no count badge, on the course page and Home', () => {
     const row = render(<CourseScreen {...cp()} />).split('<li>').find((li) => li.includes('Fall 2025'))!;
@@ -349,7 +356,9 @@ describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () 
 
   it('gives every line a ?, and folds the kinds found under the content-kind line', () => {
     const out = render(<MaterialsChecklist checks={checks} />);
-    expect(out.match(/aria-label="About this check"/g)).toHaveLength(checks.length);
+    // The syllabus (one check with its weekly plan) has its own ?.
+    expect(out.match(/aria-label="About this check"/g)).toHaveLength(checks.length - 1);
+    expect(out.match(/aria-label="About the syllabus"/g)).toHaveLength(1);
     expect(out).toContain('A repo with nothing of a content kind has nothing to release.');
     expect(out).toContain('Saving the list once, even empty, marks it reviewed.');
     // Collapsed: no `open`. Every content kind but supporting files: a tick and its folders when present, nothing when not.
@@ -359,12 +368,12 @@ describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () 
     expect(kinds).toMatch(/<li class="found"><span class="k-mark" aria-hidden="true"><svg[^]*?<\/svg><\/span><b>Lecture<\/b>: lectures\/<\/li>/);
     expect(kinds).toContain('<li><span class="k-mark" aria-hidden="true"></span><b>Readings</b><span class="sr">: none</span></li>');
     expect(kinds).not.toContain('Supporting');
-    // Kinds first, then the syllabus, the weekly plan right after it, then the withheld patterns.
+    // Needed first (the kinds), then the suggested: the syllabus row (its open part, the plan, is a suggestion), the withheld patterns.
     const t = text(<MaterialsChecklist checks={checks} />);
     expect(t).not.toContain('Every top folder has a kind');
-    expect(t.indexOf('At least one folder of a content kind')).toBeLessThan(t.indexOf('Syllabus written'));
-    expect(t.indexOf('Syllabus written')).toBeLessThan(t.indexOf('Weekly plan in the syllabus'));
-    expect(t.indexOf('Weekly plan in the syllabus')).toBeLessThan(t.indexOf('Withheld patterns reviewed'));
+    expect(t.indexOf('At least one folder of a content kind')).toBeLessThan(t.indexOf('Syllabus'));
+    expect(t.indexOf('Syllabus')).toBeLessThan(t.indexOf('Withheld patterns reviewed'));
+    expect(t).not.toContain('Weekly plan in the syllabus');
   });
 
   it('points an edit link at GitHub’s new-file page while the file does not exist', () => {

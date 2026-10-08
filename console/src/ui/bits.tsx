@@ -1,10 +1,10 @@
-// The mockup's shared pieces: crumbs, problem cards, the stage rail, footnotes.
+// The mockup's shared pieces: crumbs, problem cards, footnotes.
 
 import type { ComponentChildren } from 'preact';
 import { encPath } from '../github/client';
-import { COHORT_STAGES, COURSE_STAGES, PROBLEM_AREA, STAGE_WORD, md, opLabel, ago } from '../model/format';
-import type { TaggedProblem } from '../model/status';
-import type { Operation, Outcome, Problem, StageState } from '../model/types';
+import { PROBLEM_AREA, ago, markWord, md, opLabel, plural } from '../model/format';
+import type { ReleaseMark } from '../model/readiness';
+import type { Operation, Outcome, Problem } from '../model/types';
 import { Alert, Check, Eye, Ext, Fail, Skip } from './icons';
 
 export const DOCS = 'https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/';
@@ -53,12 +53,10 @@ export function Crumbs({ items }: { items: { t: string; href?: string }[] }) {
   );
 }
 
+/** A problem count (now or soon, `problemCount`): Home's cards and the course's Semesters rows. */
 export function Probs({ n }: { n: number }) {
-  return n ? (
-    <span class="probs"><span class="count-badge">{n}</span>{n === 1 ? '1 problem' : `${n} problems`}</span>
-  ) : (
-    <span class="probs none">No problems</span>
-  );
+  if (!n) return <span class="probs none">No problems</span>;
+  return <span class="probs"><span class="count-badge">{n}</span>{plural(n, 'problem')}</span>;
 }
 
 /** A disabled button for an action another work package builds, with the reason on hover. */
@@ -125,11 +123,24 @@ export function fixHref(p: Problem): string | null {
 }
 
 /**
- * The problem cards. `cohort` marks the course's faults "(course)" on a semester's page. A
- * card carrying `semester` (the course overview's roll-up) is tagged with it, the tag linking
- * to that semester's Dashboard, and its Fix opens that semester's screen.
+ * A release row's mark (decision 0034 §6): now or soon, a red `!`, the red time word and Fix;
+ * later, a dotted "not ready yet" and the same Fix; late, a red `!` and "late" (the caller links
+ * its Details). Fix goes where the problem card's does.
  */
-export function ProblemCards({ list, cohort }: { list: TaggedProblem[]; cohort?: boolean }) {
+export function ReleaseMarks({ m, entry }: { m: ReleaseMark; entry: string }) {
+  const red = m.bites !== 'later';
+  const href = (m.problem && fixHref(m.problem)) || `#schedule-${entry}`;
+  return (
+    <>
+      {red ? <span class="ex" aria-hidden="true">!</span> : null}
+      <span class={`st-chip ${red ? 'skip' : 'later'}`}>{markWord(m)}</span>
+      {m.late ? null : <a class={red ? 'btn small' : 'textlink'} href={href}>Fix</a>}
+    </>
+  );
+}
+
+/** The problem cards. `cohort` marks the course's faults "(course)" on a semester's page. */
+export function ProblemCards({ list, cohort }: { list: Problem[]; cohort?: boolean }) {
   if (!list.length)
     return (
       <div class="no-problems"><Check /><span>No problems. Everything automatic will happen on time.</span></div>
@@ -137,16 +148,14 @@ export function ProblemCards({ list, cohort }: { list: TaggedProblem[]; cohort?:
   return (
     <ul class="problems">
       {list.map((p) => {
-        const fix = fixHref(p);
-        const href = fix && p.semester ? `?cohort=${p.semester.org}${fix}` : fix;
+        const href = fixHref(p);
         const [org, repo] = (p.fix?.repo ?? '').split('/');
         return (
-          <li class="problem" key={p.semester ? `${p.semester.org}:${p.id}` : p.id}>
+          <li class="problem" key={p.id}>
             <div class="p-where">
-              {p.semester ? <a class="chip p-tag" href={`?cohort=${p.semester.org}#dashboard`}>{p.semester.label}</a> : null}
               <b>{PROBLEM_AREA[p.stage] ?? p.stage}</b>
               <span>{whereOf(p)}</span>
-              {(cohort || p.semester) && p.scope === 'course' ? <span>(course)</span> : null}
+              {cohort && p.scope === 'course' ? <span>(course)</span> : null}
             </div>
             <p class="p-say">{p.text}</p>
             <p class="p-effect">{p.stops}</p>
@@ -158,49 +167,6 @@ export function ProblemCards({ list, cohort }: { list: TaggedProblem[]; cohort?:
         );
       })}
     </ul>
-  );
-}
-
-export function Legend() {
-  return (
-    <div class="legend">
-      {(['done', 'problem', 'blocked', 'todo'] as StageState[]).map((s) => (
-        <span><span class={`seg ${s}`} />{STAGE_WORD[s]}</span>
-      ))}
-    </div>
-  );
-}
-
-export function Rail({
-  scope,
-  stages,
-  problems,
-  acts = {},
-}: {
-  scope: 'cohort' | 'course';
-  stages: Record<string, StageState>;
-  problems: Problem[];
-  acts?: Record<string, ComponentChildren>;
-}) {
-  const names = scope === 'cohort' ? COHORT_STAGES : COURSE_STAGES;
-  return (
-    <ol class="rail" style={`--n:${names.length}`}>
-      {names.map(([id, name]) => {
-        const st = stages[id] ?? 'todo';
-        const prob = problems.find((p) => p.stage === id);
-        return (
-          <li class={st}>
-            <span class={`seg ${st}`} aria-hidden="true" />
-            <span class="r-name">{name}</span>
-            <span class="r-state">
-              <span class="sr">{STAGE_WORD[st]}: </span>
-              {st === 'problem' && prob ? prob.text : STAGE_WORD[st]}
-            </span>
-            {acts[id] ? <span class="r-act">{acts[id]}</span> : null}
-          </li>
-        );
-      })}
-    </ol>
   );
 }
 

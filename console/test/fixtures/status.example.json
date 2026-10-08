@@ -37,6 +37,20 @@
       "C5": false,
       "C6": false
     },
+    "stage_need": {
+      "C1": "needed",
+      "C2": "needed",
+      "C3": "needed",
+      "C4": "suggested",
+      "C5": "suggested",
+      "C6": "suggested"
+    },
+    "verdict": {
+      "state": "fixing",
+      "problems": 1,
+      "missing": null,
+      "suggestions": 2
+    },
     "ready": false,
     "materials": [
       {
@@ -49,6 +63,7 @@
             "done": true,
             "why": null,
             "blocks": true,
+            "need": "needed",
             "detail": [
               {
                 "kind": "lecture",
@@ -82,16 +97,10 @@
           },
           {
             "id": "syllabus",
-            "label": "Syllabus written",
-            "done": true,
-            "why": null,
-            "blocks": true
-          },
-          {
-            "id": "sessions",
-            "label": "Weekly plan in the syllabus",
+            "label": "Syllabus",
             "done": false,
-            "why": "The weekly plan is not in SYLLABUS.md yet.",
+            "why": "The weekly plan (written from the schedule) is not in SYLLABUS.md yet.",
+            "need": "suggested",
             "blocks": false
           },
           {
@@ -99,7 +108,8 @@
             "label": "Withheld patterns reviewed",
             "done": true,
             "why": null,
-            "blocks": false
+            "blocks": false,
+            "need": "suggested"
           }
         ]
       }
@@ -116,12 +126,14 @@
     ],
     "todo": [
       {
-        "id": "materials:course-materials-f2026:sessions",
+        "id": "materials:course-materials-f2026:syllabus",
         "kind": "materials",
+        "check": "syllabus",
         "repo": "course-materials-f2026",
-        "text": "The weekly plan is not in SYLLABUS.md yet.",
+        "text": "The weekly plan (written from the schedule) is not in SYLLABUS.md yet.",
         "screen": "materials",
         "entry": "course-materials-f2026",
+        "need": "suggested",
         "optional": true,
         "set_aside": false
       }
@@ -143,9 +155,24 @@
       "K3": "done",
       "K4": "problem",
       "K5": "problem",
-      "K6": "done",
-      "K7": "todo"
+      "K6": "done"
     },
+    "stage_need": {
+      "K1": "needed",
+      "K2": "needed",
+      "K3": "needed",
+      "K4": "needed",
+      "K5": "needed",
+      "K6": "needed"
+    },
+    "verdict": {
+      "state": "fixing",
+      "problems": 1,
+      "missing": null,
+      "suggestions": 0,
+      "coming_up": 1
+    },
+    "todo": [],
     "archive_date": "2027-01-31"
   },
   "problems": [
@@ -153,6 +180,8 @@
       "id": "schedule:s5:SOURCE_MISSING",
       "scope": "semester",
       "stage": "K4",
+      "kind": "SOURCE_MISSING",
+      "release": "s5",
       "text": "Session 5 cites folder lectures/05_trees, which is not in course-materials-f2026.",
       "stops": "The release on Thu 8 Oct will be skipped.",
       "when": "2026-10-08T10:00:00+02:00",
@@ -168,6 +197,7 @@
       "id": "template:assignment-3:GRADING_CONFIG",
       "scope": "course",
       "stage": "C5",
+      "kind": "GRADING_CONFIG",
       "text": "assignment-3's grading_config.yml has autograde: sometimes, which is not yes or no.",
       "stops": "Marking of Assignment 3 cannot start.",
       "fix": {

@@ -24,6 +24,7 @@ import type { SemesterFacts } from '../model/student';
 import { nextLine, semesterLine, weekWords } from '../model/week';
 import { studentHref } from '../router';
 import { Crumbs, Probs, ghUrl } from '../ui/bits';
+import { problemCount } from '../model/readiness';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { useLoad } from '../ui/load';
@@ -88,7 +89,8 @@ function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, sub: string
   if (!l || l.kind === 'loading') return { ...base, week: '…', status: <span class="chip">Reading</span>, next: [], ro: false, urgency: 0 };
   if (l.kind !== 'ready')
     return { ...base, week: '', status: <span class="chip">{l.kind === 'absent' ? 'Not computed yet' : 'Unreadable'}</span>, next: [['', l.kind === 'absent' ? 'Open it and press Refresh.' : 'The status file could not be read.']], ro: false, urgency: 0 };
-  const s = l.status, tz = s.semester?.timezone, n = (s.problems ?? []).length;
+  // Problems now or soon (decision 0034): a later one waits in the semester's Coming up.
+  const s = l.status, tz = s.semester?.timezone, n = problemCount(s, now);
   if (s.semester?.live === false)
     return {
       ...base,

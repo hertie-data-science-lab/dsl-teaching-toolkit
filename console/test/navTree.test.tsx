@@ -55,14 +55,14 @@ describe('the instructor tree', () => {
     const h = show(<Sidenav courses={[course(['f2026'])]} course={course(['f2026'])} cohortStates={{}} current="course" now={NOW} />);
     const anchor = h.querySelector('a.nav-anchor')!;
     expect(anchor.getAttribute('href')).toBe(`?course=${COURSE_ORG}#course`);
-    // On the overview the Overview leaf is the one current entry, as Dashboard is in a semester; the anchor links there too.
+    // On the course Dashboard its leaf is the one current entry, as Dashboard is in a semester; the anchor links there too.
     expect(anchor.getAttribute('aria-current')).toBeNull();
     const cur = h.querySelectorAll('[aria-current]');
     expect(cur).toHaveLength(1);
-    expect(cur[0].textContent).toBe('Overview');
+    expect(cur[0].textContent).toBe('Dashboard');
     expect(cur[0].getAttribute('href')).toBe(anchor.getAttribute('href'));
     const leaves = [...h.querySelectorAll('ul.tree > li > a.leaf, ul.tree > li > .row > a')].map((a) => a.textContent);
-    expect(leaves.slice(0, 5)).toEqual(['Overview', 'Course details', 'Handout materials', 'Assignment templates', 'Public website']);
+    expect(leaves.slice(0, 5)).toEqual(['Dashboard', 'Course details', 'Handout materials', 'Assignment templates', 'Public website']);
     const t = h.textContent!;
     expect(t.indexOf('Public website')).toBeLessThan(t.indexOf('Semesters'));
     expect(h.querySelector('.switcher, .popmenu')).toBeNull();
@@ -70,12 +70,12 @@ describe('the instructor tree', () => {
     expect(nodes(h)).toEqual([{ name: 'Fall 2026', open: true, folded: false, live: true }]);
   });
 
-  it('shows a read-only course its Overview, current on the overview, and hides the edit pages', () => {
+  it('shows a read-only course its Dashboard, current on the dashboard, and hides the edit pages', () => {
     const ro = { ...course(['f2026']), write: false };
     const h = show(<Sidenav courses={[ro]} course={ro} cohortStates={{}} current="course" now={NOW} />);
     const cur = h.querySelectorAll('[aria-current]');
     expect(cur).toHaveLength(1);
-    expect(cur[0].textContent).toBe('Overview');
+    expect(cur[0].textContent).toBe('Dashboard');
     expect(cur[0].getAttribute('href')).toBe(`?course=${COURSE_ORG}#course`);
     const t = h.textContent!;
     for (const page of ['Course details', 'Handout materials', 'Assignment templates', 'Public website']) expect(t).not.toContain(page);
@@ -143,7 +143,7 @@ describe('the instructor tree', () => {
     expect(chev.parentElement!.firstElementChild).toBe(chev);
     // A group with nothing to show keeps the gutter empty.
     expect(h.querySelector('.row')!.firstElementChild!.tagName).toBe('SPAN');
-    expect(h.querySelector('a.leaf')!.textContent).toBe('Overview');
+    expect(h.querySelector('a.leaf')!.textContent).toBe('Dashboard');
   });
 });
 
@@ -241,10 +241,10 @@ describe('one person, two roles', () => {
     expect(nav.innerHTML).not.toContain(studied.org);
     expect(el.querySelector('.switcher')).toBeNull();
   });
-  it('lights the course’s Overview in the New semester wizard', async () => {
+  it('lights the course’s Dashboard in the New semester wizard', async () => {
     const el = await mount(`/?course=${COURSE_ORG}#new-semester-1`);
     expect(el.querySelector('.sidenav .nav-anchor')!.getAttribute('aria-current')).toBeNull();
-    expect(el.querySelector('.sidenav a.leaf[aria-current]')!.textContent).toBe('Overview');
+    expect(el.querySelector('.sidenav a.leaf[aria-current]')!.textContent).toBe('Dashboard');
   });
   it('heads a read-only course’s pages with the course banner, keeping the Public site link', async () => {
     const ro: Course = { ...taught, write: false };

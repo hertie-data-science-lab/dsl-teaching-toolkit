@@ -94,15 +94,23 @@ def parse(data: object, where: str = OPENCOURSE_FILE) -> OpenCourse:
     return out
 
 
+WHERE = f"{OPENCOURSE_REPO}/{OPENCOURSE_FILE}"
+
+
+def load(org: str) -> dict | None:
+    """The course's `opencourse.yml` as parsed YAML, None when there is none. A file that
+    is not a YAML mapping raises `Unusable`; `parse` validates the rest."""
+    try:
+        return load_yaml_config(org, OPENCOURSE_REPO, OPENCOURSE_FILE)
+    except yaml.YAMLError as exc:
+        raise Unusable(f"{WHERE} is not valid YAML") from exc
+
+
 def read(org: str) -> OpenCourse | None:
     """The course's declaration, or None when it has no `opencourse.yml`. A file that does
     not parse or does not validate raises `Unusable`."""
-    where = f"{OPENCOURSE_REPO}/{OPENCOURSE_FILE}"
-    try:
-        data = load_yaml_config(org, OPENCOURSE_REPO, OPENCOURSE_FILE)
-    except yaml.YAMLError as exc:
-        raise Unusable(f"{where} is not valid YAML") from exc
-    return None if data is None else parse(data, where)
+    data = load(org)
+    return None if data is None else parse(data, WHERE)
 
 
 def seed_text(oc: OpenCourse | None = None) -> str:

@@ -319,6 +319,13 @@
                     "label": {
                       "type": "string"
                     },
+                    "need": {
+                      "enum": [
+                        "needed",
+                        "suggested"
+                      ],
+                      "type": "string"
+                    },
                     "why": {
                       "type": [
                         "string",
@@ -365,6 +372,16 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "stage_need": {
+          "additionalProperties": {
+            "enum": [
+              "needed",
+              "suggested"
+            ],
+            "type": "string"
+          },
+          "type": "object"
         },
         "stage_optional": {
           "additionalProperties": {
@@ -429,6 +446,20 @@
           "items": {
             "additionalProperties": false,
             "properties": {
+              "check": {
+                "enum": [
+                  "kind_folder",
+                  "syllabus",
+                  "withheld",
+                  "brief",
+                  "starter",
+                  "description",
+                  "home",
+                  "archive_date",
+                  "email"
+                ],
+                "type": "string"
+              },
               "entry": {
                 "type": "string"
               },
@@ -437,8 +468,19 @@
               },
               "kind": {
                 "enum": [
+                  "course",
                   "materials",
-                  "template"
+                  "template",
+                  "site",
+                  "schedule",
+                  "instructors"
+                ],
+                "type": "string"
+              },
+              "need": {
+                "enum": [
+                  "needed",
+                  "suggested"
                 ],
                 "type": "string"
               },
@@ -467,11 +509,58 @@
             "type": "object"
           },
           "type": "array"
+        },
+        "verdict": {
+          "additionalProperties": false,
+          "properties": {
+            "coming_up": {
+              "type": "integer"
+            },
+            "missing": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "problems": {
+              "type": "integer"
+            },
+            "state": {
+              "enum": [
+                "fixing",
+                "not_ready",
+                "ready"
+              ],
+              "type": "string"
+            },
+            "suggestions": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "state",
+            "problems",
+            "missing",
+            "suggestions"
+          ],
+          "type": "object"
         }
       },
       "required": [
         "org",
         "stages"
+      ],
+      "type": "object"
+    },
+    "horizon": {
+      "additionalProperties": false,
+      "properties": {
+        "days": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "days"
       ],
       "type": "object"
     },
@@ -524,6 +613,14 @@
       "items": {
         "additionalProperties": false,
         "properties": {
+          "bites": {
+            "enum": [
+              "now",
+              "soon",
+              "later"
+            ],
+            "type": "string"
+          },
           "fix": {
             "additionalProperties": false,
             "properties": {
@@ -565,6 +662,12 @@
             "type": "object"
           },
           "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "release": {
             "type": "string"
           },
           "scope": {
@@ -725,6 +828,16 @@
         "org": {
           "type": "string"
         },
+        "stage_need": {
+          "additionalProperties": {
+            "enum": [
+              "needed",
+              "suggested"
+            ],
+            "type": "string"
+          },
+          "type": "object"
+        },
         "stage_why": {
           "additionalProperties": {
             "type": "string"
@@ -749,8 +862,120 @@
             "null"
           ]
         },
+        "template_moments": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": "object"
+        },
         "timezone": {
           "type": "string"
+        },
+        "todo": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "check": {
+                "enum": [
+                  "kind_folder",
+                  "syllabus",
+                  "withheld",
+                  "brief",
+                  "starter",
+                  "description",
+                  "home",
+                  "archive_date",
+                  "email"
+                ],
+                "type": "string"
+              },
+              "entry": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "course",
+                  "materials",
+                  "template",
+                  "site",
+                  "schedule",
+                  "instructors"
+                ],
+                "type": "string"
+              },
+              "need": {
+                "enum": [
+                  "needed",
+                  "suggested"
+                ],
+                "type": "string"
+              },
+              "optional": {
+                "type": "boolean"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "screen": {
+                "type": "string"
+              },
+              "set_aside": {
+                "type": "boolean"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "repo",
+              "text"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "verdict": {
+          "additionalProperties": false,
+          "properties": {
+            "coming_up": {
+              "type": "integer"
+            },
+            "missing": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "problems": {
+              "type": "integer"
+            },
+            "state": {
+              "enum": [
+                "fixing",
+                "not_ready",
+                "ready"
+              ],
+              "type": "string"
+            },
+            "suggestions": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "state",
+            "problems",
+            "missing",
+            "suggestions"
+          ],
+          "type": "object"
         },
         "week": {
           "type": [
