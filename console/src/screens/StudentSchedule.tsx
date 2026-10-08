@@ -24,8 +24,6 @@ export function ArchiveNotice({ when, tz, now }: { when: string; tz: string; now
   );
 }
 
-// --------------------------------------------------------------------------- Schedule
-
 /** Monday of the week `iso` falls in, as yyyy-mm-dd. */
 function mondayOf(iso: string, tz: string): string {
   const day = dayKey(iso, tz);

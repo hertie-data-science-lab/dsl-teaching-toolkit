@@ -5,11 +5,11 @@
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import { instant, startOfDay, type Announcement, type ScheduleRow, type SemesterAssignment, type SemesterFacts } from '../model/student';
-import { studentHref } from '../router';
+import { assignmentHref } from '../router';
 import { Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import { GhMd } from '../ui/rendered';
-import { fileHref } from './StudentFiles';
+import { fileHref, newTabIf } from './StudentFiles';
 import { PersonCard } from './StudentInstructors';
 
 /** Display-only rows (the site's `_events`): never news, and on a kind tab only as the kind's own event. */
@@ -62,12 +62,12 @@ function Bullet({ u, facts, org }: { u: Update; facts: SemesterFacts; org: strin
         New {noun} {r.kind === 'readings' ? 'are' : 'is'} up: {r.title}
         {r.links.map((l) => {
           const h = fileHref(org, facts.materialsRepos, l);
-          return <> [<a href={h.href} {...(h.ext ? { target: '_blank', rel: 'noopener' } : {})}>{l.name || 'file'}</a>]</>;
+          return <> [<a href={h.href} {...newTabIf(h.ext)}>{l.name || 'file'}</a>]</>;
         })}
       </li>
     );
   }
-  if ('assignment' in u) return <li>New Assignment released: [<a href={studentHref(org, `assignment-${u.assignment.slug}`)}>{u.assignment.title}</a>]</li>;
+  if ('assignment' in u) return <li>New Assignment released: [<a href={assignmentHref(org, u.assignment.slug)}>{u.assignment.title}</a>]</li>;
   if ('archive' in u) return <li><Md src={u.archive} /></li>;
   return <li>{u.news.title ? <b>{u.news.title}</b> : null}{u.news.details ? <Md src={u.news.details} /> : null}</li>;
 }
@@ -87,7 +87,7 @@ export function HomeView({ facts, org, now }: { facts: SemesterFacts; org: strin
           <ul>{updates.map((u) => <Bullet u={u} facts={facts} org={org} />)}</ul>
         </section>
       ) : null}
-      {syl ? <p class="syllabus-link"><a class="btn outline" href={syl.href} {...(syl.ext ? { target: '_blank', rel: 'noopener' } : {})}><b>Syllabus</b>{syl.ext ? <> <Ext /></> : null}</a></p> : null}
+      {syl ? <p class="syllabus-link"><a class="btn outline" href={syl.href} {...newTabIf(syl.ext)}><b>Syllabus</b>{syl.ext ? <> <Ext /></> : null}</a></p> : null}
       {description ? (
         <section aria-labelledby="h-description">
           <h2 id="h-description">Course description</h2>

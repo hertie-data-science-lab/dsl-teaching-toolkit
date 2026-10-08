@@ -92,11 +92,8 @@ export const STUDENT_HINTS: Record<string, string> = {
   instructors: 'Who teaches this semester.',
 };
 
-/** An assignment page's `?` (`#assignment-<slug>`, decision 0035 rule 6). */
-export const ASSIGNMENT_HINT = 'When it is due, how to hand it in, your repo and team, the brief, and your mark once returned. Receipts are comments the automation leaves in your repo when it collects your work.';
-
 /** A kind tab's `?`. */
-export const kindHint = (label: string) => `${label} by session, with their files once they are released.`;
+const kindHint = (label: string) => `${label} by session, with their files once they are released.`;
 
 /** The student's side nav with the open semester's kind tabs, once its facts are read (decision 0035 rule 3). */
 export function StudentSideNav(props: Omit<Parameters<typeof StudentNav>[0], 'facts'>) {
@@ -174,7 +171,7 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
   const body =
     screen === 'schedule' ? <ScheduleView facts={f} mine={m} now={now} org={org} />
     : screen === 'assignments' ? <AssignmentsView org={org} facts={f} mine={m} now={now} studentView={studentView} receipts={hasThreads ? rc : {}} unknownRole={unknownRole} login={login} />
-    : screen === 'assignment' ? <AssignmentPage slug={entry ?? ''} org={org} facts={f} mine={m} now={now} studentView={studentView} receipts={hasThreads ? rc : {}} unknownRole={unknownRole} login={login} hint={ASSIGNMENT_HINT} />
+    : screen === 'assignment' ? <AssignmentPage slug={entry ?? ''} org={org} facts={f} mine={m} now={now} studentView={studentView} receipts={hasThreads ? rc : {}} unknownRole={unknownRole} login={login} />
     : screen === 'materials' ? <div class="stack"><MaterialsView org={org} repos={f.materialsRepos} entry={entry} />{entry ? null : <ReadingsView org={org} facts={f} now={now} />}</div>
     : screen === 'instructors' ? <InstructorsView facts={f} org={org} />
     : screen === 'home' ? <HomeView facts={f} org={org} now={now} />

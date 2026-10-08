@@ -10,7 +10,8 @@ import { fmtWhen } from '../model/format';
 import { gradebookUrl, isMarked, type Gradebook, type Mine, type Receipts } from '../model/mine';
 import { instant, myState, type SemesterFacts } from '../model/student';
 import { Ext } from '../ui/icons';
-import { AssignmentBody, MarkBody, StateChip, assignmentFiles, assignmentHref } from './StudentAssignment';
+import { assignmentHref } from '../router';
+import { AssignmentBody, MarkBody, MarkFigure, StateChip, assignmentFiles, markWords } from './StudentAssignment';
 
 export function AssignmentsView({ org, facts, mine, now, studentView, receipts, login = '', unknownRole = false }: {
   org: string; facts: SemesterFacts; mine: Mine | null; now: number; studentView: boolean;
@@ -48,11 +49,14 @@ export function AssignmentsView({ org, facts, mine, now, studentView, receipts, 
   );
 }
 
+/** The assignments with a mark returned, in the gradebook's order. */
+const returnedSlugs = (gradebook: Gradebook | null) => Object.keys(gradebook?.entries ?? {}).filter((s) => isMarked(gradebook, s));
+
 const markTitles = (facts: SemesterFacts) => new Map(facts.assignments.map((a) => [a.slug, a.subtitle ? `${a.title}: ${a.subtitle}` : a.title]));
 
 /** "Your marks" (rule 7): one row per returned mark, the semester total and the gradebook; nothing until a mark is returned. */
-export function MarksTable({ org, login, facts, gradebook }: { org: string; login: string; facts: SemesterFacts; gradebook: Gradebook | null }) {
-  const slugs = Object.keys(gradebook?.entries ?? {}).filter((s) => isMarked(gradebook, s));
+function MarksTable({ org, login, facts, gradebook }: { org: string; login: string; facts: SemesterFacts; gradebook: Gradebook | null }) {
+  const slugs = returnedSlugs(gradebook);
   if (!gradebook || !slugs.length) return null;
   const titles = markTitles(facts);
   const known = new Set(facts.assignments.map((a) => a.slug));
@@ -68,7 +72,7 @@ export function MarksTable({ org, login, facts, gradebook }: { org: string; logi
               return (
                 <tr>
                   <td>{known.has(s) ? <a href={assignmentHref(org, s)}>{titles.get(s)}</a> : s}</td>
-                  <td>{e.finalGrade}{e.maxPoints ? ` / ${e.maxPoints}` : ''}</td>
+                  <td>{markWords(e)}</td>
                   <td>{e.penalty}</td>
                 </tr>
               );
@@ -84,7 +88,7 @@ export function MarksTable({ org, login, facts, gradebook }: { org: string; logi
 
 /** An archived semester's marks: the table, then each returned mark's feedback. */
 export function YourMarks({ org, login, facts, gradebook, auditor = false }: { org: string; login: string; facts: SemesterFacts; gradebook: Gradebook | null; auditor?: boolean }) {
-  const slugs = Object.keys(gradebook?.entries ?? {}).filter((s) => isMarked(gradebook, s));
+  const slugs = returnedSlugs(gradebook);
   if (!gradebook || !slugs.length) {
     return (
       <section class="panel section" aria-labelledby="h-your-marks">
@@ -101,7 +105,7 @@ export function YourMarks({ org, login, facts, gradebook, auditor = false }: { o
         const e = gradebook.entries[s];
         return (
           <section class="panel section" aria-label={titles.get(s) ?? s}>
-            <div class="a-head"><h2>{titles.get(s) ?? s}</h2><span class="mark-big">{e.finalGrade}{e.maxPoints ? <span> / {e.maxPoints}</span> : null}</span></div>
+            <div class="a-head"><h2>{titles.get(s) ?? s}</h2><MarkFigure e={e} /></div>
             <MarkBody e={e} />
           </section>
         );

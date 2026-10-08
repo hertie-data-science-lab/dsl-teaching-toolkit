@@ -21,10 +21,7 @@ import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
 import { FileHead, FolderHead } from '../ui/FileTree';
 import { Ext } from '../ui/icons';
 import { useLoad } from '../ui/load';
-import { FileLinkItem, materialHref, useYourSetup } from './StudentFiles';
-
-// The route entry for a file lives with the file links (`StudentFiles.tsx`), so they import nothing from here.
-export { materialHref };
+import { FileLinkItem, FileList, useYourSetup } from './StudentFiles';
 
 /** `<repo>/<path>` back into its parts, for a repo among `repos`. */
 export function splitEntry(entry: string, repos: string[]): { repo: string; path: string } | null {
@@ -166,7 +163,7 @@ export function ShownView({ shown, name }: { shown: Shown; name: string }) {
   }
 }
 
-/** The readings of every session: its reading files (opened here), its reading list, or "to come" while they are planned but not out. */
+/** The readings of every session: its reading files (opened here, each with its button row, decision 0035 rule 10), its reading list, or "to come" while they are planned but not out. */
 export function ReadingsView({ org, facts, now }: { org: string; facts: SemesterFacts; now: number }) {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const rows = sortedRows(facts.rows, tz).filter((r) => r.readings.length || r.readingList || r.readingsPending);
@@ -179,11 +176,7 @@ export function ReadingsView({ org, facts, now }: { org: string; facts: Semester
         {rows.map((r) => (
           <li>
             <b>{r.title}</b>{r.subtitle ? `: ${r.subtitle}` : ''} <span class="footnote">{fmtDay(r.when, tz, year)}</span>
-            {r.readings.length ? (
-              <ul class="plain-list">
-                {r.readings.map((l) => <li>{l.repo && l.path && facts.materialsRepos.includes(l.repo) ? <a href={materialHref(org, l.repo, l.path)}>{l.name}</a> : <a href={l.url} target="_blank" rel="noopener">{l.name} <Ext /></a>}</li>)}
-              </ul>
-            ) : null}
+            {r.readings.length ? <FileList org={org} repos={facts.materialsRepos} links={r.readings} /> : null}
             {r.readingList ? <Md class="reading-list" src={r.readingList.replace(/^#{1,6}\s+(.+)$/gm, '**$1**')} /> : null}
             {!r.readings.length && !r.readingList ? <span class="footnote"> Readings to come.</span> : null}
           </li>

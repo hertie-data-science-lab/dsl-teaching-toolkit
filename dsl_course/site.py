@@ -690,6 +690,11 @@ class _Row:
     dests: list[str] = field(default_factory=list)
     order: str = ""  # an off-plan row's place on its tab
 
+    @property
+    def tabs(self) -> list[str]:
+        """The kind tabs that list this row (`site_repo.row_tabs`)."""
+        return row_tabs(self.kind, bool(self.readings or self.readings_pending))
+
 
 def _row_entry(
     semester_org: str, row: _Row, live_repos: frozenset[str] = frozenset()
@@ -716,7 +721,6 @@ def _row_entry(
         [(item.section, item.links) for item in row.landed]
         + [(READINGS_LINKS, item.links) for item in row.readings]
     )
-    tabs = row_tabs(row.kind, bool(row.readings or row.readings_pending))
     flags, body = "", ""
     if not row.landed and not row.readings:
         flags = "unreleased: true\n"
@@ -746,7 +750,7 @@ def _row_entry(
         + f'title: "{q(title)}"\n'
         + (f'subtitle: "{q(subtitle)}"\n' if subtitle else "")
         + _details(details)
-        + f"tabs: [{', '.join(tabs)}]\n"
+        + f"tabs: [{', '.join(row.tabs)}]\n"
         + flags
         + (block("reading_list", reading_list) if reading_list else "")
         + f"{links}\n"
@@ -875,9 +879,7 @@ def _site_rows(
     tabs: dict[str, None] = {}
     for key, row in built:
         out[_row_filename(row, key, out)] = _row_entry(semester_org, row, live_repos)
-        tabs |= dict.fromkeys(
-            row_tabs(row.kind, bool(row.readings or row.readings_pending))
-        )
+        tabs |= dict.fromkeys(row.tabs)
     return out, list(tabs)
 
 

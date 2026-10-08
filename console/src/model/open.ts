@@ -212,7 +212,7 @@ export const editableFile = (path: string) => {
 const encPath = (path: string) => path.split('/').filter(Boolean).map(encodeURIComponent).join('/');
 
 /** The branch a GitHub blob or tree URL names, else HEAD (the repo's default). */
-export const branchOf = (url: string | undefined) => /^https:\/\/github\.com\/[^/]+\/[^/]+\/(?:blob|tree)\/([^/]+)\//.exec(url ?? '')?.[1] ?? 'HEAD';
+const branchOf = (url: string | undefined) => /^https:\/\/github\.com\/[^/]+\/[^/]+\/(?:blob|tree)\/([^/]+)\//.exec(url ?? '')?.[1] ?? 'HEAD';
 
 /** A file on github.dev: in `owner`'s copy (the student's fork, or the org's own repo), on the branch its GitHub `url` names. */
 export const fileOnline = (owner: string, repo: string, path: string, url?: string) => `https://github.dev/${owner}/${repo}/blob/${branchOf(url)}/${encPath(path)}`;

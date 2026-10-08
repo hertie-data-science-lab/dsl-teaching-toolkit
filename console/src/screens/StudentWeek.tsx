@@ -5,8 +5,6 @@ import { fmtDay, fmtTime } from '../model/format';
 import type { WeekLine } from '../model/week';
 import { studentHref } from '../router';
 
-// --------------------------------------------------------------------------- This week
-
 export function WeekList({ items, tz, org }: { items: WeekLine[]; tz: string; org: string }) {
   if (!items.length) return <p class="footnote">Nothing is due, handed out or released this week.</p>;
   return (

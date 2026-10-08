@@ -16,7 +16,7 @@ import { parseRoster, sameHandle } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { studentHref, tabHref } from '../router';
+import { assignmentHref, tabHref } from '../router';
 import { CheckLine, Lives, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
@@ -294,7 +294,7 @@ export function TeamsTab(p: TabProps) {
           <h2 class="h1">{assignmentTitle(a)} <Hint doc="09-release-assignment-to-cohort.md">Students form their own teams on the assignment’s page until the window closes; you can assign the rest here. Students without a team get no repo at hand out.</Hint></h2>
           <p class="lede">{joined.length - free.length} of {joined.length} joined students in {cur.teams.length} teams; {free.length} without a team.{notJoined ? ` ${notJoined} students have not joined yet and cannot be placed.` : ''}</p>
         </div>
-        <div class="actions"><a class="btn outline" href={studentHref(p.cohort.org, `assignment-${teamsKey}`)}>Assignment page, as students see it</a></div>
+        <div class="actions"><a class="btn outline" href={assignmentHref(p.cohort.org, teamsKey)}>Assignment page, as students see it</a></div>
       </div>
       {p.tabs}
       <div class="stack">

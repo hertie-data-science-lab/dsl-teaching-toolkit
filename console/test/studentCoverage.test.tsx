@@ -20,7 +20,8 @@ import { ScheduleView } from '../src/screens/StudentSchedule';
 import { WeekList } from '../src/screens/StudentWeek';
 import { HomeView } from '../src/screens/StudentHome';
 import { AskedList, TeamList, joinTeamUrl } from '../src/screens/StudentJoin';
-import { ReadingsView, materialHref } from '../src/screens/StudentMaterials';
+import { ReadingsView } from '../src/screens/StudentMaterials';
+import { materialHref } from '../src/screens/StudentFiles';
 import { forkOf } from '../src/model/fork';
 import { RepoChecks } from '../src/screens/StudentSetup';
 import { cloneCommand, joinPath, vscodeFolder } from '../src/model/open';
@@ -335,6 +336,12 @@ describe('7. readings per session', () => {
     expect(sched).toContain('Readings:');
     expect(sched).toContain(`href="${href}"`);
     expect(sched).toContain('Readings to come.');
+    const html = render(<ReadingsView org={ORG} facts={f} now={NOW} />);
+    // Each reading file gets the button row (decision 0035 rule 10): source on GitHub; a pdf takes no online or local.
+    expect(html).toContain(`href="${href}"`);
+    expect(html).toContain('class="file-btns"');
+    expect(html).toContain('>source</a>');
+    expect(html).not.toContain('>online</a>');
     const mat = text(<ReadingsView org={ORG} facts={f} now={NOW} />);
     expect(mat).toMatch(/Session 1 ?: Deep learning in public policy/);
     expect(mat).toContain('Session 1 readings');

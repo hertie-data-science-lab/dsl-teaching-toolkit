@@ -110,8 +110,8 @@ main { min-width: 0; }
 .hint-pop.flip-y { top: auto; bottom: calc(100% + 8px); }
 .hint-pop.flip-y::before { top: auto; bottom: -9px; }
 .lbl-row { display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
-.fold > summary::before { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; margin-right: 2px; flex: none; }
-.fold[open] > summary::before { transform: rotate(45deg); }
+.fold > summary::before, .a-card > summary.a-sum::before { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; margin-right: 2px; flex: none; }
+.fold[open] > summary::before, .a-card[open] > summary.a-sum::before { transform: rotate(45deg); }
 .lives { font-size: 12.5px; color: var(--muted); }
 .lives a { color: var(--muted); }
 .lives a:hover { color: var(--link); }
@@ -492,7 +492,7 @@ input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-sof
 .cond { margin-left: 14px; padding-left: 14px; border-left: 2px solid var(--rule-strong); display: grid; gap: 14px; }
 .fold { border-top: 1px solid var(--rule); padding-top: 10px; }
 .fold > summary { cursor: pointer; list-style: none; font-family: var(--font-display); font-weight: 600; font-size: 14px; color: var(--ink-2); display: flex; gap: 8px; align-items: center; min-height: 32px; }
-.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::-webkit-details-marker, .a-card > summary.a-sum::-webkit-details-marker { display: none; }
 .fold > summary .cnt { font-weight: 400; color: var(--muted); font-family: var(--font-body); font-size: 13px; }
 .fold > summary .cnt.changed { color: var(--amber-ink); font-weight: 600; }
 .fold .fold-body { display: grid; gap: 14px; padding-top: 12px; }
@@ -850,14 +850,14 @@ a.st-chip { color: inherit; text-decoration: none; }
 a.st-chip:hover { text-decoration: underline; }
 .a-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
 .a-head h2 { margin: 0; }
-.a-head h2 span { display: block; font-family: var(--font-body); font-weight: 400; font-size: 14px; color: var(--muted); }
+.a-head h2 span, .a-sum h2 span { display: block; font-family: var(--font-body); font-weight: 400; font-size: 14px; color: var(--muted); }
 .a-head .mono, .mono { font-family: var(--font-code); font-size: 14px; overflow-wrap: anywhere; }
 .receipt { margin-top: 6px; padding: 6px 10px; border-left: 3px solid var(--rule-strong); background: var(--surface-2); font-size: 13.5px; }
 .receipt p { margin: 2px 0; }
 .mark-big { font-family: var(--font-display); font-weight: 700; font-size: 22px; font-variant-numeric: tabular-nums; }
 .mark-big span { font-weight: 400; font-size: 15px; color: var(--muted); }
 .fb { margin-top: 14px; }
-.fb h3 { font-size: 14.5px; margin: 0 0 4px; }
+.fb h4 { font-size: 14.5px; margin: 0 0 4px; }
 .q-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .q-list li { border-top: 1px solid var(--rule); padding-top: 6px; }
 .q-list .q-score { margin-left: 10px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
@@ -882,16 +882,12 @@ fieldset.field { border: 0; margin: 0; padding: 0; }
 .trow .t-readings { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 13px; margin-top: 4px; }
 .plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .plain-list .plain-list { margin-top: 4px; padding-left: 14px; gap: 2px; }
-.team-list li { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
 .shape-note { margin: 8px 0 0; }
 /* An assignment: its card on the Assignments tab and its own page (decision 0035 rule 6) */
 .a-card > summary.a-sum { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; cursor: pointer; list-style: none; }
-.a-card > summary.a-sum::-webkit-details-marker { display: none; }
-.a-card > summary.a-sum::before { content: ""; align-self: center; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; flex: none; }
-.a-card[open] > summary.a-sum::before { transform: rotate(45deg); }
+.a-card > summary.a-sum::before { align-self: center; margin-right: 0; }
 .a-card[open] > summary.a-sum { margin-bottom: 12px; }
 .a-sum h2 { margin: 0; flex: 1 1 auto; }
-.a-sum h2 span { display: block; font-family: var(--font-body); font-weight: 400; font-size: 14px; color: var(--muted); }
 .a-sum .a-due { font-size: 13.5px; color: var(--ink-2); }
 .a-body { display: grid; gap: 12px; }
 .a-dates p { margin: 0 0 2px; }
@@ -908,7 +904,6 @@ fieldset.field { border: 0; margin: 0; padding: 0; }
 .team-table tr.mine td { background: var(--asg-bg); }
 .a-mark { border-top: 1px solid var(--rule); padding-top: 12px; }
 .a-mark .a-head h3 { margin: 0; }
-.fb h4 { font-size: 14.5px; margin: 0 0 4px; }
 .your-marks .table-wrap { margin-bottom: 8px; }
 .receipt.r-patch { border-left-color: var(--amber-ink); }
 .cmd { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 8px; }
