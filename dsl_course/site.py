@@ -1012,19 +1012,33 @@ def member_digest(semester_org: str, handle: str) -> str:
     return hashlib.sha256(f"{semester_org}:{handle.lower()}".encode()).hexdigest()
 
 
-def _formed_teams(semester_org: str, key: str) -> list[tuple[str, list[str]]]:
-    """`(team, member handles)` for every team formed for `key` so far, by name - the
-    same reader (`teams.teams_for`) the student console's team list uses.
+FormedTeams = Callable[[str], list[tuple[str, list[str]]]]
+
+
+def _formed_teams(semester_org: str) -> FormedTeams:
+    """A reader of `(team, member handles)` for every team formed for an assignment key
+    so far, by name - the same reader (`teams.teams_for`) the student console's team list
+    uses. teams.csv is loaded once, on the first ask, however many assignments are forming
+    teams, and never when none is.
 
     Never fatal: teams.csv is student-written, and a row somebody broke must not take down
     the render of a semester's whole website. The callout still goes out; only the table
     is missing."""
-    try:
-        groups = teams.teams_for(teams.load(semester_org), key)
-    except RuntimeError as exc:
-        log_err(f"could not read {semester_org}'s teams for {key}: {exc}")
-        return []
-    return sorted((team, sorted(members)) for team, members in groups.items())
+
+    @cache
+    def loaded() -> dict[str, dict[str, list[str]]] | None:
+        try:
+            return teams.load(semester_org)
+        except RuntimeError as exc:
+            log_err(f"could not read {semester_org}'s teams: {exc}")
+            return None
+
+    def formed(key: str) -> list[tuple[str, list[str]]]:
+        per = loaded()
+        groups = teams.teams_for(per, key) if per is not None else {}
+        return sorted((team, sorted(members)) for team, members in groups.items())
+
+    return formed
 
 
 def _assignment_entry(
@@ -1037,6 +1051,7 @@ def _assignment_entry(
     handed_out: frozenset[str] = frozenset(),
     now: datetime | None = None,
     sched: schedule.Schedule | None = None,
+    formed_teams: FormedTeams | None = None,
 ) -> str:
     """An assignment's page (`_layouts/assignment.html`), plus the two schedule rows it
     drives: the entry's own `date:` is the hand-out ("Assignment out") row and its
@@ -1066,7 +1081,8 @@ def _assignment_entry(
     (`schedule.formation_state`, the same answer the Join-team form's lock reads), the
     entry carries `team_join_url` / `team_join_cap` / `team_join_closes` / `team_salt`,
     and `teams:` once any has formed: each team's name, headcount, cap, its members as
-    salted digests (`member_digest`, never a handle) and its repo's URL."""
+    salted digests (`member_digest`, never a handle) and its repo's URL. `formed_teams` is
+    the sync's one reader of teams.csv (`_formed_teams`), shared by every page."""
     slug = schedule.semester_name(*found) if found else repo
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
     due = iso_when(when, "23:59:00")
@@ -1158,7 +1174,7 @@ def _assignment_entry(
 
         listed = "".join(
             team_entry(name, handles)
-            for name, handles in _formed_teams(semester_org, found[0])
+            for name, handles in (formed_teams or _formed_teams(semester_org))(found[0])
         )
         closes = spoken_day(schedule.in_semester_zone(sched, shuts))
         team_fm = (
@@ -1492,6 +1508,8 @@ def sync_site(course_org: str, semester_org: str) -> int:
         else:
             hosted = _mirror_public(site_wd, semester_org, policies)
         rows, present = _site_rows(semester_org, planned, allow, live, kinds, hosted)
+        # ONE read of teams.csv for every assignment forming teams (`_formed_teams`).
+        formed_teams = _formed_teams(semester_org)
         log_step(
             f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} row(s) "
             f"({sum('unreleased: true' in text for text in rows.values())} not released "
@@ -1622,6 +1640,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
                         found=page.hit,
                         handed_out=handed_out,
                         sched=sched,
+                        formed_teams=formed_teams,
                     )
                     for page in pages
                     if shown(page.hit)

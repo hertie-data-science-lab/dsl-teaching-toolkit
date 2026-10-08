@@ -664,6 +664,42 @@ def test_a_teams_csv_that_cannot_be_read_still_renders_the_page(monkeypatch, cap
     assert "rate limit" in capsys.readouterr().err
 
 
+def test_a_sync_reads_teams_csv_once_for_every_forming_assignment(
+    monkeypatch, tmp_path
+):
+    # Two assignments forming teams at once: one read of teams.csv for the whole sync,
+    # not one per page.
+    monkeypatch.setattr(
+        site, "load_grading_spec", lambda *a, **k: _spec(SELF_SELECT_GROUP)
+    )
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    reads = []
+    monkeypatch.setattr(
+        site.teams,
+        "_teams_text",
+        lambda org: (
+            reads.append(org)
+            or "assignment,team,github_handle\nassignment-1,alpha,ada-l\n"
+        ),
+    )
+    now = datetime.now(BERLIN)
+    sched = Schedule(
+        assignments={
+            f"assignment-{n}": AssignmentEntry(
+                course_source_repo=f"assignment-{n}-f2026",
+                handout_datetime=now - timedelta(days=1),
+                due_datetime=now + timedelta(days=10 + n),
+            )
+            for n in (1, 2)
+        },
+        org="Semester-f2026",
+    )
+    out = _plan(monkeypatch, tmp_path, sched).collections["_assignments"]
+    assert all("team_join_url" in text for text in out.values())
+    assert 'name: "alpha"' in out["01-assignment-1.md"]
+    assert reads == ["Semester-f2026"]
+
+
 def test_a_team_member_is_published_as_a_salted_digest_of_their_handle():
     # The page's script hashes its reader's saved handle the same way to recognise their
     # team, so this vector is the contract between the two sides: sha256 of
