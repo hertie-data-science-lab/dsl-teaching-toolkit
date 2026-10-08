@@ -23,9 +23,6 @@ import { Ext } from '../ui/icons';
 import { useLoad } from '../ui/load';
 import { FileLinkItem, materialHref, useYourSetup } from './StudentFiles';
 
-// The route entry for a file lives with the file links (`StudentFiles.tsx`), so they import nothing from here.
-export { materialHref };
-
 /** `<repo>/<path>` back into its parts, for a repo among `repos`. */
 export function splitEntry(entry: string, repos: string[]): { repo: string; path: string } | null {
   const i = entry.indexOf('/');
