@@ -399,7 +399,7 @@ describe('10. the small fields', () => {
     expect((await byslug())['assignment-8'].tbc).toBe(true);
   });
 
-  it('shows TBC, row details, the points, the course’s late sentences and deep-linked file chips', async () => {
+  it('shows TBC, row details, the points and deep-linked file chips, and no course-wide late section (decision 0035 rule 6)', async () => {
     const f = await facts();
     const sched = render(<ScheduleView facts={f} mine={null} now={NOW} org={ORG} />);
     expect(sched).toContain('class="tbc">TBC');
@@ -409,7 +409,7 @@ describe('10. the small fields', () => {
     const t = text(<AssignmentsView org={ORG} facts={f} mine={mine()} now={NOW} studentView={false} receipts={{}} />);
     expect(t).toContain('Out of 25 points');
     expect(t).toMatch(/Due [^)]*\(TBC\)/);
-    expect(t).toContain('Late work in this course You have free 8 late days.');
+    expect(t).not.toContain('Late work in this course');
   });
 });
 

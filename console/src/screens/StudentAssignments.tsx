@@ -1,6 +1,7 @@
 // The student's Assignments and Marks (decision 0011 rule 2): one card per assignment with
 // the student's repo, team, receipts and the brief; the marks and feedback returned from
-// their private gradebook.
+// their private gradebook. Each assignment states its own late rule; there is no course-wide
+// late-work section (decision 0035 rule 6).
 
 import { hostOf } from '../model/cascade';
 import { DEFAULT_TIMEZONE } from '../model/policy';
@@ -69,12 +70,6 @@ export function AssignmentsView({ org, facts, mine, now, studentView, receipts, 
           </section>
         );
       })}
-      {facts.latePolicy.length ? (
-        <section class="section" aria-labelledby="h-late">
-          <h2 id="h-late">Late work in this course</h2>
-          <ul class="plain-list">{facts.latePolicy.map((l) => <li>{l}</li>)}</ul>
-        </section>
-      ) : null}
     </div>
   );
 }
