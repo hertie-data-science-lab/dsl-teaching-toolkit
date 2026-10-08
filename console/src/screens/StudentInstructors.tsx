@@ -6,8 +6,6 @@ import { IMG_HOSTS, type InstructorCard, type SemesterFacts } from '../model/stu
 import { useLoad } from '../ui/load';
 import { studentData } from './Student';
 
-// --------------------------------------------------------------------------- Instructors
-
 const initials = (name: string) => {
   const n = name.replace(/^(Prof\.|Dr\.)\s+/g, '').split(/[\s,]+/).filter((w) => /^[A-Z]/.test(w));
   return (n.length > 1 ? n[0][0] + n[n.length - 1][0] : (n[0] ?? name).slice(0, 2)).toUpperCase();
