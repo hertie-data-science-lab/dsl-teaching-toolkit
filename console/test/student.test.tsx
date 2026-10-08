@@ -8,7 +8,11 @@ import type { Semester } from '../src/model/discovery';
 import { isMarked, markEntry, parseGradebook, readMine, readReceipts, unitOf, type Mine } from '../src/model/mine';
 import { FRESH_MS, SiteSource, cutoffFrom, instant, myState, startOfDay, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
-import { ArchiveNotice, AssignmentsView, InstructorsView, MarksView, ScheduleView, StudentScreen, WeekList } from '../src/screens/Student';
+import { StudentScreen } from '../src/screens/Student';
+import { AssignmentsView, MarksView } from '../src/screens/StudentAssignments';
+import { InstructorsView } from '../src/screens/StudentInstructors';
+import { ArchiveNotice, ScheduleView } from '../src/screens/StudentSchedule';
+import { WeekList } from '../src/screens/StudentWeek';
 import { FakeGitHub, fileBody } from './fake';
 import { FILES, GRADES, ORG, SITE } from './fixtures/site';
 

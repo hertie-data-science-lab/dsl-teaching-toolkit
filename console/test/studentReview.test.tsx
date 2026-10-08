@@ -9,7 +9,7 @@ import { openDeck, type DeckDeps } from '../src/model/deckTab';
 import { ownerSlug, parseGradebook, readReceipts, unitOf } from '../src/model/mine';
 import { SiteSource, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { parseSearch } from '../src/router';
-import { MarksView } from '../src/screens/Student';
+import { MarksView } from '../src/screens/StudentAssignments';
 import { FakeGitHub, fileBody } from './fake';
 
 const ORG = 'hertie-dsl-demo-f2026';
