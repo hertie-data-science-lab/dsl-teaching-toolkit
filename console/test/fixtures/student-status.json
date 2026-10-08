@@ -2,12 +2,19 @@
   "schema": "dsl.student-status/2",
   "semester": "hertie-dsl-demo-f2026",
   "course_name": "Deep Learning",
+  "course_description": "Neural networks, from scratch.",
   "semester_start": "2026-09-07",
   "semester_end": "2026-12-18",
   "generated_at": "2026-09-23T09:00:00+00:00",
   "timezone": "Europe/Berlin",
   "archive_datetime": "2027-01-31",
   "home_markdown": "# Deep Learning\n\nWelcome.",
+  "previous_offerings": [
+    {
+      "title": "Fall 2025",
+      "url": "https://hertie-dl-f2025.github.io/"
+    }
+  ],
   "syllabus": {
     "repo": "materials",
     "path": "SYLLABUS.md"
@@ -16,52 +23,62 @@
     "lecture": {
       "label": "Lecture",
       "colour": "#a94442",
-      "background": "#f2dede"
+      "background": "#f2dede",
+      "tab": true
     },
     "lab": {
       "label": "Lab",
       "colour": "#3c763d",
-      "background": "#dff0d8"
+      "background": "#dff0d8",
+      "tab": true
     },
     "readings": {
       "label": "Readings",
       "colour": "#2b6a60",
-      "background": "#dcefec"
+      "background": "#dcefec",
+      "tab": true
     },
     "exam": {
       "label": "Exam",
       "colour": "#2b2f36",
-      "background": "#e6e8ec"
+      "background": "#e6e8ec",
+      "tab": true
     },
     "assignment": {
       "label": "Assignment",
       "colour": "#1f5fa8",
-      "background": "#d6e6f7"
+      "background": "#d6e6f7",
+      "tab": false
     },
     "term": {
       "label": "Semester",
       "colour": "#7b3fb8",
-      "background": "#ead9f6"
+      "background": "#ead9f6",
+      "tab": false
     },
     "archive": {
       "label": "Archive",
       "colour": "#7d6230",
-      "background": "#fbf2d5"
+      "background": "#fbf2d5",
+      "tab": false
     },
     "drop-in": {
       "label": "Drop-in",
       "colour": "#8f4a1c",
-      "background": "#fbe3d6"
+      "background": "#fbe3d6",
+      "tab": true
     },
     "assets": {
       "label": "Supporting files",
       "colour": "#4a5560",
-      "background": "#eceff1"
+      "background": "#eceff1",
+      "tab": true
     },
     "other": {
       "label": "Event",
       "colour": "#7d6230",
-      "background": "#fbf2d5"
+      "background": "#fbf2d5",
+      "tab": true
     }
   },
   "rows": [
@@ -81,7 +98,10 @@
       "links": [],
       "readings": [],
       "reading_list": "",
-      "readings_pending": false
+      "readings_pending": false,
+      "tabs": [
+        "term_date"
+      ]
     },
     {
       "id": "lecture_01",
@@ -125,7 +145,11 @@
         }
       ],
       "reading_list": "### Read\n\nChapter 1.",
-      "readings_pending": false
+      "readings_pending": false,
+      "tabs": [
+        "lecture",
+        "readings"
+      ]
     },
     {
       "id": "assignment-1:handout",
@@ -143,7 +167,10 @@
       "links": [],
       "readings": [],
       "reading_list": "",
-      "readings_pending": false
+      "readings_pending": false,
+      "tabs": [
+        "assignment"
+      ]
     },
     {
       "id": "assignment-2-project:handout",
@@ -161,7 +188,10 @@
       "links": [],
       "readings": [],
       "reading_list": "",
-      "readings_pending": false
+      "readings_pending": false,
+      "tabs": [
+        "assignment"
+      ]
     },
     {
       "id": "assignment-1:due",
@@ -179,7 +209,10 @@
       "links": [],
       "readings": [],
       "reading_list": "",
-      "readings_pending": false
+      "readings_pending": false,
+      "tabs": [
+        "due"
+      ]
     },
     {
       "id": "lecture_02",
@@ -197,7 +230,10 @@
       "links": [],
       "readings": [],
       "reading_list": "",
-      "readings_pending": false
+      "readings_pending": false,
+      "tabs": [
+        "lecture"
+      ]
     },
     {
       "id": "assignment-3:handout",
@@ -215,7 +251,10 @@
       "links": [],
       "readings": [],
       "reading_list": "",
-      "readings_pending": false
+      "readings_pending": false,
+      "tabs": [
+        "assignment"
+      ]
     },
     {
       "id": "midterm",
@@ -233,7 +272,10 @@
       "links": [],
       "readings": [],
       "reading_list": "",
-      "readings_pending": false
+      "readings_pending": false,
+      "tabs": [
+        "exam"
+      ]
     },
     {
       "id": "assignment-2-project:due",
@@ -251,7 +293,10 @@
       "links": [],
       "readings": [],
       "reading_list": "",
-      "readings_pending": false
+      "readings_pending": false,
+      "tabs": [
+        "due"
+      ]
     },
     {
       "id": "assignment-3:due",
@@ -269,7 +314,10 @@
       "links": [],
       "readings": [],
       "reading_list": "",
-      "readings_pending": false
+      "readings_pending": false,
+      "tabs": [
+        "due"
+      ]
     },
     {
       "id": "term-end",
@@ -287,7 +335,10 @@
       "links": [],
       "readings": [],
       "reading_list": "",
-      "readings_pending": false
+      "readings_pending": false,
+      "tabs": [
+        "term_date"
+      ]
     }
   ],
   "assignments": [
