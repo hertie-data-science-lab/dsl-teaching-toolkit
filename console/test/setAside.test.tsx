@@ -14,6 +14,7 @@ import type { CourseStatus, Status } from '../src/model/types';
 import { CONFLICT } from '../src/edit/save';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
+import { CohortScreen } from '../src/screens/Cohort';
 import { CourseTabs, courseReadiness, courseView } from '../src/screens/Course';
 import { setAsideText, useSetAside } from '../src/screens/SetAside';
 import type { Files } from '../src/model/files';
@@ -250,5 +251,30 @@ describe('a read-only viewer', () => {
     await mount(BASE, files());
     await show('suggestions');
     expect(root!.textContent).toContain('click the circle before it to set it aside');
+  });
+});
+
+describe('the semester dashboard’s circle (an un-migrated course)', () => {
+  it('refuses the write with the course dashboard’s message', async () => {
+    const COHORT = 'hertie-dsl-demo-f2026';
+    const cohort = { org: COHORT, term: 'f2026', termLabel: 'Fall 2026' };
+    const course = { org: ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
+    const base = example as unknown as Status;
+    const archive = { id: 'schedule:archive_date', kind: 'schedule' as const, check: 'archive_date', repo: 'semester-config', text: 'The schedule sets no archive date.', screen: 'schedule', need: 'suggested' as const, optional: true, set_aside: false };
+    const status: Status = { ...base, semester: { ...base.semester!, todo: [archive] } };
+    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META });
+    const gh = github();
+    root ??= document.body.appendChild(document.createElement('div'));
+    await act(() => render(
+      <EnvCtx.Provider value={envOf(gh, f)}>
+        <CohortScreen course={course} cohort={cohort} loaded={{ kind: 'ready', status, sha: 's', stale: [] }} files={f} now={Date.parse('2026-09-23T10:00:00+02:00')} heartbeat={null} courseMigrated={false} />
+      </EnvCtx.Provider>, root!));
+    await show('suggestions');
+    const c = root!.querySelector<HTMLButtonElement>('button.s-circle')!;
+    await act(() => c.click());
+    await act(() => button('Set aside').click());
+    await settle(() => !!root!.textContent!.includes('Not saved'));
+    expect(root!.textContent).toContain('Not saved: the console has not yet confirmed this course uses the current names.');
+    expect(puts(gh)).toEqual([]);
   });
 });
