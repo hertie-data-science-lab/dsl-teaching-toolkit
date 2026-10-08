@@ -20,3 +20,15 @@ export function FileChips({ org, repos, links }: { org: string; repos: string[];
     </>
   );
 }
+
+/** A row's files as a list, the site's `session-files`. */
+export function FileList({ org, repos, links }: { org: string; repos: string[]; links: FileLink[] }) {
+  return (
+    <ul class="session-files">
+      {links.map((l) => {
+        const h = fileHref(org, repos, l);
+        return <li><a href={h.href} {...(h.ext ? { target: '_blank', rel: 'noopener' } : {})}>{l.name || 'file'}</a></li>;
+      })}
+    </ul>
+  );
+}

@@ -1028,3 +1028,9 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .home-people { display: grid; grid-template-columns: minmax(0, 35fr) minmax(0, 65fr); gap: 24px; align-items: start; }
 .home-people .people-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 @media (max-width: 860px) { .home-people { grid-template-columns: minmax(0, 1fr); } }
+
+/* ================= kind tabs (decision 0035 rule 5) ================= */
+.kind-tab .session + .session { border-top: 1px solid var(--rule); margin-top: 18px; padding-top: 18px; }
+.kind-tab .session-title { font-size: 18px; margin: 0 0 6px; }
+.kind-tab .session-files-label { margin: 8px 0 2px; }
+.kind-tab .session-files { margin: 0; padding-left: 20px; }

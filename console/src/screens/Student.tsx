@@ -20,7 +20,7 @@ import { knownAuditor, patchLines, readAllReceipts, readMine, repoUrl, type Mine
 import { lastVisit, markVisit } from '../model/prefs';
 import { StatusFileSource, type SemesterFacts, type StudentData } from '../model/student';
 import { semesterLine, weekItems } from '../model/week';
-import { STUDENT_SCREENS, studentHref, studentScreens } from '../router';
+import { STUDENT_SCREENS, studentHref, studentScreens, tabWord } from '../router';
 import { CheckLine, Loading, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { useLoad } from '../ui/load';
@@ -28,6 +28,7 @@ import { Ext } from '../ui/icons';
 import { CourseBanner, StudentNav } from '../ui/shell';
 import { AssignmentsView, MarksView } from './StudentAssignments';
 import { HomeView } from './StudentHome';
+import { KindView } from './StudentKind';
 import { InstructorsView } from './StudentInstructors';
 import { MaterialsView, ReadingsView } from './StudentMaterials';
 import { ArchiveNotice, ScheduleView } from './StudentSchedule';
@@ -119,7 +120,9 @@ export function StudentBanner({ root, screen, semester, studentView, chip, now =
 export function StudentScreen({ semester, screen, studentView, entry, now = Date.now() }: StudentProps) {
   const facts = useFacts(semester);
   const f = facts.kind === 'ready' ? facts.value : null;
-  const kind = screen.startsWith('kind-') ? studentScreens(f).find(([k]) => k === screen)?.[1] ?? '' : '';
+  // A kind tab's label from the policy; its key until the facts are read (or for a kind the semester lacks).
+  const key = screen.startsWith('kind-') ? screen.slice(5) : '';
+  const kind = key ? studentScreens(f).find(([k]) => k === screen)?.[1] ?? tabWord(key.charAt(0).toUpperCase() + key.slice(1)) : '';
   // Home's head is the site's h1: the course with "/ <semester>" (decision 0035 rule 4).
   const label = kind || (screen === 'home'
     ? <>{f?.courseName || semester.courseName || semester.org} <span class="h-sub">/ {semester.termLabel}</span></>
@@ -167,6 +170,7 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
     : screen === 'materials' ? <div class="stack"><MaterialsView org={org} repos={f.materialsRepos} entry={entry} />{entry ? null : <ReadingsView org={org} facts={f} now={now} />}</div>
     : screen === 'instructors' ? <InstructorsView facts={f} org={org} />
     : screen === 'home' ? <HomeView facts={f} org={org} now={now} />
+    : screen.startsWith('kind-') ? <KindView facts={f} kind={screen.slice(5)} org={org} now={now} />
     : <WeekList items={weekItems(f, m, now, patchLines(f.assignments, m, rc), studentView || !login ? null : lastVisit(login, org)).filter((i) => !(unknownRole && i.kind === 'teams'))} tz={tz} org={org} />;
   return (
     <div class="stack">
