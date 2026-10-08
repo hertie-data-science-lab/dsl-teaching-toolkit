@@ -14,7 +14,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { CohortScreen } from '../src/screens/Cohort';
-import { CourseHeaderActions, CourseScreen, SETTLING_COLUMNS, TemplateScreen, courseItems, overviewHeights, semesterChip, splitColumns, stepLink } from '../src/screens/Course';
+import { CourseHeaderActions, CourseScreen, SETTLING_COLUMNS, TemplateScreen, courseItems, handoutWords, overviewHeights, semesterChip, splitColumns, stepLink } from '../src/screens/Course';
 import { ItemRow, readinessTabs, type SetupItem } from '../src/ui/SetupPanel';
 import { DashboardTabs } from '../src/ui/DashboardTabs';
 import { tier } from '../src/model/readiness';
@@ -431,6 +431,12 @@ describe('S2 course and S17 template', () => {
     const { verdict: _v, ...noVerdict } = base;
     expect(html(<CourseScreen {...cp} loaded={{ ...fine, status: { ...STATUS, course: noVerdict } }} />)).not.toContain('class="verdict');
   });
+  it('opens on the Setup tab while the course is not ready, its verdict pointing there too', () => {
+    const notReady: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...base, stages: { ...base.stages, C3: 'todo', C5: 'done' }, verdict: { state: 'not_ready', problems: 0, missing: 'Course details have no description yet.', suggestions: 0 } } }, sha: 's', stale: [] };
+    const out = html(<CourseScreen {...cp} loaded={notReady} />);
+    expect(out).toContain('data-key="setup" aria-selected="true"');
+    expect(out).toContain('data-key="problems" aria-selected="false"');
+  });
   it('opens on the Problems tab, then Suggestions, Set aside and Setup', () => {
     const out = html(<CourseScreen {...cp} />);
     expect(out).toContain('<section class="panel section dash-tabs" id="dash-problems" tabindex="-1"><div class="ptabs" role="tablist">');
@@ -662,6 +668,17 @@ describe('S2 course and S17 template', () => {
     expect(out).toContain('value="30"');
     expect(out).toContain('<td>50</td>');
     expect(out).not.toContain('[object Object]');
+  });
+});
+
+describe('a template to-do’s hand-out words', () => {
+  it('reads the day off the moment’s own offset and the horizon off the status', () => {
+    // A New York semester's hand-out, 23:30 on Wed 4 Nov there (05:30 Thu in Berlin).
+    const brief = { ...STATUS.problems![0], id: 'template:a1:brief', scope: 'course' as const, stage: 'C5', kind: 'BRIEF', when: '2026-11-04T23:30:00-05:00', fix: { repo: 'o/a1', path: '', line: null, screen: 'template', entry: 'a1' } };
+    const now = Date.parse('2026-10-01T12:00:00Z');
+    const tiered = [{ p: brief, b: 'later' as const }];
+    expect(handoutWords(tiered, 'a1', 'brief', now, { days: 14 })).toBe('Hands out Wed 4 Nov; a problem from 21 Oct.');
+    expect(handoutWords(tiered, 'a1', 'brief', now)).toBe('Hands out Wed 4 Nov; a problem from 28 Oct.');
   });
 });
 

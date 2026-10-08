@@ -177,10 +177,10 @@ export function verdictMain(v: Verdict): string {
   return course ? 'Ready for a new semester' : `On track: nothing to fix in the next ${v.days} days`;
 }
 
-/** The muted tag after a verdict: on the course "3 suggestions", on the semester "12 coming up". */
+/** The muted tags after a verdict: on the course "3 suggestions", on the semester "12 coming up" then "3 suggestions" (as the CLI). */
 export function verdictTags(v: Verdict): string[] {
-  const n = v.scope === 'course' ? v.suggestions : v.coming_up ?? 0;
-  return n ? [v.scope === 'course' ? plural(n, 'suggestion') : `${n} coming up`] : [];
+  const coming = v.scope === 'semester' && v.coming_up ? [`${v.coming_up} coming up`] : [];
+  return [...coming, ...(v.suggestions ? [plural(v.suggestions, 'suggestion')] : [])];
 }
 
 /** The verdict as one line: "Ready for a new semester · 3 suggestions". */

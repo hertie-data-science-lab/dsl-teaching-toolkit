@@ -4,7 +4,6 @@
 // at load, for a file the previous engine wrote (contract C). Every helper below and every
 // screen trusts the fields.
 
-import { dayKey } from './format';
 import { DAY } from './week';
 import type { Bites, CourseStatus, Horizon, MaterialsCheck, Need, Problem, Release, SemesterStatus, Status, Todo, VerdictState } from './types';
 
@@ -45,7 +44,9 @@ export function normalise(status: Status, now: number): Status {
   const course = status.course && {
     ...status.course,
     stage_need: stageNeed(status.course),
-    materials: status.course.materials.map((m) => ({ ...m, checks: m.checks?.map((c): MaterialsCheck => (c.need ? c : { ...c, need: needOf(c) })) })),
+    // A previous engine's course block may carry no materials or templates list.
+    materials: (status.course.materials ?? []).map((m) => ({ ...m, checks: m.checks?.map((c): MaterialsCheck => (c.need ? c : { ...c, need: needOf(c) })) })),
+    templates: status.course.templates ?? [],
     todo: todo(status.course.todo),
   };
   const semester: SemesterStatus | undefined = status.semester && { ...status.semester, stage_need: stageNeed(status.semester), todo: todo(status.semester.todo) };
@@ -53,9 +54,21 @@ export function normalise(status: Status, now: number): Status {
   return { ...status, ...(course ? { course } : {}), ...(semester ? { semester } : {}), ...(problems ? { problems } : {}) };
 }
 
-/** The day (yyyy-mm-dd, in `tz`) a moment's problem starts to count: the horizon's days before it. */
-export function problemFromDay(iso: string, horizon: Horizon | undefined, tz: string): string {
-  return dayKey(new Date(Date.parse(iso) - horizonDays(horizon) * DAY).toISOString(), tz);
+/** An ISO moment's own UTC offset in ms: its `±hh:mm` suffix; 0 for `Z` or none. */
+function offsetOf(iso: string): number {
+  const m = /T.*([+-])(\d{2}):(\d{2})$/.exec(iso);
+  return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) * 60000 : 0;
+}
+
+/** The instant an ISO moment names; one with no offset is wall-clock time, read as UTC so its wall day stands. */
+const instantOf = (iso: string) => Date.parse(iso.includes('T') && !/(Z|[+-]\d{2}:\d{2})$/.test(iso) ? `${iso}Z` : iso);
+
+/** The day (yyyy-mm-dd) instant `ms` falls on at `iso`'s own offset: the engine writes each moment in the semester's. */
+export const dayAt = (ms: number, iso: string) => new Date(ms + offsetOf(iso)).toISOString().slice(0, 10);
+
+/** The day (yyyy-mm-dd, at the moment's own offset) its problem starts to count: the horizon's days before it. */
+export function problemFromDay(iso: string, horizon: Horizon | undefined): string {
+  return dayAt(instantOf(iso) - horizonDays(horizon) * DAY, iso);
 }
 
 /** A problem with when it bites. */
@@ -140,16 +153,23 @@ export function stepItems(
 /** The open suggestions not set aside: the verdict's "· n suggestions" tag, counted from the rows as shown. */
 export const suggestionsCount = (items: { need: Need; state: ItemState; aside?: boolean }[]) => items.filter((i) => isSuggestion(i.need, i.state) && !i.aside).length;
 
-/** A course's or semester's verdict as the console words it: the engine's, with the scope, the horizon's days and the suggestions counted here. */
+/** A course's or semester's verdict as the console words it: the engine's, with the scope, the horizon's days, and the suggestions and (a semester) what is coming up counted here. */
 export interface Verdict extends VerdictState {
   scope: 'course' | 'semester';
   days: number;
 }
 
-/** The engine's verdict for a scope, or null when its status carries none (one tick at most): no verdict line then. */
-export function verdictOf(v: VerdictState | undefined, scope: 'course' | 'semester', suggestions: number, days = 7): Verdict | null {
-  return v ? { ...v, scope, days, suggestions } : null;
+/**
+ * The engine's verdict for a scope, or null when its status carries none (one tick at most): no
+ * verdict line then. `suggestions` and `comingUp` are the console's own counts, so the line
+ * agrees with the tab badges.
+ */
+export function verdictOf(v: VerdictState | undefined, scope: 'course' | 'semester', suggestions: number, days = 7, comingUp?: number): Verdict | null {
+  return v ? { ...v, scope, days, suggestions, ...(comingUp === undefined ? {} : { coming_up: comingUp }) } : null;
 }
+
+/** The dashboard tab a verdict opens (and its button goes to): Setup while not set up, else Problems. */
+export const verdictTab = (v: Pick<VerdictState, 'state'> | null) => (v?.state === 'not_ready' ? 'setup' : 'problems');
 
 // --------------------------------------------------------------------------- repos
 
@@ -201,17 +221,20 @@ export interface ReleaseMark {
   problem?: Problem;
 }
 
+/** Earliest first: the order a release's problems mark it by. */
+const BITE_ORDER: Record<Bites, number> = { now: 0, soon: 1, later: 2 };
+
 /**
  * Each held or late release's mark (decision 0034 §6), by release id, joined on the problem's
  * `release`: one map per [status, now], for the Schedule lede, its rows and entry sheet and the
- * Dashboard. A late release with no other problem (`LATE`) is late; a held one takes its
- * problem's time, else its own date's.
+ * Dashboard. A late release with no other problem (`LATE`) is late; a held one takes the time of
+ * its earliest-biting problem (now, then soon, then later), else its own date's.
  */
 export function releaseMarks(status: Status, tiered: Tiered[], now: number): Map<string, ReleaseMark> {
   const out = new Map<string, ReleaseMark>();
   for (const rel of status.releases ?? []) {
     if (rel.state !== 'will_be_skipped' && rel.state !== 'late') continue;
-    const own = tiered.find((x) => x.p.release === rel.id);
+    const own = tiered.filter((x) => x.p.release === rel.id).sort((a, b) => BITE_ORDER[a.b] - BITE_ORDER[b.b])[0];
     if (rel.state === 'late' && (!own || own.p.kind === 'LATE')) out.set(rel.id, { bites: 'now', late: true, problem: own?.p });
     else out.set(rel.id, { bites: own?.b ?? bitesAt(rel.when, status.horizon, now), late: false, problem: own?.p });
   }

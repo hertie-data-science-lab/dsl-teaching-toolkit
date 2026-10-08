@@ -1,11 +1,11 @@
 name: console-pages
 
 # Build the Instructor Console (console/) and publish it to GitHub Pages at
-# https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/, from main. The other
-# branches are the current preview loops (decisions 0034, 0035); drop each once it has merged.
+# https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/, from main. A preview
+# loop adds its branch here while it runs and removes it in the merge.
 on:
   push:
-    branches: [main, feature/readiness-0034, feature/student-console-feedback]
+    branches: [main, feature/student-console-feedback]
     paths: [console/**, .github/workflows/console-pages.yml]
   workflow_dispatch:
 

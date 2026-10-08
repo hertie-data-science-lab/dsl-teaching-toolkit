@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from dsl_course import (
+    discovery,
     gh_commits,
     grades,
     policy,
@@ -2708,11 +2709,13 @@ def test_the_course_file_tiers_template_problems_by_the_earliest_citing_hand_out
     course = _course()
     course.templates[1].faults = [_autograde_sometimes()]
     course.templates[1].readme = None
-    later = status_json._handouts(_sched())
+    later = status_json._handouts(_sched(), frozenset(), NOW)
     assert later["assignment-3-f2026"] == status_json.Moment(_at(20), "assignment-3")
     # A second live semester hands it out next week: the earliest wins.
     soon = status_json._handouts(
-        _sched(SCHEDULE.replace("2026-10-20T10:00", "2026-09-30T10:00"))
+        _sched(SCHEDULE.replace("2026-10-20T10:00", "2026-09-30T10:00")),
+        frozenset(),
+        NOW,
     )
     merged = status_json.merge_moments([later, soon])
     assert merged["assignment-3-f2026"] == status_json.Moment(
@@ -2784,12 +2787,73 @@ def test_a_cited_template_to_do_is_a_problem_on_the_semester_and_comes_up():
     assert validate(doc, schemas.status_schema()) == []
 
 
+def test_a_hand_out_that_has_happened_never_dates_a_template_problem():
+    # assignment-2 went out on 15 Sep: its template can no longer change what students
+    # got, so its unwritten brief and starter are to-dos, not problems.
+    course = _course()
+    course.templates[0].readme = None
+    course.templates[0].starter_todo = "Derive has not been run yet."
+    doc = _render(course)
+    assert [p for p in doc["problems"] if p["stage"] == "C5"] == []
+    assert "assignment-2-f2026" not in doc["semester"]["template_moments"]
+    assert "template:assignment-2-f2026:brief" in {
+        t["id"] for t in doc["course"]["todo"]
+    }
+    # A second assignment cites it on 27 Oct: that hand-out dates it, not the past one.
+    mixed = SCHEDULE + (
+        "  assignment-4:\n"
+        "    course_source_repo: assignment-2-f2026\n"
+        "    handout_datetime: 2026-10-27T10:00\n"
+        "    due_datetime: 2026-11-08T23:59\n"
+    )
+    # Two assignments may share a template only when each names its own copy.
+    dest = settings.parse_instance(
+        "assignments:\n  assignment-2:\n    semester_dest_repo: assignment-2\n"
+        "  assignment-4:\n    semester_dest_repo: assignment-4\n"
+    )
+    sched = schedule.parse(load_yaml_lines(mixed), dest)
+    doc = _render(course, _semester(sched=sched))
+    template = [p for p in doc["problems"] if p["stage"] == "C5"]
+    assert [(p["id"], p["release"], p["when"]) for p in template] == [
+        (
+            "template:assignment-2-f2026:brief",
+            "assignment-4",
+            "2026-10-27T10:00:00+01:00",
+        ),
+        (
+            "template:assignment-2-f2026:starter",
+            "assignment-4",
+            "2026-10-27T10:00:00+01:00",
+        ),
+    ]
+    assert template[0]["stops"] == (
+        "The hand-out on Tue 27 Oct would give students a placeholder brief."
+    )
+    assert doc["semester"]["template_moments"]["assignment-2-f2026"] == (
+        "2026-10-27T10:00:00+01:00"
+    )
+
+
+def test_a_hand_out_record_counts_as_happened_before_its_date():
+    # assignment-3 was handed out by hand ahead of its 20 Oct pin: its semester template
+    # exists, so 20 Oct dates nothing.
+    course = _course()
+    course.templates[1].readme = None
+    semester = _semester()
+    semester.listing["assignment-3"] = repo_row(
+        "assignment-3", topics=[discovery.ASSIGNMENT_TEMPLATE_TOPIC]
+    )
+    doc = _render(course, semester)
+    assert [p for p in doc["problems"] if p["stage"] == "C5"] == []
+    assert doc["semester"]["template_moments"] == {}
+
+
 def test_gather_moments_reads_each_semesters_status_once(monkeypatch):
     # Decision 0034 (call budget): one read per registered semester, its own
     # status.json - never its schedule, never whether it is archived.
     live = _render()
+    # assignment-2 was handed out on 15 Sep: only the hand-out still to come is a moment.
     assert live["semester"]["template_moments"] == {
-        "assignment-2-f2026": "2026-09-15T10:00:00+02:00",
         "assignment-3-f2026": "2026-10-20T10:00:00+02:00",
     }
     ended = json.loads(json.dumps(live))
@@ -2809,12 +2873,16 @@ def test_gather_moments_reads_each_semesters_status_once(monkeypatch):
     monkeypatch.setattr(status_json, "get_file_content", read)
     moments = status_json.gather_moments(list(files), NOW)
     assert reads == [(org, "semester-config", ".system/status.json") for org in files]
-    assert set(moments) == {"assignment-2-f2026", "assignment-3-f2026"}
-    # Already handed out: its problems stand now; the other is three weeks off.
-    assert status_json.bites(moments["assignment-2-f2026"].when, NOW) == "now"
+    assert set(moments) == {"assignment-3-f2026"}
     assert status_json.bites(moments["assignment-3-f2026"].when, NOW) == "later"
     # The course file knows the instant, not the semester's entry.
     assert moments["assignment-3-f2026"].release is None
+    # A moment the file recorded that has passed since (one tick behind) is dropped.
+    stale = json.loads(json.dumps(live))
+    stale["semester"]["template_moments"]["assignment-2-f2026"] = (
+        "2026-09-15T10:00:00+02:00"
+    )
+    assert set(status_json._moments_from_status(stale, NOW)) == {"assignment-3-f2026"}
     # A file from before the field, or a semester not live, cites nothing.
     old = json.loads(json.dumps(live))
     del old["semester"]["template_moments"]

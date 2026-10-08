@@ -212,6 +212,8 @@ export function App({ state: s }: { state: AppState }) {
   const aboutCourse = !!ctx.course && !APP_SCREENS.includes(screen) && wiz?.name !== 'new-course';
   const semesterPage = !!ctx.cohort && !!ctx.course?.write && !wiz && !APP_SCREENS.includes(screen) && !(screen in COURSE_SCREENS);
   const courseLeft = aboutCourse ? s.leftovers('course', ctx.course!.org, nav) : [];
+  // The course's names are current: what a save to its files (Set aside, details) waits for.
+  const courseMigrated = Array.isArray(courseLeft) && !courseLeft.length;
   const semLeft = semesterPage ? s.leftovers('semester', ctx.cohort!.org, nav) : [];
   const failed = courseLeft === 'failed' ? { what: 'course' as const, org: ctx.course!.org } : semLeft === 'failed' ? { what: 'semester' as const, org: ctx.cohort!.org } : null;
   const pending = courseLeft === undefined || semLeft === undefined;
@@ -254,7 +256,7 @@ export function App({ state: s }: { state: AppState }) {
         name={ctx.course.name} semester={ctx.cohort ? { org: ctx.cohort.org, termLabel: ctx.cohort.termLabel } : undefined} />
     );
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
-    const cp: CourseProps = { migrated: Array.isArray(courseLeft) && !courseLeft.length, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
+    const cp: CourseProps = { migrated: courseMigrated, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
     body = wiz?.name === 'new-semester' ? <NewCohortScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-assignment' ? <NewAssignmentScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-materials' ? <NewMaterialsScreen {...cp} />
@@ -274,7 +276,7 @@ export function App({ state: s }: { state: AppState }) {
   } else {
     const cp: CohortProps = {
       course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry, tab: route.tab,
-      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template,
+      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template, courseMigrated,
     };
     const screens: Record<string, () => preact.JSX.Element> = {
       dashboard: () => <CohortScreen {...cp} />,

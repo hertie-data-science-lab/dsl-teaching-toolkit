@@ -431,9 +431,11 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   `kind` (its code: `SOURCE_MISSING`, `LATE`, `BRIEF`, ...) and, when it holds a schedule
   entry back, `release` (that entry's id): readers join on these, never on `id`. An
   undated source fault or stub is `later`; a course template's problems (stage C5) take
-  the first citing hand-out (`semester.template_moments`: this semester's in a semester
-  file; in the course file, every running semester's, none -> `later`). A needed template
-  to-do a dated hand-out cites is ALSO a problem, on the semester and the course file:
+  the first citing hand-out still to come (`semester.template_moments`: this semester's in
+  a semester file; in the course file, every running semester's, none -> `later`). A
+  hand-out that has happened (its semester template exists, or its date has passed) never
+  dates one: the copies it made are fixed one by one. A needed template to-do a future
+  dated hand-out cites is ALSO a problem, on the semester and the course file:
   `template:<repo>:brief` / `:starter`, kind `BRIEF` / `STARTER`, `when` the hand-out
   (`release` its assignment, in the semester file); the to-do stays in `course.todo[]`.
   assignments.yml values bite at their assignment's hand-out; visibility drift and a late
@@ -449,7 +451,7 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   next 7 days").
 - **Call budget.** The course tick dates its template problems off each registered
   semester's own `status.json` (`semester.template_moments`, each cited template's first
-  hand-out): ONE read per semester in `semesters.yml` (which lists names only, so an
+  hand-out still to come): ONE read per semester in `semesters.yml` (which lists names only, so an
   archived one costs its read too; its frozen file is passed over by its end date), never
   a schedule or an archived-repo probe (`gather_moments`). It is one tick behind a
   schedule edit: the course sees it once that semester's tick has rewritten its file. The
@@ -471,11 +473,6 @@ level (`console/schemas/student-status.schema.json`, `tests/test_student_status.
 marks, handles, enrol codes or team membership (a team is its name, headcount and cap), an
 email only where `show_email: true`, a brief and shape note only once handed out, and no
 assignment with `show_on_site: false`. A key added to it is added to the allow-list first.
-Decision 0035 rule 13 added what the site's landing page and kind tabs show: `course_description`,
-`previous_offerings` (the site repo's `_data/previous_offering.yml`, skipped when malformed;
-http(s) links only, deliberately stricter than the site's `home.html`, which renders every entry),
-each row's `tabs` (`site_repo.row_tabs`, the rule the site's `tabs:` front matter uses) and each
-kind's `tab`. The console reads a file without them as before (a row on its kind's tab alone).
 Unlike `status.json` it carries one moment, `generated_at`, for the student's "Updated <age>":
 `student_status.settle` keeps the published file's moment when nothing else changed, so an
 unchanged semester still makes no commit. The console reads `/1` files too (no dates, no age).
