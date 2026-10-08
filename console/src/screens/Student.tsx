@@ -148,9 +148,11 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
   const f = facts.kind === 'ready' ? facts.value : null;
   const mine = useLoad(env && f && !studentView ? () => readMine(env.client, org, env.user.login, f.assignments) : null, [org, f]);
   const m: Mine | null = mine.kind === 'ready' ? mine.value : null;
-  // The Submission receipts issues feed Assignments and This week's "your instructors updated files" line.
+  // The Submission receipts issues feed Assignments and This week's "your instructors updated files" line;
+  // an assignment's own page reads only its own thread.
   const threads = screen === 'week' || screen === 'assignments' || screen === 'assignment';
-  const receipts = useLoad<Record<string, Receipts | null>>(env && f && m && threads && !m.auditor ? () => readAllReceipts(env.client, org, f.assignments, m) : null, [org, f, m, threads]);
+  const one = screen === 'assignment' ? entry ?? '' : null;
+  const receipts = useLoad<Record<string, Receipts | null>>(env && f && m && threads && !m.auditor ? () => readAllReceipts(env.client, org, one === null ? f.assignments : f.assignments.filter((a) => a.slug === one), m) : null, [org, f, m, threads, one]);
   const login = env?.user.login ?? '';
   // The visit is stored only once the threads it is compared against were read.
   useEffect(() => {
