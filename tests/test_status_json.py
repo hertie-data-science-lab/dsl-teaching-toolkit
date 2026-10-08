@@ -2419,3 +2419,342 @@ def test_an_operation_with_no_run_is_left_out():
     assert status_json.render_operations([ran, local]) == [
         {k: ran.get(k) for k in ("run_id", "op", "conclusion", "summary", "finished")}
     ]
+
+
+# ------------------------------------------------- need, time and verdicts (0034)
+
+
+@pytest.mark.parametrize(
+    ("today", "span"),
+    [
+        # Before the start, week 1 is the current one.
+        (date(2026, 8, 20), ("2026-09-07", "2026-09-20")),
+        # Wednesday of week 3: weeks 3 and 4.
+        (date(2026, 9, 23), ("2026-09-21", "2026-10-04")),
+        # The last day of week 3 is still week 3; its first day after is week 4.
+        (date(2026, 9, 27), ("2026-09-21", "2026-10-04")),
+        (date(2026, 9, 28), ("2026-09-28", "2026-10-11")),
+        # The last week: `to` never passes the end; after the end, both are the end.
+        (date(2026, 12, 16), ("2026-12-14", "2026-12-18")),
+        (date(2027, 1, 10), ("2026-12-18", "2026-12-18")),
+    ],
+)
+def test_the_horizon_is_this_semester_week_and_the_next(today, span):
+    got = status_json.horizon(date(2026, 9, 7), date(2026, 12, 18), today)
+    assert tuple(d.isoformat() for d in got) == span
+
+
+def test_the_horizon_without_semester_dates_is_two_weeks_from_today():
+    got = status_json.horizon(None, None, date(2026, 9, 23))
+    assert got == (date(2026, 9, 23), date(2026, 10, 6))
+
+
+def _at(day: int, month: int = 10, hour: int = 10) -> datetime:
+    return datetime(2026, month, day, hour, 0, tzinfo=BERLIN)
+
+
+@pytest.mark.parametrize(
+    ("when", "now", "tier"),
+    [
+        (None, NOW, "now"),
+        # Its moment has passed, or is this very instant.
+        (NOW - timedelta(minutes=1), NOW, "now"),
+        (NOW, NOW, "now"),
+        # The horizon's last day (Sun 4 Oct), late at night, is still soon...
+        (_at(4, hour=23), NOW, "soon"),
+        # ...and the next day is later.
+        (_at(5, hour=0), NOW, "later"),
+        # Before the semester starts the horizon is weeks 1-2: soon until Sun 20 Sep.
+        (_at(18, 9), datetime(2026, 8, 20, tzinfo=UTC), "soon"),
+        (_at(21, 9), datetime(2026, 8, 20, tzinfo=UTC), "later"),
+        # After the end, anything still ahead is later.
+        (_at(10, 1).replace(year=2027), datetime(2027, 1, 2, tzinfo=UTC), "later"),
+    ],
+)
+def test_a_problem_bites_now_soon_or_later(when, now, tier):
+    today = now.astimezone(BERLIN).date()
+    _, until = status_json.horizon(date(2026, 9, 7), date(2026, 12, 18), today)
+    assert status_json.bites(when, now, until, BERLIN) == tier
+
+
+def test_the_three_semester_verdicts():
+    archive = SCHEDULE + "archive:\n  event_datetime: 2027-01-31T00:00\n"
+    healthy = {"sched": _sched(archive), "students": [_student("ada"), _student("bob")]}
+    doc = _render(semester=_semester(**healthy))
+    assert doc["semester"]["stages"]["K7"] == "done"
+    assert doc["semester"]["verdict"] == {
+        "state": "ready",
+        "problems": 0,
+        "missing": None,
+        "suggestions": 0,
+        "coming_up": 0,
+    }
+    # A needed stage open, no problem: not ready, naming the first.
+    doc = _render(semester=_semester(**{**healthy, "students": []}))
+    verdict = doc["semester"]["verdict"]
+    assert (verdict["state"], verdict["missing"]) == (
+        "not_ready",
+        "The roster has no students yet.",
+    )
+    # A `now` problem wins over everything.
+    roster_fault = header_fault("students.csv", ["github_handle"])
+    doc = _render(
+        semester=_semester(
+            **{**healthy, "students": [], "roster_faults": [roster_fault]}
+        )
+    )
+    verdict = doc["semester"]["verdict"]
+    assert (verdict["state"], verdict["problems"]) == ("fixing", 1)
+    assert validate(doc, schemas.status_schema()) == []
+
+
+def test_the_three_course_verdicts():
+    ready = _course_block(_course())["verdict"]
+    # The fixture's repo has no weekly plan and no reviewed withheld patterns.
+    assert ready == {
+        "state": "ready",
+        "problems": 0,
+        "missing": None,
+        "suggestions": 2,
+    }
+    # A needed stage open: not ready, naming it. The description is a suggestion.
+    course = _course(meta={"course_name": "ML", "course_code": "E1"})
+    block = _course_block(course)
+    assert block["verdict"]["state"] == "not_ready"
+    assert block["verdict"]["missing"] == (
+        "No course admin is declared in course details yet."
+    )
+    assert block["verdict"]["suggestions"] == 3
+    assert block["todo"][0]["id"] == "course:description"
+    assert (block["todo"][0]["need"], block["todo"][0]["screen"]) == (
+        "suggested",
+        "details",
+    )
+    assert block["ready"] is False
+    # A `now` course problem: fixing.
+    unmigrated = _materials("course-materials-x", topic=False)
+    block = _course_block(_course(materials=[unmigrated]))
+    assert (block["verdict"]["state"], block["verdict"]["problems"]) == ("fixing", 1)
+
+
+def test_k5_k6_and_k7_are_done_once_their_needed_part_is():
+    # Codes not sent are the Students panel's meter, not a setup sentence.
+    archive = SCHEDULE + "archive:\n  event_datetime: 2027-01-31T00:00\n"
+    doc = _render(
+        semester=_semester(
+            students=[_student("ada", sent=""), _student("bob", sent="")],
+            site_home="<!-- dsl-stub: site -->",
+            sched=_sched(archive),
+        )
+    )
+    semester = doc["semester"]
+    assert {k: semester["stages"][k] for k in ("K5", "K6", "K7")} == dict.fromkeys(
+        ("K5", "K6", "K7"), "done"
+    )
+    assert "K5" not in semester["stage_why"]
+    assert "code" not in json.dumps(semester["stage_why"])
+    assert doc["students"]["codes_sent"] == 0
+    (home,) = semester["todo"]
+    assert home["id"] == "site:home"
+    assert (home["need"], home["screen"], home["repo"]) == (
+        "suggested",
+        "site",
+        f"{SEMESTER}.github.io",
+    )
+    assert semester["stage_need"] == {
+        **dict.fromkeys(("K1", "K2", "K3", "K4", "K5", "K6"), "needed"),
+        "K7": "suggested",
+    }
+    # No archive date: K7 open, and its to-do is the one suggestion it counts as.
+    doc = _render()
+    assert doc["semester"]["stages"]["K7"] == "todo"
+    assert [t["id"] for t in doc["semester"]["todo"]] == ["schedule:archive_date"]
+    assert doc["semester"]["verdict"]["suggestions"] == 1
+
+
+def test_an_undated_source_fault_is_later():
+    fault = ConfigFault(
+        "releases.s9",
+        f"{COURSE}/course-materials-f2026/lectures/09 does not exist",
+        None,
+        field="course_source_path",
+        kind=FaultKind.MISSING_PATH,
+        file="schedule.yml",
+        repo="course-materials-f2026",
+        path="lectures/09",
+    )
+    doc = _render(semester=_semester(schedule_faults=[fault]))
+    (problem,) = doc["problems"]
+    assert problem["bites"] == "later"
+    assert "when" not in problem
+    assert doc["semester"]["stages"]["K4"] == "done"
+    assert doc["semester"]["verdict"]["coming_up"] == 1
+
+
+def test_a_late_release_with_no_other_problem_is_a_now_problem():
+    # s3 (Thu 24 Sep) was due a day ago and is not at its destination.
+    now = NOW + timedelta(days=2)
+    doc = _render(semester=_semester(dest_paths={"materials": {"lectures"}}), now=now)
+    (problem,) = [p for p in doc["problems"] if p["id"] == "schedule:s3:LATE"]
+    assert problem["text"] == "s3 was due Thu 24 Sep and has not gone out."
+    assert problem["bites"] == "now"
+    assert problem["fix"]["screen"] == "schedule"
+    assert problem["fix"]["entry"] == "s3"
+    assert doc["semester"]["stages"]["K4"] == "problem"
+    # A late release some other problem explains is told once.
+    doc = _render(
+        semester=_semester(
+            dest_paths={"materials": {"lectures"}},
+            schedule_faults=[_missing_s5()],
+        ),
+        now=NOW + timedelta(days=16),
+    )
+    ids = [p["id"] for p in doc["problems"]]
+    assert "schedule:s5:SOURCE_MISSING" in ids and "schedule:s5:LATE" not in ids
+    assert validate(doc, schemas.status_schema()) == []
+
+
+SYLLABUS_RELEASE = SCHEDULE.replace(
+    "assignments:\n",
+    """  syllabus:
+    event_datetime: 2026-09-30T10:00
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: SYLLABUS.md
+assignments:
+""",
+)
+
+
+def test_a_cited_placeholder_stub_is_a_source_unwritten_problem():
+    stub = ("course-materials-f2026", "SYLLABUS.md")
+    facts = _semester(sched=_sched(SYLLABUS_RELEASE), stubs={stub: True})
+    doc = _render(semester=facts)
+    (problem,) = [p for p in doc["problems"] if p["id"].endswith("SOURCE_UNWRITTEN")]
+    assert problem["text"] == (
+        "Release syllabus cites SYLLABUS.md in course-materials-f2026, which is still "
+        "the placeholder."
+    )
+    assert problem["stops"] == "The release on Wed 30 Sep will leave it out."
+    assert (problem["when"], problem["bites"]) == ("2026-09-30T10:00:00+02:00", "soon")
+    assert problem["fix"]["repo"] == f"{COURSE}/course-materials-f2026"
+    # Written: no problem.
+    doc = _render(
+        semester=_semester(sched=_sched(SYLLABUS_RELEASE), stubs={stub: False})
+    )
+    assert not [p for p in doc["problems"] if p["id"].endswith("SOURCE_UNWRITTEN")]
+
+
+def test_assignments_values_bite_at_their_hand_out_and_drift_stands_now():
+    value = ConfigFault(
+        "assignments.assignment-3",
+        "`late_days: soon` is not a number",
+        file="assignments.yml",
+        field="late_days",
+    )
+    whole = ConfigFault("", "this file is not valid YAML", file="assignments.yml")
+    doc = _render(semester=_semester(schedule_faults=[value, whole]))
+    by_entry = {p["fix"]["entry"]: p for p in doc["problems"]}
+    assert by_entry["assignment-3"]["when"] == "2026-10-20T10:00:00+02:00"
+    assert by_entry["assignment-3"]["bites"] == "later"
+    (filewide,) = [p for p in doc["problems"] if p is not by_entry["assignment-3"]]
+    assert "when" not in filewide and filewide["bites"] == "now"
+    # Visibility drift already stands: no moment, `now`.
+    doc = _render(semester=_semester(template_faults=[_visibility_mismatch()]))
+    (drift,) = doc["problems"]
+    assert "when" not in drift and drift["bites"] == "now"
+
+
+def test_main_edited_bites_at_the_templates_first_hand_out():
+    course = _course()
+    course.templates[1].main_edited = "trees.py"
+    doc = _render(course)
+    (problem,) = doc["problems"]
+    assert problem["id"] == "template:assignment-3-f2026:MAIN_EDITED"
+    assert (problem["when"], problem["bites"]) == ("2026-10-20T10:00:00+02:00", "later")
+    assert doc["course"]["stages"]["C5"] == "done"
+    assert doc["semester"]["verdict"]["coming_up"] == 1
+
+
+def test_the_course_file_tiers_template_problems_by_the_earliest_citing_hand_out():
+    course = _course()
+    course.templates[1].faults = [_autograde_sometimes()]
+    course.templates[1].readme = None
+    later = status_json.template_moments(_sched(), NOW)
+    assert later["assignment-3-f2026"] == status_json.Moment(
+        _at(20), "later", date(2026, 10, 12)
+    )
+    # A second live semester hands it out next week: the earliest, most urgent wins.
+    soon = status_json.template_moments(
+        _sched(SCHEDULE.replace("2026-10-20T10:00", "2026-09-30T10:00")), NOW
+    )
+    merged = status_json.merge_moments([later, soon])
+    assert merged["assignment-3-f2026"] == status_json.Moment(
+        _at(30, 9), "soon", date(2026, 9, 21)
+    )
+    doc = status_json.render_course_file(course, NOW, merged)
+    (problem,) = doc["problems"]
+    assert (problem["when"], problem["bites"]) == ("2026-09-30T10:00:00+02:00", "soon")
+    assert doc["course"]["stages"]["C5"] == "problem"
+    assert "horizon" not in doc
+    # The brief to-do says when it is needed and when it becomes a problem.
+    brief = {t["id"]: t for t in doc["course"]["todo"]}[
+        "template:assignment-3-f2026:brief"
+    ]
+    assert (brief["needed_by"], brief["problem_from"]) == (
+        "2026-09-30T10:00:00+02:00",
+        "2026-09-21",
+    )
+    # No live semester cites it: later, and no `needed_by`.
+    doc = status_json.render_course_file(course, NOW)
+    (problem,) = doc["problems"]
+    assert "when" not in problem and problem["bites"] == "later"
+    brief = {t["id"]: t for t in doc["course"]["todo"]}[
+        "template:assignment-3-f2026:brief"
+    ]
+    assert "needed_by" not in brief
+    assert doc["course"]["verdict"]["state"] == "ready"
+    assert validate(doc, schemas.status_schema()) == []
+
+
+def test_the_semester_counts_the_needed_template_to_dos_it_cites_as_coming_up():
+    course = _course()
+    course.templates[1].readme = None  # assignment-3's brief, handed out 20 Oct
+    course.templates.append(status_json.TemplateFacts("assignment-9", None))
+    doc = _render(course)
+    assert doc["semester"]["verdict"]["coming_up"] == 1
+    assert doc["semester"]["verdict"]["state"] == "ready"
+    # The course has no Coming up of its own.
+    assert "coming_up" not in doc["course"]["verdict"]
+
+
+def test_gather_moments_reads_only_live_semesters(monkeypatch):
+    live = {SEMESTER: True, "hertie-dsl-demo-f2025": False}
+    monkeypatch.setattr(status_json, "semester_is_live", lambda org: live[org])
+    loaded = []
+
+    def load(org):
+        loaded.append(org)
+        return _sched()
+
+    monkeypatch.setattr(status_json.schedule, "load", load)
+    moments = status_json.gather_moments(list(live), NOW)
+    assert loaded == [SEMESTER]
+    assert set(moments) == {"assignment-2-f2026", "assignment-3-f2026"}
+    # Already handed out in week 2: its problems stand now.
+    assert moments["assignment-2-f2026"].bites == "now"
+
+
+def test_an_opencourse_file_that_does_not_parse_is_a_problem_while_the_site_is_on():
+    on = _course(website_unusable=True, website_on=True)
+    doc = status_json.render_course_file(on, NOW)
+    (problem,) = doc["problems"]
+    assert problem["id"] == "website:opencourse.yml:WEBSITE"
+    assert (problem["stage"], problem["bites"]) == ("C6", "now")
+    assert problem["fix"]["screen"] == "website"
+    assert doc["course"]["stages"]["C6"] == "problem"
+    off = _course(website_unusable=True, website_on=False, public_site=False)
+    doc = status_json.render_course_file(off, NOW)
+    assert doc["problems"] == []
+    assert doc["course"]["stages"]["C6"] == "todo"
+    assert validate(doc, schemas.status_schema()) == []
