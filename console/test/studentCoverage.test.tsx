@@ -17,7 +17,8 @@ import { ArchivedSemester, AuditorNote } from '../src/screens/Student';
 import { AssignmentsView, MarksView } from '../src/screens/StudentAssignments';
 import { InstructorsView } from '../src/screens/StudentInstructors';
 import { ScheduleView } from '../src/screens/StudentSchedule';
-import { AboutView, WeekList } from '../src/screens/StudentWeek';
+import { WeekList } from '../src/screens/StudentWeek';
+import { HomeView } from '../src/screens/StudentHome';
 import { AskedList, JoinScreen, TeamList, joinTeamUrl } from '../src/screens/StudentJoin';
 import { ReadingsView, materialHref } from '../src/screens/StudentMaterials';
 import { SetupView, forkOf } from '../src/screens/StudentSetup';
@@ -378,11 +379,10 @@ describe('9. the About block', () => {
     expect(homeText('{% if site.x %}A{% endif %}{{ site.y }}{% include z.html %}', { x: 'on', y: 'B' })).toBe('AB');
   });
 
-  it('shows them on the semester’s This week, and a new announcement as a week line', async () => {
+  it('shows them on the semester’s Home (decision 0035 rule 4), and a new announcement as a week line', async () => {
     const f = await facts();
-    const v = <AboutView facts={f} org={ORG} tz="Europe/Berlin" now={NOW} />;
+    const v = <HomeView facts={f} org={ORG} now={NOW} />;
     const t = text(v);
-    expect(t).toContain('About Deep Learning (Demo)');
     expect(t).toContain('Syllabus');
     expect(t).toContain('Welcome to Deep Learning (Demo)');
     expect(t).toContain('Room change');

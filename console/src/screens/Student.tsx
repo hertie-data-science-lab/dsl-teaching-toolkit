@@ -31,7 +31,7 @@ import { HomeView } from './StudentHome';
 import { InstructorsView } from './StudentInstructors';
 import { MaterialsView, ReadingsView } from './StudentMaterials';
 import { ArchiveNotice, ScheduleView } from './StudentSchedule';
-import { AboutView, WeekList } from './StudentWeek';
+import { WeekList } from './StudentWeek';
 
 export interface StudentProps {
   semester: Semester;
@@ -167,12 +167,7 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
     : screen === 'materials' ? <div class="stack"><MaterialsView org={org} repos={f.materialsRepos} entry={entry} />{entry ? null : <ReadingsView org={org} facts={f} now={now} />}</div>
     : screen === 'instructors' ? <InstructorsView facts={f} org={org} />
     : screen === 'home' ? <HomeView facts={f} org={org} now={now} />
-    : (
-      <>
-        <WeekList items={weekItems(f, m, now, patchLines(f.assignments, m, rc), studentView || !login ? null : lastVisit(login, org)).filter((i) => !(unknownRole && i.kind === 'teams'))} tz={tz} org={org} />
-        <AboutView facts={f} org={org} tz={tz} now={now} />
-      </>
-    );
+    : <WeekList items={weekItems(f, m, now, patchLines(f.assignments, m, rc), studentView || !login ? null : lastVisit(login, org)).filter((i) => !(unknownRole && i.kind === 'teams'))} tz={tz} org={org} />;
   return (
     <div class="stack">
       {screen === 'week' && f.generatedAt ? <p class="footnote updated">Updated {ago(f.generatedAt, now)}</p> : null}
