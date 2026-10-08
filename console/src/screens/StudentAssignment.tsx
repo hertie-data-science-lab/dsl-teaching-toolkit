@@ -26,10 +26,13 @@ import { JoinRequests, TeamForm, TeamList } from './StudentJoin';
 /** Files the semester's rows for `slug` (its hand-out and due rows) carry, if any: listed with their button row (rule 10). */
 export const assignmentFiles = (facts: SemesterFacts, slug: string): FileLink[] => facts.rows.filter((r) => r.assignment === slug).flatMap((r) => r.links);
 
+/** A returned mark in words: "18 / 20", or the mark alone without a maximum. */
+export const markWords = (e: MarkEntry) => `${e.finalGrade}${e.maxPoints ? ` / ${e.maxPoints}` : ''}`;
+
 /** The state chip's words: the mark itself once returned ("returned 18 / 20"). */
 export function stateWord(st: MyState, e: MarkEntry | undefined): string {
   if (st !== 'returned' || !e?.finalGrade) return MY_STATE_WORD[st];
-  return `returned ${e.finalGrade}${e.maxPoints ? ` / ${e.maxPoints}` : ''}`;
+  return `returned ${markWords(e)}`;
 }
 
 export function StateChip({ st, entry }: { st: MyState; entry?: MarkEntry }) {
@@ -136,7 +139,7 @@ export function AssignmentBody({ org, a, mine, now, tz, studentView, unknownRole
       ) : null}
       {entry?.finalGrade ? (
         <section class="a-mark" aria-label="Mark">
-          <div class="a-head"><h3>Mark</h3><span class="mark-big">{entry.finalGrade}{entry.maxPoints ? <span> / {entry.maxPoints}</span> : null}</span></div>
+          <div class="a-head"><h3>Mark</h3><MarkFigure e={entry} /></div>
           <MarkBody e={entry} />
         </section>
       ) : null}
@@ -245,6 +248,9 @@ export function ThreadView({ receipts, tz, year }: { receipts: Receipts; tz: str
 function questionsOf(e: MarkEntry): string[] {
   return [...new Set([...Object.keys(typeof e.score === 'object' && e.score ? e.score : {}), ...Object.keys(e.questionFeedback)])];
 }
+
+/** A returned mark as a figure: "18 / 20". */
+export const MarkFigure = ({ e }: { e: MarkEntry }) => <span class="mark-big">{e.finalGrade}{e.maxPoints ? <span> / {e.maxPoints}</span> : null}</span>;
 
 /** One returned mark: submitted, days late, penalty, team, feedback, by question, team feedback. */
 export function MarkBody({ e }: { e: MarkEntry }) {
