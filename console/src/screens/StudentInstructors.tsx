@@ -1,5 +1,5 @@
 // The student's Instructors (decision 0011 rule 2): a card per instructor and teaching
-// assistant, with their picture.
+// assistant, with their picture. Home shows the same cards in two columns (decision 0035 rule 4).
 
 import { useEnv } from '../env';
 import { IMG_HOSTS, type InstructorCard, type SemesterFacts } from '../model/student';
@@ -22,9 +22,9 @@ function CardPicture({ card, org }: { card: InstructorCard; org: string }) {
   return <span class="p-avatar" aria-hidden="true">{src ? <img src={src} alt="" /> : initials(card.name)}</span>;
 }
 
-export function InstructorsView({ facts, org = '' }: { facts: SemesterFacts; org?: string }) {
-  if (!facts.instructors.length) return <p class="footnote">No instructors are listed yet.</p>;
-  const card = (c: InstructorCard) => (
+/** One instructor's card: picture, name (linked to their page), role and title, email where they show it. */
+export function PersonCard({ card: c, org }: { card: InstructorCard; org: string }) {
+  return (
     <li class="person">
       <CardPicture card={c} org={org} />
       <div>
@@ -34,5 +34,9 @@ export function InstructorsView({ facts, org = '' }: { facts: SemesterFacts; org
       </div>
     </li>
   );
-  return <ul class="people-grid">{facts.instructors.map(card)}</ul>;
+}
+
+export function InstructorsView({ facts, org = '' }: { facts: SemesterFacts; org?: string }) {
+  if (!facts.instructors.length) return <p class="footnote">No instructors are listed yet.</p>;
+  return <ul class="people-grid">{facts.instructors.map((c) => <PersonCard card={c} org={org} />)}</ul>;
 }

@@ -27,6 +27,7 @@ import { useLoad } from '../ui/load';
 import { Ext } from '../ui/icons';
 import { CourseBanner, StudentNav } from '../ui/shell';
 import { AssignmentsView, MarksView } from './StudentAssignments';
+import { HomeView } from './StudentHome';
 import { InstructorsView } from './StudentInstructors';
 import { MaterialsView, ReadingsView } from './StudentMaterials';
 import { ArchiveNotice, ScheduleView } from './StudentSchedule';
@@ -119,7 +120,10 @@ export function StudentScreen({ semester, screen, studentView, entry, now = Date
   const facts = useFacts(semester);
   const f = facts.kind === 'ready' ? facts.value : null;
   const kind = screen.startsWith('kind-') ? studentScreens(f).find(([k]) => k === screen)?.[1] ?? '' : '';
-  const label = kind || (STUDENT_SCREENS.find(([k]) => k === screen)?.[1] ?? 'Home');
+  // Home's head is the site's h1: the course with "/ <semester>" (decision 0035 rule 4).
+  const label = kind || (screen === 'home'
+    ? <>{f?.courseName || semester.courseName || semester.org} <span class="h-sub">/ {semester.termLabel}</span></>
+    : STUDENT_SCREENS.find(([k]) => k === screen)?.[1] ?? 'Home');
   const hint = kind ? kindHint(kind) : STUDENT_HINTS[screen];
   return (
     <>
@@ -162,6 +166,7 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
     : screen === 'assignments' ? <AssignmentsView org={org} facts={f} mine={m} now={now} studentView={studentView} receipts={hasThreads ? rc : {}} unknownRole={unknownRole} />
     : screen === 'materials' ? <div class="stack"><MaterialsView org={org} repos={f.materialsRepos} entry={entry} />{entry ? null : <ReadingsView org={org} facts={f} now={now} />}</div>
     : screen === 'instructors' ? <InstructorsView facts={f} org={org} />
+    : screen === 'home' ? <HomeView facts={f} org={org} now={now} />
     : (
       <>
         <WeekList items={weekItems(f, m, now, patchLines(f.assignments, m, rc), studentView || !login ? null : lastVisit(login, org)).filter((i) => !(unknownRole && i.kind === 'teams'))} tz={tz} org={org} />
@@ -173,7 +178,7 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
       {screen === 'week' && f.generatedAt ? <p class="footnote updated">Updated {ago(f.generatedAt, now)}</p> : null}
       {f.archive ? <ArchiveNotice when={f.archive} tz={tz} now={now} /> : null}
       {m?.auditor ? <AuditorNote /> : null}
-      {screen !== 'instructors' && screen !== 'materials' ? mineNote : null}
+      {['week', 'schedule', 'assignments'].includes(screen) ? mineNote : null}
       {body}
     </div>
   );

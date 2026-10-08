@@ -123,7 +123,7 @@ describe('the student banner and screens', () => {
   it('every student page title carries a ?', () => {
     for (const screen of Object.keys(STUDENT_HINTS)) {
       const out = html(<StudentScreen semester={semester} screen={screen} studentView={false} now={NOW} />);
-      expect(out).toMatch(/<h2 class="h1">[^<]+<span class="hint-wrap"><button class="hint-btn"/);
+      expect(out).toMatch(/<h2 class="h1">(?:[^<]|<span class="h-sub">[^<]+<\/span>)+<span class="hint-wrap"><button class="hint-btn"/);
       expect(out).toContain(STUDENT_HINTS[screen].slice(0, 30));
     }
     for (const t of Object.values(STUDENT_HINTS)) expect(t.split(/[.!?](\s|$)/).filter((x) => x.trim()).length).toBeLessThanOrEqual(2);
@@ -163,7 +163,7 @@ describe('the student shell', () => {
     document.body.appendChild(root);
     await act(async () => render(<App state={s} />, root!));
     await settle();
-    expect(root.querySelector('#view h2.h1')?.textContent).toContain('Home');
+    expect(root.querySelector('#view h2.h1')?.textContent).toMatch(/^Deep Learning \/ Fall 2026 \?/);
     expect(root.querySelector('.site-footer h2')!.textContent).toBe('Deep Learning');
     expect(root.querySelector('.site-footer p')!.textContent).toBe('Fall 2026');
     expect([...root.querySelectorAll('.topbar a')].some((a) => a.textContent === 'Guide')).toBe(false);

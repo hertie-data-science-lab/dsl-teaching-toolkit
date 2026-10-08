@@ -1019,3 +1019,12 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .aside-list .textlink { min-height: 0; padding: 0 2px; }
 .modal.small { width: min(460px, 100%); }
 .modal.small .entry-body p { margin: 0; }
+
+/* ================= student Home (decision 0035 rule 4) ================= */
+.h1 .h-sub { font-weight: 400; color: var(--muted); }
+.home .updates ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.home .updates li > div, .home .updates li p { display: inline; margin: 0; }
+.home .updates li b + div { margin-left: 6px; }
+.home-people { display: grid; grid-template-columns: minmax(0, 35fr) minmax(0, 65fr); gap: 24px; align-items: start; }
+.home-people .people-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+@media (max-width: 860px) { .home-people { grid-template-columns: minmax(0, 1fr); } }
