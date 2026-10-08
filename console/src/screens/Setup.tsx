@@ -5,13 +5,17 @@
 // across sign-out. The login is known from sign-in, so there is no handle field. A saved
 // setup shows as text with a pencil; the form shows while editing or while no folder is
 // saved, and nothing is stored until Save. Where the browser allows it, the folder check
-// (decision 0023) shows in both; elsewhere a footnote says where it would.
+// (decision 0023) shows in both; elsewhere a footnote says where it would. Below it, one
+// "Your repos in <course>, <semester>" section per live semester the person studies (decision
+// 0035 rule 9, `StudentSetup.tsx`): the fork check and the Open buttons that were Set up.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { canCheckFolders, folderHandle, forgetFolder, pickFolder } from '../model/localFolder';
 import { courseFolder, folderExample, lastSegment, platformOf, schemeOk, withOverride, type Editor, type Setup } from '../model/open';
+import type { Semester } from '../model/discovery';
 import { saveYourSetup, yourSetup } from '../model/prefs';
+import { YourRepos } from './StudentSetup';
 
 const EDITOR_WORD: Record<Editor, string> = { vscode: 'VS Code', desktop: 'GitHub Desktop', other: 'Another editor' };
 
@@ -111,8 +115,11 @@ const Pencil = () => (
   <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5l2.5 2.5L5.5 13H3v-2.5z" /><path d="M9.5 4l2.5 2.5" /></svg>
 );
 
-/** `courses`: the person's courses and semesters, for their folders (the App passes them). */
-export function SetupScreen({ org, courses = [] }: { org?: string; courses?: ProfileCourse[] }) {
+/**
+ * `courses`: the person's courses and semesters, for their folders; `semesters`: the live ones
+ * they study, each with its Your repos section (the App passes both).
+ */
+export function SetupScreen({ org, courses = [], semesters = [] }: { org?: string; courses?: ProfileCourse[]; semesters?: Semester[] }) {
   const env = useEnv();
   const login = env?.user.login ?? '';
   const [saved, setSaved] = useState<Setup | null>(() => yourSetup(login));
@@ -223,6 +230,7 @@ export function SetupScreen({ org, courses = [] }: { org?: string; courses?: Pro
       </section>
       <p class="footnote">Kept in this browser, for your GitHub login.</p>
       {canCheckFolders() ? null : <p class="footnote">In Chrome or Edge the console can see which repos you have cloned and offer only the step that applies.</p>}
+      {semesters.map((k, i) => <YourRepos key={k.org} semester={k} open={i === 0} />)}
     </>
   );
 }

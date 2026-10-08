@@ -1,5 +1,5 @@
 // The Open split button (decision 0017), modelled on GitHub's Code button, on the instructor
-// screens and the student Set up page alike (decision 0027): the main part does the last
+// screens and the student's Your repos in Profile alike (decisions 0027, 0035): the main part does the last
 // choice made (remembered per login in this browser), the arrow opens every choice: on
 // GitHub, on github.dev, in VS Code, in GitHub Desktop, or in the editor Profile names. Where the folder check can tell (decision 0023), it offers Open or
 // Clone, whichever applies, and the main part reads "Clone" or "Open"; it renders with both
