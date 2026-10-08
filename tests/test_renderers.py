@@ -2632,7 +2632,8 @@ def test_the_git_authentication_sweep_sees_the_pushing_buttons():
 
 
 def test_new_materials_asks_nothing_about_publishing():
-    # publish.yml is retired (decision 0016): the public website has its own settings.
+    # The public website has its own settings (opencourse.yml, decision 0016), and a
+    # semester site's publish.yml is an opt-in faculty write by hand (decision 0035).
     assert set(workflow_inputs(workflows_render.render_new_materials())) == {
         "semester",
         "copy_from",

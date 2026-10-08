@@ -85,7 +85,7 @@ def test_op_arg_enums_are_the_engine_constants():
     assert create["type"]["enum"] == list(course.ASSIGNMENT_TYPES)
     # New assignment asks nothing a semester decides.
     assert not set(create) & set(settings.RUN_KEYS)
-    # publish.yml is retired: New materials repo asks nothing about publishing.
+    # publish.yml is a hand-written opt-in: New materials repo asks nothing about it.
     materials = REGISTRY["materials.create"].args_schema["properties"]
     assert set(materials) == {"semester", "copy_from"}
     assert REGISTRY["course.publish_website"].args_schema["properties"] == {}
