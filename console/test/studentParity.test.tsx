@@ -20,6 +20,7 @@ import type { Mine } from '../src/model/mine';
 import { STUDENT_STATUS_PATH } from '../src/model/names';
 import { StatusFileSource, factsFromStatus, type SemesterFacts } from '../src/model/student';
 import { closesWords, formingAt, nextLine, semesterLine, weekItems, weekPhrase, weekWords } from '../src/model/week';
+import { studentScreens } from '../src/router';
 import { STUDENT_HINTS, StudentBanner, StudentScreen } from '../src/screens/Student';
 import { ScheduleView } from '../src/screens/StudentSchedule';
 import { AskedList, TeamForm } from '../src/screens/StudentJoin';
@@ -154,6 +155,20 @@ describe('the student banner and screens', () => {
 });
 
 describe('the student shell', () => {
+  it('renders every screen of the Student view, kind tabs too, with no student’s data read', async () => {
+    const f = withFile();
+    for (const [screen, label] of studentScreens(factsFromStatus(DOC))) {
+      const el = await mount(<StudentScreen semester={semester} screen={screen} studentView now={NOW} />, f);
+      expect(el.querySelector('.ro-banner')?.textContent).toContain('Student view.');
+      expect(el.querySelector('h2.h1')?.textContent).toContain(screen === 'home' ? 'Deep Learning / Fall 2026' : label);
+      expect(el.querySelector('.loading, .check-line.bad')).toBeNull();
+      render(null, root!);
+    }
+    // Shared facts only (the status file, the materials tree, a card picture): no one's repos, team, role or gradebook.
+    expect(f.seen.some((c) => c.url.includes('/.github/contents/'))).toBe(true);
+    expect(f.seen.filter((c) => /grades-|\/teams\/|\/user\/|\/orgs\/[^/]+\/repos|\/issues/.test(c.url))).toEqual([]);
+  });
+
   it('lands a student with one live semester on its Home, with its footer and no Guide', async () => {
     const f = withFile();
     const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: client(f) });
