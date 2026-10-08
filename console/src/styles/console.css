@@ -18,6 +18,7 @@ code, .mono { font-family: var(--font-code); font-size: 0.86em; }
 .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--brand-bar); color: var(--on-brand); padding-inline: 16px; }
 .topbar-inner { max-width: 1320px; margin: 0 auto; display: flex; align-items: center; gap: 12px; min-height: 56px; }
 .app-name { font-family: var(--font-display); font-weight: 700; font-size: 19px; color: var(--on-brand); text-decoration: none; display: flex; align-items: baseline; gap: 10px; }
+.app-name .hertie-mark { align-self: center; flex: none; width: auto; height: 26px; }
 .app-name small { font-weight: 400; font-size: 13px; opacity: 0.8; }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .who { display: flex; align-items: center; gap: 8px; font-size: 14px; }
@@ -26,6 +27,13 @@ code, .mono { font-family: var(--font-code); font-size: 0.86em; }
 .pill-ghost:hover { background: #fff; color: #BA0020; }
 .menu-btn { display: none; }
 @media (max-width: 860px) { .menu-btn { display: inline-flex; align-items: center; } .who-name, .app-name small { display: none; } }
+/* A phone: the mark alone stands for the name (kept for screen readers), and the pills tighten, so the bar fits from 360px up. */
+@media (max-width: 520px) {
+  .app-name { gap: 0; }
+  .app-name .app-words { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .topbar-inner, .topbar-right { gap: 6px; }
+  .pill-ghost { padding-inline: 8px; }
+}
 
 /* ================= shell and nav ================= */
 .shell { max-width: 1320px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 96px; display: grid; grid-template-columns: 228px minmax(0, 1fr); gap: 32px; }
@@ -55,6 +63,8 @@ code, .mono { font-family: var(--font-code); font-size: 0.86em; }
 .sidenav .leaf { margin-left: 22px; }
 .sidenav .lvl2 { padding-left: 44px; }
 .sidenav .lvl2 a { font-size: 13.5px; min-height: 30px; padding: 4px 10px; overflow-wrap: anywhere; }
+.sidenav .with-icon { display: inline-flex; align-items: center; gap: 8px; }
+.sidenav .fa-icon { width: 14px; height: 14px; flex: none; opacity: 0.75; }
 .sidenav .node-name { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
 .sidenav .nav-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
 .sidenav .past { color: var(--muted); }
@@ -1016,3 +1026,19 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .aside-list .textlink { min-height: 0; padding: 0 2px; }
 .modal.small { width: min(460px, 100%); }
 .modal.small .entry-body p { margin: 0; }
+
+/* ================= student Home (decision 0035 rule 4) ================= */
+.h1 .h-sub { font-weight: 400; color: var(--muted); }
+.home .updates ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.home .updates li > div, .home .updates li p { display: inline; margin: 0; }
+.home .updates li b + div { margin-left: 6px; }
+.home-people { display: grid; grid-template-columns: minmax(0, 35fr) minmax(0, 65fr); gap: 24px; align-items: start; }
+.home-people > :only-child { grid-column: 1 / -1; }
+.home-people .people-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+@media (max-width: 860px) { .home-people { grid-template-columns: minmax(0, 1fr); } }
+
+/* ================= kind tabs (decision 0035 rule 5) ================= */
+.kind-tab .session + .session { border-top: 1px solid var(--rule); margin-top: 18px; padding-top: 18px; }
+.kind-tab .session-title { font-size: 18px; margin: 0 0 6px; }
+.kind-tab .session-files-label { margin: 8px 0 2px; }
+.kind-tab .session-files { margin: 0; padding-left: 20px; }

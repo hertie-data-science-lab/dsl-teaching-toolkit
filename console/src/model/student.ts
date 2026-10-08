@@ -149,6 +149,11 @@ export interface SemesterFacts {
   syllabus: FileLink | null;
   /** The institution's row kinds (label, colours and whether the kind has a tab), when the source carries them. A kind's tab shows only when the semester has rows of that kind (the engine's `kind_pages(present)`). */
   kinds?: Record<string, RowKind>;
+  /**
+   * Every row a kind tab lists, in the engine's order (dated by date, then undated): `rows`
+   * plus the undated and off-schedule ones the schedule leaves out. Absent: `rows`.
+   */
+  tabRows?: ScheduleRow[];
   /** The course's one-line blurb (`course_description` in dsl-course.yml); absent or '' when unset. */
   courseDescription?: string;
   /** Earlier runs of the course, as the site's landing page lists them; absent when the source does not say. */
@@ -511,7 +516,9 @@ function linkOf(l: Obj): FileLink {
 
 /** The status file as the screens' model. Readings are the same objects as the row's links they repeat, so a screen that shows the rest of the files can tell them apart. */
 export function factsFromStatus(doc: Obj): SemesterFacts {
-  const rows: ScheduleRow[] = arr(doc.rows).filter((r) => r.when && r.off_schedule !== true).map((r) => {
+  // Undated and off-schedule rows are on their kind tabs only (`tabRows`), never on the schedule.
+  const docRows = arr(doc.rows);
+  const tabRows: ScheduleRow[] = docRows.map((r) => {
     const links = arr(r.links).map(linkOf);
     const readings = arr(r.readings).map((x) => links.find((l) => l.repo === str(x.repo) && l.path === str(x.path)) ?? linkOf(x));
     return {
@@ -532,6 +539,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
       tabs: tabsOf(r.tabs, str(r.kind)),
     };
   });
+  const rows = tabRows.filter((_, i) => docRows[i].when && docRows[i].off_schedule !== true);
   const assignments: SemesterAssignment[] = arr(doc.assignments).map((a) => {
     const tf = a.team_formation as Obj | null | undefined;
     const via = str(a.submit_via);
@@ -569,6 +577,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
     courseName: str(doc.course_name),
     courseDescription: str(doc.course_description),
     previousOfferings: offeringsOf(doc.previous_offerings),
+    tabRows,
     timezone: str(doc.timezone) || DEFAULT_TIMEZONE,
     rows,
     assignments,

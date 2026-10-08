@@ -13,7 +13,12 @@ import { forgetStudentPrefs, lastVisit, markVisit } from '../src/model/prefs';
 import type { KeyStore } from '../src/auth/types';
 import { SiteSource, homeText, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
-import { ArchivedSemester, AboutView, AssignmentsView, AuditorNote, InstructorsView, MarksView, ScheduleView, WeekList } from '../src/screens/Student';
+import { ArchivedSemester, AuditorNote } from '../src/screens/Student';
+import { AssignmentsView, MarksView } from '../src/screens/StudentAssignments';
+import { InstructorsView } from '../src/screens/StudentInstructors';
+import { ScheduleView } from '../src/screens/StudentSchedule';
+import { WeekList } from '../src/screens/StudentWeek';
+import { HomeView } from '../src/screens/StudentHome';
 import { AskedList, JoinScreen, TeamList, joinTeamUrl } from '../src/screens/StudentJoin';
 import { ReadingsView, materialHref } from '../src/screens/StudentMaterials';
 import { SetupView, forkOf } from '../src/screens/StudentSetup';
@@ -219,13 +224,13 @@ describe('4. the auditor', () => {
     await readMine(client(fake), ORG, LOGIN, []);
     expect(knownAuditor(ORG.toUpperCase())).toBe(true);
     const sem: Semester = { org: ORG, term: 'f2026', termLabel: 'Fall 2026', courseOrg: 'c', courseName: 'Deep Learning', archived: false, role: 'student' };
+    // Marks and Join live in Assignments now (decision 0035 rules 7-8): nobody's nav lists them.
     const nav = render(<StudentNav root="Your semesters" semesters={[sem]} semester={sem} current="week" />);
     expect(nav).not.toContain('#marks');
     expect(nav).not.toContain('#join');
     expect(nav).toContain('#materials');
     await readMine(client(new FakeGitHub().on('GET', new RegExp(`^/orgs/${ORG}/repos`), [])), ORG, LOGIN, []);
     expect(knownAuditor(ORG)).toBe(false);
-    expect(render(<StudentNav root="Your semesters" semesters={[sem]} semester={sem} current="week" />)).toContain('#marks');
   });
 
   it('promises no repo, team or marks: "As an auditor you ..."', async () => {
@@ -374,11 +379,10 @@ describe('9. the About block', () => {
     expect(homeText('{% if site.x %}A{% endif %}{{ site.y }}{% include z.html %}', { x: 'on', y: 'B' })).toBe('AB');
   });
 
-  it('shows them on the semester’s This week, and a new announcement as a week line', async () => {
+  it('shows them on the semester’s Home (decision 0035 rule 4), and a new announcement as a week line', async () => {
     const f = await facts();
-    const v = <AboutView facts={f} org={ORG} tz="Europe/Berlin" now={NOW} />;
+    const v = <HomeView facts={f} org={ORG} now={NOW} />;
     const t = text(v);
-    expect(t).toContain('About Deep Learning (Demo)');
     expect(t).toContain('Syllabus');
     expect(t).toContain('Welcome to Deep Learning (Demo)');
     expect(t).toContain('Room change');
@@ -395,7 +399,7 @@ describe('10. the small fields', () => {
     expect((await byslug())['assignment-8'].tbc).toBe(true);
   });
 
-  it('shows TBC, row details, the points, the course’s late sentences and deep-linked file chips', async () => {
+  it('shows TBC, row details, the points and deep-linked file chips, and no course-wide late section (decision 0035 rule 6)', async () => {
     const f = await facts();
     const sched = render(<ScheduleView facts={f} mine={null} now={NOW} org={ORG} />);
     expect(sched).toContain('class="tbc">TBC');
@@ -405,7 +409,7 @@ describe('10. the small fields', () => {
     const t = text(<AssignmentsView org={ORG} facts={f} mine={mine()} now={NOW} studentView={false} receipts={{}} />);
     expect(t).toContain('Out of 25 points');
     expect(t).toMatch(/Due [^)]*\(TBC\)/);
-    expect(t).toContain('Late work in this course You have free 8 late days.');
+    expect(t).not.toContain('Late work in this course');
   });
 });
 

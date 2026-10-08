@@ -9,7 +9,7 @@ import { openDeck, type DeckDeps } from '../src/model/deckTab';
 import { ownerSlug, parseGradebook, readReceipts, unitOf } from '../src/model/mine';
 import { SiteSource, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { parseSearch } from '../src/router';
-import { MarksView } from '../src/screens/Student';
+import { MarksView } from '../src/screens/StudentAssignments';
 import { FakeGitHub, fileBody } from './fake';
 
 const ORG = 'hertie-dsl-demo-f2026';
@@ -73,7 +73,7 @@ describe('the renamed site', () => {
 });
 
 describe('Marks', () => {
-  const facts: SemesterFacts = { courseName: '', timezone: 'Europe/Berlin', rows: [], assignments: [], instructors: [], archive: null, latePolicy: [], materialsRepos: [], homeMarkdown: '', announcements: [], syllabus: null };
+  const facts: SemesterFacts = { courseName: '', timezone: 'Europe/Berlin', rows: [], assignments: [], instructors: [], archive: null, latePolicy: [], materialsRepos: [], homeMarkdown: '', announcements: [], syllabus: null, courseDescription: '', previousOfferings: [] };
 
   it('shows the semester total over an empty gradebook, and says no marks yet', () => {
     const t = text(<MarksView org={ORG} login="octo" facts={facts} gradebook={parseGradebook('total: 88\nassignments: {}\n')} studentView={false} />);
