@@ -2853,3 +2853,23 @@ def test_two_ticks_of_the_same_facts_render_the_same_bytes():
     assert status_json.dumps(course_file) == status_json.dumps(
         status_json.render_course_file(course, NOW + timedelta(minutes=10))
     )
+
+
+def test_builders_date_a_template_problem_and_tier_never_rewrites_when():
+    # Decision 0034 (review): each builder sets `when` once; `_tier` only tiers it.
+    t = status_json.TemplateFacts("assignment-3-f2026", "# Trees", main_edited="x.py")
+    moments = {"assignment-3-f2026": status_json.Moment(_at(20), "assignment-3")}
+    (dated,) = status_json.template_problems(t, COURSE, moments)
+    assert dated["when"] == "2026-10-20T10:00:00+02:00"
+    (undated,) = status_json.template_problems(t, COURSE, {})
+    assert "when" not in undated and undated[status_json.UNDATED_LATER]
+    fault = status_json.problem_from_fault(_autograde_sometimes(), COURSE, NOW, {})
+    assert "when" not in fault and fault[status_json.UNDATED_LATER]
+    # A C5 problem's own `when` stands: nothing in `_tier` re-dates it.
+    own = {**status_json.main_edited_problem(t, COURSE), "when": _at(28, 9).isoformat()}
+    (tiered,) = status_json._tier([own], NOW)
+    assert (tiered["when"], tiered["bites"]) == ("2026-09-28T10:00:00+02:00", "soon")
+    assert [p["bites"] for p in status_json._tier([undated, fault], NOW)] == [
+        "later",
+        "later",
+    ]

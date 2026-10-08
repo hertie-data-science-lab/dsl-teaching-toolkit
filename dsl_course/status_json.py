@@ -601,7 +601,8 @@ def problem_from_fault(
     except a template's, which bites at the first hand-out that consumes the template -
     `moments`, by template; an assignments.yml value's, at its assignment's hand-out -
     `slug_handouts`, by schedule key; and visibility drift's, which stands now. Undated
-    without one; an undated source fault is marked `UNDATED_LATER`. `_tier` sets `bites`.
+    without one; an undated source fault, and a course template's no dated hand-out
+    cites, is marked `UNDATED_LATER`. `_tier` sets `bites`.
 
     The fix pointer names the repo, path and line to edit and the console screen that
     edits it; a file on a branch other than `main` (a template's `solution`) says which."""
@@ -682,9 +683,10 @@ def problem_from_fault(
         when = fault.fires
     if when is not None:
         problem["when"] = when.isoformat()
-    elif fault.is_source:
+    elif fault.is_source or filed.scope == "course" and filed.kind == "template":
         # Decision 0034: a deliberately undated entry (TBC, hand-out by hand) puts
-        # nothing at risk yet - nothing fires until it has a date.
+        # nothing at risk yet - nothing fires until it has a date; nor does a course
+        # template no dated hand-out cites.
         problem[UNDATED_LATER] = True
     return problem
 
@@ -706,26 +708,17 @@ def bites(when: datetime | None, now: datetime) -> str:
 
 
 # Set by a builder on a problem whose missing moment means "later", not "now": an undated
-# source fault, an undated SOURCE_UNWRITTEN copy. `_tier` reads it and drops it.
+# source fault, an undated SOURCE_UNWRITTEN copy, a course template no dated hand-out
+# cites. `_tier` reads it and drops it.
 UNDATED_LATER = "undated_later"
 
 
-def _tier(
-    problems: list[dict], now: datetime, moments: Mapping[str, Moment] | None = None
-) -> list[dict]:
-    """Decision 0034's one tiering site, and the only place `bites` is set. A course
-    template's problem (stage C5) takes its `when` off `moments`, by template repo: the
-    first citing hand-out; a template no dated hand-out cites is `later`. A problem with
-    no moment is `now`, unless its builder marked it `UNDATED_LATER`; one with a moment is
-    `now`, `soon` or `later` by `bites`."""
+def _tier(problems: list[dict], now: datetime) -> list[dict]:
+    """Decision 0034's one tiering site, and the only place `bites` is set; each builder
+    has set `when` already. A problem with no moment is `now`, unless its builder marked
+    it `UNDATED_LATER`; one with a moment is `now`, `soon` or `later` by `bites`."""
     for p in problems:
         undated_later = p.pop(UNDATED_LATER, False)
-        if p["scope"] == "course" and p["stage"] == "C5":
-            m = (moments or {}).get(p["fix"].get("entry") or "")
-            p.pop("when", None)
-            if m is not None and m.when is not None:
-                p["when"] = m.when.isoformat()
-            undated_later = True
         when = datetime.fromisoformat(p["when"]) if p.get("when") else None
         p["bites"] = LATER if when is None and undated_later else bites(when, now)
     return problems
@@ -1239,12 +1232,23 @@ def main_edited_problem(t: TemplateFacts, org: str) -> dict:
     }
 
 
-def template_problems(t: TemplateFacts, org: str) -> list[dict]:
+def template_problems(
+    t: TemplateFacts, org: str, moments: Mapping[str, Moment] | None
+) -> list[dict]:
     """A template's own problems beside its grading_config.yml faults: NOT_MIGRATED
-    without the topic, MAIN_EDITED on a derived one."""
+    without the topic, MAIN_EDITED on a derived one. Each bites at the template's first
+    dated citing hand-out (`moments`); one no dated hand-out cites is `later`."""
     if not t.topic:
-        return [template_problem(t, org)]
-    return [main_edited_problem(t, org)] if t.main_edited else []
+        out = [template_problem(t, org)]
+    else:
+        out = [main_edited_problem(t, org)] if t.main_edited else []
+    m = (moments or {}).get(t.repo)
+    for p in out:
+        if m is not None and m.when is not None:
+            p["when"] = m.when.isoformat()
+        else:
+            p[UNDATED_LATER] = True
+    return out
 
 
 BRIEF_TODO = f"The brief ({README_FILE}) is not written yet."
@@ -1337,7 +1341,7 @@ def template_state(t: TemplateFacts) -> str:
     grading_config.yml will not grade as written, or while a derived `main` carries a
     hand edit; `ready` once its README is written and its starter is in place (derived:
     `starter_check` finds nothing to do), `todo` before."""
-    if t.faults or template_problems(t, ""):
+    if t.faults or template_problems(t, "", None):
         return PROBLEM
     return "ready" if _written(t.readme) and not t.starter_todo else TODO
 
@@ -1450,11 +1454,11 @@ def render_course(
     ]
     problems += [p for m in facts.materials for p in kindless_problems(m, facts.org)]
     for t in facts.templates:
-        problems += template_problems(t, facts.org)
+        problems += template_problems(t, facts.org, moments)
         problems += template_todo_problems(t, facts.org, moments)
     for t in facts.templates:
-        problems += [problem_from_fault(f, facts.org, now) for f in t.faults]
-    _tier(problems, now, moments)
+        problems += [problem_from_fault(f, facts.org, now, moments) for f in t.faults]
+    _tier(problems, now)
     meta = facts.meta
     aside = set_aside_ids(meta)
     checks = {m.repo: materials_checks(m) for m in facts.materials}
@@ -2290,13 +2294,13 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     ]
     problems += [p for m in course.materials for p in kindless_problems(m, course.org)]
     for t in course.templates:
-        problems += template_problems(t, course.org)
+        problems += template_problems(t, course.org, moments)
         problems += template_todo_problems(t, course.org, moments)
     releases = render_releases(facts, facts.schedule_faults, now)
     # A late release another problem already holds back is not told twice.
     held = {p["release"] for p in problems if "release" in p}
     problems += late_problems(facts, releases, held, now)
-    problems = _unique_ids(_tier(problems, now, moments))
+    problems = _unique_ids(_tier(problems, now))
     course_block, _ = render_course(
         course, now, [p for p in problems if p["scope"] == "course"], moments
     )
