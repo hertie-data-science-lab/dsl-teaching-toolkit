@@ -753,7 +753,7 @@ def _run_form(
 
 
 # The assignment's page on the semester site, as the lock carries it for the refusals.
-_PAGE = "https://console.example/?semester=semester#join"
+_PAGE = "https://console.example/?semester=semester#assignment-assignment-2"
 
 
 def _lock_for(
@@ -1195,14 +1195,32 @@ def test_the_header_links_the_page_of_the_one_open_assignment():
     # follow if they can reach the page.
     form = welcome.join_team_form({"assignment-2": _PAGE})
     header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
-    assert f"listed in [the student console, under Join]({_PAGE})." in header
+    assert f"listed in [the student console, under Assignments]({_PAGE})." in header
     assert welcome.TEAM_LIST_SENTENCE not in header
 
 
-def test_two_open_assignments_share_the_one_join_screen():
-    form = welcome.join_team_form({"assignment-2": _PAGE, "assignment-3": _PAGE})
+def test_two_open_assignments_link_the_assignments_list():
+    # Each has its own page; the one header sentence links the list that carries both.
+    form = welcome.join_team_form(
+        {
+            "assignment-2": _PAGE,
+            "assignment-3": "https://console.example/?semester=semester#assignment-assignment-3",
+        }
+    )
     header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
-    assert header.count(_PAGE) == 1
+    assert (
+        "[the student console, under Assignments]"
+        "(https://console.example/?semester=semester#assignments)." in header
+    )
+    assert "#assignment-assignment-" not in header
+
+
+def test_two_open_assignments_on_the_site_home_link_it_once():
+    # No console: every page is the semester site's home, linked as it is.
+    home = "https://semester.github.io/"
+    form = welcome.join_team_form({"assignment-2": home, "assignment-3": home})
+    header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
+    assert header.count(home) == 1 and f"]({home})." in header
 
 
 def test_a_slug_whose_page_is_not_known_is_left_unlinked_rather_than_linked_nowhere():
@@ -1299,7 +1317,8 @@ def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):
     ]
     # And the header links its page, off the same lock - no second lookup.
     assert (
-        "[the student console, under Join](https://c.github.io/a3)" in content.decode()
+        "[the student console, under Assignments](https://c.github.io/a3)"
+        in content.decode()
     )
 
 

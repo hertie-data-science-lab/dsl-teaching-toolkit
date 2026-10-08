@@ -18,8 +18,9 @@ name: Form team
 # is refused here.
 #
 # teams.csv is PRIVATE, so the teams that exist - names and counts only - are listed in
-# the student console's Join screen (student-status.json, rewritten on a push to teams.csv).
-# The lock carries that screen's URL (`team_formation_page:`) for the refusals below to link.
+# each assignment's page in the student console (student-status.json, rewritten on a push
+# to teams.csv). The lock carries that page's URL (`team_formation_page:`) for the refusals
+# below to link.
 #
 # Runs under secrets.DSL_BOT_TOKEN, which needs, on the semester org: Contents R/W on
 # semester-config, Issues R/W on join.
@@ -132,7 +133,7 @@ jobs:
               // looks like. That reads as OPEN below - the behaviour those semesters have
               // had since the form existed - never as closed.
               //
-              // `page` is the semester's Join screen in the student console, which lists the
+              // `page` is the assignment's page in the student console, which lists the
               // teams that exist - "" where the lock carries none, and the refusal then
               // names the console without linking it.
               const LOCK = '__LOCK__';
@@ -148,7 +149,7 @@ jobs:
                 let inSlug = false, formation = null, cap = null, window = null, closes = '', page = '';
                 for (const raw of text.split(/\r?\n/)) {
                   // A comment is a `#` at the start or after a space, as in YAML: the page
-                  // URL carries a `#join` fragment.
+                  // URL carries an `#assignment-<key>` fragment.
                   const line = raw.replace(/(^|\s)#.*$/, '').trimEnd();
                   const key = line.match(/^ {2}([\w.-]+):$/);
                   if (key) { inSlug = key[1].toLowerCase() === slug; continue; }
