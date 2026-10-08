@@ -1089,10 +1089,11 @@ def test_index_is_empty_yaml_when_nothing_is_released(monkeypatch):
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     assert yaml.safe_load(
         site._materials_index("Semester-f2026", ["materials"], {})
-    ) == {"sections": []}
+    ) == {"repos": ["materials"], "sections": []}
     # And with no repos at all, without touching the tree.
     assert yaml.safe_load(site._materials_index("Semester-f2026", [], {})) == {
-        "sections": []
+        "repos": [],
+        "sections": [],
     }
 
 

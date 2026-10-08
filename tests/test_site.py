@@ -2777,6 +2777,21 @@ def test_the_sync_writes_the_restored_tabs_and_the_materials_index(
     )
 
 
+def test_the_materials_index_names_the_repos_it_indexes(monkeypatch):
+    # Your Profile forks and clones the first of them; `open_in.html` reads it too.
+    trees = {"datasets": ("data/rows.csv",), "course-materials": ("SYLLABUS.md",)}
+    monkeypatch.setattr(
+        site, "_repo_tree", lambda org, repo: ("main", trees.get(repo, ()))
+    )
+    index = yaml.safe_load(
+        site._materials_index("Semester-f2026", ["datasets", "course-materials"], {})
+    )
+    assert index["repos"] == ["course-materials", "datasets"]
+    assert (
+        yaml.safe_load(site._materials_index("Semester-f2026", [], {}))["repos"] == []
+    )
+
+
 NOTEBOOK = '{"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}\n'
 
 

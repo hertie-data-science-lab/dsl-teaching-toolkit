@@ -668,7 +668,10 @@ def _materials_index(
     happened to carry; the never-material names (`.gitkeep`) go with them.
 
     Root files come out separately as `documents:`, deduped by NAME: a course-level
-    document released into three content repos is one document, not three sections."""
+    document released into three content repos is one document, not three sections.
+
+    `repos:` names `content_repos` themselves, in order: Your Profile forks and clones the
+    first, and `open_in.html` offers `online` / `local` for that repo's files."""
     found: dict[str, dict[str, _IndexEntry]] = {}
     docs: dict[str, _IndexEntry] = {}
     for repo in sorted(content_repos):
@@ -706,6 +709,8 @@ def _materials_index(
         # where there is one and the GitHub blob otherwise.
         f"syllabus: {syllabus.view_url or syllabus.url}\n" if syllabus else ""
     )
+    repos = ", ".join(f'"{q(r)}"' for r in sorted(content_repos))
+    header += f"repos: [{repos}]\n"
     body = "documents:\n" + "\n".join(doc_rows) + "\n" if doc_rows else ""
     body += "sections:\n" + "\n".join(rows_out) if rows_out else "sections: []"
     return header + body + "\n"
