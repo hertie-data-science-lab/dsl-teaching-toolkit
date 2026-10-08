@@ -426,10 +426,10 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   still makes no commit. Each problem carries `bites`: `now` (moment passed, or none),
   `soon` (at most 7 days off), `later`. Only `now`/`soon` mark a stage or a verdict. An
   undated source fault is `later`; a course template's problems take the first citing
-  hand-out (`template_moments`: this semester's in a semester file; across every live
-  semester in the course file, `gather_moments`; none -> `later`), and a needed template
-  to-do carries `needed_by` and `problem_from` (`needed_by` less the horizon). assignments.yml values bite at their
-  assignment's hand-out; visibility drift and a late release with no other problem
+  hand-out (`template_moments`: this semester's in a semester file; in the course file,
+  every running semester's, none -> `later`), and a needed template to-do carries
+  `needed_by` and `problem_from` (`needed_by` less the horizon). assignments.yml values
+  bite at their assignment's hand-out; visibility drift and a late release with no other problem
   (`schedule:<entry>:LATE`) stand now; a cited root stub still the placeholder is
   `schedule:<entry>:SOURCE_UNWRITTEN` at the release's moment; `opencourse.yml` that does
   not parse is a `now` problem while the website is on. The digest's mail ladder is a
@@ -441,6 +441,15 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   schedule cites; the course has none. `status.py`'s checklist prints the semester's
   words ("Needs fixing: n problems in the next 7 days" / "On track: nothing to fix in the
   next 7 days").
+- **Call budget.** The course tick dates its template problems off each registered
+  semester's own `status.json` (`semester.template_moments`, each cited template's first
+  hand-out): ONE read per semester in `semesters.yml` (which lists names only, so an
+  archived one costs its read too; its frozen file is passed over by its end date), never
+  a schedule or an archived-repo probe (`gather_moments`). It is one tick behind a
+  schedule edit: the course sees it once that semester's tick has rewritten its file. The
+  semester tick adds at most the root stubs its releases cite (SYLLABUS.md, README.md),
+  usually already read by the course gather. `tests/test_status_budget.py` holds both
+  counts.
 
 Decision 0032: the course block carries `stage_set_aside` (per stage id) and each `todo[]`
 entry `set_aside`. `set_aside` comes from `dsl-course.yml`'s `set_aside:` list

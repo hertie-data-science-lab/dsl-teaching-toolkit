@@ -90,7 +90,6 @@ from .discovery import (
     list_org_repos,
     org_meta,
     read_semester_registry,
-    semester_is_live,
 )
 from .faults import NOT_MIGRATED, ConfigFault, FaultKind, Unusable
 from .gh_commits import last_commit_at
@@ -729,14 +728,16 @@ class Moment:
     problem_from: datetime | None = None
 
 
-def template_moments(sched: schedule.Schedule, now: datetime) -> dict[str, Moment]:
-    """`{template repo: Moment}` for one semester, off its schedule's hand-outs. A template
-    cited only by an undated assignment is `later`."""
+def template_moments(
+    handouts: Mapping[str, datetime | None], now: datetime
+) -> dict[str, Moment]:
+    """`{template repo: Moment}` for one semester, off its first hand-out per template
+    (`_handouts`). A template cited only by an undated assignment is `later`."""
     return {
         repo: Moment(when, bites(when, now), when - PROBLEM_HORIZON)
         if when is not None
         else Moment(None, LATER)
-        for repo, when in _handouts(sched).items()
+        for repo, when in handouts.items()
     }
 
 
@@ -2225,7 +2226,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     ]
     handouts = _handouts(sched)
     slugs = {k: a.handout_datetime for k, a in sched.assignments.items()}
-    moments = template_moments(sched, now)
+    moments = template_moments(handouts, now)
     problems = [problem_from_fault(f, facts.org, now, handouts, slugs) for f in faults]
     problems += [problem_from_fault(f, course.org, now) for f in course.faults]
     if course.website_unusable and course.website_on:
@@ -2302,6 +2303,9 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "verdict": semester_verdict(stages, why, todo, problems, waiting),
             "todo": todo,
             "archive_date": _iso(sched.archive.when if sched.archive else None),
+            # Decision 0034: each cited template's first hand-out here, which the course
+            # tick reads to date its template problems (`gather_moments`).
+            "template_moments": {repo: _iso(when) for repo, when in handouts.items()},
         },
         "problems": problems,
         "this_week": this_week(sched, releases, assignments, now),
@@ -2620,18 +2624,47 @@ def collect_course(course_org: str, now: datetime | None = None) -> dict:
 
 
 def gather_moments(semesters: list[str], now: datetime) -> dict[str, Moment]:
-    """Decision 0034: when each course template is first needed, across the course's live
-    semesters (`template_moments`, merged). A semester that is archived, or whose schedule
-    cannot be read, cites nothing: its templates fall back to `later`."""
+    """Decision 0034: when each course template is first needed, across the course's
+    running semesters - ONE read per registered semester, its own `status.json`
+    (`semester.template_moments`), never its schedule: the course tick's cost must not grow
+    with the schedules. `semesters.yml` lists names only, so an archived semester costs its
+    read too; its file (frozen when it was archived) is passed over by its end date, as is
+    one past its end and not archived yet. A file that is missing, unreadable, or written
+    by an engine before this field cites nothing: its templates fall back to `later`.
+
+    One tick behind: the course sees a schedule edit once the semester's own tick has
+    rewritten its status.json (within the same dispatch, or the next quarter hour)."""
     many = []
     for org in semesters:
         try:
-            if not semester_is_live(org):
-                continue
-            many.append(template_moments(schedule.load(org), now))
-        except (RuntimeError, Unusable, yaml.YAMLError) as exc:
-            log_err(f"  ! could not read {org}'s schedule ({type(exc).__name__})")
+            text = get_file_content(org, schedule.CONFIG_REPO, STATUS_PATH)
+            doc = json.loads(text) if text else {}
+        except (RuntimeError, json.JSONDecodeError) as exc:
+            log_err(f"  ! could not read {org}'s status.json ({type(exc).__name__})")
+            continue
+        many.append(_moments_from_status(doc, now))
     return merge_moments(many)
+
+
+def _moments_from_status(doc: object, now: datetime) -> dict[str, Moment]:
+    """The template moments a semester's `status.json` records, or none when it is not a
+    running semester's (not live, or past its end) or carries none."""
+    semester = doc.get("semester") if isinstance(doc, dict) else None
+    if not isinstance(semester, dict) or not semester.get("live"):
+        return {}
+    try:
+        tz = ZoneInfo(str(semester.get("timezone") or "UTC"))
+        end = date.fromisoformat(str(semester["end"])) if semester.get("end") else None
+        raw = semester.get("template_moments") or {}
+        handouts = {
+            str(repo): datetime.fromisoformat(when) if when else None
+            for repo, when in raw.items()
+        }
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return {}
+    if end is not None and end < now.astimezone(tz).date():
+        return {}
+    return template_moments(handouts, now)
 
 
 def collect_semester(

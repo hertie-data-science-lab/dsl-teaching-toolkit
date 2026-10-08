@@ -2666,11 +2666,14 @@ def test_the_course_file_tiers_template_problems_by_the_earliest_citing_hand_out
     course = _course()
     course.templates[1].faults = [_autograde_sometimes()]
     course.templates[1].readme = None
-    later = status_json.template_moments(_sched(), NOW)
+    later = status_json.template_moments(status_json._handouts(_sched()), NOW)
     assert later["assignment-3-f2026"] == status_json.Moment(_at(20), "later", _at(13))
     # A second live semester hands it out next week: the earliest, most urgent wins.
     soon = status_json.template_moments(
-        _sched(SCHEDULE.replace("2026-10-20T10:00", "2026-09-30T10:00")), NOW
+        status_json._handouts(
+            _sched(SCHEDULE.replace("2026-10-20T10:00", "2026-09-30T10:00"))
+        ),
+        NOW,
     )
     merged = status_json.merge_moments([later, soon])
     assert merged["assignment-3-f2026"] == status_json.Moment(
@@ -2711,21 +2714,41 @@ def test_the_semester_counts_the_needed_template_to_dos_it_cites_as_coming_up():
     assert "coming_up" not in doc["course"]["verdict"]
 
 
-def test_gather_moments_reads_only_live_semesters(monkeypatch):
-    live = {SEMESTER: True, "hertie-dsl-demo-f2025": False}
-    monkeypatch.setattr(status_json, "semester_is_live", lambda org: live[org])
-    loaded = []
+def test_gather_moments_reads_each_semesters_status_once(monkeypatch):
+    # Decision 0034 (call budget): one read per registered semester, its own
+    # status.json - never its schedule, never whether it is archived.
+    live = _render()
+    assert live["semester"]["template_moments"] == {
+        "assignment-2-f2026": "2026-09-15T10:00:00+02:00",
+        "assignment-3-f2026": "2026-10-20T10:00:00+02:00",
+    }
+    ended = json.loads(json.dumps(live))
+    ended["semester"]["end"] = "2026-06-30"  # frozen when archived, or simply over
+    files = {
+        SEMESTER: json.dumps(live),
+        "hertie-dsl-demo-s2026": json.dumps(ended),
+        "hertie-dsl-demo-f2025": None,  # no status.json yet
+        "hertie-dsl-demo-s2025": "{not json",
+    }
+    reads = []
 
-    def load(org):
-        loaded.append(org)
-        return _sched()
+    def read(org, repo, path, ref=""):
+        reads.append((org, repo, path))
+        return files[org]
 
-    monkeypatch.setattr(status_json.schedule, "load", load)
-    moments = status_json.gather_moments(list(live), NOW)
-    assert loaded == [SEMESTER]
+    monkeypatch.setattr(status_json, "get_file_content", read)
+    moments = status_json.gather_moments(list(files), NOW)
+    assert reads == [(org, "semester-config", ".system/status.json") for org in files]
     assert set(moments) == {"assignment-2-f2026", "assignment-3-f2026"}
-    # Already handed out in week 2: its problems stand now.
+    # Already handed out: its problems stand now; the other is three weeks off.
     assert moments["assignment-2-f2026"].bites == "now"
+    assert moments["assignment-3-f2026"].bites == "later"
+    # A file from before the field, or a semester not live, cites nothing.
+    old = json.loads(json.dumps(live))
+    del old["semester"]["template_moments"]
+    assert status_json._moments_from_status(old, NOW) == {}
+    old["semester"]["live"] = False
+    assert status_json._moments_from_status(old, NOW) == {}
 
 
 def test_an_opencourse_file_that_does_not_parse_is_a_problem_while_the_site_is_on():
