@@ -212,7 +212,7 @@ export function publishWebsite(s: Scope, published: boolean): OpDef {
 export function teamsWindow(s: Scope, a: AsgRef, closes: string): OpDef {
   return {
     ...base(s, 'teams.open_window', a.slug), name: 'Email students without a team', title: a.title, where: `Window open until ${closes}`,
-    intro: 'Emails every joined student who is not in a team yet, with the link to the team list on the Join screen of the student console.',
+    intro: 'Emails every joined student who is not in a team yet, with the link to the team list in the student console’s Assignments.',
     verb: 'Send the emails', running: 'Emailing students without a team', cancel: 'Stop; emails already sent stay sent',
     args: { assignment: a.slug },
   };
