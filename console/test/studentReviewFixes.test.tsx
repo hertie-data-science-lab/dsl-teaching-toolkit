@@ -4,13 +4,17 @@
 // state chip links the assignment's page.
 
 import { render } from 'preact';
+import { render as html } from 'preact-render-to-string';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient } from '../src/github/client';
 import type { Semester } from '../src/model/discovery';
 import { STUDENT_STATUS_PATH } from '../src/model/names';
+import type { Mine } from '../src/model/mine';
+import { factsFromStatus } from '../src/model/student';
 import { StudentScreen } from '../src/screens/Student';
+import { ScheduleView } from '../src/screens/StudentSchedule';
 import { FakeGitHub, fileBody } from './fake';
 import FILE from './fixtures/student-status.json?raw';
 
@@ -55,5 +59,15 @@ describe('the Submission receipts threads read', () => {
     const all = fake();
     await mount(<StudentScreen semester={semester} screen="assignments" studentView={false} now={NOW} />, all);
     expect(threadsRead(all)).toEqual([`assignment-1-${LOGIN}`, `assignment-3-${LOGIN}`]);
+  });
+});
+
+describe('the Schedule', () => {
+  it('links an assignment row’s state chip to the assignment’s page', () => {
+    const facts = factsFromStatus(JSON.parse(FILE));
+    const mine: Mine = { units: { 'assignment-1': { slug: 'assignment-1', repo: `assignment-1-${LOGIN}`, team: null, members: null, shared: false } }, gradebook: null, auditor: false };
+    const chips = [...html(<ScheduleView facts={facts} mine={mine} now={NOW} org={ORG} />).matchAll(/<a class="st-chip" href="([^"]+)">/g)].map((m) => m[1]);
+    expect(chips).toContain(`?semester=${ORG}#assignment-assignment-1`);
+    expect(chips).not.toContain(`?semester=${ORG}#assignments`);
   });
 });
