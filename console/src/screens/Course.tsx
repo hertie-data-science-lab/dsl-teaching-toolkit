@@ -9,7 +9,7 @@ import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { KIND_LABEL, ago, fmtDay, fmtShort, opLabel, templateName } from '../model/format';
 import {
-  SYLLABUS_HINT, SYLLABUS_LABEL, materialsReadiness, problemCount, problemFromDay, standing, stepItems, suggestionsCount, templateReadiness, tier, todoAside, verdictOf,
+  SYLLABUS_HINT, SYLLABUS_LABEL, materialsReadiness, problemCount, problemFromDay, standing, stepItems, suggestionsCount, templateReadinessIn, tier, todoAside, verdictOf,
   type Tiered, type Verdict as VerdictT,
 } from '../model/readiness';
 import { checkNow, derive, publishWebsite } from '../ops/defs';
@@ -64,9 +64,6 @@ export function courseView(p: Pick<CourseProps, 'loaded' | 'cohortStates'>, now:
 
 /** `courseView` once per render. */
 export const useCourseView = (p: Pick<CourseProps, 'loaded' | 'cohortStates' | 'now'>): CourseView => useMemo(() => courseView(p, p.now), [p.loaded, p.cohortStates, p.now]);
-
-/** A template's problems in a course view. */
-const templateProblems = (v: CourseView, repo: string) => v.tiered.filter((x) => x.p.fix?.entry === repo);
 
 /** A semester's problem count for its row: those now or soon. */
 function problemsOf(p: CourseProps, cohortOrg: string): number | null {
@@ -556,7 +553,7 @@ export function CourseScreen(p: CourseProps) {
           {v.course?.templates?.length ? (
             <ul class="rows">
               {v.course.templates.map((t) => {
-                const r = templateReadiness(t, v.course?.todo ?? [], templateProblems(v, t.repo));
+                const r = templateReadinessIn(v.course, t.repo, v.tiered)!;
                 const bad = r.state === 'problem';
                 return (
                   <li>
@@ -641,6 +638,7 @@ export function TemplateScreen(p: CourseProps) {
   const tree = p.files.tree(course.org, repo);
   const problems = v.problems.filter((x) => x.fix?.entry === repo);
   const tpl = v.course?.templates?.find((t) => t.repo === repo);
+  const tplReady = templateReadinessIn(v.course, repo, v.tiered);
   const [values, setValues] = useState<Values | null>(null);
   const [qdraft, setQdraft] = useState<QuestionRow[] | null>(null);
   const [save, runSave, setSave] = useSave(env);
@@ -688,7 +686,7 @@ export function TemplateScreen(p: CourseProps) {
     <>
       <div class="page-head">
         <div><h2 class="h1">{heading} <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. These settings apply to every semester, and after hand out they reach students only through Update every copy.</Hint></h2><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
-        <div class="actions">{tpl ? <RepoChip r={templateReadiness(tpl, v.course?.todo ?? [], templateProblems(v, repo))} /> : null}<OpenButton org={course.org} repo={repo} /></div>
+        <div class="actions">{tplReady ? <RepoChip r={tplReady} /> : null}<OpenButton org={course.org} repo={repo} /></div>
       </div>
       {tpl ? <section class="panel section" style="margin-bottom:18px"><RepoChecklist items={templateItems(repo, v.course?.todo ?? [], tpl.starter, v.tiered, p.now)} /></section> : null}
       {problems.length ? <div style="margin-bottom:18px"><ProblemCards list={problems} /></div> : null}
