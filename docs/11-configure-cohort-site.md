@@ -5,7 +5,8 @@ Its tabs are Home, Schedule, one tab per kind of row (Lectures, Labs, Readings, 
 Assignments (a page per assignment), All Materials and Your Profile, under a banner linking the
 semester in the student console. For now the site and the console both carry the materials;
 the console adds what a public page cannot know - a student's own repos, receipts and marks.
-Nothing about a student is on the site.
+No student's handle, email or mark is on the site; teams show by name, with salted member
+digests.
 
 The console reads `.system/student-status.json` in the semester org's `.github`, which the
 engine rewrites with every status refresh. It is public too, so it carries only what the site
@@ -30,7 +31,7 @@ You never edit what the site shows - you edit the file it reads, and it re-syncs
 | Readings on the **Readings** tab | course materials repo | drop the readings into `readings/NN_.../` and **every file is listed and linked automatically** for enrolled students - nothing to write. `READINGS.md` (or `.txt`/`.bib`) beside them is OPTIONAL, for what a file cannot say: a URL, pointers for what to focus on, or clean citation-style metadata. It is published as written (this site is public, so it never hosts a reading itself directly, rather links to the GH-hosted files (with their permission restrictions enforced there))|
 | The syllabus link on the home page | *nothing to set* | a released syllabus is pinned (the file `materials.yml` declares, else `SYLLABUS.md`, else a root file named like one) |
 | The **All Materials** tab | *nothing to set* | every file released to the semester, grouped by section and nested exactly as its repo has it - a folder opens in the page itself, at any depth. Root files (the syllabus, a README) are listed once, as course documents. `solution/`, `tests/`, grading files and `.env` are never listed |
-| Rendered decks (an HTML deck opening in the browser instead of showing as source) | course materials repo `publish.yml` | `public:` patterns, `.gitignore` syntax, of what the site may host publicly, matched against the path in the semester's copy. A matched `<name>.html` brings its `<name>_files/` bundle; the file's name then opens the hosted copy, with `source` and `render` buttons beside it. `solution/`, `tests/`, grading files and `.env` are never hosted. Remove a pattern and the copy goes on the next sync (the site repo's git history keeps the old bytes - purge by hand) |
+| Rendered decks (an HTML deck or a pdf opening in the browser instead of showing as source) | course materials repo `publish.yml` (optional; write it by hand) | the opt-in list of files the semester site hosts publicly: `public:` patterns, `.gitignore` syntax, matched against the path in the semester's copy. Only a matched `.html`, `.htm` or `.pdf` is copied - the file whose name then opens the hosted copy, with `source` and `render` buttons beside it - and a matched `<name>.html` brings its `<name>_files/` bundle; a matched `.ipynb`, `.md` or `.csv` is not copied, since GitHub already renders it. `solution/`, `tests/`, grading files, `.env` and anything `opencourse.yml`'s `withhold` names are never hosted. Remove a pattern and the copy goes on the next sync (the site repo's git history keeps the old bytes - purge by hand). The open-courseware site is governed by `opencourse.yml`, not this file |
 | Open files in your local copy (a file link opening in a student's own fork or clone) | *nothing to set* | every file row carries `source` and, where the site hosts a rendered copy, `render`. A student who fills in the site's **Your Profile** tab - handle, fork, clone, folders, editor - gets `online` and `local` beside those on every row; on each assignment page they also get their own repo by name, with Edit online and Edit locally and the clone command. The profile is saved in that student's own browser and sent nowhere |
 | Which files each session links | course org `.github/dsl-course.yml` | *nothing to set* by default: a session lists its root files plus one link per subfolder, so a rendered deck lists the deck and not its assets. `site_link_extensions: [pdf, html]` narrows it further. Everything you release ships either way |
 
@@ -48,7 +49,7 @@ commit still holds the change, to be copied back out and made at the source.
 | `lectures.md`, `labs.md`, `readings.md` (a tab per kind), `assignments.md`, `materials.md`, `profile.md` | front-matter stubs pointing at the layouts below - generated wrappers, so put your own words in `index.md` |
 | `_data/nav.yml` | the tab bar - generated, so a new tab reaches sites that already exist. Add a page of your own as a file and link it from `index.md` |
 | `_data/materials.yml`, `_data/console.yml` | the pinned syllabus and the All Materials index, and the banner's link to the console |
-| `files/<repo>/` | the public copies of whatever `publish.yml` names - **deleted and rebuilt** per repo every sync |
+| `files/<repo>/` | the public copies of the rendered files `publish.yml` names - **deleted and rebuilt** per repo every sync, and removed for a repo the plan no longer releases into |
 | `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders - shipped from `templates/site/` in the toolkit, so a rendering change reaches every course site at once |
 | `.github/workflows/deploy.yml` | the Pages build - shipped from `templates/site/` too |
 | `_config.yml` keys `course_name`, `course_code`, `course_semester`, `course_description`, `github_org` | overwritten from the sources in the table above |
