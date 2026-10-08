@@ -151,7 +151,7 @@ another live term under them, and Past semesters below, each expanding to its co
 links. A Student view's tree is that one semester's.
 
 The top bar carries the Hertie mark before the console's name in both consoles (decision 0035
-rule 2), drawn as inline SVG. Every course and semester page, in either console, opens with the **course banner**: crumbs
+rule 2), drawn as inline SVG in the bar's text colour. Every course and semester page, in either console, opens with the **course banner**: crumbs
 that follow the tree ("All courses › Course › Semester"; a student's "Your semesters ›
 Semester › Course", led by All courses for a person who also teaches), the course name as the page's one h1, and on a semester page the
 semester's line under it (its name, state, week and dates) with the Student view pill (or

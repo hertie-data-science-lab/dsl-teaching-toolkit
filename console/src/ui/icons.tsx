@@ -43,21 +43,16 @@ export const File = () => (
 );
 
 /**
- * The Hertie School mark (the site theme's `assets/images/logo.png`) as inline SVG, crisp and
- * transparent in both themes (decision 0035 rule 2): six pillars under a lintel, a crown over
- * the middle two; the middle pillars and the crown red, the rest grey. Drawn in the
- * original's 900-unit coordinates, cropped to the mark.
+ * The Hertie School mark (the site theme's `assets/images/logo.png`) as inline SVG (decision
+ * 0035 rule 2): six pillars under a lintel, a crown over the middle two, all in the text's
+ * colour, so it is white on the top bar in both themes. Drawn in the original's 900-unit
+ * coordinates, cropped to the mark.
  */
 export const HertieMark = () => (
-  <svg class="hertie-mark" viewBox="140 230 632 403" height="26" aria-hidden="true">
-    <g fill="#8f8578">
-      {[140, 250, 618, 728].map((x) => <rect x={x} y="345" width="44" height="288" />)}
-      <rect x="140" y="288" width="630" height="27" />
-    </g>
-    <g fill="#b2001e">
-      {[360, 508].map((x) => <rect x={x} y="345" width="44" height="288" />)}
-      <rect x="360" y="230" width="192" height="28" />
-    </g>
+  <svg class="hertie-mark" viewBox="140 230 632 403" height="26" fill="currentColor" aria-hidden="true">
+    {[140, 250, 360, 508, 618, 728].map((x) => <rect x={x} y="345" width="44" height="288" />)}
+    <rect x="140" y="288" width="630" height="27" />
+    <rect x="360" y="230" width="192" height="28" />
   </svg>
 );
 

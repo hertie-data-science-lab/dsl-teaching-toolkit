@@ -97,12 +97,12 @@ describe('top bar', () => {
     expect(out).toContain('>Guide</a>');
     expect(out).toContain('>Sign out</button>');
   });
-  it('carries the Hertie mark before the product name, signed in or not (decision 0035 rule 2)', () => {
+  it('carries the Hertie mark in the bar’s colour before the product name, signed in or not (decision 0035 rule 2)', () => {
     for (const out of [render(<Topbar user={null} />), render(<Topbar user={user} title="Student view" onSignOut={() => {}} />)]) {
       const name = /<a[^>]*class="app-name"[^>]*>([\s\S]*?)<\/a>/.exec(out)?.[1] ?? '';
       expect(name).toMatch(/^<svg class="hertie-mark"[^>]*aria-hidden="true"/);
-      expect(name).toContain('fill="#b2001e"');
-      expect(name).toContain('fill="#8f8578"');
+      expect(name).toMatch(/^<svg[^>]*fill="currentColor"/);
+      expect(name).not.toMatch(/fill="#/);
       expect(name.match(/width="44"/g)).toHaveLength(6);
       expect(name).toContain('</svg>DSL Teaching Console');
     }
