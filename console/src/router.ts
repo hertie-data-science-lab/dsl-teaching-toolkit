@@ -9,7 +9,8 @@
 // link from a fault mail can name both. `?semester=<org>` opens that semester's student screens:
 // a student's own, or an instructor's Student view. `?join=<org>` opens the Join course form
 // of a semester the person is not a member of yet. In the student screens `#assignment-<slug>`
-// is that assignment's own page (decision 0035 rule 6).
+// is that assignment's own page (decision 0035 rule 6), and `#kind-<key>/<repo>/<path>` a kind
+// tab with that file open in it (after a slash: a kind key and a repo name may both hold `-`).
 
 import { semesterOver } from './model/catalogue';
 import { ORG_NAME_RE } from './model/policy';
@@ -44,6 +45,8 @@ export function parseHash(hash: string, student = false): Route {
   if (!r) return { screen: '' };
   for (const [re, to, studentOnly] of RENAMED) if ((student || !studentOnly) && re.test(r)) r = r.replace(re, to);
   if (r === 'teams') return { screen: 'assignments' };
+  const kind = /^(kind-[\w-]+)\/(.+)$/.exec(r);
+  if (kind) return { screen: kind[1], entry: kind[2] };
   for (const s of ENTRY_SCREENS) {
     if (!r.startsWith(`${s}-`)) continue;
     const entry = r.slice(s.length + 1);
@@ -59,7 +62,8 @@ export function parseHash(hash: string, student = false): Route {
 
 /** The hash a route is canonically written as (the old Teams and Marks hashes rewrite to the tab). */
 export function hashOf(r: Route): string {
-  return `#${r.screen}${r.entry ? `-${r.entry}` : ''}${r.tab ? `/${r.tab}` : ''}`;
+  const sep = r.screen.startsWith('kind-') ? '/' : '-';
+  return `#${r.screen}${r.entry ? `${sep}${r.entry}` : ''}${r.tab ? `/${r.tab}` : ''}`;
 }
 
 /** The hash to write instead of `hash` (an old Teams, Marks or renamed link), or null when it is already canonical. */

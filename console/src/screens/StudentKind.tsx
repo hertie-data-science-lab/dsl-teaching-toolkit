@@ -1,14 +1,17 @@
 // A kind tab (decision 0035 rule 5), as the site's `kind.html` lists it: the rows the kind's
 // tab names, dated by date then undated in the engine's order, each with its heading, details,
 // reading list and files (on Readings only its reading files, with the pending note), then an
-// event of the kind (an exam).
+// event of the kind (an exam). A file opens in the tab (`#kind-<key>/<repo>/<path>`), the list
+// staying beside it as All materials keeps its tree (`FileBeside`), the open file marked.
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import { fmtDay } from '../model/format';
 import { instant, type ScheduleRow, type SemesterFacts } from '../model/student';
+import { kindTabs } from '../router';
 import { Md } from '../ui/bits';
 import { FileList } from './StudentFiles';
 import { isEventRow } from './StudentHome';
+import { FileBeside } from './StudentMaterials';
 
 /** The rows a kind's tab lists, and the kind's own events after them. */
 export function kindRows(facts: SemesterFacts, kind: string): { rows: ScheduleRow[]; events: ScheduleRow[] } {
@@ -22,7 +25,15 @@ export function kindRows(facts: SemesterFacts, kind: string): { rows: ScheduleRo
   };
 }
 
-export function KindView({ facts, kind, org, now }: { facts: SemesterFacts; kind: string; org: string; now: number }) {
+/** A kind's tab; `entry` (`<repo>/<path>`) is the file open beside its list. */
+export function KindView({ facts, kind, org, now, entry }: { facts: SemesterFacts; kind: string; org: string; now: number; entry?: string }) {
+  const tab = `kind-${kind}`;
+  const list = <KindList facts={facts} kind={kind} org={org} now={now} tab={tab} current={entry} />;
+  if (!entry) return list;
+  return <FileBeside org={org} repos={facts.materialsRepos} entry={entry} label={kindTabs(facts).find(([k]) => k === tab)?.[1] ?? kind}>{list}</FileBeside>;
+}
+
+function KindList({ facts, kind, org, now, tab, current }: { facts: SemesterFacts; kind: string; org: string; now: number; tab: string; current?: string }) {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const year = new Date(now).getFullYear();
   const { rows, events } = kindRows(facts, kind);
@@ -38,7 +49,7 @@ export function KindView({ facts, kind, org, now }: { facts: SemesterFacts; kind
             {r.details ? <Md class="session-description" src={r.details} /> : null}
             {r.readingList ? <Md class="reading-list" src={r.readingList} /> : null}
             {readings && r.readingsPending && r.released ? <p class="footnote"><em>Readings for this session are not yet released.</em></p> : null}
-            {files.length ? <><p class="session-files-label"><b>Files</b></p><FileList org={org} repos={facts.materialsRepos} links={files} /></> : null}
+            {files.length ? <><p class="session-files-label"><b>Files</b></p><FileList org={org} repos={facts.materialsRepos} links={files} tab={tab} current={current} /></> : null}
           </section>
         );
       })}

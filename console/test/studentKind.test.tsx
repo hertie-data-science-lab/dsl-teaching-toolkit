@@ -1,5 +1,5 @@
 // A kind tab (decision 0035 rule 5): the rows its tab names, dated then undated, the kind's
-// own event last; Readings shows only reading files and the pending note. The archive notice
+// own event last; Readings shows only reading files and the pending note; a file opens in the tab. The archive notice
 // is Schedule's alone.
 
 import { readFileSync } from 'node:fs';
@@ -57,6 +57,14 @@ describe('a kind tab', () => {
     expect(t).toContain(`Files ${lec.readings[0].name}`);
     expect(t).not.toContain('slides.pdf');
     expect(t).toContain('Readings for this session are not yet released.');
+  });
+
+  it('opens its files in the tab itself, not in All materials', () => {
+    const f = facts();
+    const html = render(<KindView facts={f} kind="lecture" org={ORG} now={NOW} />);
+    const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1].replace(/&amp;/g, '&')).filter((h) => h.startsWith('?semester='));
+    expect(hrefs.length).toBeGreaterThan(0);
+    for (const h of hrefs) expect(h.startsWith(`?semester=${ORG}#kind-lecture/`)).toBe(true);
   });
 
   it('says so when nothing is there', () => {

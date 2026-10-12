@@ -42,7 +42,7 @@ export interface StudentProps {
   screen: string;
   /** An instructor looking at the semester as a student would. */
   studentView: boolean;
-  /** What the hash names after the screen (a materials path). */
+  /** What the hash names after the screen (a materials path, in All materials or a kind tab). */
   entry?: string;
   now?: number;
 }
@@ -177,7 +177,7 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
     : screen === 'materials' ? <div class="stack"><MaterialsView org={org} repos={f.materialsRepos} entry={entry} />{entry ? null : <ReadingsView org={org} facts={f} now={now} />}</div>
     : screen === 'instructors' ? <InstructorsView facts={f} org={org} />
     : screen === 'home' ? <HomeView facts={f} org={org} now={now} />
-    : screen.startsWith('kind-') ? <KindView facts={f} kind={screen.slice(5)} org={org} now={now} />
+    : screen.startsWith('kind-') ? <KindView facts={f} kind={screen.slice(5)} org={org} now={now} entry={entry} />
     : <WeekList items={weekItems(f, m, now, patchLines(f.assignments, m, rc), studentView || !login ? null : lastVisit(login, org)).filter((i) => !(unknownRole && i.kind === 'teams'))} tz={tz} org={org} />;
   return (
     <div class="stack">

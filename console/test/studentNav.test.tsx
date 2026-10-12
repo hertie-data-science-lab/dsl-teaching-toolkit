@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import type { Estate, Semester } from '../src/model/discovery';
 import { factsFromStatus } from '../src/model/student';
 import { kindTabs, movedHash, parseHash, studentHref, studentLanding, studentScreens, tabWord } from '../src/router';
+import { materialHref } from '../src/screens/StudentFiles';
 import { StudentNav } from '../src/ui/shell';
 
 const DOC = JSON.parse(readFileSync(new URL('./fixtures/student-status.json', import.meta.url), 'utf8'));
@@ -86,6 +87,17 @@ describe('the student screens', () => {
     expect(movedHash('#join', true)).toBe('#assignments');
     expect(movedHash('#setup', true)).toBe('#profile');
     expect(studentHref(ORG)).toBe(`?semester=${ORG}#home`);
+  });
+
+  it('route a file open in a kind tab, after a slash, and keep it as written', () => {
+    const href = materialHref(ORG, 'dl-materials', 'labs/01 intro/lab.md', 'kind-drop-in');
+    expect(href).toBe(`?semester=${ORG}#kind-drop-in/${encodeURIComponent('dl-materials/labs/01 intro/lab.md')}`);
+    const hash = href.slice(href.indexOf('#'));
+    expect(parseHash(hash, true)).toEqual({ screen: 'kind-drop-in', entry: 'dl-materials/labs/01 intro/lab.md' });
+    expect(movedHash(hash, true)).toBeNull();
+    expect(movedHash('#kind-drop-in/dl-materials/lab.md', true)).toBeNull();
+    // All materials keeps its dash.
+    expect(materialHref(ORG, 'dl-materials', 'lab.md')).toBe(`?semester=${ORG}#materials-${encodeURIComponent('dl-materials/lab.md')}`);
   });
 
   it('land a person who teaches nothing on their one live semester (its Home)', () => {

@@ -234,7 +234,7 @@ Each screen reads with the student's own account:
 | Home (the site's landing page; its head is "<course> / <semester>") | the Updates box as the site picks it (sessions whose files shipped, assignments handed out, the archive row's text in the fortnight before it, announcements; newest first, seven); the syllabus pinned; the course description; the instructors' home text; previous offerings; instructors and teaching assistants in two columns | none |
 | This week (in the semester's timezone; "Updated <age>" from the file's `generated_at`) | rows due, handed out, released or on in the next 7 days; releases and announcements of the last 7; open team formation | gradebook's last change (marks returned); whether they have a team; a patch note on their Submission receipts newer than their last visit |
 | Schedule | rows by semester week (week 1 from `semester_start`, as the Dashboard counts; one group each for before and after the semester), coloured by kind; TBC dates; row details; file chips that open each file; readings (files, reading list, "to come") | their state on hand-out and due rows; rows for their repos marked |
-| A kind tab (`#kind-<kind>`) | the rows the kind's tab names (the engine's `tabs`, so a lecture whose readings shipped is on Readings too, with only its reading files), dated by date then undated, off-schedule ones included; heading, details, reading list, files, "not released yet", the pending readings note; the kind's own event (an exam) last | none |
+| A kind tab (`#kind-<kind>`) | the rows the kind's tab names (the engine's `tabs`, so a lecture whose readings shipped is on Readings too, with only its reading files), dated by date then undated, off-schedule ones included; heading, details, reading list, files, "not released yet", the pending readings note; the kind's own event (an exam) last; a file opens in the tab, the list beside it as All materials keeps its tree, the open file marked | none |
 | Assignments (`#assignments`: "Your marks" first, then a card per assignment in due order, open while the student can hand it in; each card's first line, Open the page, links the assignment's own page `#assignment-<slug>`, the 0.9.0 site's page; the card's body is the page's) | the 0.9.0 page's blocks in its order and wording: released or hands-out day, due, points; the team steps while formation is open (1 Form your team: the sentence, "Teams so far" as Team, Members, Places left, never who; 2 Open your submission repo); the hand-in callout with the shape sentence, the cutoff sentence and "Late work: <rule> (until <cutoff>)."; the brief (folded on a card); the shape note; before the hand-out, the pending sentence | `<slug>-<handle>`, a team repo they can push to, the drop box, with the Open button; their team (from the repo, else from `GET /user/teams` by the `<slug>-` prefix, so a drop-box or external group finds it too) and its members; "Join or create a team" unfolds the Join team form for that assignment, with their requests under it; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos): its body, the newest receipt, a patch note as "pull before you continue", every comment in a fold; the CONTRIBUTIONS.md ask on a team repo; for a student-choice repo after the cutoff, the Settings link to make it public; `grades-<handle>/grades.yml`: the state chip reads the mark ("returned 18 / 20"), "Your marks" (mark, penalty, semester total, gradebook link), and on the page the mark with submitted, days late, penalty, feedback overall and per question, team and team feedback |
 | All materials | the materials repos; each session's readings | each repo's recursive tree (supporting folders such as `data/` and `img/` last, folded, under "Supporting files"), each file row with its button row; each file read when opened, the tree staying beside it (a 280px column, above the file below 860px) with the open file marked (decision 0035 rule 11) |
 | Profile: Your repos in <course>, <semester> (one section per live semester they study, the first open; a folded one reads nothing until opened) | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, every 30 s after the first minute, for up to 5 minutes of the tab being shown, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decisions 0027, 0035 rule 9) |
@@ -277,8 +277,10 @@ the gradebook, from the same reads as a live one. No operation runs against it.
 
 **Every file link** on the student screens (schedule rows, kind tabs, All materials, the
 assignment page's files; the Updates box keeps names only) is the file's name, opening it in
-the console when it lives in a materials repo, else on GitHub, then a row of buttons (decision
-0035 rule 10): `source` (the GitHub blob), `online` (github.dev, in the student's fork when they
+the console when it lives in a materials repo (in All materials; in the tab itself on a kind
+tab), else on GitHub, then a row of buttons (decision 0035 rule 10): `source` (the GitHub blob),
+`render` (the same console view in a new tab, for a file the name opens there and the viewer
+draws: markdown, notebook, html, pdf, image), `online` (github.dev, in the student's fork when they
 forked the repo, else the org's) and `local` (the editor from Profile, at
 `<semester folder>/<repo>/<path>`). `online` and `local` only for a file an editor opens (not
 pdf, pptx, docx, xlsx, zip); `local` only once Profile has a folder and VS Code or an editor
@@ -431,7 +433,8 @@ A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
 The course or semester rides in the query string: `?cohort=<org>` or `?course=<org>`
 (`?semester=` opens the student screens).
 Student screens: `?semester=<org>#home` (and `#week`, `#schedule`, `#kind-<kind>`,
-`#assignments`, `#assignment-<slug>` for one assignment's page, `#materials`,
+`#kind-<kind>/<repo>/<path>` for a file open in that tab (a slash, as a kind and a repo may
+both hold `-`), `#assignments`, `#assignment-<slug>` for one assignment's page, `#materials`,
 `#materials-<repo>/<path>` for an open file, `#instructors`; a
 student's old `#marks` and `#join` redirect to `#assignments`, `#setup` to `#profile`);
 `?join=<org>` for Join course.

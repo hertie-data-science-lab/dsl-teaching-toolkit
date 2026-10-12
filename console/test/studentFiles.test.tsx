@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
-// A released file's button row (decision 0035 rule 10): the name, then source, online (github.dev
-// in the student's fork once the fork check found one, else the org's) and local (the editor
-// from Profile, in the semester's folder); online and local only for a file an editor opens,
+// A released file's button row (decision 0035 rule 10): the name, then source, render (the
+// console's viewer in a new tab, for a materials file it draws), online (github.dev in the
+// student's fork once the fork check found one, else the org's) and local (the editor from
+// Profile, in the semester's folder); online and local only for a file an editor opens,
 // local only with a folder and an editor that takes a path; one fork read per repo per session,
 // and none for a row that needs none.
 
@@ -72,7 +73,7 @@ describe('the button row', () => {
     expect(nb.online.getAttribute('href')).toBe(`https://github.dev/${LOGIN}/materials/blob/main/labs/lab.ipynb`);
     expect(nb.online.title).toBe('Edit lab.ipynb in your fork, in the browser');
     expect(md.online.getAttribute('target')).toBe('_blank');
-    expect(Object.keys(pdf)).toEqual(['source']);
+    expect(Object.keys(pdf)).toEqual(['source', 'render']);
     // No folder in Profile: no local.
     expect(nb.local).toBeUndefined();
     expect(forkReads(gh)).toBe(1);
@@ -92,6 +93,29 @@ describe('the button row', () => {
     expect(b.local.title).toBe('Open lab.ipynb in your editor');
     // A custom scheme opens no new tab.
     expect(b.local.hasAttribute('target')).toBe(false);
+  });
+
+  it('renders a file the viewer draws in a new tab: in All materials, or in the kind tab it is listed in', async () => {
+    const files = ['slides.pdf', 'notes.md', 'labs/lab.ipynb', 'deck.html', 'fig.png', 'code.py', 'essay.docx'].map((p) => link(p));
+    const el = await mount(<FileList org={ORG} repos={['materials']} links={[...files, link('slides.pdf', 'handouts')]} />, new FakeGitHub());
+    const rows = [...el.querySelectorAll('li')].map(btns);
+    expect(rows.map((b) => Object.keys(b))).toEqual([
+      ['source', 'render'], ['source', 'render', 'online'], ['source', 'render', 'online'], ['source', 'render', 'online'], ['source', 'render', 'online'],
+      ['source', 'online'], ['source'],
+      // Not in a materials repo: the console cannot open it, so no render.
+      ['source'],
+    ]);
+    const pdf = rows[0].render;
+    expect(pdf.getAttribute('href')).toBe(`?semester=${ORG}#materials-${encodeURIComponent('materials/slides.pdf')}`);
+    expect(pdf.getAttribute('target')).toBe('_blank');
+    expect(pdf.getAttribute('rel')).toBe('noopener');
+    expect(pdf.title).toBe('slides.pdf rendered');
+    if (root) render(null, root);
+    const tab = await mount(<FileList org={ORG} repos={['materials']} links={[link('slides.pdf')]} tab="kind-lecture" current="materials/slides.pdf" />, new FakeGitHub());
+    const name = tab.querySelector('li > .file-link > a')!;
+    expect(name.getAttribute('href')).toBe(`?semester=${ORG}#kind-lecture/${encodeURIComponent('materials/slides.pdf')}`);
+    expect(name.getAttribute('aria-current')).toBe('page');
+    expect(btns(tab).render.getAttribute('href')).toBe(name.getAttribute('href'));
   });
 
   it('links source to the GitHub blob when the link carries no url', async () => {
