@@ -565,7 +565,9 @@ def render_assignments(
             {
                 "slug": name,
                 "title": title,
-                "subtitle": row_name(spec.title or heading, title),
+                # A `title:` that only repeats the identifier (the seeded `Assignment
+                # N`) names nothing; the brief's heading does, as on the site.
+                "subtitle": row_name(spec.title, title) or row_name(heading, title),
                 "handout_datetime": _iso(entry.handout_datetime),
                 "due_datetime": _iso(entry.due_datetime),
                 "grading_cutoff_datetime": _iso(

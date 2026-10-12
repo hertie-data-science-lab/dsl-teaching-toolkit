@@ -2007,8 +2007,12 @@ def assignment_title(
     course_org: str, template: str, spec: GradingSpec, slug: str
 ) -> str:
     """What an assignment is called on a sheet, in status and in mail: the template's
-    `title:`, else its README heading, else the slug."""
-    return spec.title or readme_heading(course_org, template) or slug
+    `title:`, else its README heading, else the slug. A `title:` that only repeats the
+    slug's identifier (the seeded placeholder `Assignment N`, `course.row_name`) names
+    nothing, so the heading takes over, as on the site and the student console."""
+    if row_name(spec.title, identifier(slug)):
+        return spec.title
+    return readme_heading(course_org, template) or spec.title or slug
 
 
 def sheet_spec(

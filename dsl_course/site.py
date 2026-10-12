@@ -1113,9 +1113,11 @@ def _assignment_entry(
         slug=found[0] if found else "",
     )
     # The slug's own name is the row's IDENTIFIER, and it does not change at hand-out;
-    # the template's `title:`, else (once out) its README heading, is its NAME.
+    # the template's `title:`, else (once out) its README heading, is its NAME. A `title:`
+    # that only repeats the identifier (the seeded placeholder `Assignment N`) names
+    # nothing, so the heading takes over (`row_name`), as on the gradebook and console.
     title = identifier(slug)
-    subtitle = spec.title
+    subtitle = row_name(spec.title, title)
     details = found[1].details if found else ""
     # Display-only: a deadline that says "(TBC)" still closes when it says.
     tbc_fm = "tbc: true\n" if found and found[1].tbc else ""
