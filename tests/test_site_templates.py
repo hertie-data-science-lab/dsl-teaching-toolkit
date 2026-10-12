@@ -687,6 +687,16 @@ def test_the_updates_box_takes_the_inline_shape_of_the_source_link():
         assert "inline" not in _strip_comments(_templates()[rel])
 
 
+@pytest.mark.parametrize("rel", sorted(_liquid_templates()))
+def test_no_template_compares_against_blank(rel):
+    # Liquid 4 (GitHub Pages) answers `x == blank` by calling Ruby's `blank?`, which only
+    # Rails defines, so it is false for nil and "" alike. A session row guarded on
+    # `include.section == blank` listed no files on any kind tab. Test `== nil` instead.
+    # Textual, because the offline suite has no Liquid engine; the jekyll-contract job
+    # asserts the lists render.
+    assert not re.search(r"[!=]=\s*blank\b", _strip_comments(_liquid_templates()[rel]))
+
+
 def test_the_shared_link_include_adds_no_whitespace_of_its_own():
     # It renders inside a sentence in the Updates box, where a stray newline is a visible
     # space in the middle of `[name]`.

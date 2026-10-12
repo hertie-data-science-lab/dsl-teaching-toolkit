@@ -96,6 +96,20 @@ jobs:
             grep -qF -- "${tab#*:}" "${tab%%:*}/index.html" || {
               echo "::error::${tab%%:*}/ does not list ${tab#*:}"; missing=1; }
           done
+          # And each row's files under it. The list sits behind a guard on the `section`
+          # the tab passes, and a guard that is never true empties every list silently.
+          # Lectures and Labs list a row's own files; Readings lists lecture 1's reading
+          # and none of its slides.
+          for tab in lectures:"demo.py" labs:"Lab_Session_1.ipynb" readings:"schmidhuber-1997.pdf" \
+            readings:"attention.pdf"; do
+            grep -o '<ul class="session-files">.*</ul>' "${tab%%:*}/index.html" \
+              | grep -qF -- "${tab#*:}" || {
+              echo "::error::${tab%%:*}/ lists no file ${tab#*:}"; missing=1; }
+          done
+          if grep -qF "slides.pdf" readings/index.html; then
+            echo "::error::readings/ lists lecture 1's slides, not only its readings"
+            missing=1
+          fi
           exit $missing
 
       - name: Check a published file renders from the site and an unpublished one does not
