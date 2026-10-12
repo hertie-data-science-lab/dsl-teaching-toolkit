@@ -256,14 +256,14 @@
         "required": [],
         "type": "object"
       },
-      "counts_doc": "Gradebooks written and emails sent, as distribute reports them.",
+      "counts_doc": "",
       "doc": "docs/10-grade-and-return-assignments.md",
       "help": "Return marks and feedback to students.",
       "name": "grades.return",
       "preview": true,
       "required_team": "instructors",
       "scope": "semester",
-      "via": "inline"
+      "via": "workflow:distribute-grades.yml"
     },
     {
       "args_schema": {

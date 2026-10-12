@@ -72,11 +72,14 @@ by hand.
 
 The quarter-hourly tick reads every sheet. Anything it cannot use - a save that does not
 parse, a key written twice, a mark or an adjustment that is not a number, a question
-`grading_config.yml` does not declare, a handle in two submission units - opens **one**
-issue in `semester-config` (*grading sheets have entries the grader cannot read*) listing
-each by file and line, and emails whoever committed that line. Nothing is refreshed or sent
-for that unit until it is settled. The issue rewrites itself on every tick and closes when
-the last one goes.
+`grading_config.yml` does not declare, a handle in two submission units (however it is
+capitalised), a team's `members:` that is not one entry per member - opens **one** issue in
+`semester-config` (*grading sheets have entries the grader cannot read*) listing each by file
+and line, and emails whoever committed that line. Nothing is refreshed or sent for that unit
+until it is settled; a sheet that does not parse, or whose `members:` cannot be read, stops
+Return marks altogether. A held mark the student was already sent is never taken back: that
+student's gradebook, email and export row stay as last sent until it is settled. The issue
+rewrites itself on every tick and closes when the last one goes.
 
 Neither the issue nor the email ever names the student or the team: a unit key is a person,
 and both are public. They cite the line.
@@ -181,10 +184,11 @@ whenever anything in the repo would change, so an improvement to the page's own 
 reaches every student. The **email** is sent only when a MARK moves - a grade, a score or
 feedback - so a new submission time, a new maximum or a respelt date rewrites the page and
 mails nobody. A student with no mark or feedback anywhere yet is not emailed at all; the run
-that brings their first one does. The first run after the toolkit changes what the email is
-keyed on carries each student's record over and says how many it carried; a mark that
-first appears in that same run can be inside that window, so tell those students yourself
-if you have one.
+that brings their first one does.
+
+Every real return of a semester waits its turn - the automatic one, the button and the
+Console's **Return marks** (which starts this workflow) - so two never mail a class at once.
+A preview waits for nothing.
 
 ## Autograding (optional)
 

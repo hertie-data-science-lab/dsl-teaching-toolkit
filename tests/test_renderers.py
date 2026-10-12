@@ -145,7 +145,6 @@ CHECK_TEAM_TIMEOUT = 5
 # Distribute grades walks every submission repo and every gradebook in the semester, so
 # it is bounded like the other grading jobs rather than by the 30-minute default.
 JOB_TIMEOUTS = {
-    "collect_submissions": 120,
     "distribute_grades": 120,
     "bootstrap_semester": 60,
     # Archive semester freezes every repo in a semester org, in series - the same "many
@@ -1450,7 +1449,11 @@ STUDENT_CODE = ("dsl_course.collect", "--autograde-only")
 
 
 def _runs_student_code(step: dict) -> bool:
-    return any(entry in step.get("run", "") for entry in STUDENT_CODE)
+    run = step.get("run", "")
+    # `collect --refresh-only` re-derives the sheet's facts and runs nobody's code.
+    if "dsl_course.collect" in run and "--refresh-only" in run:
+        return False
+    return any(entry in run for entry in STUDENT_CODE)
 
 
 # The two shapes a reporting job comes in, as `{what "the run failed" is: its success
@@ -1994,9 +1997,9 @@ def test_student_code_is_the_last_thing_its_runner_ever_does(name):
             # It carries no secret of its own, and it must not: it runs before the step
             # that hands the runner over to the students' code.
             assert not steps[made[0]].get("env")
-    # ...and the sweep is looking at something. `collect` is reached both directly (the
-    # Collect submissions button) and through the scheduler's `--autograde-only`.
-    if name in ("collect_submissions", "scheduler"):
+    # ...and the sweep is looking at something: the scheduler's `--autograde-only`. The
+    # Collect submissions button only refreshes the sheet (`--refresh-only`).
+    if name == "scheduler":
         assert found == 1, name
 
 
@@ -2033,7 +2036,6 @@ SERIALISED_WRITERS = {
     "central_release": "release-materials",
     "provision": "release-assignment",
     "collect_submissions": "collect-submissions",
-    "distribute_grades": "distribute-grades",
     # Two presses at once would read the record, both find a student unclaimed, and
     # both claim-then-send them - the one duplicate the whole protocol exists to
     # avoid, to a whole semester.
@@ -2061,6 +2063,31 @@ def test_every_writer_serialises_against_itself_per_repo(name):
         "group": "${{ github.repository }}-" + SERIALISED_WRITERS[name],
         "cancel-in-progress": False,
     }, f"{name} can overlap itself"
+
+
+def test_distribute_grades_queues_real_returns_per_semester_and_never_a_preview():
+    # A real return - the scheduler's `return-marks` or a press, the Console's included -
+    # queues behind any other in its semester; a preview queues behind nothing, so the
+    # next automatic return cannot cancel it while it waits.
+    group = yaml.safe_load(ALL_RENDERED["distribute_grades"])["concurrency"]["group"]
+    assert "inputs.preview != false && github.run_id" in group
+    assert "-distribute-grades-{1}', github.repository," in group
+    assert "github.event.client_payload.semester_org || inputs.semester_org" in group
+    job = yaml.safe_load(ALL_RENDERED["distribute_grades"])["jobs"]["distribute-grades"]
+    assert job["if"].startswith("!cancelled()")
+
+
+def test_a_grading_leg_dropped_from_its_queue_is_not_a_failure():
+    # A leg cancelled before it started (a later run's leg took its queue slot) has no
+    # steps; reported as a failure, it filed an issue about a healthy semester.
+    jobs = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]
+    outcome = next(
+        s for s in jobs["autograde-report"]["steps"] if s.get("id") == "graded"
+    )
+    assert (
+        'if .conclusion == \\"cancelled\\" and ((.steps // []) | length) == 0 '
+        'then \\"skipped\\" else .conclusion end' in outcome["run"]
+    )
 
 
 def test_no_button_joins_the_scheduled_release_group():
@@ -2123,7 +2150,9 @@ def test_the_scheduler_grades_every_semester_without_waiting_on_the_releases():
     # It needs the release job only for the semester LIST, so it must run whatever became of
     # the releases: grading is gated on the durable snapshot marker, not on this run.
     assert autograde["needs"] == ["release"]
-    assert autograde["if"].startswith("always()")
+    # Not on a run an operator cancelled, though: that would go on running student code.
+    assert autograde["if"].startswith("!cancelled()")
+    assert jobs["autograde-report"]["if"].startswith("!cancelled()")
     # ...but not on an empty list: GitHub errors on a matrix with no vectors, and a course
     # org with no semesters registered yet is a normal state, not a failure.
     assert "needs.release.outputs.semesters != '[]'" in autograde["if"]
@@ -2232,7 +2261,7 @@ def test_only_the_jobs_that_grade_install_the_autograder():
                 assert setup["with"]["cache"] == "pip"
                 # Relative to $GITHUB_WORKSPACE, where the central repo is checked out.
                 assert setup["with"]["cache-dependency-path"] == "requirements.txt"
-    assert grading == 2  # Collect submissions, and the scheduler's autograde legs
+    assert grading == 1  # the scheduler's autograde legs
     assert core > grading
 
 
