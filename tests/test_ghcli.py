@@ -254,7 +254,11 @@ def test_a_read_that_hits_a_500_is_retried(monkeypatch, capsys):
     )
     assert ghcli.gh("api", "repos/O/R/contents/f") == (0, "{}")
     assert len(calls) == 2
-    assert "[wait] transient http 500, retry 1/3" in capsys.readouterr().out
+    # On stderr: a caller capturing stdout (`inventory=$(python3 -m dsl_course.list_orgs)`
+    # in refresh-tier.yml) would otherwise read the notice as the start of its JSON.
+    out = capsys.readouterr()
+    assert "[wait] transient http 500, retry 1/3" in out.err
+    assert out.out == ""
 
 
 def test_a_read_truncated_mid_json_is_retried(monkeypatch):
@@ -288,7 +292,7 @@ def test_a_rate_limit_is_still_retried(monkeypatch, capsys):
     )
     assert ghcli.gh("api", "repos/O/R") == (0, "ok")
     assert len(calls) == 2
-    assert "[wait] rate-limited, retry 1/3" in capsys.readouterr().out
+    assert "[wait] rate-limited, retry 1/3" in capsys.readouterr().err
 
 
 def test_a_read_whose_connection_failed_is_retried(monkeypatch, capsys):
@@ -303,7 +307,7 @@ def test_a_read_whose_connection_failed_is_retried(monkeypatch, capsys):
     assert ghcli.gh("api", "repos/O/R/contents/f") == (0, "{}")
     assert len(calls) == 2
     assert (
-        "[wait] transient tls handshake timeout, retry 1/3" in capsys.readouterr().out
+        "[wait] transient tls handshake timeout, retry 1/3" in capsys.readouterr().err
     )
 
 

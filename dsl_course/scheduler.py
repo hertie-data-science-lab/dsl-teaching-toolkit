@@ -654,7 +654,11 @@ def _run_releases(
 
 
 def _solution_due(
-    semester_org: str, sched: schedule.Schedule, slug: str, now: datetime
+    course_org: str,
+    semester_org: str,
+    sched: schedule.Schedule,
+    slug: str,
+    now: datetime,
 ) -> bool:
     """Whether this tick should push the model solution for `slug`.
 
@@ -667,7 +671,12 @@ def _solution_due(
     hand edit, a late window changed after the date was set) is held here, never dropped,
     and `_held_solution_faults` names the line to move. A cutoff that cannot be known
     (`schedule.solution_cutoff`) holds too. Only the solution waits: the hand out still
-    fires."""
+    fires.
+
+    HELD as well, for an assignment whose commits are frozen and graded (`_collects`),
+    until its snapshot exists: the freeze runs first in the tick, but one that failed (a
+    single repo's commit read) leaves every pin untaken, and a solution out before them
+    lets a commit with a backdated date be pinned as the submission."""
     entry = sched.assignments[slug]
     if entry.solution_datetime is None or entry.solution_datetime > now:
         return False
@@ -680,7 +689,19 @@ def _solution_due(
         )
         log(f"  [hold] solution {slug} - {reason}")
         return False
-    return not solution_released(semester_org, schedule.semester_name(slug, entry))
+    name = schedule.semester_name(slug, entry)
+    if solution_released(semester_org, name):
+        return False
+    if not _collects(course_org, entry):
+        return True
+    try:
+        frozen = load_snapshots(semester_org, name) is not None
+    except RuntimeError as exc:
+        log_err(f"  could not read the snapshot of {name} ({type(exc).__name__})")
+        frozen = False
+    if not frozen:
+        log(f"  [hold] solution {slug} - its submissions are not frozen yet.")
+    return frozen
 
 
 def _held_solution_faults(sched: schedule.Schedule, now: datetime) -> list[ConfigFault]:
@@ -792,7 +813,9 @@ def _handout_releases(
                 when=entry.handout_datetime,
                 assignment=template,
                 assignment_slug=slug,
-                assignment_solution=_solution_due(semester_org, sched, slug, now),
+                assignment_solution=_solution_due(
+                    course_org, semester_org, sched, slug, now
+                ),
             )
         )
     return out
@@ -1463,7 +1486,13 @@ def _archive_phase(
     `teardown.close_out` is idempotent and re-entrant, so a run that died half way is
     simply picked up by the next tick - which is why this needs no fire-once marker of its
     own. The tick after a successful one never reaches here at all: the sealed
-    `semester-config` takes the semester out of `discovery.live_semesters`."""
+    `semester-config` takes the semester out of `discovery.live_semesters`.
+
+    A schedule.yml that does not parse says nothing about `archive:` either way, so it
+    leaves every notice as it stands: read as "no block", it closed an open notice as
+    called off, and fixing the file opened (and mailed) it again."""
+    if sched.unparseable:
+        return 0
     archives = sched.archive.when if sched.archive else None
     if archives is None:
         return _stale_archive_notices(semester_org, "", dry_run)
@@ -2137,12 +2166,12 @@ def main() -> int:
 
     if args.list_semesters:
         # The grading job's matrix, and the ONLY thing that may reach stdout: the workflow
-        # captures it whole into a step output and hands it to fromJSON. `ghcli.gh` prints
-        # its retry notices ("[wait] rate-limited...") to stdout before a successful
-        # retry, and a second line there writes a step-output line with no `=` - GitHub
-        # rejects the file, the step fails, and because the listing runs first the release
-        # step is skipped. So one transient 403 would cost a whole release tick. Every log
-        # line the read makes goes to stderr for the duration; only the answer is printed.
+        # captures it whole into a step output and hands it to fromJSON. A second line
+        # there (any `log` line the read makes) writes a step-output line with no `=` -
+        # GitHub rejects the file, the step fails, and because the listing runs first the
+        # release step is skipped. Every log line the read makes goes to stderr for the
+        # duration; only the answer is printed. (`ghcli`'s retry notices are stderr's
+        # anyway.)
         with contextlib.redirect_stdout(sys.stderr):
             if args.semester_org:
                 semesters, rc = _one_semester(args.course_org, args.semester_org)

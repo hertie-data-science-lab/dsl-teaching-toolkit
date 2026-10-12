@@ -71,8 +71,9 @@ like any other, and a student who onboards later is granted push on the next tic
 world-readable - portfolio work such as a hackathon. There is then **no Submission receipts issue**
 (a hand-in time is a fact about a student, and it does not go where the internet can read
 it; the marks were never going here anyway), and the
-student console - and the repo's own About line - says the repo is
-public before they push anything into it.
+assignment's page on the semester site (in the student console instead, for a course that
+turns it on) - and the repo's own About line - says the repo is public before they push
+anything into it.
 
 No **model solution** is pushed into these repos, whatever
 `solution_datetime` says - publishing the answers is not something a later run could take
@@ -95,8 +96,10 @@ No model solution is pushed into these repos either, for the same reason: the st
 publish the repo the day after the cutoff, and the answers would go with it.
 
 Until the assignment's **grading cutoff** the scheduler puts any of these repos back to
-private on its next tick, and the student console says so. After the
-cutoff nothing touches the flag again: the repo is theirs to publish.
+private on its next tick. The assignment's page on the semester site (or the student
+console, where it is on) and the repo's About line tell the student the repo is private
+until the late cutoff and theirs to publish after it. After the cutoff nothing touches the
+flag again.
 
 One-time setup on the semester org, by hand (these are web-only settings - no API sets them):
 Settings → Member privileges → **Allow members to change repository visibilities** ON,

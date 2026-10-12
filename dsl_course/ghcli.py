@@ -121,6 +121,7 @@ def _run_gh_ladder(
                 return 1, "", err
             print(
                 f"  [wait] {err}, retry {attempt + 1}/{retries} in {delay}s",
+                file=sys.stderr,
                 flush=True,
             )
             time.sleep(delay)
@@ -144,6 +145,7 @@ def _run_gh_ladder(
             return result.returncode, result.stdout, result.stderr
         print(
             f"  [wait] {why}, retry {attempt + 1}/{retries} in {delay}s",
+            file=sys.stderr,
             flush=True,
         )
         time.sleep(delay)

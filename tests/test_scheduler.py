@@ -2418,6 +2418,7 @@ def test_the_solution_rides_on_the_handout_release_once_its_datetime_passes(
     monkeypatch.setattr(
         "dsl_course.scheduler.solution_released", lambda org, slug: released["yet"]
     )
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})
 
     def one(now):
         (r,) = scheduler._handout_releases("Course-Org", "Semester-f2026", sched, now)
@@ -2493,6 +2494,7 @@ def test_a_solution_inside_the_late_window_is_held_then_released(monkeypatch):
         lambda org, slug, entry: entry.course_source_repo,
     )
     monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})
     sched = _early_solutions()
 
     def solutions(now):
@@ -2540,17 +2542,47 @@ def test_a_held_solution_is_a_warning_at_its_schedule_line(monkeypatch):
 def test_a_solution_whose_cutoff_cannot_be_known_is_held(monkeypatch):
     # No course pointer, or a cascade that raises: never the institution's window.
     monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})
     sched = _early_solutions()
     late = datetime(2027, 1, 1, tzinfo=BERLIN)
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
-    assert not scheduler._solution_due("Sem-f2026", sched, "assignment-1", late)
+    assert not scheduler._solution_due("C", "Sem-f2026", sched, "assignment-1", late)
 
     def unreadable(sched, slug):
         raise Unusable("assignments.yml is not YAML")
 
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "Course")
     monkeypatch.setattr(schedule_mod, "grading_cutoff_datetime", unreadable)
-    assert not scheduler._solution_due("Sem-f2026", sched, "assignment-1", late)
+    assert not scheduler._solution_due("C", "Sem-f2026", sched, "assignment-1", late)
+
+
+def test_a_solution_waits_for_the_snapshot_of_what_it_answers(monkeypatch):
+    # The freeze runs first in the tick, but a freeze that failed (one repo's commit read)
+    # writes no snapshot. A solution pushed then lets a student copy it and pin a
+    # backdated commit before the next tick freezes. Work handed in off GitHub has nothing
+    # to freeze, so its solution never waits.
+    _WINDOWS.update({"assignment-1": 0})
+    monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "Course")
+    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
+    sched = _early_solutions()
+    late = datetime(2027, 1, 1, tzinfo=BERLIN)
+    frozen: dict = {}
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: frozen.get(slug))
+    assert not scheduler._solution_due("C", "Sem-f2026", sched, "assignment-1", late)
+    frozen["assignment-1"] = {"anna": "sha"}
+    assert scheduler._solution_due("C", "Sem-f2026", sched, "assignment-1", late)
+
+    def unreadable(org, slug):
+        raise RuntimeError("gh: Server Error (HTTP 502)")
+
+    monkeypatch.setattr(scheduler, "load_snapshots", unreadable)
+    assert not scheduler._solution_due("C", "Sem-f2026", sched, "assignment-1", late)
+    monkeypatch.setattr(
+        scheduler,
+        "load_grading_spec",
+        lambda org, template, **_: GradingSpec(submit_via="external"),
+    )
+    assert scheduler._solution_due("C", "Sem-f2026", sched, "assignment-1", late)
 
 
 def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
@@ -3111,13 +3143,13 @@ def test_list_semesters_prints_json_and_nothing_else(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == ["Semester-A", "Semester-B"]
 
 
-def test_list_semesters_keeps_a_retry_notice_off_stdout(monkeypatch, capsys):
-    # `ghcli.gh` prints its retry notices to STDOUT before a successful retry. A second
-    # line in the captured output writes a step-output line with no `=`, GitHub rejects
-    # the whole outputs file, and because the listing runs first the release step is then
-    # skipped - one transient rate-limit costing a whole release tick.
+def test_list_semesters_keeps_a_log_line_off_stdout(monkeypatch, capsys):
+    # Any line the read logs to STDOUT. A second line in the captured output writes a
+    # step-output line with no `=`, GitHub rejects the whole outputs file, and because the
+    # listing runs first the release step is then skipped - one stray line costing a whole
+    # release tick.
     def noisy(org):
-        print("  [wait] rate-limited, retry 1/3 in 30s")
+        print("  [wait] no teams yet")
         return ["Semester-A"]
 
     monkeypatch.setattr(scheduler.discovery, "discover_semesters", noisy)
@@ -4263,6 +4295,7 @@ def _archive(
     mails=True,
     open_notices=(),
     central_ref=lambda org: "main",
+    unparseable=False,
 ):
     """Drive `_archive_phase` alone, recording the close-out, the issue, the mail and any
     stale notice it closed."""
@@ -4305,7 +4338,10 @@ def _archive(
     rc = scheduler._archive_phase(
         "Course-Org",
         "Semester-Org",
-        Schedule(archive=ArchiveRow(when=archive_date) if archive_date else None),
+        Schedule(
+            archive=ArchiveRow(when=archive_date) if archive_date else None,
+            unparseable=unparseable,
+        ),
         now,
         dry_run,
     )
@@ -4510,6 +4546,28 @@ def test_a_notice_is_closed_when_the_archive_is_called_off(monkeypatch):
     # Idempotent: the tick after it finds nothing open and writes nothing.
     _, again = _archive(monkeypatch, None, datetime(2027, 2, 3, 9, tzinfo=timezone.utc))
     assert again["notices_closed"] == []
+
+
+def test_a_schedule_that_stops_parsing_leaves_the_notice_open(monkeypatch):
+    # A YAML typo inside the fortnight empties the plan, `archive:` included. That is not
+    # the block taken away: closing the notice as called off, then re-opening (and
+    # re-mailing) it once the file was fixed, told the teaching team two wrong things.
+    stale = "Semester archives on 2027-02-16"
+    rc, seen = _archive(
+        monkeypatch,
+        None,
+        datetime(2027, 2, 2, 9, tzinfo=timezone.utc),
+        open_notices=(stale,),
+        unparseable=True,
+    )
+    assert rc == 0
+    assert seen == {
+        "closed": [],
+        "gate": [],
+        "issues": [],
+        "mailed": [],
+        "notices_closed": [],
+    }
 
 
 def test_a_notice_that_is_still_due_is_left_alone(monkeypatch):

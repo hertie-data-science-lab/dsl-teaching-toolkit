@@ -747,7 +747,7 @@ def test_every_page_states_its_own_access_rule():
     # All Materials links the hosted copies too, which are public: the note says so.
     assert (
         "All released course material so far; only accessible to enrolled "
-        "students/auditors, except files the course hosts publicly (the render button)."
+        "students/auditors, except files the course hosts publicly (`view` in a file's menu)."
     ) in semester["materials.md"]
     # The public open-courseware site publishes the same files on purpose, so it claims no
     # gate anywhere.

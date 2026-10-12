@@ -183,6 +183,7 @@ def clear_process_memos() -> None:
     with different fakes, so clear them between tests - and the CLI's read-once memos
     (`gh_contents`, `issues`) go back to off, as a CLI start turns them on."""
     site._repo_tree.cache_clear()
+    site._materials.cache_clear()
     central.central_ref_exists.cache_clear()
     repos._repos.clear()
     gh_teams.get_org_owners.cache_clear()
