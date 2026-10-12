@@ -649,7 +649,9 @@ class Post:
 def post(monkeypatch):
     """The record file and the transport, on the CONSUMER's imported names."""
 
-    def _wire(record: Record | None = None, **kw) -> tuple[Record, Post]:
+    def _wire(
+        record: Record | None = None, console: bool = False, **kw
+    ) -> tuple[Record, Post]:
         rec = record if record is not None else Record()
         sender = Post(**kw)
         monkeypatch.setattr(team_formation, "get_file_with_sha", rec.get)
@@ -662,6 +664,10 @@ def post(monkeypatch):
         monkeypatch.setattr(team_formation.mailer, "send_indexed", sender.send_indexed)
         monkeypatch.setattr(team_formation.mailer, "preflight", sender.preflight)
         monkeypatch.setattr(discovery, "course_name_of", lambda org: "Deep Learning")
+        # The course's dsl-course.yml, as `student_console_for` reads it.
+        monkeypatch.setattr(
+            discovery, "org_meta", lambda org: {"student_console": console}
+        )
         return rec, sender
 
     return _wire
@@ -1066,9 +1072,9 @@ def test_a_release_that_also_failed_says_which_stamp_to_delete_by_hand(
 # -------------------------------------------------------------------------- the wording
 
 
-def _body(semester, post, **kw) -> tuple[str, str]:
+def _body(semester, post, console: bool = False, **kw) -> tuple[str, str]:
     semester()
-    _rec, sender = post()
+    _rec, sender = post(console=console)
     _tick(**kw)
     return sender.sent[0].subject, sender.sent[0].body
 
@@ -1080,13 +1086,23 @@ def test_the_message_carries_what_a_student_needs_in_order_to_act(semester, post
     assert "up to 4 people" in body, "the cap the Join-team form enforces"
     assert "closes on 4th Oct" in body, "the day, in the semester's own zone"
     assert f"https://github.com/{SEMESTER}/join/issues/new/choose" in body
-    assert f"?semester={SEMESTER}#join" in body, (
-        "the console's Join, which lists the teams"
-    )
+    assert (
+        "are listed on the assignment's page:\n"
+        f"  https://{SEMESTER.lower()}.github.io/assignments/02-assignment-2.html"
+    ) in body, "the assignment's page on the semester site, which lists the teams"
+    assert "console" not in body, "a course that has not opted in never names it"
     # No Join-course line: every recipient is onboarded by construction, and a student
     # who is not enters `waiting` on the tick after they join and is sent this then.
     assert "Join course" not in body
     assert len(body.splitlines()) < 20, "a student reads this once, on a phone"
+
+
+def test_a_course_that_opts_in_links_the_assignment_in_the_student_console(
+    semester, post
+):
+    _subject, body = _body(semester, post, console=True)
+    assert "are listed in the student console, where you can join or start one" in body
+    assert f"?semester={SEMESTER}#assignment-assignment-2" in body
 
 
 def test_the_message_greets_the_student_it_is_addressed_to(semester, post):

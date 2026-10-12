@@ -2603,11 +2603,15 @@ def test_a_template_with_no_spec_has_no_window_either(monkeypatch):
     assert yaml.safe_load(text)["assignments"]["a2"]["team_formation_window"] == "none"
 
 
-def _writes(monkeypatch, existing, ok: bool = True) -> list[dict]:
+def _writes(
+    monkeypatch, existing, ok: bool = True, console: bool = False
+) -> list[dict]:
     """Stub everything the lock write touches and collect what it puts. `existing` is what
-    `get_file_with_sha` answers: `(text, sha)`, None for a 404, or an exception to raise."""
+    `get_file_with_sha` answers: `(text, sha)`, None for a 404, or an exception to raise.
+    `console` is the course's `student_console:`."""
     monkeypatch.setattr(grades, "_grading_text", lambda org, t, **_: "type: group\n")
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
+    monkeypatch.setattr(discovery, "org_meta", lambda org: {"student_console": console})
     monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo, **_: False)
 
     def read(org, repo, path):
@@ -2640,10 +2644,21 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
         "max_team_size": 5,
         "team_formation_window": "closed",
         "team_formation_closes": _CUTOFF.date(),
-        # Where the teams are listed: the semester's Join screen in the student console.
-        "team_formation_page": "https://hertie-data-science-lab.github.io/"
-        "dsl-teaching-toolkit/?semester=SEMESTER#join",
+        # Where the teams are listed: the assignment's page on the semester site.
+        "team_formation_page": "https://semester.github.io/assignments/project.html",
     }
+
+
+def test_a_course_that_opts_in_locks_the_page_in_the_student_console(monkeypatch):
+    puts = _writes(monkeypatch, None, console=True)
+    grades.sync_team_lock(
+        "COURSE", "SEMESTER", _sched(project="assignment-4-project-f2026")
+    )
+    entry = yaml.safe_load(puts[0]["content"])["assignments"]["project"]
+    assert entry["team_formation_page"] == (
+        "https://hertie-data-science-lab.github.io/"
+        "dsl-teaching-toolkit/?semester=SEMESTER#assignment-project"
+    )
 
 
 def test_the_lock_links_no_page_for_an_individual_assignment_and_lists_nothing(
@@ -3115,10 +3130,10 @@ def test_the_preview_counts_feedback_on_an_undeclared_question(
     assert "WARNING: 1 unit(s) give feedback on a question" in capsys.readouterr().out
 
 
-def test_the_lock_keeps_the_fragment_of_the_join_screen_url():
-    # The page is the console's Join screen (`...?semester=x#join`): a `#` inside a value is
-    # not a comment, as in YAML, so the fragment survives the parse.
-    page = "https://console.example/?semester=x#join"
+def test_the_lock_keeps_the_fragment_of_the_assignment_page_url():
+    # The page is the assignment's page in the console (`...?semester=x#assignment-a`): a
+    # `#` inside a value is not a comment, as in YAML, so the fragment survives the parse.
+    page = "https://console.example/?semester=x#assignment-a"
     text = grades.team_lock_text({"a": ("self_select", 4, "open", "2026-10-04", page)})
     assert (
         grades.parse_team_lock(text + "# a comment\n")["a"]["team_formation_page"]
@@ -3329,3 +3344,29 @@ def test_a_whole_number_of_days_is_read_by_one_rule():
     assert [whole_days(v) for v in (-1, True, "x", None)] == [None] * 4
     dropped: list[str] = []
     assert _whole_days(-1, "where", dropped) is None and len(dropped) == 1
+
+
+@pytest.mark.parametrize(
+    ("declared", "readme", "want", "label"),
+    [
+        # The seeded placeholder names nothing: the brief's heading does.
+        (
+            "Assignment 1",
+            "# Assignment 1 - Fraud\nBody",
+            "Assignment 1 - Fraud",
+            "Assignment 1 · Fraud",
+        ),
+        # A real title beats the heading.
+        ("Churn model", "# Fraud\nBody", "Churn model", "Assignment 1 · Churn model"),
+        # No heading: the placeholder stands, and the label is the identifier alone.
+        ("Assignment 1", "Body only", "Assignment 1", "Assignment 1"),
+    ],
+)
+def test_a_placeholder_title_gives_way_to_the_readme_heading(
+    monkeypatch, declared, readme, want, label
+):
+    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: readme)
+    spec = grades.parse_grading_spec(f"title: {declared}\n")
+    got = grades.assignment_title("COURSE", "assignment-1-f2026", spec, "assignment-1")
+    assert got == want
+    assert grades._readme_label("assignment-1", got) == label

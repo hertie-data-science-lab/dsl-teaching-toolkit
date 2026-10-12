@@ -64,9 +64,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
-from . import config_digest, grades, mailer, records, roster, schedule, teams
+from . import config_digest, grades, mailer, policy, records, roster, schedule, teams
 from .course import CONFIG_REPO, course_phrase
-from .discovery import course_name_or, join_issue_url, semester_is_live
+from .discovery import (
+    course_name_or,
+    join_issue_url,
+    semester_is_live,
+    student_console_for,
+)
 from .faults import ConfigFault, Unusable
 from .gh_contents import dump_csv, get_file_with_sha, put_file_as_read, read_csv
 from .grades import self_select_keys
@@ -451,8 +456,9 @@ def _render(
     this is the one mail about it a student ever gets, and `assignment-2` is what the plan
     calls it rather than what the site and the brief do.
 
-    `page_url` is the assignment's page on the semester site, which lists the teams that
-    exist, and the sentence pointing at it goes ONLY when there is one to point at. A
+    `page_url` is the assignment's page (`AssignmentPage.url`), which lists the teams that
+    exist, and the sentence pointing at it goes ONLY when there is one to point at. It
+    names the student console only when the link is one (`policy.is_console_link`). A
     course org whose templates could not be listed gets a shorter mail rather than a link
     to the wrong page.
 
@@ -473,9 +479,14 @@ def _render(
         subject = f"Form your team for {title}"
         opening = f"{title} in {course} is a group assignment."
         cap_line = f"Teams are up to {cap} people. Team formation closes on {day}."
+    where = (
+        "in the student console, where you can join or start one"
+        if page_url and policy.is_console_link(page_url)
+        else "on the assignment's page"
+    )
     listed = (
-        f"\n\nThe teams that exist, and how much room each has, are listed in the "
-        f"student console, where you can join or start one:\n  {page_url}"
+        f"\n\nThe teams that exist, and how much room each has, are listed {where}:"
+        f"\n  {page_url}"
         if page_url
         else ""
     )
@@ -498,6 +509,8 @@ def message(
     tz_name: str,
     name: str = "",
     page: schedule.AssignmentPage | None = None,
+    *,
+    console: bool,
 ) -> tuple[str, str]:
     """The `(subject, body)` one open window sends ONE of its unteamed students.
 
@@ -507,8 +520,9 @@ def message(
     The name therefore appears in the BODY and nowhere else - not in a log line, not in the
     dry run's sample, and not in a subject that a mail client shows in a list.
 
-    `page` is the assignment's page on the semester site (`schedule.assignment_pages`): its
-    number names the assignment, and its URL is the list of teams."""
+    `page` is the assignment's page (`schedule.assignment_pages`): its number names the
+    assignment, and its URL (in the student console where the course opts in, `console`)
+    is the list of teams."""
     return _render(
         greeting(name),
         numbered(window.title, window.name, page.number if page else None),
@@ -517,7 +531,7 @@ def message(
         semester_org,
         course_name,
         phase,
-        page.url(semester_org) if page else None,
+        page.url(semester_org, console=console) if page else None,
     )
 
 
@@ -791,6 +805,7 @@ def _messages(
     course_name: str,
     tz_name: str,
     pages: dict[str, schedule.AssignmentPage],
+    console: bool,
 ) -> list[mailer.Message]:
     """The batch these nudges are, rendered once - so the dry run previews exactly the
     messages a real run would send rather than a description of them."""
@@ -805,6 +820,7 @@ def _messages(
                 tz_name,
                 n.name,
                 pages.get(n.window.key),
+                console=console,
             ),
         )
         for n in nudges
@@ -849,6 +865,7 @@ def _preview(
             course_name,
             sched.timezone,
             schedule.assignment_pages_by_key(sched),
+            student_console_for(course_org),
         ),
         dry_run=True,
         sample=sample_message(semester_org, course_name)[1],
@@ -972,6 +989,7 @@ def notify_windows(
         course_name_or(course_org),
         sched.timezone,
         schedule.assignment_pages_by_key(sched),
+        student_console_for(course_org),
     )
     try:
         # WHICH MESSAGES went out, by position, and never which ADDRESSES: `mine` and the

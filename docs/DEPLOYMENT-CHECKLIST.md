@@ -58,6 +58,7 @@ site_link_extensions: [pdf, html]  # optional - semester sites only; see below
 contact: course@example.org     # optional - the public website's contact; unset = the lab's
 licence: CC BY 4.0              # optional - one of policy.yml's licences; unset = its first
 set_aside: [C6]                 # optional - optional setup steps / to-dos set aside; see below
+student_console: true           # optional - send students to the student console; see below
 people:
   course_admins:
     - github_handle: "janedoe"   # admin on the course org + every semester
@@ -93,6 +94,13 @@ removes the id): setup steps `C4`-`C6`, the suggested to-dos (syllabus and its w
 withheld patterns reviewed, course description) and the semesters' suggested to-dos (site home
 page, archive date, instructor emails). A needed item, an unknown id, or an item done anyway is
 ignored. Unset, nothing is set aside.
+
+`student_console: true` points this course's students at the student console: the semester
+sites' banner, and team-formation links (mail, Join-team form, its comments) to each
+assignment's console page. Unset (the default), students see only the semester sites, and
+those links go to the site's own assignment pages; a student who signs in to the console is
+sent to the site. A push re-syncs the sites; the lock and
+the form follow on the next tick.
 
 `site_link_extensions` narrows what each row **links** on the **semester** sites,
 never what it ships. Unset (the default), a row lists the files at the root of each folder it

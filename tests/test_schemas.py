@@ -85,7 +85,7 @@ def test_op_arg_enums_are_the_engine_constants():
     assert create["type"]["enum"] == list(course.ASSIGNMENT_TYPES)
     # New assignment asks nothing a semester decides.
     assert not set(create) & set(settings.RUN_KEYS)
-    # publish.yml is retired: New materials repo asks nothing about publishing.
+    # publish.yml is a hand-written opt-in: New materials repo asks nothing about it.
     materials = REGISTRY["materials.create"].args_schema["properties"]
     assert set(materials) == {"semester", "copy_from"}
     assert REGISTRY["course.publish_website"].args_schema["properties"] == {}
@@ -276,6 +276,13 @@ def test_contact_and_licence_are_optional_course_facts():
         validate({**base, "contact": "ml@x.edu", "licence": "CC BY 4.0"}, schema) == []
     )
     assert validate({**base, "contact": "not an email"}, schema) != []
+
+
+def test_student_console_is_an_optional_course_flag():
+    schema = schemas.dsl_course_schema()
+    base = {"course_name": "ML", "course_code": "E1"}
+    assert validate({**base, "student_console": True}, schema) == []
+    assert validate({**base, "student_console": "yes"}, schema) != []
 
 
 def test_the_validator_catches_what_the_schemas_forbid():

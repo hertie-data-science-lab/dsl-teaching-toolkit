@@ -119,12 +119,13 @@ class PlannedRow:
 
     @property
     def dests(self) -> list[str]:
-        """The semester-side `repo/path`s its copies land in, deduped, in plan order."""
-        return list(
-            dict.fromkeys(
-                f"{d.semester_dest_repo}/{deploy_dest(d)}" for d in self.deploys
-            )
+        """The semester-side `repo/path`s its copies land in, deduped, in plan order. A
+        path under another one listed (`labs/03_lab/solutions` beside `labs/03_lab`) is
+        dropped: the pending-row sentence would otherwise link the same tree twice."""
+        paths = dict.fromkeys(
+            f"{d.semester_dest_repo}/{deploy_dest(d)}" for d in self.deploys
         )
+        return [p for p in paths if not any(p.startswith(f"{q}/") for q in paths)]
 
 
 def planned_rows(
