@@ -237,7 +237,7 @@ describe('course nav and overview', () => {
     expect(t.indexOf('Public website')).toBeLessThan(t.indexOf('Semesters'));
     expect(nav).toContain(`href="?cohort=${COHORT_ORG}#dashboard"`);
     // The engine dates s5 later (beyond the horizon): only the template problem counts.
-    expect(nav).toMatch(/aria-label="1 problems">1</);
+    expect(nav).toMatch(/aria-label="1 problem">1</);
     expect(nav).toMatch(/class="past"[^>]*><span class="node-name">Fall 2025<span class="n-soon"> archived<\/span>/);
     expect(t).toContain('Assignment templates');
     const inCohort = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" />);

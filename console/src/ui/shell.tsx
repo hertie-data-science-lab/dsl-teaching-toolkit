@@ -8,6 +8,7 @@ import { readText, safeStorage, writeText } from '../auth/types';
 import type { GhUser } from '../github/client';
 import type { Course, CohortRef, Semester } from '../model/discovery';
 import { semesterOver, termRank } from '../model/catalogue';
+import { plural } from '../model/format';
 import { problemCount } from '../model/readiness';
 import type { SemesterFacts } from '../model/student';
 import { studentHref, studentScreens } from '../router';
@@ -142,7 +143,7 @@ export interface NavNode {
   pages: NavLeaf[];
 }
 
-const Count = ({ n }: { n?: number | null }) => (n ? <span class="n-count" aria-label={`${n} problems`}>{n}</span> : null);
+const Count = ({ n }: { n?: number | null }) => (n ? <span class="n-count" aria-label={plural(n, 'problem')}>{n}</span> : null);
 
 /** The chevron in the 22px gutter before a node's name (decision 0031 rule 11). */
 export function Chev({ open, controls, what, onToggle }: { open: boolean; controls: string; what: string; onToggle: () => void }) {

@@ -713,7 +713,7 @@ describe('read only and the shell', () => {
     expect(nav).toContain('Fall 2026');
     expect(nav).toContain('class="n-count"');
     expect(nav).toContain('aria-current="page"');
-    expect(nav).toContain('1 problems');
+    expect(nav).toContain('aria-label="1 problem"');
     expect(nav).toContain(`https://${COHORT_ORG}.github.io`);
     expect(nav).toContain('Course on GitHub');
     const top = html(<Topbar user={{ login: 'a', id: 1, name: 'A', email: null, avatar_url: '' }} navOpen={false} onMenu={() => {}} />);
