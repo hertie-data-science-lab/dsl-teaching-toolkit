@@ -15,6 +15,9 @@ import { YamlText, deepEqual, isObj, obj, type Path } from '../edit/yamlText';
 import type { FileState, Files } from './files';
 import { ASSIGNMENTS_FILE, CONFIG_REPO, COURSE_REPO } from './names';
 import assignmentsSchema from '../../schemas/assignments.schema.json';
+import courseSchema from '../../schemas/dsl_course.schema.json';
+import gradingSchema from '../../schemas/grading_config.schema.json';
+import scheduleSchema from '../../schemas/schedule.schema.json';
 import { labelMap, labelOf } from './labels';
 import { DEFAULTS, penaltyRate } from './policy';
 import { validator } from './validate';
@@ -214,8 +217,11 @@ export function scheduleFile(files: Files, semesterOrg: string): YamlFile | 'loa
   return yamlFile(files.file(semesterOrg, CONFIG_REPO, 'schedule.yml'), null);
 }
 
-/** assignments.yml checked against the exported schema, before anything is written. */
+/** Each instructor file checked against its exported schema, before anything is written. */
 export const validAssignments = validator(assignmentsSchema);
+export const validSchedule = validator(scheduleSchema);
+export const validCourse = validator(courseSchema);
+export const validGrading = validator(gradingSchema);
 
 /** The course's `assignment_defaults`: from dsl-course.yml as last read or written, else as discovered. */
 export function courseBlock(files: Files, courseOrg: string, meta: Record<string, unknown> | null): Block {

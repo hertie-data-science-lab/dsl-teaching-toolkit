@@ -1,22 +1,20 @@
 // Setting suggestions aside (decisions 0032 and 0034). Only a suggested item may be set aside
-// (`need`, or on an older status `stage_optional` / a to-do's `optional`: model/readiness.ts);
+// (`need`, as the engine writes it);
 // the course's dsl-course.yml lists the ids set aside (`set_aside:`), shared by everyone on the
 // course. The console reads that list as it last read or wrote the file, so an item moves the
 // moment the save lands, before the status is rewritten; until the file is read it takes the
 // engine's `stage_set_aside` / `set_aside`.
 
-import courseSchema from '../../schemas/dsl_course.schema.json';
 import { useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { invalidText, saveText } from '../edit/save';
 import { YamlText } from '../edit/yamlText';
 import type { FileState, Files } from '../model/files';
 import { COURSE_REPO } from '../model/names';
-import { validator } from '../model/validate';
+import { validCourse } from '../model/cascade';
 import { CheckLine } from '../ui/bits';
 import { MODAL_TEXT_ID, Modal } from '../ui/Modal';
 
-const validCourse = validator(courseSchema);
 export const SET_ASIDE_KEY = 'set_aside';
 export const COURSE_FILE = 'dsl-course.yml';
 

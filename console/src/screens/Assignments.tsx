@@ -167,7 +167,7 @@ function Overview(p: TabProps) {
     cur === 4 ? `${a.marks.filled} of ${a.marks.total} marked` : cur > 4 ? 'Done' : `Opens after ${fmtDay(a.grading_cutoff_datetime, tz, year)}`,
     cur === 5 ? 'Returned' : 'Opens after marks are returned',
   ];
-  const tiered = tier(status, p.now);
+  const tiered = tier(status);
   const tpl = templateReadinessIn(status.course, a.template, tiered);
   const tplProblems = tpl?.state === 'problem' ? tiered.filter((x) => x.b !== 'later' && x.p.fix?.screen === 'template' && x.p.fix.entry === a.template).map((x) => x.p) : [];
   const row = (cls: string, state: string, why: string, ops?: preact.ComponentChildren) => (

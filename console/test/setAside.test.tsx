@@ -45,7 +45,7 @@ afterEach(() => {
 /** What the course Dashboard does around its panel: the set-aside list, the view and the rows, once. */
 function Panel({ loaded, files: f, write }: { loaded: Loaded; files: Files; write: boolean }) {
   const aside = useSetAside({ org: ORG, files: f, write });
-  const v = courseView({ loaded, cohortStates: {} }, 0);
+  const v = courseView({ loaded, cohortStates: {} });
   const r = courseReadiness(v.course!, v.tiered, aside.list, 0);
   return <CourseTabs items={r.items} problems={v.problems} aside={aside} />;
 }

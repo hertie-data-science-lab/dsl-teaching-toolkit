@@ -27,7 +27,7 @@ const ready = (status: Status): Loaded => ({ kind: 'ready', status, sha: 's', st
 const panelOf = (out: string, from: string) => out.slice(out.indexOf(from), out.indexOf('</section>', out.indexOf(from)));
 const text = (v: preact.VNode) => render(v).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 
-const prob = (id: string, scope: 'course' | 'semester', stage = 'K4'): Problem => ({ id, scope, stage, text: `${id} broke.`, stops: 'Something stops.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', screen: 'schedule', entry: 's5' } });
+const prob = (id: string, scope: 'course' | 'semester', stage = 'K4'): Problem => ({ id, scope, stage, text: `${id} broke.`, stops: 'Something stops.', bites: 'now', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', screen: 'schedule', entry: 's5' } });
 const op = (run_id: number, finished: string, o: Partial<Operation> = {}): Operation => ({ run_id, op: 'release.entry', conclusion: 'done', summary: '', finished, ...o });
 
 describe('course problems (decision 0034)', () => {

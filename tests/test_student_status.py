@@ -427,9 +427,8 @@ def test_an_unchanged_render_keeps_the_old_moment_so_it_makes_no_commit():
 def test_a_released_row_links_its_files_and_carries_its_readings():
     rows = {r["id"]: r for r in _render()["rows"]}
     lec = rows["lecture_01"]
-    assert (lec["kind"], lec["number"], lec["title"], lec["subtitle"]) == (
+    assert (lec["kind"], lec["title"], lec["subtitle"]) == (
         "lecture",
-        1,
         "Lecture 1",
         "Intro",
     )
@@ -475,7 +474,7 @@ def test_an_unreleased_row_is_on_the_calendar_with_nothing_to_open():
     rows = {r["id"]: r for r in _render()["rows"]}
     assert rows["lecture_02"]["released"] is False
     assert rows["lecture_02"]["links"] == []
-    assert rows["lecture_02"]["number"] == 2
+    assert rows["lecture_02"]["title"] == "Lecture 2"
 
 
 def test_hand_out_due_exam_and_term_rows():

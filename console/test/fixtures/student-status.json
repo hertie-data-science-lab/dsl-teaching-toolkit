@@ -86,7 +86,6 @@
     {
       "id": "term-start",
       "kind": "term_date",
-      "number": null,
       "when": "2026-09-07",
       "all_day": true,
       "title": "Semester starts",
@@ -107,7 +106,6 @@
     {
       "id": "lecture_01",
       "kind": "lecture",
-      "number": 1,
       "when": "2026-09-08T10:00:00+02:00",
       "all_day": false,
       "title": "Lecture 1",
@@ -155,7 +153,6 @@
     {
       "id": "assignment-1:handout",
       "kind": "assignment",
-      "number": null,
       "when": "2026-09-15T10:00:00+02:00",
       "all_day": false,
       "title": "Assignment 1",
@@ -176,7 +173,6 @@
     {
       "id": "assignment-2-project:handout",
       "kind": "assignment",
-      "number": null,
       "when": "2026-09-20T10:00:00+02:00",
       "all_day": false,
       "title": "Assignment 2 Project",
@@ -197,7 +193,6 @@
     {
       "id": "assignment-1:due",
       "kind": "due",
-      "number": null,
       "when": "2026-09-27T23:59:00+02:00",
       "all_day": false,
       "title": "Assignment 1",
@@ -218,7 +213,6 @@
     {
       "id": "lecture_02",
       "kind": "lecture",
-      "number": 2,
       "when": "2026-09-30T10:00:00+02:00",
       "all_day": false,
       "title": "Lecture 2",
@@ -239,7 +233,6 @@
     {
       "id": "assignment-3:handout",
       "kind": "assignment",
-      "number": null,
       "when": "2026-10-20T10:00:00+02:00",
       "all_day": false,
       "title": "Assignment 3",
@@ -260,7 +253,6 @@
     {
       "id": "midterm",
       "kind": "exam",
-      "number": null,
       "when": "2026-10-28T09:00:00+01:00",
       "all_day": false,
       "title": "Midterm",
@@ -281,7 +273,6 @@
     {
       "id": "assignment-2-project:due",
       "kind": "due",
-      "number": null,
       "when": "2026-10-30T23:59:00+01:00",
       "all_day": false,
       "title": "Assignment 2 Project",
@@ -302,7 +293,6 @@
     {
       "id": "assignment-3:due",
       "kind": "due",
-      "number": null,
       "when": "2026-11-01T23:59:00+01:00",
       "all_day": false,
       "title": "Assignment 3",
@@ -323,7 +313,6 @@
     {
       "id": "term-end",
       "kind": "term_date",
-      "number": null,
       "when": "2026-12-18",
       "all_day": true,
       "title": "Semester ends",

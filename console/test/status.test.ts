@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { GitHubClient, type Tree } from '../src/github/client';
 import { STATUS_PATH, StatusStore, loadStatus, staleInputs, validateStatus } from '../src/model/status';
@@ -18,6 +19,18 @@ const matching = () => {
 describe('status', () => {
   it('accepts the contracts example', () => {
     expect(validateStatus(example)).toEqual([]);
+  });
+
+  it('reads a key it does not know: one console serves orgs on an older engine too', () => {
+    const later = { ...example, added_later: 1, course: { ...example.course, added_later: 1 }, problems: example.problems.map((p) => ({ ...p, added_later: 1 })) };
+    expect(validateStatus(later)).toEqual([]);
+  });
+
+  it('reads what the last-promoted engine writes (`tests/fixtures/status-release/`)', () => {
+    for (const name of ['course.json', 'semester.json']) {
+      const doc: unknown = JSON.parse(readFileSync(new URL(`../../tests/fixtures/status-release/${name}`, import.meta.url), 'utf8'));
+      expect([name, validateStatus(doc)]).toEqual([name, []]);
+    }
   });
 
   it('rejects a wrong schema tag and a bad state', () => {
@@ -53,15 +66,28 @@ describe('status', () => {
     expect(staleInputs(example.inputs, t)).toEqual([]);
   });
 
-  it('compares course/ inputs only against the course tree', () => {
+  it('never compares a course/ input: it is in another repo', () => {
     const inputs = { 'course/dsl-course.yml': 'c1', 'schedule.yml': 's1' };
     expect(staleInputs(inputs, treeOf({ 'schedule.yml': 's1' }))).toEqual([]);
-    expect(staleInputs(inputs, treeOf({ 'schedule.yml': 's1' }), treeOf({ 'dsl-course.yml': 'c2' }))).toEqual(['course/dsl-course.yml']);
+    expect(staleInputs(inputs, treeOf({ 'schedule.yml': 's2', 'dsl-course.yml': 'c2' }))).toEqual(['schedule.yml']);
   });
 
   it('reports an absent file as not computed yet', async () => {
     const c = new GitHubClient({ token: () => 't', fetch: new FakeGitHub().fetch });
     expect(await loadStatus(c, 'o', 'semester-config')).toEqual({ kind: 'absent' });
+  });
+
+  it('takes archived from the settings repo: the engine writes no status once it is', async () => {
+    const gh = new FakeGitHub()
+      .on('GET', '/repos/o/semester-config', { name: 'semester-config', archived: true })
+      .on('GET', `/repos/o/semester-config/contents/${STATUS_PATH}`, fileBody(STATUS_PATH, JSON.stringify(example), 'st'));
+    const c = new GitHubClient({ token: () => 't', fetch: gh.fetch });
+    expect(example.semester.live).toBe(true);
+    const l = await loadStatus(c, 'o', 'semester-config', false);
+    expect(l.kind === 'ready' && [l.status.semester?.live, l.status.semester?.ended]).toEqual([false, false]);
+    // Archived before any status was written: archived, not "press Refresh".
+    const none = new FakeGitHub().on('GET', '/repos/o/semester-config', { name: 'semester-config', archived: true });
+    expect(await loadStatus(new GitHubClient({ token: () => 't', fetch: none.fetch }), 'o', 'semester-config')).toEqual({ kind: 'absent', archived: true });
   });
 
   it('loads, validates and checks staleness with one recursive tree read', async () => {

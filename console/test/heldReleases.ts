@@ -7,16 +7,16 @@ export function heldStatus(base: Status, org: string): Status {
   const rel = (id: string, when: string, state: 'late' | 'will_be_skipped') => ({ ...base.releases![0], id, when, state, number: Number(id.slice(1)), source: { repo: 'course-materials-f2026', path: `lectures/0${id.slice(1)}` } });
   const fix = (entry: string) => ({ repo: `${org}/semester-config`, path: 'schedule.yml', line: 9, screen: 'schedule', entry });
   // As the engine writes them: `kind` the code, `release` the entry it holds back.
-  const prob = (id: string, entry: string, when: string) => ({ id, scope: 'semester' as const, stage: 'K4', kind: id.split(':').pop(), release: entry, text: `${entry} problem.`, stops: '', fix: fix(entry), when });
+  const prob = (id: string, entry: string, when: string, bites: 'now' | 'soon') => ({ id, scope: 'semester' as const, stage: 'K4', kind: id.split(':').pop(), release: entry, text: `${entry} problem.`, stops: '', fix: fix(entry), when, bites });
   return {
     ...base,
     releases: [rel('s2', '2026-09-17T10:00:00+02:00', 'late'), rel('s3', '2026-09-21T10:00:00+02:00', 'late'), rel('s4', '2026-09-28T10:00:00+02:00', 'will_be_skipped'), ...base.releases!],
     problems: [
-      prob('schedule:s2:SOURCE_MISSING', 's2', '2026-09-17T10:00:00+02:00'),
-      prob('schedule:s3:LATE', 's3', '2026-09-21T10:00:00+02:00'),
-      prob('schedule:s4:SOURCE_MISSING', 's4', '2026-09-28T10:00:00+02:00'),
+      prob('schedule:s2:SOURCE_MISSING', 's2', '2026-09-17T10:00:00+02:00', 'now'),
+      prob('schedule:s3:LATE', 's3', '2026-09-21T10:00:00+02:00', 'now'),
+      prob('schedule:s4:SOURCE_MISSING', 's4', '2026-09-28T10:00:00+02:00', 'soon'),
       // A kind problem on s4 does not hold its release: it is not the row's mark.
-      { ...prob('kinds:s4', 's4', '2026-09-28T10:00:00+02:00'), kind: 'NO_KIND', release: undefined, when: undefined },
+      { ...prob('kinds:s4', 's4', '2026-09-28T10:00:00+02:00', 'now'), kind: 'NO_KIND', release: undefined, when: undefined },
       ...base.problems!,
     ],
   };

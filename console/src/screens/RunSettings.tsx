@@ -5,7 +5,6 @@
 // the keys the instructor set.
 
 import { useRef, useState } from 'preact/hooks';
-import scheduleSchema from '../../schemas/schedule.schema.json';
 import { useEnv } from '../env';
 import { invalidText, saveSteps, useSave, type SaveState, type Step } from '../edit/save';
 import { YamlText, compact, deepEqual, obj, type Path } from '../edit/yamlText';
@@ -13,14 +12,13 @@ import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { Modal } from '../ui/Modal';
 import {
   REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
-  validAssignments, valueWord, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
+  validAssignments, validSchedule, valueWord, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
 } from '../model/cascade';
 import { addDays, fmtWhen } from '../model/format';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { draftErrors, readDraft, writeDraft, type AssignmentDraft } from '../model/scheduleEdit';
 import { SOLUTION_WARNING } from '../model/labels';
 import type { Assignment } from '../model/types';
-import { validator } from '../model/validate';
 import { penaltyRate } from '../model/policy';
 import { round } from '../model/marks';
 import { RUN_LABEL, lateError, runTier, runTiers } from '../tiers/runSettings';
@@ -30,7 +28,6 @@ import { SaveBar } from '../ui/edit';
 import { gradingConfig, tzOf, yearOf } from './common';
 import type { ReadyProps } from './types';
 
-const validSchedule = validator(scheduleSchema);
 
 
 /** The semester's layers for `key` (empty for its defaults), read from the files as they are now. */

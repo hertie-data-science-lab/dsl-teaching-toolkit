@@ -2,7 +2,6 @@
 
 import { Fragment, type ComponentChildren } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
-import gradingSchema from '../../schemas/grading_config.schema.json';
 import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
@@ -15,16 +14,15 @@ import {
 import { checkNow, derive, publishWebsite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
-import { courseBlock, institutionLayer, lateWord, resolve, valueWord, type Layers } from '../model/cascade';
-import { DEFAULT_FORMATS, POLICY } from '../model/policy';
-import { formatsList, fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
+import { courseBlock, institutionLayer, lateWord, resolve, validGrading, valueWord, type Layers } from '../model/cascade';
+import { POLICY } from '../model/policy';
+import { fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import { pick, type Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
 import type { CourseStatus, Horizon, MaterialsCheck, Operation, Outcome, Problem, SemesterStatus, Status, Todo } from '../model/types';
 import { nextEvent, nextEventWords, recentActivity, whoWord, type Activity } from '../model/status';
 import type { CohortRef } from '../model/discovery';
 import { outcomePath } from '../ops/adapter';
-import { validator } from '../model/validate';
 import { CheckLine, Lives, Loading, OpMark, ProblemCards, Probs, Soon, fixHref, ghUrl, runUrl } from '../ui/bits';
 import { ItemRow, RepoChip, RepoWhy, TemplateSub, Verdict, readinessTabs, type Link, type SetupItem } from '../ui/SetupPanel';
 import { DASH_PANEL, DashboardTabs, showTab, type DashTab } from '../ui/DashboardTabs';
@@ -57,19 +55,19 @@ export interface CourseView {
   horizon?: Horizon;
 }
 
-export function courseView(p: Pick<CourseProps, 'loaded' | 'cohortStates'>, now: number): CourseView {
+export function courseView(p: Pick<CourseProps, 'loaded' | 'cohortStates'>): CourseView {
   const st = courseStatus(p);
-  const tiered = tier(st ?? undefined, now, 'course');
+  const tiered = tier(st ?? undefined, 'course');
   return { course: st?.course ?? null, tiered, problems: standing(tiered), horizon: st?.horizon };
 }
 
 /** `courseView` once per render. */
-export const useCourseView = (p: Pick<CourseProps, 'loaded' | 'cohortStates' | 'now'>): CourseView => useMemo(() => courseView(p, p.now), [p.loaded, p.cohortStates, p.now]);
+export const useCourseView = (p: Pick<CourseProps, 'loaded' | 'cohortStates'>): CourseView => useMemo(() => courseView(p), [p.loaded, p.cohortStates]);
 
 /** A semester's problem count for its row: those now or soon. */
 function problemsOf(p: CourseProps, cohortOrg: string): number | null {
   const l = p.cohortStates[cohortOrg];
-  return l && l.kind === 'ready' ? problemCount(l.status, p.now) : null;
+  return l && l.kind === 'ready' ? problemCount(l.status) : null;
 }
 
 /** The course's live semesters whose status is read, newest first: what the overview rolls up. */
@@ -593,7 +591,6 @@ export function CourseScreen(p: CourseProps) {
 
 // --------------------------------------------------------------------------- S17
 
-const gradingValid = validator(gradingSchema);
 /** The page that explains derived and hand-written starters (decision 0028 rule 5). */
 export const STARTER_DOC = 'assignment-starter.md';
 
@@ -635,7 +632,7 @@ export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: 
 export function TemplateScreen(p: CourseProps) {
   const { course, entry } = p;
   const env = useEnv();
-  // The entry is the template's repo name (`status.json` `course.templates[].slug` is the repo).
+  // The entry is the template's repo name.
   const repo = entry ?? '';
   const v = useCourseView(p);
   const file = p.files.file(course.org, repo, 'grading_config.yml', 'solution');
@@ -655,10 +652,10 @@ export function TemplateScreen(p: CourseProps) {
     else cfg = (y.toJS() ?? {}) as Record<string, unknown>;
   }
   const tiers = settingsTiers();
-  // A template that lists no formats runs on the course's, else the institution's: shown ticked, written only when changed.
+  // A template that lists no formats runs as `none` (no starter, no completion check): the course's
+  // default answers New assignment only. Shown ticked, written only when changed.
   const read = fromConfig(cfg, v.course?.templates?.find((t) => t.repo === repo)?.starter);
-  const fallbackFormats = formatsList(courseBlock(p.files, course.org, course.meta).formats);
-  const base: Values = { ...read, formats: (read.formats as string[]).length ? read.formats : fallbackFormats.length ? fallbackFormats : [...DEFAULT_FORMATS] };
+  const base: Values = { ...read, formats: (read.formats as string[]).length ? read.formats : ['none'] };
   const cur = values ?? base;
   const baseQ = questionRows(cfg.questions);
   const q = qdraft ?? baseQ;
@@ -681,7 +678,7 @@ export function TemplateScreen(p: CourseProps) {
     const was = toConfig(effective(tiers, base)), now = toConfig(effective(tiers, cur));
     for (const k of Object.keys({ ...was, ...now })) if (!deepEqual(was[k], now[k])) y.assign([k], now[k]);
     if (qdraft !== null && !deepEqual(qdraft, baseQ)) y.assign(['questions'], questionsValue(qdraft, cfg.questions));
-    if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', gradingValid) });
+    if (!validGrading(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', validGrading) });
     if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `template: edit the settings, from the DSL Teaching Console`, statusRepo: [course.org, COURSE_REPO] })) {
       setValues(null);
       setQdraft(null);
@@ -716,7 +713,7 @@ export function TemplateScreen(p: CourseProps) {
             </div>
             <div class="form-section">
               <h3>How it is marked <Hint label="About marking">Marking builds a mark sheet per student or team from these settings: the formats to read, whether tests run, and the questions below. You fill the sheet in Marks; totals and late penalties are worked out.</Hint></h3>
-              <FormatPicker id="g-fmt" v={cur} set={change} fallback={fallbackFormats.length ? { formats: fallbackFormats, source: 'course' } : undefined} />
+              <FormatPicker id="g-fmt" v={cur} set={change} fallback={null} />
               <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['autograde', 'tests', 'starter'])} values={cur} onChange={change} />
               <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} files={files} />
               <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf'])} values={cur} onChange={change} />

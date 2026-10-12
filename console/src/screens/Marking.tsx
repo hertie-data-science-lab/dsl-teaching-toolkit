@@ -287,6 +287,16 @@ export function TeamsTab(p: TabProps) {
   const assigned = formation?.value === 'assigned';
   const window = assigned ? 'assigned' : !opens ? 'never' : today < opens ? 'pending' : closes && today > closes ? 'closed' : 'open';
   const empty = cur.teams.filter((t) => !t.members.length);
+  // A failed read is no empty table: nothing to place, and nothing to save over.
+  const failed = file.kind === 'error' ? file : roster.kind === 'error' ? roster : null;
+  if (failed)
+    return (
+      <>
+        <div class="page-head"><div><h2 class="h1">{assignmentTitle(a)}</h2></div></div>
+        {p.tabs}
+        <CheckLine cls="bad">Could not read {failed === file ? 'teams.csv' : 'students.csv'}: {failed.message}. It is tried again shortly.</CheckLine>
+      </>
+    );
   return (
     <>
       <div class="page-head">

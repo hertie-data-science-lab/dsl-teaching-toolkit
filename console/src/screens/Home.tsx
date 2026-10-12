@@ -53,7 +53,7 @@ interface Card {
  */
 function isPast(c: CohortRef, l: Loaded | undefined, now: number): boolean {
   const s = l?.kind === 'ready' ? l.status.semester : undefined;
-  if (s?.live === false) return true;
+  if (s?.live === false || (l?.kind === 'absent' && l.archived)) return true;
   return s?.ended ?? endedNow({ org: c.org, termLabel: c.termLabel }, now);
 }
 
@@ -87,10 +87,12 @@ function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, sub: string
   if (!course.write)
     return { ...base, week: '', status: <span class="chip">read only</span>, next: [['', 'Problems and dates need write access']], ro: true, urgency: -1 };
   if (!l || l.kind === 'loading') return { ...base, week: '…', status: <span class="chip">Reading</span>, next: [], ro: false, urgency: 0 };
+  if (l.kind === 'absent' && l.archived)
+    return { ...base, week: 'Finished', status: <span class="probs none">Archived</span>, next: [['', 'Students keep access. Nothing was deleted.']], ro: false, urgency: 0 };
   if (l.kind !== 'ready')
     return { ...base, week: '', status: <span class="chip">{l.kind === 'absent' ? 'Not computed yet' : 'Unreadable'}</span>, next: [['', l.kind === 'absent' ? 'Open it and press Refresh.' : 'The status file could not be read.']], ro: false, urgency: 0 };
   // Problems now or soon (decision 0034): a later one waits in the semester's Coming up.
-  const s = l.status, tz = s.semester?.timezone, n = problemCount(s, now);
+  const s = l.status, tz = s.semester?.timezone, n = problemCount(s);
   if (s.semester?.live === false)
     return {
       ...base,

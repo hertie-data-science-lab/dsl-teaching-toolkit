@@ -24,6 +24,7 @@ import * as defs from '../src/ops/defs';
 import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
 import { ArchiveScreen } from '../src/screens/Archive';
+import { cohortFlags } from '../src/ui/shell';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen, courseFileAfter, detailsOf, missingAdmin } from '../src/screens/CourseEdit';
 import { AssignmentScreen } from '../src/screens/Assignments';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
@@ -395,6 +396,13 @@ describe('editing screens', () => {
     const out = html(<ArchiveScreen {...props()} />);
     expect(out).toContain('Archive Fall 2026');
     expect(out).toMatch(/disabled title="Preview first">Archive Fall 2026/);
+  });
+  it('archive says archived for a semester archived before it had a status, and offers no Refresh', () => {
+    const out = html(<ArchiveScreen {...props({ loaded: { kind: 'absent', archived: true } })} />);
+    expect(out).toContain('Archived: every repo is read-only.');
+    expect(out).not.toContain('Status not computed yet');
+    expect(cohortFlags({ kind: 'absent', archived: true })).toEqual({ problems: null, archived: true });
+    expect(cohortFlags({ kind: 'absent' })).toEqual({ problems: null, archived: false });
   });
   const cp = { course, loaded: { kind: 'absent' } as Loaded, cohortStates: { [COHORT_ORG]: ready }, files, now: NOW };
   it('course details edits admins with emails and the defaults', () => {

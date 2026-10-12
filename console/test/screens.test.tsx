@@ -8,6 +8,7 @@ import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
+import type { Files, TreeState } from '../src/model/files';
 import { signal } from '@preact/signals';
 import { EnvCtx, type Env } from '../src/env';
 import type { Loaded } from '../src/model/status';
@@ -231,6 +232,17 @@ describe('S6 schedule and S11 release', () => {
     expect(out).toContain('lectures/05_trees_and_ensembles');
     expect(out).toContain('schedule.yml#L5');
   });
+  it('never says a folder is missing when the repo could not be read, or was listed only in part', () => {
+    const withTree = (tree: TreeState): Files => Object.assign(Object.create(files), { tree: () => tree });
+    const failed = html(<ScheduleScreen {...props({ entry: 's5', files: withTree({ kind: 'error', message: 'HTTP 502' }) })} />);
+    expect(failed).toContain('Could not read course-materials-f2026 to check the folder; it is tried again shortly.');
+    expect(failed).not.toContain('was not found in the course');
+    const part = html(<ScheduleScreen {...props({ entry: 's5', files: withTree({ kind: 'ready', paths: [{ path: 'lectures', dir: true }], truncated: true }) })} />);
+    expect(part).toContain('course-materials-f2026 is too large to check the folder here.');
+    expect(part).not.toContain('Not found. The release will be skipped');
+    // The repo list failed: the From repo select says so rather than offering no other repos.
+    expect(failed).toContain('Could not list the course’s other repos; it is tried again shortly.');
+  });
   it('pre-selects the inferred kind: the engine’s for a saved entry, else from where the copy lands and the repo’s own aliases', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
     expect(out).toContain('<option value selected>Lecture (inferred)</option>');
@@ -411,7 +423,7 @@ describe('S2 course and S17 template', () => {
   } as typeof base;
   /** The course panel with one tab picked, as the Dashboard builds it: only that tab's body renders. */
   const panel = (c: typeof base, key: string, write = true) => {
-    const items = courseItems(c, tier({ ...STATUS, course: c }, NOW, 'course'), null, NOW);
+    const items = courseItems(c, tier({ ...STATUS, course: c }, 'course'), null, NOW);
     return html(<DashboardTabs selected={key} tabs={readinessTabs({ items, scope: 'course', onCircle: write ? () => {} : undefined })} />);
   };
   it('puts the verdict under the page note: a red ! while a problem stands, a tick once ready', () => {
@@ -455,7 +467,7 @@ describe('S2 course and S17 template', () => {
     expect(panel(base, 'setup')).toContain('One-time setup: what the course needs before a semester can start. Done stays done.');
     // Only the picked tab's body renders.
     expect(sug).not.toContain('One-time setup');
-    const tpl: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...base, templates: [{ repo: 'a', slug: 'a', state: 'todo' }], todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.', optional: false }] } }, sha: 's', stale: [] };
+    const tpl: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...base, templates: [{ repo: 'a', state: 'todo' }], todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.', need: 'needed' }] } }, sha: 's', stale: [] };
     const t = html(<CourseScreen {...cp} loaded={tpl} />);
     expect(t).not.toContain('Brief written');
     expect(t).toContain('<span class="chip notready">Not ready</span>');
@@ -603,7 +615,7 @@ describe('S2 course and S17 template', () => {
     expect(rowsOf(courseItems({ ...base, stages: { ...base.stages, C5: 'todo' } }, [{ p: STATUS.problems![1], b: 'later' }], []))).not.toContain('class="problem"');
     expect(stepLink('C6', withWhy)).toEqual({ href: '#website', label: 'Set up the public website' });
     expect(stepLink('C4', { ...withWhy, materials: [{ repo: 'm', state: 'todo' }] }).label).toBe('Open handout materials');
-    expect(stepLink('C5', { ...withWhy, templates: [{ repo: 't', slug: 't', state: 'todo' }] }).label).toBe('Open templates');
+    expect(stepLink('C5', { ...withWhy, templates: [{ repo: 't', state: 'todo' }] }).label).toBe('Open templates');
   });
   it('reads a semester as live, ended but not archived, or archived', () => {
     const sem = STATUS.semester!;
@@ -613,12 +625,19 @@ describe('S2 course and S17 template', () => {
   });
   it('heads the template settings with its state and a needed checklist: never Ready while the brief is not written', () => {
     const todo = { id: 'template:assignment-3-f2026:brief', kind: 'template' as const, check: 'brief', repo: 'assignment-3-f2026', text: 'The brief (README.md) is not written yet.', need: 'needed' as const };
-    const st: Loaded = { kind: 'ready', sha: 's', stale: [], status: { ...STATUS, problems: [], course: { ...STATUS.course!, templates: [{ repo: 'assignment-3-f2026', slug: 'assignment-3-f2026', state: 'todo' }], todo: [todo] } } };
+    const st: Loaded = { kind: 'ready', sha: 's', stale: [], status: { ...STATUS, problems: [], course: { ...STATUS.course!, templates: [{ repo: 'assignment-3-f2026', state: 'todo' }], todo: [todo] } } };
     const out = html(<TemplateScreen {...cp} loaded={st} entry="assignment-3-f2026" />);
     expect(out).toContain('<span class="chip notready">Not ready</span>');
     expect(out).not.toContain('<span class="chip ok">Ready</span>');
     expect(out).toContain('<p class="sub-h">Needed</p>');
     expect(out).toContain('<li class="open"><span class="s-mark" aria-hidden="true"></span><span class="s-name">Brief written');
+  });
+  it('shows a template that lists no formats as No starter file, as it runs, with no default claimed', () => {
+    const bare = new StaticFiles({ [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: GRADING.replace('formats: [ipynb]\n', '') });
+    const out = html(<TemplateScreen {...cp} files={bare} entry="assignment-3-f2026" />);
+    expect(out).toMatch(/id="g-fmt-fmt-none" checked/);
+    expect(out).not.toMatch(/id="g-fmt-fmt-ipynb" checked/);
+    expect(out).not.toContain('institution default');
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
@@ -644,7 +663,7 @@ describe('S2 course and S17 template', () => {
     expect(out).toMatch(/value="derived" checked/);
     expect(out).toContain('Derive student version');
     expect(out).toContain('<h3>Student version');
-    const st = { ...STATUS, course: { ...STATUS.course!, templates: [{ repo: 'assignment-3-f2026', slug: 'assignment-3-f2026', state: 'ready', starter: 'derived' as const }] } };
+    const st = { ...STATUS, course: { ...STATUS.course!, templates: [{ repo: 'assignment-3-f2026', state: 'ready', starter: 'derived' as const }] } };
     const read = html(<TemplateScreen {...cp} loaded={{ ...ready, status: st } as Loaded} entry="assignment-3-f2026" />);
     expect(read).toMatch(/value="derived" checked/);
   });
@@ -694,7 +713,7 @@ describe('read only and the shell', () => {
     expect(nav).toContain('Fall 2026');
     expect(nav).toContain('class="n-count"');
     expect(nav).toContain('aria-current="page"');
-    expect(nav).toContain('2 problems');
+    expect(nav).toContain('aria-label="1 problem"');
     expect(nav).toContain(`https://${COHORT_ORG}.github.io`);
     expect(nav).toContain('Course on GitHub');
     const top = html(<Topbar user={{ login: 'a', id: 1, name: 'A', email: null, avatar_url: '' }} navOpen={false} onMenu={() => {}} />);
@@ -715,7 +734,7 @@ describe('explicit numbers (decision 0020)', () => {
     status: {
       ...STATUS,
       releases: [...(STATUS.releases ?? []), { id: 'guest', when: '2026-09-25T10:00:00+02:00', kind: 'lecture', number: null, title: '', state: 'will_be_skipped', source: { repo: 'course-materials-f2026', path: 'lectures/03_regularisation' }, dest: { repo: 'materials', path: 'lectures/03_regularisation' }, show_on_site: true, tbc: false }],
-      problems: [...(STATUS.problems ?? []), { id: 'number:lecture:guest', scope: 'semester', stage: 'K4', kind: 'NOT_NUMBERED', release: 'guest', text: 'Give guest a number.', stops: 'The release on Fri 25 Sep will be skipped.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', line: 14, screen: 'schedule', entry: 'guest' }, when: '2026-09-25T10:00:00+02:00' }],
+      problems: [...(STATUS.problems ?? []), { id: 'number:lecture:guest', scope: 'semester', stage: 'K4', kind: 'NOT_NUMBERED', release: 'guest', text: 'Give guest a number.', stops: 'The release on Fri 25 Sep will be skipped.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', line: 14, screen: 'schedule', entry: 'guest' }, when: '2026-09-25T10:00:00+02:00', bites: 'soon' }],
     },
   };
   const guestFiles = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: GUEST }, {}, TREE);

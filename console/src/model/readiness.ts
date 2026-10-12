@@ -1,14 +1,10 @@
 // Readiness (decision 0034): every item has a need (needed or suggested), a state (done, open,
 // problem, waiting), and a problem has a time (now, soon, later). The engine writes `need`,
-// `bites`, `horizon` and `verdict` into status.json; `normalise` fills `bites` and `need` once,
-// at load, for a file the previous engine wrote (contract C). Every helper below and every
-// screen trusts the fields.
+// `bites`, `horizon` and `verdict` into status.json; every helper below and every screen
+// trusts the fields.
 
 import { DAY } from './week';
-import type { Bites, CourseStatus, Horizon, MaterialsCheck, Need, Problem, Release, SemesterStatus, Status, Todo, VerdictState } from './types';
-
-/** Each step's need when the status does not say (contract B): C1-C3 and K1-K6 needed. */
-const STEP_NEED: Record<string, Need> = { C4: 'suggested', C5: 'suggested', C6: 'suggested' };
+import type { Bites, CourseStatus, Horizon, MaterialsCheck, Need, Problem, Release, Status, Todo, VerdictState } from './types';
 
 /** The horizon's length in days: the engine's, else 7. */
 export const horizonDays = (h: Horizon | undefined) => h?.days ?? 7;
@@ -19,39 +15,6 @@ export function bitesAt(when: string | null | undefined, horizon: Horizon | unde
   const at = Date.parse(when);
   if (at <= now) return 'now';
   return at <= now + horizonDays(horizon) * DAY ? 'soon' : 'later';
-}
-
-/** A check's or to-do's need on a status the previous engine wrote: `blocks` (a check), else `optional` (a to-do). */
-const needOf = (x: { need?: Need; blocks?: boolean; optional?: boolean }): Need =>
-  x.need ?? (x.blocks !== undefined ? (x.blocks ? 'needed' : 'suggested') : x.optional === true ? 'suggested' : 'needed');
-
-/** A scope's `stage_need`, else from `stage_optional`, else the contract's default. */
-function stageNeed(c: Pick<CourseStatus, 'stages' | 'stage_need' | 'stage_optional'>): Record<string, Need> {
-  if (c.stage_need) return c.stage_need;
-  return Object.fromEntries(Object.keys(c.stages).map((id) => {
-    const opt = c.stage_optional?.[id];
-    return [id, opt === undefined ? STEP_NEED[id] ?? 'needed' : opt ? 'suggested' : 'needed'];
-  }));
-}
-
-/**
- * The one normalisation, at load (contract C): a status the previous engine wrote gets `bites`
- * (off `when` and the horizon), each check's and to-do's `need`, and each scope's `stage_need`.
- * A status today's engine wrote passes through unchanged.
- */
-export function normalise(status: Status, now: number): Status {
-  const todo = (list: Todo[] | undefined) => list?.map((t) => (t.need ? t : { ...t, need: needOf(t) }));
-  const course = status.course && {
-    ...status.course,
-    stage_need: stageNeed(status.course),
-    // A previous engine's course block may carry no materials or templates list.
-    materials: (status.course.materials ?? []).map((m) => ({ ...m, checks: m.checks?.map((c): MaterialsCheck => (c.need ? c : { ...c, need: needOf(c) })) })),
-    templates: status.course.templates ?? [],
-    todo: todo(status.course.todo),
-  };
-  const semester: SemesterStatus | undefined = status.semester && { ...status.semester, stage_need: stageNeed(status.semester), todo: todo(status.semester.todo) };
-  const problems = status.problems?.map((p) => (p.bites ? p : { ...p, bites: bitesAt(p.when, status.horizon, now) }));
-  return { ...status, ...(course ? { course } : {}), ...(semester ? { semester } : {}), ...(problems ? { problems } : {}) };
 }
 
 /** An ISO moment's own UTC offset in ms: its `±hh:mm` suffix; 0 for `Z` or none. */
@@ -74,9 +37,9 @@ export function problemFromDay(iso: string, horizon: Horizon | undefined): strin
 /** A problem with when it bites. */
 export type Tiered = { p: Problem; b: Bites };
 
-/** Every problem of a status with its time, worked out once per render (`useMemo` on [status, now]). */
-export function tier(status: Status | undefined, now: number, scope?: 'course'): Tiered[] {
-  return (status?.problems ?? []).filter((p) => !scope || p.scope === scope).map((p) => ({ p, b: p.bites ?? bitesAt(p.when, status!.horizon, now) }));
+/** Every problem of a status with the time the engine gave it. */
+export function tier(status: Status | undefined, scope?: 'course'): Tiered[] {
+  return (status?.problems ?? []).filter((p) => !scope || p.scope === scope).map((p) => ({ p, b: p.bites }));
 }
 
 /** The problems that stand now or soon (red and counted); `later` ones wait in Coming up. */
@@ -85,8 +48,8 @@ export const standing = (t: Tiered[]): Problem[] => t.filter((x) => x.b !== 'lat
 export const later = (t: Tiered[]): Problem[] => t.filter((x) => x.b === 'later').map((x) => x.p);
 
 /** The one problem count (decision 0034): problems now or soon. Every count shown (nav, Home, Semesters rows, tabs) is this. */
-export function problemCount(status: Status | undefined, now: number): number {
-  return standing(tier(status, now)).length;
+export function problemCount(status: Status | undefined): number {
+  return standing(tier(status)).length;
 }
 
 export type ItemState = 'done' | 'open' | 'problem' | 'waiting';
