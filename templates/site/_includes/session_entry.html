@@ -19,6 +19,11 @@ Updates box and the All Materials tree.
 that selects which of the entry's links belong to this page, matched against each link's
 own `section` field - the open-courseware site's pages still pass it. A semester site's
 kind tab passes none: a row is one entry of one kind, and every link it carries is its own.
+
+"None" arrives as nil (kind.html passes `section=only` with `only` unassigned), so the
+guard tests `== nil`. It must not test `== blank`: Liquid 4 (GitHub Pages) answers that by
+calling Ruby's `blank?`, which only Rails defines, so `nil == blank` and `"" == blank` are
+both false there and the list rendered empty on every kind tab.
 {%- endcomment -%}
 {%- assign entry = include.entry -%}
 <h2 class="session-title">{% include session_title.html lecture=entry %}</h2>
@@ -36,7 +41,7 @@ keeps its name: it is a contract with the dsl-jekyll-theme, not a description of
 
 {%- capture links -%}
 {%- for link in entry.links -%}
-{%- if include.section == blank or link.section == include.section -%}
+{%- if include.section == nil or link.section == include.section -%}
 <li>{% include file_link.html name=link.name url=link.url view_url=link.view_url %}</li>
 {%- endif -%}
 {%- endfor -%}
