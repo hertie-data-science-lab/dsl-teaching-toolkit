@@ -469,6 +469,40 @@ def test_the_templates_title_is_the_assignments_name_and_beats_the_readme(monkey
     assert out.count('subtitle: "Fraud detection"') == 2  # entry + due row
 
 
+@pytest.mark.parametrize(
+    ("config", "readme", "subtitle"),
+    [
+        # The seeded placeholder names nothing: the brief's heading does.
+        (
+            "title: Assignment 1\n",
+            "# Assignment 1 - Fraud detection\nBody",
+            "Fraud detection",
+        ),
+        ("title: Assignment 1\n", "# Fraud detection\nBody", "Fraud detection"),
+        # A real title still beats the heading.
+        ("title: Churn model\n", "# Fraud detection\nBody", "Churn model"),
+        # No heading either: the identifier alone, no subtitle.
+        ("title: Assignment 1\n", "Body only", None),
+    ],
+)
+def test_a_placeholder_title_gives_way_to_the_briefs_heading(
+    monkeypatch, config, readme, subtitle
+):
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: readme)
+    monkeypatch.setattr(site, "load_grading_spec", lambda *a, **k: _spec(config))
+    out = site._assignment_entry(
+        "Course",
+        "Semester-f2026",
+        "assignment-1",
+        date(2026, 10, 13),
+        handed_out=frozenset({"assignment-1"}),
+    )
+    front = yaml.safe_load(out.split("---")[1])
+    assert front["title"] == "Assignment 1"
+    assert front.get("subtitle") == subtitle
+    assert front["due_event"].get("subtitle") == subtitle
+
+
 def test_a_declared_name_that_repeats_the_identifier_is_trimmed(monkeypatch):
     # Faculty repeat the identifier in a README heading and in a `releases:` title alike,
     # so printing either whole under its identifier read "Assignment 1 / Assignment 1 -
@@ -2531,6 +2565,22 @@ def test_an_unreleased_row_names_where_its_copies_will_land(monkeypatch, tmp_pat
         "will appear in `lecture-materials/lectures/03_week-3` when they are." in text
     )
     assert "Materials for lecture 3 are not yet released" in text
+
+
+def test_an_unreleased_row_names_a_nested_copy_once(monkeypatch, tmp_path):
+    sched = Schedule(
+        releases=[
+            Release(
+                "lab-3",
+                _at(9, 15),
+                [_copy("labs/03_lab"), _copy("labs/03_lab/solutions")],
+                kind="lab",
+            )
+        ]
+    )
+    (text,) = _plan(monkeypatch, tmp_path, sched).collections["_lectures"].values()
+    assert "`materials/labs/03_lab`" in text
+    assert "solutions" not in text
 
 
 def test_a_declared_title_that_repeats_the_rows_name_is_not_said_twice(

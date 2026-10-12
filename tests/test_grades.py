@@ -3344,3 +3344,29 @@ def test_a_whole_number_of_days_is_read_by_one_rule():
     assert [whole_days(v) for v in (-1, True, "x", None)] == [None] * 4
     dropped: list[str] = []
     assert _whole_days(-1, "where", dropped) is None and len(dropped) == 1
+
+
+@pytest.mark.parametrize(
+    ("declared", "readme", "want", "label"),
+    [
+        # The seeded placeholder names nothing: the brief's heading does.
+        (
+            "Assignment 1",
+            "# Assignment 1 - Fraud\nBody",
+            "Assignment 1 - Fraud",
+            "Assignment 1 · Fraud",
+        ),
+        # A real title beats the heading.
+        ("Churn model", "# Fraud\nBody", "Churn model", "Assignment 1 · Churn model"),
+        # No heading: the placeholder stands, and the label is the identifier alone.
+        ("Assignment 1", "Body only", "Assignment 1", "Assignment 1"),
+    ],
+)
+def test_a_placeholder_title_gives_way_to_the_readme_heading(
+    monkeypatch, declared, readme, want, label
+):
+    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: readme)
+    spec = grades.parse_grading_spec(f"title: {declared}\n")
+    got = grades.assignment_title("COURSE", "assignment-1-f2026", spec, "assignment-1")
+    assert got == want
+    assert grades._readme_label("assignment-1", got) == label

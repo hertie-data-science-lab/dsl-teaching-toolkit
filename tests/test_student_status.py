@@ -322,6 +322,30 @@ def test_the_brief_its_name_and_the_shape_note_wait_for_the_hand_out():
     assert "Secret heading" not in student_status.dumps(_render()).decode()
 
 
+@pytest.mark.parametrize(
+    ("declared", "readme", "subtitle"),
+    [
+        ("Assignment 1", README_1, "Linear regression"),
+        ("Churn model", README_1, "Churn model"),
+        ("Assignment 1", "Fit a line.\n", ""),
+    ],
+)
+def test_a_placeholder_title_gives_way_to_the_briefs_heading(
+    declared, readme, subtitle
+):
+    facts = _facts()
+    facts.specs["assignment-1"] = dataclasses.replace(
+        facts.specs["assignment-1"], title=declared
+    )
+    extra = _extra(facts)
+    extra.readmes["assignment-1"] = readme
+    by = {
+        a["slug"]: a
+        for a in student_status.render(_course(), facts, extra, NOW)["assignments"]
+    }
+    assert by["assignment-1"]["subtitle"] == subtitle
+
+
 def test_the_brief_loses_only_its_leading_heading():
     # A `# ` line inside a fenced code block is a comment in the code, and a later `# `
     # heading is the brief's own: only the one that names the assignment goes.
