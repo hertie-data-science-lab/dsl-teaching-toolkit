@@ -13,10 +13,17 @@ import { forgetStudentPrefs, lastVisit, markVisit } from '../src/model/prefs';
 import type { KeyStore } from '../src/auth/types';
 import { SiteSource, homeText, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
-import { ArchivedSemester, AboutView, AssignmentsView, AuditorNote, InstructorsView, MarksView, ScheduleView, WeekList } from '../src/screens/Student';
-import { AskedList, JoinScreen, TeamList, joinTeamUrl } from '../src/screens/StudentJoin';
-import { ReadingsView, materialHref } from '../src/screens/StudentMaterials';
-import { SetupView, forkOf } from '../src/screens/StudentSetup';
+import { ArchivedSemester, AuditorNote } from '../src/screens/Student';
+import { AssignmentsView, YourMarks } from '../src/screens/StudentAssignments';
+import { InstructorsView } from '../src/screens/StudentInstructors';
+import { ScheduleView } from '../src/screens/StudentSchedule';
+import { WeekList } from '../src/screens/StudentWeek';
+import { HomeView } from '../src/screens/StudentHome';
+import { AskedList, TeamList, joinTeamUrl } from '../src/screens/StudentJoin';
+import { ReadingsView } from '../src/screens/StudentMaterials';
+import { materialHref } from '../src/screens/StudentFiles';
+import { forkOf } from '../src/model/fork';
+import { RepoChecks } from '../src/screens/StudentSetup';
 import { cloneCommand, joinPath, vscodeFolder } from '../src/model/open';
 import { Invitations } from '../src/screens/Home';
 import { GhMd } from '../src/ui/rendered';
@@ -102,14 +109,16 @@ describe('2. teams with room, pick to join', () => {
     const a3 = (await byslug())['assignment-3-project'];
     const picked: string[] = [];
     const t = text(<TeamList a={a3} current={null} onPick={(n) => picked.push(n)} picked="" />);
-    expect(t).toMatch(/team-latency 1 of 3 members Pick team-full 3 of 3 members full/);
+    expect(t).toMatch(/Teams so far Team Members Places left Pick team-latency 1 of 3 2 Pick team-full 3 of 3 full $/);
     const btn = findButton(TeamList({ a: a3, current: null, onPick: (n) => picked.push(n), picked: '' }));
     btn.props.onClick();
     expect(picked).toEqual(['team-latency']);
     expect(text(<TeamList a={a3} current={null} onPick={() => {}} picked="team-latency" />)).toContain('Picked');
     expect(new URL(joinTeamUrl(ORG, a3.slug, 'team-latency')).searchParams.get('team')).toBe('team-latency');
-    expect(text(<TeamList a={{ ...a3, teams: [] }} current={null} onPick={() => {}} picked="" />)).toContain('No team has formed for Assignment 3 Project yet');
-    expect(text(<TeamList a={a3} current="team-latency" onPick={() => {}} picked="" />)).toContain('your team');
+    expect(render(<TeamList a={{ ...a3, teams: [] }} current={null} />)).toBe('');
+    expect(text(<TeamList a={a3} current="team-latency" onPick={() => {}} picked="" />)).toContain('team-latency (your team) 1 of 3 2 team-full');
+    // Without onPick (the form is folded, or formation has closed) there is no Pick.
+    expect(text(<TeamList a={a3} current={null} />)).not.toContain('Pick');
   });
 });
 
@@ -146,8 +155,9 @@ describe('3. the whole receipts thread', () => {
     expect(t).toContain('updated data/train.csv');
     expect(t).toContain('Every comment on Submission receipts 3');
     expect(t).toContain('Files updated');
-    expect(t).toContain('Fill in CONTRIBUTIONS.md in your team repo before the deadline.');
-    expect(render(v)).toContain(`href="https://github.com/${ORG}/assignment-3-project-team-latency/blob/HEAD/CONTRIBUTIONS.md"`);
+    // A file row: GitHub draws markdown, so view opens the blob page; in browser edits it.
+    expect(t).toContain('Fill in CONTRIBUTIONS.md ▾ Open view Rendered, on GitHub GitHub The file on GitHub Edit in browser VS Code in your browser Set up your editor in Profile in your team repo before the deadline.');
+    expect(render(v)).toContain(`href="https://github.com/${ORG}/assignment-3-project-team-latency/blob/HEAD/CONTRIBUTIONS.md" role="menuitem" tabindex="-1" target="_blank" rel="noopener">`);
   });
 
   it('puts a This week line for a patch newer than the last visit, and none for an older one', async () => {
@@ -219,13 +229,13 @@ describe('4. the auditor', () => {
     await readMine(client(fake), ORG, LOGIN, []);
     expect(knownAuditor(ORG.toUpperCase())).toBe(true);
     const sem: Semester = { org: ORG, term: 'f2026', termLabel: 'Fall 2026', courseOrg: 'c', courseName: 'Deep Learning', archived: false, role: 'student' };
+    // Marks and Join live in Assignments now (decision 0035 rules 7-8): nobody's nav lists them.
     const nav = render(<StudentNav root="Your semesters" semesters={[sem]} semester={sem} current="week" />);
     expect(nav).not.toContain('#marks');
     expect(nav).not.toContain('#join');
     expect(nav).toContain('#materials');
     await readMine(client(new FakeGitHub().on('GET', new RegExp(`^/orgs/${ORG}/repos`), [])), ORG, LOGIN, []);
     expect(knownAuditor(ORG)).toBe(false);
-    expect(render(<StudentNav root="Your semesters" semesters={[sem]} semester={sem} current="week" />)).toContain('#marks');
   });
 
   it('promises no repo, team or marks: "As an auditor you ..."', async () => {
@@ -236,8 +246,9 @@ describe('4. the auditor', () => {
     expect(a).toContain('As an auditor you hand in no work for this assignment.');
     expect(a).not.toContain('Your repo');
     expect(a).not.toContain('join or create one');
-    expect(text(<MarksView org={ORG} login={LOGIN} facts={f} gradebook={null} studentView={false} auditor />)).toContain('As an auditor you get no marks');
-    expect(text(<JoinScreen org={ORG} facts={f} mine={m} studentView={false} />)).toContain('As an auditor you do not join a team.');
+    expect(a).not.toContain('Join or create a team');
+    expect(a).not.toContain('Your marks');
+    expect(text(<YourMarks org={ORG} login={LOGIN} facts={f} gradebook={null} auditor />)).toContain('As an auditor you got no marks');
     const week = weekItems(f, m, NOW).map((i) => i.kind);
     expect(week).not.toContain('teams');
     expect(week).not.toContain('marks');
@@ -326,6 +337,12 @@ describe('7. readings per session', () => {
     expect(sched).toContain('Readings:');
     expect(sched).toContain(`href="${href}"`);
     expect(sched).toContain('Readings to come.');
+    const html = render(<ReadingsView org={ORG} facts={f} now={NOW} />);
+    // Each reading file gets the menu (decision 0035 rule 10): GitHub; a pdf takes no Edit.
+    expect(html).toContain(`href="${href}"`);
+    expect(html).toContain('class="file-chev"');
+    expect(html).toContain('</svg>GitHub</span>');
+    expect(html).not.toContain('>Edit</div>');
     const mat = text(<ReadingsView org={ORG} facts={f} now={NOW} />);
     expect(mat).toMatch(/Session 1 ?: Deep learning in public policy/);
     expect(mat).toContain('Session 1 readings');
@@ -374,11 +391,10 @@ describe('9. the About block', () => {
     expect(homeText('{% if site.x %}A{% endif %}{{ site.y }}{% include z.html %}', { x: 'on', y: 'B' })).toBe('AB');
   });
 
-  it('shows them on the semester’s This week, and a new announcement as a week line', async () => {
+  it('shows them on the semester’s Home (decision 0035 rule 4), and a new announcement as a week line', async () => {
     const f = await facts();
-    const v = <AboutView facts={f} org={ORG} tz="Europe/Berlin" now={NOW} />;
+    const v = <HomeView facts={f} org={ORG} now={NOW} />;
     const t = text(v);
-    expect(t).toContain('About Deep Learning (Demo)');
     expect(t).toContain('Syllabus');
     expect(t).toContain('Welcome to Deep Learning (Demo)');
     expect(t).toContain('Room change');
@@ -395,7 +411,7 @@ describe('10. the small fields', () => {
     expect((await byslug())['assignment-8'].tbc).toBe(true);
   });
 
-  it('shows TBC, row details, the points, the course’s late sentences and deep-linked file chips', async () => {
+  it('shows TBC, row details, the points and deep-linked file chips, and no course-wide late section (decision 0035 rule 6)', async () => {
     const f = await facts();
     const sched = render(<ScheduleView facts={f} mine={null} now={NOW} org={ORG} />);
     expect(sched).toContain('class="tbc">TBC');
@@ -403,9 +419,9 @@ describe('10. the small fields', () => {
     expect(sched).toContain(`href="${materialHref(ORG, 'materials', 'lectures/01_deep-learning-in-public-policy/Session1_E1394_DL_preLecture.pdf')}"`);
     expect(sched).toContain('>Lab_Session_3.ipynb<');
     const t = text(<AssignmentsView org={ORG} facts={f} mine={mine()} now={NOW} studentView={false} receipts={{}} />);
-    expect(t).toContain('Out of 25 points');
+    expect(t).toContain('Worth 25 points');
     expect(t).toMatch(/Due [^)]*\(TBC\)/);
-    expect(t).toContain('Late work in this course You have free 8 late days.');
+    expect(t).not.toContain('Late work in this course');
   });
 });
 
@@ -434,7 +450,7 @@ describe('11. the instructors', () => {
   });
 });
 
-describe('12. Set up', () => {
+describe('12. Your repos (Profile)', () => {
   it('checks the fork: forked, none, or a same-named repo that is not the fork', async () => {
     const fake = new FakeGitHub()
       .on('GET', `/repos/${LOGIN}/materials`, { name: 'materials', fork: true, parent: { full_name: `${ORG}/materials` }, html_url: `https://github.com/${LOGIN}/materials` })
@@ -453,16 +469,13 @@ describe('12. Set up', () => {
     expect(cloneCommand('https://github.com/jane/materials', '', 'materials')).toBe('git clone https://github.com/jane/materials.git');
   });
 
-  it('lists the student’s own assignment repos with an Open button each, and nothing personal in the Student view', async () => {
+  it('lists the student’s own assignment repos with an Open button each', async () => {
     const f = await facts();
-    const html = render(<SetupView org={ORG} facts={f} mine={mine()} studentView={false} />);
-    expect(text(<SetupView org={ORG} facts={f} mine={mine()} studentView={false} />)).toContain('assignment-2-octo-student');
+    const html = render(<RepoChecks org={ORG} facts={f} mine={mine()} />);
+    expect(text(<RepoChecks org={ORG} facts={f} mine={mine()} />)).toContain('assignment-2-octo-student');
     // The clone command lives only in the Open menu's Clone ?, not in a block on the page.
     expect(html).not.toContain('<pre');
     expect(html).toContain('class="split small"');
-    const sv = text(<SetupView org={ORG} facts={f} mine={null} studentView />);
-    expect(sv).toContain('A student checks here that they have forked each materials repo');
-    expect(sv).not.toContain('git clone');
   });
 });
 
@@ -498,7 +511,8 @@ describe('14. archived semesters as history', () => {
   });
 
   it('the history shows marks read-only from the gradebook', async () => {
-    const t = text(<MarksView org={ORG} login={LOGIN} facts={await facts()} gradebook={parseGradebook(GRADES)} studentView={false} />);
-    expect(t).toContain('21 / 25');
+    const t = text(<YourMarks org={ORG} login={LOGIN} facts={await facts()} gradebook={parseGradebook(GRADES)} />);
+    expect(t).toContain('Your marks Assignment Mark Late penalty Assignment 2: Classification and evaluation 21 / 25');
+    expect(t).toContain('Clear evaluation');
   });
 });

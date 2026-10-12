@@ -193,7 +193,7 @@ function Overview(p: TabProps) {
         <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">{a.state === 'open' || a.state === 'late_window'
             ? 'Students push to their own repo until the due date. Late work is accepted with the penalty until the late cutoff.'
             : a.state === 'marking' ? 'Marks and feedback go to students; your private notes do not. Return marks previews first.'
-            : a.state === 'teams_forming' ? 'Students form teams on the Join screen until late work closes, and you can assign the rest. Students without a team get no repo.'
+            : a.state === 'teams_forming' ? 'Students form teams on the assignment’s page until late work closes, and you can assign the rest. Students without a team get no repo.'
             : a.state === 'blocked' ? 'Assign this assignment’s teams on the Teams tab; each team gets its repo once saved. Students without a team get none.'
             : 'Hands out at the scheduled time, or now. Preview never changes anything students see.'}</Hint></h2><p class="lede">{lede}</p></div>
       </div>
@@ -236,7 +236,7 @@ function Overview(p: TabProps) {
           <ul class="state-actions">
             {row(cur === 0 ? 'now' : 'past', 'Declared', handedOut ? `Handed out ${fmtWhen(a.handout, tz, year)} to ${a.units} ${group ? 'teams' : 'students'}.` : 'Hands out at its time, or now.',
               handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><OpButtons def={handout(scope, ref)} small /></div>)}
-            {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the Join screen of the student console; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={tabHref(a.slug, 'teams')}>Open teams</a></div>) : null}
+            {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the assignment’s page in the student console; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={tabHref(a.slug, 'teams')}>Open teams</a></div>) : null}
             {row(cur === 2 || cur === 3 ? 'now' : cur > 3 ? 'past' : 'later', 'Open, late window',
               cur < 2 ? 'Opens after hand out.' : cur > 3 ? `Closed ${fmtDay(a.grading_cutoff_datetime, tz, year)}.` : 'Update every copy pushes an assignment template file to every student and posts a note on each Submission receipts issue. Collect now pulls the latest work.',
               cur === 2 || cur === 3 ? (

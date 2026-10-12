@@ -34,16 +34,16 @@ describe('Home groups', () => {
     const out = render(<HomeScreen courses={[]} semesters={[NLP, NLP_OLD]} cohortStates={{}} now={0} user={user} />);
     expect(out).toContain('<h1>Your semesters <span class="hint-wrap">');
     // This semester first, then Past semesters, as the instructor's page has them (decision 0029 rule 3).
-    expect(out.indexOf('This semester')).toBeLessThan(out.indexOf('hertie-nlp-f2026#week'));
-    expect(out.indexOf('hertie-nlp-f2026#week')).toBeLessThan(out.indexOf('Past semesters'));
-    expect(out.indexOf('Past semesters')).toBeLessThan(out.indexOf('hertie-nlp-f2025#week'));
+    expect(out.indexOf('This semester')).toBeLessThan(out.indexOf('hertie-nlp-f2026#home'));
+    expect(out.indexOf('hertie-nlp-f2026#home')).toBeLessThan(out.indexOf('Past semesters'));
+    expect(out.indexOf('Past semesters')).toBeLessThan(out.indexOf('hertie-nlp-f2025#home'));
     expect(out).not.toContain('Open the semester');
     expect(out).not.toContain('Show these semesters');
     expect(out).not.toContain('New course');
     expect(out).not.toContain('Your courses');
     expect(out).toContain('Natural Language Processing, Fall 2026');
-    expect(out).toMatch(/cohort-card past" href="\?semester=hertie-nlp-f2025#week"/);
-    expect(out).toMatch(/cohort-card" href="\?semester=hertie-nlp-f2026#week"/);
+    expect(out).toMatch(/cohort-card past" href="\?semester=hertie-nlp-f2025#home"/);
+    expect(out).toMatch(/cohort-card" href="\?semester=hertie-nlp-f2026#home"/);
     expect(text(<HomeScreen courses={[]} semesters={[NLP_OLD]} cohortStates={{}} now={0} user={user} />)).toContain('Archived');
   });
 
@@ -53,11 +53,11 @@ describe('Home groups', () => {
     const f2025 = sem('hertie-dsl-demo-f2025', { term: 'f2025', termLabel: 'Fall 2025', courseOrg: COURSE_ORG, courseName: 'Deep Learning', courseCode: 'E1234' });
     const f2026 = sem('hertie-dsl-demo-f2026', { courseOrg: COURSE_ORG, courseName: 'Deep Learning', courseCode: 'E1234' });
     const out = render(<HomeScreen courses={[]} semesters={[f2026, f2025]} cohortStates={{}} now={now} user={user} />);
-    for (const org of [f2025.org, f2026.org]) expect(out.split(`href="?semester=${org}#week"`)).toHaveLength(2);
-    expect(out.indexOf('This semester')).toBeLessThan(out.indexOf(`${f2026.org}#week`));
-    expect(out.indexOf(`${f2026.org}#week`)).toBeLessThan(out.indexOf('Past semesters'));
-    expect(out.indexOf('Past semesters')).toBeLessThan(out.indexOf(`${f2025.org}#week`));
-    expect(out).toContain(`cohort-card past" href="?semester=${f2025.org}#week"`);
+    for (const org of [f2025.org, f2026.org]) expect(out.split(`href="?semester=${org}#home"`)).toHaveLength(2);
+    expect(out.indexOf('This semester')).toBeLessThan(out.indexOf(`${f2026.org}#home`));
+    expect(out.indexOf(`${f2026.org}#home`)).toBeLessThan(out.indexOf('Past semesters'));
+    expect(out.indexOf('Past semesters')).toBeLessThan(out.indexOf(`${f2025.org}#home`));
+    expect(out).toContain(`cohort-card past" href="?semester=${f2025.org}#home"`);
     expect(out).not.toContain('DSL courses');
     expect(out).not.toContain('read only');
     expect(out).toContain('<span class="cc-code">E1234</span>');
@@ -97,11 +97,11 @@ describe('Home groups', () => {
     saveCurrentOnly('octo', true);
     const out = render(<HomeScreen courses={[]} semesters={[NLP, NLP_OLD]} cohortStates={{}} now={0} user={user} />);
     expect(out).toMatch(/<label class="check my-only"><input type="checkbox" checked[^>]*\/?><span>Current only<\/span>/);
-    expect(out).not.toContain('href="?semester=hertie-nlp-f2025#week"');
+    expect(out).not.toContain('href="?semester=hertie-nlp-f2025#home"');
     expect(out).not.toContain('Past semesters');
-    expect(out).toContain('href="?semester=hertie-nlp-f2026#week"');
+    expect(out).toContain('href="?semester=hertie-nlp-f2026#home"');
     const other = render(<HomeScreen courses={[]} semesters={[NLP, NLP_OLD]} cohortStates={{}} now={0} user={{ ...user, login: 'someone-else' }} />);
-    expect(other).toContain('href="?semester=hertie-nlp-f2025#week"');
+    expect(other).toContain('href="?semester=hertie-nlp-f2025#home"');
   });
 
   it('the toggle survives storage that is missing or refuses', () => {
@@ -110,7 +110,7 @@ describe('Home groups', () => {
     expect(() => saveCurrentOnly('octo', true, refusing)).not.toThrow();
     expect(currentOnly('octo', null)).toBe(false);
     vi.stubGlobal('localStorage', undefined);
-    expect(render(<HomeScreen courses={[]} semesters={[NLP]} cohortStates={{}} now={0} user={user} />)).toContain('?semester=hertie-nlp-f2026#week');
+    expect(render(<HomeScreen courses={[]} semesters={[NLP]} cohortStates={{}} now={0} user={user} />)).toContain('?semester=hertie-nlp-f2026#home');
   });
 
   it('a student with exactly one live semester and no instructor role lands on it', () => {
@@ -166,17 +166,14 @@ describe('mode and the student shell', () => {
     expect(nav).not.toContain('nav-dot');
   });
 
-  it('the student nav lists the eight screens', () => {
-    const nav = render(<StudentNav root="Your semesters" semesters={[NLP]} semester={NLP} current="marks" />);
-    const labels = [...nav.matchAll(/<li><a href="\?semester=hertie-nlp-f2026#(\w+)"[^>]*>([^<]+)</g)].map((m) => [m[1], m[2]]);
-    expect(labels).toEqual([['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['materials', 'Materials'], ['setup', 'Set up'], ['join', 'Join'], ['instructors', 'Instructors']]);
-    expect(nav).toMatch(/#marks" aria-current="page"/);
+  it('the student nav lists the site’s tabs, Home first, with no Marks, Join or Set up (decision 0035 rule 3)', () => {
+    const nav = render(<StudentNav root="Your semesters" semesters={[NLP]} semester={NLP} current="assignments" />);
+    const labels = [...nav.matchAll(/<li><a href="\?semester=hertie-nlp-f2026#([\w-]+)"[^>]*><span class="with-icon"><svg[^>]*>.*?<\/svg>([^<]+)</g)].map((m) => [m[1], m[2]]);
+    expect(labels).toEqual([['home', 'Home'], ['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['materials', 'All materials'], ['instructors', 'Instructors']]);
+    expect(nav).toMatch(/#assignments" aria-current="page"/);
     expect(nav).toContain('Your semesters');
-    const t = text(<StudentScreen semester={NLP} screen="marks" studentView={false} />);
-    expect(t).toContain('Marks');
-    expect(t).not.toContain('Coming in D3.');
-    expect(t).not.toContain('Student view');
-    expect(studentScreen('nonsense')).toBe('week');
+    expect(studentScreen('nonsense')).toBe('home');
+    expect(studentScreen('kind-lab')).toBe('kind-lab');
   });
 
   it('Student view shows a banner, the instructor’s own identity only, and a way back', () => {
@@ -194,7 +191,7 @@ describe('mode and the student shell', () => {
     // The person's student semesters are on All courses, not in the course's tree.
     expect(nav).not.toContain(`?semester=${NLP.org}`);
     const banner = render(<CourseBanner crumbs={[]} name="Machine Learning" semester={{ org: cohort.org, termLabel: 'Fall 2026', view: 'student' }} />);
-    expect(banner).toContain(`<a class="btn small quiet" href="?semester=${cohort.org}#week">Student view</a>`);
+    expect(banner).toContain(`<a class="btn small quiet" href="?semester=${cohort.org}#home">Student view</a>`);
     expect(banner).toContain('<h1>Machine Learning</h1>');
     expect(banner).toContain('<span class="sem-title">Fall 2026</span>');
     expect(banner).toContain(`href="https://github.com/${cohort.org}"`);
@@ -205,7 +202,7 @@ describe('mode and the student shell', () => {
     const preview = render(<Topbar user={user} title="Student view (preview)" titleHref={`?cohort=${cohort.org}#dashboard`} />);
     expect(preview).toContain(`<a class="app-view" href="?cohort=${cohort.org}#dashboard"><span class="long">Student view (preview)</span><span class="short">Preview</span></a>`);
     const real = render(<Topbar user={user} title="Student view" />);
-    expect(real).toContain('DSL Teaching Console<small>Student view</small></a>');
+    expect(real).toContain('DSL Teaching Console</span><small>Student view</small></a>');
     expect(real).not.toContain('app-view');
   });
 });

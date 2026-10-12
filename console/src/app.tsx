@@ -22,7 +22,7 @@ import { OpsSession } from './ops/session';
 import { ArchiveScreen } from './screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
 import { takeInstallReturn } from './wizards/drafts';
-import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, wizardOf } from './router';
+import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, studentNavKey, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseHeaderActions, CourseScreen, TemplateScreen, courseOf, semesterChip, templateTitle } from './screens/Course';
@@ -39,14 +39,14 @@ import { NewCohortScreen } from './screens/NewCohort';
 import { NewCourseScreen } from './screens/NewCourse';
 import { NewMaterialsScreen } from './screens/NewMaterials';
 import { MigrationUnknownScreen, NotMigratedScreen } from './screens/NotMigrated';
-import { StudentBanner, StudentScreen, forgetStudentData, studentScreen } from './screens/Student';
+import { CourseWebsiteScreen, StudentBanner, StudentScreen, StudentSideNav, forgetStudentData, studentData, studentScreen } from './screens/Student';
 import { JoinCourseScreen } from './screens/StudentJoin';
 import type { CohortProps, CourseProps } from './screens/types';
 import { Loading, ghUrl } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
 import { forgetRendered } from './ui/rendered';
 import { forgetShown } from './model/materials';
-import { CourseBanner, Footer, Sidenav, StudentNav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
+import { CourseBanner, Footer, Sidenav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
 import { fmtDay } from './model/format';
 import { DEFAULT_TIMEZONE } from './model/policy';
 import type { SemesterStatus } from './model/types';
@@ -99,7 +99,7 @@ export function App({ state: s }: { state: AppState }) {
     };
   }, []);
 
-  // A semester's student screens keep their own `#setup` (Set up); only instructor links rename.
+  // A semester's student screens rename their own old hashes (`#marks`, `#join` to Assignments).
   // Until discovery answers, a `?semester=` URL is taken as the student screens' (nothing is
   // rewritten yet); after, only when the person holds a role in that semester.
   const asked = parseSearch(s.search.value);
@@ -171,13 +171,26 @@ export function App({ state: s }: { state: AppState }) {
 
   // Profile and Guide are app-level: a semester in the query does not turn them into student screens.
   const stu = FULL_WIDTH.includes(route.screen) ? null : studentContext(estate, sel, s.archivedOf);
-  if (stu?.pending) {
+  // A student (never an instructor's Student view) of a course that has not opted in gets the
+  // course's website, read off the facts the student screens read anyway.
+  const gate = stu && !stu.pending && !stu.studentView ? s.consoleGate(stu.semester.org) : null;
+  if (stu?.pending || gate === undefined) {
     return (
       <>
         <Topbar user={user} title={title} onSignOut={s.signOut} guide={guide} />
         <div class="shell" style="grid-template-columns:minmax(0,1fr)"><main><Loading what="Opening the semester" /></main></div>
         <Footer sub={root} />
       </>
+    );
+  }
+  if (stu && gate && !gate.on) {
+    const others = courses.length > 0 || semesters.length > 1;
+    return (
+      <EnvCtx.Provider value={s.env(user)}>
+        <Topbar user={user} title={title} onSignOut={s.signOut} guide={guide} />
+        <div class="shell" style="grid-template-columns:minmax(0,1fr)"><main id="view" tabindex={-1}><CourseWebsiteScreen semester={stu.semester} courseName={gate.courseName} root={others ? root : undefined} /></main></div>
+        <Footer title={gate.courseName || stu.semester.courseName || undefined} sub={stu.semester.termLabel} />
+      </EnvCtx.Provider>
     );
   }
   if (stu) {
@@ -188,7 +201,7 @@ export function App({ state: s }: { state: AppState }) {
         <Topbar user={user} title={stu.studentView ? 'Student view (preview)' : title} titleHref={stu.studentView ? back : undefined} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} guide={guide} />
         <div class="shell">
           <aside class="sidenav" id="sidenav-wrap" aria-label="Semester navigation">
-            <StudentNav root={root} semesters={semesters} semester={stu.semester} current={key} studentView={stu.studentView} now={s.now.value} />
+            <StudentSideNav root={root} semesters={semesters} semester={stu.semester} current={studentNavKey(key)} studentView={stu.studentView} now={s.now.value} />
           </aside>
           <main id="view" tabindex={-1}>
             {estate.invited?.length ? <Invitations invited={estate.invited} kind={estate.kind} /> : null}
@@ -243,7 +256,8 @@ export function App({ state: s }: { state: AppState }) {
   } else if (screen === 'help') {
     body = <HelpScreen />;
   } else if (screen === 'profile') {
-    body = <SetupScreen org={ctx.course?.org} courses={[...courses.map((c) => ({ org: c.org, name: c.name })), ...semesters.map((k) => ({ org: k.org, name: k.courseName || k.termLabel }))]} />;
+    body = <SetupScreen org={ctx.course?.org} courses={[...courses.map((c) => ({ org: c.org, name: c.name })), ...semesters.map((k) => ({ org: k.org, name: k.courseName || k.termLabel }))]}
+      semesters={semesters.filter((k) => !k.archived && !semesterOver(k, s.now.value))} />;
   } else if (screen === 'home') {
     body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {
@@ -372,6 +386,7 @@ export function createState({ auth, client }: AppDeps) {
   const files = new LiveFiles(client);
   const beats = new Map<string, ReturnType<typeof signal<Heartbeat | null | undefined>>>();
   const archived = new Map<string, ReturnType<typeof signal<boolean | undefined>>>();
+  const gates = new Map<string, ReturnType<typeof signal<{ on: boolean; courseName: string } | undefined>>>();
   const left = new Map<string, { sig: ReturnType<typeof signal<Leftover[] | 'failed' | undefined>>; nav: string }>();
   let env: Env | null = null;
   const ops = new OpsSession(new DispatchAdapter(client, () => st.user.value?.login ?? ''), {
@@ -426,6 +441,24 @@ export function createState({ auth, client }: AppDeps) {
     },
     discover(): Promise<Estate> {
       return discoverEstate(client, { kind: auth.kind() ?? 'classic', login: st.user.value?.login ?? '' });
+    },
+    /**
+     * Whether a semester's course lets its students into the console (`studentConsole` in its
+     * facts, through the one memoised `studentData` read the screens share), with the course
+     * name; undefined until it answers. A read that fails counts as on: the screens then say why.
+     */
+    consoleGate(org: string): { on: boolean; courseName: string } | undefined {
+      let g = gates.get(org);
+      if (!g) {
+        const sig = signal<{ on: boolean; courseName: string } | undefined>(undefined);
+        g = sig;
+        gates.set(org, sig);
+        void studentData(client).facts(org).then(
+          (f) => (sig.value = { on: f?.studentConsole !== false, courseName: f?.courseName ?? '' }),
+          () => (sig.value = { on: true, courseName: '' }),
+        );
+      }
+      return g.value;
     },
     /** Whether a semester's `.github` is archived, read once on first ask; undefined until it answers. */
     archivedOf(org: string): boolean | undefined {
@@ -484,6 +517,7 @@ export function createState({ auth, client }: AppDeps) {
       statuses.forget();
       beats.clear();
       archived.clear();
+      gates.clear();
       left.clear();
       ops.reset();
       env = null;

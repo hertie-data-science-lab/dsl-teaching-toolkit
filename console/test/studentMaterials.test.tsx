@@ -9,7 +9,8 @@ import { GitHubClient, encodeBase64, type TreeEntry } from '../src/github/client
 import { ASSET_LIMIT, forgetShown, showFile } from '../src/model/materials';
 import { CELL_BREAK, htmlRefs, inlineHtml, notebookCells, notebookHtml, resolve, splitRendered } from '../src/model/viewer';
 import { AskedList, JoinCourseForm, TeamForm, issueState, joinCourseUrl, joinTeamUrl } from '../src/screens/StudentJoin';
-import { MaterialsTree, ShownView, materialHref, splitEntry } from '../src/screens/StudentMaterials';
+import { MaterialsTree, ShownView, splitEntry } from '../src/screens/StudentMaterials';
+import { materialHref } from '../src/screens/StudentFiles';
 import { FakeGitHub, fileBody, json } from './fake';
 
 const ORG = 'hertie-dsl-demo-f2026';
@@ -218,8 +219,8 @@ describe('Join', () => {
 
   it('offers the team form only for an assignment forming teams, with its close date and size', () => {
     const base = { title: 'Assignment 3 Project', subtitle: 'Group project', handout: null, due: null, lateCutoff: null, lateRule: '', cutoffSentence: '', submitVia: 'assignment_repo' as const, privateRepo: true, submitUrl: '', group: true, solutionShown: null, maxPoints: '', handedOut: true, brief: '', shape: 'assignment-repo-private', shapeNote: '', tbc: false, teams: [] };
-    expect(text(<TeamForm org={ORG} assignments={[{ ...base, slug: 'a', teamFormation: null }]} mine={null} />)).toContain('No assignment is forming teams now.');
-    const t = text(<TeamForm org={ORG} assignments={[{ ...base, slug: 'assignment-3-project', teamFormation: { closes: '26th Oct', cap: 3 } }]} mine={null} />);
+    expect(text(<TeamForm org={ORG} a={{ ...base, slug: 'a', teamFormation: null }} mine={null} />)).toContain('Team formation for Assignment 3 Project is closed.');
+    const t = text(<TeamForm org={ORG} a={{ ...base, slug: 'assignment-3-project', teamFormation: { closes: '26th Oct', cap: 3 } }} mine={null} />);
     expect(t).toContain('Teams can form until 26th Oct. At most 3 in a team.');
     expect(render(<JoinCourseForm org={ORG} />)).toContain('disabled');
   });

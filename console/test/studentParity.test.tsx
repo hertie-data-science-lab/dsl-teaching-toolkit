@@ -20,10 +20,12 @@ import type { Mine } from '../src/model/mine';
 import { STUDENT_STATUS_PATH } from '../src/model/names';
 import { StatusFileSource, factsFromStatus, type SemesterFacts } from '../src/model/student';
 import { closesWords, formingAt, nextLine, semesterLine, weekItems, weekPhrase, weekWords } from '../src/model/week';
-import { STUDENT_HINTS, ScheduleView, StudentBanner, StudentScreen } from '../src/screens/Student';
+import { studentScreens } from '../src/router';
+import { STUDENT_HINTS, StudentBanner, StudentScreen } from '../src/screens/Student';
+import { ScheduleView } from '../src/screens/StudentSchedule';
 import { AskedList, TeamForm } from '../src/screens/StudentJoin';
 import { MaterialsTree } from '../src/screens/StudentMaterials';
-import { RECHECK_FOR_MS, RECHECK_MS, SetupView } from '../src/screens/StudentSetup';
+import { RECHECK_FOR_MS, RECHECK_MS, RepoChecks } from '../src/screens/StudentSetup';
 import { FakeGitHub, fileBody } from './fake';
 import FILE from './fixtures/student-status.json?raw';
 
@@ -82,8 +84,8 @@ describe('the semester dates and when the file was written', () => {
     expect(formingAt(a.teamFormation, Date.parse('2026-11-09T23:59:00+01:00'), tz)).toBe(false);
     expect(closesWords('2026-11-09 23:59', tz)).toBe('Mon 9 Nov 23:59');
     expect(closesWords('26th Oct', tz)).toBe('26th Oct');
-    expect(html(<TeamForm org={ORG} assignments={[a]} mine={null} tz={tz} now={NOW} />)).toContain('Teams can form until Mon 9 Nov 23:59.');
-    expect(html(<TeamForm org={ORG} assignments={[a]} mine={null} tz={tz} now={after} />)).toContain('No assignment is forming teams now.');
+    expect(html(<TeamForm org={ORG} a={a} mine={null} tz={tz} now={NOW} />)).toContain('Teams can form until Mon 9 Nov 23:59.');
+    expect(html(<TeamForm org={ORG} a={a} mine={null} tz={tz} now={after} />)).toContain(`Team formation for ${a.title} is closed.`);
   });
 
   it('give the week as the instructor’s banner counts it: none before week 1, the last after the end', () => {
@@ -122,8 +124,8 @@ describe('the student banner and screens', () => {
   it('every student page title carries a ?', () => {
     for (const screen of Object.keys(STUDENT_HINTS)) {
       const out = html(<StudentScreen semester={semester} screen={screen} studentView={false} now={NOW} />);
-      expect(out).toMatch(/<h2 class="h1">[^<]+<span class="hint-wrap"><button class="hint-btn"/);
-      expect(out).toContain(STUDENT_HINTS[screen].replace(/’/g, '&rsquo;').slice(0, 30));
+      expect(out).toMatch(/<h2 class="h1">(?:[^<]|<span class="h-sub">[^<]+<\/span>)+<span class="hint-wrap"><button class="hint-btn"/);
+      expect(out).toContain(STUDENT_HINTS[screen].slice(0, 30));
     }
     for (const t of Object.values(STUDENT_HINTS)) expect(t.split(/[.!?](\s|$)/).filter((x) => x.trim()).length).toBeLessThanOrEqual(2);
   });
@@ -153,7 +155,21 @@ describe('the student banner and screens', () => {
 });
 
 describe('the student shell', () => {
-  it('lands a student with one live semester on its This week, with its footer and no Guide', async () => {
+  it('renders every screen of the Student view, kind tabs too, with no student’s data read', async () => {
+    const f = withFile();
+    for (const [screen, label] of studentScreens(factsFromStatus(DOC))) {
+      const el = await mount(<StudentScreen semester={semester} screen={screen} studentView now={NOW} />, f);
+      expect(el.querySelector('.ro-banner')?.textContent).toContain('Student view.');
+      expect(el.querySelector('h2.h1')?.textContent).toContain(screen === 'home' ? 'Deep Learning / Fall 2026' : label);
+      expect(el.querySelector('.loading, .check-line.bad')).toBeNull();
+      render(null, root!);
+    }
+    // Shared facts only (the status file, the materials tree, a card picture): no one's repos, team, role or gradebook.
+    expect(f.seen.some((c) => c.url.includes('/.github/contents/'))).toBe(true);
+    expect(f.seen.filter((c) => /grades-|\/teams\/|\/user\/|\/orgs\/[^/]+\/repos|\/issues/.test(c.url))).toEqual([]);
+  });
+
+  it('lands a student with one live semester on its Home, with its footer and no Guide', async () => {
     const f = withFile();
     const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: client(f) });
     s.user.value = user;
@@ -162,7 +178,7 @@ describe('the student shell', () => {
     document.body.appendChild(root);
     await act(async () => render(<App state={s} />, root!));
     await settle();
-    expect(root.querySelector('#view h2.h1')?.textContent).toContain('This week');
+    expect(root.querySelector('#view h2.h1')?.textContent).toMatch(/^Deep Learning \/ Fall 2026 \?/);
     expect(root.querySelector('.site-footer h2')!.textContent).toBe('Deep Learning');
     expect(root.querySelector('.site-footer p')!.textContent).toBe('Fall 2026');
     expect([...root.querySelectorAll('.topbar a')].some((a) => a.textContent === 'Guide')).toBe(false);
@@ -224,7 +240,7 @@ describe('live checks', () => {
     fakeIntervals();
     let fork = false;
     const f = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, () => (fork ? ok(forked) : notFound()));
-    const el = await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, f);
+    const el = await mount(<RepoChecks org={ORG} facts={facts} mine={mine} />, f);
     expect(el.textContent).toContain('Fork materials');
     expect(el.textContent).toContain('Check again');
     const first = checks(f);
@@ -246,7 +262,7 @@ describe('live checks', () => {
   it('slows down after a minute, stops re-checking after 5 minutes and on leaving the page; Check again starts it again', async () => {
     fakeIntervals();
     const f = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, notFound);
-    const el = await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, f);
+    const el = await mount(<RepoChecks org={ORG} facts={facts} mine={mine} />, f);
     const first = checks(f);
     for (let t = 0; t < RECHECK_FOR_MS / RECHECK_MS + 3; t++) await tickBy(RECHECK_MS);
     const capped = checks(f);
@@ -268,13 +284,13 @@ describe('live checks', () => {
   it('does not re-check a repo of the name that is not the fork, or after a read that failed', async () => {
     fakeIntervals();
     const other = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, () => ok({ ...forked, fork: false, parent: undefined }));
-    await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, other);
+    await mount(<RepoChecks org={ORG} facts={facts} mine={mine} />, other);
     expect(root!.querySelector('.check-line.warn')!.textContent).toContain('that is not a fork');
     await tickBy(RECHECK_MS * 2);
     expect(checks(other)).toBe(1);
     render(null, root!);
     const failing = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, () => new Response('{"message":"Server Error"}', { status: 500 }));
-    await mount(<SetupView org={ORG} facts={facts} mine={mine} studentView={false} />, failing);
+    await mount(<RepoChecks org={ORG} facts={facts} mine={mine} />, failing);
     const after = checks(failing);
     await tickBy(RECHECK_MS * 2);
     expect(checks(failing)).toBe(after);

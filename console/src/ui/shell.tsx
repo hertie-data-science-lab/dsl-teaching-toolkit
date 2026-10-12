@@ -8,12 +8,12 @@ import { readText, safeStorage, writeText } from '../auth/types';
 import type { GhUser } from '../github/client';
 import type { Course, CohortRef, Semester } from '../model/discovery';
 import { semesterOver, termRank } from '../model/catalogue';
-import { knownAuditor } from '../model/mine';
 import { problemCount } from '../model/readiness';
-import { STUDENT_SCREENS, studentHref } from '../router';
+import type { SemesterFacts } from '../model/student';
+import { studentHref, studentScreens } from '../router';
 import type { Loaded } from '../model/status';
 import { Crumbs, ghUrl } from './bits';
-import { Bldg, Ext, Gh, Pin } from './icons';
+import { Bldg, Ext, FaIcon, Gh, HertieMark, Pin } from './icons';
 
 function initials(u: GhUser): string {
   const n = (u.name || u.login).split(/\s+/).filter(Boolean);
@@ -48,7 +48,8 @@ function useTheme(): [boolean, () => void] {
 }
 
 /**
- * The app-level bar (decision 0021): the product name (a Home link) with the view, the person
+ * The app-level bar (decision 0021): the Hertie mark and the product name (a Home link,
+ * decision 0035 rule 2) with the view, the person
  * (a link to Profile), Guide, theme, Sign out. Nothing course- or semester-specific; the Menu
  * button only where there is a side nav to open. Its links start `?`: app-level pages are about
  * no course or semester, so they clear the query. With `titleHref` (an instructor previewing a
@@ -73,7 +74,7 @@ export function Topbar({ user, onSignOut, navOpen = false, onMenu, title, titleH
     <header class="topbar">
       <div class="topbar-inner">
         {user && onMenu ? <button class="pill-ghost menu-btn" type="button" aria-expanded={navOpen} aria-controls="sidenav-wrap" onClick={onMenu}>Menu</button> : null}
-        <a class="app-name" href="?#home">DSL Teaching Console{user && title && !titleHref ? <small>{title}</small> : null}</a>
+        <a class="app-name" href="?#home"><HertieMark /><span class="app-words">DSL Teaching Console</span>{user && title && !titleHref ? <small>{title}</small> : null}</a>
         {user && title && titleHref ? <a class="app-view" href={titleHref}><span class="long">{title}</span><span class="short">Preview</span></a> : null}
         <div class="topbar-right">
           {user ? (
@@ -399,24 +400,30 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
   );
 }
 
-/** Screens an auditor has no use for: they get no marks and join no team. */
-const AUDITOR_HIDDEN = ['marks', 'join'];
+/** The site's glyph for each student tab (decision 0035 rule 3); a kind without one of its own gets the folder. */
+const SCREEN_ICON: Record<string, string> = {
+  home: 'home', week: 'calendar-week', schedule: 'calendar-alt', 'kind-lecture': 'book-reader', 'kind-lab': 'flask', 'kind-readings': 'book',
+  assignments: 'user-graduate', materials: 'folder-open', instructors: 'chalkboard-teacher',
+};
 
 /**
  * The student's side nav (decision 0031 rule 11), the same tree inverted: a student takes each
  * course once, so the anchor is the open semester (its term, plain text), its nodes the courses
- * the person studies that term, the open one expanded to its pages (an auditor's without Marks
- * and Join). Another live term sits under them with its dot; Past semesters lists the rest, each
+ * the person studies that term (each a link to its Home), the open one expanded to its pages:
+ * the site's tabs with their icons, its kind tabs from `facts` once they are read (decision
+ * 0035 rule 3). Another live term sits under them with its dot; Past semesters lists the rest, each
  * expanding to its courses as links (no third level), with the same fold as the instructor's.
  * Opening a course of another term re-anchors the tree on that term. In a Student view the tree
  * is that one semester's (decision 0025 rule 5). Semesters the person teaches are not here.
  */
-export function StudentNav({ root, semesters, semester, current, studentView = false, now = Date.now() }: {
+export function StudentNav({ root, semesters, semester, facts = null, current, studentView = false, now = Date.now() }: {
   root: string;
   /** The semesters the person is a student (or auditor) of. */
   semesters: Semester[];
   /** The semester whose student screens are open. */
   semester: Semester;
+  /** That semester's shared facts, for its kind tabs; null while they are read. */
+  facts?: SemesterFacts | null;
   current: string;
   studentView?: boolean;
   now?: number;
@@ -434,7 +441,9 @@ export function StudentNav({ root, semesters, semester, current, studentView = f
     label: s.courseName || s.org,
     href: studentHref(s.org),
     what: `the ${s.courseName || s.org} pages`,
-    pages: STUDENT_SCREENS.filter(([k]) => !(knownAuditor(s.org) && AUDITOR_HIDDEN.includes(k))).map(([k, t]) => ({ href: studentHref(s.org, k), t, current: s.org === semester.org && k === current })),
+    pages: studentScreens(s.org === semester.org ? facts : null).map(([k, t]) => ({
+      href: studentHref(s.org, k), t: <span class="with-icon"><FaIcon name={SCREEN_ICON[k] ?? 'folder'} />{t}</span>, current: s.org === semester.org && k === current,
+    })),
   }));
   const termNode = (list: Semester[], live: boolean): NavNode => {
     const courses = byName(list);

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The shell mounted on a real URL (decision 0021): Profile opens whatever semester the query
-// names, a student's `#setup` stays their Set up, and an instructor's `#setup` becomes `#profile`.
+// names, `#setup` becomes `#profile` for both, and a student's `#marks` and `#join` become `#assignments`.
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
@@ -11,7 +11,8 @@ import { PatAuth } from '../src/auth/pat';
 import { GitHubClient } from '../src/github/client';
 import type { Course, Semester } from '../src/model/discovery';
 import { Sidenav, type SubWanted } from '../src/ui/shell';
-import { FakeGitHub } from './fake';
+import { FakeGitHub, fileBody } from './fake';
+import FILE from './fixtures/student-status.json?raw';
 
 const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
 const cohort = { org: 'hertie-dsl-demo-f2026', term: 'f2026', termLabel: 'Fall 2026' };
@@ -34,7 +35,8 @@ async function mount(url: string, gh = new FakeGitHub()) {
   root = document.createElement('div');
   document.body.appendChild(root);
   await act(async () => render(<App state={s} />, root!));
-  await act(async () => {});
+  // A student's screens wait for the semester's facts (the course's opt-in): let the reads settle.
+  for (let i = 0; i < 10; i++) await act(async () => {});
   return root;
 }
 
@@ -47,10 +49,16 @@ describe('the shell on a real URL', () => {
     expect(location.hash).toBe('#profile');
   });
 
-  it('keeps a student’s #setup as their Set up, with no rewrite', async () => {
+  it('lands a student’s old #setup on Profile, and their #marks and #join on Assignments (decision 0035)', async () => {
     const el = await mount(`/?semester=${NLP.org}#setup`);
-    expect(el.querySelector('.sidenav [aria-current="page"]')?.textContent).toBe('Set up');
-    expect(location.hash).toBe('#setup');
+    expect(location.hash).toBe('#profile');
+    expect(el.querySelector('.sidenav')).toBeNull();
+    expect(el.querySelector('#view .field')).not.toBeNull();
+    for (const old of ['#marks', '#join']) {
+      const s = await mount(`/?semester=${NLP.org}${old}`);
+      expect(location.hash).toBe('#assignments');
+      expect(s.querySelector('.sidenav [aria-current="page"]')?.textContent).toBe('Assignments');
+    }
   });
 
   it('rewrites an instructor’s #setup to #profile and shows Profile', async () => {
@@ -77,7 +85,7 @@ describe('the course banner (decision 0031 rule 11)', () => {
     const banner = el.querySelector('#view .course-banner')!;
     expect(banner.querySelector('h1')?.textContent).toBe('Machine Learning');
     expect(banner.querySelector('.cb-sem .sem-title')?.textContent).toBe('Fall 2026');
-    expect(banner.querySelector(`.cb-side a[href="?semester=${cohort.org}#week"]`)?.textContent).toBe('Student view');
+    expect(banner.querySelector(`.cb-side a[href="?semester=${cohort.org}#home"]`)?.textContent).toBe('Student view');
     expect(banner.querySelector('.cb-side')!.textContent).toContain('Semester on GitHub');
     expect(el.querySelectorAll('h1')).toHaveLength(1);
     expect(el.querySelector('.topbar .app-view')).toBeNull();
@@ -136,7 +144,7 @@ describe('the course banner (decision 0031 rule 11)', () => {
   });
 
   it('for a real student the course is the h1, the crumbs go semester first, and there is no way to the instructor view', async () => {
-    const el = await mount(`/?semester=${NLP.org}#week`);
+    const el = await mount(`/?semester=${NLP.org}#home`);
     expect(el.querySelector('.topbar .app-view')).toBeNull();
     expect(el.querySelector('.topbar .app-name small')?.textContent).toBe('Student view');
     const banner = el.querySelector('.course-banner')!;
@@ -150,7 +158,52 @@ describe('the course banner (decision 0031 rule 11)', () => {
 
   it('links the course crumb on a student’s Schedule', async () => {
     const el = await mount(`/?semester=${NLP.org}#schedule`);
-    expect(crumbs(el).at(-1)).toEqual(['Natural Language Processing', `?semester=${NLP.org}#week`]);
+    expect(crumbs(el).at(-1)).toEqual(['Natural Language Processing', `?semester=${NLP.org}#home`]);
+  });
+});
+
+describe('a course that has not opted in to the student console', () => {
+  const FIXTURE = JSON.parse(FILE);
+  /** A fake answering each semester's student-status.json with `student_console` set as given (undefined drops it). */
+  const status = (consoleOn: Record<string, boolean | undefined>) => {
+    const gh = new FakeGitHub();
+    for (const [org, on] of Object.entries(consoleOn)) {
+      const doc: Record<string, unknown> = { ...FIXTURE, semester: org, student_console: on };
+      if (on === undefined) delete doc.student_console;
+      gh.on('GET', `/repos/${org}/.github/contents/.system/student-status.json`, fileBody('.system/student-status.json', JSON.stringify(doc)));
+    }
+    return gh;
+  };
+
+  it('shows its student the course website, and nothing of the student screens or their own data', async () => {
+    const gh = status({ [NLP.org]: false });
+    const el = await mount(`/?semester=${NLP.org}#assignments`, gh);
+    expect(el.querySelector('#view h1')?.textContent).toBe('Deep Learning / Fall 2026');
+    expect(el.querySelector('#view .lede')?.textContent).toContain('uses its website');
+    expect(el.querySelector('#view a.btn')?.getAttribute('href')).toBe(`https://${NLP.org}.github.io/`);
+    // Sign out, and the way back to the person's other courses.
+    expect([...el.querySelectorAll('.topbar button')].map((b) => b.textContent)).toContain('Sign out');
+    expect(el.querySelector('#view a.btn.outline')?.getAttribute('href')).toBe('?#home');
+    expect(el.querySelector('.sidenav')).toBeNull();
+    expect(el.querySelector('.course-banner')).toBeNull();
+    // Only the semester's public .github is read: no repos, teams or marks of the student's.
+    const paths = gh.seen.map((r) => r.url.replace('https://api.github.com', '').split('?')[0]);
+    expect(paths.every((u) => u.startsWith(`/repos/${NLP.org}/.github`))).toBe(true);
+  });
+
+  it('opens the student screens where the course opted in, or the file predates the flag', async () => {
+    for (const on of [true, undefined]) {
+      const el = await mount(`/?semester=${NLP.org}#assignments`, status({ [NLP.org]: on }));
+      expect(el.querySelector('.sidenav [aria-current="page"]')?.textContent).toBe('Assignments');
+      expect(el.querySelector('#view a.btn[href$=".github.io/"]')).toBeNull();
+    }
+  });
+
+  it('leaves an instructor’s Student view of it as it was', async () => {
+    const el = await mount(`/?semester=${cohort.org}#week`, status({ [cohort.org]: false }));
+    expect(el.querySelector('.topbar a.app-view .long')?.textContent).toBe('Student view (preview)');
+    expect(el.querySelector('.sidenav')).not.toBeNull();
+    expect(el.querySelector('#view a.btn[href$=".github.io/"]')).toBeNull();
   });
 });
 
