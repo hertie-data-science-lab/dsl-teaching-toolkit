@@ -848,8 +848,8 @@ def seeded_wording(ref: str) -> dict[str, str]:
         ),
         "# semester_start:                   # OPTIONAL - default: inferred from the "
         "cohort tag (f2026 -> 1 Sep 2026)": (
-            "# semester_start:                   # OPTIONAL - default: inferred from the "
-            "semester tag (f2026 -> 1 Sep 2026)"
+            "# semester_start:                   # OPTIONAL - NO default. The site's "
+            '"Semester starts" row'
         ),
         "#         cohort_dest_repo:         # OPTIONAL - default: materials": (
             "#         semester_dest_repo:         # OPTIONAL - default: materials"
@@ -867,7 +867,7 @@ def seeded_wording(ref: str) -> dict[str, str]:
         '  show_on_site: true          # a "Cohort archived" row on the site\'s Schedule '
         "tab, also sends a notice email 14 days out": (
             '  show_on_site: true          # a "Semester archived" row on the site\'s '
-            "Schedule tab, also sends a notice email 14 days out"
+            "Schedule tab. The notice email 14 days out goes either way"
         ),
         "    This cohort is archived on {date}: every repository in it becomes "
         "read-only. You keep read access, so you can still fork or clone anything you "

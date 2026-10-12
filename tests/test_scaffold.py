@@ -539,6 +539,8 @@ def test_an_external_brief_carries_no_repo_shaped_furniture(fake, monkeypatch):
     brief = fake.files[("assignment-a", "README.md")]
     assert "Commit the notebook" not in brief
     assert "`submit_url:`" in brief  # and it says where the address goes instead
+    # A run setting: written in grading_config.yml it would make the template NOT_MIGRATED.
+    assert "`assignments.yml`" in brief and "grading_config.yml" not in brief
 
 
 def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
