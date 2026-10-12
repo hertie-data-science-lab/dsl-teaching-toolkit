@@ -120,12 +120,14 @@ the instructor's (decision 0029): **This semester** (the live ones, each card wi
 "Next: ...") and **Past semesters** (archived, or past their last day; with no dates read yet,
 by the date their key implies), which a **Current only** checkbox in the page head hides (kept
 in this browser, per account). A student-only account with exactly one live semester (neither
-archived nor ended, judged by its key) lands on its This week instead; the side nav and the
+archived nor ended, judged by its key) lands on its Home instead; the side nav and the
 banner call an ended semester ended by the same rule. The top bar's Guide explains the
 instructor console, so only a person with an instructor role sees it.
 
-The mode picks the shell. `?semester=<org>` opens that semester's student screens (This
-week, Schedule, Assignments, Marks, Materials, Join, Instructors). For a
+The mode picks the shell. `?semester=<org>` opens that semester's student screens, the
+semester site's tabs (decision 0035 rule 3): Home, This week, Schedule, one tab per kind that
+has rows (Lectures, Labs, Readings, ...: the kinds whose policy entry has a tab, in policy
+order, labelled as the site labels them), Assignments, All materials, Instructors. For a
 semester the person teaches, that is the **Student view** (the Student view pill in the
 course banner): the same screens with the instructor's own identity and a note, never a
 student's repos or marks (rule 7). Its top bar reads "Student view (preview)", a link back to
@@ -143,10 +145,13 @@ three rows, the rest under "Older semesters (n)". A semester node carries its pr
 pages, else on a course page the newest live one; one at a time. Other courses are reached
 through All courses, and so are the person's own student semesters. A student's tree is
 inverted, since a student takes each course once: the open semester's term is the anchor, its
-courses the nodes (the open one expanded), another live term under them, and Past semesters
-below, each expanding to its courses as links. A Student view's tree is that one semester's.
+courses the nodes (each a link to its Home, the open one expanded to its tabs, each with the
+site's Font Awesome glyph drawn inline; its kind tabs once its `student-status.json` is read),
+another live term under them, and Past semesters below, each expanding to its courses as
+links. A Student view's tree is that one semester's.
 
-Every course and semester page, in either console, opens with the **course banner**: crumbs
+The top bar carries the Hertie mark before the console's name in both consoles (decision 0035
+rule 2), drawn as inline SVG in the bar's text colour. Every course and semester page, in either console, opens with the **course banner**: crumbs
 that follow the tree ("All courses › Course › Semester"; a student's "Your semesters ›
 Semester › Course", led by All courses for a person who also teaches), the course name as the page's one h1, and on a semester page the
 semester's line under it (its name, state, week and dates) with the Student view pill (or
@@ -226,13 +231,17 @@ Each screen reads with the student's own account:
 
 | Screen | Shared facts (`StudentData`) | The student's own (GitHub, directly) |
 |---|---|---|
-| This week (in the semester's timezone; "Updated <age>" from the file's `generated_at`) | rows due, handed out, released or on in the next 7 days; releases and announcements of the last 7; open team formation; the About block: course name, syllabus pinned, the home text, announcements | gradebook's last change (marks returned); whether they have a team; a patch note on their Submission receipts newer than their last visit |
+| Home (the site's landing page; its head is "<course> / <semester>") | the Updates box as the site picks it (sessions whose files shipped, assignments handed out, the archive row's text in the fortnight before it, announcements; newest first, seven); the syllabus pinned; the course description; the instructors' home text; previous offerings; instructors and teaching assistants in two columns | none |
+| This week (in the semester's timezone; "Updated <age>" from the file's `generated_at`) | rows due, handed out, released or on in the next 7 days; releases and announcements of the last 7; open team formation | gradebook's last change (marks returned); whether they have a team; a patch note on their Submission receipts newer than their last visit |
 | Schedule | rows by semester week (week 1 from `semester_start`, as the Dashboard counts; one group each for before and after the semester), coloured by kind; TBC dates; row details; file chips that open each file; readings (files, reading list, "to come") | their state on hand-out and due rows; rows for their repos marked |
-| Assignments | dates (TBC), late cutoff, late rule, points, how to hand in, solution shown, the shape note, the brief (a fold, rendered by GitHub), the course's late-work sentences | `<slug>-<handle>`, a team repo they can push to, the drop box; their team (from the repo, else from `GET /user/teams` by the `<slug>-` prefix, so a drop-box or external group finds it too) and its members; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos): its body, the newest receipt, a patch note as "pull before you continue", every comment in a fold; the CONTRIBUTIONS.md ask on a team repo; for a student-choice repo after the cutoff, the Settings link to make it public |
-| Marks | assignment titles | `grades-<handle>/grades.yml`: final grade, score (per question when given), penalty, feedback overall and per question, team and team feedback, a term total if present |
-| Materials | the materials repos; each session's readings | the repo's recursive tree (supporting folders such as `data/` and `img/` last, folded, under "Supporting files"); each file read when opened |
-| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, every 30 s after the first minute, for up to 5 minutes of the tab being shown, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decision 0027) |
-| Join | assignments forming teams, and each one's teams so far (name, headcount, cap; never who) with a Pick that fills in the team | their own Join course / Join team issues in `join` and the automation's last reply; after "You joined", the invitation's accept link |
+| A kind tab (`#kind-<kind>`) | the rows the kind's tab names (the engine's `tabs`, so a lecture whose readings shipped is on Readings too, with only its reading files), dated by date then undated, off-schedule ones included; heading, details, reading list, files, "not released yet", the pending readings note; the kind's own event (an exam) last; a file opens in the tab, the list beside it as All materials keeps its tree, the open file marked | none |
+| Assignments (`#assignments`: "Your marks" first, then a card per assignment in due order, open while the student can hand it in; each card's first line, Open the page, links the assignment's own page `#assignment-<slug>`, the 0.9.0 site's page; the card's body is the page's) | the 0.9.0 page's blocks in its order and wording: released or hands-out day, due, points; the team steps while formation is open (1 Form your team: the sentence, "Teams so far" as Team, Members, Places left, never who; 2 Open your submission repo); the hand-in callout with the shape sentence, the cutoff sentence and "Late work: <rule> (until <cutoff>)."; the brief (folded on a card); the shape note; before the hand-out, the pending sentence | `<slug>-<handle>`, a team repo they can push to, the drop box, with the Open button; their team (from the repo, else from `GET /user/teams` by the `<slug>-` prefix, so a drop-box or external group finds it too) and its members; "Join or create a team" unfolds the Join team form for that assignment, with their requests under it; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos): its body, the newest receipt, a patch note as "pull before you continue", every comment in a fold; the CONTRIBUTIONS.md ask on a team repo; for a student-choice repo after the cutoff, the Settings link to make it public; `grades-<handle>/grades.yml`: the state chip reads the mark ("returned 18 / 20"), "Your marks" (mark, penalty, semester total, gradebook link), and on the page the mark with submitted, days late, penalty, feedback overall and per question, team and team feedback |
+| All materials | the materials repos; each session's readings | each repo's recursive tree (supporting folders such as `data/` and `img/` last, folded, under "Supporting files"), each file row with its menu; each file read when opened, the tree staying beside it (a 280px column, above the file below 860px) with the open file marked (decision 0035 rule 11) |
+| Profile: Your repos in <course>, <semester> (one section per live semester they study, the first open; a folded one reads nothing until opened) | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, every 30 s after the first minute, for up to 5 minutes of the tab being shown, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decisions 0027, 0035 rule 9) |
+
+Marks, Join and Set up are no longer in the nav (decision 0035 rules 7-9): marks and team
+joining live in Assignments, Set up in Profile. `#marks` and `#join` open Assignments,
+`#setup` Profile.
 | Instructors | the cards, with an email only where the instructor chose to show it | none (a picture hosted on the semester site is read through the API and shown as `data:`) |
 
 Every screen also reads the person's role: `GET /orgs/{org}/teams/auditors/memberships/{login}`
@@ -263,8 +272,32 @@ yet is read from its site repo instead (`SiteSource`: the generated collections,
 `_data/*.yml`), which also serves site-hosted instructor pictures. In a Student view nothing
 of the student's own is read.
 
+The file also carries the course's `student_console` opt-in. Where it is false a student
+gets no student screens: one notice with the semester site's link (`CourseWebsiteScreen`),
+read off that same file and nothing else. A file without the key (written before the engine
+carried it, or the site fallback) counts as on. An instructor's Student view is never gated.
+
 An **archived semester** is history: the student's own repos (read-only) and their marks from
 the gradebook, from the same reads as a live one. No operation runs against it.
+
+**Every file link** on the student screens (schedule rows, kind tabs, All materials, the
+assignment page's files and CONTRIBUTIONS.md, the Home syllabus and Updates box, the latter
+with the name in brackets and nothing after it) is the file's name, opening it in
+the console when it lives in a materials repo (in All materials; in the tab itself on a kind
+tab), else on GitHub, then one chevron, "More ways to open", the semester site's file menu
+(decision 0035 rule 10). Its **Open** section: `view` (in a new tab: the same console view, for
+a file the name opens there and the viewer draws: markdown, notebook, html, pdf, image; else
+GitHub's blob page, for a file GitHub draws: markdown, notebook, pdf, image, whose `GitHub` then
+takes `?plain=1` for markdown and notebooks) and `GitHub` (the blob). Its **Edit** section:
+`in browser` (github.dev, in the student's fork when they forked the repo, else the org's) and
+the editor from Profile by name (`VS Code`, or another editor its link's scheme names, such as
+`Cursor`; else `local`), at `<semester folder>/<repo>/<path>`. Edit only for a file an editor
+opens (not pdf, pptx, docx, xlsx, zip); the editor only once Profile has a folder and VS Code or
+an editor link with `{path}` (GitHub Desktop opens repos, not files), and until then a "Set up
+your editor in Profile" item in its place. The menu is the instructor Open button's
+(`ui/OpenButton.tsx` `useMenu`): it closes on a click outside, on Escape, and on Tab, so one is
+open at a time. The instructor screens' file lists keep their own rows. Whether the student forked a repo is
+read once per session, when a row first needs it, and Profile's fork check refreshes it.
 
 **Materials** open inside the console from the private copy: markdown and notebooks through
 GitHub's markdown endpoint (one call; its HTML is sanitised by GitHub), notebook outputs as
@@ -301,7 +334,7 @@ per team; `/user/teams` is read once per session, not per semester. This week an
 add two calls per private repo (receipts issue, comments). These student reads are reused for
 a minute (`MINE_FRESH_MS`), so moving between screens does not repeat them. A brief or the home text is
 rendered once per page load (one `/markdown` call, a brief only when its fold opens); a
-site-hosted card picture is one call. Set up adds one call per materials repo. A file costs
+site-hosted card picture is one call. Each Your repos section in Profile adds one call per materials repo, a fork answer the file buttons then reuse for the session. A file costs
 one call, a markdown file or notebook two (its rendering is kept by blob sha for the session), an HTML page one per bundle file it uses (at most
 80); file bytes are kept by blob sha (up to 64 MB), so reopening costs nothing. **Home's This
 week costs all of that again for each semester shown**: its site read, the repo list,
@@ -404,13 +437,16 @@ Hash tokens as in the design mockup: `#dashboard`, `#schedule-s5`, `#assignment-
 the schedule editor also opens `#schedule-new`, `#schedule-semester` and `#schedule-archive`.
 Renamed hashes redirect: `#cohort` and `#semester` to `#dashboard`, `#staff` to
 `#instructors`, `#new-cohort-<n>` to `#new-semester-<n>`, `#schedule-term` to
-`#schedule-semester`.
+`#schedule-semester`, `#setup` to `#profile`.
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
 opens a new assignment entry for that template; `?wizard=new-semester-3` adds a link back.
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
 The course or semester rides in the query string: `?cohort=<org>` or `?course=<org>`
 (`?semester=` opens the student screens).
-Student screens: `?semester=<org>#week` (and `#schedule`, `#assignments`, `#marks`,
-`#materials`, `#materials-<repo>/<path>` for an open file, `#setup`, `#join`, `#instructors`);
+Student screens: `?semester=<org>#home` (and `#week`, `#schedule`, `#kind-<kind>`,
+`#kind-<kind>/<repo>/<path>` for a file open in that tab (a slash, as a kind and a repo may
+both hold `-`), `#assignments`, `#assignment-<slug>` for one assignment's page, `#materials`,
+`#materials-<repo>/<path>` for an open file, `#instructors`; a
+student's old `#marks` and `#join` redirect to `#assignments`, `#setup` to `#profile`);
 `?join=<org>` for Join course.

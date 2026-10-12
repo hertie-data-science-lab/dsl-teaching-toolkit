@@ -80,9 +80,9 @@ describe('the assignment hub', () => {
     expect(s).toContain('href="#assignment-assignment-2/marks"');
   });
 
-  it('the Teams tab links the students’ Join screen, not the retired site page', () => {
+  it('the Teams tab links the students’ assignment page, not the retired site page', () => {
     const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams' })} />);
-    expect(out).toContain(`href="?semester=${COHORT_ORG}#join"`);
+    expect(out).toContain(`href="?semester=${COHORT_ORG}#assignment-assignment-3"`);
     expect(out).not.toContain('github.io/assignments');
     expect(out).not.toContain('student site');
   });
