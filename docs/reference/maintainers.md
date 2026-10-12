@@ -52,17 +52,18 @@ breaks a live link that faculty click:
 | `docs/assignment-starter.md` | the console's Template settings and New assignment `?` (`Course.tsx` `STARTER_DOC`) |
 | `docs/05-manage-teaching-team.md` | `templates/semester-config/instructors.yml`, `config_digest.PEOPLE` |
 | `docs/06-enrol-students-to-cohort.md` | `config_digest.ROSTER` |
-| `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/semester-config/schedule.yml`, `templates/semester-config/validate-schedule.yml` |
+| `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/semester-config/schedule.yml`, `templates/semester-config/assignments.yml` |
 | `docs/08-release-materials-to-cohort.md` | `scaffold._RELEASEIGNORE_STUB` (seeded into every materials repo) |
-| `docs/09-release-assignment-to-cohort.md` | `config_digest.TEAMS` |
+| `docs/09-release-assignment-to-cohort.md` | `config_digest.TEAMS`, `config_digest.ASSIGNMENTS` |
 | `docs/10-grade-and-return-assignments.md` | `config_digest.GRADING_SHEETS` |
 | `docs/README.md` | `profile_readme.py` |
 | `docs/10-grade-and-return-assignments.md` | `scheduler._ARCHIVE_DOC` (the archive notice) |
+| `docs/01`-`04`, `07`-`11` and `docs/reference/actions-reference.md` | the console's **Learn more** links (`Hint doc=` / `OrgWhy doc=` in `console/src/screens/`, under `ui/bits.tsx` `DOCS`) |
 
 Every `Digest.doc` is one of these: each digest issue ends with a `Field reference:` link built
-from it, so the seven of them are the widest surface in this table.
+from it, so the eight of them are the widest surface in this table.
 
-`grep -rn 'blob/.*/docs/' dsl_course/ templates/` before any rename.
+`grep -rnE 'docs/|doc="' dsl_course/ templates/ console/src/` before any rename.
 
 ## Frozen public contracts
 
@@ -379,7 +380,7 @@ Seeded files carry their owner on the first line, and the write site enforces it
   rows, enrol codes, the semester's schedule). The code comments call this "USER-owned"; the shipped
   stamp says INSTRUCTOR-OWNED. Same thing.
 - **`dsl-stub:`** is the third state: an instructor-owned file we seeded and they have not yet
-  written. `gh_contents.STUB_MARKS` recognises it, and `deploy._is_withheld_stub` reads that to
+  written. `gh_contents.STUB_MARKS` recognises it, and `gh_contents.is_withheld_stub` reads that to
   keep an unwritten SYLLABUS.md out of a release - shipping the placeholder would give students
   faculty instructions and empty tables as their syllabus.
   It does NOT license a rewrite. Nothing refreshes a seeded stub any more: the marker cannot
@@ -625,12 +626,12 @@ them per assignment (`settings`). `settings` is the only module that reads
 Four places, in order - miss the last and every org keeps two buttons for one job:
 
 1. a renderer in `workflows_render.py`;
-2. its path in `seed.seed_github_workflows`'s `files` dict (or `workflows_place.RELEASE_WORKFLOWS`
+2. its path in `seed.github_workflow_files`'s `rendered` dict (or `workflows_place.RELEASE_WORKFLOWS`
    for a run-from-repo one, plus `TEMPLATE_WORKFLOWS` if an assignment template hosts it
    too - and `workflows_place.NEVER_IN_STUDENT_REPOS`, which `assign.withhold_from_template`
    strips off a semester template and `patch_released` refuses to push, is derived from both);
 3. `tests/test_renderers.py`'s `ALL_RENDERED` - a completeness test fails otherwise;
-4. when *retiring* a path, add it to that call's `delete=` tuple (or
+4. when *retiring* a path, add it to `seed.RETIRED_GITHUB_WORKFLOWS` (or
    `workflows_place.RETIRED_WORKFLOWS`), so orgs seeded before the change drop the old file.
    `RETIRED_WORKFLOWS` is in `NEVER_IN_STUDENT_REPOS` too, so a button retired today is
    still stripped off a template whose refresh has not reached it yet.

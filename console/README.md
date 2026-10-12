@@ -5,7 +5,7 @@ semesters as the lifecycle model describes them, and a student their semesters, 
 with the person's own token.
 Deployed by `.github/workflows/console-pages.yml` to
 https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/ on every push to `main` that
-touches `console/` (and, until it merges, to `feature/instructor-console`); the build reads
+touches `console/` (a preview loop adds its branch while it runs); the build reads
 `orgs.yml` from the branch it was built from.
 
 ## Run it locally
@@ -358,7 +358,7 @@ a first visit, mostly free 304s after).
 - Courses: organisations whose `.github` repo carries the `dsl-course-hub` topic; semesters from
   `.github/semesters.yml`; write access = push on `.github`.
 - Semesters: organisations whose `.github` carries `dsl-semester`; the course
-  from that repo's `dsl-course.yml` (`course:`), its name from the course's public `.github`;
+  from the pointer `semester-config/.system/dsl-course.yml` (`course:`), its name from the course's public `.github`;
   archived when that `.github` repo is archived. A semester known only from a course's
   registry has its `.github` read when its student screens open. Org names compare
   case-insensitively.
