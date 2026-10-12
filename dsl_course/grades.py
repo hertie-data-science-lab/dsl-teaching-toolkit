@@ -2246,7 +2246,7 @@ def find_receipts_issue(
 
 
 def ensure_receipts_issue(
-    semester_org: str, repo: str, body: str, dry_run: bool = False, create: bool = True
+    semester_org: str, repo: str, body: str, dry_run: bool = False
 ) -> int | IssueLookupFailed | None:
     """This repo's Submission receipts issue number, opening one if it has none.
 
@@ -2254,13 +2254,7 @@ def ensure_receipts_issue(
     receipts and their grade, and a second issue would split the thread they were told to
     read. Never two - see `find_receipts_issue` for why the lookup is not a search, and
     why a lookup that FAILED opens nothing: `LOOKUP_FAILED` comes straight back, and the
-    caller leaves this unit for the next tick.
-
-    `create=False` finds one without ever opening one - what a shape with no receipts
-    issue of its own does, so a semester handed out before that shape existed keeps
-    getting its receipts in the thread it was told to read. A FLAG rather than a second
-    function: reopening a closed issue and the `LOOKUP_FAILED` rule are the same either
-    way, and two spellings of them would drift."""
+    caller leaves this unit for the next tick."""
     found = find_receipts_issue(semester_org, repo)
     if isinstance(found, IssueLookupFailed):
         log_err(
@@ -2285,8 +2279,6 @@ def ensure_receipts_issue(
                     f"  ! could not reopen the Submission receipts issue: {out[:160]}"
                 )
         return number
-    if not create:
-        return None
     if dry_run:
         log("    PREVIEW  would open the Submission receipts issue")
         return None
@@ -2565,6 +2557,50 @@ def _allowlisted(fields: dict) -> dict:
     }
 
 
+def _units(spec: SheetSpec, sheet: dict | None) -> list[tuple[str, dict]]:
+    """Every `(unit key, block)` on a sheet that is a block. A unit mid-edit
+    (`team-alpha: TODO`) is passed over - the next run reads a whole block - and so is
+    everything on a sheet whose container is not a mapping (`_misshapen` says so)."""
+    container = (sheet or {}).get(spec.container_key)
+    if not isinstance(container, dict):
+        return []
+    return [
+        (unit, block) for unit, block in container.items() if isinstance(block, dict)
+    ]
+
+
+def _people(spec: SheetSpec, unit_key: str, block: dict) -> dict:
+    """`{handle: their own fields}` of one unit: a group's `members:`, or the individual
+    whose block it is. A `members:` that is not a mapping holds nobody here - it is a
+    shape fault (`_misshapen`), and nothing on that sheet is returned while it stands."""
+    if not spec.is_group:
+        return {unit_key: block}
+    members = block.get("members")
+    return members if isinstance(members, dict) else {}
+
+
+def _misshapen(spec: SheetSpec, sheet: dict | None) -> tuple[str, ...] | None:
+    """The key path of the first place this sheet is not one block per unit and one block
+    per member, or None. A grader editing in the browser turns `members:` into a list or
+    a member into a word as easily as a cell into a typo, and that crashed Return marks,
+    the status build and the sheet digest instead of naming the line to fix."""
+    container = (sheet or {}).get(spec.container_key)
+    if container is None:
+        return None
+    if not isinstance(container, dict):
+        return (spec.container_key,)
+    for unit, block in _units(spec, sheet) if spec.is_group else []:
+        members = block.get("members")
+        if members is None:
+            continue
+        if not isinstance(members, dict):
+            return (spec.container_key, unit, "members")
+        for handle, person in members.items():
+            if person is not None and not isinstance(person, dict):
+                return (spec.container_key, unit, "members", handle)
+    return None
+
+
 def student_view(
     spec: SheetSpec, unit_key: str, block: dict | None, handle: str
 ) -> dict:
@@ -2582,9 +2618,8 @@ def student_view(
     flags it where a penalty would have applied to a number."""
     block = block or {}
     info = block.get(INFO_KEY) or {}
-    person = (
-        ((block.get("members") or {}).get(handle) or {}) if spec.is_group else block
-    )
+    person = _people(spec, unit_key, block).get(handle) if spec.is_group else block
+    person = person if isinstance(person, dict) else {}
     score = block.get(spec.score_key)
     days_late = info.get("days_late")
     rate = penalty_rate(spec.late_penalty_per_day)
@@ -2632,6 +2667,7 @@ HOLD_REASONS = {
     "adjustment": "a non-numeric adjustment",
     "question": "a question the assignment does not declare",
     "duplicate": "a handle in more than one submission unit",
+    "returned": "another of their marks held, one they have already been sent",
 }
 
 
@@ -2705,16 +2741,15 @@ def sheet_hold_reasons(
             recorded.add(fault.key)
             faults.append(fault)
 
-    for unit_key, block in ((sheet or {}).get(spec.container_key) or {}).items():
-        if not isinstance(block, dict):
-            continue  # a unit mid-edit; the next run reads a whole block
+    for unit_key, block in _units(spec, sheet):
         fault = _score_fault(spec, block.get(spec.score_key))
-        people = (block.get("members") or {}) if spec.is_group else {unit_key: block}
-        for handle, person in people.items():
-            if handle in seen:
+        for handle, person in _people(spec, unit_key, block).items():
+            # Folded, as the gradebooks are (`build_gradebooks`): `Alice` in one team and
+            # `alice` in another is one student in two units.
+            if str(handle).casefold() in seen:
                 record(unit_key, handle, "duplicate")
                 continue
-            seen.add(handle)
+            seen.add(str(handle).casefold())
             person = person if isinstance(person, dict) else {}
             reason = fault or (
                 "adjustment" if _is_typo(person.get("adjustment_individual")) else ""
@@ -2896,17 +2931,32 @@ def sheet_faults(
     except SheetUnreadable:
         return faults  # `parse_sheet` recorded it; there is nothing else to read
     spec = spec or _spec_from_sheet(slug, sheet)
-    container = sheet.get(spec.container_key)
-    if container is not None and not isinstance(container, dict):
+    path = _misshapen(spec, sheet)
+    if path == (spec.container_key,):
         return [
             _sheet_fault(
                 slug,
                 f"`{spec.container_key}:` is not a mapping of submission units, so the "
                 f"sheet is left exactly as it is",
-                lineno=key_lines(text).get((spec.container_key,)),
+                lineno=key_lines(text).get(path),
                 field=spec.container_key,
                 fix=f"restore `{spec.container_key}:` to one indented entry per "
                 f"submission unit",
+                plain=_SHEET_SHAPE_PLAIN.format(sheet=slug),
+            )
+        ]
+    if path:
+        # The line, never the team or the member on it (see `_sheet_fault`).
+        lineno = key_lines(text).get(path) or key_lines(text).get(path[:3])
+        return [
+            _sheet_fault(
+                slug,
+                "a team's `members:` on this line is not one entry per member, so "
+                "nothing on this sheet is returned",
+                lineno=lineno,
+                field="members",
+                fix=f"restore {f'line {lineno}' if lineno else '`members:`'} to one "
+                f"indented `handle:` entry per member, each with its own fields",
                 plain=_SHEET_SHAPE_PLAIN.format(sheet=slug),
             )
         ]
@@ -2959,11 +3009,8 @@ def needs_hand_decision(view: dict) -> bool:
 def _views_from_sheet(spec: SheetSpec, sheet: dict) -> dict[str, dict]:
     """Every student's view of one grading sheet, keyed by handle."""
     views: dict[str, dict] = {}
-    for unit_key, block in ((sheet or {}).get(spec.container_key) or {}).items():
-        if not isinstance(block, dict):
-            continue  # a unit mid-edit; the next run reads a whole block
-        handles = (block.get("members") or {}) if spec.is_group else {unit_key: None}
-        for handle in handles:
+    for unit_key, block in _units(spec, sheet):
+        for handle in _people(spec, unit_key, block):
             views[handle] = student_view(spec, unit_key, block, handle)
     return views
 
@@ -3677,6 +3724,8 @@ def marks_due(
             # Its definition is refused, and the digest already carries that fault: a
             # return off a default-shaped spec would read the wrong container.
             continue
+        if _misshapen(spec, sheet):
+            continue  # nothing on it can be returned; the sheet's own digest says why
         units = ((sheet or {}).get(spec.container_key) or {}) if sheet else {}
         blank = _not_marked(spec, sheet) if sheet else {}
         if sheet and units and not blank:
@@ -3743,9 +3792,7 @@ def _not_marked(spec: SheetSpec, sheet: dict) -> dict[str, list[str]]:
     how half a mark reaches a student unnoticed. So the dry run says where they are, and
     the decision stays the grader's."""
     out = {}
-    for unit, block in ((sheet or {}).get(spec.container_key) or {}).items():
-        if not isinstance(block, dict):
-            continue
+    for unit, block in _units(spec, sheet):
         score = block.get(spec.score_key)
         if isinstance(score, dict) and spec.questions:
             blank = [k for k in spec.questions if is_blank(score.get(k))]
@@ -3764,13 +3811,10 @@ def _adjusted_count(spec: SheetSpec, sheet: dict) -> int:
     """How many individual adjustments a grader has written into one sheet - the dry run
     reports it, because an adjustment is the one thing in the file no arithmetic explains."""
     total = 0
-    for block in ((sheet or {}).get(spec.container_key) or {}).values():
-        if not isinstance(block, dict):
-            continue
-        people = (block.get("members") or {}) if spec.is_group else {"": block}
+    for unit, block in _units(spec, sheet):
         total += sum(
             1
-            for person in people.values()
+            for person in _people(spec, unit, block).values()
             if isinstance(person, dict)
             and not is_blank(person.get("adjustment_individual"))
         )
@@ -3892,16 +3936,22 @@ def _hold_undecided(
     where a decision should have been, and the dry run that counted it has already gone
     by. So the mark is HELD: no gradebook entry, no column in the registrar's export, no
     email, until a grader settles it in the sheet. Nothing else that student has is held
-    with it.
+    with it - unless the held mark is one they were already sent (`_hold_returned`).
 
     Returns `{slug: {handle: (submission unit, reason)}}` - the unit, because a group's
     mark is derived from the team block rather than from any member's view, so a grader
     reading the hold line is told which row to go and settle.
     """
     held: dict[str, dict[str, tuple[str, str]]] = {}
+    # Folded: the books are keyed on the FIRST spelling of a handle across the sheets
+    # (`build_gradebooks`), and a sheet may spell it another way.
+    folded = {
+        slug: {str(handle).casefold(): why for handle, why in whose.items()}
+        for slug, whose in reasons.items()
+    }
     for handle, book in books.items():
         for slug, view in list(book.items()):
-            reason = (reasons.get(slug) or {}).get(handle) or (
+            reason = (folded.get(slug) or {}).get(handle.casefold()) or (
                 "penalty" if needs_hand_decision(view) else ""
             )
             if not reason:
@@ -3913,6 +3963,49 @@ def _hold_undecided(
     for handle in [h for h, book in books.items() if not book]:
         del books[handle]
     return held
+
+
+def _hold_returned(
+    books: dict[str, dict[str, dict]],
+    held: dict[str, dict[str, tuple[str, str]]],
+    told: dict[str, dict[str, str]],
+) -> dict[str, dict[str, str]]:
+    """Take out of the run, whole, every student a HELD mark of whose they have already
+    been sent, and say what the registrar's export last carried for each:
+    `{handle: {slug: final grade}}`.
+
+    A hold stops a NEW value going out. Taking the mark out of the book did that, and for
+    a mark the student already had it also took it AWAY: their gradebook was rewritten
+    without it, the export's cell for it went blank, and they were emailed that their
+    grades had changed. So for this run that student is held whole - no gradebook commit,
+    no email, their export row exactly as the last real run wrote it - and each other
+    mark of theirs in the run is held with it (`returned`), so the automatic return of
+    that assignment asks again once the sheet is settled.
+
+    `told` is `_told_grades`, keyed on the folded handle. A mark with no final grade in
+    the export (feedback alone) cannot be told from one never sent, and is held as
+    before."""
+    kept = {
+        handle: told[handle.casefold()]
+        for slug, whose in held.items()
+        for handle in whose
+        if (told.get(handle.casefold()) or {}).get(slug)
+    }
+    for handle in kept:
+        for slug, view in (books.pop(handle, None) or {}).items():
+            held.setdefault(slug, {})[handle] = (view.get("team") or handle, "returned")
+    return kept
+
+
+def _with_told(
+    books: dict[str, dict[str, dict]], kept: dict[str, dict[str, str]]
+) -> dict[str, dict[str, dict]]:
+    """The books the registrar's export is rendered from: this run's, plus each student
+    held whole (`_hold_returned`) as the export last carried them."""
+    return books | {
+        handle: {slug: {"final_grade": grade} for slug, grade in row.items()}
+        for handle, row in kept.items()
+    }
 
 
 # The view keys a GRADER writes. The rest - `max_points`, `submitted`, `days_late` - are
@@ -3932,9 +4025,8 @@ def _has_mark(book: dict[str, dict]) -> bool:
     return any(key in view for view in book.values() for key in _GRADER_KEYS)
 
 
-# Leads every EMAIL digest `_marks_digest` writes. A digest without it is LEGACY - a hash
-# of the whole grades.yml, or of the whole book before that - and `distribute` carries it
-# over rather than reading the change of scheme as a change of marks.
+# Leads every EMAIL digest `_marks_digest` writes. Part of the digest: every recorded row
+# carries it, so dropping it would re-mail every student once.
 MARKS_DIGEST_PREFIX = "m1:"
 
 
@@ -3964,8 +4056,7 @@ def _marks_digest(book: dict[str, dict]) -> str:
     return MARKS_DIGEST_PREFIX + content_hash(text)
 
 
-# The data file of a gradebook. The commit is over the whole book; the email's LEGACY
-# digest was over this file alone, and is recognised by hashing it (see `distribute`).
+# The data file of a gradebook.
 GRADES_DATA = "grades.yml"
 
 
@@ -4323,12 +4414,22 @@ def distribute(
                 f"the migration"
             )
             return 1
+        misshapen = sorted(slug for slug in sources if _misshapen(*sources[slug]))
+        if misshapen:
+            # As for an unreadable sheet: a team whose `members:` cannot be read is a
+            # team whose marks reach nobody, so nothing goes out until it is fixed. The
+            # sheet's digest names the line.
+            log_err(
+                f"{', '.join(misshapen)}: the marking sheet is not one entry per "
+                f"student or team - nothing sent; fix the file and run this again"
+            )
+            return 1
         titles = {slug: specs[slug].title for slug in sources}
         books, unknown = _on_the_roster(build_gradebooks(sources), students)
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd)
         changed = {} if dry_run else _sheets_changed_at(wd, sheets)
-        export = _told_grades(wd) if dry_run else ({}, set())
+        export = _told_grades(wd)
 
     held = _hold_undecided(
         books,
@@ -4337,6 +4438,7 @@ def distribute(
             for slug, sheet in sheets.items()
         },
     )
+    kept = _hold_returned(books, held, export[0])
     log_step(f"Distributing {len(books)} gradebook(s) in {semester_org}")
     record: Distributed = dict(distributed)
     # Key ORDER is the order the spec prints the `Done` line in, because that line is a
@@ -4387,12 +4489,10 @@ def distribute(
     #    on one hash, a single standing sentence added to the page re-mailed every student
     #    in every live semester to tell them nothing.
     live: dict[str, str] = {}
-    legacy: dict[str, str] = {}
     for handle in sorted(books):
         files = _gradebook_files(handle, books[handle], titles)
         digest = content_hash("".join(f.decode() for f in files.values()))
         marks = _marks_digest(books[handle])
-        legacy[handle] = content_hash(files[GRADES_DATA].decode())
         entry = record.get((handle, "", CHANNEL_GRADEBOOK))
         if entry and entry[0] == digest:
             live[handle] = marks
@@ -4426,25 +4526,8 @@ def distribute(
     #    because the page around their grades was reworded is not emailed, and one whose
     #    email FAILED last time is.
     pending: list[str] = []
-    carried = 0
     for handle, marks in sorted(live.items()):
-        told = record.get((handle, "", CHANNEL_EMAIL), ("",))[0]
-        if told == marks:
-            continue
-        described = (
-            legacy[handle],
-            distributed.get((handle, "", CHANNEL_GRADEBOOK), ("",))[0],
-        )
-        if told and not told.startswith(MARKS_DIGEST_PREFIX) and told in described:
-            # A LEGACY row that still describes this book: a hash of this very grades.yml,
-            # or - from when BOTH channels were keyed on the whole book - of the content
-            # this semester's last run committed. Either way this student has already been
-            # told about everything it holds. Carried over to the marks digest in place -
-            # the CSV keeps its columns, and the row means what it says once more. A
-            # legacy row that matches neither falls through to exactly what the old code
-            # did with it, so the change of scheme can never mail anybody on its own.
-            record[(handle, "", CHANNEL_EMAIL)] = (marks, now, "")
-            carried += 1
+        if record.get((handle, "", CHANNEL_EMAIL), ("",))[0] == marks:
             continue
         if not _has_mark(books[handle]):
             # Nothing a grader wrote yet: the book moved on the toolkit's facts alone (a
@@ -4452,14 +4535,6 @@ def distribute(
             # that brings the first mark is the one that tells them.
             continue
         pending.append(handle)
-    if carried:
-        # A count in the public log, and worth saying out loud once: a mark that first
-        # appears in this very run is inside the window this carry-over covers, and
-        # telling those students is then a person's job.
-        log(
-            f"  {carried} student(s) already knew what their gradebook said - their "
-            f"record now keys on the marks alone and nothing is re-sent"
-        )
 
     if dry_run and receipt_note:
         log(
@@ -4498,7 +4573,11 @@ def distribute(
     # (no roster email) is never mailed, and a row for them would be a commit about nobody.
     reachable = _reachable(pending, students) if notify else []
     # What the final commit writes, whatever happens between here and there.
-    registrar = render_registrar_csv(students, books).encode() if students else None
+    registrar = (
+        render_registrar_csv(students, _with_told(books, kept)).encode()
+        if students
+        else None
+    )
     if reachable and not _record_before_mail(
         semester_org, record, reachable, live, now, registrar
     ):
@@ -4710,6 +4789,8 @@ _HOLD_PREVIEW = {
     "adjustment": "has an adjustment that is not a number",
     "question": "has a mark for a question the assignment does not have",
     "duplicate": "is in more than one team",
+    "returned": "has another mark held that they were already sent, so nothing of "
+    "theirs changes until it is settled",
 }
 
 

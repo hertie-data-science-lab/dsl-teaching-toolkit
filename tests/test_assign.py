@@ -957,11 +957,11 @@ def test_a_repo_no_student_can_open_is_a_failed_handout(_provisioned, monkeypatc
     assert status.startswith("failed")
 
 
-def test_a_team_missing_members_is_not_named_in_a_public_log(
+def test_a_team_missing_members_is_named_in_the_error(
     _provisioned, monkeypatch, capsys
 ):
-    # The repo is named after the TEAM, so this line published who is grouped with whom -
-    # from a release that runs in the course org's PUBLIC `.github`.
+    # A team name is public - the site's team list prints it - so the line a faculty
+    # member acts on names the team and its repo outright.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
@@ -979,33 +979,11 @@ def test_a_team_missing_members_is_not_named_in_a_public_log(
         == "failed-team-members"
     )
     captured = capsys.readouterr()
-    assert "wizards" not in captured.out + captured.err
-    # The fault itself still reaches faculty; the status above is what gets counted.
-    assert "a team is missing member(s)" in captured.err
-
-
-def test_the_verbose_log_still_says_which_team_it_was(
-    _provisioned, monkeypatch, capsys
-):
-    monkeypatch.setenv("DSL_VERBOSE", "1")
-    monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
-    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
-    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
-    assign.provision_one(
-        "COURSE",
-        "assignment-1",
-        "SEMESTER",
-        "assignment-1-wizards",
-        ["ada-l", "bob-b"],
-        "assignment-1",
-        team="assignment-1-wizards",
-    )
-    # The detail line specifically - `provision_one` narrates the CREATE through
-    # log_person too, so a bare repo-name assertion here would pass without this fix.
     assert (
         "team assignment-1-wizards is missing member(s) - they cannot see "
-        "SEMESTER/assignment-1-wizards" in capsys.readouterr().out
+        "SEMESTER/assignment-1-wizards" in captured.err
     )
+    assert "ada-l" not in captured.out + captured.err
 
 
 def test_a_group_repo_reports_the_teams_own_failures(_provisioned, monkeypatch):
@@ -1749,7 +1727,9 @@ def test_a_solution_waits_for_the_repo_this_run_created_to_populate(
     assert (
         status == "failed-solution"
     )  # withholds the fire-once marker, so a tick retries
-    assert "has not populated yet" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "has not populated yet" in err
+    assert "a1-ada" not in err  # the repo is named after the student; the log is public
 
 
 # ------------------------------------------- ONE listing instead of a probe per repo

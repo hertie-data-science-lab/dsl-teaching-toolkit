@@ -773,6 +773,21 @@ def test_a_container_that_is_not_a_mapping_of_units_is_a_fault_not_a_rebuild():
     assert "not a mapping of submission units" in fault.what
 
 
+@pytest.mark.parametrize(
+    "members, line",
+    [
+        ("members: [ada-l]", 3),
+        ("members: ada-l", 3),
+        ("members:\n      ada-l: TODO", 4),
+    ],
+)
+def test_a_members_block_that_is_not_a_mapping_is_a_fault_not_a_crash(members, line):
+    text = f"teams:\n  team-alpha:\n    {members}\n"
+    (fault,) = sheet_faults("a3", text, group())
+    assert fault.lineno == line and fault.field == "members"
+    assert "ada-l" not in fault.what + fault.fix_text and "team-alpha" not in fault.what
+
+
 def test_a_sheet_the_grader_has_not_touched_yet_reports_nothing():
     text = "submissions:\n  ada-l:\n    score_individual:\n      Q1: null\n"
     assert sheet_faults("a3", text, individual(questions=QUESTIONS)) == []

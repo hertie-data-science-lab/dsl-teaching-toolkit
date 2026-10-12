@@ -792,8 +792,8 @@ def _distribute(
     monkeypatch.setattr(
         grades,
         "ensure_receipts_issue",
-        lambda org, repo, body, dry_run=False, create=True: (
-            (effects["issues"].append((repo, body)) or issue) if create else found_issue
+        lambda org, repo, body, dry_run=False: (
+            effects["issues"].append((repo, body)) or issue
         ),
     )
     monkeypatch.setattr(
@@ -1182,6 +1182,103 @@ def test_holding_one_mark_leaves_the_students_other_marks_alone(tmp_path, monkey
     ((_repo, files, _delete),) = out["gradebooks"]
     assert "assignment-1" in files["grades.yml"]
     assert "assignment-2" not in files["grades.yml"]
+
+
+_TYPO_SHEET = _SHEET.replace(
+    "score_individual: 43", "score_individual:\n      Q1: 14/15\n      Q2: 10"
+)
+
+
+def test_a_hold_on_a_mark_already_returned_takes_nothing_away(tmp_path, monkeypatch):
+    # Ada was sent 43 for assignment-1. A grader then types `14/15` into it. The hold
+    # used to rewrite her gradebook WITHOUT assignment-1, blank its export cell and email
+    # her that her grades had changed. Now nothing of hers moves until it is settled -
+    # including assignment-2, so its automatic return is not recorded as done.
+    first = _distribute(monkeypatch, tmp_path)
+    ((_cfg, before, _d),) = first["config"]
+    sheets = {"assignment-1": _TYPO_SHEET, "assignment-2": _SHEET}
+    out = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets=sheets,
+        distributed=before[grades.DISTRIBUTED_PATH],
+        exported=before[grades.SEMESTER_CSV_NAME],
+        assignment="assignment-2",
+    )
+    assert out["rc"] == 0
+    assert (out["gradebooks"], out["outbox"]) == ([], [])
+    ((_cfg, after, _d),) = out["config"]
+    assert after[grades.SEMESTER_CSV_NAME].splitlines()[1] == "ada@uni.edu,Ada,ada-l,43"
+    assert grades.marks_return_record("assignment-2") not in after
+
+
+def test_a_hold_on_a_mark_never_sent_still_sends_the_rest(tmp_path, monkeypatch):
+    # The other side of the rule above: an export that never carried assignment-1 for
+    # Ada means the held mark is new, and her settled assignment-2 goes out.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _TYPO_SHEET, "assignment-2": _SHEET},
+        exported="hertie_email,name,github_handle\nada@uni.edu,Ada,ada-l\n",
+    )
+    ((_repo, files, _d),) = out["gradebooks"]
+    assert "assignment-2" in files["grades.yml"]
+    assert "assignment-1" not in files["grades.yml"]
+
+
+def test_a_hold_finds_a_handle_spelt_another_way_on_another_sheet(
+    tmp_path, monkeypatch
+):
+    # The gradebook is keyed on the first spelling (`Ada-L` on assignment-1); the typo is
+    # on assignment-2 under `ada-l`. The lookup missed, and `14/15` was sent.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={
+            "assignment-1": _SHEET.replace("ada-l:", "Ada-L:"),
+            "assignment-2": _TYPO_SHEET,
+        },
+    )
+    ((_repo, files, _d),) = out["gradebooks"]
+    assert "assignment-1" in files["grades.yml"]
+    assert "assignment-2" not in files["grades.yml"]
+
+
+def test_one_student_in_two_teams_under_two_spellings_is_held(tmp_path, monkeypatch):
+    sheet = _TEAM_SHEET + (
+        "  beta:\n"
+        "    score_group: 20\n"
+        "    members:\n"
+        "      Ada-L:\n"
+        "        adjustment_individual:\n"
+    )
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=_GRADING_YML + "type: group\n",
+    )
+    assert out["gradebooks"] == []
+
+
+@pytest.mark.parametrize(
+    "members",
+    ["members: [ada-l]", "members: ada-l", "members:\n      ada-l: TODO"],
+)
+def test_a_team_whose_members_are_not_a_mapping_sends_nothing(
+    tmp_path, monkeypatch, capsys, members
+):
+    # Each of these crashed Return marks with an AttributeError and no line to fix.
+    sheet = _TEAM_SHEET.split("    members:")[0] + f"    {members}\n"
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=_GRADING_YML + "type: group\n",
+    )
+    assert out["rc"] == 1
+    assert (out["gradebooks"], out["config"], out["outbox"]) == ([], [], [])
+    assert "not one entry per student or team - nothing sent" in capsys.readouterr().err
 
 
 def test_the_dry_run_sample_email_is_the_one_that_would_be_sent(tmp_path, monkeypatch):
@@ -1668,39 +1765,6 @@ def test_a_reworded_gradebook_page_is_committed_and_nobody_is_emailed(
     assert again["outbox"] == []
 
 
-def test_a_record_written_before_the_split_is_carried_over_not_re_mailed(
-    tmp_path, monkeypatch, capsys
-):
-    # What a live semester's `distributed.csv` holds: rows written when BOTH channels were
-    # keyed on the whole book, so the email row carries the same digest the gradebook row
-    # does. The columns do not change - the row is carried over in place, and a re-run on
-    # an unchanged semester mails nobody.
-    first = _distribute(monkeypatch, tmp_path)
-    ((_cfg, cfg_files, _d),) = first["config"]
-    record = grades.parse_distributed(cfg_files[grades.DISTRIBUTED_PATH])
-    whole = record[("ada-l", "", grades.CHANNEL_GRADEBOOK)][0]
-    record[("ada-l", "", grades.CHANNEL_EMAIL)] = (whole, "2026-09-01T00:00:00", "")
-    page = grades.render_readme
-    monkeypatch.setattr(
-        grades, "render_readme", lambda *a, **k: page(*a, **k) + "\nstanding text\n"
-    )
-    again = _distribute(
-        monkeypatch,
-        tmp_path / "again",
-        distributed=grades.dump_distributed(record),
-    )
-    assert again["outbox"] == []
-    assert "already knew what their gradebook said" in capsys.readouterr().out
-    ((_cfg2, files, _d2),) = again["config"]
-    carried = grades.parse_distributed(files[grades.DISTRIBUTED_PATH])
-    # ...and the row now keys on the marks alone, so the next real mark does mail.
-    email = ("ada-l", "", grades.CHANNEL_EMAIL)
-    assert (
-        carried[email][0]
-        == grades.parse_distributed(cfg_files[grades.DISTRIBUTED_PATH])[email][0]
-    )
-
-
 _EMAIL = ("ada-l", "", grades.CHANNEL_EMAIL)
 
 
@@ -1722,40 +1786,9 @@ def _told_as(record: str, digest: str) -> str:
     return grades.dump_distributed(rows)
 
 
-def test_a_legacy_email_row_for_this_very_grades_yml_is_upgraded_not_re_mailed(
-    tmp_path, monkeypatch, capsys
-):
-    # Every live semester's email rows are hashes of the whole grades.yml. One that still
-    # matches it is a student who was told exactly this: carried over to the versioned
-    # digest in the run's own record commit, and nobody is mailed for the change of scheme.
-    record, told, legacy = _first_run(monkeypatch, tmp_path)
-    assert told.startswith(grades.MARKS_DIGEST_PREFIX)
-    assert not legacy.startswith(grades.MARKS_DIGEST_PREFIX)
-    capsys.readouterr()
-    again = _distribute(
-        monkeypatch, tmp_path / "again", distributed=_told_as(record, legacy)
-    )
-    assert again["outbox"] == []
-    assert again["gradebooks"] == []
-    printed = capsys.readouterr().out
-    assert "1 student(s) already knew what their gradebook said" in printed
-    assert "ada-l" not in printed
-    ((_cfg, files, _d),) = again["config"]
-    assert grades.parse_distributed(files[grades.DISTRIBUTED_PATH])[_EMAIL][0] == told
-
-    # ...and the run after that has nothing left to do: no mail, no row moved.
-    third = _distribute(
-        monkeypatch, tmp_path / "third", distributed=files[grades.DISTRIBUTED_PATH]
-    )
-    assert (third["outbox"], third["gradebooks"]) == ([], [])
-    ((_cfg3, files3, _d3),) = third["config"]
-    assert files3[grades.DISTRIBUTED_PATH] == files[grades.DISTRIBUTED_PATH]
-    assert "already knew" not in capsys.readouterr().out
-
-
 def test_a_legacy_email_row_under_a_changed_mark_mails_once(tmp_path, monkeypatch):
-    # A legacy row that no longer describes the book is what the old code would have
-    # mailed about, so it is mailed about - once, and recorded under the new digest.
+    # A legacy row (a hash of the whole grades.yml) is not the marks digest, so it is
+    # mailed about - once, and recorded under the new digest.
     record, _told, legacy = _first_run(monkeypatch, tmp_path)
     corrected = {
         "assignment-1": _SHEET.replace("score_individual: 43", "score_individual: 45")
@@ -1830,27 +1863,23 @@ def test_changed_feedback_under_a_versioned_row_mails(tmp_path, monkeypatch):
     assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
 
 
-@pytest.mark.parametrize("case", ["legacy", "facts"])
-def test_the_dry_run_says_what_the_real_run_would_send(
-    tmp_path, monkeypatch, capsys, case
-):
-    # The preview's "emailed" is the same decision the send takes, so a carried-over row
-    # and a moved fact both preview as nobody mailed - and a dry run records nothing.
+def test_the_dry_run_says_what_the_real_run_would_send(tmp_path, monkeypatch, capsys):
+    # The preview's "emailed" is the same decision the send takes, so a moved fact
+    # previews as nobody mailed - and a dry run records nothing.
     grading = "title: Neural networks\nlate_penalty_per_day: 0%\n"
-    record, _told, legacy = _first_run(monkeypatch, tmp_path, grading=grading)
+    record, _told, _legacy = _first_run(monkeypatch, tmp_path, grading=grading)
     out = _distribute(
         monkeypatch,
         tmp_path / "dry",
-        sheets=_new_facts(monkeypatch) if case == "facts" else None,
+        sheets=_new_facts(monkeypatch),
         grading=grading,
-        distributed=_told_as(record, legacy) if case == "legacy" else record,
+        distributed=record,
         dry_run=True,
     )
     assert out["config"] == [] and out["outbox"] == []
     body = out["preview"][0]["body"]
     assert "### Students who would be emailed (0)" in body and "Subject:" not in body
-    printed = capsys.readouterr().out
-    assert f"would update {1 if case == 'facts' else 0} gradebook(s)" in printed
+    assert "would update 1 gradebook(s)" in capsys.readouterr().out
 
 
 def test_the_registrar_export_is_written_only_on_a_real_run(tmp_path, monkeypatch):

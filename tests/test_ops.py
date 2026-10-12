@@ -12,7 +12,15 @@ from datetime import UTC, datetime
 import pytest
 from conftest import workflow_inputs, workflow_jobs
 
-from dsl_course import console, deploy, grades, scheduler, status, workflows_render
+from dsl_course import (
+    console,
+    deploy,
+    enrol_codes,
+    scheduler,
+    status,
+    workflows_render,
+)
+from dsl_course.log import Summary
 from dsl_course.ops import outcome as outcome_mod
 from dsl_course.ops import request as request_mod
 from dsl_course.ops.outcome import Outcome, annotation
@@ -163,6 +171,24 @@ def test_a_workflow_op_dispatches_inputs_its_workflow_declares():
         op.name, "prof", COURSE, SEMESTER, {**req.args, "assignment": "a2-resit"}, True
     )
     assert op_inputs(op, command(op, keyed))["assignment"] == "a2-resit"
+
+
+def test_return_marks_runs_in_distribute_grades_queue():
+    # Inline, a Console press ran beside the scheduler's automatic return: both read
+    # distributed.csv before either recorded a mail, and every student was mailed twice.
+    op = REGISTRY["grades.return"]
+    assert op.workflow == "distribute-grades.yml"
+    declared = workflow_inputs(workflows_render.render_distribute_grades([SEMESTER]))
+    assert set(op.inputs) <= set(declared)
+    args = {"notify": False, "include_feedback": True, "assignment": "assignment-2"}
+    req = Request(op.name, "prof", COURSE, SEMESTER, args, False)
+    assert op_inputs(op, command(op, req)) == {
+        "semester_org": SEMESTER,
+        "notify": "false",
+        "include_feedback": "true",
+        "assignment": "assignment-2",
+        "preview": "false",
+    }
 
 
 def test_a_real_run_of_a_default_on_dry_run_cli_says_no_dry_run():
@@ -463,45 +489,44 @@ def _main(monkeypatch, capsys, raw: dict) -> tuple[int, dict | None, str]:
     return rc, body, out
 
 
-def test_a_return_marks_run_end_to_end(monkeypatch, capsys, engine):
+def test_an_inline_run_end_to_end(monkeypatch, capsys, engine):
     seen = {}
 
     def fake_main():
         seen["argv"] = sys.argv[1:]
-        return grades.return_summary(
-            {"gradebooks": 3, "emails": 3, "held": 0}, 3, dry_run=False
-        )
+        return Summary("Codes sent: 3.", counts={"sent": 3})
 
-    monkeypatch.setattr(grades, "main", fake_main)
+    monkeypatch.setattr(enrol_codes, "main", fake_main)
     rc, body, _ = _main(
         monkeypatch,
         capsys,
-        _request(op="grades.return", args={"notify": False}, preview=False),
+        _request(op="roster.send_codes", args={}, preview=False),
     )
     assert rc == 0
     assert seen["argv"] == [
-        "distribute",
         "--semester-org",
         SEMESTER,
-        "--no-notify",
+        "--dispatched-by",
+        COURSE,
+        "--resend-unjoined",
         "--no-preview",
     ]
     assert body["conclusion"] == "done"
-    assert body["summary"] == "Marks returned: 3 marks repos updated, 3 emails sent."
-    assert body["counts"] == {"gradebooks": 3, "emails": 3, "held": 0}
+    assert body["summary"] == "Codes sent: 3."
+    assert body["counts"] == {"sent": 3}
     (org, repo, path, content, _msg), _ = engine[0]
     assert (org, repo, path) == (
         SEMESTER,
         "semester-config",
-        ".system/outcomes/grades.return.json",
+        ".system/outcomes/roster.send_codes.json",
     )
     assert json.loads(content)["schema"] == "dsl.outcome/1"
 
 
 def test_a_failed_target_is_a_conclusion_not_a_red_run(monkeypatch, capsys, engine):
-    monkeypatch.setattr(grades, "main", lambda: sys.exit(2))
+    monkeypatch.setattr(enrol_codes, "main", lambda: sys.exit(2))
     rc, body, _ = _main(
-        monkeypatch, capsys, _request(op="grades.return", args={}, preview=True)
+        monkeypatch, capsys, _request(op="roster.send_codes", args={}, preview=True)
     )
     assert rc == 0 and body["conclusion"] == "failed"
 
@@ -512,9 +537,9 @@ def test_a_crashed_target_breaks_the_run_without_a_traceback(
     def boom():
         raise KeyError("grades-octocat")
 
-    monkeypatch.setattr(grades, "main", boom)
+    monkeypatch.setattr(enrol_codes, "main", boom)
     rc, body, out = _main(
-        monkeypatch, capsys, _request(op="grades.return", args={}, preview=True)
+        monkeypatch, capsys, _request(op="roster.send_codes", args={}, preview=True)
     )
     assert rc == 1 and body["conclusion"] == "failed"
     assert "Traceback" not in out and "octocat" not in out
