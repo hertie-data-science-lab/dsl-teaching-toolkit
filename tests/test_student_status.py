@@ -202,6 +202,7 @@ def _course() -> CourseFacts:
         meta={
             "course_name": "Deep Learning",
             "course_description": "Neural networks, from scratch.",
+            "student_console": True,
         },
     )
 
@@ -494,6 +495,15 @@ def test_the_course_description_and_the_previous_offerings():
         student_status.render(bare, facts, _extra(facts), NOW)["course_description"]
         == ""
     )
+
+
+def test_the_course_opt_in_travels_to_the_console():
+    assert _render()["student_console"] is True
+    facts = _facts()
+    for meta in ({}, {"student_console": False}, {"student_console": "yes"}):
+        bare = CourseFacts(org=COURSE, meta=meta)
+        doc = student_status.render(bare, facts, _extra(facts), NOW)
+        assert doc["student_console"] is False
 
 
 @pytest.mark.parametrize(

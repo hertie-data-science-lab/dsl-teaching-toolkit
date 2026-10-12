@@ -3,6 +3,7 @@
   "semester": "hertie-dsl-demo-f2026",
   "course_name": "Deep Learning",
   "course_description": "Neural networks, from scratch.",
+  "student_console": true,
   "semester_start": "2026-09-07",
   "semester_end": "2026-12-18",
   "generated_at": "2026-09-23T09:00:00+00:00",

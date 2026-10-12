@@ -106,7 +106,9 @@ Things whose *literal spelling* is depended on from outside Python:
   teams - names and counts only. Never build the URL anywhere else. A sentence around a
   stored link names the console only when the link is one (`policy.is_console_link`); the
   static templates use wording true of both. The site banner (`_data/console.yml`) follows the
-  same key.
+  same key, and so does the console itself: `student-status.json` carries it as
+  `student_console`, and where it is false a student gets the site's link, not the student
+  screens (absent counts as on).
 - **`gh_contents.STUB_MARKS` and `SUPERSEDED_DESCRIPTIONS` / `SUPERSEDED_SEMESTER_*` / `SUPERSEDED_COURSE_*`**
   are convergence chains matched against *live* state. Rewording a stub or a repo description
   means **adding a link to the chain**, never editing one. For the descriptions, an org on the
