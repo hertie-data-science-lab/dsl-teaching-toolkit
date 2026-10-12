@@ -158,8 +158,10 @@ jobs:
             missing=1
           fi
           # Every item in a file's menu leaves the page, so every one of them leaves in a
-          # new tab. The editor item is the exception and is added by script, not here.
-          if grep -rho '<ul class="file-menu-list">.*</ul>' . | grep -o '<a [^>]*>' | grep -v 'target="_blank"'; then
+          # new tab. The editor and Profile items are added by script, not here. One menu
+          # at a time (non-greedy): a kind tab renders a row's files on one line, and the
+          # row names between the menus open in place.
+          if grep -rh 'file-menu-list' . | perl -ne 'print "$1\n" while m{(<ul class="file-menu-list">.*?</ul>)}g' | grep -o '<a [^>]*>' | grep -v 'target="_blank"'; then
             echo "::error::a file-menu item was rendered without target=_blank"
             missing=1
           fi
