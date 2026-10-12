@@ -78,7 +78,9 @@ capitalised), a team's `members:` that is not one entry per member - opens **one
 and line, and emails whoever committed that line. Nothing is refreshed or sent for that unit
 until it is settled; a sheet that does not parse, or whose `members:` cannot be read, stops
 Return marks altogether. A held mark the student was already sent is never taken back: that
-student's gradebook, email and export row stay as last sent until it is settled. The issue
+student's gradebook, email and export row stay as last sent until it is settled. With the
+registrar export missing or unreadable, which marks were sent cannot be told, so a held mark
+stops Return marks until it is settled. The issue
 rewrites itself on every tick and closes when the last one goes.
 
 Neither the issue nor the email ever names the student or the team: a unit key is a person,

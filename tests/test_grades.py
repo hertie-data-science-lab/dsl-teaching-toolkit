@@ -1212,6 +1212,22 @@ def test_a_hold_on_a_mark_already_returned_takes_nothing_away(tmp_path, monkeypa
     assert grades.marks_return_record("assignment-2") not in after
 
 
+def test_a_hold_with_no_export_to_check_it_against_sends_nothing(tmp_path, monkeypatch):
+    # Ada was sent 43, then the export was deleted by hand. With no record of what went
+    # out, a held mark cannot be told from a new one, and treating it as new would take
+    # her 43 away: nothing goes out until the hold is settled.
+    first = _distribute(monkeypatch, tmp_path)
+    ((_cfg, before, _d),) = first["config"]
+    out = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": _TYPO_SHEET, "assignment-2": _SHEET},
+        distributed=before[grades.DISTRIBUTED_PATH],
+    )
+    assert out["rc"] == 1
+    assert (out["gradebooks"], out["outbox"], out["config"]) == ([], [], [])
+
+
 def test_a_hold_on_a_mark_never_sent_still_sends_the_rest(tmp_path, monkeypatch):
     # The other side of the rule above: an export that never carried assignment-1 for
     # Ada means the held mark is new, and her settled assignment-2 goes out.
@@ -3341,6 +3357,7 @@ def test_a_held_mark_is_never_re_stamped_as_returned(tmp_path, monkeypatch):
         sheets={"assignment-1": _TWO_SHEET, "assignment-2": held},
         roster_rows=_TWO_ROSTER,
         distributed=grades.dump_distributed(rows),
+        exported=cfg_files[grades.SEMESTER_CSV_NAME],
     )
     assert [repo for repo, _f, _d in again["gradebooks"]] == ["grades-ada-l"]
     ((_cfg, cfg_files, _d),) = again["config"]
