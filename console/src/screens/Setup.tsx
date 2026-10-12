@@ -16,6 +16,7 @@ import { courseFolder, folderExample, lastSegment, platformOf, schemeOk, withOve
 import type { Semester } from '../model/discovery';
 import { saveYourSetup, yourSetup } from '../model/prefs';
 import { YourRepos } from './StudentSetup';
+import { Pencil } from '../ui/icons';
 
 const EDITOR_WORD: Record<Editor, string> = { vscode: 'VS Code', desktop: 'GitHub Desktop', other: 'Another editor' };
 
@@ -110,10 +111,6 @@ function CourseFolders({ courses, setup, root, editable, onSave }: { courses: Pr
     </div>
   );
 }
-
-const Pencil = () => (
-  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5l2.5 2.5L5.5 13H3v-2.5z" /><path d="M9.5 4l2.5 2.5" /></svg>
-);
 
 /**
  * `courses`: the person's courses and semesters, for their folders; `semesters`: the live ones

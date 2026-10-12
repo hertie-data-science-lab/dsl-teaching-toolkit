@@ -4,7 +4,7 @@
 // each kind is shown. Top folders that only support the rest (data, images, code a notebook
 // loads) come last, folded, as "Supporting files" (decision 0029 rule 6). The tree stays on
 // screen while a file is open (decision 0035 rule 11): in a left column on wide screens, above
-// the file on narrow ones, the open file marked; each file row carries the button row
+// the file on narrow ones, the open file marked; each file row carries the menu
 // (`StudentFiles.tsx`, rule 10). A kind tab opens its files in the same split (`FileBeside`),
 // its own list in the left column.
 
@@ -192,7 +192,7 @@ export function ShownView({ shown, name }: { shown: Shown; name: string }) {
   }
 }
 
-/** The readings of every session: its reading files (opened here, each with its button row, decision 0035 rule 10), its reading list, or "to come" while they are planned but not out. */
+/** The readings of every session: its reading files (opened here, each with its menu, decision 0035 rule 10), its reading list, or "to come" while they are planned but not out. */
 export function ReadingsView({ org, facts, now }: { org: string; facts: SemesterFacts; now: number }) {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const rows = sortedRows(facts.rows, tz).filter((r) => r.readings.length || r.readingList || r.readingsPending);

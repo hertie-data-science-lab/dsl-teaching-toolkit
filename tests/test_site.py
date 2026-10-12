@@ -2678,7 +2678,7 @@ def _landed_link(path: str, hosted) -> Link:
 
 def test_a_published_file_is_linked_to_the_hosted_copy_and_to_its_source():
     # The row a published deck renders as: the NAME opens the site's own copy, `url` is
-    # still the file on GitHub so the template can offer `source` beside it.
+    # still the file on GitHub so the template can offer `GitHub` in its menu.
     path = "lectures/01_a/slides.html"
     link = _landed_link(path, {"materials": frozenset({path})})
     assert link.url == (

@@ -1,28 +1,32 @@
 // How a released file is linked on the student screens (decision 0035 rule 10): the name opens
 // it inside the console when it lives in a materials repo (in All materials; in a kind tab's
-// list, in that tab), else on GitHub; then the button row (`.file-btns`): `source` (the GitHub
-// blob), `render` (a drawn view in a new tab), `online` (github.dev, in the student's fork when
-// they forked the repo, else the org's) and `local` (the editor Profile names, in the semester's
-// folder). `render` opens the console's viewer for a file the name opens in the console and the
+// list, in that tab), else on GitHub; then one chevron, "More ways to open" (`.file-menu`), the
+// site's file menu: under Open, `view` (a drawn view in a new tab) and `GitHub` (the blob); under
+// Edit, `in browser` (github.dev, in the student's fork when they forked the repo, else the
+// org's) and the editor Profile names, by name (`local` when it has none), in the semester's
+// folder. `view` opens the console's viewer for a file the name opens in the console and the
 // viewer draws (markdown, notebook, html, pdf, image); for any other file in the org, GitHub's
-// blob page when GitHub draws it (markdown, notebook, pdf, image; not html), and `source` then
-// takes `?plain=1` for markdown and notebooks so the two differ. `online` and
-// `local` only for a file an editor opens; `local` only once Profile has a folder and an editor
-// that takes a path. Whether the student forked a repo is read once per session, when a row
-// first needs it (`model/fork.ts`). Every file link the student screens draw renders through
-// here, the Home syllabus and Updates box (`inline`: the name in brackets, the row compact) and
+// blob page when GitHub draws it (markdown, notebook, pdf, image; not html), and `GitHub` then
+// takes `?plain=1` for markdown and notebooks so the two differ. Edit only for a file an editor
+// opens; the editor item only once Profile has a folder and an editor that takes a path, and
+// until then a pointer to Profile in its place. The menu is the instructor Open button's
+// (`ui/OpenButton.tsx` `useMenu`). Whether the student forked a repo is read once per session,
+// when a row first needs it (`model/fork.ts`). Every file link the student screens draw renders
+// through here, the Home syllabus and Updates box (`inline`: the name in brackets, no menu) and
 // the assignment page's CONTRIBUTIONS.md included.
 
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { cachedFork, type ForkState } from '../model/fork';
-import { editableFile, fileLocal, fileOnline, isWeb, type Setup } from '../model/open';
+import { courseFolder, editableFile, editorName, fileLocal, fileOnline, isWeb, joinPath, profileHref, type Setup } from '../model/open';
 import { viewKind, type ViewKind } from '../model/viewer';
 import { yourSetup } from '../model/prefs';
 import { repoPath, type FileLink } from '../model/student';
 import { studentHref } from '../router';
 import { ghUrl } from '../ui/bits';
+import { Code, Eye, Laptop, Pencil } from '../ui/icons';
+import { useMenu } from '../ui/OpenButton';
 
 /** The route that opens a file, `<repo>/<path>`: in All materials, or after a slash in the kind tab `tab` (`kind-<key>`). */
 export const materialHref = (org: string, repo: string, path: string, tab?: string) => {
@@ -41,12 +45,12 @@ export function fileHref(org: string, repos: string[], l: FileLink, tab?: string
   return l.repo && l.path && repos.includes(l.repo) ? { href: materialHref(org, l.repo, l.path, tab), ext: false } : { href: l.url, ext: true };
 }
 
-/** The kinds the console's viewer draws, so a file of one it opens gets `render`. */
+/** The kinds the console's viewer draws, so a file of one it opens gets `view`. */
 const DRAWN: ViewKind[] = ['markdown', 'notebook', 'html', 'pdf', 'image'];
-/** The kinds GitHub's blob page draws (an html file shows as source there), so a file the console cannot open gets `render` there. */
+/** The kinds GitHub's blob page draws (an html file shows as source there), so a file the console cannot open gets `view` there. */
 const GH_DRAWN: ViewKind[] = ['markdown', 'notebook', 'pdf', 'image'];
 
-/** The repo and path of a file in `org`, or null for a link elsewhere (no button row then). */
+/** The repo and path of a file in `org`, or null for a link elsewhere (no menu then). */
 function inOrg(org: string, l: FileLink): { repo: string; path: string } | null {
   if (!l.repo || !l.path) return null;
   return !l.url || repoPath(l.url, org) ? { repo: l.repo, path: l.path } : null;
@@ -71,12 +75,23 @@ function useFork(org: string, repo: string, want: boolean): ForkState | undefine
 /** A link that leaves the console opens in a new tab. */
 export const newTabIf = (leaves: boolean) => (leaves ? { target: '_blank', rel: 'noopener' } : {});
 
-/** The buttons after a file's name: source, render, online, local; `setup` is the Profile the list read; `inline`, the compact row of a sentence. */
-function FileButtons({ org, repos, link, setup, tab, inline }: { org: string; repos: string[]; link: FileLink; setup: Setup | null; tab?: string; inline?: boolean }) {
+interface MenuItem {
+  href: string;
+  icon?: () => preact.JSX.Element;
+  label: string;
+  desc?: string;
+  muted?: boolean;
+  /** Opens in a new tab: every item but an app's own scheme and the pointer to Profile. */
+  tab: boolean;
+}
+
+/** The chevron after a file's name and its menu, Open then Edit; `setup` is the Profile the list read. */
+function FileMenu({ org, repos, link, setup, tab }: { org: string; repos: string[]; link: FileLink; setup: Setup | null; tab?: string }) {
   const env = useEnv();
   const at = inOrg(org, link);
   const edit = !!at && editableFile(at.path);
   const fork = useFork(org, at?.repo ?? '', edit);
+  const menu = useMenu<HTMLSpanElement>();
   if (!at) return null;
   const name = link.name || at.path.split('/').pop() || 'file';
   const login = env?.user.login ?? '';
@@ -86,16 +101,34 @@ function FileButtons({ org, repos, link, setup, tab, inline }: { org: string; re
   const kind = viewKind(at.path);
   const blob = link.url || ghUrl(org, at.repo, at.path, 'HEAD');
   const drawn = !shown.ext ? (DRAWN.includes(kind) ? shown.href : null) : GH_DRAWN.includes(kind) ? blob : null;
-  // Where render is GitHub's own blob page, markdown and notebooks show their text with `?plain=1`.
+  // Where `view` is GitHub's own blob page, markdown and notebooks show their text with `?plain=1`.
   const source = shown.ext && (kind === 'markdown' || kind === 'notebook') ? `${blob}${blob.includes('?') ? '&' : '?'}plain=1` : blob;
+  const opens: MenuItem[] = [
+    ...(drawn ? [{ href: drawn, icon: Eye, label: 'view', desc: shown.ext ? 'Rendered, on GitHub' : 'Rendered, here', tab: true }] : []),
+    { href: source, icon: Code, label: 'GitHub', desc: shown.ext ? 'The file on GitHub' : 'The file in the course repo', tab: true },
+  ];
+  const edits: MenuItem[] = !edit ? [] : [
+    { href: fileOnline(forked ? login : org, at.repo, at.path, link.url), icon: Pencil, label: 'in browser', desc: forked ? 'VS Code in your browser, in your fork' : 'VS Code in your browser', tab: true },
+    local
+      ? { href: local, icon: Laptop, label: editorName(setup) || 'local', desc: `In your local copy: ${joinPath(courseFolder(setup, org), at.repo)}`, tab: isWeb(local) }
+      : { href: profileHref(org, true), label: 'Set up your editor in Profile', muted: true, tab: false },
+  ];
+  const item = (i: MenuItem) => (
+    <a href={i.href} role="menuitem" tabIndex={-1} class={i.muted ? 'muted' : undefined} {...newTabIf(i.tab)} onClick={() => menu.setOpen(false)}>
+      <span class="fm-lbl">{i.icon ? <i.icon /> : null}{i.label}</span>
+      {i.desc ? <small>{i.desc}</small> : null}
+    </a>
+  );
   return (
-    <span class={inline ? 'file-btns inline' : 'file-btns'}>
-      <a class="file-btn" href={source} target="_blank" rel="noopener" title={`${name} on GitHub`}>source</a>
-      {drawn ? <a class="file-btn" href={drawn} target="_blank" rel="noopener" title={shown.ext ? `${name} rendered on GitHub` : `${name} rendered`}>render</a> : null}
-      {edit ? (
-        <a class="file-btn" href={fileOnline(forked ? login : org, at.repo, at.path, link.url)} target="_blank" rel="noopener" title={forked ? `Edit ${name} in your fork, in the browser` : `Edit ${name} in the browser`}>online</a>
-      ) : null}
-      {local ? <a class="file-btn" href={local} {...newTabIf(isWeb(local))} title={`Open ${name} in your editor`}>local</a> : null}
+    <span class="file-menu" ref={menu.wrap}>
+      <button ref={menu.caret} type="button" class="file-chev" title="More ways to open" aria-label={`More ways to open ${name}`} aria-haspopup="menu" aria-expanded={menu.open} aria-controls={menu.id}
+        onClick={() => (menu.open ? menu.setOpen(false) : menu.show('first'))} onKeyDown={menu.onCaretKey} onKeyUp={menu.onCaretKeyUp}>▾</button>
+      <div class="popmenu file-menu-list" id={menu.id} role="menu" aria-label={`Open ${name}`} hidden={!menu.open} onKeyDown={menu.onMenuKey}>
+        <div class="pm-h" role="presentation">Open</div>
+        {opens.map(item)}
+        {edits.length ? <div class="pm-h" role="presentation">Edit</div> : null}
+        {edits.map(item)}
+      </div>
     </span>
   );
 }
@@ -111,33 +144,32 @@ interface ItemProps {
   current?: boolean;
   /** The kind tab the file is listed in. */
   tab?: string;
-  /** In a sentence (the Updates box): the name in brackets, the button row compact. */
+  /** In a sentence (the Updates box): the name in brackets, no menu. */
   inline?: boolean;
   /** What the link says instead of the file's name (the Home syllabus button). */
   label?: ComponentChildren;
 }
 
-/** A file's name, linked, then its button row: the one file link of the student screens. */
+/** A file's name, linked, then its menu: the one file link of the student screens. */
 export function FileLinkItem({ org, repos, link, setup, cls, current, tab, inline, label }: ItemProps) {
   const h = fileHref(org, repos, link, tab);
   const a = <a class={cls} href={h.href} {...newTabIf(h.ext)} {...(current ? { 'aria-current': 'page' as const } : {})}>{label ?? (link.name || 'file')}</a>;
   return (
     <span class="file-link">
-      {inline ? <>[{a}]</> : a}
-      <FileButtons org={org} repos={repos} link={link} setup={setup} tab={tab} inline={inline} />
+      {inline ? <>[{a}]</> : <>{a}<FileMenu org={org} repos={repos} link={link} setup={setup} tab={tab} /></>}
     </span>
   );
 }
 
 const linkKey = (l: FileLink) => l.url || `${l.repo}/${l.path}`;
 
-/** A row's files as chips, each with its button row (the schedule). */
+/** A row's files as chips, each with its menu (the schedule). */
 export function FileChips({ org, repos, links }: { org: string; repos: string[]; links: FileLink[] }) {
   const setup = useYourSetup();
   return <>{links.map((l) => <FileLinkItem key={linkKey(l)} org={org} repos={repos} link={l} setup={setup} cls="st-chip" />)}</>;
 }
 
-/** A row's files as a list, the site's `session-files`, each with its button row; in a kind tab (`tab`) they open there, `current` (`<repo>/<path>`) marked. */
+/** A row's files as a list, the site's `session-files`, each with its menu; in a kind tab (`tab`) they open there, `current` (`<repo>/<path>`) marked. */
 export function FileList({ org, repos, links, tab, current }: { org: string; repos: string[]; links: FileLink[]; tab?: string; current?: string }) {
   const setup = useYourSetup();
   return (

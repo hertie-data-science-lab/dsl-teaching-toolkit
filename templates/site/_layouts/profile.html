@@ -34,7 +34,7 @@ cannot ask GitHub without sending the reader's handle somewhere.
 
 Step 3 can only NAME the folder to clone into: `vscode://vscode.git/clone` carries a url
 and a ref and nothing else, so a student who accepts whatever folder the dialog opens at
-leaves step 4 - and every `local` button on the site - pointing at a clone that is not
+leaves step 4 - and every editor item in a file's menu - pointing at a clone that is not
 there. Under it is the command that needs no dialog: the page cannot RUN anything, but the
 line it prints puts the clone exactly where the folder above says it is - and works for a
 student whose editor is not VS Code, who gets no clone button at all.
@@ -43,7 +43,7 @@ The materials repo is the first of `site.data.materials.repos`, the repos this s
 releases into (written by the sync, dsl_course/site.py `_materials_index`); before anything
 is released it is the default a release deploys into (`semester_dest_repo`). A course that
 releases into several repos is told which one these steps set up, and `open_in.html`
-offers `online` and `local` for that repo's files only: the others have no fork or clone
+offers its Edit items for that repo's files only: the others have no fork or clone
 these steps made.
 
 The two folder examples put the clone under a folder named for THIS semester org, so a
@@ -115,8 +115,8 @@ student shown `/Users/j.doe/...` typed it in verbatim and got a path no editor c
     {%- if materials_repos.size > 1 %}
     <p class="profile-hint" id="dsl-setup-repos">This course releases into {{ materials_repos.size }}
       repos ({{ materials_repos | join: ", " }}). These steps set up the first,
-      <code>{{ setup_repo }}</code>, and the <code>online</code> and <code>local</code>
-      buttons open its files.</p>
+      <code>{{ setup_repo }}</code>, and the Edit items in a file's menu open its
+      files.</p>
     {%- endif %}
     <p class="profile-buttons">
       <a class="btn" id="dsl-fork" target="_blank" rel="noopener"

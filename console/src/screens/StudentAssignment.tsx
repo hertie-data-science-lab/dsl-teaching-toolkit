@@ -23,7 +23,7 @@ import { GhMd, LazyFold } from '../ui/rendered';
 import { FileLinkItem, FileList, useYourSetup } from './StudentFiles';
 import { JoinRequests, TeamForm, TeamList } from './StudentJoin';
 
-/** Files the semester's rows for `slug` (its hand-out and due rows) carry, if any: listed with their button row (rule 10). */
+/** Files the semester's rows for `slug` (its hand-out and due rows) carry, if any: listed with their menu (rule 10). */
 export const assignmentFiles = (facts: SemesterFacts, slug: string): FileLink[] => facts.rows.filter((r) => r.assignment === slug).flatMap((r) => r.links);
 
 /** A returned mark in words: "18 / 20", or the mark alone without a maximum. */
