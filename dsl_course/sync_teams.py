@@ -225,7 +225,12 @@ def sync(semester_org: str, prune: bool = False, dry_run: bool = False) -> int:
         # ABSENT teams.csv - deleted, or renamed by hand - is not an empty one: reconciling
         # every project team to nobody would take every student's push on their group
         # repo. Hold, like the absent roster below; a header-only file is how to empty them.
-        if prune and _emptied(semester_org, {}):
+        emptied = _emptied(semester_org, {}) if prune else []
+        if emptied is None:
+            # The team listing failed: red, as `_empty_the_emptied` is on the same read.
+            log_err(f"could not list the teams of {semester_org} - nothing synced")
+            return 1
+        if emptied:
             log_err(
                 f"{teams.TEAMS_PATH} is absent in {semester_org}/{teams.CONFIG_REPO} but "
                 f"project teams exist - nobody is removed from them until it is restored"
@@ -252,6 +257,10 @@ def sync(semester_org: str, prune: bool = False, dry_run: bool = False) -> int:
         )
         return 0
     log_step(f"Materialising {len(wanted)} project team(s) in {semester_org}")
+    # Each onboarded member's GitHub id, so a renamed one keeps their place (`ensure_team`).
+    ids = {
+        s.github_handle: s.github_id for s in students if s.github_id and s.onboarded
+    }
     errors = 0
     for slug, accepted, rejected in vet_groups(
         {s: sorted(members) for s, members in wanted.items()}, students
@@ -286,11 +295,7 @@ def sync(semester_org: str, prune: bool = False, dry_run: bool = False) -> int:
             slug,
             members,
             prune,
-            keep_ids={
-                s.github_id
-                for s in students
-                if s.github_id and s.onboarded and s.github_handle in members
-            },
+            keep_ids={ids[m] for m in members if m in ids},
         ):
             errors += 1
     if prune:

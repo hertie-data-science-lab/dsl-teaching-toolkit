@@ -120,6 +120,12 @@ def test_a_row_naming_a_faculty_team_is_a_fault():
     assert "FACULTY team" in fault.what
 
 
+def test_a_faculty_team_row_does_not_take_the_students_real_team():
+    # Ignored, so it cannot be the "first claim" that drops their project-team row.
+    text = "assignment,team,github_handle\ncourse,admin,ada\ncourse,wizards,ada\n"
+    assert teams.parse(text) == {"course": {"wizards": ["ada"]}}
+
+
 def test_one_student_in_two_teams_of_one_assignment_is_a_fault():
     text = "assignment,team,github_handle\na4,team-x,ada\na4,team-y,ada\n"
     (fault,) = _faults(text)
