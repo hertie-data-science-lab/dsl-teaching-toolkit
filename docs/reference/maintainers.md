@@ -650,9 +650,9 @@ No fallback, and deliberately none: a fallback is how the two files came to disa
 repos of one kind graded as the other. **The migration is by hand, per org** - the toolkit
 never rewrites an instructor's file - and step 1 goes BEFORE the release ships:
 
-1. **Before the promote**, add `type:` (and `team_formation:` / `max_team_size:` where the
-   assignment is a group one) to each template's `grading_config.yml`, on its `solution`
-   branch. On the shipping release the schedule still wins, so this changes nothing; leave
+1. **Before the promote**, add `type:` to each template's `grading_config.yml`, on its
+   `solution` branch (and `team_formation:` / `max_team_size:`, where the assignment is a
+   group one, to the semester's `assignments.yml` - a template refuses run settings). On the shipping release the schedule still wins, so this changes nothing; leave
    it until afterwards and every semester that declared `group` only in `schedule.yml` hands
    out one repo per STUDENT and its Join-team form refuses every request, so the teams
    cannot even be formed to recover;

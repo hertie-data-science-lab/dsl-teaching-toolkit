@@ -34,8 +34,8 @@ lifecycle, `events` are display-only calendar rows.
                                      # cutoff is due + `late_window_days` (assignments.yml).
         marks_return_datetime: 2026-10-27  # optional: marks go back then, once all marked
     events:                          # display-only rows - nothing deploys, the site just
-      mid-term:                      # shows them. `type` is `exam` or `special_event`
-        type: exam                   # (the default when omitted). `event_datetime` is a
+      mid-term:                      # shows them. `kind` is `exam` or `special_event`
+        kind: exam                   # (the default when omitted). `event_datetime` is a
         title: MidTerm Exam          # whole day, or a full datetime when the start time
         details: Open book, 2 hours  # is known.
         event_datetime: 2026-11-03
@@ -184,10 +184,12 @@ HANDOUT_SUFFIX = "-handout"
 # --------------------------------------------------------------------------- pure core
 
 
-def _tz(name: str | None) -> ZoneInfo:
-    """Resolve a timezone name, falling back to the default if it's missing/unknown."""
+def _tz(name: object) -> ZoneInfo:
+    """Resolve a timezone name, falling back to the default if it's missing/unknown.
+
+    `name` is whatever faculty typed, so a YAML int or list is stringified first."""
     try:
-        return ZoneInfo(name or DEFAULT_TZ)
+        return ZoneInfo(str(name or DEFAULT_TZ))
     except (ZoneInfoNotFoundError, ValueError):
         return ZoneInfo(DEFAULT_TZ)
 
@@ -741,15 +743,18 @@ def _retired(old: str, home: str) -> str:
     return f"{moved_text(old, home)} - {RETIRED_COST}"
 
 
-# Settings that USED to live in an `assignments:` entry and now live in the assignment's
-# own `grading_config.yml`, on the course template's solution branch. Flagged BY NAME
+# Settings that USED to live in an `assignments:` entry and now live elsewhere: the shape
+# (`type`) in the assignment's own `grading_config.yml`, on the course template's solution
+# branch; a run setting (`settings.RUN_KEYS`, decision 0009) in the semester's
+# `assignments.yml` - a template's grading_config.yml refuses one. Flagged BY NAME
 # rather than as generic unknown keys: a semester still carrying `type: group` is not making
 # a typo, it is declaring something in a file that no longer reads it, and the message has
 # to say where the declaration went.
 _GRADING_CONFIG_HOME = "in the assignment's own grading_config.yml, on the course template's `solution` branch"
-# key -> what ignoring it here costs. Where it MOVED TO is the same sentence for both and
-# is built from the key at the flag site, so a third retired key cannot be filed under a
-# home that names a different setting.
+_RUN_KEYS_HOME = f"in {CONFIG_REPO}/{ASSIGNMENTS_FILE} (`assignments.<key>`)"
+# key -> what ignoring it here costs. Where it MOVED TO is `_moved_home(key)`, built from
+# the key at the flag site, so a third retired key cannot be filed under a home that
+# names a different setting.
 MOVED_ASSIGNMENT_KEYS = {
     "type": (
         "the assignment is handed out and graded in whatever shape grading_config.yml "
@@ -759,6 +764,13 @@ MOVED_ASSIGNMENT_KEYS = {
         "the 'Join team' flow uses the cap declared there, or the course default"
     ),
 }
+
+
+def _moved_home(key: str) -> str:
+    """Where a `MOVED_ASSIGNMENT_KEYS` setting is declared now."""
+    return _RUN_KEYS_HOME if key in settings.RUN_KEYS else _GRADING_CONFIG_HOME
+
+
 # Keys RENAMED (decision 0012), old -> new. Never read: an entry that still spells one is
 # DROPPED as NOT_MIGRATED rather than half-read - a destination silently defaulted to the
 # slug would hand out into a repo nobody named.
@@ -1260,7 +1272,7 @@ def _parse_assignments(
                 drops.note(
                     where,
                     moved,
-                    f"moved to `{moved}:` {_GRADING_CONFIG_HOME} - ignored here, so "
+                    f"moved to `{moved}:` {_moved_home(moved)} - ignored here, so "
                     f"{moved_cost}",
                     lines,
                 )
@@ -1641,7 +1653,9 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
     semester_start = _flagged_date(meta, "semester_start", drops, "", term_cost)
     semester_end = _flagged_date(meta, "semester_end", drops, "", term_cost)
     return Schedule(
-        timezone=str(tz_name or DEFAULT_TZ),
+        # The zone actually used, never the raw name: every consumer builds a ZoneInfo
+        # (and the console an Intl zone) from this, so a fallen-back name must not leak.
+        timezone=str(tz),
         releases=_parse_releases(meta.get("releases"), tz, drops),
         # `01/09/2026` coerces to None exactly like an absent key, and the site then
         # SYNTHESISES term dates from what it does know - so a bad separator quietly
