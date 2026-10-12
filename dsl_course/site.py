@@ -965,12 +965,17 @@ def _site_rows(
             continue
         readings = []
         pending = False
+        # Where the attached readings not landed yet will land: the pending-row
+        # sentence names them beside the row's own copies.
+        pending_dests: list[str] = []
         for attached in sr.readings:
             got = _row_landed(
                 semester_org, attached.deploys, allow, live_repos, True, aliases, hosted
             )
             readings += got
-            pending = pending or not got
+            if not got:
+                pending = True
+                pending_dests += attached.dests
         row = _Row(
             r.kind,
             subtitle=r.subtitle,
@@ -982,7 +987,7 @@ def _site_rows(
             landed=landed,
             readings=readings,
             readings_pending=pending,
-            dests=r.dests,
+            dests=list(dict.fromkeys([*r.dests, *pending_dests])),
         )
         built.append((r.key, row))
     built += _offplan_rows(semester_org, rows, allow, live_repos, aliases, hosted)

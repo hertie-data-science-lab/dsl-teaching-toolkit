@@ -110,6 +110,14 @@ jobs:
             echo "::error::readings/ lists lecture 1's slides, not only its readings"
             missing=1
           fi
+          # And the other way round: lecture 1's attached readings (file and citations)
+          # are on Readings only, not under it on Lectures (decision 0013 rule 3).
+          for needle in "schmidhuber-1997.pdf" "Long short-term memory"; do
+            if grep -qF -- "$needle" lectures/index.html; then
+              echo "::error::lectures/ lists lecture 1's reading $needle"
+              missing=1
+            fi
+          done
           exit $missing
 
       - name: Check a published file renders from the site and an unpublished one does not
