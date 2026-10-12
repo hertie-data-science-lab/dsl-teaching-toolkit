@@ -2548,6 +2548,35 @@ def test_a_repo_per_kind_layout_takes_its_kind_from_the_repo(monkeypatch, tmp_pa
     }
 
 
+def test_an_unusable_materials_yml_never_stops_the_site(monkeypatch, tmp_path, capsys):
+    # Faculty edit materials.yml by hand. One that fails its schema raised out of the kind
+    # inference and the syllabus lookup, so every semester's site froze and every release
+    # run went red. Now: the built-in folder names and the default syllabus, and ONE line
+    # naming the file.
+    class Unusable_(dict):  # non-empty, so the harness reads it
+        def get(self, repo, default=None):
+            raise Unusable(f"{repo}/materials.yml.kinds: must be object")
+
+    sched = Schedule(releases=[Release("week-3", _at(9, 15), [_copy("lectures/03")])])
+    trees = {"materials": ("lectures/03/a.pdf",)}
+    plan = _plan(monkeypatch, tmp_path, sched, trees=trees, declared=Unusable_(x=None))
+    (row,) = _rows(plan).values()
+    assert [(x["section"], x["name"]) for x in row["links"]] == [("lecture", "a.pdf")]
+    err = capsys.readouterr().err
+    assert err.count("course-materials-f2026/materials.yml.kinds: must be object") == 1
+
+
+def test_a_file_the_toolkit_no_longer_ships_is_retired(monkeypatch, tmp_path):
+    # 0.9.0 wrote a SYSTEM-OWNED lab row include into every semester site; nothing writes
+    # or includes it now, so a promoted site would carry it, stamped "every sync rewrites
+    # it", for ever.
+    plan = _plan(monkeypatch, tmp_path, Schedule())
+    assert "_includes/schedule_row_lab.html" in plan.retire
+    assert not (
+        Path(__file__).parents[1] / "templates/site/_includes/schedule_row_lab.html"
+    ).exists()
+
+
 def test_several_copies_are_one_row_linking_everything_that_landed(
     monkeypatch, tmp_path
 ):

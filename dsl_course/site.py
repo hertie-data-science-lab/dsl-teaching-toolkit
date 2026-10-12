@@ -31,7 +31,7 @@ import shutil
 import stat
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from functools import cache
@@ -70,11 +70,12 @@ from .discovery import (
     semester_content_repos,
     semester_is_live,
 )
+from .faults import Unusable
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
 from .grades import load_grading_spec, spoken_day, team_cap, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
-from .materials import ASSETS_KIND, publishable
+from .materials import ASSETS_KIND, Declared, publishable
 from .materials import read as read_materials
 from .opencourse import read as read_opencourse
 from .public_site import publish as publish_public_site
@@ -999,6 +1000,27 @@ def _site_rows(
     return out, list(tabs)
 
 
+# Files an older toolkit wrote into every semester site that nothing writes or includes
+# any more: 0.9.0's lab row include.
+RETIRED_SITE_FILES = ("_includes/schedule_row_lab.html",)
+
+
+@cache
+def _materials(course_org: str, repo: str) -> Declared | None:
+    """`repo`'s `materials.yml`, or None when it cannot be used - said once per run, naming
+    the file. The site then infers kinds from the built-in folder names and looks for the
+    default syllabus, as the scheduler and deploy do (`materials.kinds_reader`): one
+    faculty file must not freeze every semester's site, nor red every release run."""
+    try:
+        return read_materials(course_org, repo)
+    except Unusable as exc:
+        log_err(
+            f"{course_org}/{exc} - the site uses the built-in folder kinds and the "
+            "default syllabus until it is fixed"
+        )
+        return None
+
+
 def _declared_syllabus(
     course_org: str,
     semester_org: str,
@@ -1013,7 +1035,7 @@ def _declared_syllabus(
         sched,
         live_repos,
         lambda repo: _repo_tree(semester_org, repo)[1],
-        lambda repo: read_materials(course_org, repo),
+        lambda repo: _materials(course_org, repo) or Declared(),
     )
     if found is None:
         return None
@@ -1501,11 +1523,16 @@ def sync_site(course_org: str, semester_org: str) -> int:
         indexable = sorted(
             set(content_repos) & _indexable_repos(sched, release_sources)
         )
+
         # The rows: one per `releases:` entry, in date order, kind declared or inferred
         # once from where its first copy lands (the source repo's `materials.yml` aliases,
         # else the built-in ones).
         # An off-plan folder's copy names no source repo, and so no aliases.
-        kinds = lambda repo: read_materials(course_org, repo).kinds if repo else None
+        # A file that cannot be used names no aliases, as in `materials.kinds_reader`.
+        def kinds(repo: str) -> Mapping[str, str] | None:
+            declared = _materials(course_org, repo) if repo else None
+            return declared.kinds if declared else None
+
         planned = planned_rows(sched, kinds)
         # The repos the release plan names or a released session was found in: never a
         # student's repo, whose folder names would reach this public site.
@@ -1682,8 +1709,9 @@ def sync_site(course_org: str, semester_org: str) -> int:
                 },
                 "_events": event_entries,
             },
-            # The tab of a kind this semester has no rows of goes.
-            retire=retired_kind_pages(present, site_wd),
+            # The tab of a kind this semester has no rows of goes, and so does what the
+            # toolkit no longer ships (SYSTEM-OWNED, so nobody's edit is lost).
+            retire=(*retired_kind_pages(present, site_wd), *RETIRED_SITE_FILES),
             commit="site: sync from org structure",
             title="Student site",
         )

@@ -363,7 +363,7 @@ _SEMESTER_PAGES = (
         # private submission repo, which this must never list. See `site._indexable_repos`.
         # The hosted copies (`site._mirror_public`) are the exception to the gate.
         "All released course material so far; only accessible to enrolled "
-        "students/auditors, except files the course hosts publicly (the render button).",
+        "students/auditors, except files the course hosts publicly (`view` in a file's menu).",
     ),
     _ThemePage(
         "profile.md",
