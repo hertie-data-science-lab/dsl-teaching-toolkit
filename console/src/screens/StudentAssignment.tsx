@@ -20,7 +20,7 @@ import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { GhMd, LazyFold } from '../ui/rendered';
-import { FileList } from './StudentFiles';
+import { FileLinkItem, FileList, useYourSetup } from './StudentFiles';
 import { JoinRequests, TeamForm, TeamList } from './StudentJoin';
 
 /** Files the semester's rows for `slug` (its hand-out and due rows) carry, if any: listed with their button row (rule 10). */
@@ -195,6 +195,7 @@ function TeamSteps({ org, a, mine, studentView, tz, now }: { org: string; a: Sem
 }
 
 function MyUnitRows({ org, a, mine, receipts, loading, tz, year }: { org: string; a: SemesterAssignment; mine: Mine | null; receipts: Receipts | null | undefined; loading: boolean; tz: string; year: number }) {
+  const setup = useYourSetup();
   if (!mine || a.submitVia === 'external') return null;
   const u = mine.units[a.slug];
   const out = [];
@@ -210,7 +211,7 @@ function MyUnitRows({ org, a, mine, receipts, loading, tz, year }: { org: string
     out.push(<><dt>Your team</dt><dd>{u?.team ? <>{u.team}{u.members?.length ? <span class="footnote">: {u.members.join(', ')}</span> : null}</> : <span class="footnote">No team yet.</span>}</dd></>);
   }
   if (a.group && u?.repo && !u.shared) {
-    out.push(<><dt>Contributions</dt><dd>Fill in <a href={`${repoUrl(org, u.repo)}/blob/HEAD/CONTRIBUTIONS.md`} target="_blank" rel="noopener">CONTRIBUTIONS.md <Ext /></a> in your team repo before the deadline.</dd></>);
+    out.push(<><dt>Contributions</dt><dd>Fill in <FileLinkItem org={org} repos={[]} link={{ name: 'CONTRIBUTIONS.md', repo: u.repo, path: 'CONTRIBUTIONS.md', url: `${repoUrl(org, u.repo)}/blob/HEAD/CONTRIBUTIONS.md` }} setup={setup} /> in your team repo before the deadline.</dd></>);
   }
   if (u?.repo && a.privateRepo) {
     out.push(

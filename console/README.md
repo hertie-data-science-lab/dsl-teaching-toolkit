@@ -276,11 +276,14 @@ An **archived semester** is history: the student's own repos (read-only) and the
 the gradebook, from the same reads as a live one. No operation runs against it.
 
 **Every file link** on the student screens (schedule rows, kind tabs, All materials, the
-assignment page's files; the Updates box keeps names only) is the file's name, opening it in
+assignment page's files and CONTRIBUTIONS.md, the Home syllabus and Updates box, the latter
+with the name in brackets and a compact row) is the file's name, opening it in
 the console when it lives in a materials repo (in All materials; in the tab itself on a kind
 tab), else on GitHub, then a row of buttons (decision 0035 rule 10): `source` (the GitHub blob),
-`render` (the same console view in a new tab, for a file the name opens there and the viewer
-draws: markdown, notebook, html, pdf, image), `online` (github.dev, in the student's fork when they
+`render` (in a new tab: the same console view, for a file the name opens there and the viewer
+draws: markdown, notebook, html, pdf, image; else GitHub's blob page, for a file GitHub draws:
+markdown, notebook, pdf, image, whose `source` then takes `?plain=1` for markdown and
+notebooks), `online` (github.dev, in the student's fork when they
 forked the repo, else the org's) and `local` (the editor from Profile, at
 `<semester folder>/<repo>/<path>`). `online` and `local` only for a file an editor opens (not
 pdf, pptx, docx, xlsx, zip); `local` only once Profile has a folder and VS Code or an editor

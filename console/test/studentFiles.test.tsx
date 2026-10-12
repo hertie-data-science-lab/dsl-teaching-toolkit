@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // A released file's button row (decision 0035 rule 10): the name, then source, render (the
-// console's viewer in a new tab, for a materials file it draws), online (github.dev in the
+// console's viewer in a new tab, for a materials file it draws; GitHub's blob page for any other
+// file in the org GitHub draws), online (github.dev in the
 // student's fork once the fork check found one, else the org's) and local (the editor from
 // Profile, in the semester's folder); online and local only for a file an editor opens,
 // local only with a folder and an editor that takes a path; one fork read per repo per session,
@@ -14,7 +15,7 @@ import { GitHubClient } from '../src/github/client';
 import { editableFile, fileLocal, fileOnline, type Setup } from '../src/model/open';
 import { saveYourSetup } from '../src/model/prefs';
 import type { FileLink } from '../src/model/student';
-import { FileChips, FileList } from '../src/screens/StudentFiles';
+import { FileChips, FileLinkItem, FileList } from '../src/screens/StudentFiles';
 import { FakeGitHub } from './fake';
 
 const LOGIN = 'octo-student';
@@ -102,9 +103,11 @@ describe('the button row', () => {
     expect(rows.map((b) => Object.keys(b))).toEqual([
       ['source', 'render'], ['source', 'render', 'online'], ['source', 'render', 'online'], ['source', 'render', 'online'], ['source', 'render', 'online'],
       ['source', 'online'], ['source'],
-      // Not in a materials repo: the console cannot open it, so no render.
-      ['source'],
+      // Not in a materials repo: the console cannot open it, so render is GitHub's blob page.
+      ['source', 'render'],
     ]);
+    expect(rows[7].render.getAttribute('href')).toBe(`https://github.com/${ORG}/handouts/blob/main/slides.pdf`);
+    expect(rows[7].render.title).toBe('slides.pdf rendered on GitHub');
     const pdf = rows[0].render;
     expect(pdf.getAttribute('href')).toBe(`?semester=${ORG}#materials-${encodeURIComponent('materials/slides.pdf')}`);
     expect(pdf.getAttribute('target')).toBe('_blank');
@@ -116,6 +119,30 @@ describe('the button row', () => {
     expect(name.getAttribute('href')).toBe(`?semester=${ORG}#kind-lecture/${encodeURIComponent('materials/slides.pdf')}`);
     expect(name.getAttribute('aria-current')).toBe('page');
     expect(btns(tab).render.getAttribute('href')).toBe(name.getAttribute('href'));
+  });
+
+  it('renders a file outside the materials repos on GitHub only when GitHub draws it', async () => {
+    const files = ['brief.md', 'lab.ipynb', 'fig.png', 'slides.pdf', 'page.html', 'run.py', 'a.docx'].map((p) => link(p, 'assignment-1-octo'));
+    const el = await mount(<FileList org={ORG} repos={['materials']} links={files} />, new FakeGitHub());
+    const rows = [...el.querySelectorAll('li')].map(btns);
+    expect(rows.map((b) => 'render' in b)).toEqual([true, true, true, true, false, false, false]);
+    const blob = (p: string) => `https://github.com/${ORG}/assignment-1-octo/blob/main/${p}`;
+    expect(rows[0].render.getAttribute('href')).toBe(blob('brief.md'));
+    // Markdown and notebooks: source shows the text, so it differs from render; the rest keep the plain blob.
+    expect(rows.map((b) => b.source.getAttribute('href'))).toEqual([
+      `${blob('brief.md')}?plain=1`, `${blob('lab.ipynb')}?plain=1`, blob('fig.png'), blob('slides.pdf'), blob('page.html'), blob('run.py'), blob('a.docx'),
+    ]);
+    expect(rows[0].render.getAttribute('target')).toBe('_blank');
+  });
+
+  it('draws a compact row with the name in brackets for a sentence, and a label in place of the name', async () => {
+    const el = await mount(<FileLinkItem org={ORG} repos={['materials']} link={link('slides.pdf')} setup={null} inline />, new FakeGitHub());
+    expect(el.textContent).toBe('[slides.pdf]sourcerender');
+    expect(el.querySelector('.file-btns')!.classList.contains('inline')).toBe(true);
+    if (root) render(null, root);
+    const btn = await mount(<FileLinkItem org={ORG} repos={['materials']} link={link('SYLLABUS.md')} setup={null} cls="btn outline" label={<b>Syllabus</b>} />, new FakeGitHub());
+    expect(btn.querySelector('a.btn')!.innerHTML).toBe('<b>Syllabus</b>');
+    expect(Object.keys(btns(btn))).toEqual(['source', 'render', 'online']);
   });
 
   it('links source to the GitHub blob when the link carries no url', async () => {

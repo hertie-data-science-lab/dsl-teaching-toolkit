@@ -64,6 +64,15 @@ describe('the Updates box', () => {
     expect(html).toContain(`href="?semester=${ORG}#assignment-assignment-1"`);
     expect(html).toContain(`href="?semester=${ORG}#materials-materials%2F`);
   });
+
+  it('gives each file in a bullet, and the syllabus, its button row: render where the viewer draws it', () => {
+    const html = render(<HomeView facts={factsFromStatus(doc())} org={ORG} now={NOW} />);
+    const slides = encodeURIComponent('materials/lectures/01_intro/slides.pdf');
+    expect(html).toContain(`<span class="file-btns inline">`);
+    expect(html).toMatch(new RegExp(`href="\\?semester=${ORG}#materials-${slides}" target="_blank" rel="noopener" title="slides.pdf rendered">render</a>`));
+    const syl = html.slice(html.indexOf('syllabus-link'));
+    expect(syl).toMatch(/^[^]*?<b>Syllabus<\/b><\/a><span class="file-btns">[^]*?>source<[^]*?>render</);
+  });
 });
 
 describe('Home', () => {
