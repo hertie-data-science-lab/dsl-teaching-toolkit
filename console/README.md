@@ -282,7 +282,8 @@ the console when it lives in a materials repo (in All materials; in the tab itse
 tab), else on GitHub, then a row of buttons (decision 0035 rule 10): `source` (the GitHub blob),
 `render` (in a new tab: the same console view, for a file the name opens there and the viewer
 draws: markdown, notebook, html, pdf, image; else GitHub's blob page, for a file GitHub draws:
-markdown, notebook, pdf, image), `online` (github.dev, in the student's fork when they
+markdown, notebook, pdf, image, whose `source` then takes `?plain=1` for markdown and
+notebooks), `online` (github.dev, in the student's fork when they
 forked the repo, else the org's) and `local` (the editor from Profile, at
 `<semester folder>/<repo>/<path>`). `online` and `local` only for a file an editor opens (not
 pdf, pptx, docx, xlsx, zip); `local` only once Profile has a folder and VS Code or an editor

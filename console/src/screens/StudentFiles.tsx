@@ -5,7 +5,8 @@
 // they forked the repo, else the org's) and `local` (the editor Profile names, in the semester's
 // folder). `render` opens the console's viewer for a file the name opens in the console and the
 // viewer draws (markdown, notebook, html, pdf, image); for any other file in the org, GitHub's
-// blob page when GitHub draws it (markdown, notebook, pdf, image; not html). `online` and
+// blob page when GitHub draws it (markdown, notebook, pdf, image; not html), and `source` then
+// takes `?plain=1` for markdown and notebooks so the two differ. `online` and
 // `local` only for a file an editor opens; `local` only once Profile has a folder and an editor
 // that takes a path. Whether the student forked a repo is read once per session, when a row
 // first needs it (`model/fork.ts`). Every file link the student screens draw renders through
@@ -85,9 +86,11 @@ function FileButtons({ org, repos, link, setup, tab, inline }: { org: string; re
   const kind = viewKind(at.path);
   const blob = link.url || ghUrl(org, at.repo, at.path, 'HEAD');
   const drawn = !shown.ext ? (DRAWN.includes(kind) ? shown.href : null) : GH_DRAWN.includes(kind) ? blob : null;
+  // Where render is GitHub's own blob page, markdown and notebooks show their text with `?plain=1`.
+  const source = shown.ext && (kind === 'markdown' || kind === 'notebook') ? `${blob}${blob.includes('?') ? '&' : '?'}plain=1` : blob;
   return (
     <span class={inline ? 'file-btns inline' : 'file-btns'}>
-      <a class="file-btn" href={blob} target="_blank" rel="noopener" title={`${name} on GitHub`}>source</a>
+      <a class="file-btn" href={source} target="_blank" rel="noopener" title={`${name} on GitHub`}>source</a>
       {drawn ? <a class="file-btn" href={drawn} target="_blank" rel="noopener" title={shown.ext ? `${name} rendered on GitHub` : `${name} rendered`}>render</a> : null}
       {edit ? (
         <a class="file-btn" href={fileOnline(forked ? login : org, at.repo, at.path, link.url)} target="_blank" rel="noopener" title={forked ? `Edit ${name} in your fork, in the browser` : `Edit ${name} in the browser`}>online</a>

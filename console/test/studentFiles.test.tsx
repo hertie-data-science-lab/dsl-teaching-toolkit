@@ -126,7 +126,12 @@ describe('the button row', () => {
     const el = await mount(<FileList org={ORG} repos={['materials']} links={files} />, new FakeGitHub());
     const rows = [...el.querySelectorAll('li')].map(btns);
     expect(rows.map((b) => 'render' in b)).toEqual([true, true, true, true, false, false, false]);
-    expect(rows[0].render.getAttribute('href')).toBe(rows[0].source.getAttribute('href'));
+    const blob = (p: string) => `https://github.com/${ORG}/assignment-1-octo/blob/main/${p}`;
+    expect(rows[0].render.getAttribute('href')).toBe(blob('brief.md'));
+    // Markdown and notebooks: source shows the text, so it differs from render; the rest keep the plain blob.
+    expect(rows.map((b) => b.source.getAttribute('href'))).toEqual([
+      `${blob('brief.md')}?plain=1`, `${blob('lab.ipynb')}?plain=1`, blob('fig.png'), blob('slides.pdf'), blob('page.html'), blob('run.py'), blob('a.docx'),
+    ]);
     expect(rows[0].render.getAttribute('target')).toBe('_blank');
   });
 
