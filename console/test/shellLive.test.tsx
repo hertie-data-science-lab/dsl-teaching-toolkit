@@ -11,7 +11,7 @@ import { PatAuth } from '../src/auth/pat';
 import { GitHubClient } from '../src/github/client';
 import type { Course, Semester } from '../src/model/discovery';
 import { Sidenav, type SubWanted } from '../src/ui/shell';
-import { FakeGitHub, fileBody } from './fake';
+import { FakeGitHub, fileBody, json } from './fake';
 import FILE from './fixtures/student-status.json?raw';
 
 const user = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
@@ -27,7 +27,10 @@ afterEach(() => {
   history.replaceState(null, '', '/');
 });
 
-async function mount(url: string, gh = new FakeGitHub()) {
+/** A fake whose NLP semester has opted in to the student console (`student_console: true`). */
+const optedIn = () => new FakeGitHub().on('GET', `/repos/${NLP.org}/.github/contents/.system/student-status.json`, fileBody('.system/student-status.json', FILE));
+
+async function mount(url: string, gh = optedIn()) {
   history.replaceState(null, '', url);
   const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: new GitHubClient({ token: () => 't', fetch: gh.fetch }) });
   s.user.value = user;
@@ -191,11 +194,18 @@ describe('a course that has not opted in to the student console', () => {
     expect(paths.every((u) => u.startsWith(`/repos/${NLP.org}/.github`))).toBe(true);
   });
 
-  it('opens the student screens where the course opted in, or the file predates the flag', async () => {
-    for (const on of [true, undefined]) {
-      const el = await mount(`/?semester=${NLP.org}#assignments`, status({ [NLP.org]: on }));
-      expect(el.querySelector('.sidenav [aria-current="page"]')?.textContent).toBe('Assignments');
-      expect(el.querySelector('#view a.btn[href$=".github.io/"]')).toBeNull();
+  it('opens the student screens only where the course opted in', async () => {
+    const el = await mount(`/?semester=${NLP.org}#assignments`, status({ [NLP.org]: true }));
+    expect(el.querySelector('.sidenav [aria-current="page"]')?.textContent).toBe('Assignments');
+    expect(el.querySelector('#view a.btn[href$=".github.io/"]')).toBeNull();
+  });
+
+  it('shows the website where the course never set the flag, has no status file yet, or the read fails', async () => {
+    const path = `/repos/${NLP.org}/.github/contents/.system/student-status.json`;
+    for (const gh of [status({ [NLP.org]: undefined }), new FakeGitHub(), new FakeGitHub().on('GET', path, json({ message: 'Bad credentials' }, 401))]) {
+      const el = await mount(`/?semester=${NLP.org}#assignments`, gh);
+      expect(el.querySelector('#view .lede')?.textContent).toContain('uses its website');
+      expect(el.querySelector('.sidenav')).toBeNull();
     }
   });
 
