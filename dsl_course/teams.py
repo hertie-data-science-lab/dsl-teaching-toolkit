@@ -74,8 +74,8 @@ def parse(
 
     `faults` collects the rows this parse acts on differently from how they read - a
     faculty team named where a project team belongs, a student claimed by two teams of one
-    assignment, a row de-duplicated away - each of which was a silent drop or a `log_err`
-    in a sync nobody watches.
+    assignment (the first row wins; the later one is ignored), a row de-duplicated away -
+    each of which was a silent drop or a `log_err` in a sync nobody watches.
 
     `known_handles` is the onboarded roster, when the caller has it: a handle that is not
     on it would INVITE an arbitrary GitHub account into a private org, so the syncs refuse
@@ -98,7 +98,11 @@ def parse(
             continue
         if faults is not None:
             faults += _row_faults(lineno, assignment, team, handle, claimed, allowed)
-        claimed.setdefault((assignment, handle), (team, lineno))
+        was = claimed.setdefault((assignment, handle), (team, lineno))
+        if was[0] != team:
+            # The first claim wins, as the fault says: a second team's row would put the
+            # student in both GitHub teams, with push on both group repos.
+            continue
         members = out.setdefault(assignment, {}).setdefault(team, [])
         if handle not in members:
             members.append(handle)
@@ -135,7 +139,8 @@ def _row_faults(
                 lineno,
                 "team",
                 f"this handle is already in another team for the same assignment "
-                f"(row {was[1]}) - two teams cannot claim one student",
+                f"(row {was[1]}) - two teams cannot claim one student, so this row is "
+                f"ignored",
                 fix=_HANDLES_FIX,
             )
         )
@@ -188,8 +193,18 @@ def load(
 
     `faults` and `known_handles` are `parse`'s, for the caller that is checking the file
     rather than reading it."""
+    return load_or_none(semester_org, faults, known_handles) or {}
+
+
+def load_or_none(
+    semester_org: str,
+    faults: list[ConfigFault] | None = None,
+    known_handles: set[str] | None = None,
+) -> dict[str, dict[str, list[str]]] | None:
+    """`load`, but None when teams.csv is ABSENT (a 404) - for the caller that would take
+    access away on the strength of an empty answer (the pruning team sync)."""
     content = _teams_text(semester_org)
-    return parse(content, faults, known_handles) if content is not None else {}
+    return None if content is None else parse(content, faults, known_handles)
 
 
 def teams_for(

@@ -125,6 +125,14 @@ def test_one_student_in_two_teams_of_one_assignment_is_a_fault():
     (fault,) = _faults(text)
     assert fault.lineno == 3 and "row 2" in fault.what
     assert "two teams cannot claim one student" in fault.what
+    assert "this row is ignored" in fault.what
+
+
+def test_one_student_in_two_teams_is_placed_in_the_first_only():
+    # The fault said the student could not be in both, while the parse put them in both:
+    # two GitHub teams, push on both group repos, two grading-sheet blocks.
+    text = "assignment,team,github_handle\na4,team-x,ada\na4,team-y,ada\na4,team-y,bo\n"
+    assert teams.parse(text) == {"a4": {"team-x": ["ada"], "team-y": ["bo"]}}
 
 
 def test_a_duplicated_row_is_a_fault_rather_than_a_silent_drop():
