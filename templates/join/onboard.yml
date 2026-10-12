@@ -163,13 +163,31 @@ jobs:
               // Single-use: a code binds to the FIRST account that claims it. The one
               // exception is that account under a NEW NAME. A GitHub id is immutable and a
               // login is not, so a row whose `github_id` is this user's IS this user, whatever
-              // handle the cell still spells - and the rewrite below re-links the row. Without
-              // it a renamed student got NO_MATCH here for ever, while the nightly reconcile
-              // pruned their new login off every team and re-added a login that no longer
-              // exists: unrecoverable without a hand edit nobody knew to make.
+              // handle the cell still spells. Without it a renamed student got NO_MATCH here
+              // for ever.
               const boundElsewhere = (r) =>
                 r[iHandle] && r[iHandle].toLowerCase() !== handle.toLowerCase() &&
                 (r[iId] || '').trim() !== String(userId);
+              // ...but such a row is NOT rewritten here. Their repos, gradebook, teams.csv
+              // rows and sheet keys are all named after the OLD login, and the hourly relink
+              // (dsl_course.relink) moves every one of them, keyed on that old login being
+              // gone. Writing the new login into the cell first would hide the rename from
+              // it for good: the next handout makes fresh, empty repos under the new name.
+              const renamed = (r) =>
+                r[iHandle] && r[iHandle].toLowerCase() !== handle.toLowerCase() &&
+                (r[iId] || '').trim() === String(userId);
+              const alreadyLinked = async () => {
+                await github.rest.issues.createComment({
+                  owner: org, repo: context.repo.repo, issue_number: issue.number, body:
+                    `Thanks @${handle} - you are already enrolled, under your previous GitHub username. ` +
+                    `Nothing to do: your new username is picked up automatically within the hour, ` +
+                    `repos and all. If your repos have not moved to it within a day, contact your instructors.` });
+                await github.rest.issues.addLabels({
+                  owner: org, repo: context.repo.repo, issue_number: issue.number, labels: ['onboarded'] });
+                await github.rest.issues.update({
+                  owner: org, repo: context.repo.repo, issue_number: issue.number,
+                  title: `Join course: ${handle}`, state: 'closed' });
+              };
               // The public reply cannot say WHY (above), so the teaching team is told
               // privately: one new file per issue in semester-config, so no sha to race.
               // Who asked and who the row is bound to - never the code. Best-effort: a
@@ -197,6 +215,7 @@ jobs:
                 await recordRefusal(row);
                 return fail(NO_MATCH, 'needs-review');
               }
+              if (renamed(row)) return alreadyLinked();
 
               // Write the authenticated handle + immutable id back (idempotent).
               //
@@ -233,6 +252,7 @@ jobs:
                     await recordRefusal(matched);
                     return fail(NO_MATCH, 'needs-review');
                   }
+                  if (renamed(matched)) return alreadyLinked();
                   matched[iHandle] = handle; matched[iId] = String(userId);
                   const body = serialiseCsv([header, ...rows]);
                   try {

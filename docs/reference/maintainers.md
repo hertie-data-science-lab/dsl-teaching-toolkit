@@ -210,7 +210,10 @@ demotes staff. A handle whose stored id onboard itself linked (`roster: link
 @<handle> (id <id>)`) is a rename taken over by a stranger and is never relinked. A renamed
 account - the handle is gone, its id lives on under a new login, and the toolkit itself
 linked that pair - is relinked the same way with the `github_handle` cell as the marker,
-written last; do not hand-edit a renamed row, the next sync heals it. Onboard
+written last; do not hand-edit a renamed row, the next sync heals it. Onboard never
+rewrites one either: a renamed student who opens Join course again is told they are already
+enrolled, because a cell that already holds the new login hides the rename from relink for
+good. Onboard
 records every "bound elsewhere" refusal in `.system/enrolment/refusals/<issue>.json`; the
 relink records itself in `.system/enrolment/relinks/<old id>.json`.
 

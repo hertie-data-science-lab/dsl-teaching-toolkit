@@ -9,13 +9,22 @@
     "additionalProperties": false,
     "properties": {
       "assignment": {
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "github_handle": {
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "team": {
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       }
     },
     "required": [

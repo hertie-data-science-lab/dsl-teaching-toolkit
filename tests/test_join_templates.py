@@ -1011,6 +1011,21 @@ def test_joining_while_in_a_team_moves_you_in_one_write():
 
 
 @needs_js
+def test_a_move_drops_every_row_the_student_had_for_that_assignment():
+    # A hand edit left stu on two teams' rows. Dropping only the first row left her on the
+    # other one after the move: in two teams, and no Join could clear it.
+    out = _run_form(
+        _lock_for("open"),
+        _IN_BETA + "assignment-2,team-gamma,stu\n",
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
+    )
+    (written,) = out["writes"]
+    assert "team-beta,stu" not in written and "team-gamma,stu" not in written
+    assert written.endswith("assignment-2,team-alpha,stu\n")
+    assert "you've left **team-beta**" in out["comments"][0]
+
+
+@needs_js
 def test_creating_while_in_a_team_moves_you_to_the_new_one():
     # The dead end this replaces: in team A and wanting to START a team, Create said
     # "already in a team" and there was nowhere to go.
@@ -1445,3 +1460,26 @@ def test_the_refusal_record_is_written_at_both_bound_elsewhere_sites():
     record = code[code.index("const recordRefusal") : code.index("const row = rows")]
     assert "try {" in record and "catch (e)" in record
     assert "code" not in re.sub(r"\bcore\b|\bcontent\b", "", record)
+
+
+@needs_js
+@pytest.mark.parametrize(
+    "rosters",
+    [
+        pytest.param([_bound_roster("oldacct", "202")], id="renamed-when-read"),
+        pytest.param(
+            [_bound_roster("", ""), _bound_roster("oldacct", "202")],
+            id="renamed-while-writing",
+        ),
+    ],
+)
+def test_a_renamed_account_rejoining_is_answered_and_its_row_left_alone(rosters):
+    # newacct is id 202, whose row still says oldacct. Writing the new login into the
+    # cell hid the rename from relink for good: its repos, gradebook and team rows stayed
+    # under the old name and the next handout made fresh empty ones. The roster write here
+    # always fails, so any attempt to rewrite the row would end in a different reply.
+    out = _run_onboard(rosters)
+    (comment,) = out["comments"]
+    assert "already enrolled, under your previous GitHub username" in comment
+    assert "oldacct" not in comment
+    assert out["records"] == {}

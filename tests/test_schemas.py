@@ -332,3 +332,38 @@ def test_labels_json_names_every_engine_value_once():
         assert list(labels[key]) == list(values), key
         for value, words in labels[key].items():
             assert set(words) == {"label", "help"} and words["label"], (key, value)
+
+
+def test_the_seeded_files_validate():
+    # What Bootstrap seeds, unedited, must save through the console, which validates the
+    # whole file before every write: the schedule's bare `archive.event_datetime:` and the
+    # course file's comment-only `assignment_defaults:` both read as YAML null.
+    from dsl_course import bootstrap_course
+
+    sched = yaml.safe_load(
+        bootstrap_course.semester_scaffold("x-f2026", "schedule.yml", "release")
+    )
+    assert sched["archive"]["event_datetime"] is None
+    assert validate(sched, schemas.schedule_schema()) == []
+    for code, admins in (("E1", None), ("", ["ann"])):
+        meta = yaml.safe_load(bootstrap_course._course_metadata("ML", code, admins))
+        assert validate(meta, schemas.dsl_course_schema()) == []
+
+
+def test_blank_schedule_keys_validate():
+    # A live schedule's shape: rows carrying a `details:` slot nobody has filled yet (the
+    # engine reads blank as absent), and the console's own cleared archive date.
+    rows = {
+        f"week{i:02d}": {"event_datetime": f"2026-09-{i:02d}", "details": None}
+        for i in range(1, 24)
+    }
+    doc = {
+        "semester_start": "2026-09-01",
+        "releases": rows,
+        "events": {"midterm": {"kind": "exam", "details": None, "tbc": None}},
+        "archive": {"event_datetime": None, "show_on_site": True},
+    }
+    assert validate(doc, schemas.schedule_schema()) == []
+    assert validate({**doc, "archive": None}, schemas.schedule_schema()) == []
+    # Still a type check: a list where text belongs is refused.
+    assert validate({**doc, "archive": {"details": ["a"]}}, schemas.schedule_schema())

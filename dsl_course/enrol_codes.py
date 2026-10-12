@@ -314,12 +314,24 @@ def run(semester_org: str) -> Outcome:
     already = {
         s.hertie_email.strip().casefold() for s in students if s.code_sent_at.strip()
     }
+    # A code on two rows binds whoever joins first to the first row: mail neither until
+    # faculty blank one (`roster.parse` puts the rows on the students.csv digest issue).
+    shared = roster.shared_codes(students)
     targets = []
+    held = 0
     for s in students:
         email = s.hertie_email.strip().casefold()
         if s.enrol_code and email and not s.onboarded and email not in already:
+            if s.enrol_code.casefold() in shared:
+                held += 1
+                continue
             already.add(email)
             targets.append(s)
+    if held:
+        log_err(
+            f"{held} row(s) share an enrol_code with another row in "
+            f"{roster.ROSTER_PATH} - not emailed until each has its own (blank the copy)"
+        )
     if not targets:
         log_ok("no not-yet-onboarded students still to be sent a code.")
         return Outcome.NOTHING_TO_SEND

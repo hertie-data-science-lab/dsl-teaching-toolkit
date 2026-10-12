@@ -39,11 +39,11 @@ describe('student-status.json', () => {
     expect(f.materialsRepos).toEqual(['materials']);
   });
 
-  it('carries the course’s opt-in, on when a file predates it', () => {
+  it('carries the course’s opt-in, off when a file predates it', () => {
     expect(factsFromStatus(DOC).studentConsole).toBe(true);
     expect(factsFromStatus({ ...DOC, student_console: false }).studentConsole).toBe(false);
     const { student_console: _, ...old } = DOC;
-    expect(factsFromStatus(old).studentConsole).toBe(true);
+    expect(factsFromStatus(old).studentConsole).toBe(false);
   });
 
   it('keeps a team to its name, headcount and cap', () => {

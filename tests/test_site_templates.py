@@ -136,7 +136,7 @@ def documents(generated) -> list[dict]:
 @pytest.fixture(scope="module")
 def site_data(generated) -> dict:
     """`site.data` as Jekyll would see it: the generated `_data/*.yml` plus the seeded ones
-    (previous_offering)."""
+    (previous_offering), plus the one data file only the public site writes (`course`)."""
     data = {
         Path(rel).stem: yaml.safe_load(text)
         for rel, text in site_repo.seed_templates().items()
@@ -145,6 +145,7 @@ def site_data(generated) -> dict:
     for rel, text in generated["files"].items():
         if rel.startswith("_data/"):
             data[Path(rel).stem] = yaml.safe_load(text)
+    data["course"] = yaml.safe_load(public_site.course_facts({}))
     return data
 
 

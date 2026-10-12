@@ -272,10 +272,11 @@ yet is read from its site repo instead (`SiteSource`: the generated collections,
 `_data/*.yml`), which also serves site-hosted instructor pictures. In a Student view nothing
 of the student's own is read.
 
-The file also carries the course's `student_console` opt-in. Where it is false a student
-gets no student screens: one notice with the semester site's link (`CourseWebsiteScreen`),
-read off that same file and nothing else. A file without the key (written before the engine
-carried it, or the site fallback) counts as on. An instructor's Student view is never gated.
+The file also carries the course's `student_console` opt-in. Only `true` opens the student
+screens; otherwise a student gets one notice with the semester site's link
+(`CourseWebsiteScreen`), read off that same file and nothing else. A file without the key
+(written before the engine carried it, or the site fallback) and a read that fails count as
+off, as the engine reads an unset key. An instructor's Student view is never gated.
 
 An **archived semester** is history: the student's own repos (read-only) and their marks from
 the gradebook, from the same reads as a live one. No operation runs against it.

@@ -63,6 +63,9 @@ Never edit the GitHub teams directly; the file is the auditable record.
        - github_handle: "janedoe"
    ```
 
+   The same rule holds here: while an entry cannot be placed, nobody is removed from
+   `course-admin` in any org.
+
 2. **Commit to `main`.** 
   - The push dispatches **Sync membership** automatically - nothing to run by hand. 
   - It reconciles fully (adds *and* removes) to match the pushed file.
