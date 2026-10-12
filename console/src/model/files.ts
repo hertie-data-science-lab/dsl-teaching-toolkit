@@ -83,8 +83,10 @@ export class LiveFiles implements Files {
     const k = this.fileKey(owner, repo, path, ref);
     const v: FileState = text === null ? { kind: 'absent' } : { kind: 'ready', text, sha };
     const s = this.files.get(k);
-    if (s) s.value = v;
-    else this.files.set(k, signal<FileState>(v));
+    if (s) {
+      s.value = v;
+      this.failedAt.delete(s);
+    } else this.files.set(k, signal<FileState>(v));
     // A write is a new commit on this path: read its date again, into the same signal so
     // a screen already showing it updates.
     const c = this.changes.get(`${owner}/${repo}/${path}`);
