@@ -1997,8 +1997,9 @@ def formation_state(
     a door that never opens, not one that opens forever.
 
     Whether the assignment HAS a window is the caller's question, not this one's: it hangs
-    on `team_formation`, which lives in the template's `grading_config.yml` and which this
-    module deliberately cannot read. Both callers already hold the spec.
+    on `team_formation`, a run setting resolved into the assignment's spec
+    (`grades.load_grading_spec`), which this module deliberately cannot read. Both callers
+    already hold the spec.
 
     One place, because two things now answer off it minutes apart - the lock file the
     Join-team form refuses on, and the semester site's team-formation callout - and a page

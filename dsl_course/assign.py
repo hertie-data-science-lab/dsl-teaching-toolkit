@@ -845,11 +845,12 @@ def provision_one(
 ) -> str:
     """Generate one submission repo and grant its members access.
 
-    `visibility` is the assignment's own (`grading_config.yml`), and is acted on at CREATE
-    only - see `repos.set_visibility` for why a public repo is born private. A repo that
-    already exists is never re-PATCHed: the tick re-fires every handed-out assignment, so
-    that would nightly undo a deliberate change, and an edit to `visibility:` after
-    hand-out is reported by the semester's `grading_config.yml` digest instead.
+    `visibility` is a run setting (the semester's `assignments.yml`, else the course's or
+    the institution's default), and is acted on at CREATE only - see
+    `repos.set_visibility` for why a public repo is born private. A repo that already
+    exists is never re-PATCHed: the tick re-fires every handed-out assignment, so that
+    would nightly undo a deliberate change, and an edit to `visibility:` after hand-out is
+    reported as a fault instead (`grades._visibility_faults`).
 
     It also decides the unit's own PERMISSION. `maintain` is the floor for everything the
     toolkit owns the flag on, and it deliberately excludes GitHub's visibility switch;
