@@ -1,15 +1,17 @@
 // A semester's Home, the site's landing page (decision 0035 rule 4): the Updates box (the
 // site's `announcements.html`: what has reached students, newest first, seven), the syllabus
 // pinned, the course description, the instructors' own home text, previous offerings, and the
-// instructors and teaching assistants in two columns.
+// instructors and teaching assistants in two columns. The Updates box's files and the syllabus
+// are file links (`FileLinkItem`), each with its button row.
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
+import type { Setup } from '../model/open';
 import { instant, startOfDay, type Announcement, type ScheduleRow, type SemesterAssignment, type SemesterFacts } from '../model/student';
 import { assignmentHref } from '../router';
 import { Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import { GhMd } from '../ui/rendered';
-import { fileHref, newTabIf } from './StudentFiles';
+import { FileLinkItem, fileHref, useYourSetup } from './StudentFiles';
 import { PersonCard } from './StudentInstructors';
 
 /** Display-only rows (the site's `_events`): never news, and on a kind tab only as the kind's own event. */
@@ -53,17 +55,14 @@ export function homeUpdates(facts: SemesterFacts, now: number): Update[] {
   return out.sort((a, b) => b.at - a.at).slice(0, UPDATES_SHOWN);
 }
 
-function Bullet({ u, facts, org }: { u: Update; facts: SemesterFacts; org: string }) {
+function Bullet({ u, facts, org, setup }: { u: Update; facts: SemesterFacts; org: string; setup: Setup | null }) {
   if ('row' in u) {
     const r = u.row;
     const noun = (facts.kinds?.[r.kind]?.label || r.kind).toLowerCase();
     return (
       <li>
         New {noun} {r.kind === 'readings' ? 'are' : 'is'} up: {r.title}
-        {r.links.map((l) => {
-          const h = fileHref(org, facts.materialsRepos, l);
-          return <> [<a href={h.href} {...newTabIf(h.ext)}>{l.name || 'file'}</a>]</>;
-        })}
+        {r.links.map((l) => <> <FileLinkItem org={org} repos={facts.materialsRepos} link={l} setup={setup} inline /></>)}
       </li>
     );
   }
@@ -74,7 +73,9 @@ function Bullet({ u, facts, org }: { u: Update; facts: SemesterFacts; org: strin
 
 export function HomeView({ facts, org, now }: { facts: SemesterFacts; org: string; now: number }) {
   const updates = homeUpdates(facts, now);
-  const syl = facts.syllabus ? fileHref(org, facts.materialsRepos, facts.syllabus) : null;
+  const setup = useYourSetup();
+  const syl = facts.syllabus;
+  const sylExt = syl ? fileHref(org, facts.materialsRepos, syl).ext : false;
   const instructors = facts.instructors.filter((c) => c.role === 'instructor');
   const assistants = facts.instructors.filter((c) => c.role === 'teaching_assistant');
   const description = facts.courseDescription ?? '';
@@ -84,10 +85,10 @@ export function HomeView({ facts, org, now }: { facts: SemesterFacts; org: strin
       {updates.length ? (
         <section class="panel section updates" aria-labelledby="h-updates">
           <h2 id="h-updates">Updates</h2>
-          <ul>{updates.map((u) => <Bullet u={u} facts={facts} org={org} />)}</ul>
+          <ul>{updates.map((u) => <Bullet u={u} facts={facts} org={org} setup={setup} />)}</ul>
         </section>
       ) : null}
-      {syl ? <p class="syllabus-link"><a class="btn outline" href={syl.href} {...newTabIf(syl.ext)}><b>Syllabus</b>{syl.ext ? <> <Ext /></> : null}</a></p> : null}
+      {syl ? <p class="syllabus-link"><FileLinkItem org={org} repos={facts.materialsRepos} link={syl} setup={setup} cls="btn outline" label={<><b>Syllabus</b>{sylExt ? <> <Ext /></> : null}</>} /></p> : null}
       {description ? (
         <section aria-labelledby="h-description">
           <h2 id="h-description">Course description</h2>

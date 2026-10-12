@@ -155,8 +155,9 @@ describe('3. the whole receipts thread', () => {
     expect(t).toContain('updated data/train.csv');
     expect(t).toContain('Every comment on Submission receipts 3');
     expect(t).toContain('Files updated');
-    expect(t).toContain('Fill in CONTRIBUTIONS.md in your team repo before the deadline.');
-    expect(render(v)).toContain(`href="https://github.com/${ORG}/assignment-3-project-team-latency/blob/HEAD/CONTRIBUTIONS.md"`);
+    // A file row: GitHub draws markdown, so render opens the blob page; online edits it.
+    expect(t).toContain('Fill in CONTRIBUTIONS.md source render online in your team repo before the deadline.');
+    expect(render(v)).toContain(`href="https://github.com/${ORG}/assignment-3-project-team-latency/blob/HEAD/CONTRIBUTIONS.md" target="_blank" rel="noopener" title="CONTRIBUTIONS.md rendered on GitHub">render</a>`);
   });
 
   it('puts a This week line for a patch newer than the last visit, and none for an older one', async () => {
