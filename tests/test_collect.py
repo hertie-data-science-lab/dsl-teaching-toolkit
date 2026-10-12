@@ -18,7 +18,7 @@ import sys
 import tempfile
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -611,12 +611,15 @@ def test_snapshot_path_lives_under_snapshots():
         ("2026-10-13", None, "2026-10-13T21:59:59Z"),
     ],
 )
-def test_until_param_is_a_utc_z_stamp_of_the_semesters_own_deadline(
-    deadline, tz, expected
-):
+def test_a_deadline_is_read_in_the_semesters_own_zone(deadline, tz, expected):
+    utc = collect.local_deadline(deadline, tz).astimezone(timezone.utc)
+    assert utc.strftime("%Y-%m-%dT%H:%M:%SZ") == expected
+
+
+def test_until_param_is_a_utc_z_stamp():
     # A `+HH:MM` offset in a query string would be read as a space, silently shifting the
     # cutoff by hours - so the API cutoff is always normalised to UTC Z.
-    assert collect._until_param(deadline, tz) == expected
+    assert collect._until_param("2026-10-15T23:59:59+02:00") == "2026-10-15T21:59:59Z"
 
 
 def test_an_unparseable_deadline_still_raises_rather_than_matching_nothing():
@@ -1924,6 +1927,7 @@ def test_collect_records_a_skip_when_the_template_has_no_solution_branch(monkeyp
     # Fire-once: no marker means the scheduler re-clones this template and re-decides the
     # same skip on every hourly tick, for ever. Hand-marked assignments are common.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
     monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     sheets = _recorded_sheet_writes(monkeypatch)
@@ -1938,12 +1942,27 @@ def test_collect_records_a_skip_when_the_template_has_no_solution_branch(monkeyp
     assert len(sheets) == 1 and sheets[0]["slug"] == "assignment-1"
 
 
+def test_a_solution_clone_that_failed_records_no_skip(monkeypatch, capsys):
+    # A clone fails for a network blip as readily as for a missing branch. Read as "no
+    # branch", one bad tick after the cutoff retired the hidden tests for good.
+    monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, '{"name": "solution"}'))
+    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
+    monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
+    _recorded_sheet_writes(monkeypatch)
+    written = _captured_writes(monkeypatch)
+    assert collect.collect("Course", "assignment-1-f2026", "Semester") == 1
+    assert written == []
+    assert "recording nothing; the next run tries again" in capsys.readouterr().err
+
+
 def test_a_freeze_that_fails_records_no_skip_and_goes_red(monkeypatch, capsys):
     # A skip record is fire-once. Written over a sheet the freeze could not seal - a
     # grader saving in the browser inside the compare-and-swap window is enough - it
     # retires the assignment with an OPEN header and provisional `info:` that nothing ever
     # re-derives. So the marker waits, and the next tick seals and then records.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
     monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     _recorded_sheet_writes(monkeypatch, ok=False)
@@ -1957,6 +1976,7 @@ def test_the_next_run_after_a_failed_freeze_seals_and_then_records(monkeypatch):
     # The retry the run above leaves open: nothing about the failure is remembered, so the
     # tick that follows does both halves.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
     monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     sheets = _recorded_sheet_writes(monkeypatch, ok=True)
@@ -3827,6 +3847,7 @@ def test_an_unwritten_no_solution_branch_marker_goes_red(monkeypatch, capsys):
     # No `solution` branch means hand-marked, recorded once. A failed record means the
     # same clone attempt, and the same decision, every hour.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
     monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: collect.SheetWrite(True))
     monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
@@ -5242,7 +5263,7 @@ def _receipt_env(monkeypatch) -> list[tuple[str, str, bool]]:
     monkeypatch.setattr(
         collect.grades,
         "ensure_receipts_issue",
-        lambda org, repo, body, dry_run=False, create=True: 7,
+        lambda org, repo, body, dry_run=False: 7,
     )
     monkeypatch.setattr(
         collect.grades,
@@ -5326,7 +5347,7 @@ def test_a_team_issue_the_refresh_has_to_open_still_names_the_team(monkeypatch):
     monkeypatch.setattr(
         collect.grades,
         "ensure_receipts_issue",
-        lambda org, repo, body, dry_run=False, create=True: opened.append(body) or 7,
+        lambda org, repo, body, dry_run=False: opened.append(body) or 7,
     )
     assert collect.sync_sheet(
         "Course",

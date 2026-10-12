@@ -655,12 +655,11 @@ def local_deadline(deadline: str, tz: str | None = None) -> datetime:
     return dt.replace(tzinfo=zone) if dt.tzinfo is None else dt
 
 
-def _until_param(deadline: str, tz: str | None = None) -> str:
-    """`deadline` as a UTC `...Z` stamp - the form the commits API's `until=` takes."""
+def _until_param(deadline: str) -> str:
+    """`deadline` - an offset-carrying cutoff - as a UTC `...Z` stamp, the form the commits
+    API's `until=` takes."""
     return (
-        local_deadline(deadline, tz)
-        .astimezone(timezone.utc)
-        .strftime("%Y-%m-%dT%H:%M:%SZ")
+        local_deadline(deadline).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
 
 
@@ -3280,6 +3279,13 @@ def _grade_target(
         return result, executed
 
 
+def _solution_branch_absent(course_org: str, template: str) -> bool:
+    """Whether the template has no `solution` branch, by GitHub's own 404 - not whether a
+    clone of it failed, which a transient fault does too."""
+    code, out = gh("api", f"repos/{course_org}/{template}/branches/{SOLUTION_BRANCH}")
+    return code != 0 and is_missing_resource(out)
+
+
 def refresh_assignment_sheet(
     course_org: str,
     template: str,
@@ -3483,6 +3489,15 @@ def collect(
     with tempfile.TemporaryDirectory() as sd:
         soldir = Path(sd) / "sol"
         if not clone(course_org, template, soldir, branch=SOLUTION_BRANCH):
+            if not _solution_branch_absent(course_org, template):
+                # The skip below is FIRE-ONCE, and a clone fails for a network blip as
+                # readily as for a missing branch: only a 404 on the branch itself retires
+                # the assignment's hidden tests for good.
+                log_err(
+                    f"could not clone the `{SOLUTION_BRANCH}` branch of "
+                    f"{course_org}/{template} - recording nothing; the next run tries again"
+                )
+                return 1
             log_err(
                 f"no `{SOLUTION_BRANCH}` branch on {course_org}/{template} - no hidden "
                 f"tests to run; nothing to collect."

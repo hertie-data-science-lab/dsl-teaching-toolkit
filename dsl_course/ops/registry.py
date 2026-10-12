@@ -523,13 +523,22 @@ _OPS = (
             }
         ),
         help="Return marks and feedback to students.",
-        done_text="Marks returned.",
         doc="docs/10-grade-and-return-assignments.md",
         module="grades",
         argv=_grades,
         preview_flag="--preview",
         real_flag="--no-preview",
-        counts_doc="Gradebooks written and emails sent, as distribute reports them.",
+        # Through Distribute grades, never inline: the scheduler's automatic return runs
+        # there, and two returns outside one queue both mail every student.
+        via=f"{VIA_WORKFLOW}distribute-grades.yml",
+        inputs=(
+            "semester_org",
+            "assignment",
+            "preview",
+            "notify",
+            "receipt_note",
+            "include_feedback",
+        ),
     ),
     Operation(
         name="roster.send_codes",

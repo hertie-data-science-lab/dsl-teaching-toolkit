@@ -719,11 +719,13 @@ _AUTOGRADE_OUTCOME = """      - name: How this semester's grading leg ended
           # `|| true` and a `head`: under `bash -e` a transient search failure would
           # otherwise abort the job that exists to report, and a re-run reads its OWN
           # attempt. A null conclusion is the API lagging behind a leg `needs:` says has
-          # finished, so it is asked again for about a minute before it is believed.
+          # finished, so it is asked again for about a minute before it is believed. A leg
+          # cancelled with no steps never started - a later run's leg took its place in the
+          # semester's queue - so it reads as skipped: nothing ran, nothing failed.
           for pause in 0 5 10 20 30; do
             sleep "$pause"
             row=$(gh api "repos/$REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs" --paginate \\
-              --jq ".jobs[] | select(.name == \\"autograde $SEMESTER\\") | \\"\\(.conclusion) \\(.id)\\"" | head -n 1) || true
+              --jq ".jobs[] | select(.name == \\"autograde $SEMESTER\\") | \\"\\(if .conclusion == \\"cancelled\\" and ((.steps // []) | length) == 0 then \\"skipped\\" else .conclusion end) \\(.id)\\"" | head -n 1) || true
             if [ "${row%% *}" != "null" ]; then break; fi
           done
           if [ -z "$row" ]; then
@@ -1097,7 +1099,9 @@ on:
 {_concurrency("collect-submissions")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   collect-submissions:
-{_run_preamble(_TIMEOUT_GRADING, sandbox=True)}      - name: Collect submissions
+    # `--refresh-only` re-derives the sheet's `info:` block and runs nobody's code, so this
+    # job has no sandbox account and the ordinary budget. Grading is the scheduler's.
+{_run_preamble()}      - name: Collect submissions
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE_ORG: ${{{{ github.repository_owner }}}}
@@ -1267,6 +1271,16 @@ def _semester_dropdown(semester_orgs: list[str], optional: bool = False) -> str:
     )
 
 
+# Real returns queue PER SEMESTER: two of them reading `distributed.csv` at once both mail
+# every student, while two semesters share nothing. A preview writes nothing, so it gets a
+# group of its own - in the shared one, the scheduler's next `return-marks` arrival would
+# cancel it while it waited (a group holds one pending run).
+_DISTRIBUTE_CONCURRENCY = f"""concurrency:
+  group: ${{{{ github.event_name == 'workflow_dispatch' && inputs.preview != false && github.run_id || format('{{0}}-distribute-grades-{{1}}', github.repository, github.event_name == 'repository_dispatch' && {_PAYLOAD_SEMESTER} || inputs.semester_org) }}}}
+  cancel-in-progress: false
+"""
+
+
 def render_distribute_grades(semester_orgs: list[str]) -> str:
     """Send every mark a grader has written where it has to go."""
     return f"""name: Distribute grades
@@ -1280,7 +1294,8 @@ def render_distribute_grades(semester_orgs: list[str]) -> str:
 # Preview first; it writes no grades, sends no mail, and posts who gets what as a
 # "Distribute grades preview" issue in semester-config. Needs the GRAPH_* secrets to mail.
 # The scheduler's automatic return (an assignment's `marks_return_datetime`) arrives here
-# as a `return-marks` dispatch, so it and a button press share this workflow's queue.
+# as a `return-marks` dispatch, and the Console's Return marks starts this workflow too, so
+# every real return of a semester shares one queue. A preview queues behind nothing.
 
 on:
   repository_dispatch:
@@ -1309,12 +1324,12 @@ on:
         type: boolean
         default: false
 
-{_concurrency("distribute-grades")}
+{_DISTRIBUTE_CONCURRENCY}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   distribute-grades:
     # A button press waits for its check-team gate; the scheduler's dispatch has none
     # (no actor), and `--dispatched-by` checks what it names instead.
-    if: always() && (github.event_name == 'repository_dispatch' || needs.check-team.result == 'success')
+    if: "!cancelled() && (github.event_name == 'repository_dispatch' || needs.check-team.result == 'success')"
 {_run_preamble(_TIMEOUT_GRADING)}      - name: Distribute grades
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
@@ -1736,11 +1751,12 @@ on:
     # API - a string this file declares rather than one GitHub composes from the matrix.
     name: autograde ${{{{ matrix.semester }}}}
     needs: [release]
-    # always(), because grading is gated on the durable snapshot marker, not on this run's
-    # release pass: a red release must not silently skip a semester's grading. The output test
-    # is the empty-matrix guard - GitHub errors on a matrix with no vectors, and a course org
-    # with no semesters registered yet is a normal state, not a failure.
-    if: always() && needs.release.outputs.semesters != '' && needs.release.outputs.semesters != '[]'
+    # !cancelled(), because grading is gated on the durable snapshot marker, not on this
+    # run's release pass: a red release must not silently skip a semester's grading - but a
+    # run an operator CANCELLED must not go on to run student code for two hours. The output
+    # test is the empty-matrix guard - GitHub errors on a matrix with no vectors, and a
+    # course org with no semesters registered yet is a normal state, not a failure.
+    if: "!cancelled() && needs.release.outputs.semesters != '' && needs.release.outputs.semesters != '[]'"
     strategy:
       # One semester's grading failure must not cancel the others' - they share nothing.
       fail-fast: false
@@ -1769,7 +1785,7 @@ on:
     # matrix it reports on, so each semester keeps its own failure issue and a green semester
     # never closes a red one's.
     needs: [release, autograde]
-    if: always() && needs.release.outputs.semesters != '' && needs.release.outputs.semesters != '[]'
+    if: "!cancelled() && needs.release.outputs.semesters != '' && needs.release.outputs.semesters != '[]'"
     strategy:
       fail-fast: false
       matrix:
