@@ -431,7 +431,7 @@ function Overview(p: ReadyProps) {
   const [selected, setSelected] = useState<number[]>(thisWeek);
   // Every problem with its time, once per render (decision 0034): now or soon are the strip's red
   // counts and the Problems tab; later ones are Coming up.
-  const tiered = useMemo(() => tier(status, now), [status, now]);
+  const tiered = useMemo(() => tier(status), [status]);
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const problems = standing(tiered);
   const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.courseMigrated, write: p.course.write });

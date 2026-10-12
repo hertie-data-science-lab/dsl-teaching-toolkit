@@ -1,10 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
   "properties": {
     "assignments": {
       "items": {
-        "additionalProperties": false,
         "properties": {
           "due": {
             "type": [
@@ -25,7 +23,6 @@
             ]
           },
           "marks": {
-            "additionalProperties": false,
             "properties": {
               "filled": {
                 "type": "integer"
@@ -49,10 +46,8 @@
             "type": "boolean"
           },
           "settings": {
-            "additionalProperties": false,
             "properties": {
               "late_penalty_per_day": {
-                "additionalProperties": false,
                 "properties": {
                   "source": {
                     "enum": [
@@ -78,7 +73,6 @@
                 "type": "object"
               },
               "late_window_days": {
-                "additionalProperties": false,
                 "properties": {
                   "source": {
                     "enum": [
@@ -104,7 +98,6 @@
                 "type": "object"
               },
               "max_team_size": {
-                "additionalProperties": false,
                 "properties": {
                   "source": {
                     "enum": [
@@ -130,7 +123,6 @@
                 "type": "object"
               },
               "submit_url": {
-                "additionalProperties": false,
                 "properties": {
                   "source": {
                     "enum": [
@@ -156,7 +148,6 @@
                 "type": "object"
               },
               "team_formation": {
-                "additionalProperties": false,
                 "properties": {
                   "source": {
                     "enum": [
@@ -182,7 +173,6 @@
                 "type": "object"
               },
               "visibility": {
-                "additionalProperties": false,
                 "properties": {
                   "source": {
                     "enum": [
@@ -272,25 +262,18 @@
       "type": "array"
     },
     "course": {
-      "additionalProperties": false,
       "properties": {
         "code": {
           "type": "string"
         },
         "materials": {
           "items": {
-            "additionalProperties": false,
             "properties": {
               "checks": {
                 "items": {
-                  "additionalProperties": false,
                   "properties": {
-                    "blocks": {
-                      "type": "boolean"
-                    },
                     "detail": {
                       "items": {
-                        "additionalProperties": false,
                         "properties": {
                           "folders": {
                             "items": {
@@ -337,7 +320,7 @@
                     "id",
                     "label",
                     "done",
-                    "blocks"
+                    "need"
                   ],
                   "type": "object"
                 },
@@ -364,9 +347,6 @@
         "org": {
           "type": "string"
         },
-        "ready": {
-          "type": "boolean"
-        },
         "semesters": {
           "items": {
             "type": "string"
@@ -380,12 +360,6 @@
               "suggested"
             ],
             "type": "string"
-          },
-          "type": "object"
-        },
-        "stage_optional": {
-          "additionalProperties": {
-            "type": "boolean"
           },
           "type": "object"
         },
@@ -415,12 +389,8 @@
         },
         "templates": {
           "items": {
-            "additionalProperties": false,
             "properties": {
               "repo": {
-                "type": "string"
-              },
-              "slug": {
                 "type": "string"
               },
               "starter": {
@@ -444,7 +414,6 @@
         },
         "todo": {
           "items": {
-            "additionalProperties": false,
             "properties": {
               "check": {
                 "enum": [
@@ -484,9 +453,6 @@
                 ],
                 "type": "string"
               },
-              "optional": {
-                "type": "boolean"
-              },
               "repo": {
                 "type": "string"
               },
@@ -504,14 +470,14 @@
               "id",
               "kind",
               "repo",
-              "text"
+              "text",
+              "need"
             ],
             "type": "object"
           },
           "type": "array"
         },
         "verdict": {
-          "additionalProperties": false,
           "properties": {
             "coming_up": {
               "type": "integer"
@@ -548,12 +514,12 @@
       },
       "required": [
         "org",
-        "stages"
+        "stages",
+        "stage_need"
       ],
       "type": "object"
     },
     "horizon": {
-      "additionalProperties": false,
       "properties": {
         "days": {
           "type": "integer"
@@ -575,7 +541,6 @@
     },
     "operations": {
       "items": {
-        "additionalProperties": false,
         "properties": {
           "conclusion": {
             "enum": [
@@ -611,7 +576,6 @@
     },
     "problems": {
       "items": {
-        "additionalProperties": false,
         "properties": {
           "bites": {
             "enum": [
@@ -622,7 +586,6 @@
             "type": "string"
           },
           "fix": {
-            "additionalProperties": false,
             "properties": {
               "entry": {
                 "type": [
@@ -694,7 +657,8 @@
           "id",
           "scope",
           "stage",
-          "text"
+          "text",
+          "bites"
         ],
         "type": "object"
       },
@@ -702,10 +666,8 @@
     },
     "releases": {
       "items": {
-        "additionalProperties": false,
         "properties": {
           "dest": {
-            "additionalProperties": false,
             "properties": {
               "path": {
                 "type": "string"
@@ -738,7 +700,6 @@
             "type": "boolean"
           },
           "source": {
-            "additionalProperties": false,
             "properties": {
               "path": {
                 "type": "string"
@@ -793,7 +754,6 @@
       "type": "string"
     },
     "semester": {
-      "additionalProperties": false,
       "properties": {
         "archive_date": {
           "type": [
@@ -876,7 +836,6 @@
         },
         "todo": {
           "items": {
-            "additionalProperties": false,
             "properties": {
               "check": {
                 "enum": [
@@ -916,9 +875,6 @@
                 ],
                 "type": "string"
               },
-              "optional": {
-                "type": "boolean"
-              },
               "repo": {
                 "type": "string"
               },
@@ -936,14 +892,14 @@
               "id",
               "kind",
               "repo",
-              "text"
+              "text",
+              "need"
             ],
             "type": "object"
           },
           "type": "array"
         },
         "verdict": {
-          "additionalProperties": false,
           "properties": {
             "coming_up": {
               "type": "integer"
@@ -993,12 +949,12 @@
       "required": [
         "org",
         "stages",
+        "stage_need",
         "live"
       ],
       "type": "object"
     },
     "site": {
-      "additionalProperties": false,
       "properties": {
         "last_update": {
           "type": [
@@ -1016,7 +972,6 @@
       "type": "object"
     },
     "staff": {
-      "additionalProperties": false,
       "properties": {
         "instructors": {
           "type": "integer"
@@ -1034,7 +989,6 @@
       "type": "object"
     },
     "students": {
-      "additionalProperties": false,
       "properties": {
         "codes_sent": {
           "type": "integer"
@@ -1050,7 +1004,6 @@
     },
     "this_week": {
       "items": {
-        "additionalProperties": false,
         "properties": {
           "kind": {
             "type": "string"

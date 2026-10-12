@@ -1,4 +1,5 @@
-// Reads `status.json` (contracts section 3), validates it against the exported schema and,
+// Reads `status.json` (contracts section 3), validates it against the exported schema (open:
+// one console serves every org, so a key an older or newer engine writes is ignored) and,
 // where a screen shows it (a semester's own pages), decides whether it is stale by comparing
 // its `inputs` with one recursive tree read of the repo, read alongside it. Also
 // the course overview's readings of loaded statuses (decision 0025): the problems roll-up, a
@@ -9,7 +10,6 @@ import schema from '../../schemas/status.schema.json';
 import type { GitHubClient, Tree } from '../github/client';
 import { assignmentIdent, fmtDay, releaseIdent } from './format';
 import { DEFAULT_TIMEZONE } from './policy';
-import { normalise } from './readiness';
 import { sameHandle } from './people';
 import { instant } from './student';
 import type { Operation, Status } from './types';
@@ -20,7 +20,7 @@ export { STATUS_PATH };
 
 export type Loaded =
   | { kind: 'loading' }
-  | { kind: 'absent' } // not computed yet: the org has not been refreshed on the new engine
+  | { kind: 'absent'; archived?: true } // not computed yet: the org has not been refreshed on the new engine; or archived before it was
   | { kind: 'invalid'; errors: string[] }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; status: Status; sha: string; stale: string[] };
@@ -37,32 +37,33 @@ export function validateStatus(data: unknown): string[] {
  * or removed since the status was computed. `inputs` keys are full paths in the repo that
  * holds the status file (nested ones like `.system/assignments.lock.yml` included, so the tree
  * must be the recursive one); a key under `course/` names a file in the course's `.github` and
- * is compared only when `courseTree` is given. A `null` sha records an input that was absent:
+ * is not compared (no screen reads that tree). A `null` sha records an input that was absent:
  * it is unchanged while the path is still absent. A truncated tree cannot prove a path absent,
  * so a path it lacks is not counted.
  */
-export function staleInputs(inputs: Record<string, string | null>, tree: Tree, courseTree?: Tree): string[] {
-  const changed = (t: Tree, path: string, sha: string | null) => {
-    const found = t.tree.find((e) => e.path === path)?.sha;
-    if (found === undefined && t.truncated) return false;
+export function staleInputs(inputs: Record<string, string | null>, tree: Tree): string[] {
+  const changed = (path: string, sha: string | null) => {
+    const found = tree.tree.find((e) => e.path === path)?.sha;
+    if (found === undefined && tree.truncated) return false;
     return (found ?? null) !== sha;
   };
-  const stale: string[] = [];
-  for (const [key, sha] of Object.entries(inputs)) {
-    if (key.startsWith('course/')) {
-      if (courseTree && changed(courseTree, key.slice('course/'.length), sha)) stale.push(key);
-      continue;
-    }
-    if (changed(tree, key, sha)) stale.push(key);
-  }
-  return stale;
+  return Object.entries(inputs).filter(([key, sha]) => !key.startsWith('course/') && changed(key, sha)).map(([key]) => key);
 }
 
-/** The status file; with `withStale`, the repo's tree is read at the same time for `stale` (else `stale` is []). */
+/**
+ * The status file; with `withStale`, the repo's tree is read at the same time for `stale` (else
+ * `stale` is []). A semester's archived settings repo makes it archived (`semester.live` false):
+ * the engine writes no status once it is, so the last file still says live. A failed read of
+ * the flag leaves the file's word.
+ */
 export async function loadStatus(client: GitHubClient, owner: string, repo: string, withStale = true): Promise<Loaded> {
   try {
-    const [file, tree] = await Promise.all([client.getContents(owner, repo, STATUS_PATH), withStale ? client.listTree(owner, repo, 'HEAD', true) : null]);
-    if (!file) return { kind: 'absent' };
+    const [file, tree, archived] = await Promise.all([
+      client.getContents(owner, repo, STATUS_PATH),
+      withStale ? client.listTree(owner, repo, 'HEAD', true) : null,
+      repo === CONFIG_REPO ? client.getRepo(owner, repo).then((r) => r?.archived === true, () => false) : false,
+    ]);
+    if (!file) return archived ? { kind: 'absent', archived } : { kind: 'absent' };
     let data: unknown;
     try {
       data = JSON.parse(file.text);
@@ -71,8 +72,8 @@ export async function loadStatus(client: GitHubClient, owner: string, repo: stri
     }
     const errors = validateStatus(data);
     if (errors.length) return { kind: 'invalid', errors };
-    // A file the previous engine wrote gets its readiness fields here, once (contract C).
-    const status = normalise(data as Status, Date.now());
+    const read = data as Status;
+    const status = archived && read.semester ? { ...read, semester: { ...read.semester, live: false, ended: false } } : read;
     const stale = tree ? staleInputs(status.inputs, tree) : [];
     return { kind: 'ready', status, sha: file.sha, stale };
   } catch (e) {

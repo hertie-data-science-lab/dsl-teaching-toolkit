@@ -937,9 +937,8 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
     patterns. Every folder has a kind since decision 0031 (supporting files by default),
     so there is no check that each is mapped: `kindless_problems` names the folders the
     new default hid. `need` (decision 0034): only a content-kind folder is needed - the
-    syllabus is suggested, since releases run without it; `blocks` is the same fact, kept
-    for the console that reads it. `why` names what is missing, None once the check is
-    done; `kind_folder` carries `detail`, the folders found per content kind."""
+    syllabus is suggested, since releases run without it. `why` names what is missing,
+    None once the check is done; `kind_folder` carries `detail`, the folders found per content kind."""
     rows = (
         (
             "kind_folder",
@@ -970,7 +969,6 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
             "done": done,
             "why": None if done else why,
             "need": need,
-            "blocks": need == NEEDED,
             **({"detail": _kinds_found(m)} if cid == "kind_folder" else {}),
         }
         for cid, label, need, done, why in rows
@@ -1487,11 +1485,9 @@ def render_course(
         "stages": stages,
         "stage_why": why,
         "stage_need": dict(COURSE_STAGE_NEED),
-        # Decision 0032, derived from `stage_need`: which stages may be set aside, and are.
-        "stage_optional": {s: COURSE_STAGE_NEED[s] == SUGGESTED for s in stages},
+        # Decision 0032: which stages (suggested ones only) are set aside.
         "stage_set_aside": set_aside,
         "verdict": judged,
-        "ready": judged["state"] == READY,
         "materials": [
             {
                 "repo": m.repo,
@@ -1503,7 +1499,6 @@ def render_course(
         "templates": [
             {
                 "repo": t.repo,
-                "slug": t.repo,
                 "state": template_state(t),
                 "starter": t.starter,
             }
@@ -1516,14 +1511,13 @@ def render_course(
 
 
 def _todo(need: str, aside: frozenset[str], **entry) -> dict:
-    """One to-do: `need`, plus the two fields decision 0032 reads - `optional` (it is
-    suggested) and `set_aside` (a suggested one the course lists). Every entry names its
+    """One to-do: `need`, plus `set_aside` (decision 0032: a suggested one the course
+    lists). Every entry names its
     `check`: the materials check, or `brief` / `starter` / `description` / `home` /
     `archive_date` / `email`."""
     return {
         **entry,
         "need": need,
-        "optional": need == SUGGESTED,
         "set_aside": need == SUGGESTED and entry["id"] in aside,
     }
 

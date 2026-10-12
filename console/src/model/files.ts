@@ -1,6 +1,8 @@
 // Instructor-owned files the read screens show directly (the roster grid, the instructors table,
 // the schedule's Details, a template's settings), read with the user's token and held in
-// signals so a screen re-renders when its file arrives.
+// signals so a screen re-renders when its file arrives. A read that fails is an `error`, never
+// "absent": it is read again on the first ask once RETRY_MS has passed (the clock's minute tick
+// re-renders every screen), and the screen says it could not read meanwhile.
 
 import { signal, type Signal } from '@preact/signals';
 import type { DirEntry, GhRepo, GitHubClient } from '../github/client';
@@ -15,10 +17,15 @@ export type DirState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'error
 
 /** A repo's whole tree at a ref: every path, with `dir` for folders. */
 /** `truncated`: GitHub returned only part of the tree (its recursive listing has a size cap). */
-export type TreeState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'ready'; paths: { path: string; dir: boolean }[]; truncated: boolean };
+export type TreeState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'error'; message: string } | { kind: 'ready'; paths: { path: string; dir: boolean }[]; truncated: boolean };
 
 /** An org's repos as the user sees them. */
-export type ReposState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'ready'; repos: GhRepo[] };
+export type ReposState = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; repos: GhRepo[] };
+
+/** How long a failed read stands before an ask reads it again. */
+export const RETRY_MS = 30_000;
+
+const errorOf = (e: unknown) => ({ kind: 'error' as const, message: e instanceof Error ? e.message : String(e) });
 
 export interface Files {
   file(owner: string, repo: string, path: string, ref?: string): FileState;
@@ -42,7 +49,31 @@ export class LiveFiles implements Files {
   private changes = new Map<string, Signal<string | null | undefined>>();
   private trees = new Map<string, Signal<TreeState>>();
   private orgRepos = new Map<string, Signal<ReposState>>();
-  constructor(private readonly client: GitHubClient) {}
+  /** When each failed read failed. */
+  private failedAt = new WeakMap<Signal<unknown>, number>();
+  constructor(
+    private readonly client: GitHubClient,
+    private readonly clock: () => number = Date.now,
+  ) {}
+
+  /** `k`'s state, read on the first ask, and again on an ask RETRY_MS after a failed read. */
+  private ask<S extends { kind: string }>(cache: Map<string, Signal<S>>, k: string, read: () => Promise<S>): S {
+    let s = cache.get(k);
+    const at = s && this.failedAt.get(s);
+    if (!s || (at !== undefined && this.clock() - at >= RETRY_MS)) {
+      const sig = signal<S>({ kind: 'loading' } as S);
+      s = sig;
+      cache.set(k, sig);
+      read().then(
+        (v) => (sig.value = v),
+        (e: unknown) => {
+          this.failedAt.set(sig, this.clock());
+          sig.value = errorOf(e) as unknown as S;
+        },
+      );
+    }
+    return s.value;
+  }
 
   private fileKey(owner: string, repo: string, path: string, ref?: string) {
     return `${owner}/${repo}/${path}@${ref ?? ''}`;
@@ -76,62 +107,28 @@ export class LiveFiles implements Files {
   }
 
   tree(owner: string, repo: string, ref = 'HEAD'): TreeState {
-    const k = `${owner}/${repo}@${ref}`;
-    let s = this.trees.get(k);
-    if (!s) {
-      const sig = signal<TreeState>({ kind: 'loading' });
-      s = sig;
-      this.trees.set(k, sig);
-      this.client
-        .listTree(owner, repo, ref, true)
-        .then((t) => (sig.value = t ? { kind: 'ready', paths: t.tree.filter((e) => e.type !== 'commit').map((e) => ({ path: e.path, dir: e.type === 'tree' })), truncated: t.truncated === true } : { kind: 'absent' }))
-        .catch(() => (sig.value = { kind: 'absent' }));
-    }
-    return s.value;
+    return this.ask(this.trees, `${owner}/${repo}@${ref}`, async (): Promise<TreeState> => {
+      const t = await this.client.listTree(owner, repo, ref, true);
+      return t ? { kind: 'ready', paths: t.tree.filter((e) => e.type !== 'commit').map((e) => ({ path: e.path, dir: e.type === 'tree' })), truncated: t.truncated === true } : { kind: 'absent' };
+    });
   }
 
   repos(org: string): ReposState {
-    let s = this.orgRepos.get(org);
-    if (!s) {
-      const sig = signal<ReposState>({ kind: 'loading' });
-      s = sig;
-      this.orgRepos.set(org, sig);
-      this.client
-        .listOrgRepos(org)
-        .then((repos) => (sig.value = { kind: 'ready', repos }))
-        .catch(() => (sig.value = { kind: 'absent' }));
-    }
-    return s.value;
+    return this.ask(this.orgRepos, org, async (): Promise<ReposState> => ({ kind: 'ready', repos: await this.client.listOrgRepos(org) }));
   }
 
   file(owner: string, repo: string, path: string, ref?: string): FileState {
-    const k = this.fileKey(owner, repo, path, ref);
-    let s = this.files.get(k);
-    if (!s) {
-      const sig = signal<FileState>({ kind: 'loading' });
-      s = sig;
-      this.files.set(k, sig);
-      this.client
-        .getContents(owner, repo, path, ref)
-        .then((f) => (sig.value = f ? { kind: 'ready', text: f.text, sha: f.sha } : { kind: 'absent' }))
-        .catch((e: unknown) => (sig.value = { kind: 'error', message: e instanceof Error ? e.message : String(e) }));
-    }
-    return s.value;
+    return this.ask(this.files, this.fileKey(owner, repo, path, ref), async (): Promise<FileState> => {
+      const f = await this.client.getContents(owner, repo, path, ref);
+      return f ? { kind: 'ready', text: f.text, sha: f.sha } : { kind: 'absent' };
+    });
   }
 
   dir(owner: string, repo: string, path: string): DirState {
-    const k = `${owner}/${repo}/${path}`;
-    let s = this.dirs.get(k);
-    if (!s) {
-      const sig = signal<DirState>({ kind: 'loading' });
-      s = sig;
-      this.dirs.set(k, sig);
-      this.client
-        .listDir(owner, repo, path)
-        .then((d) => (sig.value = d ? { kind: 'ready', entries: d } : { kind: 'absent' }))
-        .catch((e: unknown) => (sig.value = { kind: 'error', message: e instanceof Error ? e.message : String(e) }));
-    }
-    return s.value;
+    return this.ask(this.dirs, `${owner}/${repo}/${path}`, async (): Promise<DirState> => {
+      const d = await this.client.listDir(owner, repo, path);
+      return d ? { kind: 'ready', entries: d } : { kind: 'absent' };
+    });
   }
 
   member(org: string, user: string): boolean | null | undefined {

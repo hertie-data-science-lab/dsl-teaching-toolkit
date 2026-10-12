@@ -340,12 +340,6 @@
             },
             "type": "array"
           },
-          "number": {
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
           "off_schedule": {
             "type": "boolean"
           },
@@ -410,7 +404,6 @@
         "required": [
           "id",
           "kind",
-          "number",
           "when",
           "all_day",
           "title",

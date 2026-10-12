@@ -141,7 +141,7 @@ describe('index screens', () => {
     expect(out).not.toContain('Syllabus written');
   });
   it('shows a template still being written as Not ready, not as a problem', () => {
-    const st: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...STATUS.course!, templates: [{ repo: 'assignment-regression', slug: 'assignment-regression', state: 'todo' }] } }, sha: 's', stale: [] };
+    const st: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...STATUS.course!, templates: [{ repo: 'assignment-regression', state: 'todo' }] } }, sha: 's', stale: [] };
     for (const v of [<TemplatesIndexScreen {...cp({ loaded: st })} />, <CourseScreen {...cp({ loaded: st })} />]) {
       const out = render(v);
       expect(out).toContain('<span class="chip notready">Not ready</span>');
@@ -236,7 +236,8 @@ describe('course nav and overview', () => {
     const t = nav.replace(/<[^>]+>/g, ' ');
     expect(t.indexOf('Public website')).toBeLessThan(t.indexOf('Semesters'));
     expect(nav).toContain(`href="?cohort=${COHORT_ORG}#dashboard"`);
-    expect(nav).toMatch(/aria-label="2 problems">2</);
+    // The engine dates s5 later (beyond the horizon): only the template problem counts.
+    expect(nav).toMatch(/aria-label="1 problems">1</);
     expect(nav).toMatch(/class="past"[^>]*><span class="node-name">Fall 2025<span class="n-soon"> archived<\/span>/);
     expect(t).toContain('Assignment templates');
     const inCohort = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="dashboard" />);

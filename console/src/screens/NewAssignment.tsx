@@ -8,13 +8,12 @@
 // the copy missed.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
-import gradingSchema from '../../schemas/grading_config.schema.json';
 import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { authorOf, copyFiles, type CopyResult } from '../github/client';
-import { validator } from '../model/validate';
+import { validGrading } from '../model/cascade';
 import { createAssignment, derive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
@@ -140,7 +139,6 @@ export function extrasOf(v: Values): Record<string, unknown> {
   return Object.fromEntries(EXTRA_KEYS.filter((k) => c[k] !== undefined).map((k) => [k, c[k]]));
 }
 
-const gradingValid = validator(gradingSchema);
 
 /** grading_config.yml with `extras` applied, or null when nothing changes. */
 export function withExtras(text: string, extras: Record<string, unknown>): string | null {
@@ -263,7 +261,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     const text = withExtras(tplNow.config.text, extrasOf(w));
     if (text === null) return set({ extrasSaved: repo });
     const y = new YamlText(text);
-    if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', gradingValid) });
+    if (!validGrading(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', validGrading) });
     if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, text, tplNow.config.sha, { message: 'template: settings from the New assignment wizard, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] }))
       set({ extrasSaved: repo });
   };

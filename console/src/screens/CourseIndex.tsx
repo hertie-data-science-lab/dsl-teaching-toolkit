@@ -8,7 +8,6 @@ import { TEMPLATE_TOPIC, termOf } from '../model/discovery';
 import type { Files } from '../model/files';
 import { ago, fmtDay, templateName } from '../model/format';
 import { MATERIALS_TOPIC } from '../model/materialsRules';
-import { DEFAULT_FORMATS } from '../model/policy';
 import { formatWord, formatsList } from '../tiers/grading';
 import { CheckLine, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
@@ -125,7 +124,7 @@ export function MaterialsIndexScreen(p: CourseProps) {
             <ul class="rows">
               {others.map((r) => <OtherRepoRow org={course.org} repo={r} write={course.write} />)}
             </ul>
-          ) : <p class="footnote">{repos.kind === 'absent' ? 'Could not list the course’s repos.' : 'No other repos.'}</p>}
+          ) : <p class="footnote">{repos.kind === 'error' ? 'Could not list the course’s repos; it is tried again shortly.' : 'No other repos.'}</p>}
         </section>
       </div>
     </>
@@ -167,7 +166,7 @@ export function TemplatesIndexScreen(p: CourseProps) {
               const y = f.kind === 'ready' ? new YamlText(f.text) : null;
               const cfg = y && !y.errors.length ? obj(y.toJS()) : {};
               const title = cfg.title ? String(cfg.title) : '';
-              const how = y && !y.errors.length ? [cfg.type === 'group' ? 'In teams' : 'Alone', formatWord(formatsList(cfg.formats)[0] ?? DEFAULT_FORMATS[0])] : [];
+              const how = y && !y.errors.length ? [cfg.type === 'group' ? 'In teams' : 'Alone', formatWord(formatsList(cfg.formats)[0] ?? 'none')] : [];
               const used = usedIn(p, t.repo);
               return (
                 <li>

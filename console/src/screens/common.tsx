@@ -127,8 +127,18 @@ export function StaleNote({ stale }: { stale: string[] }) {
   );
 }
 
-/** The page every semester screen shows before an org has been refreshed on the new engine. */
-export function NotComputed({ title, p }: { title: string; p?: Pick<CohortProps, 'course' | 'cohort'> }) {
+/** The page every semester screen shows before an org has been refreshed on the new engine; an archived one never will be. */
+export function NotComputed({ title, p, archived }: { title: string; p?: Pick<CohortProps, 'course' | 'cohort'>; archived?: boolean }) {
+  if (archived)
+    return (
+      <>
+        <div class="page-head"><div><h2 class="h1">{title}</h2><p class="lede">Archived: every repo is read-only.</p></div></div>
+        <section class="panel section stub">
+          <h2>No status</h2>
+          <p>This semester was archived before the console's engine checked it, so there is no status to show. Students keep access, and nothing was deleted.</p>
+        </section>
+      </>
+    );
   return (
     <>
       <div class="page-head">
@@ -162,7 +172,7 @@ export function WithStatus({
 }) {
   const l = props.loaded;
   if (l.kind === 'loading') return <Loading what="Reading the semester's status" />;
-  if (l.kind === 'absent') return <NotComputed title={title} p={props} />;
+  if (l.kind === 'absent') return <NotComputed title={title} p={props} archived={l.archived} />;
   if (l.kind === 'invalid' || l.kind === 'error')
     return (
       <>

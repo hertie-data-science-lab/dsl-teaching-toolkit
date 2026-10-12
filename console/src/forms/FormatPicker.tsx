@@ -15,9 +15,9 @@ export function runnableFirst(formats: string[], f: string): string[] {
   return formats.includes(f) ? [f, ...formats.filter((x) => x !== f)] : formats;
 }
 
-/** `fallback`: what applies when the template lists none, and whose it is (the course's, else the institution's). */
-export function FormatPicker({ v, set, id = 'na', fallback }: { v: Values; set: (v: Values) => void; id?: string; fallback?: { formats: string[]; source: 'course' | 'institution' } }) {
-  const dflt = fallback ?? { formats: DEFAULT_FORMATS, source: 'institution' as const };
+/** `fallback`: what New assignment writes when nobody chose, and whose it is (the course's, else the institution's); null on a template's own form, where none listed runs as `none`. */
+export function FormatPicker({ v, set, id = 'na', fallback }: { v: Values; set: (v: Values) => void; id?: string; fallback?: { formats: string[]; source: 'course' | 'institution' } | null }) {
+  const dflt = fallback === null ? null : fallback ?? { formats: DEFAULT_FORMATS, source: 'institution' as const };
   const formats = (v.formats as string[] | undefined) ?? [];
   const auto = v.autograde === 'true' && !autogradeBlock(v);
   const offs = FORMATS.map(([f]) => formatBlock(formats, f, auto)).filter((x): x is string => !!x);
@@ -25,7 +25,7 @@ export function FormatPicker({ v, set, id = 'na', fallback }: { v: Values; set: 
   const runnable = formats.filter((f) => f !== 'none');
   return (
     <div class="field">
-      <span class="label">What students hand in <span class="default">{SOURCE_WORD[dflt.source]}: {dflt.formats.map(formatWord).join(' + ')}</span></span>
+      <span class="label">What students hand in {dflt ? <span class="default">{SOURCE_WORD[dflt.source]}: {dflt.formats.map(formatWord).join(' + ')}</span> : null}</span>
       <div class="fmt-grid">
         {FORMATS.map(([f, label]) => {
           const why = formatBlock(formats, f, auto);

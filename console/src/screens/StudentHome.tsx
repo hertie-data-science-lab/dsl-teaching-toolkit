@@ -6,7 +6,7 @@
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import type { Setup } from '../model/open';
-import { instant, startOfDay, type Announcement, type ScheduleRow, type SemesterAssignment, type SemesterFacts } from '../model/student';
+import { ARCHIVE_ROWS, instant, startOfDay, type Announcement, type ScheduleRow, type SemesterAssignment, type SemesterFacts } from '../model/student';
 import { assignmentHref } from '../router';
 import { Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
@@ -19,7 +19,6 @@ const EVENT_KINDS = ['assignment', 'due', 'exam', 'special_event', 'term_date'];
 export const isEventRow = (r: ScheduleRow) => EVENT_KINDS.includes(r.kind);
 
 /** The archive row's ids: the status file's, and an old site's. */
-const ARCHIVE_ROWS = ['semester-archived', 'cohort-archived'];
 /** How long before the archive the Updates box warns of it (site.py `ARCHIVE_NOTICE`). */
 const ARCHIVE_NOTICE_DAYS = 14;
 /** How many updates the box shows. */

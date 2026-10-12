@@ -248,18 +248,27 @@ TODO_CHECKS = (
 )
 
 
-def status_schema() -> dict:
+def status_schema(*, closed: bool = True) -> dict:
     """Hand-written from contracts section 3; the status writer (WP2) keeps it honest:
-    `tests/test_status_json.py` validates its render against this. No automation
-    heartbeat - it moves every tick, and the console reads it off the run list."""
+    `tests/test_status_json.py` validates its render against this, closed. No automation
+    heartbeat - it moves every tick, and the console reads it off the run list.
+
+    The console's copy is exported OPEN (`closed=False`): one console serves every org,
+    so it reads files an older engine wrote, and an unknown key is ignored, never
+    refused. A field is removed or made required only with the Promote that ships it
+    (maintainers.md, "The status contract"); `tests/fixtures/status-release/` holds what
+    the last-promoted engine writes, and it must validate against the export."""
+
+    def obj(properties: dict, required: tuple[str, ...] = ()) -> dict:
+        return _obj(properties, required, closed=closed)
+
     stages = {"type": "object", "additionalProperties": _enum(STAGE_STATES)}
-    # Decision 0034, per stage id: needed or suggested. Every 0034 field is optional in
-    # the schema, so the console still reads a file the previous engine wrote.
+    # Decision 0034, per stage id: needed or suggested.
     stage_need = {"type": "object", "additionalProperties": _enum(NEEDS)}
     count = {"type": "integer"}
     # The container verdict the console words ("Needs fixing: n problems", "Not ready:
     # <missing>", "Ready", "· n suggestions", "· Coming up: n not ready yet").
-    verdict = _obj(
+    verdict = obj(
         {
             "state": _enum(VERDICTS),
             "problems": count,
@@ -278,7 +287,7 @@ def status_schema() -> dict:
     # A status problem's pointer: the line, screen and entry are what the fault knows,
     # and `ref` names the branch when it is not the default (a template's `solution`).
     # `url` is a fix that is a GitHub settings page rather than a file (its `path` is "").
-    fix = _obj(
+    fix = obj(
         {
             "repo": _str(),
             "path": _str(),
@@ -291,10 +300,9 @@ def status_schema() -> dict:
         ("repo", "path"),
     )
     # A template's C5 state, plus how its starter is written (decision 0028).
-    template_state = _obj(
+    template_state = obj(
         {
             "repo": _str(),
-            "slug": _str(),
             "state": _str(),
             "starter": _enum(STARTER_MODES),
         },
@@ -302,24 +310,22 @@ def status_schema() -> dict:
     )
     # A materials repo's checklist (decision 0022 rule 5); `why` is null once done.
     # `detail` (on `kind_folder`, 0024 rule 8): the top folders per content kind.
-    kind_found = _obj(
+    kind_found = obj(
         {"kind": _str(), "folders": {"type": "array", "items": _str()}},
         ("kind", "folders"),
     )
-    check = _obj(
+    check = obj(
         {
             "id": _str(),
             "label": _str(),
             "done": {"type": "boolean"},
             "why": nullable,
             "need": _enum(NEEDS),
-            # Derived from `need` (needed), kept until the console reads `need` only.
-            "blocks": {"type": "boolean"},
             "detail": {"type": "array", "items": kind_found},
         },
-        ("id", "label", "done", "blocks"),
+        ("id", "label", "done", "need"),
     )
-    materials_state = _obj(
+    materials_state = obj(
         {
             "repo": _str(),
             "state": _str(),
@@ -328,10 +334,10 @@ def status_schema() -> dict:
         ("repo", "state"),
     )
     # Work started and not finished (decision 0022 rule 3). `need` (decision 0034);
-    # `optional` is `need: suggested`, kept until the console reads `need`; `set_aside`:
-    # a suggested one the course lists (decision 0032); `check`: what it is the to-do of.
+    # `set_aside`: a suggested one the course lists (decision 0032); `check`: what it is
+    # the to-do of.
     # A needed template to-do a dated hand-out cites is a problem as well.
-    todo = _obj(
+    todo = obj(
         {
             "id": _str(),
             "kind": _enum(TODO_KINDS),
@@ -341,12 +347,11 @@ def status_schema() -> dict:
             "screen": _str(),
             "entry": _str(),
             "need": _enum(NEEDS),
-            "optional": {"type": "boolean"},
             "set_aside": {"type": "boolean"},
         },
-        ("id", "kind", "repo", "text"),
+        ("id", "kind", "repo", "text", "need"),
     )
-    course = _obj(
+    course = obj(
         {
             "org": _str(),
             "name": _str(),
@@ -354,21 +359,17 @@ def status_schema() -> dict:
             "stages": stages,
             "stage_why": stage_why,
             "stage_need": stage_need,
-            # Decision 0032, per stage id: may it be set aside (derived from
-            # `stage_need`), and is it.
-            "stage_optional": flags,
+            # Decision 0032, per stage id: is it set aside (a suggested one only).
             "stage_set_aside": flags,
             "verdict": verdict,
-            # `verdict.state == "ready"`, kept until the console reads the verdict.
-            "ready": {"type": "boolean"},
             "materials": {"type": "array", "items": materials_state},
             "templates": {"type": "array", "items": template_state},
             "semesters": {"type": "array", "items": _str()},
             "todo": {"type": "array", "items": todo},
         },
-        ("org", "stages"),
+        ("org", "stages", "stage_need"),
     )
-    semester = _obj(
+    semester = obj(
         {
             "org": _str(),
             "key": nullable,
@@ -392,9 +393,9 @@ def status_schema() -> dict:
             # Each cited template's first hand-out still to come (ISO, null: undated).
             "template_moments": {"type": "object", "additionalProperties": nullable},
         },
-        ("org", "stages", "live"),
+        ("org", "stages", "stage_need", "live"),
     )
-    problem = _obj(
+    problem = obj(
         {
             "id": _str(),
             "scope": _enum(PROBLEM_SCOPES),
@@ -413,9 +414,9 @@ def status_schema() -> dict:
             # `later` (beyond it, or a deliberately undated entry).
             "bites": _enum(BITES),
         },
-        ("id", "scope", "stage", "text"),
+        ("id", "scope", "stage", "text", "bites"),
     )
-    week_item = _obj(
+    week_item = obj(
         {
             "when": _str(),
             "kind": _str(),
@@ -427,10 +428,10 @@ def status_schema() -> dict:
     )
     # An entry with nothing to copy has no source or destination.
     place = {
-        **_obj({"repo": _str(), "path": _str()}, ("repo",)),
+        **obj({"repo": _str(), "path": _str()}, ("repo",)),
         "type": ["object", "null"],
     }
-    release = _obj(
+    release = obj(
         {
             "id": _str(),
             "when": nullable,
@@ -446,7 +447,7 @@ def status_schema() -> dict:
         # `when` always present (null while TBC): the console derives `late` from it.
         ("id", "state", "when"),
     )
-    assignment = _obj(
+    assignment = obj(
         {
             "slug": _str(),
             # The entry's own number (decision 0020); null: it has none.
@@ -462,15 +463,13 @@ def status_schema() -> dict:
             "units": {"type": "integer"},
             "submissions": {"type": ["integer", "null"]},
             "teams": {"type": ["integer", "null"]},
-            "marks": _obj(
-                {"filled": {"type": "integer"}, "total": {"type": "integer"}}
-            ),
+            "marks": obj({"filled": {"type": "integer"}, "total": {"type": "integer"}}),
             "returned": {"type": "boolean"},
             "problem": {"type": "boolean"},
             # Each run setting's effective value and the layer that gave it (`settings`).
-            "settings": _obj(
+            "settings": obj(
                 {
-                    key: _obj(
+                    key: obj(
                         {
                             "value": {
                                 "type": ["string", "integer", "null"],
@@ -496,22 +495,22 @@ def status_schema() -> dict:
     )
     return _doc(
         STATUS_SCHEMA,
-        _obj(
+        obj(
             {
                 "schema": {"type": "string", "enum": [STATUS_SCHEMA]},
                 "inputs": {"type": "object", "additionalProperties": nullable},
                 # Decision 0034: the rolling window's length in days; a problem dated
                 # within it of the tick is `soon`. No tick time: the file has no moment.
-                "horizon": _obj({"days": {"type": "integer"}}, ("days",)),
+                "horizon": obj({"days": {"type": "integer"}}, ("days",)),
                 "course": course,
                 "semester": semester,
                 "problems": {"type": "array", "items": problem},
                 "this_week": {"type": "array", "items": week_item},
                 "releases": {"type": "array", "items": release},
                 "assignments": {"type": "array", "items": assignment},
-                "students": _obj({"rows": count, "codes_sent": count, "joined": count}),
-                "staff": _obj({"instructors": count, "tas": count, "synced": unknown}),
-                "site": _obj(
+                "students": obj({"rows": count, "codes_sent": count, "joined": count}),
+                "staff": obj({"instructors": count, "tas": count, "synced": unknown}),
+                "site": obj(
                     {
                         "url": _str(),
                         "last_update": nullable,
@@ -520,7 +519,7 @@ def status_schema() -> dict:
                 ),
                 "operations": {
                     "type": "array",
-                    "items": _obj(
+                    "items": obj(
                         {
                             "run_id": {"type": "integer"},
                             "op": _str(),
@@ -858,7 +857,7 @@ def all_schemas() -> dict[str, dict]:
     return {
         "request.schema.json": request_schema(),
         "outcome.schema.json": outcome_schema(),
-        "status.schema.json": status_schema(),
+        "status.schema.json": status_schema(closed=False),
         "ops.json": ops_json(),
         "names.json": names_json(),
         "labels.json": labels_json(),

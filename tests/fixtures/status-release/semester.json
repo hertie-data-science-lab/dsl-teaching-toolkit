@@ -1,0 +1,422 @@
+{
+  "assignments": [
+    {
+      "due": "2026-09-27T23:59:00+02:00",
+      "grading_cutoff_datetime": "2026-10-07T23:59:00+02:00",
+      "handout": "2026-09-15T10:00:00+02:00",
+      "marks": {
+        "filled": 0,
+        "total": 0
+      },
+      "number": 2,
+      "problem": false,
+      "returned": false,
+      "settings": {
+        "late_penalty_per_day": {
+          "source": "institution",
+          "value": "10%"
+        },
+        "late_window_days": {
+          "source": "institution",
+          "value": 10
+        },
+        "max_team_size": {
+          "source": "institution",
+          "value": null
+        },
+        "submit_url": {
+          "source": "institution",
+          "value": ""
+        },
+        "team_formation": {
+          "source": "institution",
+          "value": "self_select"
+        },
+        "visibility": {
+          "source": "institution",
+          "value": "private"
+        }
+      },
+      "slug": "assignment-2",
+      "solution_held_until": null,
+      "solution_shown": null,
+      "state": "declared",
+      "submissions": null,
+      "teams": null,
+      "template": "assignment-2-f2026",
+      "title": "Regression",
+      "units": 0
+    },
+    {
+      "due": "2026-11-01T23:59:00+01:00",
+      "grading_cutoff_datetime": "2026-11-11T23:59:00+01:00",
+      "handout": "2026-10-20T10:00:00+02:00",
+      "marks": {
+        "filled": 0,
+        "total": 0
+      },
+      "number": 3,
+      "problem": false,
+      "returned": false,
+      "settings": {
+        "late_penalty_per_day": {
+          "source": "institution",
+          "value": "10%"
+        },
+        "late_window_days": {
+          "source": "institution",
+          "value": 10
+        },
+        "max_team_size": {
+          "source": "institution",
+          "value": null
+        },
+        "submit_url": {
+          "source": "institution",
+          "value": ""
+        },
+        "team_formation": {
+          "source": "institution",
+          "value": "self_select"
+        },
+        "visibility": {
+          "source": "institution",
+          "value": "private"
+        }
+      },
+      "slug": "assignment-3",
+      "solution_held_until": null,
+      "solution_shown": null,
+      "state": "declared",
+      "submissions": null,
+      "teams": null,
+      "template": "assignment-3-f2026",
+      "title": "assignment-3",
+      "units": 0
+    }
+  ],
+  "course": {
+    "code": "E1234",
+    "materials": [
+      {
+        "checks": [
+          {
+            "detail": [
+              {
+                "folders": [
+                  "lectures"
+                ],
+                "kind": "lecture"
+              },
+              {
+                "folders": [],
+                "kind": "lab"
+              },
+              {
+                "folders": [],
+                "kind": "readings"
+              },
+              {
+                "folders": [],
+                "kind": "exam"
+              },
+              {
+                "folders": [],
+                "kind": "drop-in"
+              },
+              {
+                "folders": [],
+                "kind": "other"
+              }
+            ],
+            "done": true,
+            "id": "kind_folder",
+            "label": "At least one folder of a content kind",
+            "need": "needed",
+            "why": null
+          },
+          {
+            "done": false,
+            "id": "syllabus",
+            "label": "Syllabus",
+            "need": "suggested",
+            "why": "The weekly plan (written from the schedule) is not in SYLLABUS.md yet."
+          },
+          {
+            "done": false,
+            "id": "withheld",
+            "label": "Withheld patterns reviewed",
+            "need": "suggested",
+            "why": "Nothing is withheld from students yet; review the withheld patterns."
+          }
+        ],
+        "repo": "course-materials-f2026",
+        "state": "ready"
+      }
+    ],
+    "name": "Machine Learning",
+    "org": "hertie-dsl-demo-course-e1234",
+    "semesters": [
+      "hertie-dsl-demo-f2026"
+    ],
+    "stage_need": {
+      "C1": "needed",
+      "C2": "needed",
+      "C3": "needed",
+      "C4": "suggested",
+      "C5": "suggested",
+      "C6": "suggested"
+    },
+    "stage_set_aside": {
+      "C1": false,
+      "C2": false,
+      "C3": false,
+      "C4": false,
+      "C5": false,
+      "C6": false
+    },
+    "stage_why": {},
+    "stages": {
+      "C1": "done",
+      "C2": "done",
+      "C3": "done",
+      "C4": "done",
+      "C5": "done",
+      "C6": "done"
+    },
+    "templates": [
+      {
+        "repo": "assignment-2-f2026",
+        "starter": "derived",
+        "state": "ready"
+      },
+      {
+        "repo": "assignment-3-f2026",
+        "starter": "derived",
+        "state": "problem"
+      }
+    ],
+    "todo": [
+      {
+        "check": "syllabus",
+        "entry": "course-materials-f2026",
+        "id": "materials:course-materials-f2026:syllabus",
+        "kind": "materials",
+        "need": "suggested",
+        "repo": "course-materials-f2026",
+        "screen": "materials",
+        "set_aside": false,
+        "text": "The weekly plan (written from the schedule) is not in SYLLABUS.md yet."
+      },
+      {
+        "check": "withheld",
+        "entry": "course-materials-f2026",
+        "id": "materials:course-materials-f2026:withheld",
+        "kind": "materials",
+        "need": "suggested",
+        "repo": "course-materials-f2026",
+        "screen": "materials",
+        "set_aside": false,
+        "text": "Nothing is withheld from students yet; review the withheld patterns."
+      }
+    ],
+    "verdict": {
+      "missing": null,
+      "problems": 0,
+      "state": "ready",
+      "suggestions": 2
+    }
+  },
+  "horizon": {
+    "days": 7
+  },
+  "inputs": {
+    ".system/assignments.lock.yml": "10c4",
+    "assignments.yml": "a551g",
+    "course/dsl-course.yml": "c0ffee",
+    "grading_sheets": "5hee7",
+    "instructors.yml": "9e091",
+    "schedule.yml": "5c4ed",
+    "students.csv": "57ude",
+    "teams.csv": "7ea45"
+  },
+  "operations": [],
+  "problems": [
+    {
+      "bites": "later",
+      "fix": {
+        "entry": "s5",
+        "line": 41,
+        "path": "schedule.yml",
+        "repo": "hertie-dsl-demo-f2026/semester-config",
+        "screen": "schedule"
+      },
+      "id": "schedule:s5:SOURCE_MISSING",
+      "kind": "SOURCE_MISSING",
+      "release": "s5",
+      "scope": "semester",
+      "stage": "K4",
+      "stops": "The release on Thu 8 Oct will be skipped.",
+      "text": "Release s5 cites folder lectures/05_trees, which is not found in course-materials-f2026.",
+      "when": "2026-10-08T10:00:00+02:00"
+    },
+    {
+      "bites": "now",
+      "fix": {
+        "entry": null,
+        "line": 1,
+        "path": "students.csv",
+        "repo": "hertie-dsl-demo-f2026/semester-config",
+        "screen": "roster"
+      },
+      "id": "roster:header:ROSTER",
+      "kind": "ROSTER",
+      "scope": "semester",
+      "stage": "K5",
+      "stops": "A semicolon-delimited export looks like this.",
+      "text": "The roster: header lacks github_handle."
+    },
+    {
+      "bites": "later",
+      "fix": {
+        "entry": "assignment-3-f2026",
+        "line": 7,
+        "path": "grading_config.yml",
+        "ref": "solution",
+        "repo": "hertie-dsl-demo-course-e1234/assignment-3-f2026",
+        "screen": "template"
+      },
+      "id": "template:assignment-3-f2026:GRADING_CONFIG",
+      "kind": "GRADING_CONFIG",
+      "scope": "course",
+      "stage": "C5",
+      "stops": "Marking uses the toolkit's default for that value.",
+      "text": "The assignment-3-f2026 template's settings: autograde: sometimes is not yes or no.",
+      "when": "2026-10-20T10:00:00+02:00"
+    }
+  ],
+  "releases": [
+    {
+      "dest": {
+        "path": "lectures/03_trees",
+        "repo": "materials"
+      },
+      "id": "s3",
+      "kind": "lecture",
+      "number": 3,
+      "show_on_site": true,
+      "source": {
+        "path": "lectures/03_trees",
+        "repo": "course-materials-f2026"
+      },
+      "state": "released",
+      "tbc": false,
+      "title": "Trees",
+      "when": "2026-09-24T10:00:00+02:00"
+    },
+    {
+      "dest": {
+        "path": "lectures/05_trees",
+        "repo": "materials"
+      },
+      "id": "s5",
+      "kind": "lecture",
+      "number": 5,
+      "show_on_site": true,
+      "source": {
+        "path": "lectures/05_trees",
+        "repo": "course-materials-f2026"
+      },
+      "state": "will_be_skipped",
+      "tbc": false,
+      "title": "Trees and ensembles",
+      "when": "2026-10-08T10:00:00+02:00"
+    }
+  ],
+  "schema": "dsl.status/1",
+  "semester": {
+    "archive_date": null,
+    "end": "2026-12-18",
+    "ended": false,
+    "key": "f2026",
+    "label": "Fall 2026",
+    "live": true,
+    "org": "hertie-dsl-demo-f2026",
+    "stage_need": {
+      "K1": "needed",
+      "K2": "needed",
+      "K3": "needed",
+      "K4": "needed",
+      "K5": "needed",
+      "K6": "needed"
+    },
+    "stage_why": {
+      "K5": "1 problem needs fixing."
+    },
+    "stages": {
+      "K1": "done",
+      "K2": "done",
+      "K3": "done",
+      "K4": "done",
+      "K5": "problem",
+      "K6": "done"
+    },
+    "start": "2026-09-07",
+    "template_moments": {
+      "assignment-3-f2026": "2026-10-20T10:00:00+02:00"
+    },
+    "timezone": "Europe/Berlin",
+    "todo": [
+      {
+        "check": "archive_date",
+        "id": "schedule:archive_date",
+        "kind": "schedule",
+        "need": "suggested",
+        "repo": "semester-config",
+        "screen": "schedule",
+        "set_aside": false,
+        "text": "The schedule sets no archive date."
+      }
+    ],
+    "verdict": {
+      "coming_up": 2,
+      "missing": null,
+      "problems": 1,
+      "state": "fixing",
+      "suggestions": 1
+    },
+    "week": 3,
+    "weeks": 15
+  },
+  "site": {
+    "last_update": "2026-09-22T06:02:00+00:00",
+    "stale": false,
+    "url": "https://hertie-dsl-demo-f2026.github.io"
+  },
+  "staff": {
+    "instructors": 1,
+    "synced": true,
+    "tas": 0
+  },
+  "students": {
+    "codes_sent": 2,
+    "joined": 1,
+    "rows": 2
+  },
+  "this_week": [
+    {
+      "kind": "release",
+      "ref": "s3",
+      "state": "released",
+      "title": "Trees",
+      "when": "2026-09-24T10:00:00+02:00"
+    },
+    {
+      "kind": "due",
+      "ref": "assignment-2",
+      "state": "declared",
+      "title": "Regression",
+      "when": "2026-09-27T23:59:00+02:00"
+    }
+  ]
+}

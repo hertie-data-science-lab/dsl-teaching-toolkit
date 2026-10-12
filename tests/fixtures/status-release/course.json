@@ -1,0 +1,161 @@
+{
+  "course": {
+    "code": "E1234",
+    "materials": [
+      {
+        "checks": [
+          {
+            "detail": [
+              {
+                "folders": [
+                  "lectures"
+                ],
+                "kind": "lecture"
+              },
+              {
+                "folders": [],
+                "kind": "lab"
+              },
+              {
+                "folders": [],
+                "kind": "readings"
+              },
+              {
+                "folders": [],
+                "kind": "exam"
+              },
+              {
+                "folders": [],
+                "kind": "drop-in"
+              },
+              {
+                "folders": [],
+                "kind": "other"
+              }
+            ],
+            "done": true,
+            "id": "kind_folder",
+            "label": "At least one folder of a content kind",
+            "need": "needed",
+            "why": null
+          },
+          {
+            "done": false,
+            "id": "syllabus",
+            "label": "Syllabus",
+            "need": "suggested",
+            "why": "The weekly plan (written from the schedule) is not in SYLLABUS.md yet."
+          },
+          {
+            "done": false,
+            "id": "withheld",
+            "label": "Withheld patterns reviewed",
+            "need": "suggested",
+            "why": "Nothing is withheld from students yet; review the withheld patterns."
+          }
+        ],
+        "repo": "course-materials-f2026",
+        "state": "ready"
+      }
+    ],
+    "name": "Machine Learning",
+    "org": "hertie-dsl-demo-course-e1234",
+    "semesters": [
+      "hertie-dsl-demo-f2026"
+    ],
+    "stage_need": {
+      "C1": "needed",
+      "C2": "needed",
+      "C3": "needed",
+      "C4": "suggested",
+      "C5": "suggested",
+      "C6": "suggested"
+    },
+    "stage_set_aside": {
+      "C1": false,
+      "C2": false,
+      "C3": false,
+      "C4": false,
+      "C5": false,
+      "C6": false
+    },
+    "stage_why": {},
+    "stages": {
+      "C1": "done",
+      "C2": "done",
+      "C3": "done",
+      "C4": "done",
+      "C5": "done",
+      "C6": "done"
+    },
+    "templates": [
+      {
+        "repo": "assignment-2-f2026",
+        "starter": "derived",
+        "state": "ready"
+      },
+      {
+        "repo": "assignment-3-f2026",
+        "starter": "derived",
+        "state": "problem"
+      }
+    ],
+    "todo": [
+      {
+        "check": "syllabus",
+        "entry": "course-materials-f2026",
+        "id": "materials:course-materials-f2026:syllabus",
+        "kind": "materials",
+        "need": "suggested",
+        "repo": "course-materials-f2026",
+        "screen": "materials",
+        "set_aside": false,
+        "text": "The weekly plan (written from the schedule) is not in SYLLABUS.md yet."
+      },
+      {
+        "check": "withheld",
+        "entry": "course-materials-f2026",
+        "id": "materials:course-materials-f2026:withheld",
+        "kind": "materials",
+        "need": "suggested",
+        "repo": "course-materials-f2026",
+        "screen": "materials",
+        "set_aside": false,
+        "text": "Nothing is withheld from students yet; review the withheld patterns."
+      }
+    ],
+    "verdict": {
+      "missing": null,
+      "problems": 0,
+      "state": "ready",
+      "suggestions": 2
+    }
+  },
+  "horizon": {
+    "days": 7
+  },
+  "inputs": {
+    "dsl-course.yml": "c0ffee",
+    "semesters.yml": "facade"
+  },
+  "problems": [
+    {
+      "bites": "later",
+      "fix": {
+        "entry": "assignment-3-f2026",
+        "line": 7,
+        "path": "grading_config.yml",
+        "ref": "solution",
+        "repo": "hertie-dsl-demo-course-e1234/assignment-3-f2026",
+        "screen": "template"
+      },
+      "id": "template:assignment-3-f2026:GRADING_CONFIG",
+      "kind": "GRADING_CONFIG",
+      "scope": "course",
+      "stage": "C5",
+      "stops": "Marking uses the toolkit's default for that value.",
+      "text": "The assignment-3-f2026 template's settings: autograde: sometimes is not yes or no."
+    }
+  ],
+  "schema": "dsl.status/1"
+}

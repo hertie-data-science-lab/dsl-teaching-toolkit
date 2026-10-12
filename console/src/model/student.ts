@@ -295,7 +295,8 @@ export function repoPath(url: string, org: string): { repo: string; path: string
   return { repo: m[2], path: decodeURIComponent(m[3]) };
 }
 
-const ARCHIVE_ROWS = ['semester-archived', 'cohort-archived'];
+/** The schedule's archive row ids, now and under the retired name. */
+export const ARCHIVE_ROWS = ['semester-archived', 'cohort-archived'];
 const stem = (name: string) => name.replace(/\.md$/, '');
 const SHAPES: Record<string, SubmitVia> = { external: 'external', 'shared-dropbox-repo': 'shared_dropbox_repo' };
 

@@ -3,6 +3,7 @@ engine's own constant, and the contract examples validate."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -152,11 +153,12 @@ CONTRACT_STATUS = {
             "C5": "problem",
             "C6": "todo",
         },
-        "ready": False,
+        "stage_need": {
+            **dict.fromkeys(("C1", "C2", "C3"), "needed"),
+            **dict.fromkeys(("C4", "C5", "C6"), "suggested"),
+        },
         "materials": [{"repo": "course-materials-f2026", "state": "ready"}],
-        "templates": [
-            {"repo": "assignment-3-f2026", "slug": "assignment-3", "state": "problem"}
-        ],
+        "templates": [{"repo": "assignment-3-f2026", "state": "problem"}],
         "semesters": ["hertie-dsl-demo-f2026"],
     },
     "semester": {
@@ -175,6 +177,7 @@ CONTRACT_STATUS = {
             "K5": "problem",
             "K6": "done",
         },
+        "stage_need": dict.fromkeys(("K1", "K2", "K3", "K4", "K5", "K6"), "needed"),
         "archive_date": "2027-01-31",
     },
     "problems": [
@@ -191,6 +194,7 @@ CONTRACT_STATUS = {
                 "screen": "schedule",
                 "entry": "s5",
             },
+            "bites": "soon",
         }
     ],
     "this_week": [
@@ -255,6 +259,27 @@ CONTRACT_STATUS = {
 def test_the_contract_examples_validate():
     assert validate(CONTRACT_OUTCOME, schemas.outcome_schema()) == []
     assert validate(CONTRACT_STATUS, schemas.status_schema()) == []
+
+
+def test_the_console_reads_the_release_engines_status():
+    # One console, built from main, serves every org; a release-tier org's files were
+    # written by the last-promoted engine. They must validate against the console's
+    # copy, or a merge breaks every real org until the next Promote (maintainers.md,
+    # "The status contract"). Refresh the fixture at each Promote, never to pass this.
+    console = json.loads((COMMITTED / "status.schema.json").read_text())
+    files = sorted((ROOT / "tests" / "fixtures" / "status-release").glob("*.json"))
+    assert [f.name for f in files] == ["course.json", "semester.json"]
+    for f in files:
+        assert validate(json.loads(f.read_text()), console) == [], f.name
+
+
+def test_the_console_copy_of_the_status_schema_is_open_and_the_engines_closed():
+    # An older or newer key is ignored on read; the engine's own render stays exact.
+    doc = {**CONTRACT_STATUS, "added_later": 1}
+    doc["course"] = {**doc["course"], "added_later": 1}
+    console = json.loads((COMMITTED / "status.schema.json").read_text())
+    assert validate(doc, console) == []
+    assert len(validate(doc, schemas.status_schema())) == 2
 
 
 def test_the_example_course_file_validates():

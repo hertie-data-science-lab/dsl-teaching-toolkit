@@ -25,7 +25,8 @@ function csp(): Plugin {
 /**
  * `virtual:validators`: every schema under schemas/ (and each op's args_schema in ops.json)
  * compiled to code at build time, so the page needs no `new Function` and the CSP no
- * 'unsafe-eval'. `table` maps JSON.stringify(schema) to its validator.
+ * 'unsafe-eval'. `table` maps JSON.stringify(schema) to its validator. Not the student file's:
+ * the console reads student-status.json loosely and validates nothing against it.
  */
 function validators(): Plugin {
   const ID = 'virtual:validators';
@@ -36,7 +37,7 @@ function validators(): Plugin {
     load(id) {
       if (id !== `\0${ID}`) return null;
       const read = (f: string) => JSON.parse(readFileSync(new URL(f, dir), 'utf8'));
-      const files = readdirSync(dir).filter((f) => f.endsWith('.schema.json'));
+      const files = readdirSync(dir).filter((f) => f.endsWith('.schema.json') && f !== 'student-status.schema.json');
       const ops = read('ops.json').ops as { args_schema?: object }[];
       const schemas = [...files.map(read), ...ops.flatMap((o) => (o.args_schema ? [o.args_schema] : []))];
       const keys = [...new Set(schemas.map((s) => JSON.stringify(s)))];

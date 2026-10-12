@@ -265,9 +265,9 @@ function liveThenPast<T extends { org: string }>(list: T[], isLive: (x: T) => bo
 }
 
 /** A semester's problem count (now or soon, decision 0034) and whether it is archived, from its loaded status. */
-export function cohortFlags(l: Loaded | undefined, now = Date.now()): { problems: number | null; archived: boolean } {
-  if (!l || l.kind !== 'ready') return { problems: null, archived: false };
-  return { problems: problemCount(l.status, now), archived: l.status.semester?.live === false };
+export function cohortFlags(l: Loaded | undefined): { problems: number | null; archived: boolean } {
+  if (!l || l.kind !== 'ready') return { problems: null, archived: l?.kind === 'absent' && l.archived === true };
+  return { problems: problemCount(l.status), archived: l.status.semester?.live === false };
 }
 
 /** The nine semester pages, in nav order. */
@@ -340,7 +340,7 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
   // Semesters: live is neither archived nor past its end (the status's, else the key's).
   const flags = (k: CohortRef) => {
     const l = cohortStates[k.org];
-    const f = cohortFlags(l, now);
+    const f = cohortFlags(l);
     const sem = l?.kind === 'ready' ? l.status.semester : undefined;
     const over = f.archived || sem?.ended === true || semesterOver({ org: k.org, termLabel: k.termLabel, archived: f.archived }, now, sem?.end ?? undefined, sem?.timezone);
     return { ...f, over };

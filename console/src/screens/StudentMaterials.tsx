@@ -18,6 +18,7 @@ import { fmtDay } from '../model/format';
 import { ASSETS_KIND, aliasKind } from '../model/materialsRules';
 import { showFile, type Shown } from '../model/materials';
 import { sortedRows, type SemesterFacts } from '../model/student';
+import { dataUrl } from '../model/viewer';
 import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
 import { FileHead, FolderHead } from '../ui/FileTree';
 import { Ext } from '../ui/icons';
@@ -164,7 +165,8 @@ export function ShownView({ shown, name }: { shown: Shown; name: string }) {
     case 'text':
       return <pre class="file-text">{shown.text}</pre>;
     case 'image':
-      return <><img class="file-img" src={url ?? ''} alt={name} /><p>{save}</p></>;
+      // A data: URL, as instructor pictures are: the page's CSP allows no blob: image.
+      return <><img class="file-img" src={dataUrl(name, shown.bytes)} alt={name} /><p>{save}</p></>;
     case 'page':
       return (
         <>

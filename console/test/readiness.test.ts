@@ -1,11 +1,10 @@
-// Readiness (decision 0034): when a problem bites, the one normalisation at load for a status the
-// previous engine wrote (contract C), the verdict as the engine computed it, the repo words, and
-// release rows joined on the problem's `release`.
+// Readiness (decision 0034): when a problem bites, the verdict as the engine computed it, the
+// repo words, and release rows joined on the problem's `release`.
 
 import { describe, expect, it } from 'vitest';
 import { heldSentence, markWord, repoWords, verdictWords } from '../src/model/format';
 import {
-  bitesAt, materialsReadiness, normalise, problemCount, problemFromDay, releaseMarks, releaseProblems, standing, stepState, suggestionsCount, templateReadiness, tier, verdictOf,
+  bitesAt, materialsReadiness, problemCount, problemFromDay, releaseMarks, releaseProblems, standing, stepState, suggestionsCount, templateReadiness, tier, verdictOf,
 } from '../src/model/readiness';
 import type { Problem, Status, Todo } from '../src/model/types';
 import example from './fixtures/status.example.json';
@@ -14,7 +13,8 @@ const STATUS = example as unknown as Status;
 const NOW = Date.parse('2026-10-08T12:00:00+02:00');
 const DAY = 864e5;
 const iso = (ms: number) => new Date(ms).toISOString();
-const at = (ms: number, over: Partial<Problem> = {}): Problem => ({ id: 'p', scope: 'semester', stage: 'K4', text: 't', stops: 's', when: iso(ms), ...over });
+// A problem dated `ms`, with the time the engine would give it at NOW.
+const at = (ms: number, over: Partial<Problem> = {}): Problem => ({ id: 'p', scope: 'semester', stage: 'K4', text: 't', stops: 's', when: iso(ms), bites: bitesAt(iso(ms), undefined, NOW), ...over });
 
 describe('bitesAt', () => {
   it('none or past is now, up to the horizon’s days soon, beyond later', () => {
@@ -38,56 +38,16 @@ describe('bitesAt', () => {
   });
 });
 
-describe('normalise (contract C)', () => {
-  // A status the previous engine wrote: no bites, no need, no stage_need.
-  const old: Status = {
-    ...STATUS,
-    horizon: undefined,
-    problems: [at(NOW + 2 * DAY), at(NOW + 30 * DAY, { id: 'q' }), { ...at(0), id: 'r', when: undefined }],
-    course: {
-      ...STATUS.course!,
-      stage_need: undefined,
-      materials: STATUS.course!.materials.map((m) => ({ ...m, checks: m.checks!.map(({ need: _n, ...c }) => c) })),
-      todo: [{ id: 't', kind: 'materials', repo: 'r', text: 'x', optional: true }, { id: 'u', kind: 'template', repo: 'a', text: 'y' }],
-    },
-    semester: { ...STATUS.semester!, stage_need: undefined, todo: undefined },
-  };
-  const n = normalise(old, NOW);
-
-  it('fills bites off when and the horizon, and keeps the engine’s', () => {
-    expect(n.problems!.map((p) => p.bites)).toEqual(['soon', 'later', 'now']);
-    expect(normalise({ ...old, problems: [at(NOW + 30 * DAY, { bites: 'soon' })] }, NOW).problems![0].bites).toBe('soon');
-  });
-  it('fills need from blocks (a check) or optional (a to-do), and stage_need from stage_optional', () => {
-    expect(n.course!.materials[0].checks!.map((c) => c.need)).toEqual(['needed', 'suggested', 'suggested']);
-    expect(n.course!.todo!.map((t) => t.need)).toEqual(['suggested', 'needed']);
-    expect(n.course!.stage_need).toMatchObject({ C3: 'needed', C6: 'suggested' });
-    expect(n.semester!.stage_need).toMatchObject({ K1: 'needed', K6: 'needed' });
-  });
-  it('takes a course block with no materials or templates list (nor todo, problems or semester todo)', () => {
-    const { materials: _m, templates: _p, todo: _t, ...course } = STATUS.course!;
-    const bare = normalise({ ...STATUS, problems: undefined, course: course as typeof STATUS.course, semester: { ...STATUS.semester!, todo: undefined } }, NOW);
-    expect(bare.course!.materials).toEqual([]);
-    expect(bare.course!.templates).toEqual([]);
-    expect(bare.course!.todo).toBeUndefined();
-    expect(bare.problems).toBeUndefined();
-  });
-  it('passes a status today’s engine wrote through unchanged', () => {
-    const now = normalise(n, NOW);
-    expect(now).toEqual(n);
-  });
-});
-
 describe('tier and the counts', () => {
-  it('tiers each problem once, and counts only those now or soon', () => {
+  it('takes each problem’s time from the engine, and counts only those now or soon', () => {
     const s: Status = { ...STATUS, problems: [at(NOW - DAY), at(NOW + DAY), at(NOW + 30 * DAY)] };
-    const t = tier(s, NOW);
+    const t = tier(s);
     expect(t.map((x) => x.b)).toEqual(['now', 'soon', 'later']);
     expect(standing(t)).toHaveLength(2);
-    expect(problemCount(s, NOW)).toBe(2);
-    expect(problemCount(undefined, NOW)).toBe(0);
-    // The engine's bites wins over the console's clock.
-    expect(tier({ ...s, problems: [at(NOW + 30 * DAY, { bites: 'now' })] }, NOW)[0].b).toBe('now');
+    expect(problemCount(s)).toBe(2);
+    expect(problemCount(undefined)).toBe(0);
+    // The engine's bites, never the console's clock.
+    expect(tier({ ...s, problems: [at(NOW + 30 * DAY, { bites: 'now' })] })[0].b).toBe('now');
   });
   it('reads a step’s state off its stage alone', () => {
     expect(stepState('problem')).toBe('problem');
@@ -161,7 +121,7 @@ describe('release marks (decision 0034 §6)', () => {
   const rel = (state: string, when = iso(NOW + 2 * DAY)) => ({ ...STATUS.releases![0], id: 's1', state: state as 'late', when });
   const marks = (problems: Problem[], r = rel('will_be_skipped')) => {
     const s: Status = { ...STATUS, releases: [r], problems };
-    return releaseMarks(s, tier(s, NOW), NOW).get('s1');
+    return releaseMarks(s, tier(s), NOW).get('s1');
   };
 
   it('joins a release to the problem that holds it back on `release`, whatever its fix names', () => {
@@ -173,7 +133,7 @@ describe('release marks (decision 0034 §6)', () => {
   it('words a held release by when its problem bites, and a late one with no fault as late', () => {
     const s: Status = { ...STATUS, releases: [rel('planned')], problems: [] };
     expect(releaseMarks(s, [], NOW).size).toBe(0);
-    expect(markWord(marks([p('schedule:s1:SOURCE_MISSING', 's1', { when: iso(NOW - DAY) })], rel('late'))!)).toBe('was skipped');
+    expect(markWord(marks([p('schedule:s1:SOURCE_MISSING', 's1', { when: iso(NOW - DAY), bites: 'now' })], rel('late'))!)).toBe('was skipped');
     expect(markWord(marks([p('schedule:s1:SOURCE_MISSING', 's1')])!)).toBe('will be skipped');
     expect(markWord(marks([p('schedule:s1:SOURCE_MISSING', 's1', { bites: 'later' })])!)).toBe('not ready yet');
     expect(marks([p('schedule:s1:LATE', 's1')], rel('late'))).toMatchObject({ bites: 'now', late: true });

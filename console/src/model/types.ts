@@ -8,10 +8,7 @@ export type AssignmentState = 'declared' | 'teams_forming' | 'blocked' | 'open' 
 export type ReleaseState = 'planned' | 'will_be_skipped' | 'released' | 'late';
 export type Conclusion = 'done' | 'nothing_to_do' | 'skipped' | 'previewed' | 'failed';
 
-/**
- * Decision 0034. Every field below is optional in the schema: a status the previous engine wrote
- * lacks them, and `readiness.normalise` fills `bites` and `need` once, at load (contract C).
- */
+/** Decision 0034: an item is needed (automation cannot act without it) or suggested. */
 export type Need = 'needed' | 'suggested';
 /** When a problem bites: past or undated (`now`), inside the horizon (`soon`), beyond it (`later`). */
 export type Bites = 'now' | 'soon' | 'later';
@@ -49,7 +46,7 @@ export interface Problem {
   fix?: Fix;
   /** When the fault bites (ISO); absent for a fault no date pins. */
   when?: string;
-  bites?: Bites;
+  bites: Bites;
   /** Its code (`SOURCE_MISSING`, `LATE`, `BRIEF`, ...): what a screen joins on, never the id. */
   kind?: string;
   /** The schedule entry it holds back, when it holds one. */
@@ -63,31 +60,27 @@ export interface CourseStatus {
   stages: Record<string, StageState>;
   /** One sentence per stage that is not done, saying why. */
   stage_why?: Record<string, string>;
-  /** Decision 0032, per stage: may it be set aside (C4-C6), and is it. Absent on an older status. */
-  stage_optional?: Record<string, boolean>;
+  /** Decision 0032, per stage: is it set aside (a suggested one only). */
   stage_set_aside?: Record<string, boolean>;
-  /** Per stage: needed or suggested (decision 0034); replaces `stage_optional` as the faculty-facing field. */
-  stage_need?: Record<string, Need>;
-  /** C1-C3 done and no course problem: a new semester can start (decision 0019). */
-  ready: boolean;
+  /** Per stage: needed or suggested (decision 0034). */
+  stage_need: Record<string, Need>;
   verdict?: VerdictState;
   materials: MaterialsState[];
   /** `starter`: how main is written (decision 0028), the key or the engine's reading of the markers. */
-  templates: { repo: string; slug: string; state: string; starter?: 'derived' | 'handwritten' }[];
+  templates: { repo: string; state: string; starter?: 'derived' | 'handwritten' }[];
   semesters: string[];
   /** Work started and not finished (decision 0022); a needed template one a dated hand-out cites is a problem as well. */
   todo?: Todo[];
 }
 
-/** One line of a materials repo's checklist; `blocks` lines are what `ready` needs. */
+/** One line of a materials repo's checklist; its needed lines are what the repo's `ready` needs. */
 export interface MaterialsCheck {
   id: string;
   label: string;
   done: boolean;
   /** What is missing, one sentence; null once done. */
   why?: string | null;
-  blocks: boolean;
-  need?: Need;
+  need: Need;
   /** On `kind_folder`: every content kind, with the top folders of that kind. */
   detail?: { kind: string; folders: string[] }[];
 }
@@ -106,10 +99,9 @@ export interface Todo {
   text: string;
   screen?: string;
   entry?: string;
-  /** Decision 0032: it blocks nothing, so it may be set aside; and it is. Absent on an older status. */
-  optional?: boolean;
+  need: Need;
+  /** Decision 0032: a suggested one the course has set aside. */
   set_aside?: boolean;
-  need?: Need;
   /** The check it is the to-do of: a materials check's id, or `brief`, `starter`, `description`, `home`, `archive_date`, `email`. */
   check?: string;
 }
@@ -133,7 +125,7 @@ export interface SemesterStatus {
   ended?: boolean;
   stages: Record<string, StageState>;
   stage_why?: Record<string, string>;
-  stage_need?: Record<string, Need>;
+  stage_need: Record<string, Need>;
   todo?: SemesterTodo[];
   verdict?: VerdictState;
   archive_date: string | null;

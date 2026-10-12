@@ -1,7 +1,6 @@
 // S6 Schedule with its entry sheet (the schedule editor) and S11 Release detail.
 
 import { useMemo, useState } from 'preact/hooks';
-import scheduleSchema from '../../schemas/schedule.schema.json';
 import { useEnv } from '../env';
 import { compileAll, matchRules } from '../edit/glob';
 import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
@@ -14,7 +13,6 @@ import {
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
-import { validator } from '../model/validate';
 import { keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
@@ -29,7 +27,7 @@ import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
-import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, type Layers } from '../model/cascade';
+import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, validSchedule, type Layers } from '../model/cascade';
 import { parse } from 'yaml';
 import { RunRows, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
@@ -38,7 +36,6 @@ import { CONTENT_KINDS, EMPTY_ENTRY_KIND, MATERIALS_FILE, inferKind, landingSect
 import { otherRepos } from './CourseIndex';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
-const validSchedule = validator(scheduleSchema);
 
 /** What the student site shows in the Details cell. */
 function Details({ r }: { r: Row }) {
@@ -101,8 +98,11 @@ function FolderCheck({ p, dp, i, onSuggest }: { p: ReadyProps; dp: DeployDraft; 
   const tree = p.files.tree(p.course.org, dp.repo);
   if (tree.kind === 'loading') return <span class="footnote">Checking the folder…</span>;
   if (tree.kind === 'absent') return <Invalid>{dp.repo} was not found in the course, or you cannot read it.</Invalid>;
+  if (tree.kind === 'error') return <span class="footnote">Could not read {dp.repo} to check the folder; it is tried again shortly.</span>;
   const folder = dp.folder.replace(/\/+$/, '');
   const hit = tree.paths.find((x) => x.path === folder);
+  // A truncated tree (a very large repo) cannot prove a folder absent.
+  if (!hit && tree.truncated) return <span class="footnote">{dp.repo} is too large to check the folder here.</span>;
   if (!hit) {
     const near = tree.paths.find((x) => x.dir && x.path.startsWith(folder)) ?? tree.paths.find((x) => x.dir && x.path.split('/').pop() === folder.split('/').pop());
     return (
@@ -134,11 +134,11 @@ export function inferredKind(p: ReadyProps, d: ReleaseDraft, saved: Draft | null
   return inferKind(landingSection(first, DEFAULT_DEST_REPO, aliases), aliases).kind;
 }
 
-/** Every repo a copy may come from: the materials repos, then the course's Other repos. */
-export function sourceRepos(p: ReadyProps, materials: string[]): { materials: string[]; others: string[] } {
+/** Every repo a copy may come from: the materials repos, then the course's Other repos; `unlisted` when the listing failed. */
+export function sourceRepos(p: ReadyProps, materials: string[]): { materials: string[]; others: string[]; unlisted: boolean } {
   const listing = p.files.repos(p.course.org);
   const known = [...materials, ...(p.status.course?.templates ?? []).map((t) => t.repo)];
-  return { materials, others: listing.kind === 'ready' ? otherRepos(p.course.org, listing.repos, known).map((r) => r.name) : [] };
+  return { materials, others: listing.kind === 'ready' ? otherRepos(p.course.org, listing.repos, known).map((r) => r.name) : [], unlisted: listing.kind === 'error' };
 }
 
 function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d: ReleaseDraft; set: Setter<ReleaseDraft>; errors: Record<string, string>; repos: string[]; inferred: string }) {
@@ -176,6 +176,7 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
                     {dp.repo && !from.materials.includes(dp.repo) && !from.others.includes(dp.repo) ? <option value={dp.repo} selected>{dp.repo}</option> : null}
                     {!dp.repo ? <option value="" selected>Choose a repo</option> : null}
                   </select>
+                  {from.unlisted ? <span class="footnote">Could not list the course’s other repos; it is tried again shortly.</span> : null}
                   {errors[`deploy${i}.repo`] ? <Invalid>{errors[`deploy${i}.repo`]}</Invalid> : null}
                 </div>
                 <div class="field">
@@ -240,7 +241,7 @@ export interface NewRun {
   errors: Record<string, string>;
 }
 
-function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; slug: string; state: string }[]; isNew: boolean; run: NewRun; tiered: Tiered[] }) {
+function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; state: string }[]; isNew: boolean; run: NewRun; tiered: Tiered[] }) {
   const tpl = templates.find((t) => t.repo === d.template);
   // The template's state in the one set of words (decision 0034).
   const tplState = tpl ? templateReadinessIn(p.status.course, tpl.repo, tiered) : null;
@@ -393,7 +394,7 @@ function View(p: ReadyProps) {
   const { status, now } = p;
   const env = useEnv();
   // Every problem with its time, and each held or late release's mark, once per render (decision 0034).
-  const tiered = useMemo(() => tier(status, now), [status, now]);
+  const tiered = useMemo(() => tier(status), [status]);
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const tz = tzOf(status), year = yearOf(now, tz);
   const scope = cohortScope(p);
@@ -705,7 +706,7 @@ function StateChip({ state, m }: { state: Release['state']; m: ReleaseMark | nul
 function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const { status, now, rel } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
-  const mark = useMemo(() => releaseMarks(status, tier(status, now), now).get(rel.id) ?? null, [status, now, rel.id]);
+  const mark = useMemo(() => releaseMarks(status, tier(status), now).get(rel.id) ?? null, [status, now, rel.id]);
   const ident = releaseIdent(rel);
   const st = rel.state;
   const scope = cohortScope(p);

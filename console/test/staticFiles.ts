@@ -18,7 +18,7 @@ export class StaticFiles implements Files {
   }
   repos(org: string): ReposState {
     const r = this.repoMap[org];
-    return r ? { kind: 'ready', repos: r.map((x) => ({ full_name: `${org}/${x.name}`, private: true, default_branch: 'main', html_url: `https://github.com/${org}/${x.name}`, name: '', ...x })) } : { kind: 'absent' };
+    return r ? { kind: 'ready', repos: r.map((x) => ({ full_name: `${org}/${x.name}`, private: true, default_branch: 'main', html_url: `https://github.com/${org}/${x.name}`, name: '', ...x })) } : { kind: 'error', message: 'not listed' };
   }
   tree(owner: string, repo: string): TreeState {
     const t = this.treeMap[`${owner}/${repo}`];

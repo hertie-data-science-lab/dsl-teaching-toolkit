@@ -107,7 +107,6 @@ TOP_KEYS = (
 ROW_KEYS = (
     "id",
     "kind",
-    "number",
     "when",
     "all_day",
     "title",
@@ -175,11 +174,11 @@ def _list(item: dict) -> dict:
 
 def json_schema() -> dict:
     """The file's shape, every level closed and built from the `*_KEYS` tuples: the
-    allow-list the PII test holds it to, and what the console validates against
-    (`console/schemas/student-status.schema.json`)."""
+    allow-list the PII test holds it to (`console/schemas/student-status.schema.json`).
+    The console does not validate against it: it reads the file loosely, field by field
+    (`console/src/model/student.ts`)."""
     link = _closed({k: _S for k in LINK_KEYS})
     row_types = {
-        "number": _IN,
         "all_day": _B,
         "released": _B,
         "tbc": _B,
@@ -346,7 +345,6 @@ def _row(
     assignment: str | None = None,
     released: bool = True,
     tbc: bool = False,
-    number: int | None = None,
     off_schedule: bool = False,
     links: list[dict] | None = None,
     readings: list[dict] | None = None,
@@ -357,7 +355,6 @@ def _row(
     return {
         "id": id_,
         "kind": kind,
-        "number": number,
         "when": _iso(when),
         "all_day": _all_day(when) if all_day is None else all_day,
         "title": title,
@@ -406,7 +403,6 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
                 details=r.details,
                 released=landed or bool(readings),
                 tbc=r.tbc,
-                number=sr.number,
                 off_schedule=not r.shown,
                 links=links + readings,
                 readings=links if own else readings,

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -97,11 +98,8 @@ CONTRACT_EXAMPLE = {
             "C5": "problem",
             "C6": "todo",
         },
-        "ready": False,
         "materials": [{"repo": "course-materials-f2026", "state": "ready"}],
-        "templates": [
-            {"repo": "assignment-3-f2026", "slug": "assignment-3", "state": "problem"}
-        ],
+        "templates": [{"repo": "assignment-3-f2026", "state": "problem"}],
         "semesters": ["hertie-dsl-demo-f2026"],
     },
     "semester": {
@@ -360,7 +358,7 @@ def test_a_healthy_semester_has_every_setup_stage_done_and_no_problems():
     )
     assert doc["problems"] == []
     assert doc["course"]["stages"] == dict.fromkeys(status_json.COURSE_STAGES, "done")
-    assert doc["course"]["ready"] is True
+    assert doc["course"]["verdict"]["state"] == "ready"
     assert doc["semester"]["stages"] == dict.fromkeys(
         status_json.SEMESTER_STAGES, "done"
     )
@@ -397,7 +395,7 @@ def test_the_contract_example_marks_k5_now_and_k4_and_c5_once_they_near():
     doc = _render(*_contract_scenario(), now=NOW + timedelta(days=21))
     assert doc["problems"][2]["bites"] == "soon"
     assert doc["course"]["stages"]["C5"] == "problem"
-    assert doc["course"]["ready"] is False
+    assert doc["course"]["verdict"]["state"] != "ready"
     assignment = next(a for a in doc["assignments"] if a["slug"] == "assignment-3")
     assert assignment["problem"] is True
     # s5 has its own problem, so its passed moment is no second "late" one.
@@ -452,7 +450,7 @@ def _course_block(course: status_json.CourseFacts) -> dict:
 )
 def test_ready_is_c1_to_c3_done(over, ready):
     block = _course_block(_course(**over))
-    assert block["ready"] is ready
+    assert (block["verdict"]["state"] == "ready") is ready
     if not ready:
         assert any(block["stage_why"].get(s) for s in ("C1", "C2", "C3"))
 
@@ -462,7 +460,7 @@ def test_a_course_problem_stops_ready_though_every_required_stage_is_done():
     course.templates[1].faults = [_autograde_sometimes()]
     # A template fault no live semester cites is coming up, not a problem yet.
     block = _course_block(course)
-    assert block["ready"] is True
+    assert block["verdict"]["state"] == "ready"
     assert "coming_up" not in block["verdict"]
     # Once a semester hands it out inside its horizon, it stops `ready`.
     moments = {"assignment-3-f2026": status_json.Moment(NOW, "now")}
@@ -470,12 +468,12 @@ def test_a_course_problem_stops_ready_though_every_required_stage_is_done():
     assert {s: block["stages"][s] for s in ("C1", "C2", "C3")} == dict.fromkeys(
         ("C1", "C2", "C3"), "done"
     )
-    assert block["ready"] is False
+    assert block["verdict"]["state"] != "ready"
     assert block["verdict"]["state"] == "fixing"
     # A migration problem on a materials repo is a course problem too.
     unmigrated = status_json.MaterialsFacts("course-materials-x", "# S", True)
     unmigrated.topic = False
-    assert _course_block(_course(materials=[unmigrated]))["ready"] is False
+    assert _course_block(_course(materials=[unmigrated]))["verdict"]["state"] != "ready"
 
 
 @pytest.mark.parametrize(
@@ -598,7 +596,6 @@ def test_an_assignment_template_by_its_old_name_only_is_not_migrated():
     assert doc["course"]["templates"] == [
         {
             "repo": "assignment-1-f2025",
-            "slug": "assignment-1-f2025",
             "state": "problem",
             "starter": "derived",
         }
@@ -1923,10 +1920,10 @@ def test_the_checklist_order_and_what_blocks():
     # Folder kinds first, then the syllabus with its weekly plan, and the withheld
     # patterns. No "every folder has a kind": since decision 0031 each has one.
     checks = status_json.materials_checks(_materials("m", None))
-    assert [(c["id"], c["need"], c["blocks"]) for c in checks] == [
-        ("kind_folder", "needed", True),
-        ("syllabus", "suggested", False),
-        ("withheld", "suggested", False),
+    assert [(c["id"], c["need"]) for c in checks] == [
+        ("kind_folder", "needed"),
+        ("syllabus", "suggested"),
+        ("withheld", "suggested"),
     ]
     # A done check carries no why; an unmet one names what is missing.
     assert [c["why"] is None for c in checks] == [True, False, False]
@@ -1987,7 +1984,7 @@ def test_a_numbered_folder_no_kind_names_is_a_problem_until_its_kind_is_set():
     # It stands in the course's problems, so the course is not ready while it does.
     block, problems = status_json.render_course(_course(materials=[m]), NOW)
     assert "kinds:cm:quiz" in [q["id"] for q in problems]
-    assert block["ready"] is False
+    assert block["verdict"]["state"] != "ready"
 
 
 def test_only_unkinded_folders_with_numbered_subfolders_are_read_and_flagged(
@@ -2201,7 +2198,6 @@ def test_the_todo_list_is_every_unmet_check_and_every_unwritten_brief():
         "screen": "template",
         "entry": "assignment-2",
         "need": "needed",
-        "optional": False,
         "set_aside": False,
     }
     assert todo[1]["text"] == "There is no SYLLABUS.md yet."
@@ -2227,25 +2223,17 @@ def test_optional_setup_steps_and_to_dos_are_marked_and_required_ones_are_not():
         website_on=False,
     )
     block = _course_block(course)
-    assert block["stage_optional"] == {
-        "C1": False,
-        "C2": False,
-        "C3": False,
-        "C4": True,
-        "C5": True,
-        "C6": True,
-    }
     assert block["stage_need"] == {
         **dict.fromkeys(("C1", "C2", "C3"), "needed"),
         **dict.fromkeys(("C4", "C5", "C6"), "suggested"),
     }
     # Decision 0034: every materials check but the content folder is suggested (the
-    # syllabus too); a brief is needed. `optional` is `need: suggested`.
-    need = {t["id"]: (t["need"], t["optional"]) for t in block["todo"]}
+    # syllabus too); a brief is needed.
+    need = {t["id"]: t["need"] for t in block["todo"]}
     assert need == {
-        "materials:course-materials-b:syllabus": ("suggested", True),
-        "materials:course-materials-b:withheld": ("suggested", True),
-        "template:assignment-2:brief": ("needed", False),
+        "materials:course-materials-b:syllabus": "suggested",
+        "materials:course-materials-b:withheld": "suggested",
+        "template:assignment-2:brief": "needed",
     }
     # Absent key: nothing is set aside (forward-only, no migration).
     assert not any(block["stage_set_aside"].values())
@@ -2280,7 +2268,7 @@ def test_set_aside_marks_only_optional_items_that_are_not_done():
     # Setting aside changes no stage, no verdict, no problem.
     plain = status_json.render_course_file(_aside(course, []), NOW)
     assert block["stages"] == plain["course"]["stages"]
-    assert block["ready"] == plain["course"]["ready"]
+    assert block["verdict"]["state"] == plain["course"]["verdict"]["state"]
     assert doc["problems"] == plain["problems"]
     assert validate(doc, schemas.status_schema()) == []
 
@@ -2337,7 +2325,6 @@ def test_a_template_with_a_starter_to_do_is_not_ready_and_lists_it():
         "screen": "template",
         "entry": "assignment-1",
         "need": "needed",
-        "optional": False,
         "set_aside": False,
     }
     assert doc["problems"] == []
@@ -2532,7 +2519,7 @@ def test_the_three_course_verdicts():
         "suggested",
         "details",
     )
-    assert block["ready"] is False
+    assert block["verdict"]["state"] != "ready"
     # A `now` course problem: fixing.
     unmigrated = _materials("course-materials-x", topic=False)
     block = _course_block(_course(materials=[unmigrated]))
@@ -2748,7 +2735,6 @@ def test_the_course_file_tiers_template_problems_by_the_earliest_citing_hand_out
         "screen",
         "entry",
         "need",
-        "optional",
         "set_aside",
     }
     # No live semester cites it: the fault is later, and the to-do no problem.
@@ -2987,3 +2973,29 @@ def test_the_email_to_do_counts_who_is_active_on_the_renders_own_date():
     berlin_new_year = datetime(2029, 12, 31, 23, 30, tzinfo=UTC)  # 00:30 in Berlin
     todo = _render(semester=facts, now=berlin_new_year)["semester"]["todo"]
     assert "instructors:email" in {t["id"] for t in todo}
+
+
+# ------------------------------------------------------------------ release fixture
+
+RELEASE_FIXTURE = Path(__file__).parent / "fixtures" / "status-release"
+
+
+def write_release_fixture() -> None:
+    """What this engine writes, frozen as the last-promoted engine's files: the console
+    must still read them (`test_schemas.test_the_console_reads_the_release_engines_status`).
+    Run at each Promote, from the promoted ref: `python -m tests.test_status_json`.
+    Synthetic facts only: never a real org's file."""
+    course, semester = _contract_scenario()
+    docs = {
+        "semester.json": _render(course, semester),
+        "course.json": status_json.render_course_file(course, NOW),
+    }
+    RELEASE_FIXTURE.mkdir(parents=True, exist_ok=True)
+    for name, doc in docs.items():
+        (RELEASE_FIXTURE / name).write_text(
+            json.dumps(doc, indent=2, sort_keys=True) + "\n"
+        )
+
+
+if __name__ == "__main__":
+    write_release_fixture()

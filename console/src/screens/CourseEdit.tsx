@@ -2,7 +2,6 @@
 // (opencourse.yml), S19 Handout materials repo settings (materials.yml, .releaseignore).
 
 import { useRef, useState } from 'preact/hooks';
-import courseSchema from '../../schemas/dsl_course.schema.json';
 import materialsSchema from '../../schemas/materials.schema.json';
 import opencourseSchema from '../../schemas/opencourse.schema.json';
 import { useEnv, type Env } from '../env';
@@ -14,6 +13,7 @@ import { termRank } from '../model/catalogue';
 import { KIND_LABEL } from '../model/format';
 import { sameHandle } from '../model/people';
 import { ASSETS_KIND, DEFAULT_SYLLABUS, FOLDER_KINDS, MATERIALS_FILE, NOTHING_DECLARED, inferKind, readDeclared, withMark } from '../model/materialsRules';
+import { validCourse } from '../model/cascade';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
@@ -34,7 +34,6 @@ import { courseScope } from './common';
 import type { CourseProps } from './types';
 import { COURSE_REPO, OPENCOURSE_FILE } from '../model/names';
 
-const validCourse = validator(courseSchema);
 
 /** The course's newest semester, for the course-page ops the engine runs per semester. */
 export function newestScope(p: Pick<CourseProps, 'course'>): Scope | null {
@@ -693,13 +692,13 @@ export function MaterialsScreen(p: CourseProps) {
                 ))}
               </tbody>
             </table>
-          ) : <p class="footnote">No folders yet.</p>}
+          ) : <p class="footnote">{tree.kind === 'error' ? 'Could not read the repo’s folders; it is tried again shortly.' : 'No folders yet.'}</p>}
           <SaveBar state={kindSave} onSave={() => void saveMat({ syllabus: baseSyl, kinds: curKinds }, runKind, setKindSave, () => setKindsDraft(null))} small disabled={kindsDraft === null || deepEqual(kindsDraft, baseKinds) || declared === null} file={matRef} />
           <Lives {...matRef} />
         </section>
         <section class="panel section">
           <h2>Withheld from students <Hint label="About withheld files">Everything in this repo is released to students as it stands, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
-          {tree.kind === 'absent' ? <p class="footnote">Could not read the repo’s files.</p> : (
+          {tree.kind === 'absent' || tree.kind === 'error' ? <p class="footnote">Could not read the repo’s files.</p> : (
             <WithholdEditor id="ign-pat" label="Withheld patterns" files={files} text={ign ?? ignText} onText={setIgn} loading={tree.kind === 'loading'} partial={partial}
               kinds={Object.fromEntries(kinds.map((k) => [k.folder, KIND_LABEL[k.kind] ?? k.kind]))} withheldWord="withheld" releasedWord="released to students" />
           )}

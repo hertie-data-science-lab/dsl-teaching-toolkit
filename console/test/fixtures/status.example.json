@@ -21,14 +21,6 @@
       "C5": "problem",
       "C6": "todo"
     },
-    "stage_optional": {
-      "C1": false,
-      "C2": false,
-      "C3": false,
-      "C4": true,
-      "C5": true,
-      "C6": true
-    },
     "stage_set_aside": {
       "C1": false,
       "C2": false,
@@ -51,7 +43,6 @@
       "missing": null,
       "suggestions": 2
     },
-    "ready": false,
     "materials": [
       {
         "repo": "course-materials-f2026",
@@ -62,7 +53,6 @@
             "label": "At least one folder of a content kind",
             "done": true,
             "why": null,
-            "blocks": true,
             "need": "needed",
             "detail": [
               {
@@ -100,15 +90,13 @@
             "label": "Syllabus",
             "done": false,
             "why": "The weekly plan (written from the schedule) is not in SYLLABUS.md yet.",
-            "need": "suggested",
-            "blocks": false
+            "need": "suggested"
           },
           {
             "id": "withheld",
             "label": "Withheld patterns reviewed",
             "done": true,
             "why": null,
-            "blocks": false,
             "need": "suggested"
           }
         ]
@@ -117,7 +105,6 @@
     "templates": [
       {
         "repo": "assignment-3-f2026",
-        "slug": "assignment-3-f2026",
         "state": "problem"
       }
     ],
@@ -134,7 +121,6 @@
         "screen": "materials",
         "entry": "course-materials-f2026",
         "need": "suggested",
-        "optional": true,
         "set_aside": false
       }
     ]
@@ -191,7 +177,8 @@
         "line": 41,
         "screen": "schedule",
         "entry": "s5"
-      }
+      },
+      "bites": "later"
     },
     {
       "id": "template:assignment-3:GRADING_CONFIG",
@@ -206,7 +193,8 @@
         "line": 7,
         "screen": "template",
         "entry": "assignment-3-f2026"
-      }
+      },
+      "bites": "now"
     }
   ],
   "this_week": [

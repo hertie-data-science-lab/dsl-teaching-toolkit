@@ -164,7 +164,7 @@ describe('the Dashboard', () => {
   });
 
   it('filters the agenda to two selected weeks, and leaves the Problems tab alone', () => {
-    const soon = { ...STATUS.problems![0], id: 'schedule:s4:SOURCE_MISSING', text: 'Session 4 cites a folder that is not there.', when: '2026-09-28T10:00:00+02:00' };
+    const soon = { ...STATUS.problems![0], id: 'schedule:s4:SOURCE_MISSING', text: 'Session 4 cites a folder that is not there.', when: '2026-09-28T10:00:00+02:00', bites: 'soon' as const };
     const h = mount({ ...STATUS, problems: [soon, ...STATUS.problems!] });
     const before = problemsText(h);
     expect(before.some((t) => t!.includes('Session 4 cites'))).toBe(true);
@@ -230,8 +230,8 @@ describe('the Dashboard', () => {
   });
 
   it('groups the problems: overdue, the next 7 days, then any time', () => {
-    const late = { ...STATUS.problems![0], id: 'schedule:s2:SOURCE_MISSING', text: 'Session 2 was skipped.', when: '2026-09-17T10:00:00+02:00' };
-    const soon = { ...STATUS.problems![0], id: 'schedule:s4:SOURCE_MISSING', text: 'Session 4 cites a folder that is not there.', when: '2026-09-28T10:00:00+02:00' };
+    const late = { ...STATUS.problems![0], id: 'schedule:s2:SOURCE_MISSING', text: 'Session 2 was skipped.', when: '2026-09-17T10:00:00+02:00', bites: 'now' as const };
+    const soon = { ...STATUS.problems![0], id: 'schedule:s4:SOURCE_MISSING', text: 'Session 4 cites a folder that is not there.', when: '2026-09-28T10:00:00+02:00', bites: 'soon' as const };
     const h = mount({ ...STATUS, problems: [soon, late, ...STATUS.problems!] });
     expect([...h.querySelectorAll('#dash-panel-problems .week-h')].map((x) => x.textContent)).toEqual(['Overdue', 'Next 7 days', 'Any time']);
     expect(h.querySelector('.p-overdue')!.textContent).toContain('Session 2 was skipped.');
@@ -300,7 +300,7 @@ describe('the Dashboard and the horizon (decision 0034)', () => {
 
   it('lists a template brief a later hand-out cites in Coming up: the engine’s later problem, no to-do of its own', () => {
     const brief = {
-      id: 'template:assignment-3-f2026:brief', scope: 'course' as const, stage: 'C5', kind: 'BRIEF', release: 'assignment-3', when: '2026-10-20T10:00:00+02:00',
+      id: 'template:assignment-3-f2026:brief', scope: 'course' as const, stage: 'C5', kind: 'BRIEF', release: 'assignment-3', when: '2026-10-20T10:00:00+02:00', bites: 'later' as const,
       text: 'The brief (README.md) is not written yet.', stops: 'The hand-out on Tue 20 Oct would give students a placeholder brief.',
       fix: { repo: `${COURSE_ORG}/assignment-3-f2026`, path: '', line: null, screen: 'template', entry: 'assignment-3-f2026' },
     };
@@ -366,7 +366,7 @@ describe('the Dashboard and explicit numbers (decision 0020)', () => {
     const status: Status = {
       ...STATUS,
       releases: [...(STATUS.releases ?? []), { id: 'guest', when: '2026-09-24T10:00:00+02:00', kind: 'lecture', number: null, title: 'Guest', state: 'will_be_skipped', source: { repo: 'course-materials-f2026', path: 'lectures/guest' }, dest: { repo: 'materials', path: 'lectures/guest' }, show_on_site: true, tbc: false }],
-      problems: [...(STATUS.problems ?? []), { id: 'number:lecture:guest', scope: 'semester', stage: 'K4', text: 'Give guest a number.', stops: 'The release on Thu 24 Sep will be skipped.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', line: 9, screen: 'schedule', entry: 'guest' }, when: '2026-09-24T10:00:00+02:00' }],
+      problems: [...(STATUS.problems ?? []), { id: 'number:lecture:guest', scope: 'semester', stage: 'K4', text: 'Give guest a number.', stops: 'The release on Thu 24 Sep will be skipped.', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'schedule.yml', line: 9, screen: 'schedule', entry: 'guest' }, when: '2026-09-24T10:00:00+02:00', bites: 'soon' }],
     };
     const h = mount(status);
     expect(cell(h, 3).querySelector('.wk-count')!.textContent).toBe('1');

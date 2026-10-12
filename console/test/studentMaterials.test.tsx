@@ -106,6 +106,11 @@ describe('opening a file', () => {
     expect(out).not.toContain('<iframe');
   });
 
+  it('shows an image as a data: URL, which the console’s CSP allows (a blob: one it blocks)', () => {
+    const out = render(<ShownView shown={{ kind: 'image', bytes: new Uint8Array([137, 80, 78, 71]), mime: 'image/png' }} name="diagram.png" />);
+    expect(out).toContain('<img class="file-img" src="data:image/png;base64,iVBORw==" alt="diagram.png"/>');
+  });
+
   it('shows a page with no scripts in a frame sandboxed with no permissions, its images inlined', async () => {
     const s = await showFile(client(fake()), ORG, REPO, entry('lectures/01/Session1_demo_deck.html'), tree);
     expect(s.kind).toBe('page');

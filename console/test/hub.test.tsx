@@ -4,7 +4,7 @@ import { render } from 'preact-render-to-string';
 import { describe, expect, it, vi } from 'vitest';
 import type { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { LiveFiles } from '../src/model/files';
+import { LiveFiles, RETRY_MS, type Files } from '../src/model/files';
 import { StaticFiles } from './staticFiles';
 import type { Loaded } from '../src/model/status';
 import type { Assignment, AssignmentState, Status } from '../src/model/types';
@@ -78,6 +78,16 @@ describe('the assignment hub', () => {
     expect(s).not.toContain('>Teams</a>');
     expect(current(s)).toBe('Overview');
     expect(s).toContain('href="#assignment-assignment-2/marks"');
+  });
+
+  it('a teams.csv it could not read is an error, never an empty team list to save over', () => {
+    const failing: Files = Object.assign(Object.create(files), {
+      file: (o: string, r: string, path: string) => (path === 'teams.csv' ? { kind: 'error', message: 'HTTP 502' } : files.file(o, r, path)),
+    });
+    const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams', files: failing })} />);
+    expect(out).toContain('Could not read teams.csv: HTTP 502. It is tried again shortly.');
+    expect(out).not.toContain('Without a team');
+    expect(out).not.toContain('Create team');
   });
 
   it('the Teams tab links the students’ assignment page, not the retired site page', () => {
@@ -203,6 +213,33 @@ describe('entry releases', () => {
       expect(Object.keys(def.options ?? {})).toEqual([]);
     }
     expect(Object.keys(releaseAdhoc(scope, ['course-materials-f2026']).options ?? {})).toContain('semester_dest_repo');
+  });
+});
+
+describe('a failed read', () => {
+  const flush = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+  it('is an error, not absent, and is read again on an ask once RETRY_MS has passed', async () => {
+    const tree = { sha: 'r', truncated: false, tree: [{ path: 'lectures', type: 'tree', sha: 'x', mode: '040000' }] };
+    const listTree = vi.fn().mockRejectedValueOnce(new Error('HTTP 502')).mockResolvedValueOnce(tree);
+    const listOrgRepos = vi.fn().mockRejectedValueOnce(new Error('HTTP 403 secondary rate limit')).mockResolvedValueOnce([]);
+    let now = 0;
+    const live = new LiveFiles({ listTree, listOrgRepos } as unknown as GitHubClient, () => now);
+    live.tree('o', 'r');
+    live.repos('o');
+    await flush();
+    expect(live.tree('o', 'r')).toEqual({ kind: 'error', message: 'HTTP 502' });
+    expect(live.repos('o')).toEqual({ kind: 'error', message: 'HTTP 403 secondary rate limit' });
+    // Shown as an error meanwhile; not asked again on every render.
+    now = RETRY_MS - 1;
+    expect(live.tree('o', 'r').kind).toBe('error');
+    expect(listTree).toHaveBeenCalledTimes(1);
+    now = RETRY_MS;
+    expect(live.tree('o', 'r').kind).toBe('loading');
+    expect(live.repos('o').kind).toBe('loading');
+    await flush();
+    expect(live.tree('o', 'r')).toMatchObject({ kind: 'ready', paths: [{ path: 'lectures', dir: true }] });
+    expect(live.repos('o')).toEqual({ kind: 'ready', repos: [] });
+    expect(listTree).toHaveBeenCalledTimes(2);
   });
 });
 
