@@ -974,9 +974,10 @@ def provision_one(
         # clone of an empty repo has no branch, and the solution then lands on whatever the
         # runner's `init.defaultBranch` is - invisible to the student and to grading.
         if not existed and not _wait_for_content(semester_org, repo):
-            log_err(
-                f"  ! {semester_org}/{repo} has not populated yet - no solution pushed; "
-                f"the next run retries"
+            log_err_person(
+                "  ! a submission repo has not populated yet - no solution pushed; the "
+                "next run retries",
+                f"{semester_org}/{repo} has not populated yet",
             )
             solution_failed = True
         elif push_solution(semester_org, repo, sol_dir):
@@ -1025,12 +1026,11 @@ def provision_one(
             log_person(f"  [ok]   + team {team} ({permission})")
         if not team_ok:
             # One per group repo, and `provision_all` tallies the `failed-team-members`
-            # status below into the count faculty read. The team NAME is a roster of who
-            # is grouped with whom, and the repo is named after it.
-            log_err_person(
-                "  ! a team is missing member(s) - they cannot see their repo",
+            # status below into the count faculty read. A team name is public (the site
+            # lists the teams), and so is the repo named after it.
+            log_err(
                 f"  ! team {team} is missing member(s) - they cannot see "
-                f"{semester_org}/{repo}",
+                f"{semester_org}/{repo}"
             )
         access_failure = (
             "failed-no-access"
@@ -1125,12 +1125,9 @@ def _grant_drop_box(
             if not sync_teams.ensure_team(
                 semester_org, team, set(members), prune=False
             ):
-                # The team NAME is a roster of who is grouped with whom, so it goes to the
-                # verbose log and the actionable half stays public.
-                log_err_person(
-                    f"  ! a team is missing member(s) - they cannot see {repo}",
+                log_err(
                     f"  ! team {team} is missing member(s) - they cannot see "
-                    f"{semester_org}/{repo}",
+                    f"{semester_org}/{repo}"
                 )
                 failed += 1
             if grant_team_repo_access(semester_org, team, repo, "push", person=True):
