@@ -224,7 +224,7 @@ describe('one person, two roles', () => {
     root = document.createElement('div');
     document.body.append(root);
     await act(async () => render(<App state={s} />, root!));
-    for (let i = 0; i < 5; i++) await act(async () => {});
+    for (let i = 0; i < 10; i++) await act(async () => {});
     return root;
   }
   it('keeps the taught semesters out of the student tree', async () => {

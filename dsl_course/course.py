@@ -29,7 +29,9 @@ def advertises_console(meta: dict) -> bool:
     """Whether a course's `dsl-course.yml` sends its students to the student console
     (`student_console: true`). Off by default: an unset course keeps its semester sites
     exactly as they were - no banner, team links to the site's own assignment pages, and
-    no student-facing sentence naming the console."""
+    no student-facing sentence naming the console - and the console, reading it off
+    `student-status.json`, shows a signed-in student the site's link instead of its
+    student screens."""
     return meta.get("student_console") is True
 
 

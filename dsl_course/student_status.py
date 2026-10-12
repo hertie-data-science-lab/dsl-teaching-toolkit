@@ -9,7 +9,9 @@ same facts, the same moment.
 
 It also carries what the site's landing page and kind tabs show: the course description,
 the previous offerings (the site repo's `_data/previous_offering.yml`), the kind tabs each row
-is listed on (`site_repo.row_tabs`, the site's own rule) and which kinds have a tab.
+is listed on (`site_repo.row_tabs`, the site's own rule) and which kinds have a tab. And
+`student_console`, the course's opt-in (`course.advertises_console`): where it is false the
+console shows a student the semester site's link instead of the student screens.
 
 PUBLIC, and so ALLOW-LISTED. `.github` is a public repo, so every key at every level is
 named below and the exported schema refuses any other (`additionalProperties: false`
@@ -38,6 +40,7 @@ from .course import (
     CUTOFF_SENTENCE,
     INSTRUCTORS_FILE,
     SELF_SELECT,
+    advertises_console,
     identifier,
     is_repo_root,
     late_rule,
@@ -84,6 +87,7 @@ TOP_KEYS = (
     "semester",
     "course_name",
     "course_description",
+    "student_console",
     "semester_start",
     "semester_end",
     "generated_at",
@@ -211,6 +215,7 @@ def json_schema() -> dict:
         ),
     }
     top_types = {
+        "student_console": _B,
         "semester_start": _SN,
         "semester_end": _SN,
         "archive_datetime": _SN,
@@ -690,6 +695,8 @@ def render(
         "semester": facts.org,
         "course_name": str((course.meta or {}).get("course_name") or ""),
         "course_description": str((course.meta or {}).get("course_description") or ""),
+        # The course's opt-in: false, and the console shows a student the site instead.
+        "student_console": advertises_console(course.meta or {}),
         # schedule.yml's dates, so the console counts "Week N of M" as the instructor's does.
         "semester_start": _iso(sched.semester_start),
         "semester_end": _iso(sched.semester_end),

@@ -10,6 +10,8 @@
 // instructor's own identity and never read anyone's repos or marks. An auditor sees the
 // materials and the schedule, and nothing that promises a repo, a team or marks. An archived
 // semester is history: the student's own repos and marks, read-only, and nothing is run.
+// A course that has not opted in (`student_console:`, false in the facts) gets none of these:
+// its students see `CourseWebsiteScreen`, the link to the semester site.
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import { useEffect } from 'preact/hooks';
@@ -19,7 +21,7 @@ import type { Semester } from '../model/discovery';
 import { ago } from '../model/format';
 import { knownAuditor, patchLines, readAllReceipts, readMine, repoUrl, type Mine, type Receipts } from '../model/mine';
 import { lastVisit, markVisit } from '../model/prefs';
-import { StatusFileSource, type SemesterFacts, type StudentData } from '../model/student';
+import { StatusFileSource, siteUrl, type SemesterFacts, type StudentData } from '../model/student';
 import { semesterLine, weekItems } from '../model/week';
 import { STUDENT_SCREENS, studentHref, studentScreens, tabWord } from '../router';
 import { CheckLine, Loading, ghUrl } from '../ui/bits';
@@ -71,6 +73,30 @@ export function studentData(client: GitHubClient): StudentData {
     sources.set(client, s);
   }
   return s;
+}
+
+/**
+ * What a student of a course that has not opted in to the console sees instead of the student
+ * screens: the course, one sentence and the semester site. Nothing of theirs is read.
+ * `root` links back to the landing page, for a person with more than this semester.
+ */
+export function CourseWebsiteScreen({ semester, courseName, root }: { semester: Semester; courseName: string; root?: string }) {
+  return (
+    <>
+      <div class="page-head">
+        <div>
+          <h1>{courseName || semester.courseName || semester.org} <span class="h-sub">/ {semester.termLabel}</span></h1>
+          <p class="lede">This course uses its website for the schedule, the assignments and the materials.</p>
+        </div>
+      </div>
+      <section class="panel section">
+        <div class="actions">
+          <a class="btn" href={siteUrl(semester.org)}>Open the course website</a>
+          {root ? <a class="btn outline" href="?#home">{root}</a> : null}
+        </div>
+      </section>
+    </>
+  );
 }
 
 export function StudentViewBanner() {

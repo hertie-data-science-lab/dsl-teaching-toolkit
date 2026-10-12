@@ -450,6 +450,9 @@
         "null"
       ]
     },
+    "student_console": {
+      "type": "boolean"
+    },
     "syllabus": {
       "additionalProperties": false,
       "properties": {
@@ -478,6 +481,7 @@
     "semester",
     "course_name",
     "course_description",
+    "student_console",
     "semester_start",
     "semester_end",
     "generated_at",

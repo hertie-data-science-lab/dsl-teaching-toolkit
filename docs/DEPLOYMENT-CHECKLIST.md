@@ -98,7 +98,8 @@ ignored. Unset, nothing is set aside.
 `student_console: true` points this course's students at the student console: the semester
 sites' banner, and team-formation links (mail, Join-team form, its comments) to each
 assignment's console page. Unset (the default), students see only the semester sites, and
-those links go to the site's own assignment pages. A push re-syncs the sites; the lock and
+those links go to the site's own assignment pages; a student who signs in to the console is
+sent to the site. A push re-syncs the sites; the lock and
 the form follow on the next tick.
 
 `site_link_extensions` narrows what each row **links** on the **semester** sites,

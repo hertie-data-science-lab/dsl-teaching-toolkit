@@ -39,7 +39,7 @@ import { NewCohortScreen } from './screens/NewCohort';
 import { NewCourseScreen } from './screens/NewCourse';
 import { NewMaterialsScreen } from './screens/NewMaterials';
 import { MigrationUnknownScreen, NotMigratedScreen } from './screens/NotMigrated';
-import { StudentBanner, StudentScreen, StudentSideNav, forgetStudentData, studentScreen } from './screens/Student';
+import { CourseWebsiteScreen, StudentBanner, StudentScreen, StudentSideNav, forgetStudentData, studentData, studentScreen } from './screens/Student';
 import { JoinCourseScreen } from './screens/StudentJoin';
 import type { CohortProps, CourseProps } from './screens/types';
 import { Loading, ghUrl } from './ui/bits';
@@ -171,13 +171,26 @@ export function App({ state: s }: { state: AppState }) {
 
   // Profile and Guide are app-level: a semester in the query does not turn them into student screens.
   const stu = FULL_WIDTH.includes(route.screen) ? null : studentContext(estate, sel, s.archivedOf);
-  if (stu?.pending) {
+  // A student (never an instructor's Student view) of a course that has not opted in gets the
+  // course's website, read off the facts the student screens read anyway.
+  const gate = stu && !stu.pending && !stu.studentView ? s.consoleGate(stu.semester.org) : null;
+  if (stu?.pending || gate === undefined) {
     return (
       <>
         <Topbar user={user} title={title} onSignOut={s.signOut} guide={guide} />
         <div class="shell" style="grid-template-columns:minmax(0,1fr)"><main><Loading what="Opening the semester" /></main></div>
         <Footer sub={root} />
       </>
+    );
+  }
+  if (stu && gate && !gate.on) {
+    const others = courses.length > 0 || semesters.length > 1;
+    return (
+      <EnvCtx.Provider value={s.env(user)}>
+        <Topbar user={user} title={title} onSignOut={s.signOut} guide={guide} />
+        <div class="shell" style="grid-template-columns:minmax(0,1fr)"><main id="view" tabindex={-1}><CourseWebsiteScreen semester={stu.semester} courseName={gate.courseName} root={others ? root : undefined} /></main></div>
+        <Footer title={gate.courseName || stu.semester.courseName || undefined} sub={stu.semester.termLabel} />
+      </EnvCtx.Provider>
     );
   }
   if (stu) {
@@ -373,6 +386,7 @@ export function createState({ auth, client }: AppDeps) {
   const files = new LiveFiles(client);
   const beats = new Map<string, ReturnType<typeof signal<Heartbeat | null | undefined>>>();
   const archived = new Map<string, ReturnType<typeof signal<boolean | undefined>>>();
+  const gates = new Map<string, ReturnType<typeof signal<{ on: boolean; courseName: string } | undefined>>>();
   const left = new Map<string, { sig: ReturnType<typeof signal<Leftover[] | 'failed' | undefined>>; nav: string }>();
   let env: Env | null = null;
   const ops = new OpsSession(new DispatchAdapter(client, () => st.user.value?.login ?? ''), {
@@ -427,6 +441,24 @@ export function createState({ auth, client }: AppDeps) {
     },
     discover(): Promise<Estate> {
       return discoverEstate(client, { kind: auth.kind() ?? 'classic', login: st.user.value?.login ?? '' });
+    },
+    /**
+     * Whether a semester's course lets its students into the console (`studentConsole` in its
+     * facts, through the one memoised `studentData` read the screens share), with the course
+     * name; undefined until it answers. A read that fails counts as on: the screens then say why.
+     */
+    consoleGate(org: string): { on: boolean; courseName: string } | undefined {
+      let g = gates.get(org);
+      if (!g) {
+        const sig = signal<{ on: boolean; courseName: string } | undefined>(undefined);
+        g = sig;
+        gates.set(org, sig);
+        void studentData(client).facts(org).then(
+          (f) => (sig.value = { on: f?.studentConsole !== false, courseName: f?.courseName ?? '' }),
+          () => (sig.value = { on: true, courseName: '' }),
+        );
+      }
+      return g.value;
     },
     /** Whether a semester's `.github` is archived, read once on first ask; undefined until it answers. */
     archivedOf(org: string): boolean | undefined {
@@ -485,6 +517,7 @@ export function createState({ auth, client }: AppDeps) {
       statuses.forget();
       beats.clear();
       archived.clear();
+      gates.clear();
       left.clear();
       ops.reset();
       env = null;
