@@ -663,6 +663,24 @@ def test_two_roster_rows_sharing_an_email_get_one_code_email(monkeypatch):
     assert [to for to, _s, _b in sent] == ["ada@uni.edu"]
 
 
+def test_rows_sharing_a_code_are_not_mailed_it(monkeypatch, capsys):
+    # Mailed to both, the code binds whoever joins first to the first row - the second
+    # student can take the first's seat. Hold both until faculty blank the copy; the
+    # count is public, the addresses are not.
+    text = (
+        HEADER
+        + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
+        + "eve@uni.edu,Eve,enrolled,,,dsl-aaa111,\n"
+        + "bob@uni.edu,Bob,enrolled,,,dsl-bbb222,\n"
+    )
+    outcome, sent, _written = _run_with(monkeypatch, text)
+    assert outcome is enrol_codes.Outcome.SENT
+    assert [to for to, _s, _b in sent] == ["bob@uni.edu"]
+    err = capsys.readouterr().err
+    assert "2 row(s) share an enrol_code" in err
+    assert "ada@uni.edu" not in err and "eve@uni.edu" not in err
+
+
 def test_a_semicolon_roster_sends_nothing_and_leaves_the_run_green(monkeypatch, capsys):
     # A German-locale Excel export. Every cell reads blank through DictReader, so the send
     # used to write a mangled roster back and exit 0 - then the header check made it a red

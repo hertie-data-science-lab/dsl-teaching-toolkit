@@ -182,7 +182,7 @@ def site_readme(org: str, semester: bool) -> str:
             "| `files/` | the hosted copies of what the course's `publish.yml` makes "
             "public |\n"
             if semester
-            else ""
+            else "| `_data/course.yml` | the contact and licence the home page shows |\n"
         )
         + f"| the tab pages - {tab_pages} | the wrappers the tabs point at |\n"
         + "| `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders |\n"

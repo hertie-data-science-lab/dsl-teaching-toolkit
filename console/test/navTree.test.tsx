@@ -14,7 +14,8 @@ import { GitHubClient } from '../src/github/client';
 import type { CohortRef, Course, Semester } from '../src/model/discovery';
 import { termOf } from '../src/model/discovery';
 import { Sidenav, StudentNav } from '../src/ui/shell';
-import { FakeGitHub } from './fake';
+import { FakeGitHub, fileBody } from './fake';
+import FILE from './fixtures/student-status.json?raw';
 
 const NOW = Date.parse('2026-10-01T12:00:00Z');
 const COURSE_ORG = 'hertie-dsl-demo-course-e1234';
@@ -218,7 +219,7 @@ describe('one person, two roles', () => {
   const studied = sem('f2026', 'Natural Language Processing');
   async function mount(url: string, courses: Course[] = [taught]) {
     history.replaceState(null, '', url);
-    const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: new GitHubClient({ token: () => 't', fetch: new FakeGitHub().on('GET', /\/git\/trees\/HEAD/, { sha: 'r', truncated: false, tree: [] }).fetch }) });
+    const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: new GitHubClient({ token: () => 't', fetch: new FakeGitHub().on('GET', /\/git\/trees\/HEAD/, { sha: 'r', truncated: false, tree: [] }).on('GET', `/repos/${studied.org}/.github/contents/.system/student-status.json`, fileBody('.system/student-status.json', FILE)).fetch }) });
     s.user.value = { login: 'octo', id: 1, name: 'Octo Cat', email: null, avatar_url: '' };
     s.estate.value = { courses, semesters: [studied], roles: new Map([[studied.org, 'student' as const], [taught.cohorts[0].org, 'instructor' as const], [COURSE_ORG, 'instructor' as const]]), kind: 'classic' };
     root = document.createElement('div');

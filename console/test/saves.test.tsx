@@ -113,6 +113,17 @@ describe('Save on the Overview form', () => {
     expect(parse(body(puts(gh, 'assignments.yml')[0])).assignments).toEqual({ 'assignment-2': { late_window_days: 3, late_penalty_per_day: '2%' } });
   });
 
+  it('saves a schedule carrying blank keys: an unfilled details slot, the seeded archive date', async () => {
+    const blank = `${SCHEDULE}    details:\nevents:\n  midterm:\n    kind: exam\n    event_datetime: 2026-10-20\n    details:\narchive:\n  event_datetime:\n`;
+    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: blank });
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-2', tab: 'overview' })} />);
+    await type('#ov-dueDate', '2026-09-29');
+    await click(button('Save'));
+    await settle(() => puts(gh, 'schedule.yml').length > 0 || root!.textContent!.includes('Not saved'));
+    expect(root!.textContent).not.toContain('Not saved');
+    expect(parse(body(puts(gh, 'schedule.yml')[0])).assignments['assignment-2'].due_datetime).toBe('2026-09-29T23:59');
+  });
+
   it('says the dates were saved when the run settings commit fails', async () => {
     const gh = github(['assignments.yml']), f = files();
     await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-2', tab: 'overview' })} />);

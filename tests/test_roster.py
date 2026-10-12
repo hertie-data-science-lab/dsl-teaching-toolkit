@@ -186,6 +186,21 @@ def test_a_duplicate_handle_and_a_duplicate_address_are_both_found():
     assert all("row 2" in f.what for f in found)
 
 
+def test_a_duplicate_enrol_code_is_found_without_naming_it():
+    # A row copied in Excel to add a student keeps the original's code: whoever joins
+    # first is bound to the FIRST row, which may be somebody else's seat.
+    text = (
+        f"{HEADER}\n"
+        "ada@uni.edu,Ada,,,,dsl-abc234,\n"
+        "eve@uni.edu,Eve,,,,DSL-ABC234,\n"
+        "bob@uni.edu,Bob,,,,dsl-zzz999,\n"
+    )
+    (fault,) = _faults(text)
+    assert (fault.lineno, fault.field) == (3, "enrol_code")
+    assert "row 2" in fault.what and "abc234" not in fault.what.casefold()
+    assert roster.shared_codes(roster.parse(text)) == {"dsl-abc234"}
+
+
 def test_a_row_fault_never_carries_a_cell():
     text = f"{HEADER}\nada@uni.edu,Ada Lovelace,audit,ada-l,42,dsl-secret,\n"
     (fault,) = _faults(text)

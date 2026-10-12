@@ -92,7 +92,7 @@ get a toolkit change out to live orgs, see
 
 - **The semester org's `fYYYY`/`sYYYY` suffix** is parsed: it picks the year's `instructors-<semester>`
   team. The course org's name is not validated.
-- **Repo topics** (`dsl-course-hub`, `dsl-cohort`, `submission`, `gradebook`,
+- **Repo topics** (`dsl-course-hub`, `dsl-semester`, `dsl-materials`, `submission`, `gradebook`,
   `assignment-template`, `dsl-assignment`) are how discovery tells orgs and repos apart. Remove one by hand and
   the repo drops out of every sweep.
 - **`.github/.system/last-refresh`** is a heartbeat: GitHub disables crons after 60 quiet days, so the

@@ -443,7 +443,9 @@ def _cited_repos(
 # ---------------------------------------------------------------------- gh/git wiring
 
 
-def load_faculty(course_org: str) -> dict[str, list[dict]] | None:
+def load_faculty(
+    course_org: str, skipped: list[str] | None = None
+) -> dict[str, list[dict]] | None:
     """Fetch + parse the course org's `.github/dsl-course.yml` `people:` block -
     course_admins only in practice; instructors/TAs are declared per semester
     (see `load_semester_faculty`), but any stray entries here are still parsed
@@ -451,11 +453,13 @@ def load_faculty(course_org: str) -> dict[str, list[dict]] | None:
 
     Returns None when dsl-course.yml is genuinely ABSENT - the caller must then NOT prune
     (an absent config is not an empty desired set). A present-but-empty `people:` block
-    parses to {} and legitimately empties the team."""
+    parses to {} and legitimately empties the team.
+
+    `skipped` is `parse_faculty_from_meta`'s: the entries it could not place."""
     meta = load_yaml_config(course_org, ".github", "dsl-course.yml")
     if meta is None:
         return None
-    return parse_faculty_from_meta(meta)
+    return parse_faculty_from_meta(meta, skipped=skipped)
 
 
 def load_semester_faculty(semester_org: str) -> dict[str, list[dict]] | None:
@@ -714,7 +718,8 @@ def sync_course_admins(
 ) -> int:
     """course_admins: declared once on the course org, mirrored unchanged into the
     course org itself and every semester's own course-admin team."""
-    faculty = load_faculty(course_org)
+    skipped: list[str] = []
+    faculty = load_faculty(course_org, skipped)
     if faculty is None:
         # ABSENT dsl-course.yml: parsing it as "" would yield an empty desired set and a
         # pruning reconcile would strip course-admin from EVERY org. Refuse to prune.
@@ -724,11 +729,19 @@ def sync_course_admins(
             f"{1 + len(semesters)} org(s)); skipping"
         )
         return 1
+    # The faculty-access FLOOR, as in `sync_semester_instructors`: an entry the parse
+    # could not place is in nobody's desired set, so hold every removal until it is fixed.
+    if skipped:
+        log_err(
+            f"  ! {COURSE_CONFIG} has {len(skipped)} entry(ies) that could not be placed "
+            f"({', '.join(skipped)}) - nobody is removed from course-admin until they "
+            f"are fixed"
+        )
     desired = _desired_for(faculty, COURSE_ADMIN_TEAM, date.today().isoformat())
     errors = 0
     for org in [course_org] + semesters:
         errors += reconcile_team_members(
-            org, COURSE_ADMIN_TEAM, desired, prune=True, dry_run=dry_run
+            org, COURSE_ADMIN_TEAM, desired, prune=not skipped, dry_run=dry_run
         )
     return errors
 

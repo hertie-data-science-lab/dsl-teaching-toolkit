@@ -101,13 +101,21 @@ def emptied_teams(
     )
 
 
-def ensure_team(org: str, slug: str, members: set[str], prune: bool) -> bool:
+def ensure_team(
+    org: str,
+    slug: str,
+    members: set[str],
+    prune: bool,
+    keep_ids: set[str] = frozenset(),
+) -> bool:
     """Create the team (idempotent) and reconcile its membership to `members`.
 
     Reconciliation goes through gh_teams.reconcile_team_members so pruning inherits its
     guard: an org Owner - or the acting login, which GitHub auto-adds as a member of
     whatever team it creates - is never removed. Without it, a maintainer or the bot
-    sitting in a project team would be evicted on the next pruning sync.
+    sitting in a project team would be evicted on the next pruning sync. `keep_ids` are
+    the members' GitHub ids: a member who renamed their account keeps their place while
+    the relink that moves their handle is still pending.
 
     A team this call made is reconciled without reading it back: GitHub's REST API 404s a
     new team for up to minutes, and its membership is known (see `just_created`)."""
@@ -118,7 +126,12 @@ def ensure_team(org: str, slug: str, members: set[str], prune: bool) -> bool:
         return False
     return (
         reconcile_team_members(
-            org, slug, members, prune=prune, just_created=outcome == CREATED
+            org,
+            slug,
+            members,
+            prune=prune,
+            keep_ids=keep_ids,
+            just_created=outcome == CREATED,
         )
         == 0
     )
@@ -174,6 +187,17 @@ def vet_groups(
     ]
 
 
+def _emptied(semester_org: str, wanted: dict[str, set[str]]) -> list[str] | None:
+    """`emptied_teams` over the org's teams and the schedule's keys; None when the team
+    listing could not be read."""
+    existing = list_teams(semester_org)
+    if existing is None:
+        return None
+    return emptied_teams(
+        existing, wanted, list(schedule.load(semester_org).assignments)
+    )
+
+
 def _empty_the_emptied(
     semester_org: str, wanted: dict[str, set[str]], dry_run: bool
 ) -> int:
@@ -183,12 +207,11 @@ def _empty_the_emptied(
     acting login are never removed, and an unreadable owner list skips the prune whole.
     A team listing that could not be read empties nothing - absence has to be a real
     answer before anybody loses access on the strength of it."""
-    existing = list_teams(semester_org)
-    if existing is None:
+    emptied = _emptied(semester_org, wanted)
+    if emptied is None:
         return 1
-    keys = list(schedule.load(semester_org).assignments)
     errors = 0
-    for slug in emptied_teams(existing, wanted, keys):
+    for slug in emptied:
         if dry_run:
             log_person(f"    PREVIEW team {slug}: now empty - would remove its members")
             continue
@@ -197,7 +220,20 @@ def _empty_the_emptied(
 
 
 def sync(semester_org: str, prune: bool = False, dry_run: bool = False) -> int:
-    wanted = desired_teams(teams.load(semester_org))
+    per = teams.load_or_none(semester_org)
+    if per is None:
+        # ABSENT teams.csv - deleted, or renamed by hand - is not an empty one: reconciling
+        # every project team to nobody would take every student's push on their group
+        # repo. Hold, like the absent roster below; a header-only file is how to empty them.
+        if prune and _emptied(semester_org, {}):
+            log_err(
+                f"{teams.TEAMS_PATH} is absent in {semester_org}/{teams.CONFIG_REPO} but "
+                f"project teams exist - nobody is removed from them until it is restored"
+            )
+        else:
+            log_ok(f"no {teams.TEAMS_PATH} yet - nothing to sync.")
+        return 0
+    wanted = desired_teams(per)
     if not wanted:
         log_ok("no project teams defined yet - nothing to sync.")
         return _empty_the_emptied(semester_org, wanted, dry_run) if prune else 0
@@ -245,7 +281,17 @@ def sync(semester_org: str, prune: bool = False, dry_run: bool = False) -> int:
             log_person(
                 f"    PREVIEW team {slug}: {', '.join('@' + m for m in sorted(members))}"
             )
-        elif not ensure_team(semester_org, slug, members, prune):
+        elif not ensure_team(
+            semester_org,
+            slug,
+            members,
+            prune,
+            keep_ids={
+                s.github_id
+                for s in students
+                if s.github_id and s.onboarded and s.github_handle in members
+            },
+        ):
             errors += 1
     if prune:
         errors += _empty_the_emptied(semester_org, wanted, dry_run)

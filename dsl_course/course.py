@@ -192,7 +192,7 @@ NO_STARTER = "none"
 # commented example turning into a live one otherwise costs a semester.
 SETTING_PLACEHOLDER = "CHANGE-ME"
 FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
-# The answer New assignment's format, team_formation, submit_via and visibility boxes
+# The answer New assignment's formats and submit_via boxes
 # arrive with when nobody touches them: "use the course's `assignment_defaults:`, else the
 # toolkit's own". Here because two layers spell it: the rendered form offers it and the
 # scaffold's CLI resolves it.

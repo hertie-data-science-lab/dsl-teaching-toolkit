@@ -6,41 +6,71 @@
       "additionalProperties": false,
       "properties": {
         "details": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "event_datetime": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "grace_days": {
           "type": "integer"
         },
         "show_on_site": {
-          "type": "boolean"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "tbc": {
-          "type": "boolean"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "title": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
-      "type": "object"
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "assignments": {
       "additionalProperties": {
         "additionalProperties": false,
         "properties": {
           "course_source_repo": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "details": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "due_datetime": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "handout_datetime": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "marks_return_datetime": {
             "oneOf": [
@@ -66,13 +96,22 @@
             "type": "integer"
           },
           "show_on_site": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "solution_datetime": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "tbc": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           }
         },
         "required": [
@@ -88,10 +127,16 @@
         "additionalProperties": false,
         "properties": {
           "details": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "event_datetime": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "kind": {
             "enum": [
@@ -101,13 +146,22 @@
             "type": "string"
           },
           "show_on_site": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "tbc": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "title": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -123,19 +177,34 @@
               "additionalProperties": false,
               "properties": {
                 "course_source_path": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "course_source_repo": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "deploy_datetime": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "semester_dest_path": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "semester_dest_repo": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "required": [
@@ -147,7 +216,10 @@
             "type": "array"
           },
           "details": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "event_datetime": {
             "type": "string"
@@ -169,13 +241,22 @@
             "type": "integer"
           },
           "show_on_site": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "tbc": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "title": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -183,13 +264,22 @@
       "type": "object"
     },
     "semester_end": {
-      "type": "string"
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "semester_start": {
-      "type": "string"
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "timezone": {
-      "type": "string"
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "title": "semester-config/schedule.yml",

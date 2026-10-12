@@ -10,7 +10,7 @@
 // instructor's own identity and never read anyone's repos or marks. An auditor sees the
 // materials and the schedule, and nothing that promises a repo, a team or marks. An archived
 // semester is history: the student's own repos and marks, read-only, and nothing is run.
-// A course that has not opted in (`student_console:`, false in the facts) gets none of these:
+// A course that has not opted in (`student_console: true`, else off) gets none of these:
 // its students see `CourseWebsiteScreen`, the link to the semester site.
 
 import { DEFAULT_TIMEZONE } from '../model/policy';

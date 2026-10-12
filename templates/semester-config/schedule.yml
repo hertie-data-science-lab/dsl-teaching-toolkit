@@ -35,8 +35,8 @@
 # a real release plan, a group project, exams - see the worked example above.
 
 # timezone: {timezone}           # OPTIONAL - default: {timezone}
-# semester_start:                   # OPTIONAL - default: inferred from the semester tag (f2026 -> 1 Sep 2026)
-# semester_end:                     # OPTIONAL - default: 15 weeks after the start
+# semester_start:                   # OPTIONAL - NO default. The site's "Semester starts" row
+# semester_end:                     # OPTIONAL - NO default. The default archive date counts from it: unset, the semester is archived only on an `archive: event_datetime:`
 
 # releases:                         
 #   seed-syllabus:                  # week 0: the course opens before teaching starts. 
@@ -100,7 +100,7 @@
 #     handout_datetime:             # technically OPTIONAL, but REQUIRED for a scheduled handout - omit it if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
 #     due_datetime:                 # REQUIRED - a bare date without time -> end of that day (23:59:59). The late cutoff is this plus `late_window_days` (assignments.yml): the snapshot freezes and the autograder fires then
 #     solution_datetime:            # OPTIONAL - NO default: if empty, the solution only ever goes out by hand ("Release assignment" with solution_datetime: now). Pushes the model answer and rubric (the template's `solution/` folder) into every student/team repo: not the same as returning marks, and it cannot be undone for reuse. Must be AFTER handout_datetime, and needs it set. Not before the late cutoff (due + late_window_days)
-#     marks_return_datetime:        # OPTIONAL - marks go back automatically at this moment once every unit is marked (until then, a problem says how many are not). Internal: shown on the site only with `show_on_site: true` written above
+#     marks_return_datetime:        # OPTIONAL - marks go back automatically at this moment once every unit is marked (until then, a problem says how many are not). Internal: to show it on the site, write it as `{{event_datetime: <date>, show_on_site: true}}`
 #
 #   This file is TIMING ONLY. How this semester runs each assignment - late window and
 #   penalty, team formation, max team size, visibility, an external submit link, the name
@@ -121,7 +121,7 @@
 #     kind: exam
 #     event_datetime:               # REQUIRED
 #
-#   clinic-drop-in:                 # no type -> a special_event row
+#   clinic-drop-in:                 # no kind -> a special_event row
 #     title: "Clinic drop-in"
 #     event_datetime:               # REQUIRED
 
@@ -129,7 +129,7 @@
 archive:
   event_datetime:             # optional (default: semester_end + {grace_days} days)
   title: Semester archived      # optional - the row's Title column
-  show_on_site: true          # a "Semester archived" row on the site's Schedule tab, also sends a notice email 14 days out
+  show_on_site: true          # a "Semester archived" row on the site's Schedule tab. The notice email 14 days out goes either way
   tbc: false                  # optional - true marks the date "(TBC)". Display only: the freeze still happens on the date above
   details: >-                 # optional, `{{date}}` is filled in automatically
     This semester is archived on {{date}}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.
