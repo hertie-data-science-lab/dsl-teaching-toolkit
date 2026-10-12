@@ -26,10 +26,9 @@ course_code: {course_code}
 # nearest-first: the assignment's block in a semester's `semester-config/assignments.yml`,
 # that file's `defaults:`, this block, then the institution's policy - the values shown are
 # the institution's, so an unset line changes nothing. A line set here applies to every
-# assignment that does not set its own, from the next run on. `formats`, `submit_via`,
-# `team_formation` and `visibility` also answer New assignment's boxes of the same name when
-# they are left at "(course default)". A late line alone is a whole rule: the other half
-# is then none.
+# assignment that does not set its own, from the next run on. `formats` and `submit_via`
+# answer New assignment's boxes of the same name when they are left at "(course default)".
+# A late line alone is a whole rule: the other half is then none.
 assignment_defaults:
   # max_team_size: 5            # group assignments only
   # late_window_days: 10        # 0 = nothing after the due date is accepted
@@ -41,7 +40,8 @@ assignment_defaults:
 
 # `course_name`, `course_code` and `course_description` are what reach the semester
 # websites. Editing them here re-syncs every semester site already bootstrapped from this
-# course org.
+# course org. The public website shows those three plus `contact` and `licence` from its
+# next publish.
 #
 # This is the persistent COURSE org - it spans many semesters (years). Semesters are
 # registered separately in .github/semesters.yml.

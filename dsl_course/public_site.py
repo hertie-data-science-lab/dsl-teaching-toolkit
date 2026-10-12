@@ -22,6 +22,7 @@ from urllib.parse import quote
 
 import yaml
 
+from . import policy
 from .course import (
     discover_local_sessions,
     discover_sections,
@@ -72,6 +73,20 @@ PUBLIC_MATERIALS_DIR = "public-materials"
 # and a lab-kind section makes a lab row (`row_kind`). The semester site reads kinds from
 # the schedule.
 READINGS_SECTION = "readings"
+
+
+def course_facts(meta: dict) -> str:
+    """`_data/course.yml`: the contact and the licence the home page shows (decision 0019).
+
+    The course's own `contact` / `licence` from dsl-course.yml, else the institution's
+    `policy.contact` and first licence. A licence `policy.licences` names carries its URL;
+    one it does not (or `All rights reserved`, which has none) is shown as plain text."""
+    pol = policy.load()
+    contact = str(meta.get("contact") or "").strip() or pol["contact"]
+    name = str(meta.get("licence") or "").strip() or pol["licences"][0]["name"]
+    url = next((lc["url"] for lc in pol["licences"] if lc["name"] == name), "")
+    facts = {"contact": contact, "licence": {"name": name, "url": url}}
+    return yaml.safe_dump(facts, sort_keys=False, allow_unicode=True)
 
 
 def _declared(src: Path) -> Declared:
@@ -359,6 +374,9 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             config["course_name"] = str(meta["course_name"])
         if meta.get("course_code"):
             config["course_code"] = str(meta["course_code"])
+        # Always written, blank included: the seed's placeholder paragraph must never
+        # reach the open web (the home page drops the section when it is blank).
+        config["course_description"] = str(meta.get("course_description") or "").strip()
         config["course_semester"] = "Open Courseware"  # neutral: the site is multi-year
         # The public open-courseware site belongs to the COURSE org (multi-year), so its
         # footer links there - unlike a semester site, which links its semester org.
@@ -384,6 +402,7 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                     edit_at=f"the `people:` block of {course_org}/.github/dsl-course.yml",
                     include_tas=False,
                 ),
+                "_data/course.yml": course_facts(meta),
                 "README.md": site_readme(course_org, semester=False),
                 # No semester repos to index, so `/materials/` stays the readings page.
                 "_data/nav.yml": nav_yaml(semester=False),

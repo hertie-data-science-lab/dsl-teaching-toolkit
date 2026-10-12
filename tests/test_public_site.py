@@ -15,8 +15,9 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
-from dsl_course import gh_contents, ghcli, public_site, site, site_repo
+from dsl_course import gh_contents, ghcli, policy, public_site, site, site_repo
 from dsl_course.faults import Unusable
 from dsl_course.opencourse import OpenCourse
 from tests.conftest import entry_links
@@ -91,6 +92,7 @@ def _install_fakes(monkeypatch) -> dict[str, str]:
             else:  # the site repo, with the settings file an older publish left
                 (dest / "_config.yml").write_text(
                     'course_name: "x"\ncourse_code: "y"\ncourse_semester: "z"\n'
+                    'course_description: "One paragraph description of the course."\n'
                 )
                 (dest / site_repo.PUBLISH_CONFIG).write_text(f"source_repo: {SOURCE}\n")
             return (0, "")
@@ -408,3 +410,45 @@ def test_a_lab_kind_section_makes_lab_rows():
     assert public_site.row_kind("tutorials", {}) == "lab"
     assert public_site.row_kind("seminars", {"seminars": "lab"}) == "lab"
     assert public_site.row_kind("lectures", {}) == "lecture"
+
+
+def test_the_course_description_contact_and_licence_reach_the_public_site(
+    published, monkeypatch
+):
+    # Seeded, documented and console-editable, and once read by nothing: the public site
+    # kept the seed's placeholder paragraph and showed no contact or licence at all.
+    meta = {
+        "course_name": "Deep Learning",
+        "course_description": "Nets, end to end.",
+        "contact": "dl@example.edu",
+        "licence": "CC BY 4.0",
+    }
+    monkeypatch.setattr(public_site, "yaml_file", lambda *a: meta)
+    files = published()
+    assert 'course_description: "Nets, end to end."' in files["_config.yml"]
+    assert yaml.safe_load(files["_data/course.yml"]) == {
+        "contact": "dl@example.edu",
+        "licence": {
+            "name": "CC BY 4.0",
+            "url": "https://creativecommons.org/licenses/by/4.0/",
+        },
+    }
+
+
+def test_unset_keys_fall_back_and_a_blank_description_replaces_the_placeholder(
+    published, monkeypatch
+):
+    monkeypatch.setattr(public_site, "yaml_file", lambda *a: {"contact": ""})
+    files = published()
+    assert 'course_description: ""' in files["_config.yml"]
+    assert "One paragraph description" not in files["_config.yml"]
+    pol = policy.load()
+    assert yaml.safe_load(files["_data/course.yml"]) == {
+        "contact": pol["contact"],
+        "licence": pol["licences"][0],
+    }
+
+
+def test_a_licence_the_policy_does_not_list_is_shown_without_a_link():
+    facts = yaml.safe_load(public_site.course_facts({"licence": "MIT"}))
+    assert facts["licence"] == {"name": "MIT", "url": ""}

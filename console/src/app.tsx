@@ -445,7 +445,9 @@ export function createState({ auth, client }: AppDeps) {
     /**
      * Whether a semester's course lets its students into the console (`studentConsole` in its
      * facts, through the one memoised `studentData` read the screens share), with the course
-     * name; undefined until it answers. A read that fails counts as on: the screens then say why.
+     * name; undefined until it answers. Opt-in: only `true` opens the student screens. A course
+     * that never set it, a semester whose engine has not written the file yet, and a read that
+     * fails all show the course website.
      */
     consoleGate(org: string): { on: boolean; courseName: string } | undefined {
       let g = gates.get(org);
@@ -454,8 +456,8 @@ export function createState({ auth, client }: AppDeps) {
         g = sig;
         gates.set(org, sig);
         void studentData(client).facts(org).then(
-          (f) => (sig.value = { on: f?.studentConsole !== false, courseName: f?.courseName ?? '' }),
-          () => (sig.value = { on: true, courseName: '' }),
+          (f) => (sig.value = { on: f?.studentConsole === true, courseName: f?.courseName ?? '' }),
+          () => (sig.value = { on: false, courseName: '' }),
         );
       }
       return g.value;

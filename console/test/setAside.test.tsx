@@ -128,6 +128,16 @@ describe('the circle before a suggestion', () => {
     expect(aside()).toEqual(['Public website · Bring back']);
   });
 
+  it('saves on a course file as seeded: no code, and assignment_defaults holding only comments', async () => {
+    const seeded = 'course_name: ML\ncourse_code: \nassignment_defaults:\n  # max_team_size: 5\n';
+    const gh = await mount(BASE, files(seeded));
+    await show('suggestions');
+    await act(() => circle('Public website').click());
+    await act(() => button('Set aside').click());
+    await settle(() => !dialog());
+    expect(body(puts(gh)[0])).toContain('set_aside:\n  - C6\n');
+  });
+
   it('sets the syllabus row aside as its one check (decision 0034)', async () => {
     const f = files();
     const why = 'SYLLABUS.md is still the placeholder, and the weekly plan (written from the schedule) is not in it yet.';

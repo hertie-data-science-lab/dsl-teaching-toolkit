@@ -11,7 +11,7 @@ Accompanies the e2e [worked example](../example-course/).
 | `[required]` | 1. Create the course org | course | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-<CODE>` (no year); invite **`hertie-dsl-bot`** as **Owner** (it joins by itself once the DSL team registers the course) | an empty org the bot can bootstrap |
 | `[required]` | 2. Bootstrap | course | [central repo → Actions → **Bootstrap Course Org**](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/bootstrap-org.yml) | `org`, `course_name`, `course_code`; optional `admin` (your handle); `central_ref` defaults to `release` | the `.github` control panel with every workflow, the `course-admin` team, [`dsl-course.yml`](#dsl-courseyml), `DSL_BOT_TOKEN` set for you |
 | `[required]` | 3. Materials | course | course `.github` → **New materials repo**, then `git push` | `semester` (e.g. `f2026`); then your content ([layout](#materials-repo)) | `course-materials-<semester>` with run-from-repo Release workflows |
-| `[required]` | 4. Assignment(s) | course | course `.github` → **New assignment**, then `git push` | `name` + `formats` (one or more starters, the first runnable) + `type` (individual/group); brief + starter on `main`, optional autograding on `solution` ([layout](#assignment-template)) | one `assignment-<name>` template each, with its own run-from-repo Release assignment workflow |
+| `[required]` | 4. Assignment(s) | course | course `.github` → **New assignment**, then `git push` | `assignment_name` + `formats` (one or more starters, the first runnable) + `type` (individual/group); brief + starter on `main`, optional autograding on `solution` ([layout](#assignment-template)) | one `assignment-<name>` template each, with its own run-from-repo Release assignment workflow |
 | *(optional)* | 5. Course admins | course | edit [`dsl-course.yml`](#dsl-courseyml), commit to `main` ([05](05-manage-teaching-team.md)) | GitHub handles, optional `start`/`end` | admin on the course org + every semester, reconciled |
 | `[required]` | 6. Refresh | course | course `.github` → **Refresh actions** | none | dropdowns populated, secrets on content repos and assignment templates |
 
@@ -81,12 +81,13 @@ after one release). This file is public, so an address written here is public to
 `assignment_defaults:` (optional) is this course's defaults for its assignments:
 `max_team_size`, `late_window_days`, `late_penalty_per_day`, `team_formation`,
 `visibility` apply to every assignment that does not set its own; unset, the institution's
-apply. `formats`, `submit_via`, `team_formation` and `visibility` also answer New
-assignment's boxes left at `(course default)`. A semester's timezone and archive grace are
+apply. `formats` and `submit_via` answer New assignment's boxes left at
+`(course default)`. A semester's timezone and archive grace are
 set in its own `schedule.yml` (default: the institution's, Europe/Berlin and 60 days).
 
 `course_name` / `course_code` / `course_description` are the fields that reach every
 semester website - a push here re-syncs them all: [11](11-configure-cohort-site.md).
+The public website shows those three plus `contact` and `licence`, from its next publish.
 
 `set_aside` lists the suggestions nobody needs, on the course's and every semester's
 Dashboard (the console writes it from the circle before each Suggestions line; Bring back
@@ -255,11 +256,12 @@ solution branch  solution/ + grading_config.yml + tests/       -> faculty-only; 
                                                             power the (optional) autograder
 ```
 
-`grading_config.yml`, on the `solution` branch, is the assignment's whole definition:
-`title`, `type`, `team_formation`, `max_team_size`, `submit_via`, `submit_url`,
-`visibility`, `formats` (a list; the first is the runnable one), `questions`, `late_window_days`, `late_penalty_per_day`,
-`autograde`, `completion_check`, `grader_pdf`, `tests`. The
-button writes it from its ten inputs plus the course's `assignment_defaults:`; every key
+`grading_config.yml`, on the `solution` branch, is what the assignment is:
+`title`, `type`, `submit_via`, `formats` (a list; the first is the runnable one), `questions`,
+`autograde`, `completion_check`, `grader_pdf`, `tests`, `starter`. How a semester runs it -
+team formation, team size, the late rule, `visibility`, `submit_url` - is that semester's
+[`assignments.yml`](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment); one of those keys written here makes the whole template
+NOT_MIGRATED. The button writes it from its five inputs plus the course's `assignment_defaults:`; every key
 is documented inline in the generated file and in
 [Add an assignment](03-add-assignment-to-course.md). Two of them drive the cutoff:
 `autograde: true` runs `tests/` (or `tests/run.sh`, in any language), and `completion_check`
@@ -421,7 +423,7 @@ events:
     kind: exam
     title: Resit Exam
     event_datetime: tbc   # undated - shown as a TBC row
-  project-clinic:         # no type -> special_event
+  project-clinic:         # no kind -> special_event
     title: Project clinic
     event_datetime: 2026-11-17T10:00
 ```
@@ -482,7 +484,8 @@ fully read goes red and opens an issue naming the bad entry.
 | `handout_datetime:` unparseable | kept, but nothing is ever handed out |
 | `title:`, `grading_datetime:`, `semester_dest_repo:` on an assignment | NOT_MIGRATED - the entry is dropped until the migration moves them |
 | `deploy_datetime:` unparseable | kept - that copy ships at the `event_datetime` |
-| unknown `type:` on an event, unknown key, unknown `timezone:` | kept, on the documented fallback |
+| unknown `kind:` on an event, unknown key, unknown `timezone:` | kept, on the documented fallback |
+| `type:` on a release or an event | NOT_MIGRATED - the row is placed as if it had no `kind:` |
 
 Verify with `python3 -m dsl_course.schedule --semester-org <SEMESTER> --validate`. Full account:
 [Schedule releases -> Dropped entries](07-schedule-releases.md#dropped-entries).

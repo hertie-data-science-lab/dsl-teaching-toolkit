@@ -66,6 +66,8 @@ def stub_team(monkeypatch):
         "get_team_members",
         lambda org, team: {"anna-adams", "hertie-dsl-bot", "henrycgbaker", "zoe-zed"},
     )
+    # Nobody here is a renamed roster member unless a test says so.
+    monkeypatch.setattr(gh_teams, "get_team_member_ids", lambda org, team: {})
     monkeypatch.setattr(gh_teams, "acting_login", lambda: "hertie-dsl-bot")
     monkeypatch.setattr(
         gh_teams, "get_org_owners", lambda org: frozenset({"henrycgbaker"})
@@ -201,7 +203,7 @@ def test_sync_never_adds_a_handle_that_is_not_on_the_roster(stub_team, monkeypat
     # a real GitHub account) must be skipped and reported, never invited.
     monkeypatch.setattr(
         sync_teams.teams,
-        "load",
+        "load_or_none",
         lambda org: {"assignment-4-project": {"wizards": ["ben-baker", "m-stranger"]}},
     )
     monkeypatch.setattr(
@@ -223,7 +225,7 @@ def test_sync_refuses_to_reconcile_when_there_is_no_roster(stub_team, monkeypatc
     # `roster.load` instead, and still reds the run.
     monkeypatch.setattr(
         sync_teams.teams,
-        "load",
+        "load_or_none",
         lambda org: {"assignment-4-project": {"wizards": ["ben-baker"]}},
     )
     monkeypatch.setattr(roster, "load", lambda org: None)  # no roster
@@ -237,7 +239,7 @@ def test_a_read_that_failed_still_reds_the_teams_sync(stub_team, monkeypatch):
     # fix, and it must not be reported to them as one - nor quietly pass as green.
     monkeypatch.setattr(
         sync_teams.teams,
-        "load",
+        "load_or_none",
         lambda org: {"assignment-4-project": {"wizards": ["ben-baker"]}},
     )
 
@@ -255,7 +257,7 @@ def test_sync_matches_roster_handles_case_insensitively(stub_team, monkeypatch):
     # dropped as an unknown stranger.
     monkeypatch.setattr(
         sync_teams.teams,
-        "load",
+        "load_or_none",
         lambda org: {"assignment-4-project": {"wizards": ["Ben-Baker"]}},
     )
     monkeypatch.setattr(
@@ -290,7 +292,7 @@ def test_a_rejected_teams_csv_handle_is_counted_publicly_and_named_only_when_ver
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(
         sync_teams.teams,
-        "load",
+        "load_or_none",
         lambda org: {"assignment-4-project": {"wizards": ["ben-baker", "m-stranger"]}},
     )
     monkeypatch.setattr(
@@ -309,7 +311,7 @@ def test_a_rejected_teams_csv_handle_is_counted_publicly_and_named_only_when_ver
 def _emptied_world(monkeypatch, stub_team, csv, existing):
     """teams.csv, the org's teams and the schedule's keys, on the CONSUMER's names; the
     team whose members `stub_team` reports is recorded per call."""
-    monkeypatch.setattr(sync_teams.teams, "load", lambda org: csv)
+    monkeypatch.setattr(sync_teams.teams, "load_or_none", lambda org: csv)
     monkeypatch.setattr(
         roster,
         "load",
@@ -401,3 +403,49 @@ def test_a_team_listing_that_cannot_be_read_empties_nothing_and_reds(
     assert sync_teams.sync("org", prune=True) == 1
     assert "zoe-zed" in stub_team["removed"]  # team-x's own prune still ran
     assert stub_team["removed"].count("zoe-zed") == 1  # and nothing was emptied
+
+
+def test_an_absent_teams_csv_empties_no_project_team(stub_team, monkeypatch, capsys):
+    # Deleted, or renamed by hand mid-window: read as "no rows", the pruning sync emptied
+    # every project team and took every student's push on their group repo. Hold and say
+    # so, as the absent roster does; a header-only file is how to empty them on purpose.
+    _emptied_world(
+        monkeypatch, stub_team, None, {"assignment-4-project-wizards": PROJECT}
+    )
+    assert sync_teams.sync("org", prune=True) == 0
+    assert stub_team["removed"] == []
+    assert "teams.csv is absent" in capsys.readouterr().err
+
+
+def test_a_header_only_teams_csv_still_empties_the_teams(stub_team, monkeypatch):
+    _emptied_world(
+        monkeypatch, stub_team, {}, {"assignment-4-project-wizards": PROJECT}
+    )
+    assert sync_teams.sync("org", prune=True) == 0
+    assert "zoe-zed" in stub_team["removed"]
+
+
+def test_a_renamed_member_keeps_their_team_while_the_relink_is_pending(
+    stub_team, monkeypatch
+):
+    # The roster and teams.csv still say ada-l; GitHub now calls id 1 ada-new. sync_roster
+    # keeps her in `students` by id - the project team must too, or she loses push on her
+    # group repo every hour until somebody settles the relink.
+    _emptied_world(
+        monkeypatch,
+        stub_team,
+        {"assignment-4-project": {"wizards": ["ada-l"]}},
+        {"assignment-4-project-wizards": PROJECT},
+    )
+    monkeypatch.setattr(
+        gh_teams,
+        "get_team_members",
+        lambda org, team: {"ada-new", "zoe-zed"},
+    )
+    monkeypatch.setattr(
+        gh_teams,
+        "get_team_member_ids",
+        lambda org, team: {"ada-new": "1", "zoe-zed": "9"},
+    )
+    assert sync_teams.sync("org", prune=True) == 0
+    assert stub_team["removed"] == ["zoe-zed"]

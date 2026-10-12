@@ -45,8 +45,8 @@ from .setting_readers import read_settings, refuse_renamed
 
 # What a COURSE may set once for every assignment under it, in `dsl-course.yml`
 # `assignment_defaults:` - the course layer of the cascade below. The run settings among
-# them resolve at READ time; `formats`, `submit_via`, `team_formation` and `visibility` also
-# answer New assignment's boxes left at `course.COURSE_DEFAULT_CHOICE`
+# them resolve at READ time; `formats` and `submit_via` answer New assignment's boxes left
+# at `course.COURSE_DEFAULT_CHOICE`
 # (`scaffold.resolve_answers`). The per-assignment keys - the title, the type, the question
 # maxima - are deliberately not among them: they are what makes one assignment different
 # from the next.

@@ -148,10 +148,7 @@ repo's, so it would accuse the entire semester of one student's late push), and
    no mail. It prints the counts, and posts who gets what - each changed grade, who is
    emailed, marks **held** for a hand decision, unmarked questions - as a *Distribute
    grades preview* issue in `semester-config`. Each preview rewrites that issue; the real
-   run closes it. There is no assignment to pick: every gradebook and the registrar's
-   export are rebuilt from every sheet in the semester on every run, so a student's
-   gradebook always shows everything they have been marked on. A half-typed sheet is
-   therefore a reason to wait.
+   run closes it.
 
 ## What Distribute grades sends
 

@@ -55,7 +55,7 @@ def test_desired_team_members_skips_an_invalid_github_handle(capsys):
 def test_sync_course_admins_refuses_to_prune_when_the_config_is_absent(monkeypatch):
     # The mass-de-admin bug: an absent dsl-course.yml must NOT be read as an empty desired
     # set, or a pruning reconcile strips course-admin from every org. Absent -> skip + error.
-    monkeypatch.setattr(sync_faculty, "load_faculty", lambda org: None)
+    monkeypatch.setattr(sync_faculty, "load_faculty", lambda org, skipped: None)
     calls = []
     monkeypatch.setattr(
         sync_faculty,
@@ -70,7 +70,7 @@ def test_sync_course_admins_refuses_to_prune_when_the_config_is_absent(monkeypat
 def test_sync_course_admins_still_prunes_a_present_but_empty_people_block(monkeypatch):
     # A present-but-empty people block ({}, not None) is a legitimate "empty the team" and
     # must still reconcile (with prune) - only ABSENT is skipped.
-    monkeypatch.setattr(sync_faculty, "load_faculty", lambda org: {})
+    monkeypatch.setattr(sync_faculty, "load_faculty", lambda org, skipped: {})
     calls = []
     monkeypatch.setattr(
         sync_faculty,
@@ -82,6 +82,32 @@ def test_sync_course_admins_still_prunes_a_present_but_empty_people_block(monkey
     # reconciled the course org + the one semester, each to an empty desired set
     assert [c[0] for c in calls] == ["Course", "Course-f2026"]
     assert all(c[2] == set() for c in calls)
+
+
+def test_sync_course_admins_removes_nobody_while_an_entry_cannot_be_placed(
+    monkeypatch, capsys
+):
+    # `@bob` is not a GitHub username, so bob is in nobody's desired set: pruning to it
+    # took course-admin off him in the course org and every semester. Add, never remove,
+    # until the entry is fixed - the floor `sync_semester_instructors` already keeps.
+    meta = {
+        "people": {
+            "course_admins": [{"github_handle": "alice"}, {"github_handle": "@bob"}]
+        }
+    }
+    monkeypatch.setattr(sync_faculty, "load_yaml_config", lambda *a, **k: meta)
+    calls = []
+    monkeypatch.setattr(
+        sync_faculty,
+        "reconcile_team_members",
+        lambda org, team, wanted, **k: calls.append((org, wanted, k["prune"])) or 0,
+    )
+    assert sync_faculty.sync_course_admins("Course", ["Course-f2026"]) == 0
+    assert calls == [
+        ("Course", {"alice"}, False),
+        ("Course-f2026", {"alice"}, False),
+    ]
+    assert "nobody is removed from course-admin" in capsys.readouterr().err
 
 
 def test_sync_semester_instructors_refuses_to_prune_when_people_yml_is_absent(

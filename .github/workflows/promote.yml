@@ -38,6 +38,17 @@ on:
         default: true
         type: boolean
 
+# One Promote at a time: a second press (a double click) waits for the first, rather
+# than fanning out beside it and racing it for every org's `.github` (the 422 race).
+# Never cancelled: a fan-out stopped half way strands orgs. The fan-out it calls
+# (refresh-tier.yml) takes no group of its own, since one shared with this caller would
+# hold the caller's own fan-out behind itself. Each org's nightly Refresh actions runs in
+# that org, out of reach of any group here - hence "avoid 05:20-06:45 UTC" in the
+# maintainers guide.
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
 # The push authenticates as a repo-scoped deploy key and the fan-out as the bot, so
 # neither job needs anything from the ambient token beyond reading this repo.
 permissions: {}

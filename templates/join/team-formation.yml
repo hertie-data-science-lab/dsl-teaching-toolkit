@@ -346,8 +346,11 @@ jobs:
                   'needs-review');
 
                 // One team per student per assignment; respect the size cap; idempotent re-open.
-                const mine = rows.find(r =>
-                  cell(r, iAssign).toLowerCase() === assignment && cell(r, iHandle).toLowerCase() === handle.toLowerCase());
+                // The FIRST row is the team they are in (dsl_course.teams.parse ignores a
+                // later row naming another team); a move drops every row of theirs.
+                const isMine = (r) =>
+                  cell(r, iAssign).toLowerCase() === assignment && cell(r, iHandle).toLowerCase() === handle.toLowerCase();
+                const mine = rows.find(isMine);
                 const current = mine ? cell(mine, iTeam).toLowerCase() : '';
                 if (current === team) return refuse(
                   `Thanks @${handle} - **${team}** is already your team for \`${assignment}\` - nothing to do.`);
@@ -401,7 +404,7 @@ jobs:
                 // the old row in the same write.
                 const fresh = header.map(() => '');
                 fresh[iAssign] = assignment; fresh[iTeam] = team; fresh[iHandle] = handle;
-                const kept = mine ? rows.filter(r => r !== mine) : rows;
+                const kept = rows.filter(r => !isMine(r));
                 kept.push(fresh);
                 const body = serialiseCsv([header, ...kept]);
                 try {

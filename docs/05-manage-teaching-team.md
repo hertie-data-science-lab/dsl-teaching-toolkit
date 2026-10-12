@@ -21,7 +21,7 @@ Never edit the GitHub teams directly; the file is the auditable record.
 | Role | You want them to… | Declare them in | Level | They get |
 |--- |---|---|---|---|
 | Faculty, FAs | Administer the **whole course**, every semester, indefinitely | course org `.github/dsl-course.yml` → `people:` `course_admins` | **course** - once, for all years | `course-admin` (admin) on the course org **and** every semester org |
-| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that semester's `semester-config/instructors.yml` → `instructors:` (`role: instructor` or `teaching_assistant`) | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>`: push on `.github` and on every course-org repo named `*-<semester>` |
+| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that semester's `semester-config/instructors.yml` → `instructors:` (`role: instructor` or `teaching_assistant`) | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>`: push on `.github` and on every course-org repo the semester's `schedule.yml` names |
 
 **Prefer the semester file** for anyone who isn't running the course across multiple years. It is per-year, self-retiring, and supplies the deployed site's instructor cards.
 
@@ -63,6 +63,9 @@ Never edit the GitHub teams directly; the file is the auditable record.
        - github_handle: "janedoe"
    ```
 
+   The same rule holds here: while an entry cannot be placed, nobody is removed from
+   `course-admin` in any org.
+
 2. **Commit to `main`.** 
   - The push dispatches **Sync membership** automatically - nothing to run by hand. 
   - It reconciles fully (adds *and* removes) to match the pushed file.
@@ -102,7 +105,7 @@ Worked example: [`example-course/semester-org/instructors.yml`](../example-cours
 
 - **Time-boxed:** do nothing, or bring the `end` date forward.
 - **Immediately:** delete their entry (or set `end` to yesterday) and push. The dispatch on that push revokes within a minute or two.
-- **Do not use the GitHub Teams UI.** A hand-add to `course-admin`, `instructors` or `instructors-<semester>` is reverted by the next sync, and a hand-*removal* of someone still named in the config is re-added. The file is the truth. Assignment teams are secret, so only org owners see them there; the student console lists them on each assignment's page.
+- **Do not use the GitHub Teams UI.** A hand-add to `course-admin`, `instructors` or `instructors-<semester>` is reverted by the next sync, and a hand-*removal* of someone still named in the config is re-added. The file is the truth. Assignment teams are secret, so only org owners see them there; each assignment's page lists them (on the semester site, or in the student console for a course with `student_console: true`).
 
 ## What the access actually reaches
 

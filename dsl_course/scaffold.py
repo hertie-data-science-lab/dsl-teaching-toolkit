@@ -617,8 +617,8 @@ def _brief_stub(
         + "".join(f"{sentence}\n\n" for sentence in artefacts)
         + (
             "_Say where and how students hand in - nothing is collected from this repo. "
-            "`submit_url:` in `grading_config.yml` puts that address on the semester site "
-            "as a button._\n"
+            "`submit_url:` in the semester's `assignments.yml` puts that address on the "
+            "semester site as a button._\n"
             if external
             else "_Say which files you expect back, and in what shape._\n"
         )
@@ -1592,7 +1592,7 @@ def main() -> int:
         help="The assignment's name, e.g. 'Neural networks from scratch': the repo is "
         "assignment-<name>, and the name is its `title:` in grading_config.yml.",
     )
-    # Four boxes default to COURSE_DEFAULT_CHOICE: the course's `assignment_defaults:`
+    # Two boxes default to COURSE_DEFAULT_CHOICE: the course's `assignment_defaults:`
     # answers them, else the toolkit does (`resolve_answers`).
     pa.add_argument(
         "--formats",

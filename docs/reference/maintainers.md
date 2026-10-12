@@ -52,17 +52,18 @@ breaks a live link that faculty click:
 | `docs/assignment-starter.md` | the console's Template settings and New assignment `?` (`Course.tsx` `STARTER_DOC`) |
 | `docs/05-manage-teaching-team.md` | `templates/semester-config/instructors.yml`, `config_digest.PEOPLE` |
 | `docs/06-enrol-students-to-cohort.md` | `config_digest.ROSTER` |
-| `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/semester-config/schedule.yml`, `templates/semester-config/validate-schedule.yml` |
+| `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/semester-config/schedule.yml`, `templates/semester-config/assignments.yml` |
 | `docs/08-release-materials-to-cohort.md` | `scaffold._RELEASEIGNORE_STUB` (seeded into every materials repo) |
-| `docs/09-release-assignment-to-cohort.md` | `config_digest.TEAMS` |
+| `docs/09-release-assignment-to-cohort.md` | `config_digest.TEAMS`, `config_digest.ASSIGNMENTS` |
 | `docs/10-grade-and-return-assignments.md` | `config_digest.GRADING_SHEETS` |
 | `docs/README.md` | `profile_readme.py` |
 | `docs/10-grade-and-return-assignments.md` | `scheduler._ARCHIVE_DOC` (the archive notice) |
+| `docs/01`-`04`, `07`-`11` and `docs/reference/actions-reference.md` | the console's **Learn more** links (`Hint doc=` / `OrgWhy doc=` in `console/src/screens/`, under `ui/bits.tsx` `DOCS`) |
 
 Every `Digest.doc` is one of these: each digest issue ends with a `Field reference:` link built
-from it, so the seven of them are the widest surface in this table.
+from it, so the eight of them are the widest surface in this table.
 
-`grep -rn 'blob/.*/docs/' dsl_course/ templates/` before any rename.
+`grep -rnE 'docs/|doc="' dsl_course/ templates/ console/src/` before any rename.
 
 ## Frozen public contracts
 
@@ -209,7 +210,10 @@ demotes staff. A handle whose stored id onboard itself linked (`roster: link
 @<handle> (id <id>)`) is a rename taken over by a stranger and is never relinked. A renamed
 account - the handle is gone, its id lives on under a new login, and the toolkit itself
 linked that pair - is relinked the same way with the `github_handle` cell as the marker,
-written last; do not hand-edit a renamed row, the next sync heals it. Onboard
+written last; do not hand-edit a renamed row, the next sync heals it. Onboard never
+rewrites one either: a renamed student who opens Join course again is told they are already
+enrolled, because a cell that already holds the new login hides the rename from relink for
+good. Onboard
 records every "bound elsewhere" refusal in `.system/enrolment/refusals/<issue>.json`; the
 relink records itself in `.system/enrolment/relinks/<old id>.json`.
 
@@ -379,7 +383,7 @@ Seeded files carry their owner on the first line, and the write site enforces it
   rows, enrol codes, the semester's schedule). The code comments call this "USER-owned"; the shipped
   stamp says INSTRUCTOR-OWNED. Same thing.
 - **`dsl-stub:`** is the third state: an instructor-owned file we seeded and they have not yet
-  written. `gh_contents.STUB_MARKS` recognises it, and `deploy._is_withheld_stub` reads that to
+  written. `gh_contents.STUB_MARKS` recognises it, and `gh_contents.is_withheld_stub` reads that to
   keep an unwritten SYLLABUS.md out of a release - shipping the placeholder would give students
   faculty instructions and empty tables as their syllabus.
   It does NOT license a rewrite. Nothing refreshes a seeded stub any more: the marker cannot
@@ -625,12 +629,12 @@ them per assignment (`settings`). `settings` is the only module that reads
 Four places, in order - miss the last and every org keeps two buttons for one job:
 
 1. a renderer in `workflows_render.py`;
-2. its path in `seed.seed_github_workflows`'s `files` dict (or `workflows_place.RELEASE_WORKFLOWS`
+2. its path in `seed.github_workflow_files`'s `rendered` dict (or `workflows_place.RELEASE_WORKFLOWS`
    for a run-from-repo one, plus `TEMPLATE_WORKFLOWS` if an assignment template hosts it
    too - and `workflows_place.NEVER_IN_STUDENT_REPOS`, which `assign.withhold_from_template`
    strips off a semester template and `patch_released` refuses to push, is derived from both);
 3. `tests/test_renderers.py`'s `ALL_RENDERED` - a completeness test fails otherwise;
-4. when *retiring* a path, add it to that call's `delete=` tuple (or
+4. when *retiring* a path, add it to `seed.RETIRED_GITHUB_WORKFLOWS` (or
    `workflows_place.RETIRED_WORKFLOWS`), so orgs seeded before the change drop the old file.
    `RETIRED_WORKFLOWS` is in `NEVER_IN_STUDENT_REPOS` too, so a button retired today is
    still stripped off a template whose refresh has not reached it yet.
@@ -650,9 +654,10 @@ No fallback, and deliberately none: a fallback is how the two files came to disa
 repos of one kind graded as the other. **The migration is by hand, per org** - the toolkit
 never rewrites an instructor's file - and step 1 goes BEFORE the release ships:
 
-1. **Before the promote**, add `type:` (and `team_formation:` / `max_team_size:` where the
-   assignment is a group one) to each template's `grading_config.yml`, on its `solution`
-   branch. On the shipping release the schedule still wins, so this changes nothing; leave
+1. **Before the promote**, add `type:` to each template's `grading_config.yml`, on its
+   `solution` branch (and `team_formation:` / `max_team_size:`, where the assignment is a
+   group one, to the semester's `assignments.yml` - a template refuses run settings). On
+   the shipping release the schedule still wins, so this changes nothing; leave
    it until afterwards and every semester that declared `group` only in `schedule.yml` hands
    out one repo per STUDENT and its Join-team form refuses every request, so the teams
    cannot even be formed to recover;
@@ -945,8 +950,9 @@ Promote.
 | `course.DEFAULT_MAX_TEAM_SIZE`, `DEFAULT_LATE_*`, `grades.course_assignment_defaults`, `parse_assignment_defaults` | `policy.defaults()`; `settings.course_defaults`, `settings.parse_assignment_defaults` | this repo only |
 | `classroom-config/people.yml` (`people:` -> `instructors:` / `teaching_assistants:`) | `semester-config/instructors.yml` (one `instructors:` list, `role: instructor \| teaching_assistant` on every entry) | semester org |
 | `format:` (one word) | `formats:` (a list; the first is the runnable one) | `grading_config.yml` on a template's `solution` branch; `assignment_defaults:` in `dsl-course.yml` |
-| `team_formation:`, `max_team_size:`, `late_window_days:`, `late_penalty_per_day:`, `visibility:`, `submit_url:` in a template | `semester-config/assignments.yml` (`defaults:` or `assignments.<key>`) | `grading_config.yml`; the course step strips them into `.github/.system/migration-run-keys.json`, each semester's keys step writes what differs from the defaults |
-| `schedule.yml` `assignments.<k>.title` | the template's `title:` | stripped by the tool |
+| `submit_via: github` | `submit_via: assignment_repo` | the same two files; rewritten by the tool. The engine still reads `github` (`course.LEGACY_SUBMIT_VIA`) until every org has migrated |
+| `team_formation:`, `max_team_size:`, `late_window_days:`, `late_penalty_per_day:`, `visibility:`, `submit_url:` in a template | `semester-config/assignments.yml` (`defaults:` or `assignments.<key>`) | `grading_config.yml`; the course step strips them into `.github/.system/migration-run-keys.json`, each semester's keys step writes the value the old engine ran with (the template's, else the policy default; the course's only for `max_team_size`) wherever the layers below would give another |
+| `schedule.yml` `assignments.<k>.title` | the template's `title:`, else its README heading | stripped by the tool; the keys plan names each one that differs |
 | `schedule.yml` `assignments.<k>.grading_datetime` | none: the late cutoff is due + `late_window_days`; where they differed the tool writes the whole days as `late_window_days` (and the penalty beside it) | stripped by the tool |
 | `schedule.yml` `assignments.<k>.semester_dest_repo` (and `cohort_dest_repo`) | `assignments.yml` `assignments.<k>.semester_dest_repo` | moved by the tool |
 | `schedule.yml` `releases.<l>.assignment`, top-level `enrolment:` | none (a hand out is `handout_datetime`; codes go out on a push to students.csv) | stripped by the tool |
@@ -1034,7 +1040,11 @@ fire then (the switch waits past each cron tick, but a run's jobs outlast it).
 
 **The tool.** `python -m dsl_course.migrate <org>` previews (the default: the plan, with
 every move, delete and re-rendered file per step, nothing written); `--no-preview` runs it. Course org first, then each of its live semesters. Per
-step: do, verify, stop on the first failure naming the rollback. A step already done says
+step: do, verify, stop on the first failure naming the rollback. What a step's do or verify
+would refuse (a `people.yml` it cannot convert, a move onto a file that differs, a rewrite
+that would lose an entry or leave a `NOT_MIGRATED`, an entry to number by hand) is asked
+in the plan too: "will stop here: <reason>", and the preview fails; a run stops there
+before its pause, with nothing written. A step already done says
 "already migrated"; a second run writes nothing, not even status.json. A missing repo or
 file reads as "not migrated yet", never as an error.
 
@@ -1083,7 +1093,7 @@ a target holding other bytes refuses the whole commit, naming both paths. Course
 `timezone` or `archive.grace_days` other than the policy's - each is named, to carry by
 hand into every live semester's `schedule.yml`), pause, registry (also a `semesters.yml`
 still keyed `cohorts:`), `.system/` in `.github`, `dsl-course.yml` keys, template keys
-(`grading_config.yml` `format:` -> `formats:` on each template's `solution` branch,
+(`grading_config.yml` `format:` -> `formats:` and `submit_via: github` -> `assignment_repo` on each template's `solution` branch,
 and the run settings out, recorded first in `.github/.system/migration-run-keys.json` for
 the semesters, re-read with `parse_grading_spec` - course-owned, so here rather than per
 semester), template starter (`starter:` written into each live template's
@@ -1096,7 +1106,7 @@ no semester; with no `DSL_BOT_TOKEN` on the laptop the repo secret is left, with
 the org's next Refresh actions; drift checked in `.github`, every content repo and every
 live template), status, unpause. The `dsl-course.yml` keys
 step strips `org`, `org_name`, `cohort_defaults` and `semester_defaults` (each with its
-block) and rewrites `assignment_defaults` `format:`; its verify re-reads the file with the
+block) and rewrites `assignment_defaults` `format:` and `submit_via: github`; its verify re-reads the file with the
 engine's own rules (`sync_faculty.retired_course_faults`) and expects no `NOT_MIGRATED`.
 Tested only against a stubbed GitHub
 (`tests/test_migrate.py`).
@@ -1104,7 +1114,7 @@ Tested only against a stubbed GitHub
 What the demo rehearsal (2026-09-25) changed, one line each:
 
 - **No lost tick.** GitHub drops what fires into a disabled repo, so after the unpause the
-  tool dispatches one Scheduled release and one Sync membership into the course's `.github`
+  tool dispatches one Scheduled release, one Sync membership and one Sync site into the course's `.github`
   (a semester's: scoped to it, like its `semester-config` push; a course's: every
   semester, as the ds01 timers do), each marked `driver: migrate` so the run history tells
   a catch-up from a real push, prints where each run shows up, and waits (up to 10

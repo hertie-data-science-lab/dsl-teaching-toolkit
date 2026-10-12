@@ -133,9 +133,10 @@ SANDBOX_USER = "dsl-sandbox"
 # dropdown offers, and a form offering a word the reader would refuse is a form that lies.
 SUBMIT_VIA = ("assignment_repo", "shared_dropbox_repo", "external")
 # `github` is the LEGACY spelling of `assignment_repo`: live INSTRUCTOR-OWNED
-# `grading_config.yml` files in real course orgs carry it, so it is accepted for ever at
-# every read boundary (`canonical_submit_via` below) and never written again by any
-# generator. `shared` was renamed to `shared_dropbox_repo` before it ever shipped to a
+# `grading_config.yml` files in real course orgs carry it, so it is accepted at every
+# read boundary (`canonical_submit_via` below) and never written again by any generator.
+# The migration rewrites it (`migrate.submit_via_line`); the alias goes once every org
+# has migrated. `shared` was renamed to `shared_dropbox_repo` before it ever shipped to a
 # real org, so it gets no alias - an unrecognised `shared` is simply Dropped.
 LEGACY_SUBMIT_VIA = {"github": "assignment_repo"}
 
@@ -192,7 +193,7 @@ NO_STARTER = "none"
 # commented example turning into a live one otherwise costs a semester.
 SETTING_PLACEHOLDER = "CHANGE-ME"
 FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
-# The answer New assignment's format, team_formation, submit_via and visibility boxes
+# The answer New assignment's formats and submit_via boxes
 # arrive with when nobody touches them: "use the course's `assignment_defaults:`, else the
 # toolkit's own". Here because two layers spell it: the rendered form offers it and the
 # scaffold's CLI resolves it.

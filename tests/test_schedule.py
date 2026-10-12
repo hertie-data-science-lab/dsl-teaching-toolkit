@@ -404,10 +404,12 @@ def test_malformed_deploy_datetime_falls_back_to_the_event_datetime():
     assert r.deploy[0].deploy_datetime is None  # ships at the event_datetime
 
 
-def test_the_settings_that_moved_to_grading_config_are_flagged_by_name():
+def test_the_settings_that_moved_out_of_schedule_are_flagged_by_name():
     # The clean break. A semester still carrying `type: group` is not making a typo, it is
     # declaring the shape in a file that no longer reads it - so the entry is KEPT (its
-    # dates are still good) and the message says which file the declaration moved to.
+    # dates are still good) and the message says which file the declaration moved to:
+    # the shape to grading_config.yml, the team cap (a run setting, which grading_config
+    # refuses whole) to the semester's assignments.yml.
     meta = {
         "assignments": {
             "assignment-4-project": {
@@ -427,8 +429,11 @@ def test_the_settings_that_moved_to_grading_config_are_flagged_by_name():
         "assignments.assignment-4-project.type",
         "assignments.assignment-4-project.max_team_size",
     }
+    said = {line.split(":")[0].rsplit(".", 1)[1]: line for line in sched.dropped}
+    assert "grading_config.yml" in said["type"] and "solution" in said["type"]
+    assert "semester-config/assignments.yml" in said["max_team_size"]
+    assert "grading_config.yml" not in said["max_team_size"]
     for line in sched.dropped:
-        assert "grading_config.yml" in line and "solution" in line
         # named as MOVED, not as the generic typo they are not
         assert "unrecognised key" not in line
 
@@ -1154,6 +1159,18 @@ def test_an_unknown_timezone_is_reported_rather_than_silently_swapped():
     assert len(sched.dropped) == 1
     assert "Europe/Berlyn" in sched.dropped[0] and "Europe/Berlin" in sched.dropped[0]
     assert sched.events[0].when == date(2026, 11, 3)  # the event itself survives
+
+
+@pytest.mark.parametrize("written", ["Berlin", "+01:00", "Europe/Berlin ", 1, [1]])
+def test_a_fallen_back_timezone_is_the_zone_the_plan_keeps(written):
+    # The parse fell back to the default zone but kept the RAW name, and every reader that
+    # builds a ZoneInfo from `timezone` (status.json, student-status.json, the console's
+    # Intl zone) raised on it - so a semester's status stopped updating with no reason
+    # given. A YAML int or list raised in `parse` itself, redding every tick.
+    sched = parse({"timezone": written})
+    assert sched.timezone == "Europe/Berlin"
+    ZoneInfo(sched.timezone)  # what every reader does with it
+    assert len(sched.dropped) == (0 if written == "Europe/Berlin " else 1)
 
 
 @pytest.mark.parametrize("key", ["semester_start", "semester_end"])

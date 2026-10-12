@@ -13,22 +13,40 @@
     "additionalProperties": false,
     "properties": {
       "code_sent_at": {
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "enrol_code": {
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "github_handle": {
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "github_id": {
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "hertie_email": {
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "name": {
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "role": {
         "enum": [

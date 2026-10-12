@@ -17,6 +17,7 @@ import yaml
 from dsl_course import (
     discovery,
     gh_commits,
+    grades,
     migrate,
     opencourse,
     records,
@@ -363,6 +364,8 @@ def fake(monkeypatch):
     # The REAL default_branch / repo_missing, over the same stub: a 404 is a 404.
     monkeypatch.setattr(repos, "gh", f.gh)
     monkeypatch.setattr(gh_commits, "gh", f.gh)
+    # A template's README heading, the name an assignment takes (`grades.readme_heading`).
+    monkeypatch.setattr(grades, "get_file_content", f.get_file_content)
     monkeypatch.setattr(migrate, "central_ref_for", lambda org: "main")
     # The checkout is the pinned ref, unless a test says otherwise.
     monkeypatch.setattr(migrate, "git", lambda *a, **k: (0, ""))
@@ -629,6 +632,16 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
                 "client_payload[driver]": "migrate",
             },
         ),
+        # The migration's own commits to schedule.yml and instructors.yml would have
+        # fired it.
+        (
+            f"{COURSE}/.github",
+            {
+                "event_type": "sync-site",
+                "client_payload[semester_org]": SEM,
+                "client_payload[driver]": "migrate",
+            },
+        ),
     ]
     out = capsys.readouterr().out
     assert (
@@ -653,7 +666,7 @@ def test_a_second_run_finds_every_step_already_migrated(
     # paused, nothing written, status.json not rewritten.
     assert out.count("already migrated") == 20
     assert fake.commits == commits and fake.puts == puts and semester == []
-    assert len(fake.dispatches) == 2  # nothing paused, so nothing was dropped
+    assert len(fake.dispatches) == 3  # nothing paused, so nothing was dropped
 
 
 def test_a_failed_step_stops_and_says_the_org_is_still_paused(
@@ -901,17 +914,30 @@ def test_a_schedule_the_rewrite_cannot_fix_fails_the_keys_verify(
     fake.tree(SEM, OLD_CONFIG_REPO)["schedule.yml"] = (
         b"assignments:\n  a1: {cohort_dest_repo: m}\n"
     )
+    # The preview fails where the run would stop; the run stops there before its pause.
+    assert _main(monkeypatch, SEM) == 1
+    out, err = capsys.readouterr()
+    assert "will stop here: schedule.yml would still say NOT_MIGRATED" in out
+    assert "the run would stop at keys" in err and "cohort_dest_repo" in err
     assert _main(monkeypatch, SEM, "--no-preview") == 1
-    assert "keys did not verify" in capsys.readouterr().err
+    assert "the run would stop at keys" in capsys.readouterr().err
+    assert fake.commits == [] and fake.dispatches == []
 
 
 def test_an_unconvertible_people_yml_stops_before_anything_is_written(
     fake, semester, monkeypatch, capsys
 ):
     fake.tree(SEM, OLD_CONFIG_REPO)["people.yml"] = b"people:\n  course_admins: []\n"
+    # Its plan still reads "people.yml -> instructors.yml": the preview must fail too.
+    assert _main(monkeypatch, SEM) == 1
+    assert "will stop here: people.yml in" in capsys.readouterr().out
     assert _main(monkeypatch, SEM, "--no-preview") == 1
-    assert "cannot be converted faithfully" in capsys.readouterr().err
-    assert [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT] == []
+    out, err = capsys.readouterr()
+    assert "cannot be converted faithfully" in out
+    assert "the run would stop at layout" in err
+    # Stopped before the pause: no record, no rename, Actions never off.
+    assert fake.commits == [] and (SEM, OLD_CONFIG_REPO) in fake.repos
+    assert all(fake.enabled(*key) for key in fake.workflow_repos())
 
 
 def test_a_record_already_at_its_new_path_with_other_bytes_stops_the_layout(
@@ -919,13 +945,16 @@ def test_a_record_already_at_its_new_path_with_other_bytes_stops_the_layout(
 ):
     tree = fake.tree(SEM, OLD_CONFIG_REPO)
     tree[".system/autograde/a1/_graded.json"] = b'{"ok": false}\n'
+    assert _main(monkeypatch, SEM) == 1
+    assert "will stop here: a record move in" in capsys.readouterr().out
     assert _main(monkeypatch, SEM, "--no-preview") == 1
-    assert "layout did not verify - stopped here" in capsys.readouterr().err
-    tree = fake.tree(SEM, CONFIG_REPO)
-    # Both versions kept, nothing else of the layout written.
+    err = capsys.readouterr().err
+    assert "1 move(s) onto a file that differs" in err
+    assert "the run would stop at layout" in err
+    # Both versions kept, nothing written: stopped before the pause.
     assert tree["autograde/a1/_graded.json"] == b'{"ok": true}\n'
     assert tree[".system/autograde/a1/_graded.json"] == b'{"ok": false}\n'
-    assert [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT] == []
+    assert fake.commits == []
 
 
 def test_an_outcome_of_a_renamed_op_takes_the_new_id(
@@ -1144,6 +1173,8 @@ def test_the_re_render_is_planned_to_run_while_work_is_left_above(
     tree = fake.tree(COURSE, ".github")
     del tree["cohort-courses-pages.yml"]
     tree["semesters.yml"] = b"semesters:\n- Sem-f2026\n"
+    # The guide as the render writes it: its move is no clash.
+    fake.tree(COURSE, "course-materials-f2026")["MAINTAINING.md"] = b"g"
     _render_course(fake, COURSE)
     assert _main(monkeypatch, COURSE) == 0
     out = capsys.readouterr().out
@@ -1321,6 +1352,10 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
                 "client_payload[driver]": "migrate",
             },
         ),
+        (
+            f"{COURSE}/.github",
+            {"event_type": "sync-site", "client_payload[driver]": "migrate"},
+        ),
     ]
 
     commits, puts = list(fake.commits), list(fake.puts)
@@ -1413,10 +1448,15 @@ def test_a_materials_clash_in_one_repo_writes_no_other(
         "course-materials-g2026",
         {"MAINTAINING.md": b"one", ".system/MAINTAINING.md": b"two"},
     )
+    assert _main(monkeypatch, COURSE) == 1
+    assert "will stop here: a system file move in course-materials-g2026" in (
+        capsys.readouterr().out
+    )
     assert _main(monkeypatch, COURSE, "--no-preview") == 1
     err = capsys.readouterr().err
-    assert "materials files did not verify - stopped here" in err
+    assert "the run would stop at materials files" in err
     assert "course-materials-g2026: 1 move(s) onto a file that differs" in err
+    assert fake.commits == []
     assert "MAINTAINING.md" in fake.tree(COURSE, "course-materials-f2026")
     assert not [c for c in fake.commits if c[1].startswith("course-materials-")]
 
@@ -2215,6 +2255,7 @@ def test_hold_pauses_every_live_org_then_migrations_never_unpause_then_release(
     assert [d[1]["event_type"] for d in fake.dispatches] == [
         "scheduled-release",
         "sync-membership",
+        "sync-site",
     ]
     assert all(d[1]["client_payload[driver]"] == "migrate" for d in fake.dispatches)
     assert all("client_payload[semester_org]" not in d[1] for d in fake.dispatches)
@@ -2837,3 +2878,179 @@ def test_the_course_writes_each_templates_starter_from_its_markers_once(
         fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
         == grading
     )
+
+
+# ------------------------------------ the preview stops where the run would (MIG-2)
+
+
+def test_a_preview_fails_where_the_run_would_stop_and_the_run_stops_before_its_pause(
+    fake, semester, monkeypatch, capsys
+):
+    # Both names already there: the rename refuses.
+    fake.add(SEM, JOIN_REPO, {"README.md": b"# Join\n"})
+    assert _main(monkeypatch, SEM) == 1
+    out, err = capsys.readouterr()
+    assert f"will stop here: {SEM} has both {OLD_JOIN_REPO} and {JOIN_REPO}" in out
+    assert "the run would stop at rename repos" in err
+    assert "PREVIEW - nothing was written" not in out
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    assert fake.commits == [] and fake.dispatches == []
+    assert all(fake.enabled(*key) for key in fake.workflow_repos())
+
+
+def test_an_assignments_yml_the_keys_step_would_write_unclean_stops_the_preview(
+    fake, semester, monkeypatch, capsys
+):
+    tree = fake.tree(SEM, OLD_CONFIG_REPO)
+    tree["assignments.yml"] = b"assignments:\n  a1:\n    no_such_key: 1\n"
+    assert _main(monkeypatch, SEM) == 1
+    out, err = capsys.readouterr()
+    assert "will stop here: the assignments.yml it writes would not read clean" in out
+    assert "no_such_key" in err
+
+
+def test_an_entry_the_rewrite_would_lose_stops_the_preview(
+    fake, semester, monkeypatch, capsys
+):
+    # A rewrite that would drop entries (what `entries_kept` guards against), stubbed:
+    # the preview must say so, not only the run.
+    monkeypatch.setattr(migrate, "schedule_timing", lambda text: "assignments: {}\n")
+    assert _main(monkeypatch, SEM) == 1
+    out, err = capsys.readouterr()
+    assert "will stop here: the schedule.yml rewrite would lose or add an entry" in out
+    assert "fix by hand" in err
+
+
+def test_an_entry_numbers_cannot_reach_stops_the_preview(
+    fake, semester, monkeypatch, capsys
+):
+    monkeypatch.setattr(migrate.Semester, "numbers_work",
+                        lambda self: ("", "", {}, {"flow": "written as a flow mapping"},
+                                      []))  # fmt: skip
+    assert _main(monkeypatch, SEM) == 1
+    assert "will stop here: schedule.yml flow: add `number:` by hand" in (
+        capsys.readouterr().out
+    )
+
+
+def test_a_course_file_left_not_migrated_stops_the_preview(
+    fake, course, monkeypatch, capsys
+):
+    # `format:` nested where the line rewrite does not look: the verify would refuse it.
+    fake.tree(COURSE, ".github")["dsl-course.yml"] += (
+        b"assignment_defaults2: 1\nassignment_defaults: {format: py}\n"
+    )
+    assert _main(monkeypatch, COURSE) == 1
+    out, err = capsys.readouterr()
+    assert "will stop here: dsl-course.yml would still say NOT_MIGRATED" in out
+    assert "`assignment_defaults.format` is still NOT_MIGRATED" in err
+
+
+def test_a_template_left_not_migrated_stops_the_preview(
+    fake, course, monkeypatch, capsys
+):
+    # A flow mapping the line rewrite cannot reach, with a run key it can strip: the
+    # rewrite has work, and leaves `format` behind for the verify to refuse.
+    fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"] = (
+        b"{format: ipynb, autograde: true}\n# late_window_days: 3\n"
+    )
+    assert _main(monkeypatch, COURSE) == 1
+    assert (
+        "will stop here: assignment-1-f2026@solution/grading_config.yml would still "
+        "say NOT_MIGRATED"
+    ) in capsys.readouterr().out
+
+
+# -------------------------------- a stripped title against the template's (MIG-7)
+
+
+def test_the_keys_plan_names_a_title_that_differs_from_the_templates(fake, semester):
+    for repo, heading in (("assignment-1-f2026", "Linear regression"),
+                          ("assignment-2-f2026", "Same name")):  # fmt: skip
+        fake.add(
+            COURSE,
+            repo,
+            {"README.md": f"# {heading}\n\nThe brief.\n".encode()},
+            branches={"solution": {"grading_config.yml": b"formats: [ipynb]\n"}},
+        )
+    meta = yaml.safe_load(
+        B1_SCHEDULE.replace(
+            "    course_source_repo: assignment-2-f2026\n",
+            "    title: Same name\n    course_source_repo: assignment-2-f2026\n",
+        )
+    )
+    assert migrate.Semester(SEM, COURSE).title_notes(meta) == [
+        (
+            'assignments.a1: title "Regression" -> "Linear regression" (the name now '
+            "comes from the template)"
+        )
+    ]
+
+
+# ------------------------------------ the old engine's own defaults (MIG-1)
+
+
+def test_a_course_default_the_old_engine_never_read_is_not_taken_as_the_old_value():
+    # The old engine read only the team cap from the course; the late pair and the
+    # visibility came from the template, else the toolkit's default.
+    lower = [
+        ("semester", {}),
+        (
+            "course",
+            {
+                "late_window_days": 7,
+                "late_penalty_per_day": "5%",
+                "visibility": "public",
+                "max_team_size": 4,
+            },
+        ),
+        ("institution", migrate.settings.institution_defaults()),
+    ]
+    meta = yaml.safe_load(
+        "assignments:\n  a1:\n    course_source_repo: t\n    due_datetime: 2026-10-13\n"
+    )
+    want, _ = migrate.instance_additions(meta, {}, lower, migrate.settings.Instance())
+    toolkit = migrate.settings.institution_defaults()
+    assert want["a1"] == {
+        "late_window_days": toolkit["late_window_days"],
+        "late_penalty_per_day": toolkit["late_penalty_per_day"],
+        "visibility": toolkit["visibility"],
+    }
+    # A template value still wins over both; the course's team cap was the old one.
+    want, _ = migrate.instance_additions(
+        meta, {"t": {"visibility": "public"}}, lower, migrate.settings.Instance()
+    )
+    assert "visibility" not in want["a1"] and "max_team_size" not in want["a1"]
+
+
+# ------------------------------------------- `submit_via: github` (CON-X2)
+
+
+def test_submit_via_github_is_written_in_the_canonical_word():
+    seeded = f"{'submit_via: github':<29} # how students hand in\n"
+    got = migrate.grading_config_keys(f"format: ipynb\n{seeded}")
+    assert got == (
+        "formats: [ipynb]\n"
+        f"{'submit_via: assignment_repo':<29} # how students hand in\n"
+    )
+    assert migrate.grading_config_keys("submit_via: 'GitHub'\n") == (
+        "submit_via: assignment_repo\n"
+    )
+    for kept in ("submit_via: external  # off GitHub\n", "  submit_via: github\n"):
+        assert migrate.grading_config_keys(kept) == kept
+    course = "assignment_defaults:\n  submit_via: github  # all of them\n"
+    assert migrate.course_config_keys(course) == (
+        "assignment_defaults:\n  submit_via: assignment_repo  # all of them\n"
+    )
+    assert migrate._grading_clean(got)
+
+
+def test_a_blank_line_inside_a_retired_course_block_goes_with_it():
+    text = (
+        "course_name: X\n\ncohort_defaults:\n  timezone: Europe/Berlin\n\n"
+        "  archive:\n    grace_days: 3\n\nassignment_defaults: {}\n"
+    )
+    assert migrate.course_config_keys(text) == (
+        "course_name: X\n\nassignment_defaults: {}\n"
+    )
+    assert migrate.course_config_keys("course_name: X\norg: C\n") == "course_name: X\n"

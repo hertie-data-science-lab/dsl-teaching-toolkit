@@ -71,7 +71,7 @@ it is what stops a re-run repeating itself and what lets a failed notification b
 
 ## `.system/assignments.lock.yml` - what the Join-team form is allowed to do (generated)
 
-SYSTEM-OWNED, and the one file here nobody edits. The "Join team" workflow runs in the PUBLIC `join` repo, under a token that cannot reach an assignment template, so it cannot read an assignment's `grading_config.yml`. This file mirrors the answers it needs - `team_formation`, `max_team_size`, and whether team formation is open for that assignment right now (`team_formation_window`, with the day it shuts in `team_formation_closes`, and the assignment's page on the semester site in `team_formation_page`) - one entry per assignment in `schedule.yml`.
+SYSTEM-OWNED, and the one file here nobody edits. The "Join team" workflow runs in the PUBLIC `join` repo, under a token that cannot reach an assignment template or the course's defaults, so it cannot work out how an assignment runs. This file mirrors the answers it needs - `team_formation` and `max_team_size` (set in this repo's `assignments.yml`, per assignment or under `defaults:`, else the course's `assignment_defaults`), and whether team formation is open for that assignment right now (`team_formation_window`, with the day it shuts in `team_formation_closes`, and the assignment's page on the semester site in `team_formation_page`) - one entry per assignment in `schedule.yml`.
 
 It is rewritten by the quarter-hourly **Scheduled release** tick - which is what opens and shuts the window on its own clock - and again by **Sync membership** (which a push to `schedule.yml` triggers), by every **Release assignment**, and by the nightly **Refresh actions**. Change an assignment's shape in its own `grading_config.yml` on the template's `solution` branch, and how this semester runs it in `assignments.yml`; this file catches up on the next sync. An assignment whose template does not exist yet is locked to `none`, so no team can be formed for it until the template says what it is.
 
@@ -85,10 +85,10 @@ This semester's whole schedule in one file. Changing a date later is just commit
 
 ## `assignments.yml` - how this semester runs each assignment (optional)
 
-The late window and penalty, team formation and max team size, who can read the repos, an external submit link, and what the repos are called - one `defaults:` block and one block per key under `assignments:` in `schedule.yml`. Absent, an assignment runs on the course's defaults, else the institution's. `visibility` is read when each repo is created: change it before the first hand out.
+The late window and penalty, team formation and max team size, who can read the repos, an external submit link, and what the repos are called - one `defaults:` block, and one block under `assignments:` per assignment key in `schedule.yml`. Absent, an assignment runs on the course's defaults, else the institution's. `visibility` is read when each repo is created: change it before the first hand out.
 
 ## `instructors.yml` - this semester's instructors/TAs (optional)
 
 Most semesters have different lecturers/TAs, so - unlike course admins (course-org level) - instructors/TAs are declared here, per semester.
 
-**Sync membership** reconciles them into this semester's own `instructors` team AND a course-org level `instructors-<semester>` team (push access scoped to just this year's content repos, plus the central `.github` repo so they can use the workflows too). It also supplies this semester's website instructor cards. 
+**Sync membership** reconciles them into this semester's own `instructors` team AND a course-org level `instructors-<semester>` team (push on every course-org repo this semester's `schedule.yml` names, plus the course `.github` repo so they can use the workflows too). It also supplies this semester's website instructor cards. 

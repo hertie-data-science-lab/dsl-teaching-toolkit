@@ -182,7 +182,7 @@ def site_readme(org: str, semester: bool) -> str:
             "| `files/` | the hosted copies of what the course's `publish.yml` makes "
             "public |\n"
             if semester
-            else ""
+            else "| `_data/course.yml` | the contact and licence the home page shows |\n"
         )
         + f"| the tab pages - {tab_pages} | the wrappers the tabs point at |\n"
         + "| `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders |\n"
@@ -363,7 +363,7 @@ _SEMESTER_PAGES = (
         # private submission repo, which this must never list. See `site._indexable_repos`.
         # The hosted copies (`site._mirror_public`) are the exception to the gate.
         "All released course material so far; only accessible to enrolled "
-        "students/auditors, except files the course hosts publicly (the render button).",
+        "students/auditors, except files the course hosts publicly (`view` in a file's menu).",
     ),
     _ThemePage(
         "profile.md",
