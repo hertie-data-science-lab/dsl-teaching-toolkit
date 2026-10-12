@@ -27,6 +27,7 @@ means `enrolled` - never break onboarding for a deployed semester's roster.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from functools import cache
 
@@ -102,6 +103,20 @@ def normalise_role(value: str) -> str:
     return ROLE_AUDITOR if value.strip().lower() == ROLE_AUDITOR else ROLE_ENROLLED
 
 
+_ONE_STUDENT = "the two rows are one student to everything downstream"
+_ONE_CODE = (
+    "neither row is emailed its code until one is blanked (a new one is then minted)"
+)
+
+
+def shared_codes(students: list[Student]) -> set[str]:
+    """The `enrol_code`s (casefolded) that more than one row holds. The Join issue binds
+    a code to the FIRST row that has it, so mailing one to the second row's student hands
+    them a seat that is not theirs - or a code that is already spent."""
+    seen = Counter(s.enrol_code.casefold() for s in students if s.enrol_code)
+    return {code for code, n in seen.items() if n > 1}
+
+
 def parse(text: str, faults: list[ConfigFault] | None = None) -> list[Student]:
     """Parse students.csv text into Student rows.
 
@@ -110,12 +125,15 @@ def parse(text: str, faults: list[ConfigFault] | None = None) -> list[Student]:
 
     `faults` collects what a human has to fix, as well as logging it: an unreadable header
     (recorded by `read_csv`, which then raises as it always has), a `role` nobody can act
-    on, and the two duplicates that were silent until now - one handle or one address on
-    two rows means one student's repos, grades and enrolment code land on the other's row.
-    A caller that passes nothing gets exactly the behaviour it always got."""
+    on, and the three duplicates that were silent until now - one handle or one address on
+    two rows means one student's repos, grades and enrolment code land on the other's row,
+    and one `enrol_code` on two rows (a row copied to add a student) binds whoever joins
+    first to the first row. A caller that passes nothing gets exactly the behaviour it
+    always got."""
     rows = []
     handles: dict[str, int] = {}
     emails: dict[str, int] = {}
+    codes: dict[str, int] = {}
     reader = read_csv(text, REQUIRED_FIELDS, ROSTER_PATH, faults)
     for row in reader:
         # The row's own line in the file, quoted newlines and all - `csv` counts what it
@@ -138,7 +156,11 @@ def parse(text: str, faults: list[ConfigFault] | None = None) -> list[Student]:
                 faults.append(fault)
         values["role"] = normalise_role(values["role"])
         if faults is not None:
-            for column, seen in (("github_handle", handles), ("hertie_email", emails)):
+            for column, seen, cost in (
+                ("github_handle", handles, _ONE_STUDENT),
+                ("hertie_email", emails, _ONE_STUDENT),
+                ("enrol_code", codes, _ONE_CODE),
+            ):
                 cell = values[column].casefold()
                 if not cell:
                     continue
@@ -148,8 +170,7 @@ def parse(text: str, faults: list[ConfigFault] | None = None) -> list[Student]:
                             ROSTER_PATH,
                             lineno,
                             column,
-                            f"this {column} is already on row {seen[cell]} - the two "
-                            f"rows are one student to everything downstream",
+                            f"this {column} is already on row {seen[cell]} - {cost}",
                         )
                     )
                 seen.setdefault(cell, lineno)
