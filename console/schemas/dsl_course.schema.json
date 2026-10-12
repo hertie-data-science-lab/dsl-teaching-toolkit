@@ -62,7 +62,10 @@
           "type": "string"
         }
       },
-      "type": "object"
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "central_ref": {
       "pattern": "^(?:main|release|preview|[0-9a-f]{40})$",
@@ -73,16 +76,28 @@
       "type": "string"
     },
     "course_code": {
-      "type": "string"
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "course_description": {
-      "type": "string"
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "course_name": {
-      "type": "string"
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "licence": {
-      "type": "string"
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "people": {
       "additionalProperties": false,
@@ -92,16 +107,28 @@
             "additionalProperties": false,
             "properties": {
               "email": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "end": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "github_handle": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "start": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -116,25 +143,46 @@
             "additionalProperties": false,
             "properties": {
               "end": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "github_handle": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "name": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "photo": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "start": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "title": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "url": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "type": "object"
@@ -146,25 +194,46 @@
             "additionalProperties": false,
             "properties": {
               "end": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "github_handle": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "name": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "photo": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "start": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "title": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "url": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "type": "object"
