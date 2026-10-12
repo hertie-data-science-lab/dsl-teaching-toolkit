@@ -1073,5 +1073,5 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .materials-tree .panel { padding: 12px 14px; }
 .materials-tree h2 { font-size: 15px; }
 .file-tree .ft-file.current { background: var(--sunk); border-radius: 6px; }
-.file-tree .ft-file a[aria-current] { font-weight: 700; }
+.file-tree .ft-file a[aria-current], .session-files a[aria-current] { font-weight: 700; }
 @media (max-width: 860px) { .materials-split { grid-template-columns: minmax(0, 1fr); } }

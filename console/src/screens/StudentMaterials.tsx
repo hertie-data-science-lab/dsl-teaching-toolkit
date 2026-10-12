@@ -5,7 +5,8 @@
 // loads) come last, folded, as "Supporting files" (decision 0029 rule 6). The tree stays on
 // screen while a file is open (decision 0035 rule 11): in a left column on wide screens, above
 // the file on narrow ones, the open file marked; each file row carries the button row
-// (`StudentFiles.tsx`, rule 10).
+// (`StudentFiles.tsx`, rule 10). A kind tab opens its files in the same split (`FileBeside`),
+// its own list in the left column.
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import { useEffect, useState } from 'preact/hooks';
@@ -41,16 +42,44 @@ export function MaterialsView({ org, repos, entry }: { org: string; repos: strin
   if (trees.kind === 'failed') return <CheckLine cls="bad">The materials could not be read: {trees.error}</CheckLine>;
   const at = entry ? splitEntry(entry, repos) : null;
   if (at) {
-    const tree = trees.value.find(([r]) => r === at.repo)?.[1] ?? [];
-    const e = tree.find((t) => t.path === at.path && t.type === 'blob');
     return (
-      <div class="materials-split">
-        <nav class="materials-tree" aria-label="All materials"><MaterialsTree org={org} trees={trees.value} current={at} /></nav>
-        <div class="materials-file">{e ? <FileView org={org} repo={at.repo} entry={e} tree={tree} /> : <p class="footnote">{at.path} is not in {at.repo}.</p>}</div>
-      </div>
+      <Split label="All materials" side={<MaterialsTree org={org} trees={trees.value} current={at} />}>
+        <OpenFile org={org} at={at} tree={trees.value.find(([r]) => r === at.repo)?.[1] ?? []} />
+      </Split>
     );
   }
   return <MaterialsTree org={org} trees={trees.value} />;
+}
+
+/** `side` (labelled `label`) in a left column on wide screens, above the file on narrow ones, and the file beside it (decision 0035 rule 11). */
+function Split({ label, side, children }: { label: string; side: preact.ComponentChildren; children: preact.ComponentChildren }) {
+  return (
+    <div class="materials-split">
+      <nav class="materials-tree" aria-label={label}>{side}</nav>
+      <div class="materials-file">{children}</div>
+    </div>
+  );
+}
+
+/** The file `at` from its repo's tree, or a note when the tree has no such file. */
+function OpenFile({ org, at, tree }: { org: string; at: { repo: string; path: string }; tree: TreeEntry[] }) {
+  const e = tree.find((t) => t.path === at.path && t.type === 'blob');
+  return e ? <FileView org={org} repo={at.repo} entry={e} tree={tree} /> : <p class="footnote">{at.path} is not in {at.repo}.</p>;
+}
+
+/** `children` (a kind tab's list) with the file `entry` names open beside it, its repo's tree read for it; `children` alone for an entry in none of `repos`. */
+export function FileBeside({ org, repos, entry, label, children }: { org: string; repos: string[]; entry: string; label: string; children: preact.ComponentChildren }) {
+  const env = useEnv();
+  const at = splitEntry(entry, repos);
+  const tree = useLoad(env && at ? () => env.client.listTree(org, at.repo, 'HEAD', true) : null, [org, entry]);
+  if (!at) return <>{children}</>;
+  return (
+    <Split label={label} side={children}>
+      {tree.kind === 'loading' ? <Loading what="Reading the materials" />
+        : tree.kind === 'failed' ? <CheckLine cls="bad">The materials could not be read: {tree.error}</CheckLine>
+        : <OpenFile org={org} at={at} tree={tree.value?.tree ?? []} />}
+    </Split>
+  );
 }
 
 /**
