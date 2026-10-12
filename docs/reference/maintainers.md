@@ -98,10 +98,15 @@ Things whose *literal spelling* is depended on from outside Python:
   keep that pairing.
 - **An assignment page's URL** - `schedule.AssignmentPage` (`<nn>-<semester name>`, or the
   name alone for an entry with no number; the number from `schedule.assignment_pages`) names the site's `_assignments/` file, and
-  `AssignmentPage.url` is every link to the assignment's teams: its page in the student
-  console (`?semester=<org>#assignment-<key>`), used by the team-formation mail and the lock's
+  `AssignmentPage.url` is every link to the assignment's teams: its page on the semester site
+  (`/assignments/<stem>.html`), or, for a course with `student_console: true`
+  (`course.advertises_console`, off by default), its page in the student console
+  (`?semester=<org>#assignment-<key>`). Used by the team-formation mail and the lock's
   `team_formation_page:` (which the Join-team form's header and refusals link). That page is the one list of a window's
-  teams - names and counts only. Never build the URL anywhere else.
+  teams - names and counts only. Never build the URL anywhere else. A sentence around a
+  stored link names the console only when the link is one (`policy.is_console_link`); the
+  static templates use wording true of both. The site banner (`_data/console.yml`) follows the
+  same key.
 - **`gh_contents.STUB_MARKS` and `SUPERSEDED_DESCRIPTIONS` / `SUPERSEDED_SEMESTER_*` / `SUPERSEDED_COURSE_*`**
   are convergence chains matched against *live* state. Rewording a stub or a repo description
   means **adding a link to the chain**, never editing one. For the descriptions, an org on the

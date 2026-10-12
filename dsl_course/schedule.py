@@ -1809,15 +1809,15 @@ class AssignmentPage(NamedTuple):
             return self.name
         return f"{self.number:02d}-{self.name}"
 
-    def url(self, semester_org: str) -> str:
-        """Where a student sees this assignment's teams and joins one: its own page in the
-        student console (`#assignment-<key>`, decision 0035 rule 8), the Assignments list
-        for an entry the plan does not name, else the semester site's home. (The site's own
-        assignment page, `<stem>.html`, lists the teams too: decision 0035 rule 1.)"""
+    def url(self, semester_org: str, *, console: bool) -> str:
+        """Where a student sees this assignment's teams and joins one: the semester site's
+        own page for it (`<stem>.html`), or, where the course opts into the student console
+        (`console`, `course.advertises_console`), its page there (`#assignment-<key>`,
+        decision 0035 rule 8; the Assignments list for an entry the plan does not name)."""
         screen = f"assignment-{self.key}" if self.key else "assignments"
+        link = policy.console_link(semester_org, screen) if console else ""
         return (
-            policy.console_link(semester_org, screen)
-            or f"https://{pages_repo(semester_org)}/"
+            link or f"https://{pages_repo(semester_org)}/assignments/{self.stem}.html"
         )
 
 

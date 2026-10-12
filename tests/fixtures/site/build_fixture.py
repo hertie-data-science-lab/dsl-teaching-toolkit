@@ -19,7 +19,7 @@ handed-out assignment with a declared `details:`, a pending one, one handed in o
 that is not out yet, one whose repos are public, one handed into a shared drop box, one
 group assignment inside its team-formation window, a dated exam and a TBC
 one, a special event, the two term boundaries, the archive row inside its notice window,
-the banner to the student console, two formed teams (one with room, one full), an All
+the banner to the student console (the course opts in), two formed teams (one with room, one full), an All
 Materials index nested three directories deep, and - within the released lecture - a
 published file linked to the site's own hosted copy beside an unpublished one linked to
 GitHub (decision 0035 rule 1: the 0.9.0 site, restored).
@@ -498,7 +498,7 @@ def data_files(hosted: site_repo.Hosted) -> dict[str, str]:
                 f"https://github.com/{SEMESTER_ORG}/{MATERIALS}/blob/main/SYLLABUS.md",
             ),
         ),
-        "_data/console.yml": site_repo.console_yaml(SEMESTER_ORG),
+        "_data/console.yml": site_repo.console_yaml(SEMESTER_ORG, True),
     }
 
 

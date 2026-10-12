@@ -1280,6 +1280,24 @@ def test_semester_site_links_back_to_the_semester_org(monkeypatch, tmp_path):
     assert plan.config["github_org"] == "Semester-f2026"
 
 
+def test_the_banner_shows_only_for_a_course_that_opts_into_the_console(
+    monkeypatch, tmp_path
+):
+    # Off by default: a real course's students see the site exactly as before.
+    off = _plan(monkeypatch, tmp_path, Schedule())
+    assert "url" not in (yaml.safe_load(off.files["_data/console.yml"]) or {})
+    on = _plan(
+        monkeypatch,
+        tmp_path,
+        Schedule(),
+        yaml_file=lambda *a: (
+            {"student_console": True} if a[-1] == "dsl-course.yml" else {}
+        ),
+    )
+    url = yaml.safe_load(on.files["_data/console.yml"])["url"]
+    assert url.endswith("?semester=Semester-f2026#week")
+
+
 def test_course_description_flows_from_course_metadata_into_config(
     monkeypatch, tmp_path
 ):

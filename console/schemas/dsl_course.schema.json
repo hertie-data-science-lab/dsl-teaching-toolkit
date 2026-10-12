@@ -185,6 +185,9 @@
         "type": "string"
       },
       "type": "array"
+    },
+    "student_console": {
+      "type": "boolean"
     }
   },
   "title": ".github/dsl-course.yml",

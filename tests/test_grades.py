@@ -2603,11 +2603,15 @@ def test_a_template_with_no_spec_has_no_window_either(monkeypatch):
     assert yaml.safe_load(text)["assignments"]["a2"]["team_formation_window"] == "none"
 
 
-def _writes(monkeypatch, existing, ok: bool = True) -> list[dict]:
+def _writes(
+    monkeypatch, existing, ok: bool = True, console: bool = False
+) -> list[dict]:
     """Stub everything the lock write touches and collect what it puts. `existing` is what
-    `get_file_with_sha` answers: `(text, sha)`, None for a 404, or an exception to raise."""
+    `get_file_with_sha` answers: `(text, sha)`, None for a 404, or an exception to raise.
+    `console` is the course's `student_console:`."""
     monkeypatch.setattr(grades, "_grading_text", lambda org, t, **_: "type: group\n")
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
+    monkeypatch.setattr(discovery, "org_meta", lambda org: {"student_console": console})
     monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo, **_: False)
 
     def read(org, repo, path):
@@ -2640,10 +2644,21 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
         "max_team_size": 5,
         "team_formation_window": "closed",
         "team_formation_closes": _CUTOFF.date(),
-        # Where the teams are listed: the assignment's page in the student console.
-        "team_formation_page": "https://hertie-data-science-lab.github.io/"
-        "dsl-teaching-toolkit/?semester=SEMESTER#assignment-project",
+        # Where the teams are listed: the assignment's page on the semester site.
+        "team_formation_page": "https://semester.github.io/assignments/project.html",
     }
+
+
+def test_a_course_that_opts_in_locks_the_page_in_the_student_console(monkeypatch):
+    puts = _writes(monkeypatch, None, console=True)
+    grades.sync_team_lock(
+        "COURSE", "SEMESTER", _sched(project="assignment-4-project-f2026")
+    )
+    entry = yaml.safe_load(puts[0]["content"])["assignments"]["project"]
+    assert entry["team_formation_page"] == (
+        "https://hertie-data-science-lab.github.io/"
+        "dsl-teaching-toolkit/?semester=SEMESTER#assignment-project"
+    )
 
 
 def test_the_lock_links_no_page_for_an_individual_assignment_and_lists_nothing(
