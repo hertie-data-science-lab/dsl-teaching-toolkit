@@ -220,15 +220,19 @@ def _classes(text: str) -> set[str]:
 
 
 # Everything else the toolkit renders and so has to style itself: an assignment page's
-# kicker line, the Updates box's inline source link, the row of buttons beside every other
-# file link, and the form that fills in the profile the last two of those buttons need.
+# kicker line, the Updates box's inline GitHub link, the menu beside every other file link,
+# and the form that fills in the profile its Edit items need.
 _OWN_CLASSES = frozenset(
     {
         "post-kicker",
         "post-due",
         "shape-note",
-        "file-btns",
-        "file-btn",
+        "file-menu",
+        "file-chev",
+        "file-menu-list",
+        "file-menu-lbl",
+        "file-menu-h",
+        "file-menu-muted",
         "open-in-line",
         "profile-steps",
         "profile-step",
@@ -655,31 +659,48 @@ def test_every_page_that_shows_a_file_link_goes_through_the_one_include(rel):
     assert "include file_link.html" in _strip_comments(_templates()[rel])
 
 
-def test_every_button_in_a_file_row_opens_a_new_tab():
+def test_every_item_in_a_file_menu_opens_a_new_tab():
     # Every one of them leaves the page the reader is working through - a repo, a rendered
     # deck, an editor in the browser - and taking the list away to show one of them is how
     # a student loses their place in it. `rel=noopener` comes with `target=_blank`.
     body = _strip_comments(_templates()["_includes/file_link.html"])
-    for button in body.split('<a class="file-btn"')[1:]:
-        head = button.split(">")[0]
+    menu = body.split('<ul class="file-menu-list">')[1].split("</ul>")[0]
+    items = menu.split("<li><a")[1:]
+    assert len(items) == 2
+    for item in items:
+        head = item.split(">")[0]
         assert 'target="_blank"' in head and 'rel="noopener"' in head, head
-    # The NAME is not one of them: it is the quiet link the page has always had, and on a
-    # site that publishes nothing it is the only link in the row.
-    assert 'target="_blank"' not in body.split('<span class="file-btns">')[0]
+    # The NAME is not one of them: it is the quiet link the page has always had.
+    assert 'target="_blank"' not in body.split('<details class="file-menu">')[0]
+
+
+def test_a_file_menu_is_one_chevron_with_two_headed_sections():
+    # One small control per file, "More ways to open", rather than a row of buttons: Open is
+    # Liquid's, and Edit is the script's, appended under its own heading.
+    body = _strip_comments(_templates()["_includes/file_link.html"])
+    assert '<summary class="file-chev" title="More ways to open"' in body
+    assert '<li class="file-menu-h">Open</li>' in body
+    script = _strip_comments(_open_in())
+    files = script.split("function decorateFiles(root, me) {")[1].split("\n  }")[0]
+    assert 'head.appendChild(document.createTextNode("Edit"));' in files
+    # Before a profile there is still one Edit item: the way to set one up.
+    assert '"Set up your editor in Profile"' in files
+    # And the script, not the reader, closes a menu left open.
+    assert "wireMenus();" in script
 
 
 def test_the_updates_box_takes_the_inline_shape_of_the_source_link():
-    # The box brackets every file it lists, so the bracketed control would read
-    # `[slides.html [source]]`. One include, two shapes, and the caller says which.
+    # The box brackets every file it lists, so a menu there would read
+    # `[slides.html ▾]` inside a sentence. One include, two shapes, and the caller says which.
     assert "inline=true" in _strip_comments(
         _templates()["_includes/lecture_links.html"]
     )
     link = _strip_comments(_templates()["_includes/file_link.html"])
     assert "include.inline" in link
     assert "· <a href=" in link
-    # And no button row inside the sentence.
+    # And no menu inside the sentence.
     assert (
-        "file-btns"
+        "file-menu"
         not in link.split("{% if include.inline %}")[1].split("{% else %}")[0]
     )
     # The lists that bracket nothing keep the bracketed one.
@@ -1293,24 +1314,25 @@ _VIEW_BRANCH = re.compile(
 )
 
 
-def test_render_is_offered_only_where_the_site_hosts_a_copy():
-    # `render` opens the semester site's own copy, which exists only for a published file a
-    # browser draws (html, pdf). Rendered unconditionally it is a button to a 404 on every
+def test_view_is_offered_only_where_the_site_hosts_a_copy():
+    # `view` opens the semester site's own copy, which exists only for a published file a
+    # browser draws (html, pdf). Rendered unconditionally it is an item to a 404 on every
     # other row of every site.
     body = _strip_comments(_templates()["_includes/file_link.html"])
     branches = [m["shown"] for m in _VIEW_BRANCH.finditer(body)]
     assert branches, "file_link.html does not branch on view_url"
-    assert (
-        body.count(">render</a>") == sum(b.count(">render</a>") for b in branches) == 1
-    )
-    # `source` is the opposite: unconditional in the button row, because the file's home
-    # on GitHub is worth a button whether or not anything else is. The Updates box's
-    # inline shape keeps it conditional - there the name itself goes to GitHub unless a
-    # hosted copy has taken it.
-    assert body.count(">source</a>") == 2
-    assert sum(b.count(">source</a>") for b in branches) == 1
+    view = "</svg>view</span>"
+    assert body.count(view) == sum(b.count(view) for b in branches) == 1
+    # `GitHub` is the opposite: unconditional in the menu, because the file's home on
+    # GitHub is worth an item whether or not anything else is. The Updates box's inline
+    # shape keeps it conditional - there the name itself goes to GitHub unless a hosted
+    # copy has taken it.
+    assert body.count("</svg>GitHub</span>") == 1
+    assert sum(b.count("</svg>GitHub</span>") for b in branches) == 0
+    assert body.count(">GitHub</a>") == 1
+    assert sum(b.count(">GitHub</a>") for b in branches) == 1
     # And the FIRST branch is the name's own href, so a hosted copy is what it opens.
-    assert body.index("include.view_url") < body.index("file-btns")
+    assert body.index("include.view_url") < body.index("file-menu")
 
 
 def test_the_fixture_site_holds_both_shapes_of_file_row(generated):
@@ -1419,8 +1441,8 @@ def test_the_control_parses_the_url_shape_the_sync_writes():
         "main",
         "labs/01/lab%20one.ipynb",
     )
-    # A directory link is the same shape with `tree`, and is offered too - "local" opens
-    # the folder.
+    # A directory link is the same shape with `tree`, and is offered too - the editor item
+    # opens the folder.
     tree = site_repo.gh_url("semester-f2026", "materials", "main", "tree", "labs/01")
     assert pattern.match(tree).group(3) == "tree"
     # Another org's repo is left alone by the script; the shape still has to parse for the
@@ -1511,9 +1533,9 @@ def test_the_profile_sets_up_the_repo_the_semester_releases_into(generated):
     assert "{%- if materials_repos.size > 1 %}" in body
 
 
-def test_online_and_local_are_offered_only_for_the_repo_the_profile_set_up():
+def test_edit_items_are_offered_only_for_the_repo_the_profile_set_up():
     # The materials folder is the clone of ONE repo, and step 2 forks that one: a file of
-    # another repo has no fork for `online` and no clone for `local` to open.
+    # another repo has no fork for `in browser` and no clone for the editor item to open.
     body = _strip_comments(_open_in())
     assert 'data-materials-repo="{{ site.data.materials.repos | first }}"' in body
     files = body.split("function decorateFiles(root, me) {")[1].split("\n  }")[0]
@@ -1610,7 +1632,7 @@ def test_step_three_names_the_folder_the_clone_dialog_should_be_pointed_at():
     # No clone URL can carry a destination - `vscode://vscode.git/clone` takes a url and a
     # ref, and the git extension hands the dialog no parent path - so the page names the
     # folder instead. Without it a student takes whatever folder the dialog opens at, and
-    # step 4 and every `local` button then point at a clone that is not there.
+    # step 4 and every editor item in a file's menu then point at a clone that is not there.
     body = _strip_comments(_profile())
     assert 'id="dsl-clone-parent"' in body
     refresh = body.split("function refresh() {")[1].split("\n  }")[0]

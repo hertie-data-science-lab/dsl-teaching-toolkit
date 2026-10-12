@@ -865,7 +865,7 @@ class Link:
 
     The templates tell the two destinations apart: the name opens `view_url` where there
     is one (the rendered copy, which is the whole point of publishing it) and `url`
-    otherwise, with `url` shown beside it as `source`. Empty by default, because on every
+    otherwise, with `url` in its menu as `GitHub`. Empty by default, because on every
     site that publishes nothing every link has exactly one destination."""
 
     name: str

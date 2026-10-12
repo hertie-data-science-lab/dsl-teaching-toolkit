@@ -118,28 +118,35 @@ jobs:
             echo "::error::slides.html is published but no page links its hosted copy"
             missing=1
           fi
-          if ! grep -rq 'slides\.html</a> <span class="file-btns">.*github\.com.*>source</a>.*>render</a>' .; then
-            echo "::error::slides.html has no source and render buttons beside it"
+          # The published file: its name opens the hosted copy (above), and the chevron's
+          # menu offers `view` (that copy) and `GitHub` (the file's home).
+          menu() { grep -rho "$1</a><details class=\"file-menu\">.*" . | sed 's#</details>.*##'; }
+          if ! menu 'slides\.html' | grep -q 'github\.com.*</svg>GitHub</span>'; then
+            echo "::error::slides.html has no chevron menu with a GitHub item"
             missing=1
           fi
-          if ! grep -q 'slides\.html</a>.*· <a[^>]*github\.com[^>]*>source</a></span>\]' index.html; then
-            echo "::error::the Updates box does not carry the inline source link"
+          if ! menu 'slides\.html' | grep -q '</svg>view</span>'; then
+            echo "::error::slides.html is published but its menu has no view item"
             missing=1
           fi
-          # The unpublished file beside it: `source`, because every file has a home on
-          # GitHub, and no `render`, because this site hosts no copy of it to draw.
-          if ! grep -rq 'slides\.pdf</a> <span class="file-btns">.*>source</a></span>' .; then
-            echo "::error::slides.pdf carries no source button"
+          if ! grep -q 'slides\.html</a>.*· <a[^>]*github\.com[^>]*>GitHub</a></span>\]' index.html; then
+            echo "::error::the Updates box does not carry the inline GitHub link"
             missing=1
           fi
-          if grep -rq 'slides\.pdf</a>.*>render</a>' .; then
+          # The unpublished file beside it: `GitHub`, because every file has a home on
+          # GitHub, and no `view`, because this site hosts no copy of it to draw.
+          if ! menu 'slides\.pdf' | grep -q '</svg>GitHub</span>'; then
+            echo "::error::slides.pdf has no chevron menu with a GitHub item"
+            missing=1
+          fi
+          if menu 'slides\.pdf' | grep -q '</svg>view</span>'; then
             echo "::error::slides.pdf is not published but offers a rendered copy"
             missing=1
           fi
-          # Every button in the row leaves the page, so every one of them leaves in a new
-          # tab. `local` is the exception and is added by script, not here.
-          if grep -rho '<a class="file-btn"[^>]*>' . | grep -v 'target="_blank"'; then
-            echo "::error::a file-row button was rendered without target=_blank"
+          # Every item in a file's menu leaves the page, so every one of them leaves in a
+          # new tab. The editor item is the exception and is added by script, not here.
+          if grep -rho '<ul class="file-menu-list">.*</ul>' . | grep -o '<a [^>]*>' | grep -v 'target="_blank"'; then
+            echo "::error::a file-menu item was rendered without target=_blank"
             missing=1
           fi
           exit $missing

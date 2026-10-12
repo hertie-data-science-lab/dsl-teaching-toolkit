@@ -6,25 +6,33 @@ toolkit; every sync rewrites it.
 ONE file link, wherever a page shows one: a session row, the Updates box, the All Materials
 tree. Params: `name`, `url`, optional `view_url`, `title` and `inline`.
 
-The name is the quiet link it has always been - what a reader clicks - and after it comes
-the row of buttons: `source`, always, and `render` where the site hosts a copy a browser
-draws. `online` and `local` finish the row, appended by `_includes/open_in.html` once the
-reader has a profile; they are not here because they depend on WHO is reading, which a
-public page cannot know. The row is one span (`.file-btns`) so that all four sit together
-however many of them there are.
+The name is the quiet link it has always been - what a reader clicks - and it opens the
+rendered view where the site hosts one, else the file on GitHub. Right after it sits ONE
+small chevron (`details.file-menu`), "More ways to open", whose menu lists every way to have
+the file under two headings:
+
+  Open   view (only with a hosted copy) - GitHub (always)
+  Edit   in browser - the reader's editor by name
+
+Open is written here, because Liquid knows those URLs. Edit is appended by
+`_includes/open_in.html`, because it depends on WHO is reading, which a public page cannot
+know; before the reader has a profile that script puts a single "Set up your editor in
+Profile" item there instead. A `<details>` opens and closes with no script and from the
+keyboard; the same script closes it on an outside click or Escape and keeps one open at a
+time. Each item is an icon and a label on one line, a one-line description under it.
 
 `inline` is for a caller that already brackets the link: the Updates box renders each file
-as `[name]`, and a row of buttons inside a sentence would swamp it. Set it and the file gets
-what it always had there - a middle dot and the word `source`, and only where there is a
-hosted copy to tell apart from the name.
+as `[name]`, and a menu inside a sentence would swamp it. Set it and the file gets what it
+always had there - a middle dot and the word `GitHub`, and only where there is a hosted copy
+to tell apart from the name.
 
 `url` is the file on GitHub. `view_url` is the semester site's own hosted copy, written by the
 sync only for a file the course published (publish.yml) that a browser renders - so the NAME
-opens the copy that renders, and `source` beside it keeps the file's own home one click
+opens the copy that renders, and `GitHub` in the menu keeps the file's own home one click
 away.
 
-Every button opens a new tab: they all leave the page the reader is working through, and
-`render` in particular is a deck or a pdf they will want beside the list, not instead of it.
+Every menu item opens a new tab: they all leave the page the reader is working through, and
+`view` in particular is a deck or a pdf they will want beside the list, not instead of it.
 
 No `assign` and no `capture`: materials_entry.html includes this from inside its own
 recursion, and both write to Liquid's outermost scope. Hence the three-way `if` inside the
@@ -34,4 +42,4 @@ the public course site links `/public-materials/...`, which needs the baseurl.
 The file ends without a newline, and the comments either side trim their own: this renders
 inside a sentence in the Updates box, where a stray space is visible.
 {%- endcomment -%}
-<a{% if include.title %} title="{{ include.title }}"{% endif %} href="{% if include.view_url %}{{ include.view_url }}{% elsif include.url contains '://' %}{{ include.url }}{% else %}{{ include.url | prepend: site.baseurl }}{% endif %}">{{ include.name }}</a>{% if include.inline %}{% if include.view_url %} <span class="file-actions">· <a href="{{ include.url }}">source</a></span>{% endif %}{% else %} <span class="file-btns"><a class="file-btn" target="_blank" rel="noopener" title="{{ include.name | escape }} on GitHub" href="{{ include.url }}">source</a>{% if include.view_url %}<a class="file-btn" target="_blank" rel="noopener" title="{{ include.name | escape }} rendered on this site" href="{{ include.view_url }}">render</a>{% endif %}</span>{% endif %}
+<a{% if include.title %} title="{{ include.title }}"{% endif %} href="{% if include.view_url %}{{ include.view_url }}{% elsif include.url contains '://' %}{{ include.url }}{% else %}{{ include.url | prepend: site.baseurl }}{% endif %}">{{ include.name }}</a>{% if include.inline %}{% if include.view_url %} <span class="file-actions">· <a href="{{ include.url }}">GitHub</a></span>{% endif %}{% else %}<details class="file-menu"><summary class="file-chev" title="More ways to open" aria-label="More ways to open {{ include.name | escape }}">▾</summary><ul class="file-menu-list"><li class="file-menu-h">Open</li>{% if include.view_url %}<li><a target="_blank" rel="noopener" href="{{ include.view_url }}"><span class="file-menu-lbl"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>view</span><small>Rendered, here</small></a></li>{% endif %}<li><a target="_blank" rel="noopener" href="{{ include.url }}"><span class="file-menu-lbl"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg>GitHub</span><small>The file in the course repo</small></a></li></ul></details>{% endif %}

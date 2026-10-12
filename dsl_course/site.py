@@ -677,7 +677,7 @@ def _materials_index(
     `<repo>/<name>` - they are different files, and neither is dropped.
 
     `repos:` names `content_repos` themselves, in order: Your Profile forks and clones the
-    first, and `open_in.html` offers `online` / `local` for that repo's files."""
+    first, and `open_in.html` offers its Edit items for that repo's files."""
     found: dict[str, dict[str, _IndexEntry]] = {}
     docs: list[tuple[str, str, Link]] = []
     for repo in sorted(content_repos):
