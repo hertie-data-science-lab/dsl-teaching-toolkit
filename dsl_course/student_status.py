@@ -552,18 +552,17 @@ def render_assignments(
         out_now = handed_out(name, entry, extra.handed_out, now)
         heading, brief = _brief(extra.readmes.get(key, "")) if out_now else ("", "")
         window, shuts = schedule.formation_state(facts.sched, key, now)
-        forming = (
-            window == "open"
-            and spec.team_formation_resolved == SELF_SELECT
-            and shuts is not None
-        )
+        self_select = spec.team_formation_resolved == SELF_SELECT
+        forming = window == "open" and self_select and shuts is not None
         cap = extra.caps.get(key)
+        # The teams stay listed after the window shuts, for the rest of the semester, as
+        # on the site's page: only `team_formation` (the invitation) goes.
         rooms = (
             [
                 {"name": team, "members": len(members), "cap": cap}
                 for team, members in sorted(teams.teams_for(facts.teams, key).items())
             ]
-            if forming
+            if self_select and (forming or out_now)
             else []
         )
         out.append(

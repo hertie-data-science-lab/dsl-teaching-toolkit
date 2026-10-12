@@ -415,7 +415,7 @@
     }
 }
 
-/* The teams that exist, in the "Form your team" callout (_layouts/assignment.html).
+/* The teams that exist, in the "Form your team" / "Teams" callout (_layouts/assignment.html).
    Scoped to its class, never to a bare `table`: the theme's header lays itself out with
    one, and it styles no table itself, so an unclassed one rendered as a run of words.
    Rules rather than boxes, and only as wide as its two columns. */

@@ -109,7 +109,7 @@ export function AssignmentBody({ org, a, mine, now, tz, studentView, unknownRole
     <div class="a-body">
       <DateLines a={a} tz={tz} year={year} />
       {steps ? <TeamSteps org={org} a={a} mine={own ? mine : null} studentView={studentView} tz={tz} now={now} /> : null}
-      {!forming && a.group && a.teams.length && !auditor ? <TeamList a={a} current={u?.team ?? null} /> : null}
+      {!forming && a.group && a.teams.length && !auditor ? <TeamList a={a} current={u?.team ?? null} shut /> : null}
       {!a.handedOut ? pendingSentence(a, repo, auditor) : (
         <section class="callout callout-submit" aria-label="Hand in">
           {steps ? (

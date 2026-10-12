@@ -1033,8 +1033,8 @@ FormedTeams = Callable[[str], list[tuple[str, list[str]]]]
 def _formed_teams(semester_org: str) -> FormedTeams:
     """A reader of `(team, member handles)` for every team formed for an assignment key
     so far, by name - the same reader (`teams.teams_for`) the student console's team list
-    uses. teams.csv is loaded once, on the first ask, however many assignments are forming
-    teams, and never when none is.
+    uses. teams.csv is loaded once, on the first ask, however many assignments list
+    teams, and never when none does.
 
     Never fatal: teams.csv is student-written, and a row somebody broke must not take down
     the render of a semester's whole website. The callout still goes out; only the table
@@ -1094,10 +1094,12 @@ def _assignment_entry(
 
     While a self-select group assignment's team-formation window is open
     (`schedule.formation_state`, the same answer the Join-team form's lock reads), the
-    entry carries `team_join_url` / `team_join_cap` / `team_join_closes` / `team_salt`,
-    and `teams:` once any has formed: each team's name, headcount, cap, its members as
-    salted digests (`member_digest`, never a handle) and its repo's URL. `formed_teams` is
-    the sync's one reader of teams.csv (`_formed_teams`), shared by every page."""
+    entry carries `team_join_url` / `team_join_cap` / `team_join_closes`. Independent of
+    the window - open, or shut for the rest of the semester - an assignment that is out
+    carries `team_salt` and `teams:` once any has formed: each team's name, headcount
+    (and, while the window is open, its cap), its members as salted digests
+    (`member_digest`, never a handle) and its repo's URL. `formed_teams` is the sync's one
+    reader of teams.csv (`_formed_teams`), shared by every page."""
     slug = schedule.semester_name(*found) if found else repo
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
     due = iso_when(when, "23:59:00")
@@ -1128,7 +1130,8 @@ def _assignment_entry(
         if sched is not None and found is not None
         else ("closed", None)
     )
-    forming = window == "open" and spec.team_formation_resolved == SELF_SELECT
+    self_select = found is not None and spec.team_formation_resolved == SELF_SELECT
+    forming = window == "open" and self_select and shuts is not None
     # Where the work goes, on the due row: the SHAPE in one word, and the address once
     # there is something at the other end of it.
     repo_lines = [f'submit_shape: "{spec.submit_shape}"']
@@ -1172,8 +1175,10 @@ def _assignment_entry(
     note = shape_note(spec.submit_shape) if out else ""
     note_fm = f'shape_note: "{q(note)}"\n' if note else ""
     team_fm = ""
-    if forming and shuts is not None:
-        cap = team_cap(course_org, spec, semester_org, found[0])
+    # The teams stay listed once the window shuts, for the rest of the semester: names and
+    # counts, read-only. Only the invitation (`team_join_*`, and the cap it quotes) goes.
+    if self_select and (forming or out):
+        cap = team_cap(course_org, spec, semester_org, found[0]) if forming else 0
 
         def team_entry(name: str, handles: list[str]) -> str:
             if external:
@@ -1184,8 +1189,9 @@ def _assignment_entry(
                 url = f"https://github.com/{semester_org}/{q(submission_repo(slug, name))}"
             digests = ", ".join(f'"{member_digest(semester_org, h)}"' for h in handles)
             return (
-                f'  - name: "{q(name)}"\n    members: {len(handles)}\n    cap: {cap}\n'
-                f"    members_sha256: [{digests}]\n"
+                f'  - name: "{q(name)}"\n    members: {len(handles)}\n'
+                + (f"    cap: {cap}\n" if cap else "")
+                + f"    members_sha256: [{digests}]\n"
                 + (f'    repo_url: "{url}"\n' if url else "")
             )
 
@@ -1193,14 +1199,17 @@ def _assignment_entry(
             team_entry(name, handles)
             for name, handles in (formed_teams or _formed_teams(semester_org))(found[0])
         )
-        closes = spoken_day(schedule.in_semester_zone(sched, shuts))
-        team_fm = (
-            f'team_join_url: "{join_issue_url(semester_org)}"\n'
-            f'team_join_cap: "{cap}"\n'
-            f'team_join_closes: "{closes}"\n'
-            f'team_salt: "{q(semester_org)}"\n'
-            + (f"teams:\n{listed}" if listed else "")
-        )
+        if forming:
+            closes = spoken_day(schedule.in_semester_zone(sched, shuts))
+            team_fm = (
+                f'team_join_url: "{join_issue_url(semester_org)}"\n'
+                f'team_join_cap: "{cap}"\n'
+                f'team_join_closes: "{closes}"\n'
+            )
+        if forming or listed:
+            team_fm += f'team_salt: "{q(semester_org)}"\n' + (
+                f"teams:\n{listed}" if listed else ""
+            )
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields.
     repo_fm = "".join(f"{ln}\n" for ln in repo_lines)
@@ -1526,7 +1535,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
         else:
             hosted = _mirror_public(site_wd, semester_org, policies)
         rows, present = _site_rows(semester_org, planned, allow, live, kinds, hosted)
-        # ONE read of teams.csv for every assignment forming teams (`_formed_teams`).
+        # ONE read of teams.csv for every self-select group assignment (`_formed_teams`).
         formed_teams = _formed_teams(semester_org)
         log_step(
             f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} row(s) "
