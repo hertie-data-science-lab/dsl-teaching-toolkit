@@ -21,6 +21,43 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q
 
+  console:
+    # The console's suite and typecheck, before merge: console-pages.yml runs them again on
+    # main, where a failure only leaves the live console on the previous build.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version-file: console/.nvmrc
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+
+  relay:
+    # The sign-in relay's suite and typecheck, before merge (relay-deploy.yml deploys on main).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+
   jekyll-contract:
     # Do the templates in templates/site/ actually COMPILE against the front matter
     # site.py writes? pytest cross-checks the keys, which catches a field nothing writes;
