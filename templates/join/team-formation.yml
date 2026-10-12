@@ -17,10 +17,11 @@ name: Form team
 # reach it. An assignment the lock does not carry, or one it marks `assigned` or `none`,
 # is refused here.
 #
-# teams.csv is PRIVATE, so the teams that exist - names and counts only - are listed in
-# each assignment's page in the student console (student-status.json, rewritten on a push
-# to teams.csv). The lock carries that page's URL (`team_formation_page:`) for the refusals
-# below to link.
+# teams.csv is PRIVATE, so the teams that exist - names and counts only - are listed on
+# each assignment's page (on the semester site, or in the student console where the course
+# opts in), which a push to teams.csv re-syncs. The lock carries that page's URL
+# (`team_formation_page:`) for the comments below to link; they name it neutrally, true
+# of either place.
 #
 # Runs under secrets.DSL_BOT_TOKEN, which needs, on the semester org: Contents R/W on
 # semester-config, Issues R/W on join.
@@ -133,9 +134,9 @@ jobs:
               // looks like. That reads as OPEN below - the behaviour those semesters have
               // had since the form existed - never as closed.
               //
-              // `page` is the assignment's page in the student console, which lists the
-              // teams that exist - "" where the lock carries none, and the refusal then
-              // names the console without linking it.
+              // `page` is the assignment's page, which lists the teams that exist - ""
+              // where the lock carries none, and the comment then names the page without
+              // linking it.
               const LOCK = '__LOCK__';
               const lockEntry = async (slug) => {
                 let text;
@@ -316,7 +317,7 @@ jobs:
                 `A maintainer will action this.`,
                 'needs-review');
               // Where the teams are listed, for the comments below to point at.
-              const page = lock.page ? `[the student console](${lock.page})` : 'the student console';
+              const page = lock.page ? `[the assignment's page](${lock.page})` : "the assignment's page";
 
               // Read-modify-write, retried on a 409. Many Join-team issues are in flight at
               // once near a project deadline, and each appends to the SAME file; the `sha`
@@ -368,7 +369,7 @@ jobs:
                 const missing = () =>
                   `Thanks @${handle} - there is no team **${team}** for \`${assignment}\`.` +
                   (near ? ` Did you mean **${near}** (${sizeOf(near)}/${cap})?` : '') +
-                  ` [Open a new Join team issue](${newIssue(near || team)}) with the name spelt exactly as in ` +
+                  ` [Open a new Join team issue](${newIssue(near || team)}) with the name spelt exactly as on ` +
                   `${page} - or choose *Create a new team* to start it.`;
                 const full = () =>
                   `Thanks @${handle} - **${team}** is full for \`${assignment}\` (${size}/${cap}). ` +
@@ -437,7 +438,7 @@ jobs:
                   `You lose access to ${outcome.left}'s repo; anything you pushed there stays with ${outcome.left}.`,
                 ]
                 : [`Done @${handle} - you're in team **${team}** for \`${assignment}\` (${outcome.count}/${cap}).`];
-              lines.push(``, `Next: your team's submission repo appears within a few minutes, under Assignments in ${page}.`);
+              lines.push(``, `Next: your team's submission repo appears within a few minutes - open it from ${page}.`);
               if (action === 'create') {
                 lines.push(``, `Tell your teammates to choose *Join or switch to an existing team* and type **${team}** exactly.`);
               }

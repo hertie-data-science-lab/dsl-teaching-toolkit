@@ -4,7 +4,8 @@ Two sites, two audiences, one set of Jekyll templates (`templates/site/`):
 
 - **semester site** (`<semester>.github.io`, `sync_site`) - student-facing, the 0.9.0 site
   (decision 0035 rule 1): the schedule, a tab per row kind, the assignment pages, All
-  Materials and Your Profile, under a banner to the student console, which carries the
+  Materials and Your Profile, under a banner to the student console (where the course
+  opts in), which carries the
   same materials. Its file links point at the semester's PRIVATE content repos, so they
   404 for non-members (the gate is deliberate). Regenerates `_lectures/`, `_assignments/`,
   `_events/` from the release state. Releases call it; the Sync site action runs it on
@@ -46,6 +47,7 @@ from .course import (
     CUTOFF_SENTENCE,
     INSTRUCTORS_FILE,
     SELF_SELECT,
+    advertises_console,
     identifier,
     late_rule,
     pages_repo,
@@ -1431,7 +1433,8 @@ def sync_site(course_org: str, semester_org: str) -> int:
     not-yet-released), the assignment pages with their hand-out and due rows, the
     display-only rows of the schedule (exams, special events and term dates), the All
     Materials index, the hosted copies the course publishes, the home text and the
-    announcements, under a banner to the student console (decision 0035 rule 1)."""
+    announcements, under a banner to the student console where the course opts in
+    (decision 0035 rule 1)."""
 
     def build(site_wd: Path) -> SitePlan:
         # ONE listing of the semester answers both questions this build asks of it: which
@@ -1624,8 +1627,11 @@ def sync_site(course_org: str, semester_org: str) -> int:
                     hosted,
                     _declared_syllabus(course_org, semester_org, sched, live, hosted),
                 ),
-                # The banner's link: this semester in the student console.
-                "_data/console.yml": console_yaml(semester_org),
+                # The banner's link: this semester in the student console, for a
+                # course that opts in; none, and no banner, otherwise.
+                "_data/console.yml": console_yaml(
+                    semester_org, advertises_console(meta)
+                ),
                 **theme_pages(semester=True, kinds=present),
                 # The course-specific layouts, includes and stylesheet - shipped
                 # from templates/site/, not from the shared theme, so a change to

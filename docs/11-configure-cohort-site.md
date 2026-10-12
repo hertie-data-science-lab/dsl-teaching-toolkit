@@ -2,8 +2,10 @@
 
 Every semester has an auto-deployed site at `<semester-org>.github.io`, regenerated from the org's config files.
 Its tabs are Home, Schedule, one tab per kind of row (Lectures, Labs, Readings, ...),
-Assignments (a page per assignment), All Materials and Your Profile, under a banner linking the
-semester in the student console. For now the site and the console both carry the materials;
+Assignments (a page per assignment), All Materials and Your Profile - under a banner linking the
+semester in the student console only for a course with `student_console: true` in its
+`dsl-course.yml` (off by default: students then see the site alone, and every team link
+points at the site). For now the site and the console both carry the materials;
 the console adds what a public page cannot know - a student's own repos, receipts and marks.
 No student's handle, email or mark is on the site; teams show by name, with salted member
 digests.

@@ -235,9 +235,17 @@ def kind_label(kind: str) -> str:
 
 def console_link(semester_org: str, screen: str = "week") -> str:
     """One semester's screen in the student console (`institution.console_url`), or "" when
-    the institution runs no console."""
+    the institution runs no console. Students are sent there only where their course opts
+    in (`course.advertises_console`); the callers ask that first."""
     url = load()["institution"].get("console_url") or ""
     return f"{url}?semester={semester_org}#{screen}" if url else ""
+
+
+def is_console_link(url: str) -> bool:
+    """Whether `url` is a `console_link` - what a sentence around a stored link (the lock's
+    `team_formation_page:`) reads to name the place it points at."""
+    base = load()["institution"].get("console_url") or ""
+    return bool(base) and url.startswith(base)
 
 
 def content_kinds() -> tuple[str, ...]:

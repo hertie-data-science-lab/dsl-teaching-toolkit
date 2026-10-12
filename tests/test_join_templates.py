@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import course, records, roster, teams, welcome
+from dsl_course import course, policy, records, roster, teams, welcome
 
 WELCOME = Path(__file__).resolve().parents[1] / "templates" / "join"
 TEMPLATES = [
@@ -753,7 +753,7 @@ def _run_form(
 
 
 # The assignment's page on the semester site, as the lock carries it for the refusals.
-_PAGE = "https://console.example/?semester=semester#assignment-assignment-2"
+_PAGE = "https://semester.github.io/assignments/02-assignment-2.html"
 
 
 def _lock_for(
@@ -897,7 +897,7 @@ def test_joining_a_name_nothing_resembles_is_refused_with_somewhere_to_look():
     # teams - carried in the lock because this script cannot work its URL out; and a new
     # issue one click away, its Team box prefilled.
     said = out["comments"][0]
-    assert f"spelt exactly as in [the student console]({_PAGE})" in said
+    assert f"spelt exactly as on [the assignment's page]({_PAGE})" in said
     assert (
         "(https://github.com/semester/join/issues/new?template=02-join-team.yml"
         "&team=team-zeta)" in said
@@ -916,7 +916,7 @@ def test_a_lock_with_no_page_still_says_where_the_teams_are_listed():
         _form_body("assignment-2", "Join or switch to an existing team", "team-zeta"),
     )
     said = out["comments"][0]
-    assert "spelt exactly as in the student console" in said
+    assert "spelt exactly as on the assignment's page" in said
     assert "github.io" not in said
 
 
@@ -962,7 +962,7 @@ def test_a_recorded_join_points_at_the_next_step():
     said = out["comments"][0]
     assert "you're in team **team-alpha** for `assignment-2` (3/4)" in said
     assert (
-        f"appears within a few minutes, under Assignments in [the student console]({_PAGE})."
+        f"appears within a few minutes - open it from [the assignment's page]({_PAGE})."
         in said
     )
     assert "Tell your teammates" not in said, "that line is for whoever CREATED it"
@@ -1005,7 +1005,7 @@ def test_joining_while_in_a_team_moves_you_in_one_write():
         in said
     )
     assert "You lose access to team-beta's repo" in said
-    assert "under Assignments in [the student console]" in said
+    assert "open it from [the assignment's page]" in said
     assert "Tell your teammates" not in said
     assert out["labels"] == ["team-recorded"]
 
@@ -1190,37 +1190,43 @@ def test_the_template_still_carries_the_sentence_the_links_are_spliced_over():
     assert welcome.TEAM_LIST_SENTENCE in welcome.template(welcome.JOIN_TEAM_FORM)
 
 
+def _header(opened: dict[str, str]) -> str:
+    return yaml.safe_load(welcome.join_team_form(opened))["body"][0]["attributes"][
+        "value"
+    ]
+
+
 def test_the_header_links_the_page_of_the_one_open_assignment():
     # "Type its name exactly as that page spells it" is an instruction a student can only
-    # follow if they can reach the page.
-    form = welcome.join_team_form({"assignment-2": _PAGE})
-    header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
-    assert f"listed in [the student console, under Assignments]({_PAGE})." in header
+    # follow if they can reach the page - on the semester site, and naming nothing else.
+    header = _header({"assignment-2": _PAGE})
+    assert f"listed on [the assignment's page]({_PAGE})." in header
     assert welcome.TEAM_LIST_SENTENCE not in header
+    assert "console" not in header
 
 
-def test_two_open_assignments_link_the_assignments_list():
+def test_two_open_assignments_link_the_sites_assignments_list():
     # Each has its own page; the one header sentence links the list that carries both.
-    form = welcome.join_team_form(
-        {
-            "assignment-2": _PAGE,
-            "assignment-3": "https://console.example/?semester=semester#assignment-assignment-3",
-        }
+    site = "https://semester.github.io/assignments/"
+    header = _header(
+        {"assignment-2": _PAGE, "assignment-3": f"{site}03-assignment-3.html"}
     )
-    header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
-    assert (
-        "[the student console, under Assignments]"
-        "(https://console.example/?semester=semester#assignments)." in header
-    )
-    assert "#assignment-assignment-" not in header
+    assert f"listed on [the semester site, under Assignments]({site})." in header
+    assert ".html" not in header
 
 
-def test_two_open_assignments_on_the_site_home_link_it_once():
-    # No console: every page is the semester site's home, linked as it is.
-    home = "https://semester.github.io/"
-    form = welcome.join_team_form({"assignment-2": home, "assignment-3": home})
-    header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
-    assert header.count(home) == 1 and f"]({home})." in header
+def test_a_course_that_opts_in_names_the_student_console():
+    # The lock carries console links only for such a course (`AssignmentPage.url`), and
+    # the sentence names the place its link points at.
+    two = policy.console_link("semester", "assignment-assignment-2")
+    three = policy.console_link("semester", "assignment-assignment-3")
+    assert f"listed in [the student console, under Assignments]({two})." in _header(
+        {"assignment-2": two}
+    )
+    both = _header({"assignment-2": two, "assignment-3": three})
+    listing = policy.console_link("semester", "assignments")
+    assert f"[the student console, under Assignments]({listing})." in both
+    assert "#assignment-assignment-" not in both
 
 
 def test_a_slug_whose_page_is_not_known_is_left_unlinked_rather_than_linked_nowhere():
@@ -1316,10 +1322,7 @@ def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):
         "a3"
     ]
     # And the header links its page, off the same lock - no second lookup.
-    assert (
-        "[the student console, under Assignments](https://c.github.io/a3)"
-        in content.decode()
-    )
+    assert "[the assignment's page](https://c.github.io/a3)" in content.decode()
 
 
 def test_a_form_that_could_not_be_written_is_reported(monkeypatch, capsys):

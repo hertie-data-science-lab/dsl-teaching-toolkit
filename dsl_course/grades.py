@@ -77,6 +77,7 @@ from .discovery import (
     exists_in,
     listing_by_name,
     listing_row,
+    student_console_for,
 )
 from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, Severity, moved_text
 from .gh_contents import (
@@ -1676,8 +1677,8 @@ _TEAM_LOCK_HEADER = f"""\
 #                   the date that window shuts, bare ISO (`2026-10-04`), for the refusal
 #                   to name - empty when there is no window, or no date to give
 #   team_formation_page:
-#                   the assignment's page in the student console, which lists the teams that
-#                   exist - for the refusal to link; empty for anything not self-select
+#                   the assignment's page, which lists the teams that exist - for the
+#                   refusal to link; empty for anything not self-select
 #
 # An assignment whose course template does not exist yet is locked to `{NO_TEAMS}`:
 # until the template says what it is, nobody can mint a GitHub team for it.
@@ -1777,7 +1778,7 @@ def team_lock_entries(
     nobody asked. Empty whenever there is no window, or no pin to take one from - the
     refusal then says only that the window is shut.
 
-    `pages` is each assignment's page in the student console by schedule key
+    `pages` is each assignment's page (`AssignmentPage.url`) by schedule key
     (`_formation_pages`), written for a self-select entry alone: that page lists the teams
     that exist, and it is what a refused Join links."""
     now = now if now is not None else datetime.now(UTC)
@@ -1842,13 +1843,15 @@ def self_select_keys(course_org: str, sched: schedule.Schedule) -> list[str]:
 def _formation_pages(
     course_org: str, semester_org: str, sched: schedule.Schedule
 ) -> dict[str, str]:
-    """Each self-select assignment's page URL in the student console, by schedule key.
+    """Each self-select assignment's page URL (`AssignmentPage.url`: on the semester site,
+    or in the student console where the course opts in), by schedule key.
 
     Empty when the plan has no self-select assignment: nothing links a page then."""
     if not self_select_keys(course_org, sched):
         return {}
+    console = student_console_for(course_org)
     return {
-        key: page.url(semester_org)
+        key: page.url(semester_org, console=console)
         for key, page in schedule.assignment_pages_by_key(sched).items()
     }
 

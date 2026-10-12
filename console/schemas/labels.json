@@ -47,7 +47,7 @@
       "label": "You assign them"
     },
     "self_select": {
-      "help": "On the assignment's page in the student console.",
+      "help": "On the assignment's page.",
       "label": "Students form their own"
     }
   },

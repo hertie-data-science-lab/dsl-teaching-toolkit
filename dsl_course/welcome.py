@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
 
-from . import records
+from . import policy, records
 from .central import CENTRAL, pin_central_ref
 from .course import JOIN_REPO
 from .gh_contents import get_file_content, put_file, put_files
@@ -136,7 +136,7 @@ ASSIGNMENT_FIELD_END = "# dsl:assignment-field:end"
 
 def open_formations(lock_text: str) -> dict[str, str]:
     """The assignments in a semester's `assignments.lock.yml` whose team-formation window is
-    OPEN, sorted, each with its page in the student console (`team_formation_page`, "" where
+    OPEN, sorted, each with its page (`team_formation_page`, "" where
     the lock carries none).
 
     A filter over `grades.parse_team_lock`, which lives beside the writer of that file: the
@@ -160,25 +160,30 @@ def open_formations(lock_text: str) -> dict[str, str]:
 # are spliced over. Pinned against the template by a test: a rewording there with no
 # rewording here would silently stop the splice.
 TEAM_LIST_SENTENCE = (
-    "The teams that already exist, and how much room each has left, are listed in the "
-    "student console, under Assignments."
+    "The teams that already exist, and how much room each has left, are listed on the "
+    "assignment's page on the semester site."
 )
 
 
 def _team_list_header(opened: Mapping[str, str]) -> str:
     """The header sentence, linking the page a student can actually open
-    (`AssignmentPage.url`): the one open assignment's own page in the student console, or,
-    with several open, the console's Assignments list, which carries each one's teams. A
-    header that knows no link is the template's own."""
+    (`AssignmentPage.url`): the one open assignment's own page, or, with several open, the
+    Assignments list, which carries each one's teams. The sentence names the place the link
+    is (`policy.is_console_link`): the student console only for a course that opts in, the
+    semester site otherwise. A header that knows no link is the template's own."""
     urls = list(dict.fromkeys(u for u in opened.values() if u))
     if not urls:
         return TEAM_LIST_SENTENCE
     url = urls[0]
-    if len(urls) > 1 and "#" in url:
-        url = f"{url.partition('#')[0]}#assignments"
+    lead = "The teams that already exist, and how much room each has left, are listed"
+    if policy.is_console_link(url):
+        if len(urls) > 1:
+            url = f"{url.partition('#')[0]}#assignments"
+        return f"{lead} in [the student console, under Assignments]({url})."
+    if len(urls) == 1:
+        return f"{lead} on [the assignment's page]({url})."
     return (
-        "The teams that already exist, and how much room each has left, are listed in "
-        f"[the student console, under Assignments]({url})."
+        f"{lead} on [the semester site, under Assignments]({url.rpartition('/')[0]}/)."
     )
 
 
@@ -195,7 +200,7 @@ def join_team_form(opened: Mapping[str, str]) -> str:
     render, which would take the Join-team route away from a semester entirely rather than
     merely leave it awkward.
 
-    `opened`'s values link each assignment's page in the student console from the header ("" =
+    `opened`'s values link each assignment's page from the header ("" =
     not known; the lock's `team_formation_page`). The form tells a student to type a
     team's name "exactly as that page spells it", so a page they cannot reach in one click
     is an instruction they cannot follow."""

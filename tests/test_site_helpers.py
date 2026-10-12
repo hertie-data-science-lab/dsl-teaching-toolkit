@@ -8,6 +8,7 @@ publish citations as text without leaking copyrighted bytes.
 from __future__ import annotations
 
 from datetime import date, datetime
+from pathlib import Path
 from textwrap import indent
 from zoneinfo import ZoneInfo
 
@@ -895,10 +896,18 @@ def test_a_public_site_has_no_assignments_tab(tmp_path):
     assert site_repo.retired_pages(tmp_path, ("assignments.md",)) == ()
 
 
-def test_the_banner_links_this_semester_in_the_console():
-    data = yaml.safe_load(site_repo.console_yaml("Semester-f2026"))
+def test_the_banner_links_this_semester_in_the_console_where_the_course_opts_in():
+    data = yaml.safe_load(site_repo.console_yaml("Semester-f2026", True))
     assert data["url"].startswith(policy.load()["institution"]["console_url"])
     assert data["url"].endswith("?semester=Semester-f2026#week")
+
+
+def test_a_course_that_has_not_opted_in_gets_no_banner():
+    # No `url:`, and the banner's `{% if %}` renders nothing.
+    assert "url" not in (yaml.safe_load(site_repo.console_yaml("S", False)) or {})
+    include = Path(__file__).parents[1] / "templates/site/_includes/console_banner.html"
+    banner = include.read_text()
+    assert "{%- if site.data.console and site.data.console.url -%}" in banner
 
 
 def _repos(*names):

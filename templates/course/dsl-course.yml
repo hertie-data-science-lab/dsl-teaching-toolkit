@@ -19,6 +19,8 @@ course_code: {course_code}
 #   # (The public open-courseware site always lists root files - it hosts what it lists.)
 #   # WHICH files the public website shows, and how, is `opencourse.yml` beside this
 #   # file - not here.
+# student_console: true   # OPTIONAL: point students at the student console - the sites'
+#   # banner and the team-formation links. Unset, they use the semester sites alone.
 
 # Defaults for this course's assignments (all OPTIONAL). Each run setting resolves
 # nearest-first: the assignment's block in a semester's `semester-config/assignments.yml`,

@@ -278,6 +278,13 @@ def test_contact_and_licence_are_optional_course_facts():
     assert validate({**base, "contact": "not an email"}, schema) != []
 
 
+def test_student_console_is_an_optional_course_flag():
+    schema = schemas.dsl_course_schema()
+    base = {"course_name": "ML", "course_code": "E1"}
+    assert validate({**base, "student_console": True}, schema) == []
+    assert validate({**base, "student_console": "yes"}, schema) != []
+
+
 def test_the_validator_catches_what_the_schemas_forbid():
     bad = {**CONTRACT_OUTCOME, "conclusion": "maybe", "extra": 1}
     problems = validate(bad, schemas.outcome_schema())

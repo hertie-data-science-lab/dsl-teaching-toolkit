@@ -118,6 +118,8 @@ COURSE_TOP_KEYS = (
     # them falls back to the institution's `policy.contact` and first licence.
     "contact",
     "licence",
+    # Send this course's students to the student console (`course.advertises_console`).
+    "student_console",
 )
 # The assignment_defaults keys New assignment reads as the course's defaults for the
 # questions it asks (contracts section 6); optional, beside COURSE_DEFAULT_KEYS.
@@ -696,6 +698,7 @@ def dsl_course_schema() -> dict:
             "site_link_extensions": {"type": "array", "items": _str()},
             # The pattern `policy.contact` is held to.
             "contact": {"type": "string", "pattern": r"^[^@\s]+@[^@\s]+$"},
+            "student_console": {"type": "boolean"},
         },
     )
     top |= {

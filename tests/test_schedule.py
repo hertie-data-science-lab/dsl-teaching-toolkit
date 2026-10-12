@@ -3122,15 +3122,20 @@ def test_assignment_pages_are_numbered_by_the_plan():
     assert pages[2].stem == "team-project"
     assert pages[3].stem == "07-capstone"
     assert pages[2].repo == "assignment-nets"
-    # Each page's link is its own page in the student console, by schedule key.
-    assert pages[2].url("Semester-F2026") == policy.console_link(
+    # Each page's link is its own page on the semester site, the file the site writes.
+    site = "https://semester-f2026.github.io/assignments/"
+    assert pages[2].url("Semester-F2026", console=False) == f"{site}team-project.html"
+    assert pages[3].url("Semester-F2026", console=False) == f"{site}07-capstone.html"
+    # Where the course opts into the student console: its page there, by schedule key.
+    assert pages[2].url("Semester-F2026", console=True) == policy.console_link(
         "Semester-F2026", "assignment-project"
     )
     # A template the plan does not name links the console's Assignments list.
     unnamed = schedule.AssignmentPage(None, "extra", "assignment-extra", None)
-    assert unnamed.url("Semester-F2026") == policy.console_link(
+    assert unnamed.url("Semester-F2026", console=True) == policy.console_link(
         "Semester-F2026", "assignments"
     )
+    assert unnamed.url("Semester-F2026", console=False) == f"{site}extra.html"
     assert set(schedule.assignment_pages_by_key(sched)) == set(sched.assignments)
 
 
