@@ -19,6 +19,8 @@ menu after it (Open: view, GitHub; Edit: in browser, the reader's editor) - is
 that selects which of the entry's links belong to this page, matched against each link's
 own `section` field - the open-courseware site's pages still pass it. A semester site's
 kind tab passes none: a row is one entry of one kind, and every link it carries is its own.
+`include.skip`, when given, is a section noun whose links are left out: a lecture's own tab
+skips "reading", so the readings attached to it show on the Readings tab only.
 
 "None" arrives as nil (kind.html passes `section=only` with `only` unassigned), so the
 guard tests `== nil`. It must not test `== blank`: Liquid 4 (GitHub Pages) answers that by
@@ -42,7 +44,9 @@ keeps its name: it is a contract with the dsl-jekyll-theme, not a description of
 {%- capture links -%}
 {%- for link in entry.links -%}
 {%- if include.section == nil or link.section == include.section -%}
+{%- unless link.section == include.skip -%}
 <li>{% include file_link.html name=link.name url=link.url view_url=link.view_url %}</li>
+{%- endunless -%}
 {%- endif -%}
 {%- endfor -%}
 {%- endcapture -%}
