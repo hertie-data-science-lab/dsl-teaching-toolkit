@@ -108,6 +108,30 @@ def test_a_rows_destinations_are_deduped_in_plan_order():
     assert row.dests == ["materials/lectures/01", "materials/labs/01"]
 
 
+def test_a_destination_under_another_of_the_rows_is_not_listed_again():
+    (row,) = _rows(
+        [
+            Release(
+                "lab-3",
+                _at(7),
+                [
+                    Deploy("cm", "labs/03_lab/solutions"),
+                    Deploy("cm", "labs/03_lab"),
+                    Deploy("cm", "labs/03_lab_extra"),
+                    Deploy("cm", "labs/03_lab", "other"),
+                    Deploy("cm", "labs/03_lab/solutions", "other"),
+                ],
+            )
+        ]
+    )
+    # Nested in the same repo goes; a sibling sharing a prefix and another repo stay.
+    assert row.dests == [
+        "materials/labs/03_lab",
+        "materials/labs/03_lab_extra",
+        "other/labs/03_lab",
+    ]
+
+
 def test_a_declared_kind_wins_over_any_folder():
     assert _kind(Deploy("cm", "labs/01"), kind="drop-in") == ("drop-in", False)
 

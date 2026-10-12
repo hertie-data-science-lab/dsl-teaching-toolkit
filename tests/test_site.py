@@ -2567,6 +2567,22 @@ def test_an_unreleased_row_names_where_its_copies_will_land(monkeypatch, tmp_pat
     assert "Materials for lecture 3 are not yet released" in text
 
 
+def test_an_unreleased_row_names_a_nested_copy_once(monkeypatch, tmp_path):
+    sched = Schedule(
+        releases=[
+            Release(
+                "lab-3",
+                _at(9, 15),
+                [_copy("labs/03_lab"), _copy("labs/03_lab/solutions")],
+                kind="lab",
+            )
+        ]
+    )
+    (text,) = _plan(monkeypatch, tmp_path, sched).collections["_lectures"].values()
+    assert "`materials/labs/03_lab`" in text
+    assert "solutions" not in text
+
+
 def test_a_declared_title_that_repeats_the_rows_name_is_not_said_twice(
     monkeypatch, tmp_path
 ):
