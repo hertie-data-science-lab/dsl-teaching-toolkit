@@ -13,7 +13,9 @@ layout: page
 {% comment %}
 One tab per row kind the semester has (Lectures, Labs, Readings, Drop-ins, ...). The page's
 own `kind` selects every row whose `tabs` name it: a lecture carrying its week's readings
-is on the Readings tab too, under the same name, showing only its reading links. Dated
+is on the Readings tab too, under the same name, showing only its reading links; its own
+tab skips those links and the citations (decision 0013: attached readings show on the
+Schedule and the Readings tab only). Dated
 rows come in date order, then the rows of folders released outside the plan (`undated`).
 An `events:` row of the same kind (an exam) is listed after them.
 {% endcomment %}
@@ -23,10 +25,11 @@ An `events:` row of the same kind (an exam) is listed after them.
 {% assign entries = dated | concat: undated %}
 {% for entry in entries %}
 {% assign only = nil %}
-{% if page.kind == "readings" and entry.kind != "readings" %}{% assign only = "reading" %}{% endif %}
+{% assign skip = "reading" %}
+{% if page.kind == "readings" %}{% assign skip = nil %}{% if entry.kind != "readings" %}{% assign only = "reading" %}{% endif %}{% endif %}
 <section class="session">
-{% capture citations %}{% if entry.reading_list %}<div class="reading-list markdown-content">{{ entry.reading_list | markdownify }}</div>{% endif %}{% if page.kind == "readings" and entry.readings_pending and entry.unreleased != true %}<p class="session-note"><em>Readings for this session are not yet released.</em></p>{% endif %}{% endcapture %}
-{% include session_entry.html entry=entry section=only extra=citations %}
+{% capture citations %}{% if page.kind == "readings" and entry.reading_list %}<div class="reading-list markdown-content">{{ entry.reading_list | markdownify }}</div>{% endif %}{% if page.kind == "readings" and entry.readings_pending and entry.unreleased != true %}<p class="session-note"><em>Readings for this session are not yet released.</em></p>{% endif %}{% endcapture %}
+{% include session_entry.html entry=entry section=only skip=skip extra=citations %}
 </section>
 {% unless forloop.last %}<hr class="session-rule"/>{% endunless %}
 {% endfor %}

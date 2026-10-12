@@ -2567,6 +2567,31 @@ def test_an_unreleased_row_names_where_its_copies_will_land(monkeypatch, tmp_pat
     assert "Materials for lecture 3 are not yet released" in text
 
 
+def test_an_unreleased_row_names_where_its_pending_readings_will_land(
+    monkeypatch, tmp_path
+):
+    # Readings attached to the lecture (decision 0013 rule 3), neither landed: the one
+    # sentence on the row names the readings' folder beside the lecture's.
+    sched = Schedule(
+        releases=[
+            Release(
+                "readings-8",
+                _at(10, 26),
+                [_copy("readings/08_week-8")],
+                show_on_site=False,
+            ),
+            Release("lecture-8", _at(11, 2), [_copy("lectures/08_lecture")]),
+        ]
+    )
+    (text,) = _plan(monkeypatch, tmp_path, sched).collections["_lectures"].values()
+    row = _front(text)
+    assert row["unreleased"] and row["readings_pending"]
+    assert (
+        "will appear in `materials/lectures/08_lecture`, `materials/readings/08_week-8`"
+        " when they are." in text
+    )
+
+
 def test_an_unreleased_row_names_a_nested_copy_once(monkeypatch, tmp_path):
     sched = Schedule(
         releases=[
