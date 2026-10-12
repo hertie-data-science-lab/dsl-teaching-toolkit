@@ -23,6 +23,18 @@ COURSE_CONFIG = "dsl-course.yml"
 # institution's defaults. Never read: a file still carrying one is NOT_MIGRATED, and
 # `migrate` strips them.
 RETIRED_COURSE_KEYS = ("org", "org_name", "cohort_defaults", "semester_defaults")
+
+
+def advertises_console(meta: dict) -> bool:
+    """Whether a course's `dsl-course.yml` sends its students to the student console
+    (`student_console: true`). Off by default: an unset course keeps its semester sites
+    exactly as they were - no banner, team links to the site's own assignment pages, and
+    no student-facing sentence naming the console - and the console, reading it off
+    `student-status.json`, shows a signed-in student the site's link instead of its
+    student screens."""
+    return meta.get("student_console") is True
+
+
 # The private per-semester config repo: roster, teams, schedule, grades, autograde records.
 # Every semester org has exactly one, under exactly this name.
 CONFIG_REPO = "semester-config"
@@ -222,7 +234,7 @@ LABELS = {
     "team_formation": {
         SELF_SELECT: {
             "label": "Students form their own",
-            "help": "On the Join screen of the student console.",
+            "help": "On the assignment's page.",
         },
         ASSIGNED: {
             "label": "You assign them",

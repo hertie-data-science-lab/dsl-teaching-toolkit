@@ -33,6 +33,7 @@ from .course import (
     JOIN_REPO,
     OLD_SEMESTER_TOPIC,
     SEMESTER_TOPIC,
+    advertises_console,
     session_dirs,
 )
 from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
@@ -538,6 +539,19 @@ def course_name_of(course_org: str) -> str:
         return ""
     meta = org_meta(course_org)
     return str(meta.get("course_name") or "")
+
+
+def student_console_for(course_org: str) -> bool:
+    """`course.advertises_console` off a COURSE org's own `dsl-course.yml`. Never raises: a
+    file that cannot be read answers False, which links the semester site - a page that
+    always exists - so a mail or a lock is never lost over which page it links."""
+    try:
+        return advertises_console(org_meta(course_org))
+    except Exception as exc:  # the site's page is always a right answer
+        log_err(
+            f"could not read {course_org}'s {COURSE_CONFIG} ({exc}) - linking the site"
+        )
+        return False
 
 
 def central_ref_for(org: str) -> str:

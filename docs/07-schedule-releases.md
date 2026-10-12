@@ -54,7 +54,7 @@ Each entry is one row on the semester site, in date order. The site names the ro
 | `title` | no | - | the session's name, shown beside the row's name ("Lecture 1 / Probability Theory") on the schedule and its kind's tab |
 | `details` | no | - | what the session covers - the **learning objectives** of a Hertie syllabus. Shown in the schedule's Details column AND under the row's heading on its kind's tab; may run to several paragraphs (use a `>` or `\|` block) |
 | `tbc` | no | `false` | signals the date is provisional: it fires as normal just the deployed site marks it **(TBC)** |
-| `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written and the entry is no row of its own (its files are in the student console's Materials). Readings are the exception; see [Silent releases](#silent-releases) |
+| `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written and the entry is no row of its own (its files are in the student console's All materials). Readings are the exception; see [Silent releases](#silent-releases) |
 
 
 NB: **the calendar event is not the release.** If nothing needs to ship at all, the row belongs under `events:`, not here.
@@ -74,7 +74,7 @@ A week's readings often go out ahead of the lecture. Give them their own entry w
 
 A readings entry with a number - its `number:`, else its label's (`readings-4`) - belongs to the lecture with that number, silent or not, whatever its date: that lecture's row links the readings and inlines the reading list, the Readings tab lists it under the lecture's name, and until the files land the Readings tab says they are still to come. Any other readings entry, or one whose number no shown lecture has, is a row of its own; a silent one is on the Readings tab only, unnumbered. In the console's schedule editor, **Joins lecture** on a readings entry sets its `number:`; leave it blank for a row of its own.
 
-Any other silent entry (setup files, a quiz solution) is no row: its files are in the student console's Materials, and the lectures around it keep their numbers. One that lands only root files (a `course-intro` shipping `SYLLABUS.md`) is a course document, pinned on the home page.
+Any other silent entry (setup files, a quiz solution) is no row: its files are in the student console's All materials, and the lectures around it keep their numbers. One that lands only root files (a `course-intro` shipping `SYLLABUS.md`) is a course document, pinned on the home page.
 
 ### Folders released outside the plan
 

@@ -1551,7 +1551,7 @@ def test_a_failed_branch_policy_clear_is_reported(monkeypatch, capsys):
 
 
 def test_a_fresh_materials_repo_has_no_publish_file(fake):
-    # Retired (decision 0016): the public website's settings are the course's
-    # opencourse.yml, and nothing reads a materials repo's publish.yml any more.
+    # An opt-in faculty write by hand (decision 0035): the semester site hosts nothing
+    # until a materials repo's publish.yml names it; the public website reads opencourse.yml.
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     assert "publish.yml" not in fake.written("course-materials-f2026")

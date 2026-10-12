@@ -64,7 +64,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    *NB: a session folder is released whole, subfolders included ([11](11-configure-cohort-site.md)).*
 
-   *NB: material no schedule entry names (a manual release, a flat `datasets/`) appears in the student console's **Materials**.*
+   *NB: material no schedule entry names (a manual release, a flat `datasets/`) appears in the student console's **All materials**.*
 
    *NB: this repo stays the source of truth, but a release is now a MERGE - so a fix typed into the semester's copy survives, and **Propagate semester edits** offers it back here as a pull request ([08](08-release-materials-to-cohort.md#carrying-semester-edits-back)).*
 

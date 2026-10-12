@@ -1258,7 +1258,7 @@ def test_a_course_preview_writes_nothing(fake, course, monkeypatch, capsys):
     assert f"-   .github/.last-refresh -> {records.path('heartbeat')}" in out
     assert "-   MAINTAINING.md -> .system/MAINTAINING.md" in out
     assert "course-materials-f2026: add the topic dsl-materials" in out
-    assert "course-materials-f2026/publish.yml: deleted (retired)" in out
+    assert "publish.yml" not in out  # the semester site's opt-in: left alone
     assert ".github/opencourse.yml: seeded on, from " in out
     assert "assignment-1-f2026: add the topic dsl-assignment" in out
     assert "(the files are listed once the registry step has run)" in out
@@ -1290,7 +1290,8 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         ).encode()
     )
     materials = fake.tree(COURSE, "course-materials-f2026")
-    assert set(materials) == {  # publish.yml deleted
+    assert set(materials) == {  # publish.yml kept: the semester site's opt-in
+        "publish.yml",
         ".system/MAINTAINING.md",
         ".system/SYLLABUS.md.sample",
         "SYLLABUS.md",
@@ -2636,8 +2637,9 @@ def test_a_website_already_on_is_seeded_with_nothing_extra_withheld(
 def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
     fake, course, monkeypatch, capsys
 ):
-    # The demo orgs are migrated already: a re-run deletes a publish.yml that is still
-    # there, and never touches an opencourse.yml someone has written.
+    # The demo orgs are migrated already: a re-run leaves a publish.yml alone (the semester
+    # site's hosted-copy opt-in, decision 0035) and never touches an opencourse.yml
+    # someone has written.
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     mine = b"enabled: true\nsource_repo: other\n"
     fake.tree(COURSE, ".github")["opencourse.yml"] = mine
@@ -2645,9 +2647,9 @@ def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     out = capsys.readouterr().out
-    assert "course-materials-f2026/publish.yml: deleted (retired)" in out
+    assert "publish.yml" not in out
     assert "opencourse.yml: seeded" not in out
-    assert "publish.yml" not in fake.tree(COURSE, "course-materials-f2026")
+    assert fake.tree(COURSE, "course-materials-f2026")["publish.yml"] == b"public:\n"
     assert fake.tree(COURSE, ".github")["opencourse.yml"] == mine
     capsys.readouterr()
     assert _main(monkeypatch, COURSE) == 0
