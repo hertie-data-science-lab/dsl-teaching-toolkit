@@ -541,6 +541,8 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
         "load_grading_spec",
         lambda *a, **k: _spec("type: group\n"),
     )
+    # Out, so the page would list any team formed; this semester has none.
+    monkeypatch.setattr(site.teams, "_teams_text", lambda org: None)
     sched = Schedule(
         assignments={
             "assignment-3": AssignmentEntry(
@@ -751,6 +753,37 @@ def test_the_invitation_goes_when_the_window_does(monkeypatch):
     out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=SHUT)
     assert "team_join" not in out
     assert out.count("Semester-f2026/repositories?q=assignment-3-") == 2
+
+
+def test_the_teams_stay_listed_after_the_window_shuts(monkeypatch):
+    # Maths f2026 assignment-2 lost its list of teams at midnight the day the window shut.
+    # The teams do not stop existing then: for the rest of the semester the page lists them,
+    # names and counts, read-only - the invitation, and the cap it quotes, go.
+    out = _team_entry(
+        monkeypatch,
+        SELF_SELECT_GROUP,
+        now=SHUT,
+        teams_csv=(
+            "assignment,team,github_handle\n"
+            "assignment-3,team-alpha,ada-l\n"
+            "assignment-3,team-alpha,bo-b\n"
+        ),
+    )
+    assert "team_join" not in out
+    assert 'team_salt: "Semester-f2026"' in out
+    assert '  - name: "team-alpha"\n    members: 2\n    members_sha256: [' in out
+    assert "cap:" not in out
+    # The reader's own team is still recognised, and linked to its repo.
+    assert (
+        '    repo_url: "https://github.com/Semester-f2026/assignment-3-team-alpha"\n'
+        in out
+    )
+    assert "ada-l" not in out and "bo-b" not in out
+
+
+def test_a_shut_window_nobody_formed_a_team_in_lists_nothing(monkeypatch):
+    out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=SHUT)
+    assert "team_" not in out and "teams:" not in out
 
 
 def test_a_group_assignment_not_yet_handed_out_is_still_only_pending(monkeypatch):

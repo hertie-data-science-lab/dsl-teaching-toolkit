@@ -1884,6 +1884,29 @@ def test_the_teams_that_exist_are_shown_under_the_invitation(generated):
     assert "No teams yet" in flat
 
 
+def test_the_teams_stay_read_only_once_the_window_shuts():
+    # After the window the page keeps the table - names and headcounts - with no join
+    # steps, no cap and no invitation, and the reader's own team is still recognised.
+    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
+    assert layout.count("{% if page.team_join_url or page.teams %}") == 2
+    # The shut arm: the `else` of the invitation's own `if`, inside the team block.
+    arm = layout.split("{% capture step_two %}")[1].split("{% else %}")[1]
+    shut = " ".join(arm.split("</section>")[0].split())
+    assert shut.startswith('<section class="callout team-step-form"> <h2>Teams</h2>')
+    assert "<th>Team</th><th>Members</th>" in shut
+    assert "{{ team.members }}" in shut
+    assert "data-members=\"{{ team.members_sha256 | join: ' ' }}\"" in shut
+    assert 'class="team-found"' in shut
+    for invite in (
+        "Form your team",
+        "Join team",
+        "team_join",
+        "team.cap",
+        "Places left",
+    ):
+        assert invite not in shut, invite
+
+
 def test_the_schedule_row_names_the_same_day_as_the_page(generated):
     # The Details cell is one line beside the brief's link, and it takes the date and the
     # address from the same two keys the Assignments tab's callout does - so the schedule

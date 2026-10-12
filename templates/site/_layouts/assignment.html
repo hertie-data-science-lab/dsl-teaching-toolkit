@@ -72,14 +72,19 @@ title: page.title
     handout provisions nothing for that student, so the repo button alone led to an empty
     listing with no explanation. So the page numbers them, in Your Profile's visual
     language (`.profile-step-title` / `.profile-step-num`), and the submission callout
-    below becomes step 2. With no window open none of this renders, and the submission
+    below becomes step 2. With no window open the steps do not render, and the submission
     callout is exactly the unnumbered box it always was.
 
-    `team_join_url` is the presence test: site.py writes the `team_join_*` keys only while
-    the window is open. The cap and the closing date are site.py's too, off the
-    assignment's own grading_config.yml and the plan's grading pin - the same two facts the
-    Join-team form enforces and the same day its refusal names. The date arrives already
+    `team_join_url` is the presence test for the INVITATION: site.py writes the
+    `team_join_*` keys only while the window is open. The cap and the closing date are
+    site.py's too, off the assignment's own grading_config.yml and the plan's grading
+    pin - the same two facts the Join-team form enforces and the same day its refusal names. The date arrives already
     spoken (`grades.spoken_day`), so it is printed as it stands.
+
+    Once the window shuts the teams STAY, for the rest of the semester: `teams` is written
+    whenever any has formed and the assignment is out, so with no `team_join_url` the
+    block is one unnumbered "Teams" callout - the table, read-only, team and headcount -
+    with no join steps, no cap, and an unnumbered submission callout below.
 
     `teams` is NAMES AND COUNTS: the site carries no readable handle. Each row also carries
     `data-members`, salted SHA-256 digests of its members' handles
@@ -101,9 +106,11 @@ title: page.title
     and Save (`.profile-steps` scopes those styles, so the box wears that class), writing
     the same `dsl.handle` through `dslOpenIn.save` - and detection re-runs in place. With no
     script, or storage that throws, `data-team-state` is never set: both steps read in full
-    and nothing is dimmed.
+    and nothing is dimmed. The same recognition runs once the window has shut, off the
+    same rows: the Teams callout names the reader's team and the submission button goes
+    to its repo.
     {%- endcomment -%}
-    {% if page.team_join_url %}
+    {% if page.team_join_url or page.teams %}
     <div class="team-steps" id="dsl-team-steps" data-salt="{{ page.team_salt | escape }}">
     <div class="profile-steps team-handle" hidden>
       <label for="dsl-team-handle">Enter your GitHub handle to see your team here</label>
@@ -114,6 +121,7 @@ title: page.title
       </span>
       <p class="profile-hint">Saved in this browser only, the same as in <a href="{{ '/profile/' | prepend: site.baseurl }}">Your Profile</a>.</p>
     </div>
+    {% if page.team_join_url %}
     <section class="callout team-step-form">
       <h2 class="profile-step-title"><span class="profile-step-num">1</span> Form your team</h2>
       <p class="team-found" hidden></p>
@@ -144,6 +152,23 @@ title: page.title
     </section>
     {% capture step_two %}<h2 class="profile-step-title"><span class="profile-step-num">2</span> Open your submission repo</h2>
       <p class="team-hint" hidden>Form or join a team first.</p>{% endcapture %}
+    {% else %}
+    <section class="callout team-step-form">
+      <h2>Teams</h2>
+      <p class="team-found" hidden></p>
+      <table class="team-table">
+        <thead><tr><th>Team</th><th>Members</th></tr></thead>
+        <tbody>
+        {% for team in page.teams %}
+          <tr data-team="{{ team.name | escape }}" data-members="{{ team.members_sha256 | join: ' ' }}"{% if team.repo_url %} data-repo-url="{{ team.repo_url }}"{% endif %}>
+            <td>{{ team.name }}</td>
+            <td>{{ team.members }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
     {% endif %}
 
     {%- comment -%}
@@ -265,7 +290,7 @@ title: page.title
     </div>
     {% endif %}
     {% endunless %}
-    {% if page.team_join_url %}
+    {% if page.team_join_url or page.teams %}
     </div>
     <script>
     (function () {

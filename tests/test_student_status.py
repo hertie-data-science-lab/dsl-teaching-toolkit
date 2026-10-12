@@ -301,6 +301,17 @@ def test_a_team_is_its_name_its_headcount_and_its_cap():
     assert project["group"] is True
 
 
+def test_the_teams_stay_after_the_window_shuts_without_the_invitation():
+    # The console lists the teams for the rest of the semester; only the form goes.
+    (project,) = [
+        a
+        for a in _render(datetime(2027, 1, 15, tzinfo=UTC))["assignments"]
+        if a["slug"] == "assignment-2-project"
+    ]
+    assert project["team_formation"] is None
+    assert project["teams"] == [{"name": "red-team", "members": 2, "cap": 3}]
+
+
 def test_an_email_only_where_the_instructor_chose_to_show_it():
     cards = _render()["instructors"]
     assert [(c["name"], c["role"], c["email"]) for c in cards] == [

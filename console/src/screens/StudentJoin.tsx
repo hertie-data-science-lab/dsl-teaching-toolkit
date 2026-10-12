@@ -202,18 +202,21 @@ export function TeamForm({ org, a, mine, onSent, picked = '', tz = DEFAULT_TIMEZ
 /**
  * "Teams so far" for `a` (decision 0035 rule 8): name, headcount and places left (the 0.9.0
  * table's "Team | Places left"), those with room first, yours marked. With `onPick` (the form
- * is open) each team with room gets a Pick button that fills in the form.
+ * is open) each team with room gets a Pick button that fills in the form. `shut` (the window
+ * has closed) keeps it for the rest of the semester as "Teams": name and headcount only, by
+ * name - nothing is left to join.
  */
-export function TeamList({ a, current, onPick, picked = '' }: { a: SemesterAssignment; current: string | null; onPick?: (name: string) => void; picked?: string }) {
+export function TeamList({ a, current, onPick, picked = '', shut = false }: { a: SemesterAssignment; current: string | null; onPick?: (name: string) => void; picked?: string; shut?: boolean }) {
   if (!a.teams.length) return null;
-  const cap = (t: TeamRoom) => t.cap ?? a.teamFormation?.cap ?? null;
+  const open = !shut;
+  const cap = (t: TeamRoom) => (open ? t.cap ?? a.teamFormation?.cap ?? null : null);
   const room = (t: TeamRoom) => cap(t) === null || t.members < cap(t)!;
   const list = [...a.teams].sort((x, y) => Number(room(y)) - Number(room(x)) || x.name.localeCompare(y.name));
   return (
     <div class="table-wrap team-table">
       <table class="grid">
-        <caption>Teams so far</caption>
-        <thead><tr><th>Team</th><th>Members</th><th>Places left</th>{onPick ? <th><span class="sr">Pick</span></th> : null}</tr></thead>
+        <caption>{open ? 'Teams so far' : 'Teams'}</caption>
+        <thead><tr><th>Team</th><th>Members</th>{open ? <th>Places left</th> : null}{onPick ? <th><span class="sr">Pick</span></th> : null}</tr></thead>
         <tbody>
           {list.map((t) => {
             const mine = current !== null && t.name.toLowerCase() === current.toLowerCase();
@@ -222,7 +225,7 @@ export function TeamList({ a, current, onPick, picked = '' }: { a: SemesterAssig
               <tr class={mine ? 'mine' : undefined}>
                 <td><b>{t.name}</b>{mine ? <span class="footnote"> (your team)</span> : null}</td>
                 <td>{t.members}{c !== null ? ` of ${c}` : ''}</td>
-                <td>{c === null ? '' : room(t) ? c - t.members : 'full'}</td>
+                {open ? <td>{c === null ? '' : room(t) ? c - t.members : 'full'}</td> : null}
                 {onPick ? <td>{mine || !room(t) ? null : <button class="btn outline small" type="button" aria-pressed={picked === t.name} onClick={() => onPick(t.name)}>{picked === t.name ? 'Picked' : 'Pick'}</button>}</td> : null}
               </tr>
             );

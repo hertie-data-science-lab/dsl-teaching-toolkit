@@ -103,7 +103,7 @@ export interface SemesterAssignment {
   shapeNote: string;
   /** The dates are provisional. */
   tbc: boolean;
-  /** The teams formed so far, while team formation is open. */
+  /** The teams formed so far: while team formation is open, and for the rest of the semester once it shuts. */
   teams: TeamRoom[];
 }
 

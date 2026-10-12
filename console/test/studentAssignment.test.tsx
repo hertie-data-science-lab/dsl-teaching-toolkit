@@ -186,7 +186,12 @@ describe('the team steps', () => {
     const closed = render(page(GROUP, mine({ units: {} }), { now: after }));
     expect(closed).not.toContain('Form your team');
     expect(closed).not.toContain('Join or create a team');
-    expect(text(page(GROUP, mine({ units: {} }), { now: after }))).toContain('Teams so far Team Members Places left team-x 2 of 3 1');
+    const shut = text(page(GROUP, mine({ units: {} }), { now: after }));
+    // Read-only for the rest of the semester: names and headcounts, nothing left to join.
+    expect(shut).toContain('Teams Team Members team-x 2 team-y 3');
+    expect(shut).not.toContain('Places left');
+    expect(shut).not.toContain('Teams so far');
+    expect(text(page(GROUP, mine({ units: { p: { slug: 'p', repo: 'p-team-x', team: 'team-x', members: [LOGIN, 'b'], shared: false } } }), { now: after }))).toContain('team-x (your team) 2');
     // An individual assignment has neither.
     expect(render(page(A, mine()))).not.toContain('Teams so far');
   });
