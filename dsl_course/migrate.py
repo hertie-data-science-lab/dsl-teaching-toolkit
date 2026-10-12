@@ -23,10 +23,12 @@ workflows, for the window, and enabled again at the end. (An org variable cannot
 on GitHub Free org variables do not reach private repos, and the workflows already live in
 an org carry no gate until they are re-rendered.) It waits for quiet before it switches
 anything. GitHub drops, rather than queues, what fires into a disabled repo, so the unpause
-dispatches one Scheduled release and one Sync membership in its place, and waits (bounded)
-for those runs, so the next org's migration finds the course quiet. For a real course
-the tier moves inside a HOLD of every org of the course (`--hold`, `--release`); a
-migration under a hold neither pauses nor unpauses.
+dispatches one Scheduled release, one Sync membership and one Sync site in its place, and
+waits (bounded) for those runs, so the next org's migration finds the course quiet. For a
+real course the tier moves inside a HOLD of every org of the course (`--hold`,
+`--release`); a migration under a hold neither pauses nor unpauses. What a step would
+refuse is asked in the plan ("will stop here"): the preview fails there, and a run stops
+before its pause.
 
 Semester org, in order: preflight, pause, rename repos, layout, keys, proposed releases,
 topic, re-render, status, unpause. Course org: preflight, pause, registry, .system/,
@@ -62,6 +64,7 @@ from .course import (
     COURSE_HUB_TOPIC,
     INSTRUCTORS_FILE,
     JOIN_REPO,
+    LEGACY_SUBMIT_VIA,
     MAINTAINING_FILE,
     MATERIALS_REPO_PREFIX,
     MIGRATE_DRIVER,
@@ -106,6 +109,7 @@ from .ghcli import forget_all, gh, git
 from .grades import (
     GRADING_FILE,
     TEAM_LOCK_PATH,
+    assignment_title,
     parse_grading_spec,
     sync_team_lock,
     team_lock_content,
@@ -325,29 +329,64 @@ def formats_line(line: str, indent: str = "") -> str:
     return f"{indent}formats: {listed}{tail}"
 
 
+def submit_via_line(line: str, indent: str = "") -> str:
+    """One `submit_via: github` line (at `indent`) in the canonical word
+    (`course.LEGACY_SUBMIT_VIA`), its comment kept at its column; any other line
+    unchanged."""
+    match = re.match(rf"^{indent}submit_via:(.*)$", line)
+    if not match:
+        return line
+    value, tail = split_comment(match.group(1))
+    word = LEGACY_SUBMIT_VIA.get(value.strip().strip("'\"").lower())
+    if word is None:
+        return line
+    head = f"{indent}submit_via: {word}"
+    if not tail:
+        return head
+    gap = len(line) - len(tail.lstrip()) - len(head)  # the comment's column kept
+    if gap < 1:
+        gap = len(tail) - len(tail.lstrip())  # ... or, past it, its spacing
+    return head + " " * gap + tail.lstrip()
+
+
 def grading_config_keys(text: str) -> str:
-    """A template's `grading_config.yml`: the top-level `format:` becomes `formats:`."""
-    return "\n".join(formats_line(line) for line in text.split("\n"))
+    """A template's `grading_config.yml`: the top-level `format:` becomes `formats:`, and
+    `submit_via: github` reads `assignment_repo`."""
+    return "\n".join(submit_via_line(formats_line(line)) for line in text.split("\n"))
 
 
 def course_config_keys(text: str) -> str:
     """The course `dsl-course.yml`: every retired key (`course.RETIRED_COURSE_KEYS` -
     `org`, `org_name`, `cohort_defaults`, `semester_defaults`) removed with its block, and
-    the `format:` under `assignment_defaults:` -> `formats:`. `assignment_defaults` stays:
-    it is the course layer of the cascade (decision 0009)."""
+    under `assignment_defaults:` `format:` -> `formats:` and `submit_via: github` ->
+    `assignment_repo`. `assignment_defaults` stays: it is the course layer of the cascade
+    (decision 0009). A blank line inside a removed block goes with it; the blank lines
+    after it leave one, where the block was."""
     out, section = [], ""
+    held: list[str] = []  # blank lines met inside a block being removed
     for line in text.split("\n"):
         if top := _TOP_KEY.match(line):
             section = top.group(1)
         if section in RETIRED_COURSE_KEYS and (top or line[:1] in (" ", "\t")):
+            held = []
             continue  # the key's own line, or a line of its block
-        if section in RETIRED_COURSE_KEYS and line.strip():
+        if section in RETIRED_COURSE_KEYS and not line.strip():
+            held.append(line)
+            continue
+        if section in RETIRED_COURSE_KEYS:
             section = ""  # a top-level comment ends the block
+        if held and out and out[-1].strip():
+            out.append("")
+        held = []
         if section == ASSIGNMENT_DEFAULTS_KEY and not top:
-            indent = re.match(r"^(\s+)format:", line)
+            indent = re.match(r"^(\s+)(?:format|submit_via):", line)
             if indent:
-                line = formats_line(line, indent.group(1))
+                line = submit_via_line(
+                    formats_line(line, indent.group(1)), indent.group(1)
+                )
         out.append(line)
+    if held and out and out[-1].strip():
+        out.append("")
     return "\n".join(out)
 
 
@@ -503,6 +542,11 @@ def _read_run_keys(raw: dict) -> dict:
     return {k: v for k, v in values.items() if v is not None or k in settings.LATE_PAIR}
 
 
+# The one run setting the old engine read from the course's `assignment_defaults` (its
+# team cap); every other one came from the template, else the toolkit's default.
+OLD_COURSE_RUN_KEYS = ("max_team_size",)
+
+
 def instance_additions(
     meta: dict,
     templates: dict[str, dict],
@@ -513,14 +557,21 @@ def instance_additions(
     of `meta` (the OLD `schedule.yml`, parsed) as the old one did: `{key: {setting:
     value}}`, and a note for each late cutoff that moves by more than an hour.
 
-    - the template's run settings (`templates`, `{template repo: raw run keys}`) that the
-      layers below (`lower`: the semester's defaults, the course, the institution) would
-      not give;
+    - each run setting as the old engine ran it - the template's (`templates`, `{template
+      repo: raw run keys}`), else the institution's default (the course's only for
+      `OLD_COURSE_RUN_KEYS`) - wherever the layers below (`lower`: the semester's
+      defaults, the course, the institution) would give another;
     - `late_window_days` (with the penalty beside it) where `grading_datetime` was not the
       due date plus the window: the cutoff is computed now, rounded to whole days;
     - `semester_dest_repo`, moved out of the schedule.
     A setting the file already states is left as written."""
     tz = schedule._tz(meta.get("timezone"))
+    named = dict(lower)
+    course = named.get("course", {})
+    toolkit = {
+        **named.get("institution", {}),
+        **{k: course[k] for k in OLD_COURSE_RUN_KEYS if course.get(k) is not None},
+    }
     out: dict[str, dict] = {}
     notes: list[str] = []
     entries = meta.get("assignments")
@@ -529,15 +580,15 @@ def instance_additions(
             continue
         slug = str(slug)
         own = _read_run_keys(templates.get(str(entry.get("course_source_repo")), {}))
-        stack = [("template", own), *lower]
+        old = [("template", own), ("toolkit", toolkit)]
         want: dict = {}
         for key in settings.RUN_KEYS:
             if key in settings.LATE_PAIR:
                 continue
-            value, _ = settings.resolve(key, stack)
-            if value != settings.resolve(key, lower)[0]:
+            value, _ = settings.resolve(key, old)
+            if value is not None and value != settings.resolve(key, lower)[0]:
                 want[key] = value
-        pair = {k: settings.resolve(k, stack)[0] for k in settings.LATE_PAIR}
+        pair = {k: settings.resolve(k, old)[0] for k in settings.LATE_PAIR}
         due = schedule._coerce_datetime(entry.get("due_datetime"), tz, end_of_day=True)
         pin = schedule._coerce_datetime(
             entry.get("grading_datetime"), tz, end_of_day=True
@@ -1399,6 +1450,11 @@ class Step:
     # Lines for a person to act on by hand, shown in the plan whether or not the step has
     # work (a done step says "already migrated" and would otherwise say nothing).
     notes: Callable[[], list[str]] = list
+    # Why `do` or `verify` would refuse, read off the org as it is now: the same checks,
+    # asked before anything is written, so a preview fails exactly where a run would stop,
+    # and a run stops before its pause rather than inside the window. Each check logs its
+    # own detail; a reason is one line.
+    stops: Callable[[], list[str]] = list
 
 
 def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
@@ -1425,6 +1481,7 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
 
         log_step(f"Migration plan for {org}")
         pending = False  # a work step above has work
+        stops: list[str] = []  # the steps a run would stop at
         for step in steps:
             if step.after_work and pending:
                 log(f"  {step.name}: runs after the steps above")
@@ -1438,6 +1495,18 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
             pending = pending or not step.bracket
             for line in [*step.plan(), *step.notes()]:
                 log(f"    - {line}")
+            for reason in step.stops():
+                log(f"    - will stop here: {reason}")
+                stops.append(step.name)
+        if stops:
+            log_err(
+                f"the run would stop at {stops[0]}: fix what is named above by hand, "
+                f"then run again. Nothing was written."
+            )
+            if not preview and pause.window_open():
+                pause.load()  # a stopped run's pause: say what is still off
+                log_err(pause.stopped())
+            return 1
         if preview:
             log_ok("PREVIEW - nothing was written. Run again with --no-preview.")
             return 0
@@ -1491,6 +1560,7 @@ PAUSE_COMMIT = "migrate: record the Actions settings paused"
 
 
 MEMBERSHIP_WORKFLOW = "sync-membership.yml"
+SITE_WORKFLOW = "sync-site.yml"
 
 
 @dataclass(frozen=True)
@@ -1506,9 +1576,11 @@ class Tick:
 
 
 def lost_ticks(semester_org: str | None) -> list[Tick]:
-    """The Scheduled release and the Sync membership a pause drops: for one semester, scoped
-    to it as its `semester-config` push is; for a course, what the ds01 timers send - every
-    semester."""
+    """The Scheduled release, Sync membership and Sync site a pause drops: for one
+    semester, scoped to it as its `semester-config` push is; for a course, what the ds01
+    timers (and a push of `dsl-course.yml`) send - every semester. Sync site because the
+    migration's own commits to `schedule.yml`, `assignments.yml` and `instructors.yml`
+    are what would have fired it."""
     driver = ("-f", f"client_payload[driver]={MIGRATE_DRIVER}")
     if semester_org:
         who = ("-f", f"client_payload[semester_org]={semester_org}")
@@ -1525,6 +1597,12 @@ def lost_ticks(semester_org: str | None) -> list[Tick]:
                 (*who, *driver),
                 f"Sync membership for {semester_org}",
             ),
+            Tick(
+                "sync-site",
+                SITE_WORKFLOW,
+                (*who, *driver),
+                f"Sync site for {semester_org}",
+            ),
         ]
     return [
         Tick(
@@ -1539,6 +1617,8 @@ def lost_ticks(semester_org: str | None) -> list[Tick]:
             ("-F", "client_payload[all_semesters]=true", *driver),
             "Sync membership for every semester",
         ),
+        # A Sync site dispatch naming no semester syncs every one.
+        Tick("sync-site", SITE_WORKFLOW, driver, "Sync site for every semester"),
     ]
 
 
@@ -2073,6 +2153,22 @@ def _diff(name: str, old: str, new: str) -> list[str]:
     return [f"  {line}" for line in lines if not line.startswith(("---", "+++"))]
 
 
+def _meta_faults(text: str | None) -> list[str]:
+    """Each key of a `dsl-course.yml` this engine refuses as NOT_MIGRATED (a retired key,
+    an old spelling in the course layer), named."""
+    meta = _yaml(text)
+    defaults = meta.get(ASSIGNMENT_DEFAULTS_KEY)
+    bad = [f.field for f in retired_course_faults(meta)]
+    bad += [
+        f"{ASSIGNMENT_DEFAULTS_KEY}.{key}"
+        for key in RENAMED_SETTINGS
+        if isinstance(defaults, dict) and key in defaults
+    ]
+    for key in bad:
+        log_err(f"{COURSE_CONFIG}: `{key}` is still NOT_MIGRATED")
+    return bad
+
+
 def _grading_clean(text: str | None) -> bool:
     """A `grading_config.yml` read by this engine with no NOT_MIGRATED fault."""
     if text is None:
@@ -2130,6 +2226,14 @@ class Semester:
             if want := self.description(old):
                 out.append(f"  description -> {want}")
         return out
+
+    def rename_stops(self) -> list[str]:
+        names = set(_listing(self.org))
+        return [
+            f"{self.org} has both {old} and {new} - resolve by hand"
+            for old, new in self.renames_left().items()
+            if new in names
+        ]
 
     def rename(self) -> bool:
         names = set(_listing(self.org))
@@ -2312,6 +2416,22 @@ class Semester:
             ].decode()
         return out + review_plan(final)
 
+    def layout_stops(self) -> list[str]:
+        """What `layout` refuses: a `people.yml` it cannot convert, a record move onto
+        a file that differs (`refuse_clashes` names them)."""
+        repo = self.config()
+        moves, files, _, _ = self.layout_work()
+        out = []
+        if INSTRUCTORS_FILE in files and not files[INSTRUCTORS_FILE]:
+            out.append(
+                f"{OLD_PEOPLE_FILE} in {self.org} cannot be converted faithfully - write "
+                f"{INSTRUCTORS_FILE} by hand (docs/05), delete {OLD_PEOPLE_FILE}, then "
+                f"run again"
+            )
+        if refuse_clashes(self.org, repo, _files(self.org, repo), moves):
+            out.append(f"a record move in {repo} lands on a file that differs")
+        return out
+
     def layout(self) -> bool:
         repo = self.config()
         moves, files, deletes, old_pointer = self.layout_work()
@@ -2443,6 +2563,34 @@ class Semester:
             and _schedule_clean(text, self.instance_text(), quiet=True)
         )
 
+    def title_notes(self, meta: dict) -> list[str]:
+        """`assignments.<key>: title "old" -> "new"` for each `title:` the keys step
+        strips that is not the name the assignment takes from now on (its template's,
+        `grades.assignment_title`): for faculty to check, nothing is written."""
+        entries = meta.get("assignments")
+        out = []
+        for key, entry in entries.items() if isinstance(entries, dict) else ():
+            if not isinstance(entry, dict) or entry.get("title") in (None, ""):
+                continue
+            repo = str(entry.get("course_source_repo") or "")
+            text = repo and get_file_content(
+                self.course, repo, GRADING_FILE, ref=SOLUTION_BRANCH
+            )
+            try:
+                spec = parse_grading_spec(text or "")
+            except (NotMigrated, yaml.YAMLError):
+                spec = parse_grading_spec("")
+            old, new = (
+                str(entry["title"]).strip(),
+                assignment_title(self.course, repo, spec, str(key)),
+            )
+            if old != new:
+                out.append(
+                    f'assignments.{key}: title "{old}" -> "{new}" (the name now comes '
+                    f"from the template)"
+                )
+        return out
+
     def keys_plan(self) -> list[str]:
         text, new = self.keys_text()
         instance, notes = self.instance_work()
@@ -2467,7 +2615,21 @@ class Semester:
                 + "write what the old files said"
             )
             out += _diff(ASSIGNMENTS_FILE, current, instance)
-        return out + notes
+        return out + notes + self.title_notes(_yaml(text))
+
+    def keys_stops(self) -> list[str]:
+        """What `keys` refuses and `keys_verified` fails on, over the files as `keys`
+        would write them: the first, as the run stops at the first."""
+        text, new = self.keys_text()
+        instance, _ = self.instance_work()
+        if text != new and not entries_kept(text, new):
+            return [f"the {schedule.SCHEDULE_PATH} rewrite would lose or add an entry"]
+        if instance is not None and not _instance_clean(instance):
+            return [f"the {ASSIGNMENTS_FILE} it writes would not read clean"]
+        after = self.instance_text() if instance is None else instance
+        if not _schedule_clean(new, after):
+            return [f"{schedule.SCHEDULE_PATH} would still say NOT_MIGRATED"]
+        return []
 
     def keys(self) -> bool:
         text, new = self.keys_text()
@@ -2535,6 +2697,12 @@ class Semester:
                 f"  {key}: undated: will show as a problem until dated and numbered"
                 for key in undated
             ),
+        ]
+
+    def numbers_stops(self) -> list[str]:
+        declined = self.numbers_work()[3]
+        return [
+            f"{schedule.SCHEDULE_PATH} {key}: add `number:` by hand" for key in declined
         ]
 
     def numbers(self) -> bool:
@@ -2703,6 +2871,7 @@ class Semester:
                 plan=self.rename_plan,
                 do=self.rename,
                 verify=self.rename_verified,
+                stops=self.rename_stops,
                 rollback="rename each repo back in its Settings (the old name is free)",
             ),
             Step(
@@ -2711,6 +2880,7 @@ class Semester:
                 plan=self.layout_plan,
                 do=self.layout,
                 verify=self.layout_verified,
+                stops=self.layout_stops,
                 rollback=(
                     f"git revert the '{LAYOUT_COMMIT}' commit(s) in {repo}, "
                     f"{self.org}/.github and {self.org}/{JOIN_REPO}"
@@ -2722,6 +2892,7 @@ class Semester:
                 plan=self.keys_plan,
                 do=self.keys,
                 verify=self.keys_verified,
+                stops=self.keys_stops,
                 rollback=(
                     f"git revert the '{KEYS_COMMIT}' commit in {repo} (it holds "
                     f"{schedule.SCHEDULE_PATH} and {ASSIGNMENTS_FILE})"
@@ -2733,6 +2904,7 @@ class Semester:
                 plan=self.numbers_plan,
                 do=self.numbers,
                 verify=self.numbers_done,
+                stops=self.numbers_stops,
                 rollback=(
                     f"git revert the '{NUMBERS_COMMIT}' commit in {repo} (it holds "
                     f"only {schedule.SCHEDULE_PATH})"
@@ -2858,18 +3030,12 @@ class Course:
     def meta_verified(self) -> bool:
         """Re-read with this engine's own rules: no retired key, no old spelling in the
         course layer."""
-        text, _ = self.meta_text()
-        meta = _yaml(text)
-        defaults = meta.get(ASSIGNMENT_DEFAULTS_KEY) or {}
-        bad = [f.field for f in retired_course_faults(meta)]
-        bad += [
-            f"{ASSIGNMENT_DEFAULTS_KEY}.{key}"
-            for key in RENAMED_SETTINGS
-            if key in (defaults if isinstance(defaults, dict) else {})
-        ]
-        for key in bad:
-            log_err(f"{COURSE_CONFIG}: `{key}` is still NOT_MIGRATED")
-        return self.meta_done() and not bad
+        return self.meta_done() and not _meta_faults(self.meta_text()[0])
+
+    def meta_stops(self) -> list[str]:
+        if _meta_faults(self.meta_text()[1]):
+            return [f"{COURSE_CONFIG} would still say NOT_MIGRATED"]
+        return []
 
     def rewrite_meta(self) -> bool:
         text, new = self.meta_text()
@@ -2973,6 +3139,13 @@ class Course:
             )
             for repo, text in self.templates_left().items()
         )
+
+    def template_stops(self) -> list[str]:
+        return [
+            f"{repo}@{SOLUTION_BRANCH}/{GRADING_FILE} would still say NOT_MIGRATED"
+            for repo, new in self.templates_left().items()
+            if not _grading_clean(new)
+        ]
 
     def templates_verified(self) -> bool:
         bad = [r for r in self.templates() if not _grading_clean(self.grading_text(r))]
@@ -3088,13 +3261,18 @@ class Course:
             if (moves := fold(set(_files(self.org, repo)), MATERIALS_MOVES))
         }
 
+    def materials_stops(self) -> list[str]:
+        """Each repo with a move onto a file that differs (`refuse_clashes` names them)."""
+        return [
+            f"a system file move in {repo} lands on a file that differs"
+            for repo, moves in self.materials_moves().items()
+            if refuse_clashes(self.org, repo, _files(self.org, repo), moves)
+        ]
+
     def move_materials(self) -> bool:
         """Every repo's moves checked before the first is written: a clash in one repo
         must not land after another's commit."""
-        work = self.materials_moves()
-        if any(
-            refuse_clashes(self.org, r, _files(self.org, r), m) for r, m in work.items()
-        ):
+        if self.materials_stops():
             return False
         return all(
             move_files(self.org, repo, moves, LAYOUT_COMMIT)
@@ -3247,11 +3425,13 @@ class Course:
                 plan=lambda: [
                     (
                         f"remove {', '.join(RETIRED_COURSE_KEYS)}; "
-                        "assignment_defaults format: -> formats:"
+                        "assignment_defaults format: -> formats:, "
+                        "submit_via: github -> assignment_repo"
                     )
                 ],
                 do=self.rewrite_meta,
                 verify=self.meta_verified,
+                stops=self.meta_stops,
                 rollback=f"git revert the '{KEYS_COMMIT}' commit in {dotgithub}",
             ),
             Step(
@@ -3263,7 +3443,7 @@ class Course:
                     for line in (
                         (
                             f"{r}@{SOLUTION_BRANCH}/{GRADING_FILE}: format: -> formats:, "
-                            f"run settings out (recorded in .github/{RUN_KEYS_RECORD} "
+                            f"submit_via: github -> assignment_repo, run settings out (recorded in .github/{RUN_KEYS_RECORD} "
                             f"for the semesters' {ASSIGNMENTS_FILE})"
                         ),
                         *_diff(GRADING_FILE, self.grading_text(r) or "", new),
@@ -3271,6 +3451,7 @@ class Course:
                 ],
                 do=self.rewrite_templates,
                 verify=self.templates_verified,
+                stops=self.template_stops,
                 rollback=(
                     f"git revert the '{KEYS_COMMIT}' commit on each template's "
                     f"{SOLUTION_BRANCH} branch"
@@ -3329,6 +3510,7 @@ class Course:
                 ],
                 do=self.move_materials,
                 verify=lambda: not self.materials_moves(),
+                stops=self.materials_stops,
                 rollback=f"git revert the '{LAYOUT_COMMIT}' commit in each materials repo",
             ),
             Step(
