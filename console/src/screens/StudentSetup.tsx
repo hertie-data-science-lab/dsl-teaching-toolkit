@@ -8,7 +8,7 @@
 // of the tab being shown; "Check again" checks now and starts that again. A repo of the name
 // that is not the fork, or a read that failed, waits for "Check again". A section reads its
 // semester (facts, then the student's own repos) only once it is opened. The fork answers are
-// kept for the session (`model/fork.ts`), which the file button row reads too (rule 10).
+// kept for the session (`model/fork.ts`), which a file's menu reads too (rule 10).
 
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';

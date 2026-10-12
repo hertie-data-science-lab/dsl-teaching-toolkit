@@ -1,7 +1,7 @@
 // Where a course repo opens: on GitHub, on github.dev, in VS Code, in GitHub Desktop, in
 // another editor by its link scheme. One Open button for both
 // roles (decisions 0017, 0027): instructors on their course screens, students in Profile. A
-// released file's `online` and `local` buttons (decision 0035 rule 10) come from here too. The
+// released file's Edit items (decision 0035 rule 10) come from here too. The
 // folder and editor come from Profile (`model/prefs.ts`); nothing here reads storage.
 
 import { ghUrl } from '../ui/bits';
@@ -200,6 +200,18 @@ export function folderExample(p: Platform): string {
 }
 
 // --------------------------------------------------------------------------- one file (decision 0035 rule 10)
+
+/**
+ * What a file menu calls the editor Profile names: VS Code, or another editor known by its
+ * link's scheme; empty for any other (the menu then says `local`). The site's `open_in.html`
+ * keeps the same list (`EDITOR_NAMES`), so a file menu reads the same on both.
+ */
+const EDITOR_NAMES: Record<string, string> = { vscode: 'VS Code', cursor: 'Cursor', windsurf: 'Windsurf', pycharm: 'PyCharm', zed: 'Zed' };
+export function editorName(setup: Setup | null): string {
+  if (setup?.editor === 'vscode') return 'VS Code';
+  if (setup?.editor !== 'other') return '';
+  return EDITOR_NAMES[(setup.scheme ?? '').trim().split(':')[0].toLowerCase()] ?? '';
+}
 
 /** Files an editor opens: everything but the documents and archives the 0.9.0 site left out. */
 const NOT_EDITABLE = ['pdf', 'pptx', 'docx', 'xlsx', 'zip'];

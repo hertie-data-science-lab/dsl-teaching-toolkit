@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // All materials with a file open (decision 0035 rule 11): the tree of every repo stays on
 // screen beside the file, the open file's row marked and its folders open; each tree row is
-// a file link with its button row (rule 10). A kind tab opens its files in the same split, its
+// a file link with its menu (rule 10). A kind tab opens its files in the same split, its
 // own list beside the file.
 
 import { render } from 'preact';
@@ -58,14 +58,15 @@ it('keeps every repo’s tree beside the open file, the file marked and its fold
   expect(split.querySelector('.materials-file h2')!.textContent).toBe('labs/01/lab.md');
 });
 
-it('gives each tree row the button row, a pdf source and render only', async () => {
+it('gives each tree row the menu, a pdf view and GitHub only', async () => {
   const el = await mount();
   expect(el.querySelector('.materials-split')).toBeNull();
   const row = (name: string) => [...el.querySelectorAll('.ft-file')].find((li) => li.querySelector('.ft-name')!.textContent === name)!;
-  const words = (li: Element) => [...li.querySelectorAll('.file-btns a')].map((a) => a.textContent);
-  expect(words(row('SYLLABUS.md'))).toEqual(['source', 'render', 'online']);
-  expect(row('SYLLABUS.md').querySelector('.file-btns a')!.getAttribute('href')).toBe(`https://github.com/${ORG}/materials/blob/HEAD/SYLLABUS.md`);
-  expect(words(row('notes.pdf'))).toEqual(['source', 'render']);
+  const items = (li: Element) => [...li.querySelectorAll('.file-menu [role="menuitem"]')];
+  const words = (li: Element) => items(li).map((a) => a.querySelector('.fm-lbl')!.textContent);
+  expect(words(row('SYLLABUS.md'))).toEqual(['view', 'GitHub', 'in browser', 'Set up your editor in Profile']);
+  expect(items(row('SYLLABUS.md'))[1].getAttribute('href')).toBe(`https://github.com/${ORG}/materials/blob/HEAD/SYLLABUS.md`);
+  expect(words(row('notes.pdf'))).toEqual(['view', 'GitHub']);
   expect(row('notes.pdf').querySelector('.ft-name')!.getAttribute('href')).toContain('#materials-');
 });
 

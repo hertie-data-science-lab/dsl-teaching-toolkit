@@ -1,6 +1,6 @@
 // Whether a student forked a semester's materials repo (decisions 0027 rule 4, 0035 rules 9
 // and 10): one read of `GET /repos/{login}/{repo}`, kept for the session per sign-in. Profile's
-// Your repos check re-reads it and keeps the fresh answer; the file button row reads the kept
+// Your repos check re-reads it and keeps the fresh answer; a file's menu reads the kept
 // one, lazily, when a row first needs it.
 
 import type { GitHubClient } from '../github/client';
@@ -36,5 +36,5 @@ export function cachedFork(client: GitHubClient, login: string, org: string, rep
   return p;
 }
 
-/** Keep a fresh answer (the fork check's re-reads), so the button rows opened after it follow. */
+/** Keep a fresh answer (the fork check's re-reads), so the file menus opened after it follow. */
 export const noteFork = (client: GitHubClient, login: string, org: string, repo: string, f: ForkState) => forksOf(client).set(forkKey(login, org, repo), Promise.resolve(f));

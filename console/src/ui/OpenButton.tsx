@@ -8,9 +8,11 @@
 // carry a `?` (decision 0024 rule 7), the clone's holding the command. A menu button in the
 // WAI-ARIA sense: the arrow opens it from the keyboard (Enter, Space, Down, Up), arrows move
 // through its items, Escape closes it and gives focus back. A `?` is not an item: off the
-// arrow keys and the tab order, it opens on hover or a tap.
+// arrow keys and the tab order, it opens on hover or a tap. `useMenu` is that menu's
+// behaviour on its own, which a released file's chevron menu shares (screens/StudentFiles.tsx).
 
 import { signal } from '@preact/signals';
+import type { RefObject } from 'preact';
 import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { courseFolder, defaultItem, isWeb, mainLabel, openItems, profileHref, repoCloneCommand, type OpenItem, type RepoRef, type Setup } from '../model/open';
@@ -52,19 +54,26 @@ function useCloned(login: string, home: string, repo: string, setup: Setup | nul
   return answer.key === key ? answer.cloned : undefined;
 }
 
-export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean; quiet?: boolean }) {
-  const env = useEnv();
-  const login = env?.user.login ?? '';
-  const [setup, remember] = useSetup(login);
-  const home = ref.home ?? ref.org;
-  const cloned = useCloned(login, home, ref.repo, setup);
-  const items = openItems(ref, setup, cloned);
-  const main = defaultItem(items, setup, cloned);
-  const label = mainLabel(main, cloned);
+/** A menu button's menu: open state, focus, and the keys (Enter, Space, Down, Up on the button; arrows, Home, End, Escape, Tab in the menu). */
+export interface Menu<W extends HTMLElement = HTMLDivElement> {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  id: string;
+  wrap: RefObject<W>;
+  caret: RefObject<HTMLButtonElement>;
+  show: (at: 'first' | 'last') => void;
+  shut: () => void;
+  onCaretKey: (e: KeyboardEvent) => void;
+  onCaretKeyUp: (e: KeyboardEvent) => void;
+  onMenuKey: (e: KeyboardEvent) => void;
+}
+
+/** The menu's behaviour: closes on a click outside `wrap`, which is also what keeps one open at a time; `onShow` runs as it opens. */
+export function useMenu<W extends HTMLElement = HTMLDivElement>(onShow?: () => void): Menu<W> {
   const [open, setOpen] = useState(false);
   const [focusAt, setFocusAt] = useState<'first' | 'last' | null>(null);
   const id = useId();
-  const wrap = useRef<HTMLDivElement>(null);
+  const wrap = useRef<W>(null);
   const caret = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -75,16 +84,6 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [open]);
-  // A `?` in the menu is not one of its items (decision 0024): out of the tab order, its text
-  // the description of the item beside it.
-  useEffect(() => {
-    wrap.current?.querySelectorAll<HTMLElement>('.open-menu .pm-row').forEach((row) => {
-      const btn = row.querySelector<HTMLElement>('.hint-btn');
-      const pop = row.querySelector<HTMLElement>('.hint-pop');
-      if (btn) btn.tabIndex = -1;
-      if (pop) row.querySelector('[role="menuitem"]')?.setAttribute('aria-describedby', pop.id);
-    });
-  });
   useEffect(() => {
     if (!open || !focusAt) return;
     const all = menuItems();
@@ -94,18 +93,13 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
 
   const menuItems = () => [...(wrap.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
   const show = (at: 'first' | 'last') => {
-    if (login) void askFolderOnce(login);
+    onShow?.();
     setOpen(true);
     setFocusAt(at);
   };
   const shut = () => {
     setOpen(false);
     caret.current?.focus();
-  };
-  const choose = (item: OpenItem) => {
-    remember(item);
-    // From the menu, focus goes back to the arrow rather than to the page.
-    if (open) shut();
   };
   const onCaretKey = (e: KeyboardEvent) => {
     if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
@@ -136,7 +130,36 @@ export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean
       shut();
     } else if (e.key === 'Tab') setOpen(false);
   };
+  return { open, setOpen, id, wrap, caret, show, shut, onCaretKey, onCaretKeyUp, onMenuKey };
+}
 
+export function OpenButton({ small, quiet, ...ref }: RepoRef & { small?: boolean; quiet?: boolean }) {
+  const env = useEnv();
+  const login = env?.user.login ?? '';
+  const [setup, remember] = useSetup(login);
+  const home = ref.home ?? ref.org;
+  const cloned = useCloned(login, home, ref.repo, setup);
+  const items = openItems(ref, setup, cloned);
+  const main = defaultItem(items, setup, cloned);
+  const label = mainLabel(main, cloned);
+  const { open, setOpen, id, wrap, caret, show, shut, onCaretKey, onCaretKeyUp, onMenuKey } = useMenu(() => {
+    if (login) void askFolderOnce(login);
+  });
+  // A `?` in the menu is not one of its items (decision 0024): out of the tab order, its text
+  // the description of the item beside it.
+  useEffect(() => {
+    wrap.current?.querySelectorAll<HTMLElement>('.open-menu .pm-row').forEach((row) => {
+      const btn = row.querySelector<HTMLElement>('.hint-btn');
+      const pop = row.querySelector<HTMLElement>('.hint-pop');
+      if (btn) btn.tabIndex = -1;
+      if (pop) row.querySelector('[role="menuitem"]')?.setAttribute('aria-describedby', pop.id);
+    });
+  });
+  const choose = (item: OpenItem) => {
+    remember(item);
+    // From the menu, focus goes back to the arrow rather than to the page.
+    if (open) shut();
+  };
   const cls = `btn${quiet ? ' quiet' : ''}${small ? ' small' : ''}`;
   const link = (item: OpenItem, extra: Record<string, unknown>, children: preact.ComponentChildren) => (
     <a href={item.href} {...(isWeb(item.href) ? { target: '_blank', rel: 'noopener' } : {})} onClick={() => choose(item)} {...extra}>{children}</a>

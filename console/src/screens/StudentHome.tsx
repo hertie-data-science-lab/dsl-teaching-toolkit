@@ -2,7 +2,7 @@
 // site's `announcements.html`: what has reached students, newest first, seven), the syllabus
 // pinned, the course description, the instructors' own home text, previous offerings, and the
 // instructors and teaching assistants in two columns. The Updates box's files and the syllabus
-// are file links (`FileLinkItem`), each with its button row.
+// are file links (`FileLinkItem`), each with its menu.
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
 import type { Setup } from '../model/open';
