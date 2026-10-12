@@ -417,6 +417,16 @@ def test_an_absent_teams_csv_empties_no_project_team(stub_team, monkeypatch, cap
     assert "teams.csv is absent" in capsys.readouterr().err
 
 
+def test_an_absent_teams_csv_and_an_unreadable_team_listing_reds(
+    stub_team, monkeypatch, capsys
+):
+    # Not "no teams.csv yet - nothing to sync": nobody could look at the teams at all.
+    _emptied_world(monkeypatch, stub_team, None, None)
+    assert sync_teams.sync("org", prune=True) == 1
+    assert stub_team["removed"] == []
+    assert "nothing to sync" not in capsys.readouterr().out
+
+
 def test_a_header_only_teams_csv_still_empties_the_teams(stub_team, monkeypatch):
     _emptied_world(
         monkeypatch, stub_team, {}, {"assignment-4-project-wizards": PROJECT}

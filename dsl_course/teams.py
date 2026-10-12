@@ -98,6 +98,8 @@ def parse(
             continue
         if faults is not None:
             faults += _row_faults(lineno, assignment, team, handle, claimed, allowed)
+        if is_reserved_slug(team_slug(assignment, team)):
+            continue  # ignored, as its fault says - and so it claims nobody either
         was = claimed.setdefault((assignment, handle), (team, lineno))
         if was[0] != team:
             # The first claim wins, as the fault says: a second team's row would put the

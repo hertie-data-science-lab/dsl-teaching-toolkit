@@ -4430,6 +4430,8 @@ def distribute(
         retired = _retired_gradebook_files(wd)
         changed = {} if dry_run else _sheets_changed_at(wd, sheets)
         export = _told_grades(wd)
+        # None: the export is missing or unreadable while gradebooks went out already.
+        told_known = _already_returned(wd) is not None
 
     held = _hold_undecided(
         books,
@@ -4438,6 +4440,15 @@ def distribute(
             for slug, sheet in sheets.items()
         },
     )
+    if held and not told_known and not dry_run:
+        # `_hold_returned` cannot tell a held mark already sent from a new one without the
+        # export, and taking a sent mark out of the book takes it away from the student.
+        log_err(
+            f"a mark is held and {SEMESTER_CSV_NAME} is missing or cannot be read, so "
+            f"whether it was already sent is not known - nothing sent. Settle the held "
+            f"marks (the preview lists them), then run this again"
+        )
+        return 1
     kept = _hold_returned(books, held, export[0])
     log_step(f"Distributing {len(books)} gradebook(s) in {semester_org}")
     record: Distributed = dict(distributed)

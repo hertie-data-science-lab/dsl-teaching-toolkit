@@ -162,13 +162,11 @@ how old that file's facts are ("Updated 3 h ago"). The footer names the course a
 semester. On a phone the preview's top-bar link reads "Preview".
 
 Both **Dashboards**, the course's and each semester's, share one model of readiness (decision
-0034, `model/readiness.ts`). The engine writes every field; `normalise` runs once, at load
-(`loadStatus`), and fills `bites`, `need` and `stage_need` on a status the previous engine
-wrote (from `when` and the horizon, `blocks`, a to-do's `optional`, `stage_optional`); every
-helper and screen after it trusts the fields. Every item has a need (needed or suggested), a
+0034, `model/readiness.ts`). The engine writes every field (`bites`, `need`, `stage_need`,
+`horizon`, `verdict`), and every helper and screen trusts them. Every item has a need (needed or suggested), a
 state (done, open, has a problem, waiting) and, for a problem, a time: `now` (passed or
 undated), `soon` (within `horizon.days`, 7 by default) or `later`. A screen tiers the problems
-once per render (`tier`, memoised on the status and the clock) and hands the list to every
+once per render (`tier`, memoised on the status) and hands the list to every
 consumer: the strip's counts, the panel's rows, the Problems and Coming up tabs and the release
 marks. Only now and soon are red and counted (`problemCount`): the nav, Home's cards, the
 course's Semesters rows and the Dashboards all show that one number. Screens join problems on
