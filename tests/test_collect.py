@@ -5242,7 +5242,7 @@ def _receipt_env(monkeypatch) -> list[tuple[str, str, bool]]:
     monkeypatch.setattr(
         collect.grades,
         "ensure_receipts_issue",
-        lambda org, repo, body, dry_run=False, create=True: 7,
+        lambda org, repo, body, dry_run=False: 7,
     )
     monkeypatch.setattr(
         collect.grades,
@@ -5326,7 +5326,7 @@ def test_a_team_issue_the_refresh_has_to_open_still_names_the_team(monkeypatch):
     monkeypatch.setattr(
         collect.grades,
         "ensure_receipts_issue",
-        lambda org, repo, body, dry_run=False, create=True: opened.append(body) or 7,
+        lambda org, repo, body, dry_run=False: opened.append(body) or 7,
     )
     assert collect.sync_sheet(
         "Course",

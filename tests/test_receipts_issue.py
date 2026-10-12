@@ -325,12 +325,6 @@ def test_a_repo_that_is_not_there_has_no_issue_rather_than_no_answer(monkeypatch
     # on the strength of it: `receipts_thread_policy` decides that, off the listing.
     monkeypatch.setattr(grades, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
     assert grades.find_receipts_issue("Semester", "assignment-1-ada-l") is None
-    assert (
-        grades.ensure_receipts_issue(
-            "Semester", "assignment-1-ada-l", "body", create=False
-        )
-        is None
-    )
 
 
 def test_the_oldest_labelled_issue_is_asked_for_first(monkeypatch):
