@@ -1,15 +1,20 @@
-"""Relink a student who switched to a different GitHub account.
+"""Relink a student who switched to a different GitHub account, or renamed theirs.
 
-Faculty re-point the row's `github_handle` at the new account; Sync membership then moves
-the student's handle-keyed state here, before the roster reconcile. A row qualifies only
-on definite answers: the handle names a different account from the stored `github_id`,
-that id still exists under another login, neither is on another row, and onboard never
-linked this (handle, id) pair itself - the squat guard, since that pair means a renamed
-account whose old login a stranger took. More than `MAX_PER_PASS` rows reads as a bad
+A switch: faculty re-point the row's `github_handle` at the new account; Sync membership
+then moves the student's handle-keyed state here, before the roster reconcile. A row
+qualifies only on definite answers: the handle names a different account from the stored
+`github_id`, that id still exists under another login, neither is on another row, and
+onboard never linked this (handle, id) pair itself - the squat guard, since that pair
+means a renamed account whose old login a stranger took.
+
+A rename needs no faculty edit: the row's handle names no account, its stored id lives on
+under a new login, and the toolkit itself linked that (handle, id) pair - so the id is not
+a hand-pasted stranger's. More than `MAX_PER_PASS` rows of either kind reads as a bad
 paste and none is acted on.
 
-The stored `github_id` is the pending marker, written LAST; every step is idempotent on
-(old, new), so a run that stops anywhere is finished by the next. Nothing is deleted:
+The pending marker is written LAST - the stored `github_id` for a switch, the
+`github_handle` cell for a rename; every step is idempotent on (old, new), so a run that
+stops anywhere is finished by the next. Nothing is deleted:
 anything a person wrote on both sides is a REFUSAL, held until faculty settle it. The
 config commit is compare-and-set, and the old account leaves the org only as a plain
 member in no faculty team. Not moved: drop-box folders, `.system/snapshots/`, Submission
@@ -104,7 +109,8 @@ class Refused(Exception):
 
 @dataclass(frozen=True)
 class Pending:
-    """One roster row whose handle now names a different account from its stored id."""
+    """One roster row whose handle now names a different account from its stored id - or,
+    for a rename, the same account (`old_id == new_id`) under a new login."""
 
     index: int  # data-row index, as `roster.parse` orders them
     email: str
@@ -133,6 +139,32 @@ def pending(org: str, students: list[roster.Student]) -> list[Pending]:
     found: list[Pending] = []
     unanswered = 0
     subjects: tuple[str, ...] | None = None
+
+    def linked(handle: str, user_id: str) -> bool | None:
+        """Whether onboard (or a relink) committed this (handle, id) pair; None when the
+        roster's history could not be read."""
+        nonlocal subjects
+        if subjects is None:
+            try:
+                subjects = path_commit_subjects(
+                    org, roster.CONFIG_REPO, roster.ROSTER_PATH
+                )
+            except RuntimeError as exc:
+                log_err(
+                    f"could not read {roster.ROSTER_PATH}'s history ({exc}) - no "
+                    f"relink this run"
+                )
+                return None
+        prefix = LINK_MESSAGE.format(handle=handle, user_id=user_id).casefold()
+        return any(subject.casefold().startswith(prefix) for subject in subjects)
+
+    def deleted(line: int, s: roster.Student, stored: str) -> None:
+        log_err_person(
+            f"  students.csv line {line}: the GitHub account this row was first "
+            f"linked to has been deleted - not relinked",
+            f"    the row now names @{s.github_handle}; its stored id {stored} is gone",
+        )
+
     for i, s in enumerate(students):
         line = i + 2
         stored = s.github_id.strip()
@@ -140,8 +172,36 @@ def pending(org: str, students: list[roster.Student]) -> list[Pending]:
             continue
         new_id = id_of_login(s.github_handle)
         if new_id == "":
-            _skip(
-                line, f"no GitHub account is called @{s.github_handle} - check the cell"
+            # A rename only if the toolkit linked this pair: `github_id` is a hand-editable
+            # cell, and a typo plus a pasted id must never write a stranger into the row.
+            was_linked = linked(s.github_handle, stored)
+            if was_linked is None:
+                return []
+            if not was_linked:
+                _skip(
+                    line,
+                    f"no GitHub account is called @{s.github_handle} - check the cell",
+                )
+                continue
+            current = login_of_id(stored)
+            if current == "":
+                deleted(line, s, stored)
+                continue
+            if current is None or current.casefold() == s.github_handle.casefold():
+                unanswered += 1
+                log_person(f"    no definite answer for id {stored} (line {line})")
+                continue
+            if handles[s.github_handle.casefold()] > 1:
+                _skip(line, "this handle is on another row too")
+                continue
+            if handles[current.casefold()]:
+                _skip(line, "the account's current login is another row's handle")
+                continue
+            if any(o.github_id.strip() == stored for o in students if o is not s):
+                _skip(line, "the account this row was linked to is on another row too")
+                continue
+            found.append(
+                Pending(i, s.hertie_email, current, stored, s.github_handle, stored)
             )
             continue
         if new_id is None:
@@ -158,29 +218,16 @@ def pending(org: str, students: list[roster.Student]) -> list[Pending]:
             continue
         old = login_of_id(stored)
         if old == "":
-            log_err_person(
-                f"  students.csv line {line}: the GitHub account this row was first "
-                f"linked to has been deleted - not relinked",
-                f"    the row now names @{s.github_handle}; its stored id {stored} is gone",
-            )
+            deleted(line, s, stored)
             continue
         if old is None or old.casefold() == s.github_handle.casefold():
             unanswered += 1
             log_person(f"    no definite answer for id {stored} (line {line})")
             continue
-        if subjects is None:
-            try:
-                subjects = path_commit_subjects(
-                    org, roster.CONFIG_REPO, roster.ROSTER_PATH
-                )
-            except RuntimeError as exc:
-                log_err(
-                    f"could not read {roster.ROSTER_PATH}'s history ({exc}) - no "
-                    f"relink this run"
-                )
-                return []
-        linked = LINK_MESSAGE.format(handle=s.github_handle, user_id=stored).casefold()
-        if any(subject.casefold().startswith(linked) for subject in subjects):
+        squatted = linked(s.github_handle, stored)
+        if squatted is None:
+            return []
+        if squatted:
             _skip(
                 line,
                 "the student renamed their account and someone else now holds the old "
@@ -577,6 +624,7 @@ def _record(org: str, p: Pending, repos: list[str]) -> bool:
         "new_id": p.new_id,
         "relinked_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "repos": repos,
+        "rename": p.old_id == p.new_id,
         "not_moved": "shared drop-box folders, .system/snapshots/, Submission receipts text",
     }
     return put_file(
@@ -589,7 +637,10 @@ def _record(org: str, p: Pending, repos: list[str]) -> bool:
     )
 
 
-def _write_id(org: str, p: Pending) -> bool:
+def _write_cell(
+    org: str, p: Pending, column: str, value: str, replacing: str, suffix: str
+) -> bool:
+    """The last step: the row's pending marker, written only over the value it held."""
     got = get_file_with_sha(org, roster.CONFIG_REPO, roster.ROSTER_PATH)
     if got is None:
         return False
@@ -598,11 +649,10 @@ def _write_id(org: str, p: Pending) -> bool:
         org,
         raw,
         sha,
-        "github_id",
-        [(p.index, p.email, p.new_id)],
-        LINK_MESSAGE.format(handle=p.new, user_id=p.new_id)
-        + " after an account switch",
-        replacing=p.old_id,
+        column,
+        [(p.index, p.email, value)],
+        LINK_MESSAGE.format(handle=p.new, user_id=p.new_id) + suffix,
+        replacing=replacing,
     )
     roster._roster_text.cache_clear()
     teams._teams_text.cache_clear()
@@ -617,7 +667,7 @@ def relink_row(
 ) -> str:
     """Move one student to their new account: `DONE`, `FAILED` when a step's write failed,
     or `RACED` when another commit landed in semester-config between the read and the
-    write. Either way the id is untouched and the next run resumes. Raises `Refused` for a
+    write. Either way the marker is untouched and the next run resumes. Raises `Refused` for a
     collision - checked before anything moves, so a refused relink moves nothing."""
     team_repos = _team_repos(org)
     _check_repos(org, p, existing, team_repos)
@@ -649,7 +699,13 @@ def relink_row(
         not failed
         and _remove_old_member(org, p)
         and _record(org, p, _repos_of(existing, p.new, team_repos))
-        and _write_id(org, p)
+        and (
+            _write_cell(org, p, "github_handle", p.new, p.old, " after a rename")
+            if p.old_id == p.new_id
+            else _write_cell(
+                org, p, "github_id", p.new_id, p.old_id, " after an account switch"
+            )
+        )
     )
     return DONE if done else FAILED
 
@@ -670,7 +726,10 @@ def sync(org: str, existing: dict[str, dict] | None, dry_run: bool = False) -> i
     if existing is None:
         log_err(f"{len(found)} relink(s) in {org} wait for a repo listing - next run")
         return 0
-    log_step(f"Relinking {len(found)} student(s) who switched GitHub account in {org}")
+    log_step(
+        f"Relinking {len(found)} student(s) who switched or renamed their GitHub "
+        f"account in {org}"
+    )
     done = raced = errors = 0
     for p in found:
         log_person(f"  relink @{p.old} (id {p.old_id}) -> @{p.new} (id {p.new_id})")

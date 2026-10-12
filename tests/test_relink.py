@@ -1,6 +1,7 @@
-"""relink: a student re-pointed at a new GitHub account in students.csv is moved there by
-the next membership sync - repos, grants, config rows, throttle issues - with the stored
-`github_id` written last, so a run that stops anywhere is finished by the next.
+"""relink: a student re-pointed at a new GitHub account in students.csv - or whose account
+was renamed - is moved there by the next membership sync: repos, grants, config rows,
+throttle issues, with the row's pending marker (the stored `github_id`, or the handle cell
+for a rename) written last, so a run that stops anywhere is finished by the next.
 
 Everything `relink` reaches GitHub through is stubbed by the name it imported, over one
 in-memory `World`; the enrol-code writer runs for real against a stubbed Contents API."""
@@ -122,8 +123,22 @@ class World:
         return True
 
     def stored_id(self) -> str:
+        return self.cell("github_id")
+
+    def cell(self, column: str) -> str:
         rows = list(read_csv(self.roster, roster.REQUIRED_FIELDS, "students.csv"))
-        return rows[0]["github_id"]
+        return rows[0][column]
+
+    def rename(self) -> None:
+        """Ada renames OLD -> NEW: same id, the old login 404s, and everything GitHub
+        holds by account id (membership, grants, issues) follows her; the roster row and
+        everything keyed on her login do not."""
+        self.roster = roster_text(handle=OLD)
+        self.users = {NEW: OLD_ID, "bob": "303"}
+        self.org = {NEW: "member", "bob": "member"}
+        for repo in self.repos.values():
+            if OLD in repo["collab"]:
+                repo["collab"][NEW] = repo["collab"].pop(OLD)
 
 
 @pytest.fixture
@@ -658,3 +673,119 @@ def test_the_grant_follows_provisioning_even_when_the_old_one_was_pruned(world):
     world.repos[f"assignment-1-{OLD}"]["collab"] = {}
     run(world)
     assert world.repos[f"assignment-1-{NEW}"]["collab"] == {NEW: "maintain"}
+
+
+# ------------------------------------------------------------ a renamed account
+
+
+def test_a_renamed_account_is_moved_and_its_handle_cell_written_last(world):
+    world.rename()
+    (p,) = pending(world)
+    assert (p.old, p.new, p.old_id, p.new_id) == (OLD, NEW, OLD_ID, OLD_ID)
+    assert run(world)[0] == 0
+    assert (world.cell("github_handle"), world.stored_id()) == (NEW, OLD_ID)
+    assert f"assignment-1-{NEW}" in world.repos and f"grades-{NEW}" in world.repos
+    assert f"assignment-1-{OLD}" not in world.repos
+    assert world.repos[f"assignment-1-{NEW}"]["collab"] == {NEW: "maintain"}
+    assert "assignment-2,team-x,newacct" in world.config[teams.TEAMS_PATH].decode()
+    assert NEW in sheet_of(world)["submissions"]
+    assert f".system/autograde/assignment-1/{NEW}.json" in world.config
+    record = json.loads(world.config[f".system/enrolment/relinks/{OLD_ID}.json"])
+    assert record["rename"] is True and record["new_login"] == NEW
+    assert world.roster.splitlines()[2] == "b@x.edu,Bob,,bob,303,,"
+    snapshot = (dict(world.config), world.roster, dict(world.repos))
+    assert run(world)[0] == 0
+    assert (dict(world.config), world.roster, dict(world.repos)) == snapshot
+
+
+def test_a_switch_records_that_it_was_not_a_rename(world):
+    run(world)
+    record = json.loads(world.config[f".system/enrolment/relinks/{OLD_ID}.json"])
+    assert record["rename"] is False
+
+
+@pytest.mark.parametrize("step", ["rename", "config", "issues", "record", "id"])
+def test_a_rename_that_fails_at_any_step_keeps_the_old_handle_until_the_next_run(
+    world, step
+):
+    world.rename()
+    world.fail = step
+    world.fail_times = gh_contents.WRITE_ATTEMPTS if step == "id" else 1
+    assert run(world)[0] == 1
+    assert world.cell("github_handle") == OLD, "the handle must be the last write"
+    assert world.stored_id() == OLD_ID
+    assert run(world)[0] == 0
+    assert (world.cell("github_handle"), world.stored_id()) == (NEW, OLD_ID)
+    assert f"grades-{NEW}" in world.repos and NEW in sheet_of(world)["submissions"]
+
+
+def test_a_rename_never_names_either_login_in_the_public_log(world, capsys):
+    world.rename()
+    run(world)
+    out = capsys.readouterr()
+    assert OLD not in out.out + out.err and NEW not in out.out + out.err
+    assert "switched or renamed their GitHub account" in out.out
+
+
+def test_a_vanished_handle_the_toolkit_never_linked_is_left_for_faculty(world, capsys):
+    # A typo'd handle plus a pasted id must never write a stranger's login into the row.
+    world.rename()
+    world.subjects = ("roster: link @bob (id 303)",)
+    before = (world.roster, dict(world.config), set(world.repos))
+    assert run(world)[0] == 0
+    assert (world.roster, dict(world.config), set(world.repos)) == before
+    err = capsys.readouterr().err
+    assert err.count(f"no GitHub account is called @{OLD}") == 1 and NEW not in err
+
+
+def test_a_renamed_then_deleted_account_is_one_line_for_faculty(world, capsys):
+    world.rename()
+    world.gone[OLD_ID] = ""
+    before = world.roster
+    run(world)
+    err = capsys.readouterr().err
+    assert err.count("has been deleted") == 1 and "could not be checked" not in err
+    assert world.roster == before
+
+
+@pytest.mark.parametrize(
+    "setup",
+    [
+        pytest.param(lambda w: setattr(w, "subjects", None), id="history-unreadable"),
+        pytest.param(lambda w: w.gone.update({OLD_ID: None}), id="stored-unanswered"),
+        pytest.param(
+            lambda w: setattr(
+                w, "roster", roster_text(handle=OLD, extra=[f"c@x.edu,Cy,,{OLD},,,"])
+            ),
+            id="duplicate-handle",
+        ),
+        pytest.param(
+            lambda w: setattr(
+                w, "roster", roster_text(handle=OLD, extra=[f"c@x.edu,Cy,,{NEW},,,"])
+            ),
+            id="current-login-on-another-row",
+        ),
+        pytest.param(
+            lambda w: setattr(
+                w, "roster", roster_text(handle=OLD, extra=[f"c@x.edu,Cy,,,{OLD_ID},,"])
+            ),
+            id="stored-id-on-another-row",
+        ),
+    ],
+)
+def test_a_rename_that_cannot_be_told_for_certain_is_left_alone(world, setup):
+    world.rename()
+    setup(world)
+    before = (world.roster, dict(world.config), set(world.repos))
+    assert pending(world) == []
+    assert run(world)[0] == 0
+    assert (world.roster, dict(world.config), set(world.repos)) == before
+
+
+def test_an_unanswered_rename_lookup_is_counted_not_named(world, capsys):
+    world.rename()
+    world.gone[OLD_ID] = None
+    run(world)
+    err = capsys.readouterr().err
+    assert err.count("could not be checked") == 1 and "1 roster row(s)" in err
+    assert OLD not in err and NEW not in err

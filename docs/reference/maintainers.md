@@ -196,7 +196,10 @@ until faculty settle it. The config commit is compare-and-set (`put_files(base=.
 write that landed after the read fails it, and the next sync retries. The old account then
 leaves the org only if it is a plain `member` in no faculty team - the access floor never
 demotes staff. A handle whose stored id onboard itself linked (`roster: link
-@<handle> (id <id>)`) is a rename taken over by a stranger and is never relinked. Onboard
+@<handle> (id <id>)`) is a rename taken over by a stranger and is never relinked. A renamed
+account - the handle is gone, its id lives on under a new login, and the toolkit itself
+linked that pair - is relinked the same way with the `github_handle` cell as the marker,
+written last; do not hand-edit a renamed row, the next sync heals it. Onboard
 records every "bound elsewhere" refusal in `.system/enrolment/refusals/<issue>.json`; the
 relink records itself in `.system/enrolment/relinks/<old id>.json`.
 
