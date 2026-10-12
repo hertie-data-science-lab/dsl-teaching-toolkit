@@ -87,6 +87,7 @@ set in its own `schedule.yml` (default: the institution's, Europe/Berlin and 60 
 
 `course_name` / `course_code` / `course_description` are the fields that reach every
 semester website - a push here re-syncs them all: [11](11-configure-cohort-site.md).
+The public website shows those three plus `contact` and `licence`, from its next publish.
 
 `set_aside` lists the suggestions nobody needs, on the course's and every semester's
 Dashboard (the console writes it from the circle before each Suggestions line; Bring back
