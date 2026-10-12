@@ -3030,7 +3030,8 @@ class Course:
     def meta_verified(self) -> bool:
         """Re-read with this engine's own rules: no retired key, no old spelling in the
         course layer."""
-        return self.meta_done() and not _meta_faults(self.meta_text()[0])
+        bad = _meta_faults(self.meta_text()[0])  # named even when the rewrite is off
+        return self.meta_done() and not bad
 
     def meta_stops(self) -> list[str]:
         if _meta_faults(self.meta_text()[1]):

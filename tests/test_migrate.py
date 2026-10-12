@@ -3054,3 +3054,12 @@ def test_a_blank_line_inside_a_retired_course_block_goes_with_it():
         "course_name: X\n\nassignment_defaults: {}\n"
     )
     assert migrate.course_config_keys("course_name: X\norg: C\n") == "course_name: X\n"
+
+
+def test_a_course_meta_that_did_not_verify_names_the_key_left(monkeypatch, capsys):
+    # A rewrite that did not land still says which key to fix by hand.
+    course = migrate.Course(COURSE)
+    left = "course_name: ML\nassignment_defaults:\n  format: ipynb\n"
+    monkeypatch.setattr(course, "meta_text", lambda: (left, "course_name: ML\n"))
+    assert course.meta_verified() is False
+    assert "assignment_defaults.format" in capsys.readouterr().err
