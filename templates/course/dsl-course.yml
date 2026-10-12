@@ -41,7 +41,8 @@ assignment_defaults:
 
 # `course_name`, `course_code` and `course_description` are what reach the semester
 # websites. Editing them here re-syncs every semester site already bootstrapped from this
-# course org.
+# course org. The public website shows those three plus `contact` and `licence` from its
+# next publish.
 #
 # This is the persistent COURSE org - it spans many semesters (years). Semesters are
 # registered separately in .github/semesters.yml.

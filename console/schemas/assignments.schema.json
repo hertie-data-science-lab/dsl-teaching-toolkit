@@ -19,10 +19,16 @@
             "type": "integer"
           },
           "semester_dest_repo": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "submit_url": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "team_formation": {
             "enum": [
@@ -60,7 +66,10 @@
           "type": "integer"
         },
         "submit_url": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "team_formation": {
           "enum": [

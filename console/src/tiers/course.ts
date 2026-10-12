@@ -18,7 +18,7 @@ export const TIMEZONES = [...new Set([DEFAULT_TIMEZONE, 'Europe/London', 'Europe
 export const ABOUT: Tiers = {
   course_name: { tier: 'ask', label: 'Course name', reason: 'Appears on every semester’s student site.' },
   course_code: { tier: 'ask', label: 'Course code', reason: 'Upper case here; lower case in the org name.' },
-  course_description: { tier: 'default', label: 'Description', widget: 'markdown', reason: 'One paragraph. Students see it on every semester’s student site home page.' },
+  course_description: { tier: 'default', label: 'Description', widget: 'markdown', reason: 'One paragraph. Students see it on every semester’s student site home page, and the public website shows it too.' },
 };
 
 const LICENCE = POLICY.licences[0].name;

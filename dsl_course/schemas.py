@@ -151,9 +151,12 @@ def _str() -> dict:
 
 
 def _keys(keys, overrides: dict | None = None) -> dict:
+    """Each key's schema: `overrides`, else a flag or text. A flag or text key may also be
+    blank (YAML null): every parser reads a bare `details:` as absent, and the seeded files
+    and the console's own edits write them."""
     overrides = overrides or {}
     return {
-        k: overrides.get(k, {"type": "boolean"} if k in _FLAGS else _str())
+        k: overrides.get(k, {"type": ["boolean" if k in _FLAGS else "string", "null"]})
         for k in sorted(keys)
     }
 
@@ -567,6 +570,8 @@ def schedule_schema() -> dict:
     )
     event = _obj(_keys(KNOWN_EVENT, {"kind": _enum(_EVENT_KINDS)}))
     archive = _obj(_keys(KNOWN_ARCHIVE, {"grace_days": {"type": "integer"}}))
+    # A bare `archive:` asks for the default date (`schedule._parse_archive`).
+    archive["type"] = ["object", "null"]
     top = _keys(
         KNOWN_TOP_LEVEL,
         {
@@ -687,6 +692,8 @@ def dsl_course_schema() -> dict:
         }
     )
     defaults = _obj(_keys((*COURSE_DEFAULT_KEYS, *ASKED_DEFAULT_KEYS), _SPEC_TYPES))
+    # The seeded block holds only comments, so YAML reads it as null (`settings` reads {}).
+    defaults["type"] = ["object", "null"]
     central_ref = {
         "type": "string",
         "pattern": f"^(?:{'|'.join(TIERS)}|[0-9a-f]{{40}})$",

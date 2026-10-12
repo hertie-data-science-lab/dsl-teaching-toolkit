@@ -164,10 +164,9 @@ export interface SemesterFacts {
   /** When the engine last found the facts changed (an ISO instant); absent when the source does not say. */
   generatedAt?: string;
   /**
-   * The course's opt-in (`student_console:` in dsl-course.yml): false, and a student is shown
-   * the semester site instead of these screens. Absent (the site fallback, a status file
-   * written before the engine carried it) counts as on, so an un-refreshed semester keeps its
-   * screens until the engine's next write says otherwise.
+   * The course's opt-in (`student_console: true` in dsl-course.yml, `course.advertises_console`):
+   * only true opens these screens. Absent (the site fallback, a status file written before the
+   * engine carried it) counts as off, as the engine reads an unset key.
    */
   studentConsole?: boolean;
 }
@@ -605,7 +604,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
     ...(doc.semester_start ? { start: str(doc.semester_start) } : {}),
     ...(doc.semester_end ? { end: str(doc.semester_end) } : {}),
     ...(doc.generated_at ? { generatedAt: str(doc.generated_at) } : {}),
-    studentConsole: doc.student_console !== false,
+    studentConsole: doc.student_console === true,
   };
 }
 
