@@ -638,6 +638,11 @@ describe('S2 course and S17 template', () => {
     expect(out).toMatch(/id="g-fmt-fmt-none" checked/);
     expect(out).not.toMatch(/id="g-fmt-fmt-ipynb" checked/);
     expect(out).not.toContain('institution default');
+    // The starter choice stays, greyed and disabled, with why.
+    expect(out).toContain('<div class="starter-off">');
+    expect(out).toMatch(/value="handwritten" checked disabled/);
+    expect(out).toContain('No starter file: students get none, so there is nothing to derive or write.');
+    expect(out).toContain('Starter files');
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
