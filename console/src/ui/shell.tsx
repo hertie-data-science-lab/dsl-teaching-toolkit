@@ -301,7 +301,8 @@ export type SubWanted = { materials: boolean; templates: boolean };
  * Assignment templates open on a page inside them, or with their chevron), then its semesters as
  * nodes: being set up first, every live one, then past ones newest first to three rows and the
  * rest under Older semesters. The open semester is expanded to its pages, else on a course page
- * the newest live one. The person's student semesters are not here: they are on All courses.
+ * the newest live one. The course's org login sits under its name, so two courses of one name
+ * tell apart. The person's student semesters are not here: they are on All courses.
  * `cohort` is the semester whose page is open, none on a course page; `site` the semester whose
  * public site the external links name (the URL's, on any page of the course, read only too).
  */
@@ -368,7 +369,7 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
   ];
   const expanded = cohort?.org ?? ordered.find((k) => !flags(k).over)?.org ?? null;
   return (
-    <NavTree root={root} anchor={<NavAnchor href={`?course=${course.org}#course`}>{course.name}</NavAnchor>}>
+    <NavTree root={root} anchor={<><NavAnchor href={`?course=${course.org}#course`}>{course.name}</NavAnchor><div class="nav-org">{course.org}</div></>}>
       {course.write ? (
         <>
           <ul class="tree">

@@ -239,6 +239,7 @@ describe('one person, two roles', () => {
     const el = await mount(`/?course=${COURSE_ORG}#details`);
     const nav = el.querySelector('.sidenav')!;
     expect(nav.querySelector('.nav-anchor')!.textContent).toBe('Machine Learning');
+    expect(nav.querySelector('.nav-org')!.textContent).toBe(COURSE_ORG);
     expect(nav.innerHTML).not.toContain(studied.org);
     expect(el.querySelector('.switcher')).toBeNull();
   });
