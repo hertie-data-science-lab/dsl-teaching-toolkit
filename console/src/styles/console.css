@@ -114,8 +114,6 @@ main { min-width: 0; }
 .fold > summary::before, .a-card > summary.a-sum::before { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; margin-right: 2px; flex: none; }
 .fold[open] > summary::before, .a-card[open] > summary.a-sum::before { transform: rotate(45deg); }
 .lives { font-size: 12.5px; color: var(--muted); }
-.lives a { color: var(--muted); }
-.lives a:hover { color: var(--link); }
 .note { border: 1.5px dashed var(--rule-strong); border-radius: 10px; padding: 10px 14px; font-size: 13.5px; color: var(--ink-2); background: var(--surface-2); }
 .note b { font-family: var(--font-display); }
 

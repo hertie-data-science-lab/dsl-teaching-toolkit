@@ -25,6 +25,7 @@ from . import (
     policy,
     records,
     releaseignore,
+    site_repo,
     status_json,
     student_status,
 )
@@ -735,7 +736,8 @@ def materials_schema() -> dict:
 def names_json() -> dict:
     """The repo names and paths the console must spell exactly as the engine does, so it
     holds no literal of its own: the config and join repos, the `.system/` folder and every
-    record in it (`records.path`), and the instructor files."""
+    record in it (`records.path`), the instructor files, and a semester site's
+    `_config.yml` keys."""
     return {
         "config_repo": CONFIG_REPO,
         "join_repo": JOIN_REPO,
@@ -749,6 +751,12 @@ def names_json() -> dict:
         "join_markers": {
             "join_course": JOIN_COURSE_MARKER,
             "join_team": JOIN_TEAM_MARKER,
+        },
+        # A semester site's `_config.yml`: the keys every sync rewrites, and the
+        # institution keys it leaves to the site.
+        "site_config": {
+            "synced": list(site_repo.SYNCED_CONFIG_KEYS),
+            "institution": list(site_repo.INSTITUTION_CONFIG_KEYS),
         },
     }
 

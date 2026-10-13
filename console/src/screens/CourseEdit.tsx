@@ -6,7 +6,7 @@ import materialsSchema from '../../schemas/materials.schema.json';
 import opencourseSchema from '../../schemas/opencourse.schema.json';
 import { useEnv, type Env } from '../env';
 import { badgeFiles, denylisted, neverMaterial } from '../edit/badges';
-import { invalidText, useSave } from '../edit/save';
+import { invalidText, useSave, type SaveState } from '../edit/save';
 import { YamlText, compact, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { termRank } from '../model/catalogue';
@@ -21,7 +21,7 @@ import { ABOUT, COURSE_FACTS, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
-import { CheckLine, EditFile, Loading, editUrl, fileLinkText, newFileUrl } from '../ui/bits';
+import { CheckLine, EditFile, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { PatternTree } from '../ui/PatternTree';
@@ -104,6 +104,26 @@ export function courseFileAfter(text: string, before: Details, after: Details, m
   const out = new YamlText(text);
   writeDetails(out, before, after, meta);
   return validCourse(out.toJS()) ? { text: out.text } : { error: invalidText('dsl-course.yml', validCourse) };
+}
+
+/**
+ * Save dsl-course.yml with `after` written over `before`: refused on the save line, before any
+ * write, while the course's names are unconfirmed, while `errs` marks a field, when the file
+ * would not be valid, or when a new admin has no GitHub account. True once written.
+ */
+export async function saveCourseFile(
+  env: Env | null,
+  [run, report]: [ReturnType<typeof useSave>[1], (s: SaveState) => void],
+  o: { org: string; migrated?: boolean; file: { text: string; sha: string }; meta: Record<string, unknown>; before: Details; after: Details; errs: Record<string, string> },
+): Promise<boolean> {
+  const refuse = (text: string) => (report({ kind: 'bad', text }), false);
+  if (o.migrated === false) return refuse('Not saved: the console has not yet confirmed this course uses the current names.');
+  if (Object.keys(o.errs).length) return refuse('Fix the fields marked in red first.');
+  const out = courseFileAfter(o.file.text, o.before, o.after, o.meta);
+  if ('error' in out) return refuse(out.error);
+  const missing = await missingAdmin(env, o.before.admins, o.after.admins);
+  if (missing) return refuse(`There is no GitHub account called ${missing}.`);
+  return run({ owner: o.org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, o.file.sha, { message: 'course: edit the course details, from the DSL Teaching Console', statusRepo: [o.org, COURSE_REPO] });
 }
 
 /** The first new admin handle with no GitHub account, or null (a failed lookup counts as there). */
@@ -208,11 +228,10 @@ function LinkKindsField({ id, value, onInput }: { id: string; value: string; onI
   );
 }
 
-/** A course file's edit link (Edit the file directly), on .github's default branch (main until the repo list is read); GitHub's new-file page when it does not exist yet. */
-export function courseFileUrl(files: CourseProps['files'], org: string, path: string, exists: boolean): string {
+/** The course's `.github` default branch, for its file links (main until the repo list is read). */
+function courseBranch(files: CourseProps['files'], org: string): string {
   const gh = files.repos(org);
-  const branch = (gh.kind === 'ready' ? gh.repos.find((r) => r.name === COURSE_REPO)?.default_branch : undefined) ?? 'main';
-  return exists ? editUrl(org, COURSE_REPO, path, branch) : newFileUrl(org, COURSE_REPO, path, branch);
+  return (gh.kind === 'ready' ? gh.repos.find((r) => r.name === COURSE_REPO)?.default_branch : undefined) ?? 'main';
 }
 
 export function DetailsScreen(p: CourseProps) {
@@ -233,22 +252,13 @@ export function DetailsScreen(p: CourseProps) {
   const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, COURSE_FACTS, d.about), ...defaultErrs };
   const doSave = async () => {
     if (!y || file.kind !== 'ready') return;
-    if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
-    if (Object.keys(errs).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    const after = d;
-    const out = courseFileAfter(file.text, before, after, meta);
-    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
-    const missing = await missingAdmin(env, before.admins, after.admins);
-    if (missing) return setSave({ kind: 'bad', text: `There is no GitHub account called ${missing}.` });
-    if (await runSave({ owner: course.org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, file.sha, { message: 'course: edit the course details, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) {
-      setDraft(null);
-    }
+    if (await saveCourseFile(env, [runSave, setSave], { org: course.org, migrated: p.migrated, file, meta, before, after: d, errs })) setDraft(null);
   };
   return (
     <>
       <div class="page-head">
         <div><h2 class="h1">Course details <Hint doc="01-new-course-org.md">Every semester of the course starts from these settings. Each semester and each assignment can set its own defaults.</Hint></h2><p class="lede">What every semester’s student site shows about the course, and the course’s defaults.</p></div>
-        <div class="actions"><a class="btn quiet" href={courseFileUrl(p.files, course.org, 'dsl-course.yml', file.kind !== 'absent')} target="_blank" rel="noopener" title={`${course.org}/${COURSE_REPO}/${'dsl-course.yml'}`}>{fileLinkText(file.kind !== 'absent')} <Ext /></a></div>
+        <div class="actions"><EditFile cls="btn quiet" org={course.org} repo={COURSE_REPO} path="dsl-course.yml" branch={courseBranch(p.files, course.org)} exists={file.kind !== 'absent'} /></div>
       </div>
       {file.kind === 'loading' ? <Loading what="Reading dsl-course.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no dsl-course.yml in {course.org}/.github.</CheckLine> : null}
@@ -465,7 +475,7 @@ export function WebsiteScreen(p: CourseProps) {
         </div>
         <div class="actions">
           <OpButtons def={publishWebsite(courseScope(p), published)} />
-          <a class="btn quiet" href={courseFileUrl(p.files, course.org, OPENCOURSE_FILE, file.kind !== 'absent')} target="_blank" rel="noopener" title={`${course.org}/${COURSE_REPO}/${OPENCOURSE_FILE}`}>{fileLinkText(file.kind !== 'absent')} <Ext /></a>
+          <EditFile cls="btn quiet" org={course.org} repo={COURSE_REPO} path={OPENCOURSE_FILE} branch={courseBranch(p.files, course.org)} exists={file.kind !== 'absent'} />
         </div>
       </div>
       {file.kind === 'loading' ? <Loading what={`Reading ${OPENCOURSE_FILE}`} /> : null}

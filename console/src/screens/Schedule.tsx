@@ -74,6 +74,14 @@ export function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
   return { text: f.text, sha: f.sha, ...parsed! };
 }
 
+/** schedule.yml after `drafts` (each under its final id) and `removed`, or why it would not be valid. */
+export function scheduleAfter(sf: SchedFile, drafts: Draft[], removed: Record<string, Block> = {}): { text: string } | { error: string } {
+  const y = new YamlText(sf.text);
+  for (const d of drafts) writeDraft(y, d, sf.doc);
+  for (const [id, b] of Object.entries(removed)) y.delete([b, id]);
+  return validSchedule(y.toJS()) ? { text: y.text } : { error: invalidText('the schedule', validSchedule) };
+}
+
 // ------------------------------------------------------------------ the entry sheet
 
 type Setter<T> = (patch: Partial<T>) => void;
@@ -490,22 +498,17 @@ function View(p: ReadyProps) {
       setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
       return;
     }
-    const y = new YamlText(sf.text);
     let newId: string | null = null;
-    for (const k of dirtyKeys) {
+    const written = dirtyKeys.map((k): Draft => {
       const d = prefill(drafts[k]);
-      if (k === 'new' && (d.kind === 'releases' || d.kind === 'assignments' || d.kind === 'events')) {
-        newId = d.kind === 'assignments' ? assignmentKey(d.number)
-          : d.kind === 'releases' ? (d.number ? freshId(doc, 'releases', `${kindFor(d)}-${d.number}`) : unnumberedId(doc, kindFor(d) ?? 'lecture', d.title))
-          : freshId(doc, d.kind, d.title || 'event');
-        writeDraft(y, { ...d, id: newId }, doc);
-      } else writeDraft(y, d, doc);
-    }
-    for (const [id, b] of Object.entries(removed)) y.delete([b, id]);
-    if (!validSchedule(y.toJS())) {
-      setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
-      return;
-    }
+      if (k !== 'new' || !(d.kind === 'releases' || d.kind === 'assignments' || d.kind === 'events')) return d;
+      newId = d.kind === 'assignments' ? assignmentKey(d.number)
+        : d.kind === 'releases' ? (d.number ? freshId(doc, 'releases', `${kindFor(d)}-${d.number}`) : unnumberedId(doc, kindFor(d) ?? 'lecture', d.title))
+        : freshId(doc, d.kind, d.title || 'event');
+      return { ...d, id: newId };
+    });
+    const out = scheduleAfter(sf, written, removed);
+    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
     // assignments.yml follows the schedule (the new entry's run settings; no block left for a
     // removed one). It is built and checked BEFORE the schedule is written, so a refusal
     // writes nothing.
@@ -523,7 +526,7 @@ function View(p: ReadyProps) {
       }
     }
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${Object.keys(removed).join(', ')}` : `${dirty} changes`;
-    const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: y.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
+    const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: out.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
     // Once the schedule is written its drafts are gone, whatever happens to assignments.yml:
     // a retry must not add the entry a second time.
     await saveSteps(env, setSave, first, second, newAsg ? 'Entry saved without its run settings' : 'Entry removed, but its block is still in assignments.yml', () => {

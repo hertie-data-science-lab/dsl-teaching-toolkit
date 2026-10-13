@@ -64,6 +64,20 @@ _THEME_CONFIG = {
     "dateformat": "%d/%m/%Y",
 }
 
+# The course-identity `_config.yml` keys every sync rewrites from the course and the
+# semester (`site.sync_site` builds them, `title` follows `course_name`), and the
+# institution keys the seed writes once and the sync leaves to the site. Exported to the
+# console (`names.json`), whose Site settings save the second set into the site repo.
+SYNCED_CONFIG_KEYS = (
+    "course_name",
+    "title",
+    "course_code",
+    "course_description",
+    "course_semester",
+    "github_org",
+)
+INSTITUTION_CONFIG_KEYS = ("schoolname", "schoolurl", "dsl_org_url", "address")
+
 # The collections the shipped templates read (`site.lectures`, `site.assignments`,
 # `site.events`, `site.announcements`) and the layout an assignment page gets. Both are
 # multi-line blocks rather than scalars, so `_upsert_config` writes them whole; both are

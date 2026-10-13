@@ -12,7 +12,7 @@ import { checkAccess, sendCodes, syncMembershipUrl } from '../ops/defs';
 import { OpOpen } from '../ops/Panel';
 import { PERSON, PHOTO_DIR, displayOnly, photoError } from '../tiers/people';
 import { pick } from '../tiers/types';
-import { authorOf } from '../github/client';
+import { GitHubError, authorOf } from '../github/client';
 import { CheckLine, EditFile, Loading, ProblemCards, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar, SaveLine } from '../ui/edit';
@@ -414,7 +414,7 @@ function PhotoField({ p, values, set }: { p: ReadyProps; values: Record<string, 
     try {
       await env.client.putContents({ owner: p.cohort.org, repo, path: `${PHOTO_DIR}/${name}`, text: new Uint8Array(await f.arrayBuffer()), sha: null, message: `site: add the photo ${name}, from the DSL Teaching Console`, author: authorOf(env.user) });
     } catch (e) {
-      const taken = e instanceof Error && 'status' in e && (e as { status: number }).status === 422;
+      const taken = e instanceof GitHubError && e.status === 422;
       return setState({ kind: 'bad', text: taken ? `${name} is already in the folder: rename the image, or type its path.` : `Not uploaded: ${e instanceof Error ? e.message : String(e)}` });
     }
     setState({ kind: 'idle' });

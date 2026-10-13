@@ -564,7 +564,8 @@ Promote.
 
 A semester is archived when its `semester-config` is (`status.loadStatus` reads the repo's
 flag): the engine writes no status once it is, so the last file still says `live: true`. Beside the schemas it
-writes `names.json` (repo and path names) and `policy.json` (the loaded policy, below), so
+writes `names.json` (repo and path names, and the `_config.yml` keys a site sync rewrites or
+leaves to the site) and `policy.json` (the loaded policy, below), so
 the console holds no default of its own, and `materials.schema.json` (a materials repo's
 optional `materials.yml`: `syllabus`, `kinds` folder aliases; `materials.parse`).
 

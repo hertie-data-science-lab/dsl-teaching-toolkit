@@ -71,7 +71,7 @@ export function Soon({ label, cls = 'btn', title = SOON }: { label: ComponentChi
 export const Prop = () => <span class="prop" title="Not in the engine today">proposed</span>;
 
 /** The two file links: "Edit the file directly" (GitHub's edit page) or, while the file does not exist (`exists` false), "Create the file on GitHub" (its new-file page); the full `org/repo/path` is the tooltip. */
-export function fileLinkText(exists: boolean): string {
+function fileLinkText(exists: boolean): string {
   return exists ? 'Edit the file directly' : 'Create the file on GitHub';
 }
 

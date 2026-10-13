@@ -13,6 +13,7 @@ import { buildRequest } from '../src/ops/adapter';
 import { hashOf, movedHash, parseHash, wizardOf } from '../src/router';
 import { NotMigratedScreen } from '../src/screens/NotMigrated';
 import { formatsAfter } from '../src/screens/CourseEdit';
+import { syncedValues } from '../src/screens/Site';
 import { FakeGitHub, fileBody, json } from './fake';
 
 const SRC = new URL('../src/', import.meta.url).pathname;
@@ -57,9 +58,16 @@ const RETIRED: [string, RegExp][] = [
 
 describe('names', () => {
   it('has exactly the keys the engine exports', () => {
-    expect(Object.keys(NAMES).sort()).toEqual(['assignments_file', 'config_repo', 'instructors_file', 'join_markers', 'join_repo', 'opencourse_file', 'records', 'registry_file', 'system_dir']);
+    expect(Object.keys(NAMES).sort()).toEqual(['assignments_file', 'config_repo', 'instructors_file', 'join_markers', 'join_repo', 'opencourse_file', 'records', 'registry_file', 'site_config', 'system_dir']);
     expect(NAMES.config_repo).toBe('semester-config');
     expect(NAMES.records.status.startsWith(`${NAMES.system_dir}/`)).toBe(true);
+  });
+
+  it('gives every _config.yml key the engine says a sync rewrites a value from the course or the semester', () => {
+    const course = { org: 'c', name: 'N', code: 'C', description: 'D', write: true, admins: [], cohorts: [], meta: {} };
+    const values = syncedValues(course, { org: 's', term: 'f2026', termLabel: 'Fall 2026' });
+    expect(Object.keys(values)).toEqual(NAMES.site_config.synced);
+    for (const [k, v] of Object.entries(values)) expect(v, k).not.toBe('');
   });
 
   it('agrees with schemas/names.json, which the engine exports, and holds every record the console reads', () => {
