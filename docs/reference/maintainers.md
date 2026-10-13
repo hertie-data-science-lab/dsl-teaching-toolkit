@@ -58,7 +58,7 @@ breaks a live link that faculty click:
 | `docs/10-grade-and-return-assignments.md` | `config_digest.GRADING_SHEETS` |
 | `docs/README.md` | `profile_readme.py` |
 | `docs/10-grade-and-return-assignments.md` | `scheduler._ARCHIVE_DOC` (the archive notice) |
-| `docs/01`-`04`, `07`-`11` and `docs/reference/actions-reference.md` | the console's **Learn more** links (`Hint doc=` / `OrgWhy doc=` in `console/src/screens/`, under `ui/bits.tsx` `DOCS`) |
+| `docs/01`-`04`, `07`-`11` and `docs/reference/actions-reference.md` | the console's **Learn more** links (`Hint doc=` / `OrgWhy doc=` in `console/src/screens/`, a field's `hint.doc` in `console/src/tiers/`, under `ui/bits.tsx` `DOCS`) |
 
 Every `Digest.doc` is one of these: each digest issue ends with a `Field reference:` link built
 from it, so the eight of them are the widest surface in this table.

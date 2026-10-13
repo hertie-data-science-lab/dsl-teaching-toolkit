@@ -99,6 +99,21 @@ export function toConfig(v: Values): Record<string, unknown> {
   };
 }
 
+/** The `?` beside "Run automatic tests on submissions". */
+export const AUTOGRADE_HINT = {
+  label: 'About automatic tests',
+  text:
+    'Hidden pytest tests you keep in the template’s tests/ folder on the solution branch; students never see them. ' +
+    'They run once, at the late cutoff, on each submission as it was frozen, in a sandbox. ' +
+    'You get a pass count such as 7/10 in the grading sheet’s info.autograde and on the Marks tab, with per-test detail in the semester’s private .system/autograde/. ' +
+    'It informs the marker: it is never a mark and never shown to students; you still enter the marks. ' +
+    'To write them: one test per behaviour, import the student’s module by its starter name, plain asserts, the standard library plus what the runner installs. ' +
+    'Other languages: a tests/run.sh.',
+  link: { label: 'A worked, annotated example', href: 'https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/tree/solution/tests' },
+  doc: '10-grade-and-return-assignments.md#autograding-optional',
+  docLabel: 'How autograding works',
+};
+
 /** The template's own fields; `formats` is the format picker beside them, not a tier. */
 export function settingsTiers(): Tiers {
   return {
@@ -112,7 +127,7 @@ export function settingsTiers(): Tiers {
       options: SUBMIT.map(([v, l, s]) => opt(v, l, s)),
     },
     autograde: {
-      tier: 'default', label: 'Run automatic tests on submissions', widget: 'radio', default: 'false', defaultLabel: 'default: off',
+      tier: 'default', label: 'Run automatic tests on submissions', widget: 'radio', default: 'false', defaultLabel: 'default: off', hint: AUTOGRADE_HINT,
       options: [opt('true', 'On', 'Tests suggest a mark. Marker has final discretion.'), opt('false', 'Off', 'Marked purely by hand.')],
       forced: (v) => (isDrop(v) ? { value: undefined, reason: 'A shared drop box holds every student’s work in one repo, so tests cannot run per student.' } : null),
       check: (x) => (x === undefined || x === 'true' || x === 'false' ? null : `The file says “${String(x)}”. Choose on or off.`),

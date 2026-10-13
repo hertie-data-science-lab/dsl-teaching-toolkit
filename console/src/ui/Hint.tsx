@@ -8,8 +8,8 @@ import { DOCS } from './bits';
 
 const GAP = 8; // between the ? and the popover, and the popover and the viewport's edge
 
-/** `small` sets it beside a fact in a list rather than a heading. */
-export function Hint({ children, doc, label = 'About this page', small = false }: { children: ComponentChildren; doc?: string; label?: string; small?: boolean }) {
+/** `small` sets it beside a fact in a list rather than a heading; `docLabel` names the `doc` link. */
+export function Hint({ children, doc, docLabel = 'Learn more', label = 'About this page', small = false }: { children: ComponentChildren; doc?: string; docLabel?: string; label?: string; small?: boolean }) {
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
   const [place, setPlace] = useState<{ cls: string; maxWidth?: number }>({ cls: '' });
@@ -49,7 +49,7 @@ export function Hint({ children, doc, label = 'About this page', small = false }
       <button class="hint-btn" type="button" aria-label={label} aria-describedby={id}>?</button>
       <span class={`hint-pop${place.cls}`} id={id} ref={pop} hidden={!open} style={place.maxWidth ? { maxWidth: `${place.maxWidth}px` } : undefined}>
         {children}
-        {doc ? <> <a href={`${DOCS}${doc}`} target="_blank" rel="noopener">Learn more</a></> : null}
+        {doc ? <> <a href={`${DOCS}${doc}`} target="_blank" rel="noopener">{docLabel}</a></> : null}
       </span>
     </span>
   );

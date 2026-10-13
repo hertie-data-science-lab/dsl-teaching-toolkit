@@ -102,9 +102,16 @@ export function Invalid({ children }: { children: ComponentChildren }) {
 }
 
 function Label({ t, id, as }: { t: FieldTier; id?: string; as?: 'label' | 'span' }) {
+  const h = t.hint;
   const inner = (
     <>
       {t.label}
+      {h ? (
+        <Hint label={h.label} doc={h.doc} docLabel={h.docLabel}>
+          {h.text}
+          {h.link ? <> <a href={h.link.href} target="_blank" rel="noopener">{h.link.label}</a>{h.doc ? ' ·' : null}</> : null}
+        </Hint>
+      ) : null}
       {t.defaultLabel ? <span class="default"> {t.defaultLabel}</span> : null}
       {t.irreversible ? <span class="default"> cannot be changed after creation</span> : null}
       {t.proposed ? <Prop /> : null}

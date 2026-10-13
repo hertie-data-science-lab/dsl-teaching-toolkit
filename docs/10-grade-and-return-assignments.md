@@ -199,6 +199,15 @@ count lands in `info.autograde` (`7/9`) for your information only - it is never 
 itself and a student never sees it. Per-test detail goes to `semester-config/.system/autograde/`.
 To regrade, delete `.system/autograde/<slug>/`.
 
+**Writing the tests.** One test function per behaviour, with a docstring saying what it checks:
+that line is what you read in the per-test detail. Import the student's module by its starter
+name (`from starter import fit`) - the runner puts the submission on `sys.path`. Plain
+`assert`s, `pytest.approx` for numbers, `pytest.raises` for errors; count on the standard
+library and pytest, nothing more.
+
+**Worked example:** the demo course's [tests folder](https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/tree/solution/tests) - ten tests and a
+[README](https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/blob/solution/tests/README.md) on adapting them to your assignment.
+
 ### Tests in another language: `tests/run.sh`
 
 The hidden tests are pytest unless you say otherwise. Put a **`run.sh`** at the top of the

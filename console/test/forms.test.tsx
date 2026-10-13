@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 import gradingSchema from '../schemas/grading_config.schema.json';
 import { SchemaForm, effective, fieldErrors, layout } from '../src/forms/Form';
 import { opSpec } from '../src/ops/registry';
-import { STARTER_COPY, fromConfig, settingsTiers, starterOf, toConfig } from '../src/tiers/grading';
+import { DOCS } from '../src/ui/bits';
+import { AUTOGRADE_HINT, STARTER_COPY, fromConfig, settingsTiers, starterOf, toConfig } from '../src/tiers/grading';
 import { RETURN_MARKS, releaseAdhoc } from '../src/tiers/ops';
 import { matches } from '../src/edit/glob';
 import { diffRoster, readTable, writeTable } from '../src/edit/csv';
@@ -41,6 +42,16 @@ describe('the tiered form', () => {
     expect(out).toContain('Written by hand');
     expect(out).toContain(STARTER_COPY.derived.hint);
     expect(out).toContain('aria-label="About Written by hand"');
+  });
+
+  it('explains automatic tests in a ? beside the setting, linking the docs and the worked example', () => {
+    const out = render(<SchemaForm id="t" schema={null} tiers={{ autograde: tiers.autograde }} values={fromConfig({})} onChange={() => {}} />);
+    expect(out).toContain('aria-label="About automatic tests"');
+    expect(out).toContain('never shown to students');
+    expect(out).toContain(`href="${DOCS}10-grade-and-return-assignments.md#autograding-optional"`);
+    expect(out).toContain('>How autograding works</a>');
+    expect(out).toContain(`href="${AUTOGRADE_HINT.link.href}" target="_blank"`);
+    expect(out).toContain('>A worked, annotated example</a>');
   });
 
   it('counts only non-default Advanced fields', () => {
