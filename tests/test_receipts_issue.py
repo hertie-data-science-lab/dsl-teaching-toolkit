@@ -198,6 +198,14 @@ def test_the_penalty_shown_is_the_days_times_the_rate():
     assert grades.penalty_display(spec(late_penalty_per_day=None), 2) == ""
 
 
+def test_a_receipt_quotes_the_penalty_its_grader_already_chose():
+    assert grades.penalty_display(spec(), 2, "waive") == "waived"
+    assert grades.penalty_display(spec(), 2, "5%") == "-5% (set by hand)"
+    assert "2 days late (waived)" in grades.receipt(
+        spec(), course.RECEIPT_UPDATED, sha=SHA, days=2, late_penalty="waive"
+    )
+
+
 def test_the_marker_keys_on_the_commit_as_well_as_the_event():
     # Per COMMIT, so a re-run over the same pin says nothing while a genuinely new push
     # still earns its own receipt.

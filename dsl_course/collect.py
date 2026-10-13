@@ -1668,6 +1668,7 @@ def _post_receipts(
             sha=sha,
             pushed_display=grades._display_long(when),
             days=days_late(when, due, tz) if (when is not None and due) else 0,
+            late_penalty=(previous.get(unit) or {}).get(grades.LATE_PENALTY_KEY),
         )
         # Nothing weaker than "this repo is in the listing and the listing says it is
         # private" may be posted into. Off the rows this pass already holds, so the guard

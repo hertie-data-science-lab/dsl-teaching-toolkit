@@ -11,9 +11,10 @@
 # from CONTRIBUTIONS.md at the same moments. All of them freeze at the late cutoff.
 # You fill in: feedback_group, adjustment_individual, feedback_individual,
 # notes_not_shared_with_students, score_group (one value per question; max points shown beside
-# each), feedback_per_question (optional, one per question). Anything you type is never
-# touched. Nothing reaches a student until you run Distribute grades. YAML comments you add are
-# not preserved when the toolkit rewrites the file.
+# each), feedback_per_question (optional, one per question), late_penalty (optional, on a late
+# unit: apply, waive, or the whole penalty as 10%). Anything you type is never touched. Nothing
+# reaches a student until you run Distribute grades. YAML comments you add are not preserved
+# when the toolkit rewrites the file.
 # -------------------------------------------------------------------------------------------
 teams:
   team-alpha:
