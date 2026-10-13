@@ -30,7 +30,7 @@ export interface DeployDraft {
  * nothing to ship, a lab's second group); with one or more, under `releases:`.
  */
 export interface ReleaseDraft {
-  kind: 'releases';
+  kind: 'session';
   id: string;
   type: string;
   /** The row's number (decision 0020). Undefined until proposed; '' while the box is empty. */
@@ -158,7 +158,7 @@ export function readDraft(doc: Raw, key: string): Draft | null {
       const [atDate, atTime] = splitWhen(x.deploy_datetime);
       return { repo: s(x.course_source_repo), folder: s(x.course_source_path), dest: s(x.semester_dest_repo), path: s(x.semester_dest_path), atDate, atTime, src };
     });
-    return { kind: 'releases', ...common, type: s(e.kind), number, date, time, deploys };
+    return { kind: 'session', ...common, type: s(e.kind), number, date, time, deploys };
   }
   if (b === 'assignments') {
     const [handoutDate, handoutTime] = splitWhen(e.handout_datetime);
@@ -173,7 +173,7 @@ export function readDraft(doc: Raw, key: string): Draft | null {
   const tbc = common.tbc || s(e.event_datetime).toLowerCase() === 'tbc';
   const type = s(e.kind).trim().toLowerCase();
   // A session with nothing to ship is a session's draft with no deploys (`sessionBlock`).
-  if (isSession(type)) return { kind: 'releases', ...common, tbc, type, number, date, time, deploys: [] };
+  if (isSession(type)) return { kind: 'session', ...common, tbc, type, number, date, time, deploys: [] };
   return { kind: 'events', ...common, type: type || 'special_event', date, time, tbc };
 }
 
@@ -207,13 +207,13 @@ function numberValue(d: ReleaseDraft | AssignmentDraft, raw: Raw, fresh: boolean
 export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEntry: unknown): Raw {
   const raw = obj(rawEntry);
   const fresh = rawEntry === undefined;
-  if (d.kind === 'releases' && sessionBlock(d) === 'events') {
+  if (d.kind === 'session' && sessionBlock(d) === 'events') {
     return {
       ...raw, deploy: undefined, kind: d.type || EMPTY_ENTRY_KIND, number: numberValue(d, raw, fresh), ...display(raw, d),
       event_datetime: whenOf(raw.event_datetime, d.date, d.time) ?? 'tbc', tbc: d.date ? keep(raw.tbc, d.tbc, false) : undefined,
     };
   }
-  if (d.kind === 'releases') {
+  if (d.kind === 'session') {
     const rawDeploys = Array.isArray(raw.deploy) ? raw.deploy : [];
     return {
       ...raw,
@@ -279,13 +279,13 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
     return;
   }
   // A session moves between `releases:` and `events:` as it gains or loses what it releases.
-  const block = d.kind === 'releases' ? sessionBlock(d) : d.kind;
+  const block = d.kind === 'session' ? sessionBlock(d) : d.kind;
   const from = blockOf(doc, d.id);
   if (from && from !== block) {
     // The block it leaves stays a mapping (`releases: {}`), as the schema wants, when it was its last entry.
     if (Object.keys(obj(doc[from])).length === 1) y.set([from], {});
     else y.delete([from, d.id]);
-  } else if (d.kind === 'releases') dropRemovedDeploys(y, d, obj(doc.releases)[d.id]);
+  } else if (d.kind === 'session') dropRemovedDeploys(y, d, obj(doc.releases)[d.id]);
   y.assign([block, d.id], entryValue(d, obj(doc[from ?? block])[d.id]));
 }
 
@@ -298,7 +298,7 @@ function dropRemovedDeploys(y: YamlText, d: ReleaseDraft, rawEntry: unknown): vo
   const raw = obj(rawEntry).deploy;
   if (!Array.isArray(raw) || !d.deploys.length) return;
   const kept = d.deploys.map((dp) => dp.src).filter((i): i is number => i !== undefined);
-  for (let i = raw.length - 1; i >= 0; i--) if (!kept.includes(i)) y.delete([d.kind, d.id, 'deploy', i]);
+  for (let i = raw.length - 1; i >= 0; i--) if (!kept.includes(i)) y.delete(['releases', d.id, 'deploy', i]);
 }
 
 /**
@@ -389,7 +389,7 @@ export function nextNumber(doc: Raw, kind: string, kindOf: KindOf = spelledKind)
  * supporting-files entry carries none: it is no row.
  */
 export function withNumber<T extends Draft>(d: T, doc: Raw, kindOf: KindOf = spelledKind, kind?: string): T {
-  if ((d.kind !== 'assignments' && d.kind !== 'releases') || d.id) return d;
+  if ((d.kind !== 'assignments' && d.kind !== 'session') || d.id) return d;
   const k = d.kind === 'assignments' ? 'assignment' : kind || d.type || 'lecture';
   if (k === 'assets') return d.number === undefined ? d : { ...d, number: undefined };
   const n = d.number === undefined ? nextNumber(doc, k, kindOf) : null;
@@ -404,7 +404,7 @@ export function blankDraft(type: string, defaults: { repo: string }): ReleaseDra
   if (type === 'handout')
     return { kind: 'assignments', ...common, template: '', manual: false, handoutDate: '', handoutTime: '10:00', dueDate: '', dueTime: '23:59', solutionOn: false, solutionDate: '', solutionTime: '' };
   if (type === 'exam' || type === 'special_event') return { kind: 'events', ...common, type, date: '', time: '' };
-  return { kind: 'releases', ...common, type, date: '', time: '10:00', deploys: [blankDeploy(defaults.repo)] };
+  return { kind: 'session', ...common, type, date: '', time: '10:00', deploys: [blankDeploy(defaults.repo)] };
 }
 
 /** A sheet moment as the engine reads it, sortable: a bare day at its start, or (a due date) its end. */
@@ -419,7 +419,7 @@ function moment(when: string, endOfDay = false): string {
  */
 export function draftErrors(d: Draft, others?: { templateUsers?: (template: string) => number; doc?: Raw; kind?: string }, cutoff?: string | null): Record<string, string> {
   const e: Record<string, string> = {};
-  if (d.kind === 'releases' || d.kind === 'assignments') {
+  if (d.kind === 'session' || d.kind === 'assignments') {
     const kind = d.kind === 'assignments' ? 'assignment' : others?.kind ?? (d.type || 'lecture');
     if (d.number === '' || d.number === undefined) {
       if (needsNumber(d, kind)) e.number = 'A number is needed.';
@@ -428,7 +428,7 @@ export function draftErrors(d: Draft, others?: { templateUsers?: (template: stri
     } else if (!(Number.isInteger(d.number) && d.number >= 1 && d.number <= 999)) e.number = 'A whole number from 1 to 999.';
     else if (d.kind === 'assignments' && !d.id && others?.doc && takenKeys(others.doc).has(assignmentKey(d.number))) e.number = `${assignmentKey(d.number)} is already in this schedule.`;
   }
-  if (d.kind === 'releases') {
+  if (d.kind === 'session') {
     if (!d.date && sessionBlock(d) === 'releases') e.date = 'When is needed.';
     d.deploys.forEach((dp, i) => {
       if (!dp.repo) e[`deploy${i}.repo`] = 'Choose the repo.';

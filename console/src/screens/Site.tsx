@@ -8,7 +8,8 @@ import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { ago, fmtWhen, kebab, str } from '../model/format';
 import type { FileState } from '../model/files';
 import { parseInstructors } from '../model/people';
-import { bodyOf, frontMatter, homeText, unsetSiteKeys } from '../model/student';
+import { bodyOf, frontMatter } from '../model/student';
+import { homeText, unsetSiteKeys } from '../model/siteText';
 import type { Outcome } from '../model/types';
 import { outcomePath } from '../ops/adapter';
 import { updateSite } from '../ops/defs';
@@ -114,7 +115,7 @@ function Site(p: ReadyProps) {
   const cfg = useYaml(cfgFile);
   const synced = useMemo(() => syncedValues(p.course, p.cohort), [p.course, p.cohort]);
   const siteVars = useMemo(() => ({ ...cfg?.doc, ...Object.fromEntries(Object.entries(synced).filter(([, v]) => !!v)) }), [cfg, synced]);
-  const unset = unsetSiteKeys(shown, siteVars);
+  const unset = useMemo(() => unsetSiteKeys(shown, siteVars), [shown, siteVars]);
   const saveHome = async () => {
     if (home.kind !== 'ready' || body === null) return;
     const front = home.text.slice(0, home.text.length - bodyOf(home.text).length);

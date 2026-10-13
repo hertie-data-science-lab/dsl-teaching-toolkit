@@ -9,7 +9,7 @@ import { Field, Invalid } from '../forms/Form';
 import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  assignmentKey, blankDeploy, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft,
+  assignmentKey, blankDeploy, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft,
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
@@ -146,7 +146,7 @@ function FolderCheck({ p, dp, i, onSuggest }: { p: ReadyProps; dp: DeployDraft; 
  * none and whose copies are as saved has the engine's answer in status; the local rule covers the
  * rest (a draft): from where its first copy lands. */
 export function inferredKind(p: ReadyProps, d: ReleaseDraft, saved: Draft | null = null): string {
-  if (saved?.kind === 'releases' && !saved.type && deepEqual(saved.deploys, d.deploys)) {
+  if (saved?.kind === 'session' && !saved.type && deepEqual(saved.deploys, d.deploys)) {
     const engine = (p.status.releases ?? []).find((r) => r.id === saved.id)?.kind;
     if (engine) return engine;
   }
@@ -428,7 +428,7 @@ function identOf(d: Draft, row: Row | undefined, kind: string): string {
   if (row) return row.ident;
   if (d.kind === 'assignments') return d.number ? `Assignment ${d.number}` : 'Assignment';
   if (d.kind === 'events') return d.type === 'exam' ? 'Exam' : 'Event';
-  if (d.kind === 'releases') {
+  if (d.kind === 'session') {
     const word = KIND_LABEL[kind] ?? kind;
     return d.number ? `${word} ${d.number}` : word;
   }
@@ -475,7 +475,7 @@ function View(p: ReadyProps) {
   const kindOf: KindOf = (k, e) => statusKind[k] ?? (String((e as { kind?: unknown })?.kind ?? '') || 'lecture');
   // A release's kind as the engine will read it: its own, else the one its folder implies.
   const inferredOf = (d: ReleaseDraft): string => inferredKind(p, d, d.id ? baseOf(d.id) : null);
-  const kindFor = (d: Draft): string | undefined => (d.kind === 'releases' ? d.type || inferredOf(d) : undefined);
+  const kindFor = (d: Draft): string | undefined => (d.kind === 'session' ? d.type || inferredOf(d) : undefined);
   // A new entry shows the number it will get until one is typed (decision 0020).
   const prefill = (d: Draft): Draft => withNumber(d, doc, kindOf, kindFor(d));
   const draftOf = (k: string): Draft | null => (drafts[k] ? prefill(drafts[k]) : baseOf(k));
@@ -526,9 +526,9 @@ function View(p: ReadyProps) {
     let newId: string | null = null;
     const written = dirtyKeys.map((k): Draft => {
       const d = prefill(drafts[k]);
-      if (k !== 'new' || !(d.kind === 'releases' || d.kind === 'assignments' || d.kind === 'events')) return d;
+      if (k !== 'new' || !(d.kind === 'session' || d.kind === 'assignments' || d.kind === 'events')) return d;
       newId = d.kind === 'assignments' ? assignmentKey(d.number)
-        : d.kind === 'releases' ? (d.number ? freshId(doc, 'releases', `${kindFor(d)}-${d.number}`) : unnumberedId(doc, kindFor(d) ?? 'lecture', d.title))
+        : d.kind === 'session' ? (d.number ? freshId(doc, sessionBlock(d), `${kindFor(d)}-${d.number}`) : unnumberedId(doc, kindFor(d) ?? 'lecture', d.title))
         : freshId(doc, d.kind, d.title || 'event');
       return { ...d, id: newId };
     });
@@ -621,16 +621,16 @@ function View(p: ReadyProps) {
         // inferred from the folder), so a kind or folder change takes that kind's next number.
         // Typing in the Number field (clearing it included) is the instructor's own number.
         // Readings get no proposal (`nextNumber` is null), so their number is always typed and stays.
-        if (key === 'new' && d.kind === 'releases' && next.kind === 'releases' && !('number' in patch) && d.number === nextNumber(doc, kindFor(d)!, kindOf)) next = { ...next, number: undefined };
+        if (key === 'new' && d.kind === 'session' && next.kind === 'session' && !('number' in patch) && d.number === nextNumber(doc, kindFor(d)!, kindOf)) next = { ...next, number: undefined };
         setDraft(key, next);
       };
-      const rel = d.kind === 'releases' && key !== 'new' ? (status.releases ?? []).find((x) => x.id === key) : undefined;
+      const rel = d.kind === 'session' && key !== 'new' ? (status.releases ?? []).find((x) => x.id === key) : undefined;
       const ref = rel ? releaseRef(rel, tz, year) : null;
       const ident = identOf(d, current, kindFor(d) ?? '');
       const title = d.kind === 'semester' ? <>Semester dates</> : d.kind === 'archive' ? <><b>Archive</b>: {d.title || 'Semester archived'} <ArchiveHelp org={p.cohort.org} /></> : <><b>{ident}</b>: {d.title || (current?.name ?? 'Untitled')}</>;
-      const eyebrow = d.kind === 'semester' ? 'Semester' : d.kind === 'archive' ? 'Archive' : d.kind === 'assignments' ? 'Assignment entry' : `${TYPE_LABEL[d.kind === 'releases' ? d.type || 'lecture' : d.type] ?? ''}${d.date ? `, ${fmtDay(d.date, tz, year)}${d.time ? ` ${d.time}` : ''}` : ''}`;
+      const eyebrow = d.kind === 'semester' ? 'Semester' : d.kind === 'archive' ? 'Archive' : d.kind === 'assignments' ? 'Assignment entry' : `${TYPE_LABEL[d.kind === 'session' ? d.type || 'lecture' : d.type] ?? ''}${d.date ? `, ${fmtDay(d.date, tz, year)}${d.time ? ` ${d.time}` : ''}` : ''}`;
       const probs = (status.problems ?? []).filter((x) => x.fix?.entry === key && x.fix.path === 'schedule.yml');
-      const two = d.kind === 'releases' || d.kind === 'assignments';
+      const two = d.kind === 'session' || d.kind === 'assignments';
       const siteTitle = d.kind === 'semester' ? '' : d.title || current?.name || '';
       sheet = (
         <div class="entry" role="dialog" aria-labelledby="entry-title">
@@ -652,7 +652,7 @@ function View(p: ReadyProps) {
             {probs.length && rel?.state !== 'will_be_skipped' ? <ProblemCards list={probs} /> : null}
             <div class="form">
               {d.kind !== 'semester' && d.kind !== 'archive' ? <div class="field"><span class="label">Identifier</span><div class="ident">{ident}<span>derived, as the student site does</span></div></div> : null}
-              {d.kind === 'releases' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} inferred={inferredOf(d)} />
+              {d.kind === 'session' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} inferred={inferredOf(d)} />
                 : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} tiered={tiered} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
                 : d.kind === 'events' ? <EventForm d={d} set={set} errors={errors} />
                 : d.kind === 'semester' ? <SemesterForm d={d} set={set} errors={errors} />

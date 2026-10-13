@@ -3,7 +3,7 @@
 
 import { parse } from 'yaml';
 import { obj } from '../edit/yamlText';
-import { ASSIGNMENT_WORD, KIND_LABEL, RELEASE_WORD, addDays, assignmentIdent, dayKey, daysBetween, labelNumber, releaseIdent, sortKey, zoned } from './format';
+import { ASSIGNMENT_WORD, RELEASE_WORD, addDays, assignmentIdent, dayKey, daysBetween, kindIdent, labelNumber, releaseIdent, sortKey, zoned } from './format';
 import { ASSETS_KIND, CONTENT_KINDS } from './materialsRules';
 import type { Release, Status } from './types';
 
@@ -47,9 +47,9 @@ function entry(raw: unknown, dflt: Partial<SchedEntry> = {}): SchedEntry {
   };
 }
 
-/** The kinds an `events:` entry may take besides special_event (`schedule.SESSION_KINDS`): every content kind that is a row. */
-export const EVENT_KINDS = CONTENT_KINDS.filter((k) => k !== ASSETS_KIND);
-/** Whether an event kind is a session with nothing to ship (`schedule.is_session`): any but exam and special_event. */
+/** The kinds an `events:` entry may take besides special_event (`schedule.EVENT_KINDS`): every content kind that is a row. */
+const EVENT_KINDS = CONTENT_KINDS.filter((k) => k !== ASSETS_KIND);
+/** Whether an event kind is a session with nothing to ship (`Schedule.sessions`): any but exam and special_event. */
 export const isSession = (kind: string) => kind !== 'exam' && EVENT_KINDS.includes(kind);
 /** An event's kind as the engine reads it: an unknown one is a special event. */
 const eventKind = (kind: string) => (EVENT_KINDS.includes(kind.trim().toLowerCase()) ? kind.trim().toLowerCase() : 'special_event');
@@ -131,15 +131,18 @@ export function scheduleRows(status: Status, sched: Schedule | null, now: number
   }
   if (sched) {
     // A session with nothing to ship ("Lab 1", group 2) is named as the site names it: its kind and number, its own title else its release's.
-    const releaseTitle = (kind: string, n: number | null) => (n === null ? '' : releases.find((r) => r.kind === kind && (r.number ?? labelNumber(r.id)) === n)?.title ?? '');
+    const titles = new Map<string, string>();
+    for (const r of releases) {
+      const k = `${r.kind}:${r.number ?? labelNumber(r.id)}`;
+      if (!titles.has(k)) titles.set(k, r.title);
+    }
     for (const ev of sched.events) {
       const session = isSession(ev.kind);
       const n = session ? ev.number ?? labelNumber(ev.id) : null;
-      const word = KIND_LABEL[ev.kind] ?? ev.kind;
       rows.push({
         entry: ev.id, block: 'events', type: ev.kind, when: ev.when,
-        ident: session ? (n === null ? word : `${word} ${n}`) : ev.kind === 'exam' ? 'Exam' : 'Event',
-        name: session ? ev.title || releaseTitle(ev.kind, n) : ev.title, state: ev.when ? (past(ev.when) ? 'past' : 'upcoming') : 'upcoming', details: ev.details, tbc: ev.tbc, show: ev.show,
+        ident: session ? kindIdent(ev.kind, n) : ev.kind === 'exam' ? 'Exam' : 'Event',
+        name: session ? ev.title || (n === null ? '' : titles.get(`${ev.kind}:${n}`) ?? '') : ev.title, state: ev.when ? (past(ev.when) ? 'past' : 'upcoming') : 'upcoming', details: ev.details, tbc: ev.tbc, show: ev.show,
       });
     }
     if (sched.start) rows.push({ entry: 'semester', block: 'events', type: 'term', when: sched.start, ident: 'Semester', name: 'Starts', state: past(sched.start) ? 'past' : 'upcoming', details: '', tbc: false, show: true });

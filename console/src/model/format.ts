@@ -307,8 +307,12 @@ export function labelNumber(key: string): number | null {
  * status): the label's own number. Never a position.
  */
 export function releaseIdent(r: Release): string {
-  const word = KIND_LABEL[r.kind ?? 'lecture'] ?? r.kind ?? 'Lecture';
-  const n = r.number === undefined ? labelNumber(r.id) : r.number;
+  return kindIdent(r.kind ?? 'lecture', r.number === undefined ? labelNumber(r.id) : r.number);
+}
+
+/** A row's name: its kind's label and its number ("Lab 1"), the label alone with no number. */
+export function kindIdent(kind: string, n: number | null): string {
+  const word = KIND_LABEL[kind] ?? kind;
   return n === null ? word : `${word} ${n}`;
 }
 

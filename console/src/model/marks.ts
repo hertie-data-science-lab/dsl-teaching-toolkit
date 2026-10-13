@@ -126,41 +126,57 @@ export function scoreTotal(score: unknown, questions?: Record<string, unknown> |
   return marked ? total : null;
 }
 
-/** `late_penalty` as one word: '' (absent or blank), `apply`, `waive`, or the text written. */
-function lateChoice(latePenalty: unknown): string {
+export type LateMode = 'apply' | 'waive' | 'set' | 'bad';
+
+/** A unit's `late_penalty` read once (grades.late_choice): `apply` (absent or blank too), `waive`,
+ *  `set` - the whole penalty is `set` - or `bad`, which nobody can apply and the engine holds. */
+export function lateChoice(latePenalty: unknown): { mode: LateMode; set?: number } {
   const t = latePenalty === null || latePenalty === undefined ? '' : String(latePenalty).trim();
-  return ['apply', 'waive'].includes(t.toLowerCase()) ? t.toLowerCase() : t;
+  if (t === '' || t.toLowerCase() === 'apply') return { mode: 'apply' };
+  if (t.toLowerCase() === 'waive') return { mode: 'waive' };
+  const set = penaltyRate(t);
+  return set === null ? { mode: 'bad' } : { mode: 'set', set };
 }
 
-/** The fraction a unit loses for lateness (grades.effective_penalty): `rate x days` when absent or
- *  `apply`, nothing when waived or not late, the written penalty when set by hand; null for
- *  anything else, which the engine holds for a hand decision. */
-export function effectivePenalty(rate: number | null, daysLate: unknown, latePenalty: unknown = null): number | null {
+/** What a unit loses for lateness (grades.effective_penalty): `fraction` of its total, the `mode`
+ *  of the grader's choice behind it, and whether it is `late` at all. */
+export interface Penalty {
+  fraction: number;
+  mode: LateMode;
+  late: boolean;
+}
+
+/** `rate x days` when absent or `apply`, nothing when waived or not late, the written penalty when
+ *  set by hand; a `bad` one keeps the late rule's arithmetic, and the engine holds the unit. */
+export function effectivePenalty(rate: number | null, daysLate: unknown, latePenalty: unknown = null): Penalty {
   const choice = lateChoice(latePenalty);
-  const set = choice === '' || choice === 'apply' || choice === 'waive' ? null : penaltyRate(choice);
-  if (set === null && !['', 'apply', 'waive'].includes(choice)) return null;
   const days = num(daysLate);
-  if (days === null || days <= 0 || choice === 'waive') return 0;
-  return set ?? (rate === null ? 0 : rate * days);
+  const late = days !== null && days > 0;
+  if (!late || choice.mode === 'waive') return { fraction: 0, mode: choice.mode, late };
+  return { fraction: choice.set ?? (rate === null ? 0 : rate * days), mode: choice.mode, late };
 }
 
-export function finalGrade(total: number | null, rate: number | null, daysLate: unknown, adjustment: unknown, latePenalty: unknown = null): number | null {
+/** `total x (1 - penalty) + adjustment`, floored at 0; null when there is no total. */
+export function finalGrade(total: number | null, penalty: Penalty, adjustment: unknown): number | null {
   if (total === null) return null;
-  const penalty = effectivePenalty(rate, daysLate, latePenalty) ?? effectivePenalty(rate, daysLate);
-  return Math.max(0, total * (1 - (penalty ?? 0)) + (num(adjustment) ?? 0));
+  return Math.max(0, total * (1 - penalty.fraction) + (num(adjustment) ?? 0));
 }
 
-const percentOff = (fraction: number) => `−${Math.round(fraction * 1000) / 10}%`;
+const percent = (fraction: number) => Math.round(fraction * 1000) / 10;
+const percentOff = (fraction: number) => `−${percent(fraction)}%`;
 
-/** The penalty as the grid shows it: "−20%", "waived" or "−25% (set by hand)"; '' when not late. */
-export function penaltyText(rate: number | null, daysLate: unknown, latePenalty: unknown = null): string {
-  const days = num(daysLate);
-  if (days === null || days <= 0) return '';
-  const choice = lateChoice(latePenalty);
-  if (choice === 'waive') return 'waived';
-  const set = effectivePenalty(rate, days, latePenalty);
-  if (choice !== '' && choice !== 'apply' && set !== null) return `${percentOff(set)} (set by hand)`;
-  return rate === null ? '' : percentOff(rate * days);
+/** The penalty as the grid shows it: "−20%", "waived" or "−25% (set by hand)"; '' when not late,
+ *  or when no late rule gives one. */
+export function penaltyText(p: Penalty, rate: number | null): string {
+  if (!p.late) return '';
+  switch (p.mode) {
+    case 'waive':
+      return 'waived';
+    case 'set':
+      return `${percentOff(p.fraction)} (set by hand)`;
+    default:
+      return rate === null ? '' : percentOff(p.fraction);
+  }
 }
 
 /** What the override box writes: `15` or `15%` as `15%`, cleared as `apply`, anything else as typed
@@ -168,15 +184,20 @@ export function penaltyText(rate: number | null, daysLate: unknown, latePenalty:
 export function overrideValue(raw: string): string {
   const t = raw.trim().replace(/%$/, '').trim();
   if (!t) return 'apply';
-  return Number.isFinite(Number(t)) ? `${Number(t)}%` : raw.trim();
+  return penaltyRate(`${t}%`) === null ? raw.trim() : `${Number(t)}%`;
 }
 
 /** The override box's text for a stored `late_penalty`: empty unless the penalty is set by hand. */
 export function overrideText(latePenalty: unknown): string {
   const choice = lateChoice(latePenalty);
-  if (choice === '' || choice === 'apply' || choice === 'waive') return '';
-  const set = penaltyRate(choice);
-  return set === null ? choice : `${Math.round(set * 1000) / 10}`;
+  switch (choice.mode) {
+    case 'set':
+      return `${percent(choice.set ?? 0)}`;
+    case 'bad':
+      return String(latePenalty).trim();
+    default:
+      return '';
+  }
 }
 
 export const round = (n: number | null) => (n === null ? '' : String(Math.round(n * 100) / 100));

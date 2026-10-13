@@ -11,7 +11,8 @@ import { discoverEstate, invitationUrl, pendingOrgs, type Semester } from '../sr
 import { forgetMine, forgetMyTeams, knownAuditor, parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
 import { forgetStudentPrefs, lastVisit, markVisit } from '../src/model/prefs';
 import type { KeyStore } from '../src/auth/types';
-import { SiteSource, homeText, pictureOf, sitePicture, unsetSiteKeys, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
+import { SiteSource, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
+import { homeText, unsetSiteKeys } from '../src/model/siteText';
 import { weekItems } from '../src/model/week';
 import { ArchivedSemester, AuditorNote } from '../src/screens/Student';
 import { AssignmentsView, YourMarks } from '../src/screens/StudentAssignments';

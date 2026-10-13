@@ -7,8 +7,8 @@ import { readTable, writeTable } from '../edit/csv';
 import { useSave } from '../edit/save';
 import { YamlText, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
-import { assignmentTitle, fmtDay, fmtWhen, str } from '../model/format';
-import { NOTES_KEY, cellValue, effectivePenalty, finalGrade, num, overrideText, overrideValue, penaltyText, questionFile, questionPoints, readSheet, round, scoreTotal, type Unit } from '../model/marks';
+import { assignmentTitle, fmtDay, fmtWhen, plural, str } from '../model/format';
+import { NOTES_KEY, cellValue, effectivePenalty, finalGrade, num, overrideText, overrideValue, penaltyText, questionFile, questionPoints, readSheet, round, scoreTotal, type Penalty, type Unit } from '../model/marks';
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
 import { assignmentSettings, sheetName } from './RunSettings';
 import { penaltyRate } from '../model/policy';
@@ -94,10 +94,6 @@ export function MarksTab(p: TabProps) {
     setEdits({ ...edits, [key(pth)]: typed ? cellValue(raw) : raw.trim() ? raw : null });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
-  const put = (pth: Path, val: string) => {
-    setEdits({ ...edits, [key(pth)]: val });
-    if (save.kind !== 'busy') setSave({ kind: 'idle' });
-  };
   const changed = new Set(Object.keys(edits).map((k) => (JSON.parse(k) as Path)[1] as string)).size;
   const scoreOf = (u: Unit) => {
     if (qs.length) {
@@ -121,22 +117,22 @@ export function MarksTab(p: TabProps) {
   // A late unit's penalty (`late_penalty`): ticked writes `apply`, unticked `waive`; an override
   // is the whole penalty and implies applied, and clearing it writes `apply` back.
   const lateOf = (u: Unit) => v(u.latePenaltyPath, u.latePenalty);
-  const lateCell = (u: Unit) => {
+  // What the unit loses for lateness, worked out once for its late cell and its final grades.
+  const lateFor = (u: Unit) => effectivePenalty(rate, u.info?.days_late, lateOf(u));
+  const lateCell = (u: Unit, pen: Penalty) => {
     const days = num(u.info?.days_late);
-    if (days === null || days <= 0) return <td class="pen" />;
-    const lp = lateOf(u);
-    const applied = String(lp ?? '').trim().toLowerCase() !== 'waive';
-    const computed = penaltyText(rate, days);
-    const late = `${days} day${days === 1 ? '' : 's'} late`;
+    if (!pen.late || days === null) return <td class="pen" />;
+    const computed = penaltyText(effectivePenalty(rate, days), rate);
+    const late = `${plural(days, 'day')} late`;
     return (
       <td class="pen">
-        {penaltyText(rate, days, lp)}
+        {penaltyText(pen, rate)}
         <label class="check late-apply">
-          <input type="checkbox" checked={applied} onChange={(e) => { const on = (e.target as HTMLInputElement).checked; setTyped({ ...typed, [u.key]: '' }); put(u.latePenaltyPath, on ? 'apply' : 'waive'); }} />
+          <input type="checkbox" checked={pen.mode !== 'waive'} onChange={(e) => { const on = (e.target as HTMLInputElement).checked; setTyped({ ...typed, [u.key]: '' }); set(u.latePenaltyPath, on ? 'apply' : 'waive'); }} />
           <span>Apply late penalty ({computed ? `${computed}, ${late}` : late})</span>
         </label>
-        <input class="ovr" type="text" inputMode="decimal" placeholder="Override %" aria-label={`Late penalty override for ${u.key}, as a percentage`} value={typed[u.key] ?? overrideText(lp)} onInput={(e) => { const raw = (e.target as HTMLInputElement).value; setTyped({ ...typed, [u.key]: raw }); put(u.latePenaltyPath, overrideValue(raw)); }} />
-        {effectivePenalty(rate, days, lp) === null ? <Invalid>Write a percentage, or clear it: held until then.</Invalid> : null}
+        <input class="ovr" type="text" inputMode="decimal" placeholder="Override %" aria-label={`Late penalty override for ${u.key}, as a percentage`} value={typed[u.key] ?? overrideText(lateOf(u))} onInput={(e) => { const raw = (e.target as HTMLInputElement).value; setTyped({ ...typed, [u.key]: raw }); set(u.latePenaltyPath, overrideValue(raw)); }} />
+        {pen.mode === 'bad' ? <Invalid>Write a percentage, or clear it: held until then.</Invalid> : null}
       </td>
     );
   };
@@ -148,7 +144,7 @@ export function MarksTab(p: TabProps) {
   // The unit's own row: its score per question, and (on a group sheet) the team's feedback.
   const unitRow = (u: Unit) => {
     const total = scoreTotal(scoreOf(u), questions);
-    const days = u.info?.days_late;
+    const pen = lateFor(u);
     const nosub = u.info !== null && !u.info?.submitted;
     const scoreCells = qs.length
       ? qs.map(([q, m]) => <td>{input([...u.scorePath, q], (u.score as Record<string, unknown> | null)?.[q] ?? null, 'q', `${q}${outOf(m)} for ${u.key}`)}</td>)
@@ -163,8 +159,8 @@ export function MarksTab(p: TabProps) {
           <td>{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${u.key}`, false, true)}</td>
           <td>{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${u.key}`)}</td>
           <td>{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${u.key}`, false)}</td>
-          {lateCell(u)}
-          <td class="calc">{round(finalGrade(total, rate, days, v([...pr.base, 'adjustment_individual'], pr.adjustment), lateOf(u)))}</td>
+          {lateCell(u, pen)}
+          <td class="calc">{round(finalGrade(total, pen, v([...pr.base, 'adjustment_individual'], pr.adjustment)))}</td>
         </tr>
       );
     }
@@ -175,7 +171,7 @@ export function MarksTab(p: TabProps) {
           <b>{u.key}</b><br /><span class="footnote">{u.people.length} member{u.people.length === 1 ? '' : 's'}</span>{qToggle}
         </td>{info(u)}{scoreCells}
         <td>{u.feedbackPath ? input(u.feedbackPath, u.feedback, 'fb', `Team feedback for ${u.key}`, false, true) : null}</td>
-        <td /><td />{lateCell(u)}<td class="calc">{round(finalGrade(total, rate, days, 0, lateOf(u)))}</td>
+        <td /><td />{lateCell(u, pen)}<td class="calc">{round(finalGrade(total, pen, 0))}</td>
       </tr>
     );
   };
@@ -188,20 +184,20 @@ export function MarksTab(p: TabProps) {
       <td colSpan={5} />
     </tr>
   );
-  const memberRows = (u: Unit) => u.people.map((pr) => {
+  const memberRows = (u: Unit) => {
     const total = scoreTotal(scoreOf(u), questions);
-    const days = u.info?.days_late;
-    return (
+    const pen = lateFor(u);
+    return u.people.map((pr) => (
       <tr class="member-row">
         <td style="padding-left:22px"><span class="slug">{pr.handle}</span></td>
         <td class="sys" colSpan={4} /><td colSpan={Math.max(1, qs.length)} />
         <td>{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${pr.handle}`, false, true)}</td>
         <td>{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${pr.handle}`)}</td>
         <td>{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${pr.handle}`, false)}</td>
-        <td class="pen" /><td class="calc">{round(finalGrade(total, rate, days, v([...pr.base, 'adjustment_individual'], pr.adjustment), lateOf(u)))}</td>
+        <td class="pen" /><td class="calc">{round(finalGrade(total, pen, v([...pr.base, 'adjustment_individual'], pr.adjustment)))}</td>
       </tr>
-    );
-  });
+    ));
+  };
   const rows = sheet.units.flatMap((u) => [
     unitRow(u),
     ...(qs.length && qOpen(u) ? [questionRow(u)] : []),

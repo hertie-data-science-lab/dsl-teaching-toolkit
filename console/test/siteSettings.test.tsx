@@ -15,7 +15,7 @@ import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
 import { SiteScreen } from '../src/screens/Site';
-import { homeText } from '../src/model/student';
+import { homeText } from '../src/model/siteText';
 import { StaticFiles } from './staticFiles';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, json, type Seen } from './fake';

@@ -14,8 +14,8 @@ import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
 import { POLICY, penaltyRate } from '../src/model/policy';
-import { effectivePenalty, finalGrade, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { assignmentKey, blankDeploy, blankDraft, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { effectivePenalty, finalGrade, lateChoice, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
+import { assignmentKey, blankDeploy, blankDraft, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
 import { validSchedule } from '../src/model/cascade';
 import { StatusStore, type Loaded } from '../src/model/status';
@@ -215,7 +215,8 @@ describe('the schedule entry sheet model', () => {
     const doc = y.toJS() as Record<string, unknown>;
     const d = { ...(blankDraft('lab', { repo: 'm' }) as ReleaseDraft), deploys: [], number: 1 as const, details: 'Group 2', date: '2026-09-17', time: '18:00' };
     expect(draftErrors(d, { kind: 'lab' })).toEqual({});
-    const id = freshId(doc, 'releases', 'lab-1');
+    expect(sessionBlock(d)).toBe('events');
+    const id = freshId(doc, sessionBlock(d), 'lab-1');
     expect(id).toBe('lab-1-b');
     writeDraft(y, { ...d, id }, doc);
     expect(parse(y.text).events[id]).toEqual({ event_datetime: '2026-09-17T18:00', kind: 'lab', number: 1, details: 'Group 2' });
@@ -230,8 +231,10 @@ describe('the schedule entry sheet model', () => {
   });
 
   it('keeps an exam or a special event on its own sheet, and an unknown kind is a special event', () => {
-    const doc = { events: { mid: { kind: 'exam', event_datetime: '2026-11-03' }, clinic: { event_datetime: '2026-11-04' }, odd: { kind: 'assets', event_datetime: '2026-11-05' } } };
+    const doc = { events: { mid: { kind: 'exam', event_datetime: '2026-11-03' }, clinic: { event_datetime: '2026-11-04' }, odd: { kind: 'assets', event_datetime: '2026-11-05' }, lab: { kind: 'lab', event_datetime: '2026-11-06' } } };
     expect(readDraft(doc, 'mid')?.kind).toBe('events');
+    // A session kind is a session's sheet, whichever block holds it.
+    expect(readDraft(doc, 'lab')?.kind).toBe('session');
     expect(readDraft(doc, 'clinic')).toMatchObject({ kind: 'events', type: 'special_event' });
     expect(readDraft(doc, 'odd')?.kind).toBe('events');
   });
@@ -345,35 +348,44 @@ describe('marks arithmetic, as grades.py does it', () => {
     expect(penaltyRate('10%')).toBe(0.1);
     expect(penaltyRate('0.1')).toBe(0.1);
     expect(penaltyRate('10')).toBeNull();
-    expect(finalGrade(50, 0.1, 2, 4)).toBeCloseTo(44);
-    expect(finalGrade(10, 0.5, 3, -2)).toBe(0);
-    expect(finalGrade(null, 0.1, 1, 5)).toBeNull();
+    expect(finalGrade(50, effectivePenalty(0.1, 2), 4)).toBeCloseTo(44);
+    expect(finalGrade(10, effectivePenalty(0.5, 3), -2)).toBe(0);
+    expect(finalGrade(null, effectivePenalty(0.1, 1), 5)).toBeNull();
   });
 
   it('takes the late penalty the grader chose, as grades.effective_penalty does', () => {
-    expect(effectivePenalty(0.1, 2)).toBeCloseTo(0.2);
-    expect(effectivePenalty(0.1, 2, 'apply')).toBeCloseTo(0.2);
-    expect(effectivePenalty(0.1, 2, 'waive')).toBe(0);
-    expect(effectivePenalty(0.1, 2, '15%')).toBeCloseTo(0.15);
-    expect(effectivePenalty(0.1, 2, 0.15)).toBeCloseTo(0.15);
-    expect(effectivePenalty(0.1, 0, '15%')).toBe(0);
-    expect(effectivePenalty(0.1, 2, 'half')).toBeNull();
-    expect(effectivePenalty(0.1, 2, '15')).toBeNull();
-    expect(finalGrade(20, 0.1, 2, null, 'waive')).toBe(20);
-    expect(finalGrade(20, 0.1, 2, 1, '5%')).toBe(20);
-    expect(finalGrade(20, 0.1, 2, null, 'half')).toBeCloseTo(16);
-    expect(penaltyText(0.1, 2)).toBe('−20%');
-    expect(penaltyText(0.1, 2, 'waive')).toBe('waived');
-    expect(penaltyText(0.1, 2, '15%')).toBe('−15% (set by hand)');
-    expect(penaltyText(0.1, 0, 'waive')).toBe('');
+    expect(effectivePenalty(0.1, 2).fraction).toBeCloseTo(0.2);
+    expect(effectivePenalty(0.1, 2, 'apply').fraction).toBeCloseTo(0.2);
+    expect(effectivePenalty(0.1, 2, 'waive').fraction).toBe(0);
+    expect(effectivePenalty(0.1, 2, '15%').fraction).toBeCloseTo(0.15);
+    expect(effectivePenalty(0.1, 2, 0.15).fraction).toBeCloseTo(0.15);
+    expect(effectivePenalty(0.1, 0, '15%').fraction).toBe(0);
+    // Nobody can apply these: the late rule's arithmetic, and the engine holds the unit.
+    expect(effectivePenalty(0.1, 2, 'half')).toMatchObject({ mode: 'bad', fraction: 0.2 });
+    expect(effectivePenalty(0.1, 2, '15').mode).toBe('bad');
+    expect(lateChoice(' Waive ')).toEqual({ mode: 'waive' });
+    expect(lateChoice('15%')).toEqual({ mode: 'set', set: 0.15 });
+    expect(lateChoice(null)).toEqual({ mode: 'apply' });
+    expect(finalGrade(20, effectivePenalty(0.1, 2, 'waive'), null)).toBe(20);
+    expect(finalGrade(20, effectivePenalty(0.1, 2, '5%'), 1)).toBe(20);
+    expect(finalGrade(20, effectivePenalty(0.1, 2, 'half'), null)).toBeCloseTo(16);
+    expect(penaltyText(effectivePenalty(0.1, 2), 0.1)).toBe('−20%');
+    expect(penaltyText(effectivePenalty(0.1, 2, 'waive'), 0.1)).toBe('waived');
+    expect(penaltyText(effectivePenalty(0.1, 2, '15%'), 0.1)).toBe('−15% (set by hand)');
+    expect(penaltyText(effectivePenalty(0.1, 0, 'waive'), 0.1)).toBe('');
+    expect(penaltyText(effectivePenalty(null, 2), null)).toBe('');
     expect(overrideValue('15')).toBe('15%');
     expect(overrideValue(' 12.5% ')).toBe('12.5%');
     expect(overrideValue('')).toBe('apply');
     expect(overrideValue('half')).toBe('half');
+    // Not a penalty anybody can apply: written as typed, and held.
+    expect(overrideValue('150')).toBe('150');
+    expect(overrideValue('-5')).toBe('-5');
     expect(overrideText('15%')).toBe('15');
     expect(overrideText(0.15)).toBe('15');
     expect(overrideText('apply')).toBe('');
     expect(overrideText('waive')).toBe('');
+    expect(overrideText(' half ')).toBe('half');
   });
 
   it('reads a question given as {points, file} and keeps file: on a save', () => {
