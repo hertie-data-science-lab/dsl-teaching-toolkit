@@ -22,7 +22,7 @@ export const PERSON: Tiers = {
     options: [{ value: 'instructor', label: 'Instructor' }, { value: 'teaching_assistant', label: 'Teaching assistant' }],
   },
   name: { tier: 'default', label: 'Display name', defaultLabel: 'default: from GitHub' },
-  title: { tier: 'default', label: 'Title', defaultLabel: 'optional', reason: 'Shown under the name on the student site.' },
+  title: { tier: 'default', label: 'Title', defaultLabel: 'optional', placeholder: 'Professor · Lecturer · Teaching assistant', reason: 'Shown under the name on the student site.' },
   photo: { tier: 'advanced', label: 'Photo', placeholder: 'images/handle.jpg', reason: 'A path in the student site repo, or a link. Upload the image to the site repo’s images folder first.' },
   url: { tier: 'advanced', label: 'Web page', widget: 'url', placeholder: 'https://', reason: 'The name links here on the student site.' },
   start: { tier: 'advanced', label: 'From', widget: 'date', defaultLabel: 'optional', reason: 'Access starts on this day.' },
