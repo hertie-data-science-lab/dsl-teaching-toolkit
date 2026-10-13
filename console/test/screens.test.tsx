@@ -829,3 +829,11 @@ describe('no problems', () => {
     expect(text(<ProblemCards list={[]} />).trim()).toBe('No problems.');
   });
 });
+
+describe('schedule lede', () => {
+  it('counts the entries and, with nothing held, says every planned release has its folder', () => {
+    const t = text(<ScheduleScreen {...props({ loaded: { ...ready, status: { ...STATUS, releases: [] } } })} />);
+    expect(t).toMatch(/\d+ entries\. Every planned release has its associated folder\./);
+    expect(t).not.toContain('Every release has its folder.');
+  });
+});

@@ -659,7 +659,7 @@ function View(p: ReadyProps) {
       <div class="page-head">
         <div>
           <h2 class="h1">Schedule <Hint doc="07-schedule-releases.md">The schedule drives everything automatic: releases, hand outs, collection and the student site’s calendar. Dates are in the semester’s timezone.</Hint></h2>
-          <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {heldLine || 'Every release has its folder.'}</p>
+          <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {heldLine || 'Every planned release has its associated folder.'}</p>
         </div>
         <div class="actions"><CheckNow p={p} label="Check" /><a class="btn outline" href="#schedule-new">Add entry</a></div>
       </div>
