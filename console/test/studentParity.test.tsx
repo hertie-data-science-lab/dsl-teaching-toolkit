@@ -144,8 +144,8 @@ describe('the student banner and screens', () => {
     const heads = (facts: SemesterFacts) => [...html(<ScheduleView facts={facts} mine={null} now={NOW} org={ORG} />).matchAll(/<h2 class="week-h">(.*?)<\/h2>/g)].map((m) => m[1].replace(/<[^>]+>/g, '').trim());
     const weeks = (facts: SemesterFacts) => heads(facts).map((h) => h.replace(/ from .*/, ''));
     // Weeks 5 and 6 have no row: the numbers skip them, as the Dashboard counts.
-    expect(weeks(f)).toEqual(['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 7', 'Week 8', 'Week 15']);
-    expect(weeks({ ...f, start: undefined, end: undefined })).toEqual(['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5', 'Week 6', 'Week 7']);
+    expect(weeks(f)).toEqual(['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 7', 'Week 8', 'Week 15', 'No date yet']);
+    expect(weeks({ ...f, start: undefined, end: undefined })).toEqual(['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5', 'Week 6', 'Week 7', 'No date yet']);
     // A Wednesday start: weeks run Wednesday to Tuesday, as the Dashboard counts them, with one
     // group for what falls before the semester and one for after.
     const row = (when: string) => ({ ...f.rows[1], id: when, when, kind: 'lecture', title: when });

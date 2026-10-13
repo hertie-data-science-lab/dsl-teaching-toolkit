@@ -46,6 +46,7 @@ function KindList({ facts, kind, org, now, tab, current }: { facts: SemesterFact
         return (
           <section class="session" aria-label={r.title}>
             <h2 class="session-title"><b>{r.title}</b>{r.subtitle ? `: ${r.subtitle}` : ''}{r.released ? null : <> <span class="st-chip">not released yet</span></>}</h2>
+            {r.dateless ? <p class="session-when"><b>TBC</b></p> : null}
             {r.details ? <Md class="session-description" src={r.details} /> : null}
             {r.readingList ? <Md class="reading-list" src={r.readingList} /> : null}
             {readings && r.readingsPending && r.released ? <p class="footnote"><em>Readings for this session are not yet released.</em></p> : null}

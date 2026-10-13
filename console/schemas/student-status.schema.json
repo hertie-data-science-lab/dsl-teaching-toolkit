@@ -304,6 +304,9 @@
               "null"
             ]
           },
+          "dateless": {
+            "type": "boolean"
+          },
           "details": {
             "type": "string"
           },
@@ -412,6 +415,7 @@
           "assignment",
           "released",
           "tbc",
+          "dateless",
           "off_schedule",
           "links",
           "readings",

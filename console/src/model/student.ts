@@ -37,6 +37,8 @@ export interface ScheduleRow {
   links: FileLink[];
   /** The date is provisional ("TBC"); the row still happens when it says. */
   tbc: boolean;
+  /** No date yet (`event_datetime: tbc`): `when` only places the row, after its kind's last dated one, and is never shown. */
+  dateless?: boolean;
   /** The released reading files of the session (also among `links`). */
   readings: FileLink[];
   /** The session's reading list as prose (markdown), when its readings shipped one. */
@@ -360,6 +362,7 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     released: fm.unreleased !== true,
     links: [] as FileLink[],
     tbc: fm.tbc === true,
+    dateless: fm.dateless === true,
     readings: [] as FileLink[],
     readingList: '',
     readingsPending: fm.readings_pending === true,
@@ -543,6 +546,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
       released: r.released === true,
       links,
       tbc: r.tbc === true,
+      dateless: r.dateless === true,
       readings,
       readingList: str(r.reading_list).trim(),
       readingsPending: r.readings_pending === true,

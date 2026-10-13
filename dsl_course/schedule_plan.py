@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from typing import NamedTuple
+from zoneinfo import ZoneInfo
 
 from . import policy, schedule
 from .faults import ConfigFault
@@ -105,12 +106,16 @@ class PlannedRow:
 
     `key` is the entry's label (unique in the file); `deploys` are its copies in plan
     order, which is what the row links once they have landed. `shown` is the entry's
-    `show_on_site`: a silent row stays off the schedule and the Updates box."""
+    `show_on_site`: a silent row stays off the schedule and the Updates box.
+
+    `undated`: the entry is `event_datetime: tbc`. Its `when` is then no date at all but
+    the place it sorts at (`planned_rows`), which nothing may show or fire on."""
 
     key: str
     kind: str
     when: date | datetime
     tbc: bool = False
+    undated: bool = False
     subtitle: str = ""
     details: str = ""
     shown: bool = True
@@ -131,26 +136,53 @@ class PlannedRow:
 def planned_rows(
     sched: schedule.Schedule, aliases: Aliases = _no_aliases
 ) -> list[PlannedRow]:
-    """One row per dated `releases:` entry, in date order (ties in plan order). An
-    undated (`event_datetime: tbc`) entry has no place on a dated list and is left out."""
-    rows = []
-    dated = [r for r in sched.releases if r.when is not None]
-    for release in sorted(dated, key=lambda r: r.when):
+    """One row per `releases:` entry: the dated ones in date order (ties in plan order),
+    then the undated (`event_datetime: tbc`) ones in plan order, flagged `undated`.
+
+    An undated row sorts at the END of its kind: a minute after the last dated row of
+    that kind, one more per undated row before it - so "Lab 9, TBC" follows Lab 8 on the
+    schedule rather than piling up after the exams. A kind with no dated row sorts at
+    the end of term. That `when` is a sort key only: the site prints "TBC", and nothing
+    fires on it (`Release.due_deploys` reads the entry, whose `when` is None)."""
+
+    def row(release: schedule.Release, when: date | datetime) -> PlannedRow:
         kind, _ = entry_kind(release, aliases)
-        rows.append(
-            PlannedRow(
-                key=release.label,
-                kind=kind,
-                when=release.when,
-                tbc=release.tbc,
-                subtitle=release.title,
-                details=release.details,
-                shown=release.show_on_site,
-                number=release.number,
-                deploys=tuple(release.deploy),
-            )
+        return PlannedRow(
+            key=release.label,
+            kind=kind,
+            when=when,
+            tbc=release.tbc,
+            undated=release.when is None,
+            subtitle=release.title,
+            details=release.details,
+            shown=release.show_on_site,
+            number=release.number,
+            deploys=tuple(release.deploy),
         )
+
+    dated = [r for r in sched.releases if r.when is not None]
+    rows = [row(r, r.when) for r in sorted(dated, key=lambda r: r.when)]
+    last: dict[str, datetime] = {r.kind: r.when for r in rows}
+    end = _term_end(sched, [r.when for r in rows])
+    taken: dict[str, int] = {}
+    for release in sched.releases:
+        if release.when is None:
+            kind, _ = entry_kind(release, aliases)
+            taken[kind] = taken.get(kind, 0) + 1
+            at = last.get(kind, end) + timedelta(minutes=taken[kind])
+            rows.append(row(release, at))
     return rows
+
+
+def _term_end(sched: schedule.Schedule, dated: list[datetime]) -> datetime:
+    """Where an undated row of a kind with no dated row sorts: the end of term, else the
+    last dated row, else the start of term (else today)."""
+    tz = ZoneInfo(sched.timezone)
+    if sched.semester_end:
+        return datetime.combine(sched.semester_end, time(23, 0), tzinfo=tz)
+    if dated:
+        return max(dated)
+    return datetime.combine(sched.semester_start or date.today(), time(9, 0), tzinfo=tz)
 
 
 @dataclass

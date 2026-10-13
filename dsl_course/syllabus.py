@@ -178,7 +178,12 @@ def build(course_org: str, semester_org: str) -> tuple[str, int]:
     sched = schedule.load(semester_org)
     rows = planned_rows(sched, lambda repo: read_materials(course_org, repo).kinds)
     shown = site_rows(rows)
-    lectures = [sr for sr in shown if sr.row.shown and sr.row.kind == "lecture"]
+    # Dated sessions only: a weekly plan has no week to put a TBC session in.
+    lectures = [
+        sr
+        for sr in shown
+        if sr.row.shown and sr.row.kind == "lecture" and not sr.row.undated
+    ]
     further = [sr.row for sr in shown if sr.row.kind == "readings"]
     trees: dict[str, tuple[str, ...]] = {}
 

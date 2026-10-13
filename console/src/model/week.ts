@@ -90,6 +90,7 @@ export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, 
     out.push({ label: WORD[i.kind], cls: CLASS[i.kind], tz, ...i });
   const auditor = mine?.auditor === true;
   for (const r of facts.rows) {
+    if (r.dateless) continue; // no date yet: its `when` only places it on the schedule
     const at = instant(r.when, tz);
     const ahead = at >= start && at < end;
     const what = name(r.title, r.subtitle);
@@ -193,6 +194,6 @@ const NEXT_WORD: Record<string, string> = { assignment: 'hand out', due: 'due' }
 /** A semester card's "Next: Assignment 2 hand out, Mon 6 Oct", worded as the instructor's cards (`nextEventWords`): the next dated row, or "Nothing scheduled". */
 export function nextLine(facts: Pick<SemesterFacts, 'rows' | 'timezone'>, now: number): string {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
-  const next = facts.rows.map((r) => ({ r, at: instant(r.when, tz) })).filter((x) => x.at > now).sort((a, b) => a.at - b.at)[0]?.r;
+  const next = facts.rows.filter((r) => !r.dateless).map((r) => ({ r, at: instant(r.when, tz) })).filter((x) => x.at > now).sort((a, b) => a.at - b.at)[0]?.r;
   return nextEventWords(next ? { title: next.title, word: NEXT_WORD[next.kind] ?? '', when: next.when } : null, tz, new Date(now).getFullYear());
 }
