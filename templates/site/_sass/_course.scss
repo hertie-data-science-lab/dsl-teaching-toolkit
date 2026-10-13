@@ -272,11 +272,17 @@
     font-size: 0.72em;
     line-height: 1;
     list-style: none;
+    margin: 0;
     cursor: pointer;
     vertical-align: middle;
 
     &::-webkit-details-marker {
         display: none;
+    }
+
+    &::before,
+    &::after {
+        content: none !important;
     }
 
     &:hover,
@@ -294,9 +300,9 @@
     min-width: 18rem;
     /* Escaped: Ruby Sass and libsass read a bare `min()` as their own function. */
     max-width: unquote("min(26rem, calc(100vw - 32px))");
-    margin: 0;
-    padding: 6px 0;
-    list-style: none;
+    margin: 0 !important;
+    padding: 6px 0 !important;
+    list-style: none !important;
     background: #fff;
     border: 1px solid #d8d8d8;
     border-radius: 8px;
@@ -304,19 +310,41 @@
     font-size: 0.875rem;
     line-height: 1.35;
 
-    li {
-        margin: 0;
-        list-style: none;
+    /* The menu is a widget, not a list in the page's prose, so it opts out of every list
+       style around it - with `!important`, because what it has to beat is not one rule
+       but whichever the page it sits in brings: the theme's `article ul > li:before`
+       en dash (every tab) and `ul#archive li`'s dotted rule, padding and white fill (All
+       Materials - an id, which no class selector outranks). The rows' own padding and
+       the hairline's fill are restated below at higher specificity, also `!important`. */
+    > li {
+        display: block !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        background: none !important;
+        list-style: none !important;
+
+        &::before,
+        &::after {
+            content: none !important;
+        }
     }
 
     /* A row: icon and label take the width, the status sits at the right. */
     a,
-    .file-menu-off {
-        display: flex;
+    > .file-menu-off {
+        display: flex !important;
         align-items: center;
         gap: 10px;
-        padding: 7px 14px;
+        padding: 7px 14px !important;
         white-space: nowrap;
+    }
+
+    /* The hairline between the two Open rows and the two Edit rows. */
+    > .file-menu-sep {
+        height: 1px;
+        margin: 4px 14px !important;
+        background: #ececec !important;
     }
 
     a {
@@ -352,13 +380,6 @@
     flex-grow: 1;
     align-items: center;
     gap: 10px;
-}
-
-/* The hairline between the two Open rows and the two Edit rows. */
-.file-menu-sep {
-    height: 1px;
-    margin: 4px 14px !important;
-    background: #ececec;
 }
 
 /* A row this file does not have, still listed so every menu reads the same: muted, not a
