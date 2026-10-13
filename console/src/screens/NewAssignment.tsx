@@ -128,7 +128,7 @@ export function naDone(d: NaDraft, v: Values, created: boolean): boolean[] {
 /** Question 4's radio: the two ways a starter is written, each described in full (decision 0028 rule 4). */
 const STARTER_TIERS: Tiers = {
   starter: {
-    tier: 'ask', label: 'How students get the starter', widget: 'radio',
+    tier: 'ask', label: 'How students get the starter files', widget: 'radio',
     options: STARTERS.map((k) => ({ value: k, label: k === 'derived' ? `${STARTER_COPY[k].label} (recommended when tests mark it)` : STARTER_COPY[k].label, sub: STARTER_COPY[k].hint })),
   },
 };
@@ -404,7 +404,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
           <dt>Students</dt><dd>{w.type === 'group' ? 'In teams' : 'Alone'}</dd><dd><a href="#new-assignment-2">Change</a></dd>
           <dt>Submit</dt><dd>{submit}</dd><dd><a href="#new-assignment-2">Change</a></dd>
           <dt>Marking</dt><dd>{`${fmts}; tests ${w.autograde === 'true' ? `on (${String(w.tests ?? 'tests')})` : 'off'}`}</dd><dd><a href="#new-assignment-3">Change</a></dd>
-          <dt>Starter</dt><dd>{STARTER_COPY[starterChoice(v)].label}</dd><dd><a href="#new-assignment-4">Change</a></dd>
+          <dt>Starter files</dt><dd>{STARTER_COPY[starterChoice(v)].label}</dd><dd><a href="#new-assignment-4">Change</a></dd>
           <dt>Points</dt><dd>{rows.length ? `${rows.length} question${rows.length === 1 ? '' : 's'}, total ${total}` : 'Not set yet'}</dd><dd><a href="#new-assignment-5">Change</a></dd>
         </dl>
         <Checks list={tplNow?.checks ?? null} busy={tpl.busy} pending={[`Assignment template ${repo} created`]} />

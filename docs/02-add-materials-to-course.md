@@ -4,7 +4,8 @@ Create the year's materials repo and fill it with lectures + readings. **Release
 later copies files and folders from here into a semester. One repo per year: `course-materials-{f/s}YYYY`
 by default. What makes a repo a materials repo is its `dsl-materials` topic, which the scaffold sets;
 add the topic to a repo you made by hand to have it listed as one (the console's **Handout
-materials** page does it: **Treat as handout materials** on the repo's row).
+materials** page does it: **Treat as course materials** on the repo's row). The same page shows each materials repo's
+files as a folder tree: open a folder to see inside it; every file and folder links to GitHub.
 
 ## Prerequisites
 

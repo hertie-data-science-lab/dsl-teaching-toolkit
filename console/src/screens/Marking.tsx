@@ -17,7 +17,7 @@ import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { assignmentHref, tabHref } from '../router';
-import { CheckLine, Lives, Loading } from '../ui/bits';
+import { CheckLine, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { Check, Lock } from '../ui/icons';
@@ -206,7 +206,6 @@ export function MarksTab(p: TabProps) {
       </div>
       <div class="panel" style="display:grid;gap:10px;margin-top:14px">
         <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!changed} file={{ org: p.cohort.org, repo: CONFIG_REPO, path }} note={changed ? `${changed} ${sheet.group ? 'team' : 'student'}${changed > 1 ? 's' : ''} changed` : 'No unsaved changes'} />
-        <Lives org={p.cohort.org} repo={CONFIG_REPO} path={path} />
       </div>
     </>
   );
@@ -375,7 +374,6 @@ export function TeamsTab(p: TabProps) {
         </section>
         <div class="panel" style="display:grid;gap:10px">
           <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv', exists: file.kind !== 'absent' }} note={dirty ? 'Unsaved changes' : undefined} />
-          <Lives org={p.cohort.org} repo={CONFIG_REPO} path="teams.csv" exists={file.kind !== 'absent'} />
         </div>
       </div>
     </>

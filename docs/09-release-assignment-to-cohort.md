@@ -33,7 +33,7 @@ collaborator.
 Four boxes, in the order you answer them: `course_source_repo`, `semester_org`, then
 - `solution_datetime` (empty by default; `now` also pushes the template's `solution`
 branch into each student repo - the model answer and rubric, which is not returning marks
-and cannot be undone for reuse). Schedulable instead, as `solution_datetime:` on the
+and cannot be undone: think twice if the template is reused in a later semester). Schedulable instead, as `solution_datetime:` on the
 assignment - see [07](07-schedule-releases.md#releasing-the-model-solution)
 - `preview` (**on** by default; list the repos that *would* be created - untick it to hand out).
 

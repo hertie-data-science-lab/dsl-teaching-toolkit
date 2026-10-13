@@ -19,7 +19,6 @@ import { StatusStore, type Loaded } from './model/status';
 import { DispatchAdapter, outcomePath } from './ops/adapter';
 import { OpPanel } from './ops/Panel';
 import { OpsSession } from './ops/session';
-import { ArchiveScreen } from './screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
 import { takeInstallReturn } from './wizards/drafts';
 import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, studentNavKey, wizardOf } from './router';
@@ -270,7 +269,7 @@ export function App({ state: s }: { state: AppState }) {
         name={ctx.course.name} semester={ctx.cohort ? { org: ctx.cohort.org, termLabel: ctx.cohort.termLabel } : undefined} />
     );
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
-    const cp: CourseProps = { migrated: courseMigrated, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
+    const cp: CourseProps = { migrated: courseMigrated, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry, folder: sel.folder };
     body = wiz?.name === 'new-semester' ? <NewCohortScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-assignment' ? <NewAssignmentScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-materials' ? <NewMaterialsScreen {...cp} />
@@ -304,7 +303,6 @@ export function App({ state: s }: { state: AppState }) {
       site: () => <SiteScreen {...cp} />,
       operations: () => <OperationsScreen {...cp} />,
       marks: () => <MarksOverviewScreen {...cp} />,
-      archive: () => <ArchiveScreen {...cp} />,
     };
     body = (screens[screen] ?? screens.dashboard)();
     const sem = cohortLoaded?.kind === 'ready' ? cohortLoaded.status.semester : undefined;

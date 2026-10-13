@@ -216,6 +216,23 @@ def _materials(repo: str, syllabus: str | None = "# Syllabus", **over):
     )
 
 
+# The weeks of SCHEDULE with nothing dated in them after NOW: the fixture course sets them
+# aside (decision 0032), so only the empty-week tests see an EMPTY_WEEK problem.
+QUIET_WEEKS = [
+    f"empty_week:{d}"
+    for d in (
+        "2026-09-28",
+        "2026-10-12",
+        "2026-11-02",
+        "2026-11-16",
+        "2026-11-23",
+        "2026-11-30",
+        "2026-12-07",
+        "2026-12-14",
+    )
+]
+
+
 def _course(**over) -> status_json.CourseFacts:
     facts = status_json.CourseFacts(
         org=COURSE,
@@ -223,6 +240,7 @@ def _course(**over) -> status_json.CourseFacts:
             "course_name": "Machine Learning",
             "course_code": "E1234",
             "course_description": "Learning from data.",
+            "set_aside": list(QUIET_WEEKS),
             "people": {
                 "course_admins": [{"github_handle": "admin1", "email": "a@x.edu"}]
             },
@@ -598,6 +616,7 @@ def test_an_assignment_template_by_its_old_name_only_is_not_migrated():
             "repo": "assignment-1-f2025",
             "state": "problem",
             "starter": "derived",
+            "starter_applies": True,
         }
     ]
     (problem,) = [p for p in doc["problems"] if p["id"].startswith("template:")]
@@ -2416,6 +2435,54 @@ def test_the_gather_reads_two_trees_and_the_record_never_a_source(monkeypatch):
     assert t.starter == "handwritten"
 
 
+@pytest.mark.parametrize(
+    ("config", "applies"),
+    [
+        ("formats: [ipynb]\n", True),
+        ("formats: [none]\n", False),  # no starter file
+        ("formats: [ipynb]\nsubmit_via: external\n", False),  # no repo at all
+        ("a: [\n", True),  # unparseable: keeps the check
+    ],
+)
+def test_the_starter_is_checked_only_where_a_starter_is_handed_out(
+    monkeypatch, config, applies
+):
+    monkeypatch.setattr(
+        status_json,
+        "list_org_repos",
+        lambda org: [repo_row("quiz", isTemplate=True, topics=["dsl-assignment"])],
+    )
+    monkeypatch.setattr(
+        status_json,
+        "get_file_content",
+        lambda org, repo, path, ref="": (
+            config if path == "grading_config.yml" else "# Quiz"
+        ),
+    )
+    # Nothing under solution/ and nothing on main: a starter to-do wherever it applies.
+    monkeypatch.setattr(status_json, "repo_path_shas", lambda *a, **k: {})
+    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(status_json, "org_meta", lambda org: {})
+    monkeypatch.setattr(status_json, "read_semester_registry", lambda org, f: [])
+    monkeypatch.setattr(status_json, "load_opencourse", lambda org: None)
+    monkeypatch.setattr(
+        status_json.sync_faculty, "read_course_config", lambda org, faults: None
+    )
+    (t,) = status_json.gather_course(COURSE).templates
+    assert t.starter_applies is applies
+    assert (t.starter_todo is not None) is applies
+    doc = status_json.render_course_file(_course(templates=[t]), NOW)
+    row = doc["course"]["templates"][0]
+    assert row["starter_applies"] is applies
+    assert (
+        any(x["id"] == "template:quiz:starter" for x in doc["course"]["todo"])
+        is applies
+    )
+    if not t.faults:
+        assert row["state"] == ("todo" if applies else "ready")
+    assert validate(doc, schemas.status_schema()) == []
+
+
 def test_an_operation_with_no_run_is_left_out():
     # Every operations row opens its run; an outcome recorded outside one has none.
     ran = {"op": "semester.check", "run_id": 7, "conclusion": "done", "finished": "b"}
@@ -2999,3 +3066,55 @@ def write_release_fixture() -> None:
 
 if __name__ == "__main__":
     write_release_fixture()
+
+
+# ------------------------------------------------------------------ empty weeks
+
+THREE_WEEKS = """\
+timezone: Europe/Berlin
+semester_start: 2026-10-05
+semester_end: 2026-10-23
+releases:
+  s1:
+    event_datetime: 2026-10-07T10:00
+    title: One
+events:
+  exam:
+    kind: exam
+    title: Exam
+    event_datetime: 2026-10-22
+"""
+
+
+def _empty_weeks(now: datetime, aside: tuple[str, ...] = ()) -> list[dict]:
+    facts = _semester(sched=_sched(THREE_WEEKS))
+    return status_json.empty_week_problems(facts, now, frozenset(aside))
+
+
+def test_a_week_with_nothing_dated_is_one_empty_week_problem():
+    # Weeks of 5, 12 and 19 Oct: the release is in the first, the exam in the third.
+    before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    (p,) = _empty_weeks(before)
+    assert p["id"] == "empty_week:2026-10-12"
+    assert p["kind"] == "EMPTY_WEEK"
+    assert p["text"] == "Nothing is scheduled in the week of 12 Oct."
+    assert p["when"] == "2026-10-12T00:00:00+02:00"
+    assert p["fix"]["screen"] == "schedule"
+
+
+def test_a_week_already_begun_is_not_raised():
+    assert _empty_weeks(datetime(2026, 10, 13, 9, 0, tzinfo=UTC)) == []
+
+
+def test_a_set_aside_empty_week_is_not_raised():
+    before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    assert _empty_weeks(before, ("empty_week:2026-10-12",)) == []
+    # Through the render: the course's set_aside list hides it there too.
+    course = _course()
+    course.meta = {**course.meta, "set_aside": []}
+    semester = _semester(sched=_sched(THREE_WEEKS))
+    ids = [p["id"] for p in _render(course, semester, before)["problems"]]
+    assert "empty_week:2026-10-12" in ids
+    course.meta = {**course.meta, "set_aside": ["empty_week:2026-10-12"]}
+    ids = [p["id"] for p in _render(course, semester, before)["problems"]]
+    assert "empty_week:2026-10-12" not in ids

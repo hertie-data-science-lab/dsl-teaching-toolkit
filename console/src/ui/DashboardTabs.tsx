@@ -2,9 +2,11 @@
 // alike, the tab list an input. Each tab carries its count as a badge: red for problems, grey
 // otherwise, a green tick in place of a count where there is nothing left (Setup complete, no
 // problems). Problems is the default tab; a tab may sit at the right, after a spacer (Setup).
+// What a tab is for sits in a `?` after its label while it is open, so its body starts with the rows.
 
-import type { ComponentChildren } from 'preact';
+import { Fragment, type ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
+import { Hint } from './Hint';
 import { Check } from './icons';
 
 export interface DashTab {
@@ -15,6 +17,8 @@ export interface DashTab {
   bad?: boolean;
   /** After the spacer, at the right. */
   right?: boolean;
+  /** What the tab is for, in the `?` after its label while it is open. */
+  hint?: ComponentChildren;
   body: ComponentChildren;
 }
 
@@ -27,12 +31,15 @@ export function DashboardTabs({ tabs, selected, onSelect }: { tabs: DashTab[]; s
   const cur = tabs.some((t) => t.key === (selected ?? own)) ? (selected ?? own) : tabs[0]?.key;
   const pick = (key: string) => (onSelect ? onSelect(key) : setOwn(key));
   const tab = (t: DashTab) => (
-    <button type="button" role="tab" id={`dash-tab-${t.key}`} data-key={t.key} aria-selected={t.key === cur} aria-controls={`dash-panel-${t.key}`} onClick={() => pick(t.key)}>
-      {t.label}
-      {t.count === 'done'
-        ? <span class="n ok" aria-label="done"><Check /></span>
-        : <span class={`n${t.bad && t.count ? ' bad' : ''}`}>{t.count}</span>}
-    </button>
+    <Fragment key={t.key}>
+      <button type="button" role="tab" id={`dash-tab-${t.key}`} data-key={t.key} aria-selected={t.key === cur} aria-controls={`dash-panel-${t.key}`} onClick={() => pick(t.key)}>
+        {t.label}
+        {t.count === 'done'
+          ? <span class="n ok" aria-label="done"><Check /></span>
+          : <span class={`n${t.bad && t.count ? ' bad' : ''}`}>{t.count}</span>}
+      </button>
+      {t.key === cur && t.hint ? <Hint label={`About ${t.label}`}>{t.hint}</Hint> : null}
+    </Fragment>
   );
   return (
     <section class="panel section dash-tabs" id={DASH_PANEL} tabIndex={-1}>

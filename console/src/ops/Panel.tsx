@@ -1,6 +1,6 @@
 // S13 the operation panel: a non-modal drawer that minimises to a bar, and the buttons
-// that open it. Preview is the filled button; a gated op's verb unlocks only after this
-// session previewed it. The outcome sentence is the engine's summary, verbatim. Stop
+// that open it. Preview is the filled button beside the verb; the verb never waits for a
+// preview (a confirmation box still holds it where the op has one). The outcome sentence is the engine's summary, verbatim. Stop
 // cancels the workflow run; the drawer is resized by its bottom-left grip; once a run
 // ends, "See on GitHub" opens the op's `target`.
 
@@ -246,7 +246,6 @@ export function OpPanel() {
     );
   } else {
     const allowed = ops.canRun({ ...c, values }) && !invalid;
-    const gatedShut = mode === 'gated' && !ops.isPreviewed(d, c.values, c.checked);
     body = (
       <>
         <p class="op-intro">{d.intro}</p>
@@ -265,14 +264,11 @@ export function OpPanel() {
       mode === 'direct' || mode === 'previewOnly' ? (
         <div class="actions">{verb}<button class="btn quiet" type="button" onClick={() => ops.close()}>Cancel</button></div>
       ) : (
-        <>
-          <div class="actions">
-            <button class="btn" type="button" disabled={invalid} onClick={() => void ops.start('preview')}>{d.previewLabel ?? (c.dry ? 'Preview again' : 'Preview')}</button>
-            {d.previewProposed ? <Prop /> : null}
-            {verb}
-          </div>
-          {gatedShut ? <p class="gate-hint">{d.verb} unlocks when the preview finishes.</p> : null}
-        </>
+        <div class="actions">
+          <button class="btn" type="button" disabled={invalid} onClick={() => void ops.start('preview')}>{d.previewLabel ?? (c.dry ? 'Preview again' : 'Preview')}</button>
+          {d.previewProposed ? <Prop /> : null}
+          {verb}
+        </div>
       );
   }
   return (
@@ -298,10 +294,10 @@ export function OpPanel() {
 }
 
 /**
- * The buttons a screen shows for an operation: Preview (filled) and the verb, which a gated
- * op keeps disabled until this session has previewed it; a direct op shows only the verb.
+ * The buttons a screen shows for an operation: Preview (filled) and the verb, which is never
+ * held back for want of a preview; a direct op shows only the verb.
  */
-export function OpButtons({ def, small, label, previewLabel = def.previewLabel ?? 'Preview', verbCls, hint = true }: { def: OpDef; small?: boolean; label?: string; previewLabel?: string; verbCls?: string; hint?: boolean }) {
+export function OpButtons({ def, small, label, previewLabel = def.previewLabel ?? 'Preview', verbCls }: { def: OpDef; small?: boolean; label?: string; previewLabel?: string; verbCls?: string }) {
   const env = useEnv();
   const ops = env?.ops;
   const mode = modeOf(def.op);
@@ -309,12 +305,10 @@ export function OpButtons({ def, small, label, previewLabel = def.previewLabel ?
   const verb = label ?? def.verb;
   if (mode === 'direct' || mode === 'previewOnly')
     return <button class={verbCls ?? `btn${sz}`} type="button" onClick={() => ops?.open(def)}>{verb}</button>;
-  const ok = mode !== 'gated' || !!ops?.isPreviewed(def);
   return (
     <>
       <button class={`btn${sz}`} type="button" onClick={() => ops?.open(def, 'preview')}>{previewLabel}</button>
-      <button class={verbCls ?? `btn${sz} outline`} type="button" disabled={!ok} title={ok ? undefined : 'Preview first'} onClick={() => ops?.open(def, 'run')}>{verb}</button>
-      {!ok && hint ? <span class="gate-hint">Preview first</span> : null}
+      <button class={verbCls ?? `btn${sz} outline`} type="button" onClick={() => ops?.open(def, 'run')}>{verb}</button>
     </>
   );
 }

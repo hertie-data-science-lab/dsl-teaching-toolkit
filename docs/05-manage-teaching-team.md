@@ -79,7 +79,7 @@ Never edit the GitHub teams directly; the file is the auditable record.
 
 `photo` accepts either form:
 
-1. **A site-relative path** like `/_images/pp/jane.jpg` - commit the image into this semester's site repo, `<semester-org>.github.io`, under `_images/pp/`. The **safe default**.
+1. **A site-relative path** like `/_images/pp/jane.jpg` - commit the image into this semester's site repo, `<semester-org>.github.io`, under `_images/pp/` (or drop it on the console's Instructors > Photo field, which uploads it there and fills in the path). The **safe default**.
 2. **An absolute URL** on a host that allows hotlinking. GitHub avatars (`https://github.com/<handle>.png`) always work.
 
 > Institutional profile sites often block off-site requests. E.g. `hertie-school.org` returns **403** to anything not loaded from its own pages.

@@ -3,6 +3,7 @@
 // with a before and an after bucket; the header line; the week cells as filters for the agenda;
 // the Problems list (now and soon, whatever the strip picks); the expanded timeline.
 
+import { readFileSync } from 'node:fs';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -88,19 +89,19 @@ describe('term weeks', () => {
 });
 
 describe('the header line', () => {
-  it('reads exams and archive; the semester, dates and week are the banner’s', () => {
+  it('leaves the exams and the archive to the Schedule; the semester, dates and week are the banner’s', () => {
     const s = { ...STATUS, semester: { ...STATUS.semester!, archive_date: '2027-01-12' } };
-    expect(headerLine(s, sched, rows, TZ, 2026)).toBe('Exams 22 Oct and 15 Dec. Archive 12 Jan 2027.');
+    expect(headerLine(s, sched, TZ, 2026)).toBe('');
   });
 
   it('says Starts before week 1 only without an end date, and leaves out what is not known', () => {
     const s = { ...STATUS, semester: { ...STATUS.semester!, week: 0, archive_date: null } };
-    expect(headerLine(s, sched, [], TZ, 2026)).toBe('');
+    expect(headerLine(s, sched, TZ, 2026)).toBe('');
     const open = { ...STATUS, semester: { ...STATUS.semester!, week: 0, end: null, archive_date: null } };
-    expect(headerLine(open, null, [], TZ, 2026)).toBe('Starts 7 Sep.');
+    expect(headerLine(open, null, TZ, 2026)).toBe('Starts 7 Sep.');
     // No start date: the year is said against this year.
     const bare = { ...STATUS, semester: { ...STATUS.semester!, start: null, end: null, archive_date: '2027-01-12' } };
-    expect(headerLine(bare, null, [], TZ, 2026)).toBe('Archive 12 Jan 2027.');
+    expect(headerLine(bare, null, TZ, 2026)).toBe('');
   });
 
   it('names a month once', () => {
@@ -173,14 +174,14 @@ describe('the Dashboard', () => {
     expect(cell(h, 5).getAttribute('aria-pressed')).toBe('true');
     expect(h.textContent).toContain('Planned in weeks 3 and 5');
     expect(problemsText(h)).toEqual(before);
-    const listed = h.querySelector('.grid-2 .panel')!.textContent!;
+    const listed = h.querySelector('.agenda')!.textContent!;
     expect(listed).toContain('Trees and ensembles');
     expect(listed).toContain('37 of 48 submitted so far.');
     expect(listed).not.toContain('Midterm');
     expect(listed).not.toContain('Before the semester');
     click(cell(h, 3));
     click(cell(h, 5)); // nothing selected is all weeks
-    const all = h.querySelector('.grid-2 .panel')!.textContent!;
+    const all = h.querySelector('.agenda')!.textContent!;
     expect(all).toContain('Midterm');
     expect(all).toContain('Before the semester');
     expect(all).toContain('After the semester');
@@ -192,7 +193,7 @@ describe('the Dashboard', () => {
     const late: Status = { ...STATUS, releases: STATUS.releases!.map((r) => (r.id === 's5' ? { ...r, state: 'late' as const } : r)) };
     const h = mount(late);
     click(cell(h, 5));
-    const listed = h.querySelector('.grid-2 .panel')!;
+    const listed = h.querySelector('.agenda')!;
     expect(listed.textContent).toContain('Late: due Thu 8 Oct, not released yet.');
     expect(listed.textContent).not.toContain('Goes to students at its time');
     expect(listed.querySelector('a[href="#release-s5"]')!.textContent).toBe('Details');
@@ -202,7 +203,7 @@ describe('the Dashboard', () => {
     const h = mount();
     click(cell(h, 3));
     click(cell(h, 2));
-    const listed = h.querySelector('.grid-2 .panel')!;
+    const listed = h.querySelector('.agenda')!;
     expect(listed.textContent).toContain('Hand out');
     expect(listed.textContent).toContain('Hands out at its time.');
     expect(listed.querySelector('a[href="#assignment-assignment-2"]')!.textContent).toBe('Open assignment');
@@ -245,7 +246,7 @@ describe('the Dashboard', () => {
 
   it('names the agenda panel for what it plans, with a ?', () => {
     const h = mount();
-    const head = () => h.querySelector('.grid-2 .panel .section-head h2')!;
+    const head = () => h.querySelector('.agenda .section-head h2')!;
     expect(head().textContent).toMatch(/^Planned this week \?/);
     expect(head().querySelector('.hint-wrap')).not.toBeNull();
     click(cell(h, 5));
@@ -290,12 +291,15 @@ describe('the Dashboard and the horizon (decision 0034)', () => {
     expect(tabCount(h, 'Coming up')).toBe('1');
     // Only the current tab's body renders: Coming up's once picked.
     expect(h.querySelector('#dash-panel-coming')!.textContent).toBe('');
+    expect(h.querySelector('.ptabs .hint-pop')!.textContent).toBe('What will not happen until you fix it: overdue, and the next 7 days.');
     click(h.querySelector<HTMLButtonElement>('[role="tab"][data-key="coming"]')!);
     const coming = h.querySelector('#dash-panel-coming')!;
     expect(coming.querySelector('.week-h')!.textContent).toBe('Week 5 from 5 Oct · problems from 1 Oct');
     expect(coming.querySelector('li')!.textContent).toContain('Session 5 cites folder lectures/05_trees');
     expect(coming.querySelector('li a')!.getAttribute('href')).toBe('#schedule-s5');
-    expect(coming.textContent).toContain('Each item becomes a problem 7 days before the date it is needed by');
+    // What the tab is for is in the `?` after its label; the body starts with the weeks.
+    expect(h.querySelector('.ptabs .hint-pop')!.textContent).toBe('Needed later, by week. Each item becomes a problem 7 days before the date it is needed by, and is listed here until then.');
+    expect(coming.firstElementChild!.classList.contains('footnote')).toBe(false);
   });
 
   it('lists a template brief a later hand-out cites in Coming up: the engine’s later problem, no to-do of its own', () => {
@@ -320,7 +324,7 @@ describe('the Dashboard and the horizon (decision 0034)', () => {
     expect(fine.querySelector('.verdict')!.className).toBe('verdict ok');
     expect(fine.querySelector('.verdict')!.textContent).toBe('On track: nothing to fix in the next 14 days1 coming up');
     // One-time setup is not in the verdict or the lede: the tick on the Setup tab says it.
-    expect(fine.querySelector('.lede')!.textContent).not.toContain('Setup complete');
+    expect(fine.querySelector('.lede')?.textContent ?? '').not.toContain('Setup complete');
     expect(tabCount(fine, 'Setup')).toBe('✓');
   });
 
@@ -401,7 +405,7 @@ describe('release rows by time (decision 0034 §6)', () => {
   it('marks the agenda rows the same way, and keeps the late sentence', () => {
     const h = mount(heldStatus(STATUS, COHORT_ORG));
     click(cell(h, 3)); // all weeks
-    const row = (id: string) => h.querySelector(`.grid-2 .panel a[href="#release-${id}"]`)!.closest('li')!;
+    const row = (id: string) => h.querySelector(`.agenda a[href="#release-${id}"]`)!.closest('li')!;
     expect(marks(row('s2'))).toMatchObject({ ex: true, chip: 'was skipped', links: ['Fix #schedule-s2 btn small', 'Details #release-s2 textlink'] });
     expect(marks(row('s4'))).toMatchObject({ ex: true, chip: 'will be skipped', links: ['Fix #schedule-s4 btn small', 'Details #release-s4 textlink'] });
     expect(row('s4').textContent).toContain('Will be skipped: its folder was not found.');
@@ -423,7 +427,63 @@ describe('release rows by time (decision 0034 §6)', () => {
     expect(badge(6)).toBeNull();
     expect(cell(h, 5).getAttribute('aria-label')).toContain('; 1 not ready yet');
     const legend = h.querySelector('.strip-legend')!;
-    expect(legend.textContent).toContain('2problems');
-    expect(legend.querySelector('.lg-count.later')!.parentElement!.textContent).toBe('2not ready yet');
+    expect(legend.textContent).toContain('nproblems');
+    expect(legend.querySelector('.lg-count.later')!.parentElement!.textContent).toBe('nnot ready yet');
+  });
+});
+
+describe('the agenda rows', () => {
+  it('put each row on one line: when, chip, label, state, details, actions; the title holds it all', () => {
+    const h = mount();
+    const rows = [...h.querySelectorAll<HTMLLIElement>('.agenda ul.week > li')];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const li of rows) {
+      // No stacked lines: the row's own children sit side by side, and nothing breaks inside them.
+      expect([...li.children].map((c) => c.className)).toEqual(expect.arrayContaining(['when', 'what']));
+      expect(li.querySelector('br')).toBeNull();
+      const what = li.querySelector('.what')!;
+      expect(what.children[0].classList.contains('chip')).toBe(true);
+      expect(what.children[1].matches('b.t')).toBe(true);
+      expect(li.getAttribute('title')).toContain(what.children[1].textContent!);
+    }
+    expect(rows[0].getAttribute('title')).toBe('Due · Assignment 2 · open · Regression. 37 of 48 submitted so far.');
+    expect(rows[0].querySelector('.what .st-chip')!.textContent).toBe('open');
+    expect(rows[0].querySelector('.what .d')!.textContent).toBe('Regression. 37 of 48 submitted so far.');
+    expect(rows[0].querySelector(':scope > .actions')!.textContent).toBe('Open assignment');
+  });
+
+  it('cut long details with an ellipsis instead of wrapping', () => {
+    const css = readFileSync(`${__dirname}/../src/styles/console.css`, 'utf8');
+    expect(css).toMatch(/\.week li \{[^}]*display: flex;[^}]*white-space: nowrap;/);
+    expect(css).toMatch(/\.week \.what \.d \{[^}]*overflow: hidden; text-overflow: ellipsis;/);
+  });
+});
+
+describe('the Students panel', () => {
+  const withStudents = (students: Status['students']) => ({ ...STATUS, students });
+  const lines = (h: HTMLElement) => [...h.querySelectorAll('.waiting-list a')].map((a) => `${a.textContent} ${a.getAttribute('href')}`);
+
+  it('shows the roster meter and every state, each line opening the Students tab', () => {
+    const h = mount(withStudents({ rows: 36, codes_sent: 30, joined: 29 }));
+    expect(lines(h)).toEqual(['6 on the roster, code not sent yet #students', '1 code sent, not joined yet #students', '29 joined #students']);
+    expect(h.querySelector('.waiting .meter')).not.toBeNull();
+    expect(h.querySelector('.waiting .counts')!.textContent).toBe('36on the roster30codes sent29joined');
+    expect(h.querySelector('.waiting')!.textContent).toContain('Incomplete: 7 of 36 not joined yet.');
+    expect(h.querySelector<HTMLAnchorElement>('.waiting .section-head a')!.getAttribute('href')).toBe('#students');
+  });
+
+  it('keeps a state nobody is in, as a zero', () => {
+    const h = mount(withStudents({ rows: 36, codes_sent: 36, joined: 30 }));
+    expect(lines(h)).toEqual(['0 on the roster, code not sent yet #students', '6 codes sent, not joined yet #students', '30 joined #students']);
+  });
+
+  it('is hidden when nobody waits', () => {
+    for (const s of [{ rows: 36, codes_sent: 36, joined: 36 }, { rows: 0, codes_sent: 0, joined: 0 }, undefined]) {
+      const h = mount(withStudents(s));
+      expect(h.querySelector('.waiting')).toBeNull();
+      render(null, h);
+      h.remove();
+      host = null;
+    }
   });
 });

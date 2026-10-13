@@ -141,7 +141,7 @@ goes, as a semester's Dashboard is where its name goes; a read-only course shows
 then its semesters as nodes: being set up
 first, every live one (a green dot), then past ones ("ended" or "archived") newest first to
 three rows, the rest under "Older semesters (n)". A semester node carries its problem count
-(now or soon only, `problemCount`); its Dashboard leaf does not repeat it. The open semester is expanded to its nine
+(now or soon only, `problemCount`); its Dashboard leaf does not repeat it. The open semester is expanded to its eight
 pages, else on a course page the newest live one; one at a time. Other courses are reached
 through All courses, and so are the person's own student semesters. A student's tree is
 inverted, since a student takes each course once: the open semester's term is the anchor, its
@@ -186,7 +186,7 @@ open>" or "On track: nothing to fix in the next 7 days", tagged "· n coming up"
 a button to the Problems tab; there is no separate problem badge in the page head.
 
 Under it (on a semester, under the week strip) sits one **tabbed panel** (`ui/DashboardTabs`,
-`id="dash-problems"`; only the current tab's body renders), Problems first and selected: Problems (a red count, or a green tick when
+`id="dash-problems"`; only the current tab's body renders, and what the open tab is for sits in a `?` after its label, so the body starts with the rows), Problems first and selected: Problems (a red count, or a green tick when
 none), on a semester Coming up, then Suggestions, Set aside, and Setup at the right (a green
 tick once every needed step is done, else "n of m"). On the course, Problems lists the course's
 own problems now or soon (a settings file that does not parse, a template's problem); a
@@ -202,7 +202,7 @@ needed to-do is never listed in the panel: it shows once, at its point of need, 
 ("Not ready" and the first missing needed item) and its settings checklist, split into Needed
 and Suggested.
 
-Under the course's tabbed panel, the other panels, Handout materials followed by Assignment
+Under the course's tabbed panel, the other panels, Course materials followed by Assignment
 templates (one block, heading the left), Semesters (heading the right; each with its next
 automatic event and its count), Course details (with the public website's indicator and Publish
 button) and Recent activity (the last five operations across the course and its live
@@ -210,11 +210,17 @@ semesters; who ran each comes from its outcome file), go wherever the two column
 closest in height (`splitColumns`, from each panel's estimated height). Until the course's and
 every semester's status has loaded the columns keep a fixed layout (`SETTLING_COLUMNS`), so
 panels do not move as each arrives. The semester Dashboard's line under its title says only
-what the banner does not: the exams and the archive date.
+what the banner does not: the start, while the semester has no end date (the exams and the
+archive date are on the Schedule and the agenda). It has no Assignments panel: each
+assignment's state and progress are on the Assignments tab. Its Students panel is the roster
+meter plus every state, each line opening the Students tab: on the roster with no code sent
+yet, codes sent but not joined yet, and joined (`status.json` does not say who has an org
+invitation still to accept, so that step is not counted); it is hidden once every row has joined.
 
 The semester Dashboard's week strip filters its agenda only: This week on load, any set of
 weeks picked, none picked for all of them; the agenda panel's heading names the selection
-("Planned this week", "Planned in weeks 3 and 5", "Planned, all weeks"). A red number on a week
+("Planned this week", "Planned in weeks 3 and 5", "Planned, all weeks"). Each agenda row is one line: type chip, label, state, then the
+details, cut with an ellipsis (the row's title holds the whole text), and its actions. A red number on a week
 counts its problems now or soon; a hollow one its later problems (a week with both shows the red
 one), and the legend shows both. A release row, on the expanded strip, in the agenda and on the
 Schedule page alike, marks the problem that holds it (`problemForRelease`, `releaseMark`): now, a
@@ -370,8 +376,12 @@ a first visit, mostly free 304s after).
 - Automation's heartbeat: the course's Scheduled release run list.
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
   `students.csv`, `instructors.yml`, a template's `grading_config.yml`, the site's `index.md`.
-- Handout materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and
-  last changes; a materials repo's recursive tree, badged from its `.releaseignore`.
+- Course materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and
+  last changes; a materials repo's recursive tree, badged from its `.releaseignore` on its
+  settings page. The index lists each materials repo's files under its row as a read-only folder
+  tree (`ui/MaterialsTree.tsx`): every folder collapsed, "N files" beside it while it is, a
+  GitHub link to its tree page; a file opens its blob page on GitHub. The folders a viewer opens
+  are kept per repo in sessionStorage; `?folder=<repo>/<path>#materials` opens that folder.
 
 ## What it changes
 
@@ -380,7 +390,7 @@ a first visit, mostly free 304s after).
   `teams.csv`, `grading_sheets/<slug>.yml`, `.github/dsl-course.yml`, a template's
   `grading_config.yml` (on `solution`), a materials repo's `materials.yml` and `.releaseignore`,
   the course's `.github/opencourse.yml` (the public website),
-  the site's `index.md` and `_announcements/`. "Treat as handout materials" on an Other repos
+  the site's `index.md`, `_announcements/` and the institution keys of its `_config.yml`. "Treat as course materials" on an Other repos
   row adds the `dsl-materials` topic to that repo (`PUT /repos/{o}/{r}/topics`). YAML is edited in place (`src/edit/yamlText.ts`):
   only the changed values' bytes move, so comments and their columns survive. After a write the
   console follows the commit's checks and says what they found.
@@ -389,15 +399,16 @@ a first visit, mostly free 304s after).
   `return_run_details`, polls the run's job listing alone (`src/github/poll.ts`, the one poll loop: every 3 s, every
   10 s after 30 s, nothing while the tab is hidden), and reads the public `dsl-outcome` annotation and the
   private outcome file. Hand out, return marks, archive, update every copy and send new codes
-  unlock only after a preview in the same session; publishing the public website, which has no
-  engine preview, asks for a confirmation instead. Other previews are offered only where they
+  offer a preview beside the verb, never required: the page's verb opens the panel and the
+  panel's verb runs, behind the op's confirmation box where it has one; publishing the public website, which has no
+  engine preview, asks for a confirmation. Other previews are offered only where they
   show something you act on (`PREVIEW_NOT_OFFERED` in `src/ops/registry.ts` lists the ones
   that are not). The run popup lists each job step once (GitHub's "Post ..." steps are left
   out), resizes by its bottom-left grip, and its Stop cancels the workflow run
   (`POST .../actions/runs/{id}/cancel`), saying "Stopping…" until GitHub ends it and then
   "Stopped". Once a run ends, "See on GitHub" opens the op's `target` (`src/ops/defs.ts`):
   the repo, branch or folder it changed.
-- Wizards: New course, New semester, New assignment, New handout materials. Each step checks live state
+- Wizards: New course, New semester, New assignment, New course materials. Each step checks live state
   before it lets you continue (the org exists, `hertie-dsl-bot` is an owner, the set-up left
   its repos, the template has both branches and a settings file that parses), and unfinished
   answers stay in this browser so leaving loses nothing. Setting up a course is the one
@@ -436,10 +447,12 @@ Hash tokens as in the design mockup: `#dashboard`, `#schedule-s5`, `#assignment-
 the schedule editor also opens `#schedule-new`, `#schedule-semester` and `#schedule-archive`.
 Renamed hashes redirect: `#cohort` and `#semester` to `#dashboard`, `#staff` to
 `#instructors`, `#new-cohort-<n>` to `#new-semester-<n>`, `#schedule-term` to
-`#schedule-semester`, `#setup` to `#profile`.
+`#schedule-semester`, `#setup` to `#profile`, and the retired Archive page `#archive` to
+`#schedule-archive` (its explanation is the `?` on the archive row, its Archive button on that entry).
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
-opens a new assignment entry for that template; `?wizard=new-semester-3` adds a link back.
+opens a new assignment entry for that template; `?folder=<repo>/<path>#materials` the materials
+index with that folder open; `?wizard=new-semester-3` adds a link back.
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
 The course or semester rides in the query string: `?cohort=<org>` or `?course=<org>`
 (`?semester=` opens the student screens).

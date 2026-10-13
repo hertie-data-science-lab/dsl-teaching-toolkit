@@ -2,6 +2,7 @@
 // tables). Keys are the op's args-schema properties; anything not listed is Derived or
 // Hidden and never a field.
 
+import { SOLUTION_WARNING } from '../model/labels';
 import { DEFAULT_DEST_REPO } from '../model/policy';
 import { opt, type Tiers } from './types';
 
@@ -25,7 +26,7 @@ export const HANDOUT: Tiers = {
   solution_datetime: {
     tier: 'advanced', label: 'Solution shown', widget: 'select', default: '', defaultLabel: 'default: not now',
     options: [opt('', 'Not now'), opt('now', 'Now, with the hand out')],
-    reason: 'Pushes the model answer and rubric into every student’s repo. This is not returning marks, and it cannot be undone for reuse.',
+    reason: SOLUTION_WARNING,
   },
 };
 

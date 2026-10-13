@@ -63,7 +63,7 @@ describe('the instructor tree', () => {
     expect(cur[0].textContent).toBe('Dashboard');
     expect(cur[0].getAttribute('href')).toBe(anchor.getAttribute('href'));
     const leaves = [...h.querySelectorAll('ul.tree > li > a.leaf, ul.tree > li > .row > a')].map((a) => a.textContent);
-    expect(leaves.slice(0, 5)).toEqual(['Dashboard', 'Course details', 'Handout materials', 'Assignment templates', 'Public website']);
+    expect(leaves.slice(0, 5)).toEqual(['Dashboard', 'Course details', 'Course materials', 'Assignment templates', 'Public OpenCourse website Beta']);
     const t = h.textContent!;
     expect(t.indexOf('Public website')).toBeLessThan(t.indexOf('Semesters'));
     expect(h.querySelector('.switcher, .popmenu')).toBeNull();
@@ -79,7 +79,7 @@ describe('the instructor tree', () => {
     expect(cur[0].textContent).toBe('Dashboard');
     expect(cur[0].getAttribute('href')).toBe(`?course=${COURSE_ORG}#course`);
     const t = h.textContent!;
-    for (const page of ['Course details', 'Handout materials', 'Assignment templates', 'Public website']) expect(t).not.toContain(page);
+    for (const page of ['Course details', 'Course materials', 'Assignment templates', 'Public website']) expect(t).not.toContain(page);
     expect(t).toContain('Read only: other pages need write access.');
   });
 
@@ -239,6 +239,7 @@ describe('one person, two roles', () => {
     const el = await mount(`/?course=${COURSE_ORG}#details`);
     const nav = el.querySelector('.sidenav')!;
     expect(nav.querySelector('.nav-anchor')!.textContent).toBe('Machine Learning');
+    expect(nav.querySelector('.nav-org')!.textContent).toBe(COURSE_ORG);
     expect(nav.innerHTML).not.toContain(studied.org);
     expect(el.querySelector('.switcher')).toBeNull();
   });

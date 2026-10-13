@@ -55,7 +55,7 @@ export const STARTER_COPY: Record<Starter, { label: string; hint: string }> = {
 /** The starter radio, for the wizard step and Template settings. */
 export function starterTier(): Tiers[string] {
   return {
-    tier: 'default', label: 'How students get the starter', widget: 'radio',
+    tier: 'default', label: 'How students get the starter files', widget: 'radio',
     options: STARTERS.map((k) => ({ value: k, label: STARTER_COPY[k].label, hint: STARTER_COPY[k].hint })),
   };
 }
@@ -124,7 +124,7 @@ export function settingsTiers(): Tiers {
       options: [opt('auto', 'Auto'), opt('on', 'On'), opt('off', 'Off')],
       forced: (v) => (isDrop(v) ? { value: 'auto', reason: 'Off: not available for a shared drop box.' } : null),
     },
-    starter: { ...starterTier(), label: 'Starter' },
+    starter: { ...starterTier(), label: 'Starter files' },
     grader_pdf: {
       tier: 'advanced', label: 'Marker PDF', widget: 'checkbox', default: false, defaultLabel: 'a PDF of each submission for markers; default off',
       forced: (v) => (isDrop(v) ? { value: false, reason: 'Off: not available for a shared drop box.' } : null),

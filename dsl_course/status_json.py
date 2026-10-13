@@ -63,6 +63,7 @@ from .course import (
     INSTRUCTORS_TEAM,
     JOIN_REPO,
     MATERIALS_REPO_PREFIX,
+    NO_STARTER,
     SELF_SELECT,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
@@ -206,6 +207,9 @@ class TemplateFacts:
     topic: bool = True
     # Decision 0028: how `main` is written (the key, else read off the solution tree).
     starter: str = STARTER_DERIVED
+    # False when no starter is handed out at all: `format: none`, or handed in off GitHub
+    # (`submit_via: external`, no repo). The starter is then not checked.
+    starter_applies: bool = True
     # What the starter still needs (`starter_check`), None when it is in place.
     starter_todo: str | None = None
     # Derived: the first recorded starter file whose blob on `main` is not Derive's.
@@ -1147,7 +1151,7 @@ def _number_stops(m: Unnumbered, now: datetime, released: bool = False) -> str:
     return f"The {moment} on {_day(m.fires)} will be skipped."
 
 
-def _schedule_fix(org: str, key: str, line: int | None) -> dict:
+def _schedule_fix(org: str, key: str | None, line: int | None) -> dict:
     return {
         "repo": f"{org}/{schedule.CONFIG_REPO}",
         "path": schedule.SCHEDULE_PATH,
@@ -1207,6 +1211,73 @@ def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
                 ),
             }
         )
+    return out
+
+
+EMPTY_WEEK = "EMPTY_WEEK"
+
+
+def _scheduled_days(sched: schedule.Schedule) -> set[date]:
+    """Every day, in the semester's timezone, something dated in the schedule falls on: a
+    release (and a deploy of its own), an assignment's hand-out, due date and late cutoff,
+    an exam or event, the archive. A `tbc` entry has no day."""
+    tz = ZoneInfo(sched.timezone)
+    out: set[date] = set()
+
+    def add(when: date | datetime | None) -> None:
+        if isinstance(when, datetime):
+            out.add(when.astimezone(tz).date() if when.tzinfo else when.date())
+        elif isinstance(when, date):
+            out.add(when)
+
+    for r in sched.releases:
+        add(r.when)
+        for d in r.deploy:
+            add(d.deploy_datetime)
+    for slug, a in sched.assignments.items():
+        add(a.handout_datetime)
+        add(a.due_datetime)
+        add(schedule.grading_cutoff_datetime(sched, slug))
+    for e in sched.events:
+        add(e.when)
+    if sched.archive:
+        add(sched.archive.when)
+    return out
+
+
+def empty_week_problems(
+    facts: SemesterFacts, now: datetime, aside: frozenset[str] = frozenset()
+) -> list[dict]:
+    """`empty_week:<monday>` for each calendar week (Monday to Sunday, the semester's
+    timezone) of the term with nothing dated in it, dated at that Monday 00:00 so the tiers
+    place it. A week already begun is not raised, nor one the course has set aside
+    (decision 0032: a reading week or an exam week is dismissed that way)."""
+    sched = facts.sched
+    start, end = sched.semester_start, sched.semester_end
+    if start is None or end is None or end < start:
+        return []
+    tz = ZoneInfo(sched.timezone)
+    today = now.astimezone(tz).date()
+    days = _scheduled_days(sched)
+    out = []
+    monday = start - timedelta(days=start.weekday())
+    while monday <= end:
+        pid = f"empty_week:{monday.isoformat()}"
+        week = {monday + timedelta(days=i) for i in range(7)}
+        if monday > today and not week & days and pid not in aside:
+            out.append(
+                {
+                    "id": pid,
+                    "scope": "semester",
+                    "stage": "K4",
+                    "kind": EMPTY_WEEK,
+                    "text": f"Nothing is scheduled in the week of {monday.day} {monday:%b}.",
+                    "stops": "Students see an empty week. A reading or exam week can be set aside.",
+                    "fix": _schedule_fix(facts.org, None, None),
+                    "when": datetime.combine(monday, time(), tz).isoformat(),
+                }
+            )
+        monday += timedelta(days=7)
     return out
 
 
@@ -1501,6 +1572,7 @@ def render_course(
                 "repo": t.repo,
                 "state": template_state(t),
                 "starter": t.starter,
+                "starter_applies": t.starter_applies,
             }
             for t in facts.templates
         ],
@@ -2296,6 +2368,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
         problem_from_fault(f, course.org, now, moments) for f in facts.template_faults
     ]
     problems += number_problems(facts, now)
+    problems += empty_week_problems(facts, now, set_aside_ids(course.meta))
     problems += kindless_entry_problems(facts)
     problems += unwritten_problems(facts, course.org, now)
     problems += [
@@ -2475,11 +2548,13 @@ def gather_course(course_org: str) -> CourseFacts:
             text = get_file_content(
                 course_org, name, grades.GRADING_FILE, ref=SOLUTION_BRANCH
             )
+            spec = None
             if text is not None:
-                t.faults, _ = grades.grading_spec_faults(
+                t.faults, spec = grades.grading_spec_faults(
                     name, name, course_org, text, None
                 )
-            if t.topic:
+            t.starter_applies = starter_applies(spec)
+            if t.topic and t.starter_applies:
                 _starter_facts(course_org, t, text)
             facts.templates.append(t)
     facts.public_site = pages_repo(course_org) in listing
@@ -2497,6 +2572,13 @@ def gather_course(course_org: str) -> CourseFacts:
     else:
         facts.website_on = bool(oc and oc.enabled)
     return facts
+
+
+def starter_applies(spec: grades.GradingSpec | None) -> bool:
+    """Whether the template hands out a starter to check: not with `format: none` (no
+    starter file), nor with `submit_via: external` (no repo is created). A file that does
+    not parse keeps the check."""
+    return spec is None or (spec.format != NO_STARTER and not spec.submit_external)
 
 
 def _starter_facts(org: str, t: TemplateFacts, config: str | None) -> None:

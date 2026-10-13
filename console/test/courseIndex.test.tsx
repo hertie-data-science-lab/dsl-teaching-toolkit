@@ -17,7 +17,7 @@ import { MaterialsScreen, WebsiteScreen, folderKinds, kindChoices, resetLabel, w
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { REVIEWED_MARK, withMark } from '../src/model/materialsRules';
-import { EditFile, Lives, newFileUrl } from '../src/ui/bits';
+import { EditFile, newFileUrl } from '../src/ui/bits';
 import { Sidenav } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
 
@@ -109,15 +109,15 @@ describe('index screens', () => {
     expect(t).toContain('Fall 2026');
     expect(t).not.toContain('public website');
     expect(t).toContain('Last change');
-    expect(t).toContain('Handout materials repos');
-    expect(t).toContain('New handout materials');
+    expect(t).toContain('Course materials repos');
+    expect(t).toContain('New course materials');
     expect(t).toContain('lecture-code-f2026');
-    expect(t).toContain('Not handout materials, so nothing to set up here. Can be released to a semester from the schedule.');
+    expect(t).toContain('Not course materials, so nothing to set up here. Can be released to a semester from the schedule.');
     // Other repos get the Open button, not a GitHub link.
     const other = render(<MaterialsIndexScreen {...cp()} />).split('<li>').find((li) => li.includes('lecture-code-f2026'))!;
     expect(other).toContain('aria-label="More ways to open lecture-code-f2026"');
     expect(other).not.toContain('<a class="btn small quiet"');
-    expect(other).toContain('>Treat as handout materials</button>');
+    expect(other).toContain('>Treat as course materials</button>');
     expect(t).not.toContain('assignment-9-draft');
     expect(t).not.toContain('old-thing');
     expect(render(<MaterialsIndexScreen {...cp()} />)).toContain(`href="#materials-${MAT}"`);
@@ -252,7 +252,7 @@ describe('course nav and overview', () => {
     const t = text(<CourseScreen {...cp({ loaded: ready })} />);
     expect(t).toContain('Problems');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
-    expect(t).not.toContain('Everything automatic will happen on time');
+    expect(t).not.toContain('No problems.');
     expect(t).toContain('Fall 2025');
     expect(t).toMatch(/\d problems?/);
     const calm: Loaded = { kind: 'ready', status: { ...STATUS, problems: [] }, sha: 's', stale: [] };
@@ -383,8 +383,17 @@ describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () 
     expect(absent).toContain('href="https://github.com/o/r/new/main?filename=materials.yml"');
     expect(absent).toContain('Create the file on GitHub');
     expect(render(<EditFile org="o" repo="r" path="materials.yml" />)).toContain('href="https://github.com/o/r/edit/main/materials.yml"');
-    expect(render(<Lives org="o" repo="r" path=".releaseignore" exists={false} />)).toContain('href="https://github.com/o/r/new/main?filename=.releaseignore"');
-    expect(render(<Lives org="o" repo="r" path=".releaseignore" />)).toContain('href="https://github.com/o/r/blob/main/.releaseignore"');
+  });
+
+  it('keeps two short file links, with the full org/repo/path as the tooltip', () => {
+    const absent = render(<EditFile org="o" repo="r" path="materials.yml" exists={false} />);
+    const present = render(<EditFile org="o" repo="r" path="materials.yml" />);
+    expect(absent).toContain('title="o/r/materials.yml"');
+    expect(present).toContain('title="o/r/materials.yml"');
+    expect(present).toContain('target="_blank"');
+    expect(present).toContain('Edit the file directly');
+    expect(absent).not.toContain('Create o/r');
+    expect(present).not.toContain('Lives in');
   });
 
   it('on the settings screen: new-file links for an absent materials.yml, the editor for a present .releaseignore', () => {

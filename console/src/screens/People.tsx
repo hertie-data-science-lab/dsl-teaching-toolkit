@@ -5,13 +5,15 @@ import { useEnv } from '../env';
 import { EMAIL_RE, diffRoster, missingColumns, readTable, writeTable, type RosterDiff } from '../edit/csv';
 import { useSave } from '../edit/save';
 import { YamlText } from '../edit/yamlText';
-import { SchemaForm, fieldErrors } from '../forms/Form';
+import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { fmtShort } from '../model/format';
-import { ROLE_WORD, ROSTER_HEADER, parseInstructors, sameHandle, type Person } from '../model/people';
-import { checkAccess, sendCodes } from '../ops/defs';
-import { OpButtons, OpOpen } from '../ops/Panel';
-import { PERSON, displayOnly } from '../tiers/people';
-import { CheckLine, EditFile, Lives, Loading, ProblemCards } from '../ui/bits';
+import { ROLE_WORD, ROSTER_HEADER, ROSTER_SAVE_NOTE, parseInstructors, pendingSummary, roleSplit, sameHandle, type Person } from '../model/people';
+import { checkAccess, sendCodes, syncMembershipUrl } from '../ops/defs';
+import { OpOpen } from '../ops/Panel';
+import { PERSON, PHOTO_DIR, displayOnly, photoError } from '../tiers/people';
+import { pick } from '../tiers/types';
+import { authorOf } from '../github/client';
+import { CheckLine, EditFile, Loading, ProblemCards, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar, SaveLine } from '../ui/edit';
 import { StudentCounts } from './Cohort';
@@ -38,8 +40,13 @@ function Students(p: ReadyProps) {
   const file = p.files.file(p.cohort.org, CONFIG_REPO, 'students.csv');
   const [edits, setEdits] = useState<Record<number, Row>>({});
   const [added, setAdded] = useState<Row[]>([]);
+  // File rows marked for removal (by index), struck through until Save drops them.
+  const [removed, setRemoved] = useState<number[]>([]);
   const [replacement, setReplacement] = useState<{ rows: Row[]; diff: RosterDiff; name: string } | null>(null);
   const [upload, setUpload] = useState<{ open: boolean; error: string; pending: { rows: Row[]; diff: RosterDiff; name: string } | null }>({ open: false, error: '', pending: null });
+  // Read view until Edit roster: the grid then shows inputs for your columns (and a joined
+  // row's handle), saved together by the Save bar below.
+  const [editing, setEditing] = useState(false);
   const [save, runSave, setSave] = useSave(env);
   const table = file.kind === 'ready' ? readTable(file.text) : null;
   const missing = table ? missingColumns(table.header, [...ROSTER_HEADER]) : [];
@@ -49,6 +56,8 @@ function Students(p: ReadyProps) {
   const waiting = Math.max(0, s.codes_sent - s.joined);
 
   const base = table?.rows ?? [];
+  // The role split is the file's: the status counts rows, not roles.
+  const split = table && !missing.length ? roleSplit(base) : null;
   // Edits are keyed by row index. `lines` is each row's line in the file (blank lines and quoted
   // newlines move it), shown and matched with the engine's faults; a row added here, or a
   // replacement's, is numbered on from the file's last row.
@@ -56,9 +65,23 @@ function Students(p: ReadyProps) {
   const fileLines = replacement ? [] : (table?.lines ?? []);
   const lastLine = fileLines[fileLines.length - 1] ?? 1;
   const lines = current.map((_, i) => fileLines[i] ?? lastLine + i - fileLines.length + 1);
-  const nEdits = replacement ? 1 : Object.keys(edits).filter((i) => EDITED.some((k) => (edits[+i][k] ?? '') !== (base[+i]?.[k] ?? ''))).length + added.filter((r) => r.hertie_email || r.name).length;
-  const badEmail = current.filter((r) => (r.hertie_email || r.name) && !EMAIL_RE.test(r.hertie_email ?? ''));
-  const toSend = current.filter((r) => !r.code_sent_at && EMAIL_RE.test(r.hertie_email ?? '')).length - base.filter((r) => !r.code_sent_at && EMAIL_RE.test(r.hertie_email ?? '')).length;
+  const gone = (i: number) => !replacement && removed.includes(i);
+  // What Save writes: every row but the removed ones.
+  const kept = current.filter((_, i) => !gone(i));
+  const keptBase = base.filter((_, i) => !gone(i));
+  const d0 = replacement?.diff;
+  const counts = d0
+    ? { added: d0.added.length, removed: d0.removed.length, changed: d0.changed.length }
+    : {
+        added: added.filter((r) => r.hertie_email || r.name).length,
+        removed: removed.length,
+        changed: Object.keys(edits).filter((i) => !gone(+i) && EDITED.some((k) => (edits[+i][k] ?? '') !== (base[+i]?.[k] ?? ''))).length,
+      };
+  const nEdits = replacement ? 1 : counts.added + counts.removed + counts.changed;
+  const badEmail = kept.filter((r) => (r.hertie_email || r.name) && !EMAIL_RE.test(r.hertie_email ?? ''));
+  const noName = replacement ? [] : added.filter((r) => r.hertie_email && !r.name?.trim());
+  const unsent = (r: Row) => !r.code_sent_at && EMAIL_RE.test(r.hertie_email ?? '');
+  const toSend = kept.filter(unsent).length - keptBase.filter(unsent).length;
   const saveLabel = !nEdits ? 'Save' : toSend > 0 ? `Save and send ${toSend} code${toSend > 1 ? 's' : ''}` : `Save ${nEdits} change${nEdits > 1 ? 's' : ''}`;
 
   /** Row `i`'s `k`: an edit of a file row, or the text of a row added here. */
@@ -77,8 +100,9 @@ function Students(p: ReadyProps) {
   };
   const doSave = async () => {
     if (!table || file.kind !== 'ready') return;
+    if (noName.length) return setSave({ kind: 'bad', text: `${noName.length} added row${noName.length > 1 ? 's have' : ' has'} no name.` });
     if (badEmail.length) return setSave({ kind: 'bad', text: `${badEmail.length} row${badEmail.length > 1 ? 's have' : ' has'} an email that is not an address; no code can be sent to it.` });
-    const switched = replacement ? [] : base.map((r, i) => (edits[i]?.github_handle ?? r.github_handle ?? '').trim()).filter((h, i) => !sameHandle(h, base[i].github_handle ?? ''));
+    const switched = replacement ? [] : base.map((r, i) => (gone(i) ? r.github_handle ?? '' : (edits[i]?.github_handle ?? r.github_handle ?? '')).trim()).filter((h, i) => !sameHandle(h, base[i].github_handle ?? ''));
     if (switched.includes('')) return setSave({ kind: 'bad', text: 'A joined student’s GitHub handle cannot be blank. Put back the old one, or type their new account.' });
     for (const handle of switched) {
       setSave({ kind: 'busy', text: `Checking that ${handle} exists on GitHub…` });
@@ -90,37 +114,48 @@ function Students(p: ReadyProps) {
       }
       if (!ok) return setSave({ kind: 'bad', text: `There is no GitHub account called ${handle}.` });
     }
-    const rows = current.filter((r) => r.hertie_email || r.name);
+    const rows = kept.filter((r) => r.hertie_email || r.name);
     const text = writeTable({ header: table.header, rows });
-    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv' }, text, file.sha, { message: `roster: ${replacement ? `replace from ${replacement.name}` : `${nEdits} change${nEdits > 1 ? 's' : ''}`}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
+    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv' }, text, file.sha, { message: `roster: ${replacement ? `replace from ${replacement.name}` : pendingSummary(counts)}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
     if (ok) {
       setEdits({});
       setAdded([]);
+      setRemoved([]);
       setReplacement(null);
     }
   };
-  const input = (i: number, r: Row, k: string, label: string, type = 'text') => (
+  const input = (i: number, r: Row, k: string, label: string, type = 'text') => (!editing || gone(i) ? (r[k] ?? '') : (
     <input type={type} value={r[k] ?? ''} aria-label={`${label}, line ${lines[i]}`} aria-invalid={k === 'hertie_email' && (r.hertie_email || r.name) && !EMAIL_RE.test(r.hertie_email ?? '') ? 'true' : undefined} disabled={!!replacement}
       onInput={(e) => setCell(i, k, (e.target as HTMLInputElement).value)} />
-  );
-  const role = (i: number, r: Row) => (
+  ));
+  const role = (i: number, r: Row) => (!editing || gone(i) ? (r.role || 'enrolled') : (
     <select aria-label={`Role, line ${lines[i]}`} disabled={!!replacement} onChange={(e) => setCell(i, 'role', (e.target as HTMLSelectElement).value)}>
       <option value="enrolled" selected={(r.role || 'enrolled') === 'enrolled'}>enrolled</option>
       <option value="auditor" selected={r.role === 'auditor'}>auditor</option>
     </select>
-  );
+  ));
+  /** Edit mode's per-row control: a file row is marked (Undo takes it back), a row added here goes at once. */
+  const removeControl = (i: number) => {
+    if (replacement) return null;
+    if (gone(i)) return <button class="btn small quiet" type="button" aria-label={`Undo removing line ${lines[i]}`} onClick={() => setRemoved(removed.filter((x) => x !== i))}>Undo</button>;
+    const drop = () => (i >= base.length ? setAdded(added.filter((_, j) => j !== i - base.length)) : setRemoved([...removed, i]));
+    return <button class="btn small quiet rm" type="button" aria-label={`Remove line ${lines[i]}`} title="Remove" onClick={() => { drop(); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }}>&times;</button>;
+  };
   const d = upload.pending?.diff;
   return (
     <>
       <div class="page-head">
-        <div><h2 class="h1">Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h2><p class="lede">{s.rows} on the roster. {s.codes_sent} codes sent; {s.joined} joined.</p></div>
+        <div><h2 class="h1">Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h2></div>
         <div class="actions">
+          <button class={`btn${editing ? ' quiet' : ''}`} type="button" aria-pressed={editing} disabled={!table || !!missing.length || !!replacement} onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit roster'}</button>
           <button class="btn quiet" type="button" aria-expanded={upload.open} onClick={() => setUpload({ ...upload, open: !upload.open })}>Replace from CSV</button>
-          <OpButtons def={sendCodes(scope, waiting)} label="Send new codes to students who have not joined" />
+          {/* Preview lives in each op's panel, not beside the button. */}
+          <OpOpen def={sendCodes(scope, waiting)} cls="btn quiet" label="Send codes" />
+          <a class="btn quiet" href={syncMembershipUrl(scope)} target="_blank" rel="noopener" title="Opens Sync membership on GitHub: press Run workflow there. Saving the roster starts it anyway.">Sync now</a>
         </div>
       </div>
       <div class="stack">
-        <div class="panel"><StudentCounts status={status} /></div>
+        <div class="panel"><StudentCounts status={status} split={split} /></div>
         {problems.length ? <ProblemCards list={problems} /> : null}
         {upload.open ? (
           <div class="upload">
@@ -154,13 +189,14 @@ function Students(p: ReadyProps) {
         {missing.length ? <CheckLine cls="bad">students.csv is missing the {missing.join(', ')} column{missing.length > 1 ? 's' : ''}.</CheckLine> : null}
         {table && !missing.length ? (
           <div>
-            <div class="table-wrap roster-table" style="max-height:600px;overflow:auto">
+            <div class={`table-wrap roster-table${editing ? ' editing' : ''}`} style="max-height:600px;overflow:auto">
               <table class="grid" style="min-width:980px">
                 <thead>
                   <tr>
                     <th>Line</th><th>Email<span class="grp">yours: hertie_email</span></th><th>Name<span class="grp">yours</span></th><th>Role<span class="grp">yours</span></th>
                     <th class="sys">GitHub handle<span class="grp">yours once joined</span></th><th class="sys">GitHub id<span class="grp">system</span></th>
                     <th class="sys">Code sent<span class="grp">system</span></th><th class="sys">Status<span class="grp">system</span></th>
+                    {editing ? <th><span class="sr">Remove</span></th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -168,7 +204,7 @@ function Students(p: ReadyProps) {
                     const at = lines[i];
                     const changed = !replacement && (edits[i] || i >= base.length);
                     return (
-                      <tr class={`${faultLines.has(at) ? 'fault' : ''}${changed ? ' changed' : ''}`} id={`line-${at}`}>
+                      <tr class={`${faultLines.has(at) ? 'fault' : ''}${gone(i) ? ' removed' : changed ? ' changed' : ''}`} id={`line-${at}`}>
                         <td class="line">{at}</td>
                         <td>{input(i, r, 'hertie_email', 'Email', 'email')}</td>
                         <td>{input(i, r, 'name', 'Name')}</td>
@@ -177,28 +213,28 @@ function Students(p: ReadyProps) {
                         <td class="sys mono">{r.github_id}</td>
                         <td class="sys">{(r.code_sent_at ?? '').replace('T', ', ').replace(/:\d\d(\.\d+)?Z?$/, '')}</td>
                         <td class="sys"><RowStatus r={r} /></td>
+                        {editing ? <td class="rm-cell">{removeControl(i)}</td> : null}
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            <ul class="roster-cards">
+            <ul class={`roster-cards${editing ? ' editing' : ''}`}>
               {current.map((r, i) => (
-                <li class={`rcard${faultLines.has(lines[i]) ? ' fault' : ''}`}>
-                  <div class="rc-top">{r.name}<span>line {lines[i]}</span></div>
+                <li class={`rcard${faultLines.has(lines[i]) ? ' fault' : ''}${gone(i) ? ' removed' : ''}`}>
+                  <div class="rc-top">{r.name}<span>line {lines[i]}{editing ? <> {removeControl(i)}</> : null}</span></div>
                   <div class="field"><span class="label">Email</span>{input(i, r, 'hertie_email', 'Email', 'email')}</div>
                   <div class="field"><span class="label">Role</span>{role(i, r)}</div>
                   <div class="rc-status"><RowStatus r={r} />{r.github_handle ? ` as ${r.github_handle}` : ''}</div>
                 </li>
               ))}
             </ul>
-            <div style="margin-top:10px"><button class="btn small quiet" type="button" disabled={!!replacement} onClick={() => setAdded([...added, { hertie_email: '', name: '', role: 'enrolled' }])}>Add a student</button></div>
+            <div style="margin-top:10px"><button class="btn small quiet" type="button" disabled={!!replacement} onClick={() => { setEditing(true); setAdded([...added, { hertie_email: '', name: '', role: 'enrolled' }]); }}>Add a student</button></div>
           </div>
         ) : null}
         <div class="panel" style="display:grid;gap:10px">
-          <SaveBar state={save} onSave={() => void doSave()} label={saveLabel} disabled={!nEdits} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv', exists: file.kind !== 'absent' }} note={nEdits ? `${nEdits} unsaved change${nEdits > 1 ? 's' : ''}` : 'No unsaved changes'} />
-          <Lives org={p.cohort.org} repo={CONFIG_REPO} path="students.csv" exists={file.kind !== 'absent'} />
+          <SaveBar state={save} onSave={() => void doSave()} label={saveLabel} disabled={!nEdits} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv', exists: file.kind !== 'absent' }} note={nEdits ? `${pendingSummary(counts)}. ${ROSTER_SAVE_NOTE}` : 'No unsaved changes'} />
         </div>
       </div>
     </>
@@ -340,7 +376,8 @@ function Instructors(p: ReadyProps) {
         {editing ? (
           <div class="person-form">
             <h3>{editing.idx === 'new' ? 'Add a person' : `Edit ${people[editing.idx]?.name || people[editing.idx]?.handle}`}</h3>
-            <SchemaForm id="p" schema={null} tiers={PERSON} values={editing.values} onChange={(v) => setEditing({ ...editing, values: v })} />
+            <SchemaForm id="p" schema={null} tiers={pick(PERSON, Object.keys(PERSON).filter((k) => k !== 'photo'))} values={editing.values} onChange={(v) => setEditing({ ...editing, values: v })} />
+            <PhotoField p={p} values={editing.values} set={(photo) => setEditing({ ...editing, values: { ...editing.values, photo } })} />
             {displayOnly(editing.values) ? <CheckLine cls="warn">Display only: this person gets a card on the student site, no GitHub access and no problem emails.</CheckLine> : null}
             <SaveBar state={save} onSave={() => void saveForm()} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: INSTRUCTORS_FILE, exists: file.kind !== 'absent' }}>
               <button class="btn quiet" type="button" onClick={() => setEditing(null)}>Cancel</button>
@@ -352,9 +389,51 @@ function Instructors(p: ReadyProps) {
             <div class="savebar"><EditFile org={p.cohort.org} repo={CONFIG_REPO} path={INSTRUCTORS_FILE} exists={file.kind !== 'absent'} /></div>
           </>
         ) : null}
-        <Lives org={p.cohort.org} repo={CONFIG_REPO} path={INSTRUCTORS_FILE} exists={file.kind !== 'absent'} />
       </div>
     </>
+  );
+}
+
+/**
+ * The Photo field: a link or a path typed in, or an image dropped on it (or chosen) that is
+ * uploaded to the site repo's photo folder, the path then filled in.
+ */
+function PhotoField({ p, values, set }: { p: ReadyProps; values: Record<string, unknown>; set: (v: string | undefined) => void }) {
+  const env = useEnv();
+  const [state, setState] = useState<{ kind: 'idle' | 'busy' | 'bad'; text?: string }>({ kind: 'idle' });
+  const [over, setOver] = useState(false);
+  const repo = `${p.cohort.org}.github.io`;
+  const dir = p.files.dir(p.cohort.org, repo, PHOTO_DIR);
+  const folder = dir.kind === 'absent' ? ghUrl(p.cohort.org, repo) : ghUrl(p.cohort.org, repo, PHOTO_DIR, 'main', 'tree');
+  const upload = async (f: File | undefined) => {
+    if (!f || !env) return;
+    const err = photoError(f);
+    if (err) return setState({ kind: 'bad', text: err });
+    const name = f.name.toLowerCase().replace(/[^a-z0-9.]+/g, '-');
+    setState({ kind: 'busy', text: `Uploading ${name}…` });
+    try {
+      await env.client.putContents({ owner: p.cohort.org, repo, path: `${PHOTO_DIR}/${name}`, text: new Uint8Array(await f.arrayBuffer()), sha: null, message: `site: add the photo ${name}, from the DSL Teaching Console`, author: authorOf(env.user) });
+    } catch (e) {
+      const taken = e instanceof Error && 'status' in e && (e as { status: number }).status === 422;
+      return setState({ kind: 'bad', text: taken ? `${name} is already in the folder: rename the image, or type its path.` : `Not uploaded: ${e instanceof Error ? e.message : String(e)}` });
+    }
+    setState({ kind: 'idle' });
+    set(`/${PHOTO_DIR}/${name}`);
+  };
+  return (
+    <div
+      class={`photo-drop${over ? ' over' : ''}`}
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); void upload(e.dataTransfer?.files[0]); }}
+    >
+      <Field id="p-photo" k="photo" t={PERSON.photo} value={values.photo} values={values} error={fieldErrors(null, { photo: PERSON.photo }, values).photo} set={(_, v) => set(v === undefined ? undefined : String(v))} />
+      <p class="why">
+        Drop an image here, or <label class="textlink" for="p-photo-file">choose one</label>, to upload it to the site repo’s <a class="textlink" href={folder} target="_blank" rel="noopener">photo folder</a> (PNG, JPEG or WebP, up to 2 MB).
+        <input type="file" id="p-photo-file" class="sr" accept="image/png,image/jpeg,image/webp" onChange={(e) => void upload((e.target as HTMLInputElement).files?.[0])} />
+      </p>
+      {state.kind === 'busy' ? <CheckLine cls="busy">{state.text}</CheckLine> : state.kind === 'bad' ? <CheckLine cls="bad">{state.text}</CheckLine> : null}
+    </div>
   );
 }
 

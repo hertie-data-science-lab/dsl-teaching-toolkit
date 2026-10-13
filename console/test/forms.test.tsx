@@ -1,3 +1,4 @@
+import { PERSON } from '../src/tiers/people';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import gradingSchema from '../schemas/grading_config.schema.json';
@@ -123,5 +124,9 @@ describe('roster tables', () => {
     expect(diff.changed[0].after).toMatchObject({ name: 'Anna A', role: 'auditor', github_handle: 'anna-a', enrol_code: 'CODE1' });
     expect(diff.removed.map((r) => r.hertie_email)).toEqual(['ben@x.org']);
     expect(rows).toHaveLength(2);
+  });
+  it('suggests instructor titles in grey, as a placeholder that typing replaces', () => {
+    const out = render(<SchemaForm id="p" schema={null} tiers={PERSON} values={{ role: 'instructor' }} onChange={() => {}} />);
+    expect(out).toMatch(/id="p-title"[^>]*placeholder="Professor · Lecturer · Teaching assistant"/);
   });
 });

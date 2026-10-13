@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'preact/hooks';
 import {
-  ASSIGNMENT_WORD, NOT_READY_YET, TYPE_CLASS, TYPE_LABEL, addDays, ago, assignmentTitle, daysBetween, fmtDate, fmtDay, fmtDays, fmtShort, fmtTime, fmtWhen, markWord, plural, releaseIdent,
+  NOT_READY_YET, TYPE_CLASS, TYPE_LABEL, addDays, ago, daysBetween, fmtDate, fmtDay, fmtShort, fmtTime, fmtWhen, markWord, plural, releaseIdent,
+  asideable, emptyWeekLabel,
 } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekStart, type Row, type Schedule, type Term, type WeekGroup, type WeekKey, termOf } from '../model/schedule';
 import type { Assignment, Problem, Status } from '../model/types';
@@ -27,9 +28,9 @@ export function readSchedule(p: CohortProps): Schedule | null {
 export function asgSummary(a: Assignment, tz: string, year: number): string {
   switch (a.state) {
     case 'open':
-      return `Due ${fmtWhen(a.due, tz, year)}; ${a.submissions} of ${a.units} submitted`;
+      return `Due ${fmtWhen(a.due, tz, year)}; ${a.submissions ?? 0} of ${a.units} submitted`;
     case 'late_window':
-      return `Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions} of ${a.units} submitted`;
+      return `Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions ?? 0} of ${a.units} submitted`;
     case 'marking':
       return `${a.marks.filled} of ${a.marks.total} marked`;
     case 'returned':
@@ -39,39 +40,17 @@ export function asgSummary(a: Assignment, tz: string, year: number): string {
   }
 }
 
-export function AsgRows({ status, now }: { status: Status; now: number }) {
-  const tz = tzOf(status), year = yearOf(now, tz);
-  return (
-    <>
-      {(status.assignments ?? []).map((a) => (
-        <li>
-          <a href={`#assignment-${a.slug}`}>
-            <span class="a-name">{assignmentTitle(a)}</span>
-            <span class="a-sub">{asgSummary(a, tz, year)}</span>
-            <span class="a-side">
-              <span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span>
-              {a.problem ? <span class="a-flag">Assignment template has a problem</span> : null}
-            </span>
-          </a>
-        </li>
-      ))}
-    </>
-  );
-}
-
 /**
  * The Dashboard's line under its title: what the course banner does not say (its name, dates
- * and week are there). The start while the semester has no end date yet, the exams, the archive.
+ * and week are there). The start while the semester has no end date yet; the exams and the
+ * archive are the Schedule's and the agenda's.
  */
-export function headerLine(status: Status, sched: Schedule | null, rows: Row[], tz: string, thisYear: number): string {
+export function headerLine(status: Status, sched: Schedule | null, tz: string, thisYear: number): string {
   const sem = status.semester;
   const start = sem?.start ?? sched?.start ?? null, end = sem?.end ?? sched?.end ?? null;
   const year = start ? Number(start.slice(0, 4)) : thisYear;
   const out: string[] = [];
   if (sem?.week === 0 && start && !end) out.push(`Starts ${fmtDate(start, tz, year)}.`);
-  const exams = rows.filter((r) => r.type === 'exam' && r.when).map((r) => r.when!);
-  if (exams.length) out.push(`${exams.length > 1 ? 'Exams' : 'Exam'} ${fmtDays(exams, tz, year)}.`);
-  if (sem?.archive_date) out.push(`Archive ${fmtDate(sem.archive_date, tz, year)}.`);
   return out.join(' ');
 }
 
@@ -129,7 +108,7 @@ export function TermStrip({ rows, term, tz, today, counts, selected, onToggle }:
       <div class="strip-legend">
         <span><i class="m lec" />Lecture</span><span><i class="m lab" />Lab</span><span><i class="m asg" />Assignment</span>
         <span><i class="m exam" />Exam</span><span><i class="m evt" />Event</span><span><i class="m term" />Semester date</span>
-        <span><span class="lg-count" aria-hidden="true">2</span>problems</span><span><span class="lg-count later" aria-hidden="true">2</span>{NOT_READY_YET}</span>
+        <span><span class="lg-count" aria-hidden="true">n</span>problems</span><span><span class="lg-count later" aria-hidden="true">n</span>{NOT_READY_YET}</span>
       </div>
     </div>
   );
@@ -194,18 +173,21 @@ function releaseDetail(status: Status, rel: Release | undefined, m: ReleaseMark 
   return 'Goes to students at its time; the site row goes live.';
 }
 
+/**
+ * One agenda row, on one line: type chip, label, state, details (cut with an ellipsis; the row's
+ * title carries the whole of it), then its actions.
+ */
 function RowItem({ r, status, p, marks }: { r: Row; status: Status; p: CohortProps; marks: Marks }) {
   const tz = tzOf(status), releases = status.releases ?? [];
   let chip = TYPE_LABEL[r.type] ?? r.type, cls = TYPE_CLASS[r.type] ?? 'evt', detail = '', buttons = null;
+  const m = rowMark(marks, r);
   if (r.block === 'releases') {
     const rel = releases.find((x) => x.id === r.entry);
     const ref = rel && r.when ? releaseRef(rel, tz, Number(r.when.slice(0, 4))) : null;
-    const m = rowMark(marks, r);
     chip = 'Release';
     detail = releaseDetail(status, rel, m, tz);
     buttons = (
       <>
-        {m ? <ReleaseMarks m={m} entry={r.entry} /> : null}
         {ref && rel?.state === 'planned' ? <OpButtons def={releaseEarly(cohortScope(p), ref)} small label={`Release ${r.ident} early`} /> : null}
         <a class="textlink" href={`#release-${r.entry}`}>Details</a>
       </>
@@ -213,20 +195,23 @@ function RowItem({ r, status, p, marks }: { r: Row; status: Status; p: CohortPro
   } else if (r.type === 'due' || r.type === 'handout') {
     const asg = (status.assignments ?? []).find((a) => a.slug === r.entry);
     chip = r.type === 'due' ? 'Due' : 'Hand out';
-    detail = r.type === 'due' && asg ? `${asg.submissions} of ${asg.units} submitted so far.` : 'Hands out at its time.';
+    detail = r.type === 'due' && asg ? `${asg.submissions ?? 0} of ${asg.units} submitted so far.` : 'Hands out at its time.';
     buttons = <a class="btn small quiet" href={`#assignment-${r.entry}`}>Open assignment</a>;
   } else {
     chip = chip.charAt(0).toUpperCase() + chip.slice(1);
   }
+  const state = m ? markWord(m) : r.state;
+  const details = [r.name, detail].filter(Boolean).join('. ');
   return (
-    <li>
+    <li title={[chip, r.ident, state, details].filter(Boolean).join(' · ')}>
       <span class="when">{r.when ? <><b>{fmtDay(r.when, tz).replace(/ \w+$/, '')}</b><span>{fmtTime(r.when, tz)}</span></> : <b>TBC</b>}</span>
       <span class="what">
-        <span><span class={`chip ${cls}`}>{chip}</span></span>
-        <span class="t"><b>{r.ident}</b>: {r.name}</span>
-        {detail ? <span class="d">{detail}</span> : null}
-        {buttons ? <span class="actions">{buttons}</span> : null}
+        <span class={`chip ${cls}`}>{chip}</span>
+        <b class="t">{r.ident}</b>
+        {m ? <ReleaseMarks m={m} entry={r.entry} /> : state ? <span class="st-chip">{state}</span> : null}
+        {details ? <span class="d">{details}</span> : null}
       </span>
+      {buttons ? <span class="actions">{buttons}</span> : null}
     </li>
   );
 }
@@ -335,7 +320,12 @@ export function semesterItems(status: Status, tiered: Tiered[], list: string[] |
       aside: todoAside(t, list),
     };
   });
-  return [...steps, ...todos];
+  // A set-aside empty week (decision 0032) has no row of its own once set aside: list it here so it can be brought back.
+  const weeks: SetupItem[] = (list ?? []).flatMap((id) => {
+    const label = emptyWeekLabel(id);
+    return label ? [{ id, label, kind: 'todo' as const, need: 'suggested' as const, state: 'open' as const, aside: true }] : [];
+  });
+  return [...steps, ...todos, ...weeks];
 }
 
 /** One line of the semester's Coming up: a `later` problem. */
@@ -347,6 +337,8 @@ export interface ComingRow {
   text: string;
   href: string;
   link: string;
+  /** The problem itself, when it can be set aside (an empty week). */
+  aside?: Problem;
 }
 
 /**
@@ -356,6 +348,7 @@ export interface ComingRow {
 export function comingRows(status: Status, tiered: Tiered[]): ComingRow[] {
   return tiered.filter((x) => x.b === 'later').map(({ p }) => ({
     key: p.id, when: p.when, from: p.when ? problemFromDay(p.when, status.horizon) : undefined, text: p.text, href: fixHref(p) ?? '#schedule', link: 'Fix',
+    aside: asideable(p) ? p : undefined,
   }));
 }
 
@@ -367,7 +360,7 @@ export function comingGroups(rows: ComingRow[], term: Term, tz: string): WeekGro
 }
 
 /** The Coming up fold's body: by week, each week saying when its items become problems. */
-export function ComingUp({ rows, term, tz, year }: { rows: ComingRow[]; term: Term; tz: string; year: number }) {
+export function ComingUp({ rows, term, tz, year, onSetAside }: { rows: ComingRow[]; term: Term; tz: string; year: number; onSetAside?: (p: Problem) => void }) {
   return (
     <>
       {comingGroups(rows, term, tz).map((g) => {
@@ -377,7 +370,7 @@ export function ComingUp({ rows, term, tz, year }: { rows: ComingRow[]; term: Te
             <h3 class="week-h">{g.label}{g.from || from ? <span>{g.from ? ` from ${fmtShort(g.from)}` : ''}{from ? ` · problems from ${fmtShort(from)}` : ''}</span> : null}</h3>
             <ul>
               {g.rows.map((r) => (
-                <li key={r.key}><b>{r.when ? fmtDay(r.when, tz, year) : 'No date'}</b><span>{r.text}</span><a class="textlink" href={r.href}>{r.link}</a></li>
+                <li key={r.key}><b>{r.when ? fmtDay(r.when, tz, year) : 'No date'}</b><span>{r.text}</span><a class="textlink" href={r.href}>{r.link}</a>{onSetAside && r.aside ? <button class="textlink" type="button" onClick={() => onSetAside(r.aside!)}>Set aside</button> : null}</li>
               ))}
             </ul>
           </section>
@@ -387,7 +380,8 @@ export function ComingUp({ rows, term, tz, year }: { rows: ComingRow[]; term: Te
   );
 }
 
-export function StudentCounts({ status }: { status: Status }) {
+/** The roster meter: rows, codes sent, joined; `split` (the Students tab reads the file) adds the students and auditors under it. */
+export function StudentCounts({ status, split }: { status: Status; split?: { students: number; auditors: number } | null }) {
   const s = status.students ?? { rows: 0, codes_sent: 0, joined: 0 };
   return (
     <>
@@ -397,7 +391,34 @@ export function StudentCounts({ status }: { status: Status }) {
         <div><span class="n">{s.joined}</span><span class="l">joined</span></div>
       </div>
       <div class="meter"><i style={`width:${s.rows ? ((s.joined / s.rows) * 100).toFixed(1) : 0}%`} /></div>
+      {split ? <p class="footnote roster-split">{plural(split.students, 'student')}, {plural(split.auditors, 'auditor')}</p> : null}
     </>
+  );
+}
+
+/**
+ * The roster's states, as counts the status carries, every one shown (a zero too): each opens the
+ * Students tab. Whether a joined student has accepted the org invitation is not in the status,
+ * so it is not counted here.
+ */
+export function studentLines(status: Status): string[] {
+  const s = status.students;
+  if (!s) return [];
+  const notSent = Math.max(0, s.rows - s.codes_sent), notJoined = Math.max(0, s.codes_sent - s.joined);
+  return [`${notSent} on the roster, code not sent yet`, `${plural(notJoined, 'code')} sent, not joined yet`, `${s.joined} joined`];
+}
+
+/** The Dashboard's Students panel, in the roster meter's look; hidden once every row has joined. */
+function StudentsPanel({ status }: { status: Status }) {
+  const s = status.students;
+  if (!s || s.joined >= s.rows) return null;
+  return (
+    <section class="panel section waiting">
+      <div class="section-head"><h2>Students</h2><a class="btn small quiet" href="#students">Open roster</a></div>
+      <StudentCounts status={status} />
+      <p class="footnote">Incomplete: {s.rows - s.joined} of {s.rows} not joined yet.</p>
+      <ul class="waiting-list">{studentLines(status).map((l) => <li><a class="textlink" href="#students">{l}</a></li>)}</ul>
+    </section>
   );
 }
 
@@ -431,10 +452,12 @@ function Overview(p: ReadyProps) {
   const [selected, setSelected] = useState<number[]>(thisWeek);
   // Every problem with its time, once per render (decision 0034): now or soon are the strip's red
   // counts and the Problems tab; later ones are Coming up.
-  const tiered = useMemo(() => tier(status), [status]);
+  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.courseMigrated, write: p.course.write });
+  // An empty week the course set aside leaves the moment the list says so, before the status is rewritten.
+  const tiered = useMemo(() => tier(status).filter(({ p: x }) => !(asideable(x) && aside.list?.includes(x.id))), [status, aside.list?.join('\n')]);
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const problems = standing(tiered);
-  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.courseMigrated, write: p.course.write });
+  const setAsideProblem = aside.onCircle ? (x: Problem) => aside.onCircle!({ id: x.id, label: x.text }) : undefined;
   const items = semesterItems(status, tiered, aside.list);
   const coming = comingRows(status, tiered);
   const days = horizonDays(status.horizon);
@@ -443,7 +466,6 @@ function Overview(p: ReadyProps) {
   const [picked, setTab] = useState<string | null>(null);
   const tab = picked ?? verdictTab(verdict);
   const late = (status.releases ?? []).filter((r) => r.state === 'late');
-  const s = status.students;
   const ops = useOperations(status.operations, p.cohort.org);
   const toggle = (w: number) => setSelected(selected.includes(w) ? selected.filter((k) => k !== w) : [...selected, w]);
   const name = selectionName(selected, thisWeek);
@@ -453,9 +475,7 @@ function Overview(p: ReadyProps) {
       <div class="page-head">
         <div>
           <h2 class="h1">Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h2>
-          <p class="lede">
-            <span>{headerLine(status, sched, rows, tz, year)}</span>
-          </p>
+          {headerLine(status, sched, tz, year) ? <p class="lede"><span>{headerLine(status, sched, tz, year)}</span></p> : null}
         </div>
         <div class="actions"><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
       </div>
@@ -480,14 +500,14 @@ function Overview(p: ReadyProps) {
           <DashboardTabs selected={tab} onSelect={setTab} tabs={[
             {
               key: 'problems', label: 'Problems', count: problems.length || 'done', bad: true,
+              hint: <>What will not happen until you fix it: overdue, and the next {days} days.</>,
               body: (
                 <>
-                  <p class="footnote">What will not happen until you fix it: overdue, and the next {days} days.</p>
                   {!problems.length ? <ProblemCards list={[]} cohort /> : null}
                   {shown.map((g) => (
                     <div class={`p-${g.key}`}>
                       <h3 class="week-h">{g.label}</h3>
-                      <ProblemCards list={g.rows} cohort />
+                      <ProblemCards list={g.rows} cohort onSetAside={setAsideProblem} />
                     </div>
                   ))}
                 </>
@@ -495,39 +515,20 @@ function Overview(p: ReadyProps) {
             },
             {
               key: 'coming', label: 'Coming up', count: coming.length,
-              body: coming.length ? (
-                <>
-                  <p class="footnote">Needed later, by week. Each item becomes a problem {days} days before the date it is needed by, and is listed here until then.</p>
-                  <ComingUp rows={coming} term={term} tz={tz} year={year} />
-                </>
-              ) : <p class="footnote">Nothing is needed later.</p>,
+              hint: <>Needed later, by week. Each item becomes a problem {days} days before the date it is needed by, and is listed here until then.</>,
+              body: coming.length ? <ComingUp rows={coming} term={term} tz={tz} year={year} onSetAside={setAsideProblem} /> : <p class="footnote">Nothing is needed later.</p>,
             },
             ...readinessTabs({ items, scope: 'semester', busy: aside.busy, onCircle: aside.onCircle, onBack: aside.onBack(items) }),
           ]} />
           {aside.after}
         </div>
-        <div class="grid-2">
-          <section class="panel section">
+        <section class="panel section agenda">
             <div class="section-head"><h2>{plannedHeading(name)} <Hint label="About what is planned">Every release and deadline in the picked weeks, with its state. Late means its date has passed and it has not gone out. Pick weeks in the Semester strip above.</Hint></h2>{selected.length === 1 ? <span class="meta">{fmtDay(weekStart(term, selected[0]), tz).replace(/ \w+$/, '')} to {fmtDay(addDays(weekStart(term, selected[0]), 6), tz, year)}</span> : null}</div>
             <WeekRows status={status} p={p} rows={rows} term={term} selected={selected} name={name} marks={marks} />
             <p class="overdue">{late.length ? `${late.length} release${late.length > 1 ? 's are' : ' is'} late: ${late.map((r) => releaseIdent(r)).join(', ')}.` : 'Nothing overdue.'}</p>
-          </section>
-          <section class="panel section">
-            <div class="section-head"><h2>Assignments</h2><a class="btn small quiet" href="#assignments">All assignments</a></div>
-            <ul class="asg-list"><AsgRows status={status} now={now} /></ul>
-          </section>
-        </div>
+        </section>
         <div class="grid-2">
-          <section class="panel section">
-            <div class="section-head"><h2>Students</h2><a class="btn small quiet" href="#students">Open roster</a></div>
-            <StudentCounts status={status} />
-            {s ? (
-              <p class="footnote">
-                {s.codes_sent - s.joined} students have a code but have not joined.
-                {s.rows > s.codes_sent ? ` ${s.rows - s.codes_sent} ${s.rows - s.codes_sent > 1 ? 'have' : 'has'} no code.` : ''}
-              </p>
-            ) : null}
-          </section>
+          <StudentsPanel status={status} />
           <section class="panel section">
             <div class="section-head">
               <h2>Automation</h2>

@@ -1167,10 +1167,32 @@ def test_nothing_opens_or_names_a_team_list_issue_any_more():
 # --- The generated Assignment field --------------------------------------------------
 
 
-def test_a_semester_with_nothing_open_keeps_the_free_text_assignment_field():
-    # A dropdown needs at least one option, and a form GitHub refuses to render is worse
-    # than an awkward one: it takes the Join-team route away from the semester entirely.
-    assert welcome.join_team_form({}) == welcome.template(welcome.JOIN_TEAM_FORM)
+def test_a_semester_with_nothing_open_says_the_form_is_not_needed():
+    # A free-text slug there invites one the workflow refuses; a dropdown with no option is
+    # a form GitHub refuses to render. A markdown line says so, and the Action and Team
+    # inputs keep the form valid.
+    form = welcome.join_team_form({})
+    doc = yaml.safe_load(form)
+    assert [b.get("id", b["type"]) for b in doc["body"]] == [
+        "markdown",
+        "markdown",
+        "action",
+        "team",
+    ]
+    assert doc["body"][1]["attributes"]["value"] == welcome.NO_TEAM_ASSIGNMENT_OPEN
+    assert 'placeholder: "e.g. assignment-3"' not in form
+    # Everything outside the markers is the reviewed template, to the byte.
+    template = welcome.template(welcome.JOIN_TEAM_FORM)
+    head = template.index(welcome.ASSIGNMENT_FIELD_START)
+    tail = template.index(welcome.ASSIGNMENT_FIELD_END) + len(
+        welcome.ASSIGNMENT_FIELD_END
+    )
+    assert form.startswith(template[:head]) and form.endswith(template[tail:])
+
+
+def test_a_semester_whose_lock_was_not_read_keeps_the_free_text_assignment_field():
+    # Unread says nothing about what is open: the free-text form works in every semester.
+    assert welcome.join_team_form(None) == welcome.template(welcome.JOIN_TEAM_FORM)
 
 
 def test_the_open_assignments_become_a_dropdown_the_workflow_can_still_parse():
@@ -1291,13 +1313,33 @@ def test_a_semester_whose_lock_cannot_be_read_gets_the_free_text_form(monkeypatc
         monkeypatch.setattr(
             welcome, "get_file_content", lambda *a, _answer=answer, **k: _answer
         )
-        assert welcome._open_formations("Org") == {}
+        assert welcome._open_formations("Org") is None
 
     def boom(*a, **k):
         raise RuntimeError("403")
 
     monkeypatch.setattr(welcome, "get_file_content", boom)
-    assert welcome._open_formations("Org") == {}
+    assert welcome._open_formations("Org") is None
+    assert welcome.join_team_form(None) == welcome.template(welcome.JOIN_TEAM_FORM)
+
+
+def test_a_lock_with_nothing_open_pushes_the_not_needed_form(monkeypatch):
+    from dsl_course import grades
+
+    lock = grades.team_lock_text(
+        {"a2": ("self_select", 4, "closed", "2026-09-01", "https://c.github.io/a2")}
+    )
+    monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: lock)
+    written: list[bytes] = []
+    monkeypatch.setattr(
+        welcome,
+        "put_file",
+        lambda org, repo, path, content, msg, **kw: written.append(content) or True,
+    )
+    assert welcome.refresh_join_team_form("Org") == 0
+    body = yaml.safe_load(written[0].decode())["body"]
+    assert not [b for b in body if b.get("id") == "assignment"]
+    assert body[1]["attributes"]["value"] == welcome.NO_TEAM_ASSIGNMENT_OPEN
 
 
 def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):

@@ -217,8 +217,26 @@ export function heldSentence(b: Bites, n: number): string {
 /** Where a problem sits, as the problem card's bold first word. */
 export const PROBLEM_AREA: Record<string, string> = {
   K1: 'Org', K2: 'Setup', K3: 'Instructors', K4: 'Schedule', K5: 'Roster', K6: 'Site',
-  C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Handout materials', C5: 'Template', C6: 'Public website',
+  C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Course materials', C5: 'Template', C6: 'Public website',
 };
+
+/**
+ * Problem kinds the console names itself: the card's bold word, the screen that fixes it, and
+ * whether it can be set aside (decision 0032; the id goes in the course's `set_aside:`).
+ */
+export const PROBLEM_KIND: Record<string, { label: string; screen: string; aside?: boolean }> = {
+  EMPTY_WEEK: { label: 'Empty week', screen: 'schedule', aside: true },
+};
+
+/** Whether a problem can be set aside: today only an empty week (`empty_week:<monday>`). */
+export const asideable = (p: { kind?: string }) => !!(p.kind && PROBLEM_KIND[p.kind]?.aside);
+
+/** "Empty week of 20 Oct" from a set-aside id `empty_week:2026-10-20`; null for any other id. */
+export function emptyWeekLabel(id: string): string | null {
+  const m = /^empty_week:(\d{4})-(\d{2})-(\d{2})$/.exec(id);
+  if (!m) return null;
+  return `Empty week of ${+m[3]} ${'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[+m[2] - 1]}`;
+}
 
 export const ASSIGNMENT_WORD: Record<AssignmentState, string> = {
   declared: 'declared', teams_forming: 'teams forming', blocked: 'blocked', open: 'open',
@@ -247,7 +265,7 @@ export const OP_LABEL: Record<string, string> = {
   'course.publish_website': 'Publish website',
   'assignment.derive_starter': 'Derive student version',
   'assignment.generate_syllabus': 'Generate the weekly plan',
-  'materials.create': 'New handout materials',
+  'materials.create': 'New course materials',
   'assignment.create': 'New assignment',
   'semester.bootstrap': 'New semester',
   'teams.open_window': 'Email students without a team',

@@ -162,7 +162,7 @@ function Overview(p: TabProps) {
   const subs = [
     'In the schedule',
     group ? (cur === 1 ? `${a.teams} teams so far` : cur >= 4 ? 'Closed' : cur > 1 ? 'Still open' : 'From hand out') : 'Skipped: students work alone',
-    cur === 2 ? `${a.submissions} of ${a.units} in` : cur > 2 ? `Closed ${fmtDay(a.due, tz, year)}` : `Opens ${a.handout ? fmtDay(a.handout, tz, year) : 'at hand out'}`,
+    cur === 2 ? `${a.submissions ?? 0} of ${a.units} in` : cur > 2 ? `Closed ${fmtDay(a.due, tz, year)}` : `Opens ${a.handout ? fmtDay(a.handout, tz, year) : 'at hand out'}`,
     cur === 3 ? `Until ${fmtDay(a.grading_cutoff_datetime, tz, year)}` : cur > 3 ? `Closed ${fmtDay(a.grading_cutoff_datetime, tz, year)}` : `Opens after ${fmtDay(a.due, tz, year)}`,
     cur === 4 ? `${a.marks.filled} of ${a.marks.total} marked` : cur > 4 ? 'Done' : `Opens after ${fmtDay(a.grading_cutoff_datetime, tz, year)}`,
     cur === 5 ? 'Returned' : 'Opens after marks are returned',
@@ -174,8 +174,8 @@ function Overview(p: TabProps) {
     <li class={cls}><span class="sa-state">{state}</span><div class="sa-body"><span class="sa-why">{why}</span>{ops}</div></li>
   );
   const lede =
-    a.state === 'open' ? `Open. Due ${fmtDay(a.due, tz, year)} at ${fmtTime(a.due, tz)}; ${a.submissions} of ${a.units} submitted so far.`
-    : a.state === 'late_window' ? `Late window. Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions} of ${a.units} submitted.`
+    a.state === 'open' ? `Open. Due ${fmtDay(a.due, tz, year)} at ${fmtTime(a.due, tz)}; ${a.submissions ?? 0} of ${a.units} submitted so far.`
+    : a.state === 'late_window' ? `Late window. Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions ?? 0} of ${a.units} submitted.`
     : a.state === 'marking' ? `Marking. ${a.marks.filled} of ${a.marks.total} marked.`
     : a.state === 'returned' ? 'Returned. Marks are with students.'
     : a.state === 'teams_forming' ? `Teams forming. Handed out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}; no team has formed yet.`

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Handout materials (decision 0026): the topics write behind "Treat as handout materials", the
+// Course materials (decision 0026): the topics write behind "Treat as course materials", the
 // Supporting files kind, the syllabus select, the weekly plan's Copy, and the withheld tree's
 // look and its line flash in the pattern box.
 
@@ -66,7 +66,7 @@ async function settle(until: () => boolean) {
   for (let i = 0; i < 200 && !until(); i++) await act(() => new Promise((r) => setTimeout(r, 0)));
 }
 
-describe('Treat as handout materials', () => {
+describe('Treat as course materials', () => {
   // The listing carries no topics: the button reads them from GitHub just before it writes.
   const repo: GhRepo = { name: 'lecture-code' } as GhRepo;
   const row = (write = true) => <ul class="rows"><OtherRepoRow org={ORG} repo={repo} write={write} /></ul>;
@@ -76,28 +76,28 @@ describe('Treat as handout materials', () => {
       .on('GET', `/repos/${ORG}/lecture-code/topics`, { names: ['python'] })
       .on('PUT', `/repos/${ORG}/lecture-code/topics`, { names: ['python', 'dsl-materials'] });
     await mount(envOf(gh), row());
-    await act(() => button('Treat as handout materials')!.click());
+    await act(() => button('Treat as course materials')!.click());
     await settle(() => root!.textContent!.includes('Added.'));
     expect(gh.seen.map((s) => s.method)).toEqual(['GET', 'PUT']);
     const put = gh.seen.find((s) => s.method === 'PUT')!;
     expect(put.url).toBe(`https://api.github.com/repos/${ORG}/lecture-code/topics`);
     expect(put.body).toEqual({ names: ['python', 'dsl-materials'] });
-    expect(root!.textContent).toContain('Added. It shows under Handout materials after the next Refresh.');
-    expect(button('Treat as handout materials')).toBeUndefined();
+    expect(root!.textContent).toContain('Added. It shows under Course materials after the next Refresh.');
+    expect(button('Treat as course materials')).toBeUndefined();
   });
 
   it('keeps the button and says why when GitHub refuses', async () => {
     const gh = new FakeGitHub().on('GET', /\/topics$/, { names: [] }).on('PUT', /\/topics$/, () => json({ message: 'Must have admin rights to Repository.' }, 403));
     await mount(envOf(gh), row());
-    await act(() => button('Treat as handout materials')!.click());
+    await act(() => button('Treat as course materials')!.click());
     await settle(() => !!root!.querySelector('.check-line.bad'));
     expect(root!.querySelector('.check-line.bad')!.textContent).toContain('Could not add the topic');
-    expect(button('Treat as handout materials')).toBeDefined();
+    expect(button('Treat as course materials')).toBeDefined();
   });
 
   it('offers nothing on a course the person cannot change', async () => {
     await mount(envOf(new FakeGitHub()), row(false));
-    expect(button('Treat as handout materials')).toBeUndefined();
+    expect(button('Treat as course materials')).toBeUndefined();
   });
 });
 

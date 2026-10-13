@@ -63,8 +63,8 @@ export function cohortScope(p: Pick<CohortProps, 'course' | 'cohort'>): Scope {
 }
 
 /** Refresh: read everything again and re-run every check (semester.check), with its `?`. */
-export function CheckNow({ small, p, label }: { small?: boolean; p?: Pick<CohortProps, 'course' | 'cohort'>; label?: string }) {
-  const hint = <Hint label="About Refresh">{REFRESH_HINT}</Hint>;
+export function CheckNow({ small, p, label, about }: { small?: boolean; p?: Pick<CohortProps, 'course' | 'cohort'>; label?: string; about?: { text: string; doc: string } }) {
+  const hint = about ? <Hint label={`About ${label ?? 'Refresh'}`} doc={about.doc}>{about.text}</Hint> : <Hint label="About Refresh">{REFRESH_HINT}</Hint>;
   if (!p) return <><Soon label="Refresh" cls={small ? 'btn small' : 'btn'} title={CHECK_NOW_SOON} />{hint}</>;
   return <><OpButtons def={checkNow(cohortScope(p))} small={small} label={label} />{hint}</>;
 }
@@ -110,7 +110,7 @@ export function MoreMenu({ p }: { p?: Pick<CohortProps, 'course' | 'cohort'> }) 
         <button type="button" role="menuitem" disabled={!scope} onClick={() => go(scope && previewNext(scope))}>Preview the next automatic run</button>
         <button type="button" role="menuitem" disabled={!scope} onClick={() => go(scope && keepFuture(scope))}>Keep for future semesters</button>
         <button type="button" role="menuitem" disabled={!scope} onClick={() => go(exportDef)}>Export <span class="pm-sub">roster, marks, schedule</span></button>
-        <a href="#archive" role="menuitem" onClick={() => setOpen(false)}>Archive this semester</a>
+        <a href="#schedule-archive" role="menuitem" onClick={() => setOpen(false)}>Archive this semester</a>
       </div>
     </div>
   );

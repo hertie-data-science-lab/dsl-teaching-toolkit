@@ -438,7 +438,7 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   description is the course to-do `course:description`. Every to-do names its `check`
   (`kind_folder`, `syllabus`, `withheld`, `brief`, `starter`, `description`, `home`,
   `archive_date`, `email`). K5 is done once the roster has a row (codes sent is the Students
-  panel's meter), K6 once the site repo exists.
+  tab's meter), K6 once the site repo exists.
 - **Time.** `horizon` (both files) is `{days}`, the rolling window's length, off the one
   constant `status_json.PROBLEM_HORIZON` (7 days); no tick time, so an unchanged state
   still makes no commit. Each problem carries `bites`: `now` (moment passed, or none),
