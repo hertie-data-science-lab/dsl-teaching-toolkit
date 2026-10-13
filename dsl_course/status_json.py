@@ -1215,6 +1215,22 @@ def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
 
 
 EMPTY_WEEK = "EMPTY_WEEK"
+EMPTY_WEEK_KIND = "EMPTY_WEEK_KIND"
+# The kinds a week is expected to carry one of each of, once the semester uses the kind, and
+# how the problem names the missing one.
+_WEEKLY_KINDS = {
+    "lecture": "No lecture seems",
+    "lab": "No lab seems",
+    "readings": "No readings seem",
+}
+_ASIDE_HINT = "If this is intentional, click 'Set aside'."
+
+
+def _local_day(when: date | datetime, tz: ZoneInfo) -> date:
+    """The day `when` falls on in the semester's timezone."""
+    if isinstance(when, datetime):
+        return when.astimezone(tz).date() if when.tzinfo else when.date()
+    return when
 
 
 def _scheduled_days(sched: schedule.Schedule) -> set[date]:
@@ -1225,10 +1241,8 @@ def _scheduled_days(sched: schedule.Schedule) -> set[date]:
     out: set[date] = set()
 
     def add(when: date | datetime | None) -> None:
-        if isinstance(when, datetime):
-            out.add(when.astimezone(tz).date() if when.tzinfo else when.date())
-        elif isinstance(when, date):
-            out.add(when)
+        if when is not None:
+            out.add(_local_day(when, tz))
 
     for r in sched.releases:
         add(r.when)
@@ -1248,10 +1262,17 @@ def _scheduled_days(sched: schedule.Schedule) -> set[date]:
 def empty_week_problems(
     facts: SemesterFacts, now: datetime, aside: frozenset[str] = frozenset()
 ) -> list[dict]:
-    """`empty_week:<monday>` for each calendar week (Monday to Sunday, the semester's
-    timezone) of the term with nothing dated in it, dated at that Monday 00:00 so the tiers
-    place it. A week already begun is not raised, nor one the course has set aside
-    (decision 0032: a reading week or an exam week is dismissed that way)."""
+    """The gaps in each calendar week (Monday to Sunday, the semester's timezone) of the
+    term still to come, dated at that Monday 00:00 so the tiers place them:
+
+    - `empty_week:<monday>`: nothing dated in the week at all - and then only that;
+    - else `empty_week:<monday>:<kind>`: no release of a weekly kind (lecture, lab,
+      readings) the semester uses - one with a release anywhere in its plan, dated or
+      `tbc`, so a course without readings is never told it lacks them. A hand-out, a due
+      date or an exam is no lecture.
+
+    A week already begun is not raised, nor a gap the course has set aside (decision
+    0032: a reading week or an exam week is dismissed that way)."""
     sched = facts.sched
     start, end = sched.semester_start, sched.semester_end
     if start is None or end is None or end < start:
@@ -1259,24 +1280,50 @@ def empty_week_problems(
     tz = ZoneInfo(sched.timezone)
     today = now.astimezone(tz).date()
     days = _scheduled_days(sched)
+    aliases = lambda repo: facts.aliases.get(repo, {})
+    kinds = [(r, entry_kind(r, aliases)[0]) for r in sched.releases]
+    used = [k for k in _WEEKLY_KINDS if any(kind == k for _, kind in kinds)]
+    kind_days = {
+        k: {
+            _local_day(r.when, tz)
+            for r, kind in kinds
+            if kind == k and r.when is not None
+        }
+        for k in used
+    }
     out = []
-    monday = start - timedelta(days=start.weekday())
-    while monday <= end:
-        pid = f"empty_week:{monday.isoformat()}"
-        week = {monday + timedelta(days=i) for i in range(7)}
-        if monday > today and not week & days and pid not in aside:
+
+    def gap(pid: str, kind: str, text: str, stops: str, monday: date) -> None:
+        if pid not in aside:
             out.append(
                 {
                     "id": pid,
                     "scope": "semester",
                     "stage": "K4",
-                    "kind": EMPTY_WEEK,
-                    "text": f"Nothing is scheduled in the week of {monday.day} {monday:%b}.",
-                    "stops": "Students see an empty week. A reading or exam week can be set aside.",
+                    "kind": kind,
+                    "text": f"{text} {_ASIDE_HINT}",
+                    "stops": stops,
                     "fix": _schedule_fix(facts.org, None, None),
                     "when": datetime.combine(monday, time(), tz).isoformat(),
                 }
             )
+
+    monday = start - timedelta(days=start.weekday())
+    # The first week still to come: one already begun is not raised.
+    while monday <= today:
+        monday += timedelta(days=7)
+    while monday <= end:
+        week = {monday + timedelta(days=i) for i in range(7)}
+        pid = f"empty_week:{monday.isoformat()}"
+        if not week & days:
+            nothing = "Nothing seems to have been scheduled for this week."
+            gap(pid, EMPTY_WEEK, nothing, "Students see an empty week.", monday)
+        else:
+            for k in used:
+                if not week & kind_days[k]:
+                    text = f"{_WEEKLY_KINDS[k]} to have been scheduled for this week."
+                    stops = f"Students see a week with no {k}."
+                    gap(f"{pid}:{k}", EMPTY_WEEK_KIND, text, stops, monday)
         monday += timedelta(days=7)
     return out
 

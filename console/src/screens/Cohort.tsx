@@ -457,7 +457,7 @@ function Overview(p: ReadyProps) {
   const tiered = useMemo(() => tier(status).filter(({ p: x }) => !(asideable(x) && aside.list?.includes(x.id))), [status, aside.list?.join('\n')]);
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const problems = standing(tiered);
-  const setAsideProblem = aside.onCircle ? (x: Problem) => aside.onCircle!({ id: x.id, label: x.text }) : undefined;
+  const setAsideProblem = aside.onCircle ? (x: Problem) => aside.onCircle!({ id: x.id, label: emptyWeekLabel(x.id) ?? x.text }) : undefined;
   const items = semesterItems(status, tiered, aside.list);
   const coming = comingRows(status, tiered);
   const days = horizonDays(status.horizon);

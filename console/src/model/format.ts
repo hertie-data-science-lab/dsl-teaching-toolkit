@@ -226,16 +226,35 @@ export const PROBLEM_AREA: Record<string, string> = {
  */
 export const PROBLEM_KIND: Record<string, { label: string; screen: string; aside?: boolean }> = {
   EMPTY_WEEK: { label: 'Empty week', screen: 'schedule', aside: true },
+  EMPTY_WEEK_KIND: { label: 'Missing', screen: 'schedule', aside: true },
 };
 
-/** Whether a problem can be set aside: today only an empty week (`empty_week:<monday>`). */
+/** A problem card's bold word: "Missing lab" for a week's missing kind (`empty_week:<monday>:<kind>`), else its kind's label. */
+export function problemLabel(p: { id: string; kind?: string }): string | undefined {
+  if (p.kind === 'EMPTY_WEEK_KIND') return `Missing ${p.id.split(':')[2] ?? ''}`.trim();
+  return p.kind ? PROBLEM_KIND[p.kind]?.label : undefined;
+}
+
+/** Whether a problem can be set aside: today only a gap in a week (`empty_week:<monday>[:<kind>]`). */
 export const asideable = (p: { kind?: string }) => !!(p.kind && PROBLEM_KIND[p.kind]?.aside);
 
-/** "Empty week of 20 Oct" from a set-aside id `empty_week:2026-10-20`; null for any other id. */
+/** Whether a set-aside id is a gap in a week, which the course sets aside as intentional. */
+export const isWeekGap = (id: string) => id.startsWith('empty_week:');
+
+const GAP_ID = /^empty_week:(\d{4})-(\d{2})-(\d{2})(?::(\w+))?$/;
+
+/** "week of 20 Oct" from a week's gap id (`empty_week:2026-10-20[:<kind>]`): the card's text says only "this week". Null for any other id. */
+export function gapWeek(id: string): string | null {
+  const m = GAP_ID.exec(id);
+  return m ? `week of ${+m[3]} ${'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[+m[2] - 1]}` : null;
+}
+
+/** "Empty week of 20 Oct" from `empty_week:2026-10-20`, "Missing lab, week of 20 Oct" from `empty_week:2026-10-20:lab`; null for any other id. */
 export function emptyWeekLabel(id: string): string | null {
-  const m = /^empty_week:(\d{4})-(\d{2})-(\d{2})$/.exec(id);
-  if (!m) return null;
-  return `Empty week of ${+m[3]} ${'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[+m[2] - 1]}`;
+  const week = gapWeek(id);
+  if (!week) return null;
+  const kind = GAP_ID.exec(id)![4];
+  return kind ? `Missing ${kind}, ${week}` : `Empty ${week}`;
 }
 
 /** The engine's `late_window` keeps its name; the console says marking from the due date (decision 0037). */

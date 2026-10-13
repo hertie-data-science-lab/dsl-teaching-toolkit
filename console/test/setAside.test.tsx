@@ -15,6 +15,7 @@ import { CONFLICT } from '../src/edit/save';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
 import { CohortScreen } from '../src/screens/Cohort';
+import { emptyWeekLabel, problemLabel } from '../src/model/format';
 import { CourseTabs, courseReadiness, courseView } from '../src/screens/Course';
 import { setAsideText, useSetAside } from '../src/screens/SetAside';
 import type { Files } from '../src/model/files';
@@ -301,14 +302,14 @@ describe('an empty week on the semester dashboard', () => {
   const cohort = { org: COHORT, term: 'f2026', termLabel: 'Fall 2026' };
   const course = { org: ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
   const base = example as unknown as Status;
-  const week = (monday: string, bites: 'soon' | 'later') => ({
-    id: `empty_week:${monday}`, scope: 'semester' as const, stage: 'K4', kind: 'EMPTY_WEEK', bites,
-    text: `Nothing is scheduled in the week of ${Number(monday.slice(8))} ${monday.slice(5, 7) === '09' ? 'Sep' : 'Oct'}.`,
-    stops: 'Students see an empty week. A reading or exam week can be set aside.',
+  const week = (monday: string, bites: 'soon' | 'later', kind?: string) => ({
+    id: `empty_week:${monday}${kind ? `:${kind}` : ''}`, scope: 'semester' as const, stage: 'K4', kind: kind ? 'EMPTY_WEEK_KIND' : 'EMPTY_WEEK', bites,
+    text: `${kind ? `No ${kind} seems` : 'Nothing seems'} to have been scheduled for this week. If this is intentional, click 'Set aside'.`,
+    stops: kind ? `Students see a week with no ${kind}.` : 'Students see an empty week.',
     fix: { repo: `${COHORT}/semester-config`, path: 'schedule.yml', line: null, screen: 'schedule', entry: null },
     when: `${monday}T00:00:00+02:00`,
   });
-  const status: Status = { ...base, problems: [week('2026-09-28', 'soon'), week('2026-10-12', 'later')] };
+  const status: Status = { ...base, problems: [week('2026-09-28', 'soon'), week('2026-10-12', 'later'), week('2026-10-05', 'soon', 'lab')] };
   async function mountCohort(meta: string, gh = github()) {
     const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: meta });
     root ??= document.body.appendChild(document.createElement('div'));
@@ -326,7 +327,7 @@ describe('an empty week on the semester dashboard', () => {
     expect(card.querySelector<HTMLAnchorElement>('.p-fix a.btn')!.getAttribute('href')).toBe('#schedule');
     expect([...card.querySelectorAll('button')].some((b) => b.textContent === 'Set aside')).toBe(true);
     await show('coming');
-    const row = [...root!.querySelectorAll('#dash-panel-coming li')].find((li) => li.textContent!.includes('week of 12 Oct'))!;
+    const row = [...root!.querySelectorAll('#dash-panel-coming li')].find((li) => li.textContent!.includes('12 Oct') && li.textContent!.includes('Nothing seems'))!;
     expect([...row.querySelectorAll('button')].some((b) => b.textContent === 'Set aside')).toBe(true);
   });
 
@@ -334,10 +335,33 @@ describe('an empty week on the semester dashboard', () => {
     const gh = await mountCohort(META);
     const card = [...root!.querySelectorAll('li.problem')].find((li) => li.textContent!.includes('week of 28 Sep'))!;
     await act(() => [...card.querySelectorAll('button')].find((b) => b.textContent === 'Set aside')!.click());
-    expect(dialog()!.textContent).toContain('Nothing is scheduled in the week of 28 Sep.');
+    expect(dialog()!.textContent).toContain('Set aside “Empty week of 28 Sep”?');
+    expect(dialog()!.textContent).toContain('Setting this aside tells the console the gap is intentional. It moves to Set aside');
+    expect(dialog()!.textContent).not.toContain('optional');
     await act(() => button('Set aside').click());
     await settle(() => puts(gh).length > 0);
     expect(body(puts(gh)[0])).toBe(`${META}set_aside:\n  - empty_week:2026-09-28\n`);
+  });
+
+  it('names a week’s missing kind, and sets it aside as an intentional gap', async () => {
+    const gh = await mountCohort(META);
+    const card = [...root!.querySelectorAll('li.problem')].find((li) => li.textContent!.includes('week of 5 Oct'))!;
+    expect(card.querySelector('.p-where b')!.textContent).toBe('Missing lab');
+    expect(card.querySelector('.p-say')!.textContent).toBe("No lab seems to have been scheduled for this week. If this is intentional, click 'Set aside'.");
+    await act(() => [...card.querySelectorAll('button')].find((b) => b.textContent === 'Set aside')!.click());
+    expect(dialog()!.textContent).toContain('Set aside “Missing lab, week of 5 Oct”?');
+    expect(dialog()!.textContent).toContain('Setting this aside tells the console the gap is intentional.');
+    await act(() => button('Set aside').click());
+    await settle(() => puts(gh).length > 0);
+    expect(body(puts(gh)[0])).toBe(`${META}set_aside:\n  - empty_week:2026-10-05:lab\n`);
+  });
+
+  it('labels each missing kind, on its card and in the Set aside list', () => {
+    for (const k of ['lecture', 'lab', 'readings']) {
+      expect(problemLabel({ id: `empty_week:2026-10-05:${k}`, kind: 'EMPTY_WEEK_KIND' })).toBe(`Missing ${k}`);
+      expect(emptyWeekLabel(`empty_week:2026-10-05:${k}`)).toBe(`Missing ${k}, week of 5 Oct`);
+    }
+    expect(problemLabel({ id: 'empty_week:2026-10-05', kind: 'EMPTY_WEEK' })).toBe('Empty week');
   });
 
   it('once set aside, leaves the problems and is listed under Set aside to bring back', async () => {

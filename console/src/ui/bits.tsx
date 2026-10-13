@@ -2,7 +2,7 @@
 
 import type { ComponentChildren } from 'preact';
 import { encPath } from '../github/client';
-import { PROBLEM_AREA, PROBLEM_KIND, ago, asideable, markWord, md, opLabel, plural } from '../model/format';
+import { PROBLEM_AREA, PROBLEM_KIND, ago, asideable, gapWeek, markWord, md, opLabel, plural, problemLabel } from '../model/format';
 import type { ReleaseMark } from '../model/readiness';
 import type { Operation, Outcome, Problem } from '../model/types';
 import { Alert, Check, Eye, Ext, Fail, Skip } from './icons';
@@ -102,6 +102,8 @@ export function Loading({ what = 'Loading' }: { what?: string }) {
 
 /** "schedule.yml, line 41" */
 function whereOf(p: Problem): string {
+  const week = gapWeek(p.id);
+  if (week) return week;
   if (!p.fix) return '';
   const file = p.fix.path.split('/').pop();
   return p.fix.line ? `${file}, line ${p.fix.line}` : (file ?? '');
@@ -144,7 +146,7 @@ export function ProblemCards({ list, cohort, onSetAside }: { list: Problem[]; co
         return (
           <li class="problem" key={p.id}>
             <div class="p-where">
-              <b>{(p.kind && PROBLEM_KIND[p.kind]?.label) ?? PROBLEM_AREA[p.stage] ?? p.stage}</b>
+              <b>{problemLabel(p) ?? PROBLEM_AREA[p.stage] ?? p.stage}</b>
               <span>{whereOf(p)}</span>
               {cohort && p.scope === 'course' ? <span>(course)</span> : null}
             </div>
