@@ -68,3 +68,8 @@ it('refuses a file that is not a PNG, JPEG or WebP image, inline, and uploads no
   expect(el.querySelector('.photo-drop')!.textContent).toContain('Not uploaded: a photo must be a PNG, JPEG or WebP image.');
   expect(gh.seen.some((s) => s.method === 'PUT')).toBe(false);
 });
+
+it('says the Photo field takes a URL link or a path', async () => {
+  const el = await mount(new FakeGitHub());
+  expect(el.textContent).toContain('A URL link, or a path in the student site repo.');
+});

@@ -143,7 +143,7 @@ function Site(p: ReadyProps) {
             {people.map((x) => (
               <li>
                 <span class="r-title">{x.name || x.handle} {x.photo ? <span class="chip ok">Photo</span> : <span class="chip">No photo</span>}</span>
-                <span class="r-sub">{x.photo || 'Add one on Instructors: a link, or an image dropped on the Photo field there.'}</span>
+                <span class="r-sub">{x.photo || 'Add one on Instructors: a URL link, or an image dropped on the Photo field there.'}</span>
                 <span class="r-side"><a class="btn small quiet" href="#instructors">Instructors</a></span>
               </li>
             ))}
