@@ -52,15 +52,20 @@ teams:
 | `feedback_group`, `feedback_individual` | you | yes (own + team) |
 | `feedback_per_question` (where questions are declared; the team's on a group sheet) | you, optional | yes: a list after the overall feedback, inside the team's quote on a group sheet; a blank cell is not sent |
 | `score_group` | you | never shown as-is; each member's gradebook shows only the final grade it derives - the score itself too, but only for a team with no repo of its own (`shared_dropbox_repo`, `external`) |
-| `adjustment_individual` | you - the ONLY override, in both shapes | **no** - only the final grade it produced |
+| `adjustment_individual` | you - the ONLY override of the mark, in both shapes | **no** - only the final grade it produced |
+| `late_penalty` (per student or team, beside `info:`; optional) | you: `apply` (the default), `waive`, or the whole penalty as `15%` / `0.15` | the penalty that applied: `-20%`, `waived` or `-15% (set by hand)` |
 | `notes_not_shared_with_students` | you | **never** |
 | final grade | derived on output, never stored | yes |
 
-The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A
+The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A late
+unit's `late_penalty` changes the middle term: `waive` takes nothing off, and `15%` takes
+off 15% in place of `rate × days_late`; a unit that is not late loses nothing whatever it
+says. The console's Marks tab writes it for you: untick **Apply late penalty**, or type an
+override. A penalty changed after marks were returned goes out again as a changed mark. A
 non-numeric score (`pass`, `A-`) is passed through verbatim with no arithmetic - unless a
 late penalty applies to it, which no arithmetic can do: that mark is **held**. Nothing is
 posted, written or emailed for it, the preview and the run both count it (`held`), and it
-goes out as soon as you put a number (or waive the penalty with `adjustment_individual`). The question names, the `# /N` maxima and the whole
+goes out as soon as you put a number (or write `late_penalty: waive`). The question names, the `# /N` maxima and the whole
 header come from `grading_config.yml` and `schedule.yml` and are re-emitted on every write - so
 edit them **there**, never in the sheet. The toolkit writes the file only when the data or
 that header really moved, so your quoting and spacing survive the quarter-hourly tick; YAML
@@ -71,7 +76,8 @@ by hand.
 ### When a sheet has something nobody can act on
 
 The quarter-hourly tick reads every sheet. Anything it cannot use - a save that does not
-parse, a key written twice, a mark or an adjustment that is not a number, a question
+parse, a key written twice, a mark or an adjustment that is not a number, a `late_penalty`
+that is not `apply`, `waive` or a percentage, a question
 `grading_config.yml` does not declare, a handle in two submission units (however it is
 capitalised), a team's `members:` that is not one entry per member - opens **one** issue in
 `semester-config` (*grading sheets have entries the grader cannot read*) listing each by file

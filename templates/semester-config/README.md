@@ -34,8 +34,9 @@ A push to this file triggers **Sync membership** automatically, reconciling the 
 ## `grading_sheets/<assignment>.yml` - marks
 
 One file per assignment, created at handout with every row already in it. It is the ONE
-place you type: scores, feedback, an `adjustment_individual` where you need one, and notes
-that never leave this repo. Worked examples of both shapes are in the
+place you type: scores, feedback, an `adjustment_individual` where you need one, a
+`late_penalty` (`waive`, or the whole penalty as `15%`) on a late row, and notes that never
+leave this repo. Worked examples of both shapes are in the
 [worked example semester](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/semester-org/grading_sheets).
 
 Everything under `info:` is the toolkit's - when the work came in, how late it was, what
