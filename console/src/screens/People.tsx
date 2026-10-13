@@ -6,10 +6,10 @@ import { EMAIL_RE, diffRoster, missingColumns, readTable, writeTable, type Roste
 import { useSave } from '../edit/save';
 import { YamlText } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
-import { fmtShort } from '../model/format';
-import { ROLE_WORD, ROSTER_HEADER, parseInstructors, sameHandle, type Person } from '../model/people';
-import { checkAccess, sendCodes } from '../ops/defs';
-import { OpButtons, OpOpen } from '../ops/Panel';
+import { fmtShort, plural } from '../model/format';
+import { ROLE_WORD, ROSTER_HEADER, ROSTER_SAVE_NOTE, parseInstructors, pendingSummary, roleSplit, sameHandle, type Person } from '../model/people';
+import { checkAccess, sendCodes, syncMembershipUrl } from '../ops/defs';
+import { OpOpen } from '../ops/Panel';
 import { PERSON, PHOTO_DIR, displayOnly, photoError } from '../tiers/people';
 import { pick } from '../tiers/types';
 import { authorOf } from '../github/client';
@@ -40,6 +40,8 @@ function Students(p: ReadyProps) {
   const file = p.files.file(p.cohort.org, CONFIG_REPO, 'students.csv');
   const [edits, setEdits] = useState<Record<number, Row>>({});
   const [added, setAdded] = useState<Row[]>([]);
+  // File rows marked for removal (by index), struck through until Save drops them.
+  const [removed, setRemoved] = useState<number[]>([]);
   const [replacement, setReplacement] = useState<{ rows: Row[]; diff: RosterDiff; name: string } | null>(null);
   const [upload, setUpload] = useState<{ open: boolean; error: string; pending: { rows: Row[]; diff: RosterDiff; name: string } | null }>({ open: false, error: '', pending: null });
   // Read view until Edit roster: the grid then shows inputs for your columns (and a joined
@@ -54,6 +56,8 @@ function Students(p: ReadyProps) {
   const waiting = Math.max(0, s.codes_sent - s.joined);
 
   const base = table?.rows ?? [];
+  // The role split is the file's: the status counts rows, not roles.
+  const split = table && !missing.length ? roleSplit(base) : null;
   // Edits are keyed by row index. `lines` is each row's line in the file (blank lines and quoted
   // newlines move it), shown and matched with the engine's faults; a row added here, or a
   // replacement's, is numbered on from the file's last row.
@@ -61,9 +65,23 @@ function Students(p: ReadyProps) {
   const fileLines = replacement ? [] : (table?.lines ?? []);
   const lastLine = fileLines[fileLines.length - 1] ?? 1;
   const lines = current.map((_, i) => fileLines[i] ?? lastLine + i - fileLines.length + 1);
-  const nEdits = replacement ? 1 : Object.keys(edits).filter((i) => EDITED.some((k) => (edits[+i][k] ?? '') !== (base[+i]?.[k] ?? ''))).length + added.filter((r) => r.hertie_email || r.name).length;
-  const badEmail = current.filter((r) => (r.hertie_email || r.name) && !EMAIL_RE.test(r.hertie_email ?? ''));
-  const toSend = current.filter((r) => !r.code_sent_at && EMAIL_RE.test(r.hertie_email ?? '')).length - base.filter((r) => !r.code_sent_at && EMAIL_RE.test(r.hertie_email ?? '')).length;
+  const gone = (i: number) => !replacement && removed.includes(i);
+  // What Save writes: every row but the removed ones.
+  const kept = current.filter((_, i) => !gone(i));
+  const keptBase = base.filter((_, i) => !gone(i));
+  const d0 = replacement?.diff;
+  const counts = d0
+    ? { added: d0.added.length, removed: d0.removed.length, changed: d0.changed.length }
+    : {
+        added: added.filter((r) => r.hertie_email || r.name).length,
+        removed: removed.length,
+        changed: Object.keys(edits).filter((i) => !gone(+i) && EDITED.some((k) => (edits[+i][k] ?? '') !== (base[+i]?.[k] ?? ''))).length,
+      };
+  const nEdits = replacement ? 1 : counts.added + counts.removed + counts.changed;
+  const badEmail = kept.filter((r) => (r.hertie_email || r.name) && !EMAIL_RE.test(r.hertie_email ?? ''));
+  const noName = replacement ? [] : added.filter((r) => r.hertie_email && !r.name?.trim());
+  const unsent = (r: Row) => !r.code_sent_at && EMAIL_RE.test(r.hertie_email ?? '');
+  const toSend = kept.filter(unsent).length - keptBase.filter(unsent).length;
   const saveLabel = !nEdits ? 'Save' : toSend > 0 ? `Save and send ${toSend} code${toSend > 1 ? 's' : ''}` : `Save ${nEdits} change${nEdits > 1 ? 's' : ''}`;
 
   /** Row `i`'s `k`: an edit of a file row, or the text of a row added here. */
@@ -82,8 +100,9 @@ function Students(p: ReadyProps) {
   };
   const doSave = async () => {
     if (!table || file.kind !== 'ready') return;
+    if (noName.length) return setSave({ kind: 'bad', text: `${noName.length} added row${noName.length > 1 ? 's have' : ' has'} no name.` });
     if (badEmail.length) return setSave({ kind: 'bad', text: `${badEmail.length} row${badEmail.length > 1 ? 's have' : ' has'} an email that is not an address; no code can be sent to it.` });
-    const switched = replacement ? [] : base.map((r, i) => (edits[i]?.github_handle ?? r.github_handle ?? '').trim()).filter((h, i) => !sameHandle(h, base[i].github_handle ?? ''));
+    const switched = replacement ? [] : base.map((r, i) => (gone(i) ? r.github_handle ?? '' : (edits[i]?.github_handle ?? r.github_handle ?? '')).trim()).filter((h, i) => !sameHandle(h, base[i].github_handle ?? ''));
     if (switched.includes('')) return setSave({ kind: 'bad', text: 'A joined student’s GitHub handle cannot be blank. Put back the old one, or type their new account.' });
     for (const handle of switched) {
       setSave({ kind: 'busy', text: `Checking that ${handle} exists on GitHub…` });
@@ -95,34 +114,44 @@ function Students(p: ReadyProps) {
       }
       if (!ok) return setSave({ kind: 'bad', text: `There is no GitHub account called ${handle}.` });
     }
-    const rows = current.filter((r) => r.hertie_email || r.name);
+    const rows = kept.filter((r) => r.hertie_email || r.name);
     const text = writeTable({ header: table.header, rows });
-    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv' }, text, file.sha, { message: `roster: ${replacement ? `replace from ${replacement.name}` : `${nEdits} change${nEdits > 1 ? 's' : ''}`}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
+    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv' }, text, file.sha, { message: `roster: ${replacement ? `replace from ${replacement.name}` : pendingSummary(counts)}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
     if (ok) {
       setEdits({});
       setAdded([]);
+      setRemoved([]);
       setReplacement(null);
     }
   };
-  const input = (i: number, r: Row, k: string, label: string, type = 'text') => (!editing ? (r[k] ?? '') : (
+  const input = (i: number, r: Row, k: string, label: string, type = 'text') => (!editing || gone(i) ? (r[k] ?? '') : (
     <input type={type} value={r[k] ?? ''} aria-label={`${label}, line ${lines[i]}`} aria-invalid={k === 'hertie_email' && (r.hertie_email || r.name) && !EMAIL_RE.test(r.hertie_email ?? '') ? 'true' : undefined} disabled={!!replacement}
       onInput={(e) => setCell(i, k, (e.target as HTMLInputElement).value)} />
   ));
-  const role = (i: number, r: Row) => (!editing ? (r.role || 'enrolled') : (
+  const role = (i: number, r: Row) => (!editing || gone(i) ? (r.role || 'enrolled') : (
     <select aria-label={`Role, line ${lines[i]}`} disabled={!!replacement} onChange={(e) => setCell(i, 'role', (e.target as HTMLSelectElement).value)}>
       <option value="enrolled" selected={(r.role || 'enrolled') === 'enrolled'}>enrolled</option>
       <option value="auditor" selected={r.role === 'auditor'}>auditor</option>
     </select>
   ));
+  /** Edit mode's per-row control: a file row is marked (Undo takes it back), a row added here goes at once. */
+  const removeControl = (i: number) => {
+    if (replacement) return null;
+    if (gone(i)) return <button class="btn small quiet" type="button" aria-label={`Undo removing line ${lines[i]}`} onClick={() => setRemoved(removed.filter((x) => x !== i))}>Undo</button>;
+    const drop = () => (i >= base.length ? setAdded(added.filter((_, j) => j !== i - base.length)) : setRemoved([...removed, i]));
+    return <button class="btn small quiet rm" type="button" aria-label={`Remove line ${lines[i]}`} title="Remove" onClick={() => { drop(); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }}>&times;</button>;
+  };
   const d = upload.pending?.diff;
   return (
     <>
       <div class="page-head">
-        <div><h2 class="h1">Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h2><p class="lede">{s.rows} on the roster. {s.codes_sent} codes sent; {s.joined} joined.</p></div>
+        <div><h2 class="h1">Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h2><p class="lede">{split ? `${base.length} on the roster: ${plural(split.students, 'student')}, ${plural(split.auditors, 'auditor')}.` : `${s.rows} on the roster.`} {s.codes_sent} codes sent; {s.joined} joined.</p></div>
         <div class="actions">
           <button class={`btn${editing ? ' quiet' : ''}`} type="button" aria-pressed={editing} disabled={!table || !!missing.length || !!replacement} onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit roster'}</button>
           <button class="btn quiet" type="button" aria-expanded={upload.open} onClick={() => setUpload({ ...upload, open: !upload.open })}>Replace from CSV</button>
-          <OpButtons def={sendCodes(scope, waiting)} label="Send new codes to students who have not joined" />
+          {/* Preview lives in each op's panel, not beside the button. */}
+          <OpOpen def={sendCodes(scope, waiting)} cls="btn quiet" label="Send codes" />
+          <a class="btn quiet" href={syncMembershipUrl(scope)} target="_blank" rel="noopener" title="Opens Sync membership on GitHub: press Run workflow there. Saving the roster starts it anyway.">Sync now</a>
         </div>
       </div>
       <div class="stack">
@@ -167,6 +196,7 @@ function Students(p: ReadyProps) {
                     <th>Line</th><th>Email<span class="grp">yours: hertie_email</span></th><th>Name<span class="grp">yours</span></th><th>Role<span class="grp">yours</span></th>
                     <th class="sys">GitHub handle<span class="grp">yours once joined</span></th><th class="sys">GitHub id<span class="grp">system</span></th>
                     <th class="sys">Code sent<span class="grp">system</span></th><th class="sys">Status<span class="grp">system</span></th>
+                    {editing ? <th><span class="sr">Remove</span></th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -174,7 +204,7 @@ function Students(p: ReadyProps) {
                     const at = lines[i];
                     const changed = !replacement && (edits[i] || i >= base.length);
                     return (
-                      <tr class={`${faultLines.has(at) ? 'fault' : ''}${changed ? ' changed' : ''}`} id={`line-${at}`}>
+                      <tr class={`${faultLines.has(at) ? 'fault' : ''}${gone(i) ? ' removed' : changed ? ' changed' : ''}`} id={`line-${at}`}>
                         <td class="line">{at}</td>
                         <td>{input(i, r, 'hertie_email', 'Email', 'email')}</td>
                         <td>{input(i, r, 'name', 'Name')}</td>
@@ -183,6 +213,7 @@ function Students(p: ReadyProps) {
                         <td class="sys mono">{r.github_id}</td>
                         <td class="sys">{(r.code_sent_at ?? '').replace('T', ', ').replace(/:\d\d(\.\d+)?Z?$/, '')}</td>
                         <td class="sys"><RowStatus r={r} /></td>
+                        {editing ? <td class="rm-cell">{removeControl(i)}</td> : null}
                       </tr>
                     );
                   })}
@@ -191,8 +222,8 @@ function Students(p: ReadyProps) {
             </div>
             <ul class={`roster-cards${editing ? ' editing' : ''}`}>
               {current.map((r, i) => (
-                <li class={`rcard${faultLines.has(lines[i]) ? ' fault' : ''}`}>
-                  <div class="rc-top">{r.name}<span>line {lines[i]}</span></div>
+                <li class={`rcard${faultLines.has(lines[i]) ? ' fault' : ''}${gone(i) ? ' removed' : ''}`}>
+                  <div class="rc-top">{r.name}<span>line {lines[i]}{editing ? <> {removeControl(i)}</> : null}</span></div>
                   <div class="field"><span class="label">Email</span>{input(i, r, 'hertie_email', 'Email', 'email')}</div>
                   <div class="field"><span class="label">Role</span>{role(i, r)}</div>
                   <div class="rc-status"><RowStatus r={r} />{r.github_handle ? ` as ${r.github_handle}` : ''}</div>
@@ -203,7 +234,7 @@ function Students(p: ReadyProps) {
           </div>
         ) : null}
         <div class="panel" style="display:grid;gap:10px">
-          <SaveBar state={save} onSave={() => void doSave()} label={saveLabel} disabled={!nEdits} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv', exists: file.kind !== 'absent' }} note={nEdits ? `${nEdits} unsaved change${nEdits > 1 ? 's' : ''}` : 'No unsaved changes'} />
+          <SaveBar state={save} onSave={() => void doSave()} label={saveLabel} disabled={!nEdits} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv', exists: file.kind !== 'absent' }} note={nEdits ? `${pendingSummary(counts)}. ${ROSTER_SAVE_NOTE}` : 'No unsaved changes'} />
           <Lives org={p.cohort.org} repo={CONFIG_REPO} path="students.csv" exists={file.kind !== 'absent'} />
         </div>
       </div>

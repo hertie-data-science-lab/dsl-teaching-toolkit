@@ -174,18 +174,21 @@ function releaseDetail(status: Status, rel: Release | undefined, m: ReleaseMark 
   return 'Goes to students at its time; the site row goes live.';
 }
 
+/**
+ * One agenda row, on one line: type chip, label, state, details (cut with an ellipsis; the row's
+ * title carries the whole of it), then its actions.
+ */
 function RowItem({ r, status, p, marks }: { r: Row; status: Status; p: CohortProps; marks: Marks }) {
   const tz = tzOf(status), releases = status.releases ?? [];
   let chip = TYPE_LABEL[r.type] ?? r.type, cls = TYPE_CLASS[r.type] ?? 'evt', detail = '', buttons = null;
+  const m = rowMark(marks, r);
   if (r.block === 'releases') {
     const rel = releases.find((x) => x.id === r.entry);
     const ref = rel && r.when ? releaseRef(rel, tz, Number(r.when.slice(0, 4))) : null;
-    const m = rowMark(marks, r);
     chip = 'Release';
     detail = releaseDetail(status, rel, m, tz);
     buttons = (
       <>
-        {m ? <ReleaseMarks m={m} entry={r.entry} /> : null}
         {ref && rel?.state === 'planned' ? <OpButtons def={releaseEarly(cohortScope(p), ref)} small label={`Release ${r.ident} early`} /> : null}
         <a class="textlink" href={`#release-${r.entry}`}>Details</a>
       </>
@@ -198,15 +201,18 @@ function RowItem({ r, status, p, marks }: { r: Row; status: Status; p: CohortPro
   } else {
     chip = chip.charAt(0).toUpperCase() + chip.slice(1);
   }
+  const state = m ? markWord(m) : r.state;
+  const details = [r.name, detail].filter(Boolean).join('. ');
   return (
-    <li>
+    <li title={[chip, r.ident, state, details].filter(Boolean).join(' · ')}>
       <span class="when">{r.when ? <><b>{fmtDay(r.when, tz).replace(/ \w+$/, '')}</b><span>{fmtTime(r.when, tz)}</span></> : <b>TBC</b>}</span>
       <span class="what">
-        <span><span class={`chip ${cls}`}>{chip}</span></span>
-        <span class="t"><b>{r.ident}</b>: {r.name}</span>
-        {detail ? <span class="d">{detail}</span> : null}
-        {buttons ? <span class="actions">{buttons}</span> : null}
+        <span class={`chip ${cls}`}>{chip}</span>
+        <b class="t">{r.ident}</b>
+        {m ? <ReleaseMarks m={m} entry={r.entry} /> : state ? <span class="st-chip">{state}</span> : null}
+        {details ? <span class="d">{details}</span> : null}
       </span>
+      {buttons ? <span class="actions">{buttons}</span> : null}
     </li>
   );
 }
@@ -381,6 +387,32 @@ export function StudentCounts({ status }: { status: Status }) {
   );
 }
 
+/**
+ * The roster's waiting states, as counts the status carries: each line opens the Students tab.
+ * Whether a joined student has accepted the org invitation is not in the status, so it is not
+ * counted here. Hidden when nobody is waiting.
+ */
+export function waitingLines(status: Status): string[] {
+  const s = status.students;
+  if (!s) return [];
+  const notSent = Math.max(0, s.rows - s.codes_sent), notJoined = Math.max(0, s.codes_sent - s.joined);
+  return [
+    notSent ? `${notSent} on the roster, code not sent yet` : '',
+    notJoined ? `${plural(notJoined, 'code')} sent, not joined yet` : '',
+  ].filter(Boolean);
+}
+
+function StudentsWaiting({ status }: { status: Status }) {
+  const lines = waitingLines(status);
+  if (!lines.length) return null;
+  return (
+    <section class="panel section waiting">
+      <div class="section-head"><h2>Students</h2></div>
+      <ul class="waiting-list">{lines.map((l) => <li><a class="textlink" href="#students">{l}</a></li>)}</ul>
+    </section>
+  );
+}
+
 export function AutomationHead({ heartbeat, now }: { heartbeat: CohortProps['heartbeat']; now: number }) {
   if (heartbeat === undefined)
     return <div class="auto-head"><span class="dot idle" aria-hidden="true" /><div><b>Reading automation</b><div class="sub">Automation checks this semester every 15 minutes.</div></div></div>;
@@ -423,7 +455,6 @@ function Overview(p: ReadyProps) {
   const [picked, setTab] = useState<string | null>(null);
   const tab = picked ?? verdictTab(verdict);
   const late = (status.releases ?? []).filter((r) => r.state === 'late');
-  const s = status.students;
   const ops = useOperations(status.operations, p.cohort.org);
   const toggle = (w: number) => setSelected(selected.includes(w) ? selected.filter((k) => k !== w) : [...selected, w]);
   const name = selectionName(selected, thisWeek);
@@ -488,16 +519,7 @@ function Overview(p: ReadyProps) {
             <p class="overdue">{late.length ? `${late.length} release${late.length > 1 ? 's are' : ' is'} late: ${late.map((r) => releaseIdent(r)).join(', ')}.` : 'Nothing overdue.'}</p>
         </section>
         <div class="grid-2">
-          <section class="panel section">
-            <div class="section-head"><h2>Students</h2><a class="btn small quiet" href="#students">Open roster</a></div>
-            <StudentCounts status={status} />
-            {s ? (
-              <p class="footnote">
-                {s.codes_sent - s.joined} students have a code but have not joined.
-                {s.rows > s.codes_sent ? ` ${s.rows - s.codes_sent} ${s.rows - s.codes_sent > 1 ? 'have' : 'has'} no code.` : ''}
-              </p>
-            ) : null}
-          </section>
+          <StudentsWaiting status={status} />
           <section class="panel section">
             <div class="section-head">
               <h2>Automation</h2>

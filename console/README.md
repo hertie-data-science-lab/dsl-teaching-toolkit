@@ -211,11 +211,15 @@ closest in height (`splitColumns`, from each panel's estimated height). Until th
 every semester's status has loaded the columns keep a fixed layout (`SETTLING_COLUMNS`), so
 panels do not move as each arrives. The semester Dashboard's line under its title says only
 what the banner does not: the exams and the archive date. It has no Assignments panel: each
-assignment's state and progress are on the Assignments tab.
+assignment's state and progress are on the Assignments tab. Its Students notice lists only
+who waits, each line opening the Students tab: on the roster with no code sent yet, and codes
+sent but not joined yet (`status.json` does not say who has an org invitation still to accept,
+so that step is not counted); it is hidden when nobody waits.
 
 The semester Dashboard's week strip filters its agenda only: This week on load, any set of
 weeks picked, none picked for all of them; the agenda panel's heading names the selection
-("Planned this week", "Planned in weeks 3 and 5", "Planned, all weeks"). A red number on a week
+("Planned this week", "Planned in weeks 3 and 5", "Planned, all weeks"). Each agenda row is one line: type chip, label, state, then the
+details, cut with an ellipsis (the row's title holds the whole text), and its actions. A red number on a week
 counts its problems now or soon; a hollow one its later problems (a week with both shows the red
 one), and the legend shows both. A release row, on the expanded strip, in the agenda and on the
 Schedule page alike, marks the problem that holds it (`problemForRelease`, `releaseMark`): now, a
