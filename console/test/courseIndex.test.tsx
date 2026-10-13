@@ -252,7 +252,7 @@ describe('course nav and overview', () => {
     const t = text(<CourseScreen {...cp({ loaded: ready })} />);
     expect(t).toContain('Problems');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
-    expect(t).not.toContain('Everything automatic will happen on time');
+    expect(t).not.toContain('No problems.');
     expect(t).toContain('Fall 2025');
     expect(t).toMatch(/\d problems?/);
     const calm: Loaded = { kind: 'ready', status: { ...STATUS, problems: [] }, sha: 's', stale: [] };

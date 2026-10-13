@@ -134,7 +134,7 @@ export function ReleaseMarks({ m, entry }: { m: ReleaseMark; entry: string }) {
 export function ProblemCards({ list, cohort }: { list: Problem[]; cohort?: boolean }) {
   if (!list.length)
     return (
-      <div class="no-problems"><Check /><span>No problems. Everything automatic will happen on time.</span></div>
+      <div class="no-problems"><Check /><span>No problems.</span></div>
     );
   return (
     <ul class="problems">

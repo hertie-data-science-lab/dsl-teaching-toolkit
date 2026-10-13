@@ -27,6 +27,7 @@ import type { CohortProps } from '../src/screens/types';
 import { generateSyllabus } from '../src/ops/defs';
 import { OutcomeView } from '../src/ops/Panel';
 import { ScreenBoundary } from '../src/ui/boundary';
+import { ProblemCards } from '../src/ui/bits';
 import { Footer, Sidenav, Topbar } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
 import { heldStatus } from './heldReleases';
@@ -820,5 +821,11 @@ describe('S14 site lede', () => {
     const t = text(<SiteScreen {...props()} />);
     expect(t).toContain('Deployed semester page for the semester. Most of it is auto-populated from the schedule, instructors and materials.');
     expect(t).not.toContain('single page');
+  });
+});
+
+describe('no problems', () => {
+  it('says only that', () => {
+    expect(text(<ProblemCards list={[]} />).trim()).toBe('No problems.');
   });
 });
