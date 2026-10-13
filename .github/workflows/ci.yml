@@ -178,32 +178,53 @@ jobs:
             missing=1
           fi
           # The published file: its name opens the hosted copy (above), and the chevron's
-          # menu offers `view` (that copy) and `GitHub` (the file's home).
+          # menu offers `View here` (that copy) and `View on GitHub` (the file's home).
           menu() { grep -rho "$1</a><details class=\"file-menu\">.*" . | sed 's#</details>.*##'; }
-          if ! menu 'slides\.html' | grep -q 'github\.com.*</svg>GitHub</span>'; then
-            echo "::error::slides.html has no chevron menu with a GitHub item"
+          if ! menu 'slides\.html' | grep -q 'github\.com.*</svg>View on GitHub</span>'; then
+            echo "::error::slides.html has no chevron menu with a View on GitHub row"
             missing=1
           fi
-          if ! menu 'slides\.html' | grep -q '</svg>view</span>'; then
-            echo "::error::slides.html is published but its menu has no view item"
+          if ! menu 'slides\.html' | grep -q '</svg>View here</span><small>rendered here</small>'; then
+            echo "::error::slides.html is published but its menu has no live View here row"
             missing=1
           fi
           if ! grep -q 'slides\.html</a>.*· <a[^>]*github\.com[^>]*>GitHub</a></span>\]' index.html; then
             echo "::error::the Updates box does not carry the inline GitHub link"
             missing=1
           fi
-          # The unpublished file beside it: `GitHub`, because every file has a home on
-          # GitHub, and no `view`, because this site hosts no copy of it to draw.
-          if ! menu 'slides\.pdf' | grep -q '</svg>GitHub</span>'; then
-            echo "::error::slides.pdf has no chevron menu with a GitHub item"
+          # The unpublished file beside it: `View on GitHub`, because every file has a home
+          # on GitHub, and no `View here`, because this site hosts no copy of it.
+          if ! menu 'slides\.pdf' | grep -q '</svg>View on GitHub</span>'; then
+            echo "::error::slides.pdf has no chevron menu with a View on GitHub row"
             missing=1
           fi
-          if menu 'slides\.pdf' | grep -q '</svg>view</span>'; then
-            echo "::error::slides.pdf is not published but offers a rendered copy"
+          # Every menu lists its rows in order - `View here` first only for a hosted copy -
+          # with a hairline before the Edit pair, which is always listed: greyed for a
+          # pdf's format, for a notebook the Profile step the script fills in from the
+          # reader's browser.
+          items() { menu "$1" | head -1 | grep -o '</svg>[^<]*</span>\|file-menu-sep' | sed 's#</svg>##; s#</span>##' | paste -sd, -; }
+          for want in 'slides\.html:View here,View on GitHub,file-menu-sep,Edit in browser,Edit in VS Code' \
+            'slides\.pdf:View on GitHub,file-menu-sep,Edit in browser,Edit in VS Code' \
+            'Lab_Session_1\.ipynb:View on GitHub,file-menu-sep,Edit in browser,Edit in VS Code'; do
+            f=${want%%:*}
+            got=$(items "$f" | head -1)
+            if [ "$got" != "${want#*:}" ]; then
+              echo "::error::$f's menu lists [$got], not [${want#*:}]"
+              missing=1
+            fi
+          done
+          if [ "$(menu 'slides\.pdf' | head -1 | grep -o 'data-edit="[a-z]*"><span class="file-menu-lbl" role="link" aria-disabled="true">' | wc -l)" -ne 2 ] \
+            || [ "$(menu 'slides\.pdf' | head -1 | grep -o '<small>not an editable format</small>' | wc -l)" -ne 2 ]; then
+            echo "::error::slides.pdf's Edit rows are not both greyed as not an editable format"
             missing=1
           fi
-          # Every item in a file's menu leaves the page, so every one of them leaves in a
-          # new tab. The editor and Profile items are added by script, not here. One menu
+          if ! menu 'Lab_Session_1\.ipynb' | head -1 | grep -q 'data-edit="online"><span class="file-menu-lbl" role="link" aria-disabled="true">.*<small>set up in <a[^>]*href="[^"]*/profile/">Profile</a></small>.*data-edit="local"><span class="file-menu-lbl" role="link" aria-disabled="true">.*<small>set up in <a[^>]*href="[^"]*/profile/">Profile</a></small>'; then
+            echo "::error::Lab_Session_1.ipynb's Edit rows are not there for the script to enable"
+            missing=1
+          fi
+          # Every row in a file's menu leaves the page, so every one of them leaves in a
+          # new tab, and so does the Profile link in a greyed row's reason; a greyed row
+          # itself is no link at all. The script's live Edit rows are not checked here. One menu
           # at a time (non-greedy): a kind tab renders a row's files on one line, and the
           # row names between the menus open in place.
           if grep -rh 'file-menu-list' . | perl -ne 'print "$1\n" while m{(<ul class="file-menu-list">.*?</ul>)}g' | grep -o '<a [^>]*>' | grep -v 'target="_blank"'; then

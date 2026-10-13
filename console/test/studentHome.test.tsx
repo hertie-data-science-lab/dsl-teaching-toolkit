@@ -65,14 +65,14 @@ describe('the Updates box', () => {
     expect(html).toContain(`href="?semester=${ORG}#materials-materials%2F`);
   });
 
-  it('gives each file in a bullet its name alone, and the syllabus its menu: view where the viewer draws it', () => {
+  it('gives each file in a bullet its name alone, and the syllabus its menu: View here where the viewer draws it', () => {
     const html = render(<HomeView facts={factsFromStatus(doc())} org={ORG} now={NOW} />);
     const slides = encodeURIComponent('materials/lectures/01_intro/slides.pdf');
     expect(html).toContain(`<span class="file-link">[<a href="?semester=${ORG}#materials-${slides}">slides.pdf</a>]</span>`);
     const updates = html.slice(0, html.indexOf('syllabus-link'));
     expect(updates).not.toContain('file-menu');
     const syl = html.slice(html.indexOf('syllabus-link'));
-    expect(syl).toMatch(/^[^]*?<b>Syllabus<\/b><\/a><span class="file-menu"><button[^>]*class="file-chev"[^]*?<\/svg>view<\/span>[^]*?<\/svg>GitHub</);
+    expect(syl).toMatch(/^[^]*?<b>Syllabus<\/b><\/a><span class="file-menu"><button[^>]*class="file-chev"[^]*?<\/svg>View here<\/span>[^]*?<\/svg>View on GitHub</);
   });
 });
 
