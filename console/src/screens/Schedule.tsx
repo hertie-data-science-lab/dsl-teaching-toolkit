@@ -59,7 +59,7 @@ interface SchedFile {
   error: string | null;
 }
 
-function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
+export function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
   const f = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml');
   const text = f.kind === 'ready' ? f.text : null;
   const parsed = useMemo(() => {
@@ -340,7 +340,7 @@ function EventForm({ d, set, errors }: { d: EventDraft; set: Setter<EventDraft>;
   );
 }
 
-function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Setter<SemesterDraft>; errors: Record<string, string> }) {
+export function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Setter<SemesterDraft>; errors: Record<string, string> }) {
   return (
     <>
       <div class="row-2">

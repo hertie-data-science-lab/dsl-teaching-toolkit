@@ -790,6 +790,9 @@ describe('an announcement file', () => {
   it('reads back what it writes, and reads a CRLF file the same way', () => {
     const f = announcementFile('2026-10-05', 'Room change: B2.01');
     expect(readAnnouncement(f.content)).toEqual({ date: '2026-10-05', text: 'Room change: B2.01' });
+    const titled = announcementFile('2026-10-05', 'We meet in B2.01.', 'Room change');
+    expect(titled.path).toBe('_announcements/2026-10-05-room-change.md');
+    expect(readAnnouncement(titled.content)).toEqual({ title: 'Room change', date: '2026-10-05', text: 'We meet in B2.01.' });
     expect(readAnnouncement('---\r\ndate: 2026-10-05\r\n---\r\nNo class today.\r\n')).toEqual({ date: '2026-10-05', text: 'No class today.' });
   });
 });

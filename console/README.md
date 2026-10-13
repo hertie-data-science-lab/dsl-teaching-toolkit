@@ -389,7 +389,7 @@ a first visit, mostly free 304s after).
   `teams.csv`, `grading_sheets/<slug>.yml`, `.github/dsl-course.yml`, a template's
   `grading_config.yml` (on `solution`), a materials repo's `materials.yml` and `.releaseignore`,
   the course's `.github/opencourse.yml` (the public website),
-  the site's `index.md` and `_announcements/`. "Treat as course materials" on an Other repos
+  the site's `index.md`, `_announcements/` and the institution keys of its `_config.yml`. "Treat as course materials" on an Other repos
   row adds the `dsl-materials` topic to that repo (`PUT /repos/{o}/{r}/topics`). YAML is edited in place (`src/edit/yamlText.ts`):
   only the changed values' bytes move, so comments and their columns survive. After a write the
   console follows the commit's checks and says what they found.

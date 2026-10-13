@@ -2,9 +2,9 @@
 
 import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { useSave } from '../edit/save';
-import { render } from '../edit/yamlText';
-import { Field } from '../forms/Form';
+import { invalidText, useSave } from '../edit/save';
+import { YamlText, deepEqual, obj, render } from '../edit/yamlText';
+import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { ago, fmtWhen } from '../model/format';
 import { parseInstructors } from '../model/people';
 import { bodyOf, frontMatter, homeText } from '../model/student';
@@ -13,23 +13,30 @@ import type { Outcome } from '../model/types';
 import { outcomePath } from '../ops/adapter';
 import { updateSite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { CheckLine, EditFile, Loading, OpsList } from '../ui/bits';
+import { CheckLine, Loading, OpsList } from '../ui/bits';
 import { Hint } from '../ui/Hint';
-import { SaveBar } from '../ui/edit';
+import { SaveBar, SaveLine } from '../ui/edit';
 import { Ext } from '../ui/icons';
 import { WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
-import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
+import { COURSE_REPO, CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
+import { validSchedule } from '../model/cascade';
+import { draftErrors, readDraft, writeDraft, type SemesterDraft } from '../model/scheduleEdit';
+import { ABOUT } from '../tiers/course';
+import type { Tiers, Values } from '../tiers/types';
+import { courseFileAfter, detailsOf } from './CourseEdit';
+import { SemesterForm, useSchedFile } from './Schedule';
 
-/** A hand-written announcement's date and text, from its front matter (or its body). */
-export function readAnnouncement(text: string): { date: string; text: string } {
+/** A hand-written announcement's title, date and text, from its front matter (or its body). */
+export function readAnnouncement(text: string): { title?: string; date: string; text: string } {
   const fm = frontMatter(text);
-  return { date: fm.date == null ? '' : String(fm.date).slice(0, 10), text: fm.details == null ? bodyOf(text).trim() : String(fm.details) };
+  return { title: fm.title == null ? undefined : String(fm.title), date: fm.date == null ? '' : String(fm.date).slice(0, 10), text: fm.details == null ? bodyOf(text).trim() : String(fm.details) };
 }
 
-export function announcementFile(date: string, text: string): { path: string; content: string } {
-  const slug = text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').split('-').slice(0, 6).join('-') || 'update';
-  return { path: `_announcements/${date}-${slug}.md`, content: `---\n${render({ date, details: text })}---\n` };
+/** A new `_announcements/` file, named by its date and its title (else its text). The Updates box shows `details`. */
+export function announcementFile(date: string, text: string, title = ''): { path: string; content: string } {
+  const slug = (title || text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').split('-').slice(0, 6).join('-') || 'update';
+  return { path: `_announcements/${date}-${slug}.md`, content: `---\n${render({ ...(title ? { title } : {}), date, details: text })}---\n` };
 }
 
 function Announcement({ p, repo, path, sha }: { p: ReadyProps; repo: string; path: string; sha: string }) {
@@ -40,7 +47,7 @@ function Announcement({ p, repo, path, sha }: { p: ReadyProps; repo: string; pat
   return (
     <li>
       <span class="r-title">{a?.date || path.replace(/^_announcements\//, '').slice(0, 10)}</span>
-      <span class="r-sub">{a ? a.text : path.replace(/^_announcements\//, '').replace(/\.md$/, '')}</span>
+      <span class="r-sub">{a ? <>{a.title ? <b>{a.title}: </b> : null}{a.text}</> : path.replace(/^_announcements\//, '').replace(/\.md$/, '')}</span>
       <span class="r-side">
         {save.kind !== 'idle' ? <CheckLine cls={save.kind === 'busy' ? 'busy' : save.kind}>{save.text}</CheckLine> : null}
         <button class="btn small quiet" type="button" disabled={save.kind === 'busy'} onClick={() => void runSave({ owner: p.cohort.org, repo, path }, null, f.kind === 'ready' ? f.sha : sha, { message: `site: remove the announcement ${path}, from the DSL Teaching Console` })}>Remove</button>
@@ -78,7 +85,7 @@ function Site(p: ReadyProps) {
   const site = status.site;
   const [body, setBody] = useState<string | null>(null);
   const [homeSave, runHome] = useSave(env);
-  const [newAnn, setNewAnn] = useState<{ date: string; text: string }>({ date: todayOf(now, tz), text: '' });
+  const [newAnn, setNewAnn] = useState<{ title: string; date: string; text: string } | null>(null);
   const [annSave, runAnn, setAnnSave] = useSave(env);
   const homeBody = home.kind === 'ready' ? bodyOf(home.text) : '';
   const shown = body ?? homeBody;
@@ -90,12 +97,11 @@ function Site(p: ReadyProps) {
     const front = home.text.slice(0, home.text.length - bodyOf(home.text).length);
     if (await runHome({ owner: p.cohort.org, repo, path: 'index.md' }, `${front}${body.endsWith('\n') ? body : `${body}\n`}`, home.sha, { message: 'site: edit the home text, from the DSL Teaching Console' })) setBody(null);
   };
+  const annFile = newAnn ? announcementFile(newAnn.date, newAnn.text.trim(), newAnn.title.trim()) : null;
   const addAnn = async () => {
+    if (!newAnn || !annFile) return;
     if (!newAnn.text.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(newAnn.date)) return setAnnSave({ kind: 'bad', text: 'Give the date and the text.' });
-    const f = announcementFile(newAnn.date, newAnn.text.trim());
-    if (await runAnn({ owner: p.cohort.org, repo, path: f.path }, f.content, null, { message: 'site: add an announcement, from the DSL Teaching Console' })) {
-      setNewAnn({ date: todayOf(now, tz), text: '' });
-    }
+    if (await runAnn({ owner: p.cohort.org, repo, path: annFile.path }, annFile.content, null, { message: 'site: add an announcement, from the DSL Teaching Console' })) setNewAnn(null);
   };
   return (
     <>
@@ -128,14 +134,23 @@ function Site(p: ReadyProps) {
           {ann.kind === 'ready' && ann.entries.length ? (
             <ul class="rows">{ann.entries.filter((e) => e.type === 'file').map((e) => <Announcement p={p} repo={repo} path={e.path} sha={e.sha} />)}</ul>
           ) : ann.kind === 'loading' ? <Loading /> : <p class="footnote">No announcements.</p>}
-          <div class="list-edit">
-            <div class="le-row two">
-              <input type="date" aria-label="Date" value={newAnn.date} onInput={(e) => setNewAnn({ ...newAnn, date: (e.target as HTMLInputElement).value })} />
-              <textarea aria-label="Text" style="min-height:40px" placeholder="What students should know" onInput={(e) => setNewAnn({ ...newAnn, text: (e.target as HTMLTextAreaElement).value })}>{newAnn.text}</textarea>
-              <span />
+          {newAnn && annFile ? (
+            <div class="form">
+              <div class="form-section">
+                <div class="field"><label for="ann-title">Title</label><input id="ann-title" type="text" value={newAnn.title} onInput={(e) => setNewAnn({ ...newAnn, title: (e.target as HTMLInputElement).value })} /></div>
+                <div class="field"><label for="ann-date">Date</label><input id="ann-date" type="date" value={newAnn.date} onInput={(e) => setNewAnn({ ...newAnn, date: (e.target as HTMLInputElement).value })} /></div>
+                <div class="field"><label for="ann-text">Text</label><textarea id="ann-text" placeholder="What students should know" onInput={(e) => setNewAnn({ ...newAnn, text: (e.target as HTMLTextAreaElement).value })}>{newAnn.text}</textarea></div>
+                <SaveBar state={annSave} onSave={() => void addAnn()} small disabled={!newAnn.text.trim()} file={{ org: p.cohort.org, repo, path: annFile.path, exists: false }}>
+                  <button class="btn small quiet" type="button" onClick={() => { setNewAnn(null); setAnnSave({ kind: 'idle' }); }}>Cancel</button>
+                </SaveBar>
+              </div>
             </div>
-          </div>
-          <SaveBar state={annSave} onSave={() => void addAnn()} label="Add an announcement" small disabled={!newAnn.text.trim()} file={{ org: p.cohort.org, repo, path: '_announcements/', exists: false }} />
+          ) : (
+            <>
+              <SaveLine state={annSave} />
+              <div class="savebar"><button class="btn small outline" type="button" onClick={() => { setNewAnn({ title: '', date: todayOf(now, tz), text: '' }); setAnnSave({ kind: 'idle' }); }}>Add an announcement</button></div>
+            </>
+          )}
         </section>
         <section class="panel section">
           <h2>Instructor photos</h2>
@@ -149,17 +164,135 @@ function Site(p: ReadyProps) {
             ))}
           </ul>
         </section>
-        <section class="panel section">
-          <h2>Site settings</h2>
-          <dl class="kv">
-            <dt>Course name</dt><dd>{p.course.name}{p.course.code ? ` (${p.course.code})` : ''} <span class="footnote">rewritten on every update</span></dd>
-            <dt>Semester</dt><dd>{p.cohort.termLabel} <span class="footnote">rewritten</span></dd>
-            <dt>GitHub org</dt><dd>{p.cohort.org} <span class="footnote">rewritten</span></dd>
-          </dl>
-          <p class="lives"><EditFile org={p.cohort.org} repo={repo} path="_config.yml" exists={p.files.file(p.cohort.org, repo, '_config.yml').kind !== 'absent'} /></p>
-        </section>
+        <SiteSettings p={p} repo={repo} />
       </div>
     </>
+  );
+}
+
+/** The site's own `_config.yml` keys the sync leaves alone (`site_repo.apply_plan`), saved into the site repo. */
+const INSTITUTION: Tiers = {
+  schoolname: { tier: 'ask', label: 'School name', reason: 'The institution the site names.' },
+  schoolurl: { tier: 'ask', label: 'School link', widget: 'url' },
+  dsl_org_url: { tier: 'ask', label: 'Lab link', widget: 'url', reason: 'Where the home text’s lab link points.' },
+  address: { tier: 'ask', label: 'Address', widget: 'textarea', reason: 'The site’s footer.' },
+};
+const COURSE_KEYS = ['course_name', 'course_code', 'course_description'];
+const COURSE_FILE = 'dsl-course.yml';
+const str = (v: unknown) => (v == null ? '' : String(v));
+
+/** Where a derived group is saved, and that the site follows at the next sync. */
+function SavedTo({ href, screen }: { href: string; screen: string }) {
+  return <p class="footnote">Saved to <a class="textlink" href={href}>{screen}</a>; the site updates at the next sync.</p>;
+}
+
+/** Course name, code and description: the sync copies them from dsl-course.yml, so they are saved there. */
+function CourseGroup({ p }: { p: ReadyProps }) {
+  const { course } = p;
+  const env = useEnv();
+  const file = p.files.file(course.org, COURSE_REPO, COURSE_FILE);
+  const [draft, setDraft] = useState<Values | null>(null);
+  const [save, runSave, setSave] = useSave(env);
+  const y = file.kind === 'ready' ? new YamlText(file.text) : null;
+  const meta = y && !y.errors.length ? obj(y.toJS()) : null;
+  const before = meta ? detailsOf(meta) : null;
+  const base: Values = Object.fromEntries(COURSE_KEYS.map((k) => [k, before?.about[k]]));
+  const cur = draft ?? base;
+  const doSave = async () => {
+    if (!before || !meta || file.kind !== 'ready') return;
+    if (p.courseMigrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
+    if (Object.keys(fieldErrors(null, ABOUT, cur)).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
+    const out = courseFileAfter(file.text, before, { ...before, about: { ...before.about, ...cur } }, meta);
+    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
+    if (await runSave({ owner: course.org, repo: COURSE_REPO, path: COURSE_FILE }, out.text, file.sha, { message: 'course: edit the course details, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setDraft(null);
+  };
+  return (
+    <div class="form-section">
+      <h3>Course</h3>
+      {file.kind === 'loading' ? <Loading what={`Reading ${COURSE_FILE}`} /> : null}
+      {y?.errors.length ? <CheckLine cls="bad">{COURSE_FILE} does not parse ({y.errors[0]}); fix it with Edit the file directly.</CheckLine> : null}
+      {meta ? <SchemaForm id="ss-course" schema={null} tiers={ABOUT} values={cur} onChange={(v) => { setDraft(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }} readOnly={!course.write} /> : null}
+      <SavedTo href={`?course=${course.org}#details`} screen="Course details" />
+      <SaveBar state={save} onSave={() => void doSave()} small disabled={!meta || !course.write || deepEqual(cur, base)} file={{ org: course.org, repo: COURSE_REPO, path: COURSE_FILE, exists: file.kind !== 'absent' }} />
+    </div>
+  );
+}
+
+/** The semester's dates and timezone: the sync reads them from schedule.yml, so they are saved there. */
+function SemesterGroup({ p }: { p: ReadyProps }) {
+  const env = useEnv();
+  const sf = useSchedFile(p);
+  const [draft, setDraft] = useState<SemesterDraft | null>(null);
+  const [save, runSave, setSave] = useSave(env);
+  const ready = sf && sf !== 'loading' && !sf.error ? sf : null;
+  const before = ready ? (readDraft(ready.doc, 'semester') as SemesterDraft) : null;
+  const d = draft ?? before;
+  const errors = d ? draftErrors(d) : {};
+  const doSave = async () => {
+    if (!ready || !d) return;
+    if (Object.keys(errors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
+    const y = new YamlText(ready.text);
+    writeDraft(y, d, ready.doc);
+    if (!validSchedule(y.toJS())) return setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
+    if (await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, y.text, ready.sha, { message: 'schedule: edit the semester dates, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] })) setDraft(null);
+  };
+  return (
+    <div class="form-section">
+      <h3>Semester dates</h3>
+      {sf === 'loading' ? <Loading what="Reading the schedule" /> : sf === null ? <p class="footnote">No schedule.yml yet.</p> : sf.error ? <CheckLine cls="bad">schedule.yml does not parse ({sf.error}); fix it with Edit the file directly.</CheckLine> : null}
+      {d ? <SemesterForm d={d} set={(patch) => { setDraft({ ...d, ...patch }); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }} errors={errors} /> : null}
+      <SavedTo href="#schedule-semester" screen="Schedule" />
+      <SaveBar state={save} onSave={() => void doSave()} small disabled={!d || deepEqual(d, before)} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: sf !== null }} />
+    </div>
+  );
+}
+
+/** The institution keys of the site's `_config.yml`: the sync never rewrites them, so they are saved in the site repo. */
+function InstitutionGroup({ p, repo }: { p: ReadyProps; repo: string }) {
+  const env = useEnv();
+  const file = p.files.file(p.cohort.org, repo, '_config.yml');
+  const [draft, setDraft] = useState<Values | null>(null);
+  const [save, runSave, setSave] = useSave(env);
+  const y = file.kind === 'ready' ? new YamlText(file.text) : null;
+  const doc = y && !y.errors.length ? obj(y.toJS()) : null;
+  const base: Values = Object.fromEntries(Object.keys(INSTITUTION).map((k) => [k, str(doc?.[k])]));
+  const cur = draft ?? base;
+  const doSave = async () => {
+    if (!doc || file.kind !== 'ready') return;
+    if (Object.keys(fieldErrors(null, INSTITUTION, cur)).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
+    const out = new YamlText(file.text);
+    // Only the keys that changed are written; every other byte of the file stays as it is.
+    for (const k of Object.keys(INSTITUTION)) if (str(cur[k]) !== base[k]) out.assign([k], str(cur[k]) === '' ? undefined : str(cur[k]));
+    if (await runSave({ owner: p.cohort.org, repo, path: '_config.yml' }, out.text, file.sha, { message: 'site: edit the site settings, from the DSL Teaching Console' })) setDraft(null);
+  };
+  return (
+    <div class="form-section">
+      <h3>Institution</h3>
+      {file.kind === 'loading' ? <Loading what="Reading _config.yml" /> : file.kind === 'absent' ? <p class="footnote">No _config.yml yet: it appears when the site is set up.</p> : null}
+      {y?.errors.length ? <CheckLine cls="bad">_config.yml does not parse ({y.errors[0]}); fix it with Edit the file directly.</CheckLine> : null}
+      {doc ? <SchemaForm id="ss-inst" schema={null} tiers={INSTITUTION} values={cur} onChange={(v) => { setDraft(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }} /> : null}
+      <SaveBar state={save} onSave={() => void doSave()} small disabled={!doc || deepEqual(cur, base)} file={{ org: p.cohort.org, repo, path: '_config.yml', exists: file.kind !== 'absent' }} />
+    </div>
+  );
+}
+
+function SiteSettings({ p, repo }: { p: ReadyProps; repo: string }) {
+  return (
+    <section class="panel section">
+      <h2>Site settings</h2>
+      <div class="form">
+        <CourseGroup p={p} />
+        <SemesterGroup p={p} />
+        <InstitutionGroup p={p} repo={repo} />
+        <div class="form-section">
+          <h3>Semester and org</h3>
+          <dl class="kv">
+            <dt>Semester</dt><dd>{p.cohort.termLabel} <span class="footnote">from the semester org’s name</span></dd>
+            <dt>GitHub org</dt><dd>{p.cohort.org} <span class="footnote">the semester org itself</span></dd>
+          </dl>
+        </div>
+      </div>
+    </section>
   );
 }
 
