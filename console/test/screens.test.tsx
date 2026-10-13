@@ -470,13 +470,15 @@ describe('S14 site and S18 operations', () => {
     expect(out).not.toContain('layout: home');
     expect(out).toContain('2026-09-21-scikit');
   });
-  it('fills the site’s Liquid in the home text preview with the semester’s values, leaving an unknown tag visible', () => {
+  it('fills the site’s Liquid in the home text preview with the semester’s values, as students see it, and names an unset key', () => {
     const liquid = new StaticFiles({
       [`${COHORT_ORG}/${COHORT_ORG}.github.io/index.md`]: '---\nlayout: home\n---\nWelcome to **{{ site.course_name }}**, {{ site.course_semester }}, in [{{site.github_org}}]({{ site.dsl_org_url }}). {{ site.mystery }}\n',
       [`${COHORT_ORG}/${COHORT_ORG}.github.io/_config.yml`]: 'course_name: "Course Name (Code)"\ndsl_org_url: "https://github.com/hertie-data-science-lab"\n',
     });
     const out = html(<SiteScreen {...props({ files: liquid })} />);
-    expect(out).toContain(`Welcome to <b>Machine Learning</b>, Fall 2026, in <a href="https://github.com/hertie-data-science-lab" target="_blank" rel="noopener">${COHORT_ORG}</a>. {{ site.mystery }}`);
+    expect(out).toContain(`Welcome to <b>Machine Learning</b>, Fall 2026, in <a href="https://github.com/hertie-data-science-lab" target="_blank" rel="noopener">${COHORT_ORG}</a>.</p>`);
+    expect(out).not.toContain('{{ site.mystery }}</p>');
+    expect(out).toContain('Not set in _config.yml: mystery - this text shows nothing for it.');
   });
   it('lists operations with the outcome sentence, details fold and the run', () => {
     const out = html(<OperationsScreen {...props()} />);
