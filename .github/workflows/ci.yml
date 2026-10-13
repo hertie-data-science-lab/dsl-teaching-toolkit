@@ -128,7 +128,7 @@ jobs:
           # A tab per kind the fixture has rows of, each listing its own: lecture 1 is on
           # the Readings tab too (its readings attach to it), the exam events on Exams, and
           # the lab folder released outside the plan on Labs.
-          for tab in lectures:"Lecture 1" labs:"Lab 1" labs:"Week 2" readings:"Lecture 1" \
+          for tab in lectures:"Lecture 1" labs:"Lab 1" labs:"Week 2" labs:"Attention lab" readings:"Lecture 1" \
             readings:"Attention, further" drop-ins:"Drop-in 1" exams:"MidTerm Exam"; do
             grep -qF -- "${tab#*:}" "${tab%%:*}/index.html" || {
               echo "::error::${tab%%:*}/ does not list ${tab#*:}"; missing=1; }
@@ -143,6 +143,14 @@ jobs:
               | grep -qF -- "${tab#*:}" || {
               echo "::error::${tab%%:*}/ lists no file ${tab#*:}"; missing=1; }
           done
+          # The fixture's `event_datetime: tbc` lab: a row whose Date cell reads TBC on the
+          # schedule, and TBC under its heading on the Labs tab.
+          if ! perl -0ne 'exit !m{<li class="table-row table-row-lab"(?:(?!</li>).)*?data-label="Date">\s*TBC\s*</div>(?:(?!</li>).)*?Attention lab}s' schedule/index.html; then
+            echo "::error::schedule/ has no TBC row for the undated lab"; missing=1
+          fi
+          if ! tr -d '\n' < labs/index.html | grep -q 'Attention lab</h2>[[:space:]]*<p class="session-when"><b>TBC</b></p>'; then
+            echo "::error::labs/ does not mark the undated lab TBC"; missing=1
+          fi
           if grep -qF "slides.pdf" readings/index.html; then
             echo "::error::readings/ lists lecture 1's slides, not only its readings"
             missing=1
@@ -293,7 +301,7 @@ jobs:
         # one announces the last week of term as "New Lab is up" before week one has
         # happened - which is what two live semester sites showed all term. The fixture holds
         # a released lecture 2 beside an unreleased lecture 3, a silent readings row, an
-        # undated off-plan lab, and a handed-out assignment 1 beside a pending assignment
+        # undated off-plan lab, a TBC lab, and a handed-out assignment 1 beside a pending assignment
         # 2, so the box is checked in both directions.
         run: |
           box=$(sed -n '/<h2>Updates<\/h2>/,/<\/ul>/p' "$RUNNER_TEMP/build/index.html")
@@ -305,7 +313,7 @@ jobs:
               missing=1
             fi
           done
-          for needle in "Lecture 3" "Attention, further" "Lab_Session_2" "Assignment 2"; do
+          for needle in "Lecture 3" "Attention, further" "Lab_Session_2" "Assignment 2" "Attention lab"; do
             if printf '%s' "$box" | grep -qF -- "$needle"; then
               echo "::error::the Updates box announces $needle, which has not released"
               missing=1

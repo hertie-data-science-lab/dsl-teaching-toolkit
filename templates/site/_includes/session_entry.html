@@ -30,6 +30,11 @@ both false there and the list rendered empty on every kind tab.
 {%- endcomment -%}
 {%- assign entry = include.entry -%}
 <h2 class="session-title">{% include session_title.html lecture=entry %}</h2>
+{%- comment -%}A row with no date yet (`event_datetime: tbc`) says so; a dated one's date is
+on the Schedule.{%- endcomment -%}
+{%- if entry.dateless %}
+<p class="session-when"><b>TBC</b></p>
+{%- endif %}
 
 {%- comment -%}
 `details` is the schedule.yml entry's `details:` - the same sentence the session's schedule

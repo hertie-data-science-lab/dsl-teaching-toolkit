@@ -1955,7 +1955,7 @@ def render_releases(
     rows = []
     aliases = lambda repo: facts.aliases.get(repo, {})
     # The number the site gives each row (`schedule_plan.site_rows`); None for a row it
-    # does not number (silent, attached readings, undated).
+    # does not number (silent, attached readings).
     numbers = {
         sr.row.key: sr.number for sr in site_rows(planned_rows(facts.sched, aliases))
     }

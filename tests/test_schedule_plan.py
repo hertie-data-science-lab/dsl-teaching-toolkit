@@ -1,13 +1,13 @@
 """schedule_plan: the rows a semester's release plan declares.
 
-One row per dated `releases:` entry, in date order, with its kind declared or inferred once
-from where its first copy lands. Nothing is read off a folder name beyond that section.
+One row per `releases:` entry, dated ones in date order then undated (`tbc`) ones, with its
+kind declared or inferred once from where its first copy lands. Nothing is read off a folder name beyond that section.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -39,13 +39,58 @@ def test_one_row_per_dated_entry_in_plan_order():
         [
             Release("lecture-1", _at(7), [Deploy("cm", "lectures/01_a")]),
             Release("lab-1", _at(9, 14), [Deploy("cm", "labs/01_a")]),
-            Release("drop-in", None, [], tbc=True),  # undated: no place on a dated list
         ]
     )
-    assert [(r.key, r.kind, r.when) for r in rows] == [
-        ("lecture-1", "lecture", _at(7)),
-        ("lab-1", "lab", _at(9, 14)),
+    assert [(r.key, r.kind, r.when, r.undated) for r in rows] == [
+        ("lecture-1", "lecture", _at(7), False),
+        ("lab-1", "lab", _at(9, 14), False),
     ]
+
+
+def test_an_undated_entry_sorts_after_the_last_dated_row_of_its_kind():
+    # `event_datetime: tbc` is a row, flagged undated, with no `when`, sorted a minute
+    # after the last lab - so it follows Lab 2 on the schedule, ahead of the lecture after it.
+    minute = timedelta(minutes=1)
+    rows = _rows(
+        [
+            Release("lab-3", None, [Deploy("cm", "labs/03_a")]),
+            Release("lab-1", _at(8), [Deploy("cm", "labs/01_a")]),
+            Release("lab-2", _at(9), [Deploy("cm", "labs/02_a")]),
+            Release("lab-4", None, [Deploy("cm", "labs/04_a")]),
+            Release("lecture-1", _at(10), [Deploy("cm", "lectures/01_a")]),
+        ]
+    )
+    assert [(r.key, r.when, r.sort_at, r.undated) for r in rows] == [
+        ("lab-1", _at(8), _at(8), False),
+        ("lab-2", _at(9), _at(9), False),
+        ("lecture-1", _at(10), _at(10), False),
+        # No date of its own: `when` is None, and `sort_at` only places it.
+        ("lab-3", None, _at(9) + minute, True),
+        ("lab-4", None, _at(9) + 2 * minute, True),
+    ]
+
+
+def test_an_undated_entry_of_a_kind_with_no_dated_row_sorts_at_term_end():
+    sched = Schedule(
+        releases=[
+            Release("lecture-1", _at(7), [Deploy("cm", "lectures/01_a")]),
+            Release("lab-1", None, [Deploy("cm", "labs/01_a")]),
+        ],
+        semester_end=date(2026, 12, 18),
+    )
+    lab = schedule_plan.planned_rows(sched)[-1]
+    assert (lab.key, lab.undated) == ("lab-1", True)
+    assert lab.when is None
+    assert lab.sort_at.date() == date(2026, 12, 18)
+    assert lab.sort_at > _at(7)
+
+
+def test_nothing_fires_for_an_undated_entry():
+    # The row's `when` is a place on the list, never a release time: the entry's own
+    # deploys stay undue however late it is.
+    release = Release("lab-1", None, [Deploy("cm", "labs/01_a")])
+    _rows([release])
+    assert release.due_deploys(datetime(2099, 1, 1, tzinfo=BERLIN)) == []
 
 
 def test_a_row_is_dated_by_its_event_not_by_when_its_files_ship():

@@ -143,7 +143,7 @@ describe('the assignment page', () => {
 
   it('lists the files its rows carry with their menu, before the brief', () => {
     const link = { name: 'data.csv', repo: 'materials', path: 'a1/data.csv', url: `https://github.com/${ORG}/materials/blob/main/a1/data.csv` };
-    const row = { id: 'a1:handout', kind: 'assignment', when: '2026-09-28T09:00:00', allDay: false, title: 'Assignment 1', subtitle: '', details: '', assignment: 'a1', released: true, links: [link], tbc: false, readings: [], readingList: '', readingsPending: false, tabs: ['assignment'] };
+    const row = { id: 'a1:handout', kind: 'assignment', when: '2026-09-28T09:00:00', sortAt: '2026-09-28T09:00:00', allDay: false, title: 'Assignment 1', subtitle: '', details: '', assignment: 'a1', released: true, links: [link], tbc: false, readings: [], readingList: '', readingsPending: false, tabs: ['assignment'] };
     const out = render(<AssignmentPage slug="a1" org={ORG} facts={{ ...facts([A]), rows: [row] }} mine={mine()} now={NOW} studentView={false} receipts={{}} login={LOGIN} />);
     expect(out).toMatch(/<ul class="session-files">.*data\.csv.*class="file-chev".*>View on GitHub<\/span>.*<\/ul><article class="a-brief">/);
     expect(render(page(A, mine()))).not.toContain('session-files');
@@ -218,7 +218,7 @@ describe('the route', () => {
   });
 
   it('This week’s lines about one assignment open its page', () => {
-    const f = { ...facts([GROUP]), rows: [{ id: 'p:due', kind: 'due', when: '2026-10-12T23:59:00', allDay: false, title: 'Project', subtitle: '', details: '', assignment: 'p', released: true, links: [], tbc: false, readings: [], readingList: '', readingsPending: false, tabs: ['due'] }] };
+    const f = { ...facts([GROUP]), rows: [{ id: 'p:due', kind: 'due', when: '2026-10-12T23:59:00', sortAt: '2026-10-12T23:59:00', allDay: false, title: 'Project', subtitle: '', details: '', assignment: 'p', released: true, links: [], tbc: false, readings: [], readingList: '', readingsPending: false, tabs: ['due'] }] };
     const gb = parseGradebook("assignments:\n  p:\n    final_grade: '9'\n", '2026-10-07T08:00:00Z');
     const lines = weekItems(f, mine({ units: {}, gradebook: gb }), NOW, [{ slug: 'p', when: '2026-10-08T08:00:00Z' }]);
     expect(Object.fromEntries(lines.map((l) => [l.kind, l.screen]))).toEqual({ due: 'assignment-p', teams: 'assignment-p', marks: 'assignment-p', patch: 'assignment-p' });

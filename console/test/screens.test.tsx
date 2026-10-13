@@ -22,6 +22,7 @@ import { tier } from '../src/model/readiness';
 import { HomeScreen, ReadonlyScreen, SignInScreen } from '../src/screens/Home';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
+import { parseSchedule, scheduleRows, termOf, weekGroups } from '../src/model/schedule';
 import { OperationsScreen, SiteScreen, announcementFile, readAnnouncement } from '../src/screens/Site';
 import type { CohortProps } from '../src/screens/types';
 import { generateSyllabus } from '../src/ops/defs';
@@ -212,6 +213,18 @@ describe('S16 and S10 assignments', () => {
 });
 
 describe('S6 schedule and S11 release', () => {
+  it('lists an undated (`event_datetime: tbc`) release last, as No date yet, on the Schedule and the Dashboard', () => {
+    const tbc = { ...STATUS.releases![0], id: 'lab9', kind: 'lab', number: 9, title: 'Attention', when: null, state: 'planned' as const, tbc: true };
+    const status: Status = { ...STATUS, releases: [...STATUS.releases!, tbc] };
+    const loaded: Loaded = { ...ready, status };
+    const t = text(<ScheduleScreen {...props({ loaded })} />);
+    expect(t).toMatch(/No date yet Lab 9 : Attention/);
+    expect(t.indexOf('Lab 9')).toBeGreaterThan(t.indexOf('Lecture 5'));
+    // The Dashboard's All weeks and timeline group it the same way.
+    const rows = scheduleRows(status, parseSchedule(SCHEDULE), NOW, 'Europe/Berlin');
+    const groups = weekGroups(rows, (r) => r.when, termOf(status, parseSchedule(SCHEDULE), '2026-09-23'), 'Europe/Berlin', 'all');
+    expect(groups.at(-1)).toMatchObject({ label: 'No date yet', rows: [{ entry: 'lab9' }] });
+  });
   it('shows Type, Details as markdown and State, with events from schedule.yml', () => {
     const out = html(<ScheduleScreen {...props()} />);
     expect(out).toContain('<span>Details</span>');

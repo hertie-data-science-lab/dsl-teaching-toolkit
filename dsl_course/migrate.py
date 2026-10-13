@@ -1230,7 +1230,8 @@ def position_numbers(
     rows of its kind in date order, and an assignment among the plan's by due date.
     A readings row is not stamped: a number there joins it to that lecture."""
     out: dict[tuple[str, str], int] = {}
-    rows = planned_rows(sched, aliases)
+    # Undated entries never had a position (`undated_unnumbered` names them instead).
+    rows = [r for r in planned_rows(sched, aliases) if not r.undated]
     lectures: set[int] = set()
     position = 0
     for r in rows:
