@@ -100,7 +100,7 @@ function Site(p: ReadyProps) {
   return (
     <>
       <div class="page-head">
-        <div><h2 class="h1">Student site <Hint doc="11-configure-cohort-site.md">The home text and announcements are yours. The schedule, lectures, assignments and instructors pages are rewritten on every update.</Hint></h2><p class="lede">Students’ single page for the semester. Almost everything on it comes from the schedule, instructors and materials.</p></div>
+        <div><h2 class="h1">Student site <Hint doc="11-configure-cohort-site.md">The home text and announcements are yours. The schedule, lectures, assignments and instructors pages are rewritten on every update.</Hint></h2><p class="lede">Deployed semester page for the semester. Most of it is auto-populated from the schedule, instructors and materials.</p></div>
         <div class="actions">
           <OpButtons def={updateSite(cohortScope(p))} verbCls="btn outline" />
           <a class="btn quiet" href={url} target="_blank" rel="noopener">Open the student site <Ext /></a>

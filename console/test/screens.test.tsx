@@ -810,3 +810,11 @@ describe('schedule chips by time (decision 0034 §6)', () => {
     expect(html(<ReleaseScreen {...props({ loaded, entry: 's2' })} />)).toContain('<span class="chip bad">was skipped</span>');
   });
 });
+
+describe('S14 site lede', () => {
+  it('says the page is deployed and mostly auto-populated', () => {
+    const t = text(<SiteScreen {...props()} />);
+    expect(t).toContain('Deployed semester page for the semester. Most of it is auto-populated from the schedule, instructors and materials.');
+    expect(t).not.toContain('single page');
+  });
+});
