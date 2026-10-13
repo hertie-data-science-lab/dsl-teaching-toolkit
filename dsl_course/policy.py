@@ -233,6 +233,13 @@ def kind_label(kind: str) -> str:
     return next((k["label"] for k in kinds() if k["key"] == kind), kind)
 
 
+def numbered_title(kind: str, number: int | None) -> str:
+    """A row's title: its kind's label and number ("Lecture 3"), the label alone when it
+    has none."""
+    label = kind_label(kind)
+    return f"{label} {number}" if number is not None else label
+
+
 def console_link(semester_org: str, screen: str = "week") -> str:
     """One semester's screen in the student console (`institution.console_url`), or "" when
     the institution runs no console. Students are sent there only where their course opts

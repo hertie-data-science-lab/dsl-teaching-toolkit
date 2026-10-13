@@ -975,14 +975,6 @@ def test_the_updates_box_still_prints_a_rows_declared_sentence():
     assert arm.index("n.details") < arm.index("n.content")
 
 
-def test_the_updates_box_leaves_out_a_session_with_nothing_to_ship():
-    # An `events:` session (a lab's second group) is a row with no files: no "New lab is
-    # up" bullet, filtered before the limit like an unreleased row.
-    body = _strip_comments(_liquid_templates()["_includes/announcements.html"])
-    picked = body.partition("assign released_sessions")[2].partition("-%}")[0]
-    assert '"entry.no_materials != true"' in picked
-
-
 def test_no_template_reads_description_off_a_generated_document():
     # The key is gone from every generated page. A template still reading it prints an
     # empty string - silently, and on the one column a reader looks at first.

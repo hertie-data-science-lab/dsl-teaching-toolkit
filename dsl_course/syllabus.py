@@ -177,7 +177,8 @@ def build(course_org: str, semester_org: str) -> tuple[str, int]:
     website numbers them, so the two cannot disagree about what session 3 is called."""
     sched = schedule.load(semester_org)
     rows = planned_rows(sched, lambda repo: read_materials(course_org, repo).kinds)
-    shown = site_rows(rows)
+    # An `events:` session (a lab's second group) repeats a week, it is not one.
+    shown = site_rows([r for r in rows if not r.session])
     # Dated sessions only: a weekly plan has no week to put a TBC session in.
     lectures = [
         sr

@@ -66,6 +66,7 @@ from .roster import FIELDS as ROSTER_FIELDS
 from .roster import REQUIRED_FIELDS as ROSTER_REQUIRED
 from .roster import ROLE_AUDITOR, ROLE_ENROLLED
 from .schedule import (
+    EVENT_KINDS,
     KNOWN_ARCHIVE,
     KNOWN_ASSIGNMENT,
     KNOWN_DEPLOY,
@@ -73,7 +74,6 @@ from .schedule import (
     KNOWN_RELEASE,
     KNOWN_ROW_KINDS,
     KNOWN_TOP_LEVEL,
-    SESSION_KINDS,
 )
 from .settings import (
     ASSIGNMENT_DEFAULTS_KEY,
@@ -92,8 +92,7 @@ DEFAULT_OUT = Path("console/schemas")
 # The schema-level types of the keys whose parser accepts more than a string. Anything not
 # named here is a string: the parsers read dates, paths and titles as text.
 _FLAGS = {"tbc", "show_on_site"}
-# `special_event` and every session kind (`schedule.SESSION_KINDS`, exam among them).
-_EVENT_KINDS = ("special_event", *SESSION_KINDS)
+_EVENT_KINDS = ("special_event", *EVENT_KINDS)
 # instructors.yml entry keys (sync_faculty and the site read them by name; no constant holds them).
 PEOPLE_ENTRY_KEYS = (
     "github_handle",

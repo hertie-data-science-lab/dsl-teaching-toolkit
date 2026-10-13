@@ -129,6 +129,7 @@ from .ops.registry import STATUS_SCHEMA
 from .releaseignore import RELEASEIGNORE, REVIEWED_MARK, listed
 from .repos import default_branch
 from .schedule_plan import (
+    Aliases,
     Unnumbered,
     deploy_dest,
     duplicate_numbers,
@@ -1261,9 +1262,8 @@ def schedule_moments(sched: schedule.Schedule) -> list[ScheduledMoment]:
             (schedule.grading_cutoff_datetime(sched, slug), "cutoff", slug, a),
         ]
     for e in sched.events:
-        out.append(
-            (e.when, "event" if e.kind == "special_event" else e.kind, e.label, e)
-        )
+        out.append((e.when, "exam" if e.kind == "exam" else "event", e.label, e))
+    out += [(e.when, e.kind, e.label, e) for e in sched.sessions]
     if sched.archive:
         out.append((sched.archive.when, "archive", "", sched.archive))
     return [m for m in out if m[0] is not None]
@@ -1297,7 +1297,7 @@ def empty_week_problems(
     aliases = lambda repo: facts.aliases.get(repo, {})
     # A session of the kind with nothing to ship (an `events:` lab) counts as one.
     kinds = [(r.when, entry_kind(r, aliases)[0]) for r in sched.releases]
-    kinds += [(e.when, e.kind) for e in sched.events if schedule.is_session(e)]
+    kinds += [(e.when, e.kind) for e in sched.sessions]
     kind_days = {
         k: {_local_day(when, tz) for when, kind in kinds if kind == k and when}
         for k in _WEEKLY_KINDS
@@ -1385,7 +1385,7 @@ def nothing_to_release_problems(
         if any(w == copies or w.startswith(f"{copies}[") for w in faulted):
             continue
         n = schedule.own_number(r.number, r.label)
-        name = f"{policy.kind_label(entry_kind(r, aliases)[0])} {n}" if n else r.label
+        name = policy.numbered_title(entry_kind(r, aliases)[0], n) if n else r.label
         out.append(
             {
                 "id": pid,
@@ -2084,7 +2084,9 @@ def render_releases(
     # The number the site gives each row (`schedule_plan.site_rows`); None for a row it
     # does not number (silent, attached readings).
     numbers = {
-        sr.row.key: sr.number for sr in site_rows(planned_rows(facts.sched, aliases))
+        sr.row.key: sr.number
+        for sr in site_rows(planned_rows(facts.sched, aliases))
+        if not sr.row.session
     }
     held = {m.key for m in unnumbered(facts.sched, aliases) if m.block == "releases"}
     for r in facts.sched.releases:
@@ -2125,11 +2127,13 @@ def this_week(
     releases: list[dict],
     assignments: list[dict],
     now: datetime,
+    aliases: Aliases = lambda _repo: {},
 ) -> list[dict]:
     """What happens from the start of today to the same moment seven days on, in the
     semester's zone: releases, hand-outs, due dates and events (an `events:` session under
-    its own kind, `lab`). The start is included and the end is not, so a moment belongs
-    to exactly one week."""
+    its own kind, `lab`, titled as its row: `schedule_plan.planned_rows`). The start is
+    included and the end is not, so a moment belongs to exactly one week. `aliases` are
+    the source repos' folder aliases, which a session's title follows its release by."""
     tz = ZoneInfo(sched.timezone)
     start = _local_midnight(now, tz)
     end = start + timedelta(days=7)
@@ -2157,6 +2161,7 @@ def this_week(
 
     by_id = {r["id"]: r for r in releases}
     by_slug = {a["slug"]: a for a in assignments}
+    sessions = {r.key: r for r in planned_rows(sched, aliases) if r.session}
     for when, what, key, entry in schedule_moments(sched):
         if what == "release":
             state = by_id.get(key, {}).get("state", "planned")
@@ -2164,13 +2169,12 @@ def this_week(
         elif what in ("hand_out", "due"):
             row = by_slug.get(key, {})
             add(when, what, key, row.get("title", key), row.get("state", "declared"))
-        elif isinstance(entry, schedule.Event) and schedule.is_session(entry):
-            # A session with nothing to ship (`events:`, kind `lab`): its kind and number.
-            n = schedule.own_number(entry.number, key)
-            label = policy.kind_label(entry.kind)
-            add(when, what, key, entry.title or f"{label} {n or ''}".strip(), "planned")
         elif what in ("exam", "event"):
             add(when, what, key, entry.title, "planned")
+        elif isinstance(entry, schedule.Event):
+            row = sessions[key]
+            title = row.subtitle or policy.numbered_title(row.kind, row.number)
+            add(when, what, key, title, "planned")
     return [row for _, row in sorted(items, key=lambda p: p[0])]
 
 
@@ -2559,7 +2563,9 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "template_moments": {repo: _iso(m.when) for repo, m in moments.items()},
         },
         "problems": problems,
-        "this_week": this_week(sched, releases, assignments, now),
+        "this_week": this_week(
+            sched, releases, assignments, now, lambda repo: facts.aliases.get(repo, {})
+        ),
         "releases": releases,
         "assignments": assignments,
         "students": {

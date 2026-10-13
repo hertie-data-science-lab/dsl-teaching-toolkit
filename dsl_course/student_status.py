@@ -62,7 +62,6 @@ from .schedule_plan import (
     declared_syllabus,
     deploy_dest,
     planned_rows,
-    session_rows,
     site_rows,
     term_end,
 )
@@ -387,20 +386,19 @@ def _row(
         # Event rows (exam, due, hand-out, semester dates) sit on their own kind's tab
         # only, as the site's kind.html lists site.events by kind.
         "tabs": tabs or [kind],
-        # An `events:` session (`schedule_plan.session_rows`): nothing ships, nothing is
-        # pending, and it is never news (the site's `no_materials`).
+        # It ships nothing (an `events:` session): nothing pends, and it is never news
+        # (the site's `no_materials`).
         "no_materials": no_materials,
     }
 
 
 def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
-    """A row per entry the site shows (`schedule_plan.site_rows`), numbered as the site
-    numbers it, with the files it has landed and the readings attached to it; then a row
-    per `events:` session (`schedule_plan.session_rows`), with none."""
+    """A row per entry the site shows (`schedule_plan.site_rows`, the `events:` sessions
+    among them), numbered as the site numbers it, with the files it has landed and the
+    readings attached to it. A row that ships nothing is `no_materials`, as on the site."""
     aliases = lambda repo: facts.aliases.get(repo, {})
-    planned = planned_rows(facts.sched, aliases)
     out = []
-    for sr in site_rows(planned):
+    for sr in site_rows(planned_rows(facts.sched, aliases)):
         r = sr.row
         own = r.kind == "readings"
         links, prose, landed = _landed(facts, r, own, extra.link_extensions)
@@ -412,8 +410,8 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
             readings += got
             prose += more
             pending = pending or not done
-        label = policy.kind_label(r.kind)
-        title = f"{label} {sr.number}" if sr.number is not None else label
+        title = policy.numbered_title(r.kind, sr.number)
+        nothing = not (landed or readings or pending or r.deploys)
         out.append(
             _row(
                 r.key,
@@ -423,7 +421,7 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
                 sort_at=r.sort_at,
                 subtitle=row_name(r.subtitle, title),
                 details=r.details,
-                released=landed or bool(readings),
+                released=landed or bool(readings) or nothing,
                 tbc=r.tbc,
                 dateless=r.undated,
                 off_schedule=not r.shown,
@@ -433,24 +431,7 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
                 readings_pending=pending,
                 # Readings attached, landed or not: the site's own test.
                 tabs=row_tabs(r.kind, bool(sr.readings)),
-            )
-        )
-    for r in session_rows(facts.sched, planned):
-        number = schedule.own_number(r.number, r.key)
-        label = policy.kind_label(r.kind)
-        title = f"{label} {number}" if number is not None else label
-        out.append(
-            _row(
-                r.key,
-                r.kind,
-                r.when,
-                title,
-                sort_at=r.sort_at,
-                subtitle=row_name(r.subtitle, title),
-                details=r.details,
-                tbc=r.tbc,
-                dateless=r.undated,
-                no_materials=True,
+                no_materials=nothing,
             )
         )
     return out
@@ -507,8 +488,7 @@ def event_rows(facts: SemesterFacts) -> list[dict]:
                 )
             )
     for ev in sched.events:
-        # A session kind's event is a row of its kind (`release_rows`).
-        if not ev.show_on_site or schedule.is_session(ev):
+        if not ev.show_on_site:
             continue
         # An undated event (`event_datetime: tbc`) has no `when` and sorts at the end of
         # term (the site's `_event_entry`), marked TBC.

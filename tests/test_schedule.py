@@ -1603,18 +1603,17 @@ def test_an_event_takes_any_session_kind_and_a_number():
         }
     )
     assert not sched.dropped
-    by = {e.label: e for e in sched.events}
+    by = {e.label: e for e in [*sched.events, *sched.sessions]}
     assert (by["lab-01-group-2"].kind, by["lab-01-group-2"].number) == ("lab", 1)
     # No `number:`: the label's own, as on a release (`own_number`).
     assert by["lecture_04"].number is None
     assert schedule.own_number(None, "lecture_04") == 4
     assert by["lecture_04"].when is None and by["lecture_04"].tbc
-    # Exams and special events are what they were.
+    # Exams and special events are what they were, and stay `events`; a content kind
+    # is a session.
     assert by["mid-term"].kind == "exam" and by["clinic"].kind == "special_event"
-    assert {k for k, e in by.items() if schedule.is_session(e)} == {
-        "lab-01-group-2",
-        "lecture_04",
-    }
+    assert [e.label for e in sched.events] == ["clinic", "mid-term"]
+    assert [e.label for e in sched.sessions] == ["lab-01-group-2", "lecture_04"]
 
 
 @pytest.mark.parametrize("kind", ["assets", "assignment", "term", "lab-group"])
@@ -1629,7 +1628,7 @@ def test_an_unusable_event_number_is_flagged_and_falls_back_to_the_label():
     sched = parse(
         {"events": {"lab_2": {"kind": "lab", "number": "two", "event_datetime": "tbc"}}}
     )
-    assert sched.events[0].number is None
+    assert sched.sessions[0].number is None
     (line,) = sched.dropped
     assert line.startswith("events.lab_2.number:")
 

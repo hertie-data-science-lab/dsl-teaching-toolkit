@@ -703,3 +703,14 @@ def test_a_session_event_is_a_row_of_its_kind_with_nothing_to_ship():
     assert "lecture-1-online" not in {
         r["id"] for r in student_status.event_rows(_facts())
     }
+
+
+def test_a_release_with_an_empty_deploy_ships_nothing_like_a_session():
+    # The site's `no_materials` test: no copies, no readings - never "not released yet".
+    facts = _facts()
+    facts.sched.releases.append(
+        schedule.Release("lab_04", NOW, [], kind="lab", number=4)
+    )
+    rows = {r["id"]: r for r in student_status.release_rows(facts, _extra(facts))}
+    assert rows["lab_04"]["no_materials"] is True
+    assert rows["lab_04"]["released"] is True

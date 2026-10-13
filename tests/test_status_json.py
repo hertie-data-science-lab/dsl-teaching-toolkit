@@ -3393,6 +3393,14 @@ def test_this_week_lists_a_session_event_under_its_kind():
     assert group["title"] == "Lab 1"
 
 
+def test_this_week_titles_a_session_as_the_release_it_repeats():
+    # No `title:` of its own: the lab 1 release's, as on the site row.
+    sched = _sched(SESSIONS.replace("  lab_1:\n", "  lab_1:\n    title: Regression\n"))
+    week = status_json.this_week(sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC))
+    (group,) = [r for r in week if r["ref"] == "lab-1-group-2"]
+    assert (group["kind"], group["title"]) == ("lab", "Regression")
+
+
 def test_a_session_event_is_never_nothing_to_release():
     facts = _semester(sched=_sched(SESSIONS))
     now = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)

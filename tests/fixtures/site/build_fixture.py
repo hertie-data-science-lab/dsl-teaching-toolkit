@@ -323,7 +323,7 @@ SCHEDULE = schedule.Schedule(
     ],
     # A second lab group with nothing to ship: a "Lab 1" row of its own (the release's
     # title), no files, never in the Updates box.
-    events=[
+    sessions=[
         schedule.Event(
             "lab-1-group-2",
             "",
@@ -338,15 +338,13 @@ SCHEDULE = schedule.Schedule(
 
 def _lectures(hosted: site_repo.Hosted) -> tuple[dict[str, str], list[str]]:
     """The `_lectures` collection, through the sync's own row code, and the kinds it has."""
-    planned = schedule_plan.planned_rows(SCHEDULE)
     return site._site_rows(
         SEMESTER_ORG,
-        planned,
+        schedule_plan.planned_rows(SCHEDULE),
         frozenset(),
         frozenset({MATERIALS}),
         schedule_plan._no_aliases,
         hosted,
-        schedule_plan.session_rows(SCHEDULE, planned),
     )
 
 

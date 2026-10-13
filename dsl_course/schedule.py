@@ -137,6 +137,7 @@ from .gh_contents import (
     yaml_mark_line,
 )
 from .log import CLIParser, log, log_err
+from .materials import ASSETS_KIND
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
 from .repos import default_branch, repo_missing
 
@@ -449,8 +450,9 @@ class Event:
     # A bare date = whole day; a datetime = real start time; None = `event_datetime: tbc`
     # (the site shows a TBC row). `tbc: true` next to a real date = provisional, "(TBC)".
     when: date | datetime | None
-    # 'exam' | 'special_event' | a session kind (`SESSION_KINDS`: lecture, lab, ...).
-    # Exams render as their own row; a session kind as a row of that kind with no files.
+    # 'exam' | 'special_event' on `Schedule.events`; a content kind (lecture, lab, ...)
+    # on `Schedule.sessions` - a row of that kind with no files. Exams render as their
+    # own row.
     kind: str = "special_event"
     tbc: bool = False
     # Display-only: the row's Details cell. `title` says which row this is, `details` what
@@ -461,8 +463,8 @@ class Event:
     # fires nothing, so this is the whole of what it does here; the twin of a silent
     # release, for a date faculty keep in the file without publishing it.
     show_on_site: bool = True
-    # A session row's number ("Lab 1"), when the entry writes one; else the label's own
-    # number (`own_number`), as on a release.
+    # A session's own `number:` ("Lab 1"); the row's number is resolved with the
+    # label's (`schedule_plan.planned_rows`), as on a release.
     number: int | None = None
 
 
@@ -511,7 +513,11 @@ class Schedule:
     semester_start: date | None = None
     semester_end: date | None = None
     assignments: dict[str, AssignmentEntry] = field(default_factory=dict)
+    # The `events:` entries: `events` the exams and special events, `sessions` those of
+    # a content kind (`EVENT_KINDS`) - a session with nothing to ship (a lab's second
+    # group), a row of its kind (`schedule_plan.planned_rows`).
     events: list[Event] = field(default_factory=list)
+    sessions: list[Event] = field(default_factory=list)
     # The `archive:` block, or None where the semester wrote none - see `ArchiveRow`, which
     # holds every key of it. None IS "nobody asked for archiving", which is a different
     # answer from an ArchiveRow whose `when` could not be derived. Resolved by `parse` and
@@ -812,15 +818,9 @@ KNOWN_EVENT = frozenset(
     {"kind", "number", "title", "details", "event_datetime", "tbc", "show_on_site"}
 )
 # The kinds an `events:` entry may declare besides `special_event`: every content kind
-# that is a row (supporting files never are, decision 0026). One of them other than `exam`
-# makes a session with nothing to ship (`is_session`); `exam` keeps its own row.
-SESSION_KINDS = tuple(k for k in policy.content_kinds() if k != "assets")
-
-
-def is_session(event: Event) -> bool:
-    """Whether `event` is a session row of a policy kind ("Lab 1", no files) rather than
-    an exam or a special event."""
-    return event.kind not in ("exam", "special_event")
+# that is a row (supporting files never are, decision 0026). `exam` keeps its own row;
+# any other makes a session with nothing to ship (`Schedule.sessions`).
+EVENT_KINDS = tuple(k for k in policy.content_kinds() if k != ASSETS_KIND)
 
 
 def _flag_unknown_keys(
@@ -1434,10 +1434,13 @@ def _parse_assignments(
     return out
 
 
-def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
+def _parse_events(
+    raw: object, tz: ZoneInfo, drops: Drops
+) -> tuple[list[Event], list[Event]]:
     """Parse `events:` (label -> {kind, title, event_datetime}) into display-only rows,
-    in calendar order. `kind:` is `special_event` (the default), `exam`, or another
-    session kind (`SESSION_KINDS`); anything else is flagged and shown as a special event.
+    in calendar order: `(events, sessions)` (`Schedule`). `kind:` is `special_event` (the
+    default), `exam`, or another content kind (`EVENT_KINDS`), which makes a session;
+    anything else is flagged and shown as a special event.
 
     `event_datetime` is a whole-day date, or a full datetime when the start time is known
     (the website then shows that time instead of its placeholder). `event_datetime: tbc`
@@ -1449,7 +1452,7 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
         raw, drops, "events", "label", "no calendar rows appear on the site"
     )
     if mapping is None:
-        return out
+        return out, []
     for label, entry in mapping.items():
         where = f"events.{label}"
         if not isinstance(entry, dict):
@@ -1480,7 +1483,7 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
             lines,
         )
         kind = str(entry.get("kind") or "").strip().lower() or "special_event"
-        if kind != "special_event" and kind not in SESSION_KINDS:
+        if kind != "special_event" and kind not in EVENT_KINDS:
             # A typo'd `kind` (e.g. `exma`) still shows the row, but as a plain special
             # event - the exam styling, and "this is an exam", quietly disappear.
             _flag_bad_value(
@@ -1490,7 +1493,7 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
                 kind,
                 "the row is shown as a plain special event, not an exam or a session "
                 "(expected `special_event` "
-                f"or one of {', '.join(SESSION_KINDS)})",
+                f"or one of {', '.join(EVENT_KINDS)})",
                 lines,
             )
             kind = "special_event"
@@ -1525,7 +1528,10 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
             epoch if e.when is None else _instant(e.when, tz),
         )
     )
-    return out
+    shown_alone = ("exam", "special_event")
+    return [e for e in out if e.kind in shown_alone], [
+        e for e in out if e.kind not in shown_alone
+    ]
 
 
 KNOWN_ARCHIVE = frozenset(
@@ -1691,7 +1697,8 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
                 meta.get("assignments"), tz, drops, instance.dests
             )
         ),
-        events=_parse_events(meta.get("events"), tz, drops),
+        events=(events := _parse_events(meta.get("events"), tz, drops))[0],
+        sessions=events[1],
         archive=_parse_archive(meta, semester_end, drops),
         dropped=drops.report + _instance_report(instance, meta, assignments, drops),
         faults=drops.faults,
@@ -2508,12 +2515,9 @@ def _validate_report(sched: Schedule, source: str) -> str:
         (
             f"  {len(sched.releases)} release(s), "
             f"{sum(len(r.deploy) for r in sched.releases)} deploy(s) | "
-            f"{len(sched.assignments)} assignment(s) | {len(sched.events)} event(s)"
-            + (
-                f", {n} of them session(s)"
-                if (n := sum(map(is_session, sched.events)))
-                else ""
-            )
+            f"{len(sched.assignments)} assignment(s) | "
+            f"{len(sched.events) + len(sched.sessions)} event(s)"
+            + (f", {n} of them session(s)" if (n := len(sched.sessions)) else "")
         ),
     ]
     if sched.dropped:

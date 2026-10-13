@@ -151,6 +151,12 @@ jobs:
           if ! tr -d '\n' < labs/index.html | grep -q 'Attention lab</h2>[[:space:]]*<p class="session-when"><b>TBC</b></p>'; then
             echo "::error::labs/ does not mark the undated lab TBC"; missing=1
           fi
+          # The fixture's second lab group (an `events:` session) ships nothing: a row on
+          # the schedule, never an Updates bullet - so lab 1 is announced once.
+          if [ "$(tr -d '\n' < index.html | grep -o 'New lab is up: Lab 1[^0-9]' | wc -l)" -ne 1 ]; then
+            echo "::error::the Updates box announces the session with nothing to ship"
+            missing=1
+          fi
           if grep -qF "slides.pdf" readings/index.html; then
             echo "::error::readings/ lists lecture 1's slides, not only its readings"
             missing=1

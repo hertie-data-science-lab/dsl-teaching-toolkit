@@ -3262,18 +3262,26 @@ def test_a_session_event_is_a_row_of_its_kind_with_no_files(monkeypatch, tmp_pat
     sched = Schedule(
         releases=[
             Release("lab-1", _at(9, 2), [_copy("labs/01_intro")], title="Intro"),
+            # A release with an empty `deploy:` ships nothing either.
+            Release("lecture-2", _at(9, 5), [], kind="lecture", number=2),
         ],
-        events=[
+        sessions=[
             Event("lab-1-group-2", "", _at(9, 3), "lab", details="Group 2.", number=1),
             Event("lab_02", "Trees", None, "lab", tbc=True),
             Event("guest-1", "Guest talk", _at(9, 4), "lecture"),
-            Event("mid-term", "MidTerm", date(2026, 11, 3), "exam"),
         ],
+        events=[Event("mid-term", "MidTerm", date(2026, 11, 3), "exam")],
     )
     plan = _plan(monkeypatch, tmp_path, sched)
     rows = _rows(plan)
     sessions = {name: r for name, r in rows.items() if r.get("no_materials")}
-    assert set(sessions) == {"lab-01-lab-1-group-2.md", "lab-02.md", "session-01.md"}
+    assert set(sessions) == {
+        "lab-01-lab-1-group-2.md",
+        "lab-02.md",
+        "session-01.md",
+        "session-02.md",
+    }
+    assert "unreleased" not in sessions["session-02.md"]
     group = sessions["lab-01-lab-1-group-2.md"]
     assert (group["title"], group["subtitle"]) == ("Lab 1", "Intro")
     assert group["details"] == "Group 2." and group["tabs"] == ["lab"]
