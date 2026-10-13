@@ -251,7 +251,7 @@ describe('a read-only viewer', () => {
     await mount(BASE, files(`${META}set_aside: [C6]\n`), github(), false);
     await show('suggestions');
     expect(root!.querySelector('button.s-circle')).toBeNull();
-    expect(root!.textContent).not.toContain('click the circle');
+    expect(root!.querySelector('.ptabs .hint-pop')!.textContent).toBe('Optional: the course works without these.');
     await show('aside');
     expect(aside()).toEqual(['Public website']);
     expect(root!.querySelector('.aside-fold button')).toBeNull();
@@ -260,7 +260,7 @@ describe('a read-only viewer', () => {
   it('a writer’s Suggestions tab says how to set aside', async () => {
     await mount(BASE, files());
     await show('suggestions');
-    expect(root!.textContent).toContain('click the circle before it to set it aside');
+    expect(root!.querySelector('.ptabs .hint-pop')!.textContent).toBe('Optional: the course works without these. If you would rather skip one, click the circle before it to set it aside.');
   });
 });
 

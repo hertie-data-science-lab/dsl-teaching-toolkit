@@ -439,12 +439,8 @@ export function CourseTabs({ items, problems: list, aside, tab, onTab }: { items
   const n = list.length;
   const problems: DashTab = {
     key: 'problems', label: 'Problems', count: n || 'done', bad: true,
-    body: n ? <ProblemCards list={list} /> : (
-      <>
-        <div class="no-problems"><Check /><span>No problems on the course.</span></div>
-        <p class="footnote">{COURSE_PROBLEMS_NOTE}</p>
-      </>
-    ),
+    hint: COURSE_PROBLEMS_NOTE,
+    body: n ? <ProblemCards list={list} /> : <div class="no-problems"><Check /><span>No problems on the course.</span></div>,
   };
   return (
     <div ref={aside.ref}>

@@ -460,9 +460,9 @@ function Overview(p: ReadyProps) {
           <DashboardTabs selected={tab} onSelect={setTab} tabs={[
             {
               key: 'problems', label: 'Problems', count: problems.length || 'done', bad: true,
+              hint: <>What will not happen until you fix it: overdue, and the next {days} days.</>,
               body: (
                 <>
-                  <p class="footnote">What will not happen until you fix it: overdue, and the next {days} days.</p>
                   {!problems.length ? <ProblemCards list={[]} cohort /> : null}
                   {shown.map((g) => (
                     <div class={`p-${g.key}`}>
@@ -475,12 +475,8 @@ function Overview(p: ReadyProps) {
             },
             {
               key: 'coming', label: 'Coming up', count: coming.length,
-              body: coming.length ? (
-                <>
-                  <p class="footnote">Needed later, by week. Each item becomes a problem {days} days before the date it is needed by, and is listed here until then.</p>
-                  <ComingUp rows={coming} term={term} tz={tz} year={year} />
-                </>
-              ) : <p class="footnote">Nothing is needed later.</p>,
+              hint: <>Needed later, by week. Each item becomes a problem {days} days before the date it is needed by, and is listed here until then.</>,
+              body: coming.length ? <ComingUp rows={coming} term={term} tz={tz} year={year} /> : <p class="footnote">Nothing is needed later.</p>,
             },
             ...readinessTabs({ items, scope: 'semester', busy: aside.busy, onCircle: aside.onCircle, onBack: aside.onBack(items) }),
           ]} />

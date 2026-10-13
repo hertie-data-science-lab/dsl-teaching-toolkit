@@ -472,8 +472,10 @@ describe('S2 course and S17 template', () => {
     expect(sug).toContain('Syllabus<span class="s-need slug">course-materials-f2026</span><span class="s-opt">optional</span>');
     expect(sug).toContain('One file, SYLLABUS.md, two parts');
     expect(sug).toContain('<span class="s-why">The weekly plan (written from the schedule) is not in SYLLABUS.md yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a></span>');
-    expect(sug).toContain('If you would rather skip one, click the circle before it to set it aside.');
-    expect(panel(base, 'setup')).toContain('One-time setup: what the course needs before a semester can start. Done stays done.');
+    // What a tab is for is in the `?` after its label, so the body starts with the rows.
+    expect(sug).toMatch(/aria-label="About Suggestions"[^]*?<span class="hint-pop"[^>]*>Optional: the course works without these\. If you would rather skip one, click the circle before it to set it aside\.<\/span>/);
+    expect(sug).toContain('<div class="ptab ptab-suggestions" role="tabpanel" id="dash-panel-suggestions" aria-labelledby="dash-tab-suggestions"><ul class="setup">');
+    expect(panel(base, 'setup')).toMatch(/aria-label="About Setup"[^]*?<span class="hint-pop"[^>]*>One-time setup: what the course needs before a semester can start\. Done stays done\.<\/span>/);
     // Only the picked tab's body renders.
     expect(sug).not.toContain('One-time setup');
     const tpl: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...base, templates: [{ repo: 'a', state: 'todo' }], todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.', need: 'needed' }] } }, sha: 's', stale: [] };
