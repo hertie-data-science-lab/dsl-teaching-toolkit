@@ -317,6 +317,7 @@ table.kinds td select { min-width: 180px; }
 .week .what .t { font-weight: 600; }
 .week .what .d { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 13.5px; color: var(--muted); }
 .week .actions { flex: none; flex-wrap: nowrap; }
+.waiting-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .week .overdue { font-size: 13.5px; color: var(--muted); padding-top: 12px; border-top: 1px solid var(--rule); }
 
 /* assignment index */

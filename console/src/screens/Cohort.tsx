@@ -387,6 +387,32 @@ export function StudentCounts({ status }: { status: Status }) {
   );
 }
 
+/**
+ * The roster's waiting states, as counts the status carries: each line opens the Students tab.
+ * Whether a joined student has accepted the org invitation is not in the status, so it is not
+ * counted here. Hidden when nobody is waiting.
+ */
+export function waitingLines(status: Status): string[] {
+  const s = status.students;
+  if (!s) return [];
+  const notSent = Math.max(0, s.rows - s.codes_sent), notJoined = Math.max(0, s.codes_sent - s.joined);
+  return [
+    notSent ? `${notSent} on the roster, code not sent yet` : '',
+    notJoined ? `${plural(notJoined, 'code')} sent, not joined yet` : '',
+  ].filter(Boolean);
+}
+
+function StudentsWaiting({ status }: { status: Status }) {
+  const lines = waitingLines(status);
+  if (!lines.length) return null;
+  return (
+    <section class="panel section waiting">
+      <div class="section-head"><h2>Students</h2></div>
+      <ul class="waiting-list">{lines.map((l) => <li><a class="textlink" href="#students">{l}</a></li>)}</ul>
+    </section>
+  );
+}
+
 export function AutomationHead({ heartbeat, now }: { heartbeat: CohortProps['heartbeat']; now: number }) {
   if (heartbeat === undefined)
     return <div class="auto-head"><span class="dot idle" aria-hidden="true" /><div><b>Reading automation</b><div class="sub">Automation checks this semester every 15 minutes.</div></div></div>;
@@ -429,7 +455,6 @@ function Overview(p: ReadyProps) {
   const [picked, setTab] = useState<string | null>(null);
   const tab = picked ?? verdictTab(verdict);
   const late = (status.releases ?? []).filter((r) => r.state === 'late');
-  const s = status.students;
   const ops = useOperations(status.operations, p.cohort.org);
   const toggle = (w: number) => setSelected(selected.includes(w) ? selected.filter((k) => k !== w) : [...selected, w]);
   const name = selectionName(selected, thisWeek);
@@ -494,16 +519,7 @@ function Overview(p: ReadyProps) {
             <p class="overdue">{late.length ? `${late.length} release${late.length > 1 ? 's are' : ' is'} late: ${late.map((r) => releaseIdent(r)).join(', ')}.` : 'Nothing overdue.'}</p>
         </section>
         <div class="grid-2">
-          <section class="panel section">
-            <div class="section-head"><h2>Students</h2><a class="btn small quiet" href="#students">Open roster</a></div>
-            <StudentCounts status={status} />
-            {s ? (
-              <p class="footnote">
-                {s.codes_sent - s.joined} students have a code but have not joined.
-                {s.rows > s.codes_sent ? ` ${s.rows - s.codes_sent} ${s.rows - s.codes_sent > 1 ? 'have' : 'has'} no code.` : ''}
-              </p>
-            ) : null}
-          </section>
+          <StudentsWaiting status={status} />
           <section class="panel section">
             <div class="section-head">
               <h2>Automation</h2>

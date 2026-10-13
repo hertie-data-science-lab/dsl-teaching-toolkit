@@ -458,3 +458,30 @@ describe('the agenda rows', () => {
     expect(css).toMatch(/\.week \.what \.d \{[^}]*overflow: hidden; text-overflow: ellipsis;/);
   });
 });
+
+describe('the Students notice', () => {
+  const withStudents = (students: Status['students']) => ({ ...STATUS, students });
+  const lines = (h: HTMLElement) => [...h.querySelectorAll('.waiting-list a')].map((a) => `${a.textContent} ${a.getAttribute('href')}`);
+
+  it('counts who waits at each step, each line opening the Students tab', () => {
+    const h = mount(withStudents({ rows: 36, codes_sent: 30, joined: 29 }));
+    expect(lines(h)).toEqual(['6 on the roster, code not sent yet #students', '1 code sent, not joined yet #students']);
+    // Counts only: no meter, no totals.
+    expect(h.querySelector('.waiting .meter')).toBeNull();
+  });
+
+  it('leaves out a step nobody waits at', () => {
+    const h = mount(withStudents({ rows: 36, codes_sent: 36, joined: 30 }));
+    expect(lines(h)).toEqual(['6 codes sent, not joined yet #students']);
+  });
+
+  it('is hidden when nobody waits', () => {
+    for (const s of [{ rows: 36, codes_sent: 36, joined: 36 }, { rows: 0, codes_sent: 0, joined: 0 }, undefined]) {
+      const h = mount(withStudents(s));
+      expect(h.querySelector('.waiting')).toBeNull();
+      render(null, h);
+      h.remove();
+      host = null;
+    }
+  });
+});
