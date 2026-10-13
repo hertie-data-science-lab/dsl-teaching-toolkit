@@ -449,6 +449,8 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 }
 .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 22px; line-height: 1; min-width: 34px; min-height: 34px; border-radius: 8px; }
 .x:hover { background: var(--sunk); color: var(--ink); }
+.kind-help { display: grid; gap: 6px; font-family: var(--font-body); font-weight: 400; font-size: 13.5px; }
+.kind-help > span { display: block; }
 .type-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
 .type-pick button { font: inherit; font-family: var(--font-display); font-weight: 600; font-size: 14px; border-radius: 8px; padding: 10px; min-height: 44px; cursor: pointer; border: 1px solid var(--rule); color: var(--row-text); text-align: left; }
 

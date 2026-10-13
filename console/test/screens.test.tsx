@@ -248,6 +248,16 @@ describe('S6 schedule and S11 release', () => {
     expect(out).toContain('lectures/05_trees_and_ensembles');
     expect(out).toContain('schedule.yml#L5');
   });
+  it('offers the kinds of entry, Assignment among them, with a ? saying what each does', () => {
+    const out = html(<ScheduleScreen {...props({ entry: 'new' })} />);
+    expect([...out.matchAll(/<button type="button" class="trow [a-z]+"[^>]*>([^<]+)<\/button>/g)].map((m) => m[1])).toEqual(['Lecture', 'Lab', 'Readings', 'Assignment', 'Exam', 'Event']);
+    expect(out).toContain('aria-label="About the kinds of entry"');
+    const t = text(<ScheduleScreen {...props({ entry: 'new' })} />);
+    for (const k of ['Lecture, Lab, Readings : a session’s materials.', 'Assignment : work students hand in.', 'Exam : a dated row', 'Event : any other dated row', 'Archive (under Archive settings)']) expect(t).toContain(k);
+    expect(t).toContain('none when work is handed in outside GitHub');
+    expect(out).toContain('docs/07-schedule-releases.md');
+    expect(t).not.toContain('A hand out is an assignment entry');
+  });
   it('names both ends of a line From and To, explains what to release, and offers one more line', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
     for (const l of ['From: repo', 'From: path', 'To: repo', 'To: path', 'Release at']) expect(out).toContain(`>${l}`);

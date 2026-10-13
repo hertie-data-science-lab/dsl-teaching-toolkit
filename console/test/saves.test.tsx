@@ -177,7 +177,7 @@ describe('Save on the schedule’s new release, its kind inferred from the folde
   const sched = 'timezone: Europe/Berlin\nreleases:\n  lab-2:\n    event_datetime: 2026-09-15T10:00\n    kind: lab\n    deploy:\n      - course_source_repo: course-materials-f2026\n        course_source_path: labs/02_x\n';
   async function addRelease(gh: FakeGitHub, f: StaticFiles, folder: string, number?: string) {
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new' })} />);
-    await click(button('lecture'));
+    await click(button('Lecture'));
     await type('#e-type', '', 'change');
     await type('#e-d0-folder', folder);
     await type('#e-date', '2026-10-01');
@@ -198,7 +198,7 @@ describe('Save on the schedule’s new release, its kind inferred from the folde
   it('keys a silent lecture with its number cleared `lecture`, with no number', async () => {
     const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new' })} />);
-    await click(button('lecture'));
+    await click(button('Lecture'));
     await type('#e-d0-folder', 'lectures/01_intro');
     await type('#e-date', '2026-10-01');
     await click(root!.querySelector('#e-show')!);
@@ -222,7 +222,7 @@ describe('Save on the schedule’s new release, its kind inferred from the folde
   it('asks readings which lecture they join, prefilled with nothing, and writes the number typed', async () => {
     const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new' })} />);
-    await click(button('readings'));
+    await click(button('Readings'));
     expect(q('#e-num').closest('.field')!.querySelector('.label')!.textContent).toMatch(/^Joins lecture \(optional\)/);
     expect(q<HTMLInputElement>('#e-num').value).toBe('');
     render(null, root!);

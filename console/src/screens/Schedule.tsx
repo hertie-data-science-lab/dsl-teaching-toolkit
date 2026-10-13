@@ -393,7 +393,23 @@ function ArchiveHelp({ org }: { org: string }) {
   );
 }
 
-const NEW_TYPES: [string, string, string][] = [['lecture', 'lecture', 'lec'], ['lab', 'lab', 'lab'], ['readings', 'readings', 'lec'], ['handout', 'hand out', 'asg'], ['exam', 'exam', 'exam'], ['special_event', 'event', 'evt']];
+// The New entry picker: [draft type, label, row colour]. An assignment's draft type stays `handout`.
+const NEW_TYPES: [string, string, string][] = [['lecture', 'Lecture', 'lec'], ['lab', 'Lab', 'lab'], ['readings', 'Readings', 'lec'], ['handout', 'Assignment', 'asg'], ['exam', 'Exam', 'exam'], ['special_event', 'Event', 'evt']];
+
+/** The New entry picker's `?`: what each kind is for, what students see, and what automation does with it. */
+function KindHelp() {
+  return (
+    <Hint label="About the kinds of entry" doc="07-schedule-releases.md">
+      <span class="kind-help">
+        <span><b>Lecture, Lab, Readings</b>: a session’s materials. The student site shows a dated row of that kind, linking the files once they are out. At the release time, automation copies the files you name from the course repo into the semester’s materials.</span>
+        <span><b>Assignment</b>: work students hand in. The site shows its hand out and due date and gives it a page. At the hand out, automation creates the repos students work in from the template (none when work is handed in outside GitHub); it collects at the late cutoff, and returns marks at their return date or when you press Return marks.</span>
+        <span><b>Exam</b>: a dated row on the student site and in the calendar. Nothing is copied or collected.</span>
+        <span><b>Event</b>: any other dated row, such as a guest talk or a reading week. Nothing is copied or collected.</span>
+        <span><b>Archive</b> (under Archive settings): on its date, automation makes the semester’s repos read-only. Nothing is deleted.</span>
+      </span>
+    </Hint>
+  );
+}
 
 /** A new entry's identifier, from the number it will be written with (decision 0020); a saved entry's is its row's. */
 function identOf(d: Draft, row: Row | undefined, kind: string): string {
@@ -577,10 +593,9 @@ function View(p: ReadyProps) {
     if (key === 'new' && !d) {
       sheet = (
         <div class="entry" role="dialog" aria-labelledby="entry-title">
-          <div class="entry-head"><div><div class="eyebrow">New entry</div><h2 id="entry-title">What kind of entry?</h2></div>{close}</div>
+          <div class="entry-head"><div><div class="eyebrow">New entry</div><h2 id="entry-title">What kind of entry? <KindHelp /></h2></div>{close}</div>
           <div class="entry-body">
             <div class="type-pick">{NEW_TYPES.map(([t, label, cls]) => <button type="button" class={`trow ${cls}`} style="display:block;min-height:44px" onClick={() => setDraft('new', blankDraft(t, { repo: repos[0] ?? '' }))}>{label}</button>)}</div>
-            <p class="footnote">A hand out is an assignment entry: assignment template, hand out, due and late work together.</p>
             <SaveLine state={save} />
           </div>
         </div>
