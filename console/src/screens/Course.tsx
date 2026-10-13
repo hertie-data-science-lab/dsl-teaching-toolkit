@@ -215,14 +215,16 @@ export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
   );
 }
 
-/** A template's needed checklist (the brief, the student version), from the course's open to-dos. */
-export function templateItems(repo: string, todo: Todo[], starter: 'derived' | 'handwritten' | undefined, tiered: Tiered[], now: number, horizon?: Horizon): SetupItem[] {
+/** A template's needed checklist (the brief, the student version where a starter is handed out), from the course's open to-dos. */
+export function templateItems(repo: string, todo: Todo[], tpl: { starter?: 'derived' | 'handwritten'; starter_applies?: boolean }, tiered: Tiered[], now: number, horizon?: Horizon): SetupItem[] {
   const row = (k: 'brief' | 'starter', label: string): SetupItem => {
     const t = todo.find((x) => x.kind === 'template' && x.repo === repo && x.check === k);
     const when = t ? handoutWords(tiered, repo, k, now, horizon) : undefined;
     return { id: k, label, kind: 'step', need: 'needed', state: t ? 'open' : 'done', why: t?.text, when, hint: TEMPLATE_TODO[k].hint, hintLabel: 'About this check' };
   };
-  return [row('brief', TEMPLATE_TODO.brief.label), row('starter', starter === 'handwritten' ? 'Starter files on main' : TEMPLATE_TODO.starter.label)];
+  const brief = row('brief', TEMPLATE_TODO.brief.label);
+  if (tpl.starter_applies === false) return [brief];
+  return [brief, row('starter', tpl.starter === 'handwritten' ? 'Starter files on main' : TEMPLATE_TODO.starter.label)];
 }
 
 /** Each grading_config.yml text read so far -> its title, so a re-render parses no YAML. */
@@ -691,7 +693,7 @@ export function TemplateScreen(p: CourseProps) {
         <div><h2 class="h1">{heading} <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. These settings apply to every semester, and after hand out they reach students only through Update every copy.</Hint></h2><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
         <div class="actions">{tplReady ? <RepoChip r={tplReady} /> : null}<OpenButton org={course.org} repo={repo} /></div>
       </div>
-      {tpl ? <section class="panel section" style="margin-bottom:18px"><RepoChecklist items={templateItems(repo, v.course?.todo ?? [], tpl.starter, v.tiered, p.now, v.horizon)} /></section> : null}
+      {tpl ? <section class="panel section" style="margin-bottom:18px"><RepoChecklist items={templateItems(repo, v.course?.todo ?? [], tpl, v.tiered, p.now, v.horizon)} /></section> : null}
       {problems.length ? <div style="margin-bottom:18px"><ProblemCards list={problems} /></div> : null}
       {file.kind === 'loading' ? <Loading what="Reading grading_config.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no grading_config.yml on the solution branch of {repo}.</CheckLine> : null}

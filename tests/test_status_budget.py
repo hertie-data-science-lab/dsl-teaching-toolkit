@@ -265,7 +265,9 @@ def world() -> FakeGitHub:
             branches={
                 "solution": {
                     "README.md": "# A\n",
-                    "grading_config.yml": "type: individual\nstarter: handwritten\n",
+                    "grading_config.yml": (
+                        "type: individual\nformats: [py]\nstarter: handwritten\n"
+                    ),
                     "solution/a.py": "x",
                 }
             },

@@ -63,6 +63,7 @@ from .course import (
     INSTRUCTORS_TEAM,
     JOIN_REPO,
     MATERIALS_REPO_PREFIX,
+    NO_STARTER,
     SELF_SELECT,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
@@ -206,6 +207,9 @@ class TemplateFacts:
     topic: bool = True
     # Decision 0028: how `main` is written (the key, else read off the solution tree).
     starter: str = STARTER_DERIVED
+    # False when no starter is handed out at all: `format: none`, or handed in off GitHub
+    # (`submit_via: external`, no repo). The starter is then not checked.
+    starter_applies: bool = True
     # What the starter still needs (`starter_check`), None when it is in place.
     starter_todo: str | None = None
     # Derived: the first recorded starter file whose blob on `main` is not Derive's.
@@ -1501,6 +1505,7 @@ def render_course(
                 "repo": t.repo,
                 "state": template_state(t),
                 "starter": t.starter,
+                "starter_applies": t.starter_applies,
             }
             for t in facts.templates
         ],
@@ -2475,11 +2480,13 @@ def gather_course(course_org: str) -> CourseFacts:
             text = get_file_content(
                 course_org, name, grades.GRADING_FILE, ref=SOLUTION_BRANCH
             )
+            spec = None
             if text is not None:
-                t.faults, _ = grades.grading_spec_faults(
+                t.faults, spec = grades.grading_spec_faults(
                     name, name, course_org, text, None
                 )
-            if t.topic:
+            t.starter_applies = starter_applies(spec)
+            if t.topic and t.starter_applies:
                 _starter_facts(course_org, t, text)
             facts.templates.append(t)
     facts.public_site = pages_repo(course_org) in listing
@@ -2497,6 +2504,13 @@ def gather_course(course_org: str) -> CourseFacts:
     else:
         facts.website_on = bool(oc and oc.enabled)
     return facts
+
+
+def starter_applies(spec: grades.GradingSpec | None) -> bool:
+    """Whether the template hands out a starter to check: not with `format: none` (no
+    starter file), nor with `submit_via: external` (no repo is created). A file that does
+    not parse keeps the check."""
+    return spec is None or (spec.format != NO_STARTER and not spec.submit_external)
 
 
 def _starter_facts(org: str, t: TemplateFacts, config: str | None) -> None:

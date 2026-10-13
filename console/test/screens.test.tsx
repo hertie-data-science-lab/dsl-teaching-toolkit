@@ -15,7 +15,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { CohortScreen } from '../src/screens/Cohort';
-import { CourseHeaderActions, CourseScreen, SETTLING_COLUMNS, TemplateScreen, courseItems, handoutWords, overviewHeights, semesterChip, splitColumns, stepLink } from '../src/screens/Course';
+import { CourseHeaderActions, CourseScreen, SETTLING_COLUMNS, TemplateScreen, courseItems, handoutWords, overviewHeights, semesterChip, splitColumns, stepLink, templateItems } from '../src/screens/Course';
 import { ItemRow, readinessTabs, type SetupItem } from '../src/ui/SetupPanel';
 import { DashboardTabs } from '../src/ui/DashboardTabs';
 import { tier } from '../src/model/readiness';
@@ -701,6 +701,17 @@ describe('S2 course and S17 template', () => {
     expect(out).toContain('value="30"');
     expect(out).toContain('<td>50</td>');
     expect(out).not.toContain('[object Object]');
+  });
+});
+
+describe('a template’s checklist', () => {
+  it('lists the starter only where the engine says one is handed out', () => {
+    const todo = [{ id: 'template:a1:starter', kind: 'template' as const, check: 'starter', repo: 'a1', text: 'Derive has not been run yet.', need: 'needed' as const }];
+    const ids = (tpl: { starter?: 'derived' | 'handwritten'; starter_applies?: boolean }) => templateItems('a1', todo, tpl, [], 0).map((i) => `${i.id}:${i.state}`);
+    expect(ids({ starter: 'derived' })).toEqual(['brief:done', 'starter:open']);
+    expect(ids({ starter: 'derived', starter_applies: true })).toEqual(['brief:done', 'starter:open']);
+    // `formats: [none]` or `submit_via: external`: no starter row at all, not a tick.
+    expect(ids({ starter: 'derived', starter_applies: false })).toEqual(['brief:done']);
   });
 });
 

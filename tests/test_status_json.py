@@ -598,6 +598,7 @@ def test_an_assignment_template_by_its_old_name_only_is_not_migrated():
             "repo": "assignment-1-f2025",
             "state": "problem",
             "starter": "derived",
+            "starter_applies": True,
         }
     ]
     (problem,) = [p for p in doc["problems"] if p["id"].startswith("template:")]
@@ -2414,6 +2415,54 @@ def test_the_gather_reads_two_trees_and_the_record_never_a_source(monkeypatch):
     t = status_json.TemplateFacts("assignment-1", "# Trees")
     status_json._starter_facts(COURSE, t, None)
     assert t.starter == "handwritten"
+
+
+@pytest.mark.parametrize(
+    ("config", "applies"),
+    [
+        ("formats: [ipynb]\n", True),
+        ("formats: [none]\n", False),  # no starter file
+        ("formats: [ipynb]\nsubmit_via: external\n", False),  # no repo at all
+        ("a: [\n", True),  # unparseable: keeps the check
+    ],
+)
+def test_the_starter_is_checked_only_where_a_starter_is_handed_out(
+    monkeypatch, config, applies
+):
+    monkeypatch.setattr(
+        status_json,
+        "list_org_repos",
+        lambda org: [repo_row("quiz", isTemplate=True, topics=["dsl-assignment"])],
+    )
+    monkeypatch.setattr(
+        status_json,
+        "get_file_content",
+        lambda org, repo, path, ref="": (
+            config if path == "grading_config.yml" else "# Quiz"
+        ),
+    )
+    # Nothing under solution/ and nothing on main: a starter to-do wherever it applies.
+    monkeypatch.setattr(status_json, "repo_path_shas", lambda *a, **k: {})
+    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(status_json, "org_meta", lambda org: {})
+    monkeypatch.setattr(status_json, "read_semester_registry", lambda org, f: [])
+    monkeypatch.setattr(status_json, "load_opencourse", lambda org: None)
+    monkeypatch.setattr(
+        status_json.sync_faculty, "read_course_config", lambda org, faults: None
+    )
+    (t,) = status_json.gather_course(COURSE).templates
+    assert t.starter_applies is applies
+    assert (t.starter_todo is not None) is applies
+    doc = status_json.render_course_file(_course(templates=[t]), NOW)
+    row = doc["course"]["templates"][0]
+    assert row["starter_applies"] is applies
+    assert (
+        any(x["id"] == "template:quiz:starter" for x in doc["course"]["todo"])
+        is applies
+    )
+    if not t.faults:
+        assert row["state"] == ("todo" if applies else "ready")
+    assert validate(doc, schemas.status_schema()) == []
 
 
 def test_an_operation_with_no_run_is_left_out():
