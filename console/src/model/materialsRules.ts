@@ -19,6 +19,8 @@ export const EMPTY_ENTRY_KIND = rules.empty_entry_kind;
 /** The kinds a folder may be set to (decision 0031 rule 10), in row order: the rest are schedule kinds. */
 export const FOLDER_KINDS: string[] = rules.folder_kinds;
 const ALIASES: Record<string, string> = rules.aliases;
+/** How deep a folder's own name still names its kind (`materials.ALIAS_DEPTH`): the top, and one level down. */
+export const ALIAS_DEPTH: number = rules.alias_depth;
 /** The line a `.releaseignore` carries when somebody looked and chose to withhold nothing. */
 export const REVIEWED_MARK: string = rules.reviewed_mark;
 
@@ -58,10 +60,15 @@ export function readDeclared(text: string | null): Declared | null {
   return { syllabus: syllabus || DEFAULT_SYLLABUS, declared: !!syllabus, kinds };
 }
 
-/** `materials.alias_kind`: the kind a section NAMES (the repo's alias, else a built-in one), or null. */
+/**
+ * `materials.alias_kind`: the kind a section NAMES (the repo's alias, else a built-in one), or
+ * null. A section may be a folder path: an alias names it at any depth, a built-in name only
+ * within `ALIAS_DEPTH` (`students/lectures`).
+ */
 export function aliasKind(section: string, aliases: Record<string, string> = {}): string | null {
-  const key = section.toLowerCase();
-  const found = aliases[key] ?? ALIASES[key];
+  const key = section.replace(/^\/+|\/+$/g, '').toLowerCase();
+  const parts = key.split('/');
+  const found = aliases[key] ?? (parts.length <= ALIAS_DEPTH ? ALIASES[parts[parts.length - 1]] : undefined);
   return found ? known(found) : null;
 }
 

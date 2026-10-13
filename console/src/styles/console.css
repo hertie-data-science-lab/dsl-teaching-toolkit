@@ -988,6 +988,9 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .file-tree .ft-closed, .file-tree .ft-opened { display: inline-flex; }
 .file-tree details[open] > summary .ft-closed, .file-tree details:not([open]) > summary .ft-opened { display: none; }
 .file-tree .ft-out > .ft-name, .file-tree .ft-out > details > summary > .ft-name { color: var(--muted); text-decoration: line-through; }
+.file-tree .ft-kind { margin-left: auto; font-size: 12px; padding: 1px 6px; min-height: 0; }
+/* A suggestion's "!" (Folder kinds with a content kind no folder has): the dotted idle ring, never red. */
+.ex.suggest { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 999px; border: 1.5px dotted var(--idle); color: var(--muted); font-family: var(--font-display); font-weight: 700; font-size: 11px; vertical-align: middle; margin-left: 6px; }
 .pattern-box { position: relative; background: var(--surface); border-radius: 6px; }
 .pattern-box textarea.code, .pattern-box .pattern-mirror { font-family: var(--font-code); font-size: 13px; line-height: 1.5; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .pattern-box textarea.code { position: relative; background: transparent; min-height: 240px; }

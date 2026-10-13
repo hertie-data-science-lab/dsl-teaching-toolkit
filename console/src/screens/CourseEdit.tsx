@@ -12,7 +12,7 @@ import { SchemaForm, fieldErrors } from '../forms/Form';
 import { termRank } from '../model/catalogue';
 import { KIND_LABEL } from '../model/format';
 import { sameHandle } from '../model/people';
-import { ASSETS_KIND, DEFAULT_SYLLABUS, FOLDER_KINDS, MATERIALS_FILE, NOTHING_DECLARED, inferKind, readDeclared, withMark } from '../model/materialsRules';
+import { ASSETS_KIND, DEFAULT_SYLLABUS, FOLDER_KINDS, MATERIALS_FILE, NOTHING_DECLARED, aliasKind, inferKind, readDeclared, withMark } from '../model/materialsRules';
 import { validCourse } from '../model/cascade';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
@@ -527,7 +527,7 @@ const kindRank = (kind: string) => {
   return kind === ASSETS_KIND ? FOLDER_KINDS.length : i < 0 ? FOLDER_KINDS.length - 1 : i;
 };
 
-/** Each top-level folder's kind, and where it came from: `materials.yml`, the folder's name, or the default (supporting files). Ordered by kind (decision 0031 rule 10), then name. */
+/** Each folder's kind, and where it came from: `materials.yml`, the folder's name, or the default (supporting files). Ordered by kind (decision 0031 rule 10), then name. */
 export function folderKinds(folders: string[], kinds: Record<string, string>): { folder: string; kind: string; from: 'declared' | 'name' | 'default' }[] {
   const all = [...new Set([...folders, ...Object.keys(kinds)])];
   return all
@@ -541,6 +541,42 @@ export function folderKinds(folders: string[], kinds: Record<string, string>): {
 }
 
 const FROM_WORD = { declared: 'set here', name: 'from its name', default: 'by default' };
+
+/**
+ * The folders that carry a kind (`status_json.kind_folders`), out of a repo's folder paths: every
+ * released top folder, a folder one level down in a top folder no kind names when its own name
+ * names one, and a folder `materials.yml` declares at any depth. Any other folder is part of the
+ * folder above it.
+ */
+export function kindFolderPaths(dirs: string[], kinds: Record<string, string>): string[] {
+  const parts = (d: string) => d.split('/');
+  return dirs.filter((d) => !parts(d).some((x) => x.startsWith('.')) && !neverMaterial(d) && !denylisted(d)
+    && (!d.includes('/') || !!kinds[d.toLowerCase()] || (parts(d).length === 2 && !aliasKind(parts(d)[0], kinds) && !!aliasKind(d))));
+}
+
+/**
+ * The Folder kinds tree's per-folder picker. A kind folder's first option is the kind its name
+ * gives, or the default; any other folder's is the folder above's ("part of"). Then each folder
+ * kind to declare; a declared one reads "set here", so the detected default is told from a saved
+ * choice, and only a choice is ever written.
+ */
+function KindPicker({ path, declared, kindFolder, onKind }: { path: string; declared?: string; kindFolder: boolean; onKind: (kind: string) => void }) {
+  const k = { folder: path, kind: declared ?? inferKind(path).kind, from: declared ? 'declared' : 'name' };
+  const parent = path.slice(0, path.lastIndexOf('/'));
+  const choices = kindFolder ? kindChoices(path, declared) : [...new Set([...FOLDER_KINDS, ...(declared ? [declared] : [])])];
+  return (
+    <>
+      {declared ? <span class="footnote">{FROM_WORD.declared}</span> : null}
+      <select class="ft-kind" aria-label={`Kind of ${path}`} onChange={(e) => onKind((e.target as HTMLSelectElement).value)}>
+        <option value="" selected={kindFolder ? resetSelected(k) : !declared}>{kindFolder ? resetLabel(path) : `Part of ${parent}/`}</option>
+        {choices.map((x) => <option value={x} selected={declared === x}>{KIND_LABEL[x] ?? x}</option>)}
+      </select>
+    </>
+  );
+}
+
+/** The hint on Folder kinds, also in docs/02-add-materials-to-course.md. */
+export const FOLDER_KINDS_HINT = 'Which folders hold the lectures, labs and readings, so the sites can sort them. Pick any folder, including one inside another; a kind this course does not teach stays unassigned.';
 
 /** The override's "not set here" option: the kind the folder gets by its name, or by default. */
 export function resetLabel(folder: string): string {
@@ -602,9 +638,13 @@ export function MaterialsScreen(p: CourseProps) {
   const [sylSave, runSyl, setSylSave] = useSave(env);
   const [kindSave, runKind, setKindSave] = useSave(env);
   const curKinds = kindsDraft ?? baseKinds;
-  // The top folders a release can copy (`status_json._released_folders`): never-released ones need no kind.
-  const folders = tree.kind === 'ready' ? tree.paths.filter((x) => x.dir && !x.path.includes('/') && !x.path.startsWith('.') && !neverMaterial(x.path) && !denylisted(x.path)).map((x) => x.path) : [];
+  // The folders that carry a kind (`status_json.kind_folders`): never-released ones need none.
+  const folders = tree.kind === 'ready' ? kindFolderPaths(tree.paths.filter((x) => x.dir).map((x) => x.path), curKinds) : [];
   const kinds = folderKinds(folders, curKinds);
+  // Folders a kind is read for without a declaration: the tree's other folders are part of the one above.
+  const kindSet = new Set(tree.kind === 'ready' ? kindFolderPaths(tree.paths.filter((x) => x.dir).map((x) => x.path), {}) : []);
+  // A content kind with no folder (the engine's suggested `kind_folder:<kind>`): a notice, never an error.
+  const missingKinds = (m?.checks ?? []).filter((c) => c.id.startsWith('kind_folder:') && !c.done);
   // The chosen file: the draft, else the declared one, else the default. Choosing the default writes no key.
   const savedSyl = baseSyl.trim() || DEFAULT_SYLLABUS;
   const syllabus = syl ?? savedSyl;
@@ -691,24 +731,13 @@ export function MaterialsScreen(p: CourseProps) {
           ) : <p class="footnote">Needs a semester: the plan is built from its schedule.</p>}
         </section>
         <section class="panel section">
-          <h2>Folder kinds <Hint label="About folder kinds">Each top folder gets a kind: it decides where its files appear on the student console and the public website. A folder named lectures, labs or readings is that kind by default; any other folder is Supporting files: released to students’ GitHub repos but with no page of its own. Set a kind here if you name your folders differently.</Hint></h2>
-          {tree.kind === 'loading' ? <Loading /> : kinds.length ? (
-            <table class="grid kinds">
-              <thead><tr><th>Folder</th><th>Kind, and why</th><th>Change</th></tr></thead>
-              <tbody>
-                {kinds.map((k) => (
-                  <tr>
-                    <td><code>{k.folder}/</code></td>
-                    <td><span class="chip">{KIND_LABEL[k.kind] ?? k.kind}</span> <span class="footnote">{FROM_WORD[k.from]}</span></td>
-                    <td><select aria-label={`Kind of ${k.folder}`} onChange={(e) => setKind(k.folder, (e.target as HTMLSelectElement).value)}>
-                      <option value="" selected={resetSelected(k)}>{resetLabel(k.folder)}</option>
-                      {kindChoices(k.folder, k.from === 'declared' ? k.kind : undefined).map((x) => <option value={x} selected={k.from === 'declared' && k.kind === x}>{KIND_LABEL[x] ?? x}</option>)}
-                    </select></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : <p class="footnote">{tree.kind === 'error' ? 'Could not read the repo’s folders; it is tried again shortly.' : 'No folders yet.'}</p>}
+          <h2>Folder kinds <Hint label="About folder kinds">{FOLDER_KINDS_HINT}</Hint>
+            {missingKinds.length ? <span class="ex suggest" role="img" title={missingKinds.map((c) => c.label).join('. ')} aria-label={missingKinds.map((c) => c.label).join('. ')}>!</span> : null}
+          </h2>
+          {tree.kind === 'loading' ? <Loading /> : tree.kind === 'ready' ? (
+            <PatternTree files={files} patterns={linesOf(ign ?? ignText)} onChange={() => {}} withheldWord="withheld" releasedWord="released to students"
+              control={(path, dir) => (dir && !neverMaterial(path) && !denylisted(path) ? <KindPicker path={path} declared={curKinds[path.toLowerCase()]} kindFolder={kindSet.has(path)} onKind={(kind) => setKind(path, kind)} /> : null)} />
+          ) : <p class="footnote">Could not read the repo’s folders; it is tried again shortly.</p>}
           <SaveBar state={kindSave} onSave={() => void saveMat({ syllabus: baseSyl, kinds: curKinds }, runKind, setKindSave, () => setKindsDraft(null))} small disabled={kindsDraft === null || deepEqual(kindsDraft, baseKinds) || declared === null} file={matRef} />
         </section>
         <section class="panel section">

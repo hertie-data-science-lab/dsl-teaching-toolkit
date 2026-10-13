@@ -13,7 +13,7 @@ import type { Status } from '../src/model/types';
 import { CourseScreen, MaterialsChecklist } from '../src/screens/Course';
 import { materialsReadiness } from '../src/model/readiness';
 import { HomeScreen } from '../src/screens/Home';
-import { MaterialsScreen, WebsiteScreen, folderKinds, kindChoices, resetLabel, writeHolds } from '../src/screens/CourseEdit';
+import { FOLDER_KINDS_HINT, MaterialsScreen, WebsiteScreen, folderKinds, kindChoices, resetLabel, writeHolds } from '../src/screens/CourseEdit';
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { REVIEWED_MARK, withMark } from '../src/model/materialsRules';
@@ -290,14 +290,16 @@ describe('materials settings: syllabus file and folder kinds', () => {
   it('shows the kinds and the declared syllabus, and edits that file', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT, files: withYml })} />);
     const t = text(<MaterialsScreen {...cp({ entry: MAT, files: withYml })} />);
-    expect(t).toContain('quiz/ Exam set here');
-    expect(t).toContain('Tutorials/ Lab from its name');
-    expect(t).toContain('datasets/ Supporting files by default');
+    // A declared kind says so beside its picker; a detected one is the picker's first option.
+    expect(t).toContain('quiz/ set here');
+    expect(t).not.toContain('Tutorials/ set here');
     expect(t).not.toContain('No kind yet');
-    // The ? reads as the maintainer wrote it (decision 0031 rule 10).
-    expect(t).toContain('A folder named lectures, labs or readings is that kind by default; any other folder is Supporting files: released to students’ GitHub repos but with no page of its own.');
-    expect(out).toContain('<table class="grid kinds">');
-    expect(out).toContain('<th>Kind, and why</th>');
+    // The ? reads as the maintainer wrote it: two sentences.
+    expect(t).toContain('Folder kinds ? Which folders hold the lectures, labs and readings, so the sites can sort them. Pick any folder, including one inside another; a kind this course does not teach stays unassigned.');
+    expect(FOLDER_KINDS_HINT.split('. ').length).toBe(2);
+    // Folder kinds and Withheld from students are one tree component, twice.
+    expect(out.match(/<ul class="file-tree">/g)?.length).toBe(2);
+    expect(out).not.toContain('<table class="grid kinds">');
     expect(out).toContain('value="E1282.pdf"');
     expect(out).toContain(`/edit/main/E1282.pdf`);
     expect(out).toContain('<span class="ft-name">Tutorials/</span><span class="chip">Lab</span>');
@@ -329,7 +331,7 @@ describe('materials settings: syllabus file and folder kinds', () => {
     const sel = out.split('aria-label="Kind of datasets">')[1].split('</select>')[0];
     expect(sel).toContain('<option value="assets" selected>Supporting files</option>');
     expect(sel).not.toContain('<option value selected>');
-    expect(text(<MaterialsScreen {...cp({ entry: MAT, files: declared })} />)).toContain('datasets/ Supporting files set here');
+    expect(text(<MaterialsScreen {...cp({ entry: MAT, files: declared })} />)).toContain('datasets/ set here');
   });
   it('names the kind a folder gets by its name, or by default', () => {
     expect(resetLabel('quiz')).toBe('Supporting files (by default)');
