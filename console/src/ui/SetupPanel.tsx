@@ -150,7 +150,7 @@ export function readinessTabs({ items, scope, onCircle, onBack, busy = false }: 
 }
 
 /**
- * The verdict line under a page's head: red ! with the problem count, a grey circle with what
+ * The verdict line under a page’s head: red ! with the problem count, a red ring with what
  * is missing, or a green tick. With `onOpen` its words are a button to the Problems tab: the
  * dashboard's one problem count (decision 0034, amended).
  */
