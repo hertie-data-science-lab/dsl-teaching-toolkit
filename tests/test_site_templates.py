@@ -233,7 +233,7 @@ _OWN_CLASSES = frozenset(
         "file-menu-list",
         "file-menu-lbl",
         "file-menu-h",
-        "file-menu-muted",
+        "file-menu-off",
         "open-in-line",
         "profile-steps",
         "profile-step",
@@ -681,13 +681,65 @@ def test_a_file_menu_is_one_chevron_with_two_headed_sections():
     body = _strip_comments(_templates()["_includes/file_link.html"])
     assert '<summary class="file-chev" title="More ways to open"' in body
     assert '<li class="file-menu-h">Open</li>' in body
+    assert '<li class="file-menu-h">Edit</li>' in body
     script = _strip_comments(_open_in())
-    files = script.split("function decorateFiles(root, me) {")[1].split("\n  }")[0]
-    assert 'head.appendChild(document.createTextNode("Edit"));' in files
-    # Before a profile there is still one Edit item: the way to set one up.
-    assert '"Set up your editor in Profile"' in files
+    # Before a profile the Edit items stay, greyed, each naming the Profile step it needs.
+    assert 'fork: "Set up your fork in "' in script
+    assert 'editor: "Set up your editor in "' in script
     # And the script, not the reader, closes a menu left open.
     assert "wireMenus();" in script
+
+
+_MENU_ITEM = re.compile(r"</svg>(view|GitHub|in browser|VS Code)</span>")
+
+
+def test_every_file_menu_lists_the_same_four_items_in_order():
+    # Decision 13 Oct (D10): a menu of a different length on every row taught a reader
+    # nothing; four fixed items, the missing ones greyed with a reason, does.
+    body = _strip_comments(_templates()["_includes/file_link.html"])
+    menu = body.split('<ul class="file-menu-list">')[1].split("</ul>")[0]
+    # `view` twice - live in the view_url branch, greyed in the other - then one each.
+    assert [m[1] for m in _MENU_ITEM.finditer(menu)] == [
+        "view",
+        "view",
+        "GitHub",
+        "in browser",
+        "VS Code",
+    ]
+    greyed = '<span class="file-menu-lbl" role="link" aria-disabled="true">'
+    off = menu.split('<li class="file-menu-off"')[1:]
+    assert len(off) == 3
+    for item in off:
+        assert greyed in item and "<small>" in item
+        # No href on the item itself - only the Profile link inside its reason has one.
+        assert "href" not in item.split("<small>")[0]
+    assert "<small>Not published on this site</small>" in off[0]
+    for item in off[1:]:
+        assert "Not an editable format" in item
+        assert ">Profile</a>" in item
+    # The Edit pair carries what the script replaces it by.
+    assert 'data-edit="online"' in off[1] and 'data-edit="local"' in off[2]
+
+
+def test_the_script_greys_what_it_cannot_open_with_the_reason():
+    script = _strip_comments(_open_in())
+    files = script.split("function decorateFiles(root, me) {")[1].split("\n  }\n")[0]
+    # It replaces Liquid's greyed pair rather than appending a second Edit section.
+    assert 'list.querySelectorAll("li[data-edit]")' in files
+    assert files.count("offItem(") == 4
+    # The reasons Liquid writes, spelt the same.
+    link = _strip_comments(_templates()["_includes/file_link.html"])
+    for reason in (
+        "Not published on this site",
+        "Not an editable format",
+        "Set up your fork in ",
+        "Set up your editor in ",
+    ):
+        assert f'"{reason}"' in script and reason in link
+    off = script.split("function offItem(")[1].split("\n  }")[0]
+    assert (
+        '"aria-disabled", "true"' in off and "href" not in off.split("if (profile)")[0]
+    )
 
 
 def test_the_updates_box_takes_the_inline_shape_of_the_source_link():
@@ -1330,10 +1382,13 @@ def test_view_is_offered_only_where_the_site_hosts_a_copy():
     # browser draws (html, pdf). Rendered unconditionally it is an item to a 404 on every
     # other row of every site.
     body = _strip_comments(_templates()["_includes/file_link.html"])
-    branches = [m["shown"] for m in _VIEW_BRANCH.finditer(body)]
+    branches = [m["shown"].split("{% else %}")[0] for m in _VIEW_BRANCH.finditer(body)]
     assert branches, "file_link.html does not branch on view_url"
-    view = "</svg>view</span>"
+    # The live item - a link to the hosted copy - only in the branch; without one it is
+    # still listed (every menu has the same four items) but greyed, with no href.
+    view = '<li><a target="_blank" rel="noopener" href="{{ include.view_url }}">'
     assert body.count(view) == sum(b.count(view) for b in branches) == 1
+    assert "</svg>view</span><small>Not published on this site</small>" in body
     # `GitHub` is the opposite: unconditional in the menu, because the file's home on
     # GitHub is worth an item whether or not anything else is. The Updates box's inline
     # shape keeps it conditional - there the name itself goes to GitHub unless a hosted
@@ -1551,7 +1606,11 @@ def test_edit_items_are_offered_only_for_the_repo_the_profile_set_up():
     assert 'data-materials-repo="{{ site.data.materials.repos | first }}"' in body
     files = body.split("function decorateFiles(root, me) {")[1].split("\n  }")[0]
     assert 'var mine = root.getAttribute("data-materials-repo") || "";' in files
-    assert "if (m[2].toLowerCase() !== mine.toLowerCase()) { continue; }" in files
+    assert "m[2].toLowerCase() === mine.toLowerCase()" in files
+    # Greyed with that reason, rather than dropped: every menu lists the same four items.
+    assert ': (ours ? "" : WHY.other);' in files
+    assert 'var local = why ? "" :' in files
+    assert "var online = !why && me.handle" in files
 
 
 def test_the_folder_examples_are_respelt_for_the_readers_platform():

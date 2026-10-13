@@ -241,9 +241,10 @@
 }
 
 /* The chevron beside a file link and its menu - every way to have the file, under two
-   headings: Open (`view`, `GitHub`) written in Liquid (_includes/file_link.html), Edit
-   (`in browser`, the reader's editor) appended by script once the browser holds the profile
-   they need (_includes/open_in.html). The student console draws the same control
+   headings, the same four in every menu: Open (`view`, `GitHub`) written in Liquid
+   (_includes/file_link.html), Edit (`in browser`, the reader's editor) written greyed there
+   and made live by script once the browser holds the profile they need
+   (_includes/open_in.html). The student console draws the same control
    (console/src/styles/open.css `.file-menu`), so the two look alike.
 
    The chevron is small and outlined: a session page carries a dozen file rows and the All
@@ -354,10 +355,22 @@
     text-transform: uppercase;
 }
 
-/* "Set up your editor in Profile": a pointer, not a way to open the file. */
-.file-menu-muted a {
-    color: $grey-color-dark !important;
-    font-style: italic;
+/* An item this file does not have, still listed so every menu reads the same: greyed, not
+   a link, with the reason under it. The reason's own Profile link stays a link. */
+.file-menu-off {
+    display: grid;
+    gap: 1px;
+    padding: 6px 8px;
+    color: $grey-color-dark;
+    cursor: default;
+
+    .file-menu-lbl {
+        opacity: 0.55;
+    }
+
+    small a {
+        color: $brand-color !important;
+    }
 }
 
 /* An assignment page has ONE repo rather than a list of files, so its Edit online and Edit locally
