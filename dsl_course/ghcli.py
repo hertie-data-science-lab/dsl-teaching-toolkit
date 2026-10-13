@@ -431,13 +431,13 @@ def file_target(target: str) -> tuple[str, str]:
 _ORG_ALLOWLIST_ENV = "DSL_ORG_ALLOWLIST"
 
 # The three shapes an owner appears in inside a gh argv: an api path (`repos/<owner>/...`,
-# `orgs/<owner>/...`), a bare `<owner>/<repo>` (which is also what `-R`/`--repo` takes),
+# `orgs/<owner>/...`, or the org itself, `orgs/<owner>`), a bare `<owner>/<repo>` (which is also what `-R`/`--repo` takes),
 # and the `owner=` field of a create-from-template call, whose PATH names the template's
 # org while the field names the org the new repo lands in.
 #
 # Shape-matched rather than positional, because a `--field content=<base64>` value carries
 # slashes too: no owner has an `=`, a space or a colon in it, and flags are skipped.
-_API_OWNER = re.compile(r"^(?:repos|orgs)/([A-Za-z0-9._-]+)/")
+_API_OWNER = re.compile(r"^(?:repos|orgs)/([A-Za-z0-9._-]+)(?:[/?]|$)")
 _NAME_WITH_OWNER = re.compile(r"^([A-Za-z0-9._-]+)/[A-Za-z0-9._-]+$")
 _OWNER_FIELD = re.compile(r"^owner=([A-Za-z0-9._-]+)$")
 _OWNER_NAME = re.compile(r"[A-Za-z0-9._-]+")
