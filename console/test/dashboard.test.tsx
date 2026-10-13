@@ -89,19 +89,19 @@ describe('term weeks', () => {
 });
 
 describe('the header line', () => {
-  it('reads exams and archive; the semester, dates and week are the banner’s', () => {
+  it('leaves the exams and the archive to the Schedule; the semester, dates and week are the banner’s', () => {
     const s = { ...STATUS, semester: { ...STATUS.semester!, archive_date: '2027-01-12' } };
-    expect(headerLine(s, sched, rows, TZ, 2026)).toBe('Exams 22 Oct and 15 Dec. Archive 12 Jan 2027.');
+    expect(headerLine(s, sched, TZ, 2026)).toBe('');
   });
 
   it('says Starts before week 1 only without an end date, and leaves out what is not known', () => {
     const s = { ...STATUS, semester: { ...STATUS.semester!, week: 0, archive_date: null } };
-    expect(headerLine(s, sched, [], TZ, 2026)).toBe('');
+    expect(headerLine(s, sched, TZ, 2026)).toBe('');
     const open = { ...STATUS, semester: { ...STATUS.semester!, week: 0, end: null, archive_date: null } };
-    expect(headerLine(open, null, [], TZ, 2026)).toBe('Starts 7 Sep.');
+    expect(headerLine(open, null, TZ, 2026)).toBe('Starts 7 Sep.');
     // No start date: the year is said against this year.
     const bare = { ...STATUS, semester: { ...STATUS.semester!, start: null, end: null, archive_date: '2027-01-12' } };
-    expect(headerLine(bare, null, [], TZ, 2026)).toBe('Archive 12 Jan 2027.');
+    expect(headerLine(bare, null, TZ, 2026)).toBe('');
   });
 
   it('names a month once', () => {
@@ -324,7 +324,7 @@ describe('the Dashboard and the horizon (decision 0034)', () => {
     expect(fine.querySelector('.verdict')!.className).toBe('verdict ok');
     expect(fine.querySelector('.verdict')!.textContent).toBe('On track: nothing to fix in the next 14 days1 coming up');
     // One-time setup is not in the verdict or the lede: the tick on the Setup tab says it.
-    expect(fine.querySelector('.lede')!.textContent).not.toContain('Setup complete');
+    expect(fine.querySelector('.lede')?.textContent ?? '').not.toContain('Setup complete');
     expect(tabCount(fine, 'Setup')).toBe('✓');
   });
 

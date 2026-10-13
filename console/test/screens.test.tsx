@@ -143,7 +143,8 @@ describe('S4 cohort overview', () => {
   it('leads with the header, term strip, problems and this week; the assignments are on their tab', () => {
     expect(html(<CohortScreen {...props()} />)).not.toContain('class="crumbs"'); // the semester banner replaces them
     expect(t).toContain('Dashboard ? What this semester has planned');
-    expect(t).toContain('Exam 22 Oct. Archive 31 Jan 2027.');
+    expect(t).not.toContain('Archive 31 Jan 2027.');
+    expect(t).not.toContain('Exam 22 Oct.');
     expect(t).not.toContain('Week 3 of 15');
     // The verdict replaces the setup sentence, and is the page's one problem count (no badge in the head).
     expect(t).toContain('Needs fixing: 1 problem in the next 7 days 1 coming up');

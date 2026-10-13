@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'preact/hooks';
 import {
-  NOT_READY_YET, TYPE_CLASS, TYPE_LABEL, addDays, ago, daysBetween, fmtDate, fmtDay, fmtDays, fmtShort, fmtTime, fmtWhen, markWord, plural, releaseIdent,
+  NOT_READY_YET, TYPE_CLASS, TYPE_LABEL, addDays, ago, daysBetween, fmtDate, fmtDay, fmtShort, fmtTime, fmtWhen, markWord, plural, releaseIdent,
 } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekStart, type Row, type Schedule, type Term, type WeekGroup, type WeekKey, termOf } from '../model/schedule';
 import type { Assignment, Problem, Status } from '../model/types';
@@ -41,17 +41,15 @@ export function asgSummary(a: Assignment, tz: string, year: number): string {
 
 /**
  * The Dashboard's line under its title: what the course banner does not say (its name, dates
- * and week are there). The start while the semester has no end date yet, the exams, the archive.
+ * and week are there). The start while the semester has no end date yet; the exams and the
+ * archive are the Schedule's and the agenda's.
  */
-export function headerLine(status: Status, sched: Schedule | null, rows: Row[], tz: string, thisYear: number): string {
+export function headerLine(status: Status, sched: Schedule | null, tz: string, thisYear: number): string {
   const sem = status.semester;
   const start = sem?.start ?? sched?.start ?? null, end = sem?.end ?? sched?.end ?? null;
   const year = start ? Number(start.slice(0, 4)) : thisYear;
   const out: string[] = [];
   if (sem?.week === 0 && start && !end) out.push(`Starts ${fmtDate(start, tz, year)}.`);
-  const exams = rows.filter((r) => r.type === 'exam' && r.when).map((r) => r.when!);
-  if (exams.length) out.push(`${exams.length > 1 ? 'Exams' : 'Exam'} ${fmtDays(exams, tz, year)}.`);
-  if (sem?.archive_date) out.push(`Archive ${fmtDate(sem.archive_date, tz, year)}.`);
   return out.join(' ');
 }
 
@@ -464,9 +462,7 @@ function Overview(p: ReadyProps) {
       <div class="page-head">
         <div>
           <h2 class="h1">Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h2>
-          <p class="lede">
-            <span>{headerLine(status, sched, rows, tz, year)}</span>
-          </p>
+          {headerLine(status, sched, tz, year) ? <p class="lede"><span>{headerLine(status, sched, tz, year)}</span></p> : null}
         </div>
         <div class="actions"><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
       </div>
