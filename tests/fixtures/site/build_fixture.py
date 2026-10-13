@@ -95,7 +95,9 @@ FORMING_SCHEDULE = schedule.Schedule(
 TREE = (
     "SYLLABUS.md",
     "labs/01_week-1/Lab_Session_1.ipynb",
+    "lectures/01_week-1/Deck.PPTX",
     "lectures/01_week-1/demo.py",
+    "lectures/01_week-1/lab.pdf-notes/README.md",
     "lectures/01_week-1/handouts/extra/further-notes.pdf",
     "lectures/01_week-1/slides.html",
     "lectures/01_week-1/slides_files/figure/plot.svg",

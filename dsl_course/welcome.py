@@ -146,11 +146,19 @@ def open_formations(lock_text: str) -> dict[str, str]:
     `open` is written only for a self-select group assignment inside its window, so this
     needs no second opinion about the shape either: every other assignment is one the form
     would refuse anyway, and offering it in the dropdown would be inviting a student to be
-    refused."""
+    refused. A self-select entry with no window key at all (a lock from a toolkit older
+    than the window) is open, as the workflow reads it."""
+
+    def is_open(entry: Mapping[str, str]) -> bool:
+        window = entry.get("team_formation_window")
+        if window is None:
+            return entry.get("team_formation", "").lower() == "self_select"
+        return window.lower() == "open"
+
     return {
         key: entry.get("team_formation_page", "")
         for key, entry in sorted(parse_team_lock(lock_text).items())
-        if entry.get("team_formation_window", "").lower() == "open"
+        if is_open(entry)
     }
 
 
@@ -187,10 +195,14 @@ def _team_list_header(opened: Mapping[str, str]) -> str:
     )
 
 
-# What a semester whose lock says no team assignment is open gets in place of the field.
+# What a semester whose lock says no team assignment is open gets in place of the field:
+# the Assignment dropdown's one option, and the sentence under its label. The option is
+# what the issue body carries, and the workflow (`templates/join/team-formation.yml`)
+# answers it with that sentence.
 NO_TEAM_ASSIGNMENT_OPEN = (
     "This semester has no team assignment open right now, so this form is not needed."
 )
+NO_TEAM_ASSIGNMENT_OPTION = "No team assignment is open right now"
 
 
 def join_team_form(opened: Mapping[str, str] | None) -> str:
@@ -201,10 +213,11 @@ def join_team_form(opened: Mapping[str, str] | None) -> str:
     a guess, and a guess that misses is answered by a workflow comment some minutes later,
     which is the slowest possible way to learn you typed a dash wrong.
 
-    With none (a lock read, nothing open), the field becomes a markdown line saying the
-    form is not needed: a free-text field there invites a slug the workflow refuses. The
-    Action and Team inputs stay, so the form still renders (GitHub refuses a form with no
-    input, as it refuses a dropdown with no option).
+    With none (a lock read, nothing open), the dropdown offers one option saying nothing is
+    open, under a line saying the form is not needed: a free-text field there invites a
+    slug the workflow refuses, and a markdown block is not submitted, so an issue filed
+    from it would carry no Assignment at all. The workflow answers that option with the
+    same sentence.
 
     Unread (None), the template's own free-text field is returned untouched: a lock that
     could not be read says nothing about what is open, and the free-text form works in
@@ -228,23 +241,21 @@ def join_team_form(opened: Mapping[str, str] | None) -> str:
         "  # `semester-config/.system/assignments.lock.yml`: the assignments open for team\n"
         "  # formation right now. Edits between these markers are overwritten.\n"
     )
-    if not opened:
-        block = (
-            f"{head}"
-            "  - type: markdown\n"
-            "    attributes:\n"
-            f"      value: {NO_TEAM_ASSIGNMENT_OPEN}\n"
-            f"  {ASSIGNMENT_FIELD_END}"
-        )
-        return form[:start] + block + form[end + len(ASSIGNMENT_FIELD_END) :]
-    options = "\n".join(f"        - {slug}" for slug in opened)
+    description = (
+        "The group assignment you are forming a team for."
+        if opened
+        else NO_TEAM_ASSIGNMENT_OPEN
+    )
+    options = "\n".join(
+        f"        - {slug}" for slug in (opened or [NO_TEAM_ASSIGNMENT_OPTION])
+    )
     block = (
         f"{head}"
         "  - type: dropdown\n"
         "    id: assignment\n"
         "    attributes:\n"
         "      label: Assignment\n"
-        "      description: The group assignment you are forming a team for.\n"
+        f"      description: {description}\n"
         "      options:\n"
         f"{options}\n"
         "    validations:\n"

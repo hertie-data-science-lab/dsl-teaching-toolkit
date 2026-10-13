@@ -330,8 +330,9 @@
         }
     }
 
-    /* A row: icon and label take the width, the status sits at the right. */
-    a,
+    /* A row: icon and label take the width, the status sits at the right. The row's own
+       link only (`> li > a`): a greyed row's status carries an inline Profile link. */
+    > li > a,
     > .file-menu-off {
         display: flex !important;
         align-items: center;
@@ -347,7 +348,7 @@
         background: #ececec !important;
     }
 
-    a {
+    > li > a {
         color: inherit !important;
         text-decoration: none !important;
 

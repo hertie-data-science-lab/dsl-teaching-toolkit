@@ -734,6 +734,15 @@ def test_every_file_menu_lists_its_rows_in_order():
     assert 'data-edit="{% if forloop.first %}online{% else %}local{% endif %}"' in item
 
 
+def test_the_menu_row_rule_leaves_the_reasons_profile_link_inline():
+    # The row rule is `display: flex !important` with padding: on every `a` in the menu it
+    # also caught the Profile link inside a greyed row's reason and broke the one-line status.
+    scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
+    menu = scss.split(".file-menu-list {")[1].split("\n}\n")[0]
+    assert "> li > a,\n    > .file-menu-off {" in menu
+    assert not re.search(r"^    a[ ,{]", menu, re.MULTILINE)
+
+
 def test_the_script_greys_what_it_cannot_open_with_the_reason():
     script = _strip_comments(_open_in())
     files = script.split("function decorateFiles(root, me) {")[1].split("\n  }\n")[0]

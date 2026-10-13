@@ -226,6 +226,16 @@ jobs:
             echo "::error::slides.pdf's Edit rows are not both greyed as not an editable format"
             missing=1
           fi
+          # The format is the name's last extension, any case: `Deck.PPTX` is greyed, and a
+          # `.pdf` in a folder's name (`lab.pdf-notes/README.md`) is not a pdf.
+          if [ "$(menu 'Deck\.PPTX' | head -1 | grep -o 'data-edit-why="format"' | wc -l)" -ne 2 ]; then
+            echo "::error::Deck.PPTX's Edit rows are not greyed as not an editable format"
+            missing=1
+          fi
+          if ! grep -rho 'lab\.pdf-notes/README\.md">.*' . | sed 's#</details>.*##' | head -1 | grep -q 'data-edit-why="" data-edit="online"'; then
+            echo "::error::lab.pdf-notes/README.md is greyed as not an editable format"
+            missing=1
+          fi
           if ! menu 'Lab_Session_1\.ipynb' | head -1 | grep -q 'data-edit="online"><span class="file-menu-lbl" role="link" aria-disabled="true">.*<small>set up in <a[^>]*href="[^"]*/profile/">Profile</a></small>.*data-edit="local"><span class="file-menu-lbl" role="link" aria-disabled="true">.*<small>set up in <a[^>]*href="[^"]*/profile/">Profile</a></small>'; then
             echo "::error::Lab_Session_1.ipynb's Edit rows are not there for the script to enable"
             missing=1

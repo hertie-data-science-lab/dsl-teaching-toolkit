@@ -18,7 +18,7 @@ body:
   # dsl:assignment-field:start - this semester's open assignments are spliced in here as a
   # dropdown by dsl_course.welcome.join_team_form; edits between these markers are
   # overwritten on the next refresh. A semester with no assignment open for team formation
-  # gets a line saying the form is not needed; the free-text field below is what one whose
+  # gets a one-option dropdown saying nothing is open; the free-text field below is what one whose
   # lock could not be read receives.
   - type: input
     id: assignment
