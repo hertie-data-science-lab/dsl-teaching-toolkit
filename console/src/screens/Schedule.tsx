@@ -177,7 +177,7 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
       </div>
       <NumberField d={d} set={set as Setter<ReleaseDraft | AssignmentDraft>} errors={errors} kind={d.type || inferred} />
       <div class="row-2">
-        <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: `Automation releases at this time, ${tz}.` }} />
+        <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: d.deploys.length ? `Automation releases at this time, ${tz}.` : 'Leave the date empty and the student site shows TBC.' }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time' }} />
       </div>
       <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', 'Shown to students under the title.')} />
@@ -225,7 +225,7 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
             </div>
           );
         })}
-        {d.deploys.length ? null : <p class="why">Nothing is released for this entry; its row still shows on the student site.</p>}
+        {d.deploys.length ? null : <p class="why">Nothing to release: a session of its own (a second lab group, say), saved under events. Its row still shows on the student site, without files.</p>}
         <div><button class="btn small quiet" type="button" onClick={() => set({ deploys: [...d.deploys, blankDeploy(repos[0] ?? '')] })}>{d.deploys.length ? 'Add another' : 'Add what to release'}</button></div>
       </div>
       {d.id ? <a class="textlink" href={`#release-${d.id}`}>Open release details</a> : null}
@@ -413,7 +413,7 @@ function KindHelp() {
   return (
     <Hint label="About the kinds of entry" doc="07-schedule-releases.md">
       <span class="kind-help">
-        <span><b>Lecture, Lab, Readings</b>: a session’s materials. The student site shows a dated row of that kind, linking the files once they are out. At the release time, automation copies the files you name from the course repo into the semester’s materials.</span>
+        <span><b>Lecture, Lab, Readings</b>: a session’s materials. The student site shows a dated row of that kind, linking the files once they are out. At the release time, automation copies the files you name from the course repo into the semester’s materials. With nothing to release (a second lab group), the row shows without files.</span>
         <span><b>Assignment</b>: work students hand in. The site shows its hand out and due date and gives it a page. At the hand out, automation creates the repos students work in from the template (none when work is handed in outside GitHub); it collects at the late cutoff, and returns marks at their return date or when you press Return marks.</span>
         <span><b>Exam</b>: a dated row on the student site and in the calendar. Nothing is copied or collected.</span>
         <span><b>Event</b>: any other dated row, such as a guest talk or a reading week. Nothing is copied or collected.</span>

@@ -110,7 +110,7 @@
 
 # events:                           # DISPLAY-ONLY calendar rows - nothing deploys
 #   midterm-exam:
-#     kind: exam                    # OPTIONAL - default: special_event. exam | special_event; `exam` colours the row as an exam
+#     kind: exam                    # OPTIONAL - default: special_event. exam | special_event | a release kind (lab, ...): a session with no files
 #     title: Midterm exam           # OPTIONAL - default: prettified label
 #     details:                      # OPTIONAL - what the row's Details column says (the room, the format, what to bring). NO default: with none it says nothing
 #     show_on_site: true            # OPTIONAL - default: true. false keeps the row in this file and off the site

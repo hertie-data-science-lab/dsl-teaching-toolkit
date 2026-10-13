@@ -343,6 +343,9 @@
             },
             "type": "array"
           },
+          "no_materials": {
+            "type": "boolean"
+          },
           "off_schedule": {
             "type": "boolean"
           },
@@ -428,7 +431,8 @@
           "readings",
           "reading_list",
           "readings_pending",
-          "tabs"
+          "tabs",
+          "no_materials"
         ],
         "type": "object"
       },

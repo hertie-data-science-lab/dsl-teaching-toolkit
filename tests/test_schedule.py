@@ -1587,6 +1587,65 @@ def test_an_unknown_event_type_is_flagged_like_an_unknown_assignment_type():
     assert "'exma'" in line and "not an exam" in line
 
 
+def test_an_event_takes_any_session_kind_and_a_number():
+    sched = parse(
+        {
+            "events": {
+                "lab-01-group-2": {
+                    "kind": "Lab",
+                    "number": 1,
+                    "event_datetime": "2026-09-17T18:00",
+                },
+                "lecture_04": {"kind": "lecture", "event_datetime": "tbc"},
+                "mid-term": {"kind": "exam", "event_datetime": "2026-11-03"},
+                "clinic": {"event_datetime": "2026-10-14"},
+            }
+        }
+    )
+    assert not sched.dropped
+    by = {e.label: e for e in sched.events}
+    assert (by["lab-01-group-2"].kind, by["lab-01-group-2"].number) == ("lab", 1)
+    # No `number:`: the label's own, as on a release (`own_number`).
+    assert by["lecture_04"].number is None
+    assert schedule.own_number(None, "lecture_04") == 4
+    assert by["lecture_04"].when is None and by["lecture_04"].tbc
+    # Exams and special events are what they were.
+    assert by["mid-term"].kind == "exam" and by["clinic"].kind == "special_event"
+    assert {k for k, e in by.items() if schedule.is_session(e)} == {
+        "lab-01-group-2",
+        "lecture_04",
+    }
+
+
+@pytest.mark.parametrize("kind", ["assets", "assignment", "term", "lab-group"])
+def test_an_event_kind_that_is_no_row_still_shows_as_a_special_event(kind):
+    sched = parse({"events": {"x": {"kind": kind, "event_datetime": "2026-11-03"}}})
+    assert sched.events[0].kind == "special_event"
+    (line,) = sched.dropped
+    assert line.startswith("events.x.kind:")
+
+
+def test_an_unusable_event_number_is_flagged_and_falls_back_to_the_label():
+    sched = parse(
+        {"events": {"lab_2": {"kind": "lab", "number": "two", "event_datetime": "tbc"}}}
+    )
+    assert sched.events[0].number is None
+    (line,) = sched.dropped
+    assert line.startswith("events.lab_2.number:")
+
+
+def test_validate_counts_the_session_events():
+    sched = parse(
+        {
+            "events": {
+                "lab-1-b": {"kind": "lab", "number": 1, "event_datetime": "tbc"},
+                "exam": {"kind": "exam", "event_datetime": "2026-11-03"},
+            }
+        }
+    )
+    assert "| 2 event(s), 1 of them session(s)" in schedule._validate_report(sched, "x")
+
+
 def test_an_absent_optional_value_is_never_flagged():
     # Omitting handout/grading/deploy/solution is the documented way to take their
     # defaults - only a value that IS there and cannot be read is a fault.

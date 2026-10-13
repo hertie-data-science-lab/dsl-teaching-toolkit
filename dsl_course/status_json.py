@@ -1247,8 +1247,9 @@ ScheduledMoment = tuple[
 def schedule_moments(sched: schedule.Schedule) -> list[ScheduledMoment]:
     """Every dated moment of the schedule, in plan order, as `(when, what, key, entry)`: a
     release (`release`, and `deploy` for each copy's own moment), an assignment's
-    `hand_out`, `due` and late `cutoff`, an `exam` or `event`, and the `archive`. A `tbc`
-    entry has none. `this_week` lists some of them; the empty-week check counts them all."""
+    `hand_out`, `due` and late `cutoff`, an `exam` or `event` (an `events:` session: its
+    kind, `lab`), and the `archive`. A `tbc` entry has none. `this_week` lists some of
+    them; the empty-week check counts them all."""
     out: list = []
     for r in sched.releases:
         out.append((r.when, "release", r.label, r))
@@ -1260,7 +1261,9 @@ def schedule_moments(sched: schedule.Schedule) -> list[ScheduledMoment]:
             (schedule.grading_cutoff_datetime(sched, slug), "cutoff", slug, a),
         ]
     for e in sched.events:
-        out.append((e.when, "exam" if e.kind == "exam" else "event", e.label, e))
+        out.append(
+            (e.when, "event" if e.kind == "special_event" else e.kind, e.label, e)
+        )
     if sched.archive:
         out.append((sched.archive.when, "archive", "", sched.archive))
     return [m for m in out if m[0] is not None]
@@ -1275,10 +1278,10 @@ def empty_week_problems(
 
     - `empty_week:<monday>`: nothing dated in the week at all - and then only that;
     - else `empty_week:<monday>:<kind>`: no release of a weekly kind (lecture, lab,
-      readings) the semester runs weekly - one with a dated release in at least half
-      (rounded up) of the term's planned weeks, those with anything dated in them, so a
-      course without readings, or with one further-readings entry, is never told it lacks
-      them. A hand-out, a due date or an exam is no lecture.
+      readings) the semester runs weekly - one with a dated release (or `events:`
+      session) in at least half (rounded up) of the term's planned weeks, those with
+      anything dated in them, so a course without readings, or with one further-readings
+      entry, is never told it lacks them. A hand-out, a due date or an exam is no lecture.
 
     The id names the Monday of the week's first day. Each problem carries its card word
     (`label`) and `aside: true` - a gap is what the course can set aside. A week already
@@ -1292,13 +1295,11 @@ def empty_week_problems(
     today = now.astimezone(tz).date()
     days = {_local_day(when, tz) for when, *_ in schedule_moments(sched)}
     aliases = lambda repo: facts.aliases.get(repo, {})
-    kinds = [(r, entry_kind(r, aliases)[0]) for r in sched.releases]
+    # A session of the kind with nothing to ship (an `events:` lab) counts as one.
+    kinds = [(r.when, entry_kind(r, aliases)[0]) for r in sched.releases]
+    kinds += [(e.when, e.kind) for e in sched.events if schedule.is_session(e)]
     kind_days = {
-        k: {
-            _local_day(r.when, tz)
-            for r, kind in kinds
-            if kind == k and r.when is not None
-        }
+        k: {_local_day(when, tz) for when, kind in kinds if kind == k and when}
         for k in _WEEKLY_KINDS
     }
     _, weeks = semester_weeks(start, end, today)
@@ -2126,8 +2127,9 @@ def this_week(
     now: datetime,
 ) -> list[dict]:
     """What happens from the start of today to the same moment seven days on, in the
-    semester's zone: releases, hand-outs, due dates and events. The start is included and the
-    end is not, so a moment belongs to exactly one week."""
+    semester's zone: releases, hand-outs, due dates and events (an `events:` session under
+    its own kind, `lab`). The start is included and the end is not, so a moment belongs
+    to exactly one week."""
     tz = ZoneInfo(sched.timezone)
     start = _local_midnight(now, tz)
     end = start + timedelta(days=7)
@@ -2162,6 +2164,11 @@ def this_week(
         elif what in ("hand_out", "due"):
             row = by_slug.get(key, {})
             add(when, what, key, row.get("title", key), row.get("state", "declared"))
+        elif isinstance(entry, schedule.Event) and schedule.is_session(entry):
+            # A session with nothing to ship (`events:`, kind `lab`): its kind and number.
+            n = schedule.own_number(entry.number, key)
+            label = policy.kind_label(entry.kind)
+            add(when, what, key, entry.title or f"{label} {n or ''}".strip(), "planned")
         elif what in ("exam", "event"):
             add(when, what, key, entry.title, "planned")
     return [row for _, row in sorted(items, key=lambda p: p[0])]

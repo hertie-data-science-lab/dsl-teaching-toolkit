@@ -35,6 +35,8 @@ export interface ScheduleRow {
   assignment?: string;
   /** False for a session whose materials are not out yet. */
   released: boolean;
+  /** A session with nothing to ship (an `events:` lab, the site's `no_materials`): no files, never pending, never news. Absent from older engines: false. */
+  noMaterials?: boolean;
   /** Released files: `path` within `repo` when they live in a materials repo the console can open. */
   links: FileLink[];
   /** The date is provisional ("TBC"); the row still happens when it says. */
@@ -362,6 +364,7 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     details: str(fm.details),
     allDay: fm.hide_time === true,
     released: fm.unreleased !== true,
+    noMaterials: fm.no_materials === true,
     links: [] as FileLink[],
     tbc: fm.tbc === true,
     dateless: fm.dateless === true,
@@ -551,6 +554,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
       details: str(r.details),
       assignment: r.assignment ? str(r.assignment) : undefined,
       released: r.released === true,
+      noMaterials: r.no_materials === true,
       links,
       tbc: r.tbc === true,
       dateless: r.dateless === true,

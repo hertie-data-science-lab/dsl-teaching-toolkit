@@ -13,7 +13,7 @@ rest of the seed-once half from `templates/site-seed/`. Only the THEME's stand-i
 not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
-lecture, an unreleased one, a lab, a silent readings row with its reading list inlined, a
+lecture, an unreleased one, a lab, a second lab group with nothing to ship, a silent readings row with its reading list inlined, a
 drop-in whose one copy is a single file, a silent syllabus copy that raises no row, a
 handed-out assignment with a declared `details:`, a pending one, one handed in off GitHub, one handed in off GitHub
 that is not out yet, one whose repos are public, one handed into a shared drop box, one
@@ -321,18 +321,32 @@ SCHEDULE = schedule.Schedule(
         # never in the Updates box.
         _release("lab-3", None, "labs/03_week-3", title="Attention lab"),
     ],
+    # A second lab group with nothing to ship: a "Lab 1" row of its own (the release's
+    # title), no files, never in the Updates box.
+    events=[
+        schedule.Event(
+            "lab-1-group-2",
+            "",
+            datetime(2026, 9, 10, 18, 0, tzinfo=BERLIN),
+            "lab",
+            details="Group 2, room 2.32.",
+            number=1,
+        )
+    ],
 )
 
 
 def _lectures(hosted: site_repo.Hosted) -> tuple[dict[str, str], list[str]]:
     """The `_lectures` collection, through the sync's own row code, and the kinds it has."""
+    planned = schedule_plan.planned_rows(SCHEDULE)
     return site._site_rows(
         SEMESTER_ORG,
-        schedule_plan.planned_rows(SCHEDULE),
+        planned,
         frozenset(),
         frozenset({MATERIALS}),
         schedule_plan._no_aliases,
         hosted,
+        schedule_plan.session_rows(SCHEDULE, planned),
     )
 
 

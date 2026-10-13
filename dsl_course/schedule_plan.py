@@ -1,8 +1,9 @@
 """Interpret a parsed `schedule.Schedule` into the rows a site or syllabus shows.
 
-A row is a `releases:` entry: its date, its kind, its name and the copies it makes. Rows
-come in date order and nothing is inferred from folder names beyond one fallback - an entry
-that declares no `kind` takes it from the section its first copy lands in
+A row is a `releases:` entry: its date, its kind, its name and the copies it makes (or an
+`events:` entry of a session kind, which makes none: `session_rows`). Rows come in date
+order and nothing is inferred from folder names beyond one fallback - an entry that
+declares no `kind` takes it from the section its first copy lands in
 (`materials.infer_kind`). An `NN_` prefix on a folder means nothing here. Pure: nothing
 touches GitHub or renders anything - `site` turns rows into pages, `syllabus` into a table.
 """
@@ -185,6 +186,51 @@ def term_end(sched: schedule.Schedule, dated: list[datetime]) -> datetime:
     if dated:
         return max(dated)
     return datetime.combine(sched.semester_start or date.today(), time(9, 0), tzinfo=tz)
+
+
+def session_rows(sched: schedule.Schedule, rows: list[PlannedRow]) -> list[PlannedRow]:
+    """A row per shown `events:` entry of a session kind (`schedule.is_session`): a session
+    with nothing to ship (a lab's second group). Numbered as a release (`own_number`); its
+    title is its own, else that of the shown release `rows` holds of the same kind and
+    number. An undated one sorts after the last dated row of its kind, as in
+    `planned_rows`. No copies: the site never marks it unreleased nor announces it."""
+    tz = ZoneInfo(sched.timezone)
+    titles: dict[tuple[str, int], str] = {}
+    for r in rows:
+        if r.shown and r.subtitle and (n := own_number(r.number, r.key)):
+            titles.setdefault((r.kind, n), r.subtitle)
+    events = [e for e in sched.events if e.show_on_site and schedule.is_session(e)]
+    last: dict[str, datetime] = {}
+    for r in rows:
+        if not r.undated:
+            last[r.kind] = max(last.get(r.kind, r.sort_at), r.sort_at)
+    for e in events:
+        if e.when is not None:
+            at = schedule._instant(e.when, tz)
+            last[e.kind] = max(last.get(e.kind, at), at)
+    end = term_end(sched, list(last.values()))
+    out, taken = [], {}
+    for e in events:
+        n = own_number(e.number, e.label)
+        if e.when is None:
+            taken[e.kind] = taken.get(e.kind, 0) + 1
+            sort_at = last.get(e.kind, end) + timedelta(minutes=taken[e.kind])
+        else:
+            sort_at = e.when
+        out.append(
+            PlannedRow(
+                key=e.label,
+                kind=e.kind,
+                when=e.when,
+                sort_at=sort_at,
+                tbc=e.tbc,
+                undated=e.when is None,
+                subtitle=e.title or (titles.get((e.kind, n), "") if n else ""),
+                details=e.details,
+                number=e.number,
+            )
+        )
+    return out
 
 
 @dataclass

@@ -140,10 +140,19 @@
           },
           "kind": {
             "enum": [
+              "special_event",
+              "lecture",
+              "lab",
+              "readings",
               "exam",
-              "special_event"
+              "drop-in",
+              "other"
             ],
             "type": "string"
+          },
+          "number": {
+            "minimum": 1,
+            "type": "integer"
           },
           "show_on_site": {
             "type": [

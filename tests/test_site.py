@@ -3249,3 +3249,43 @@ def test_a_repo_no_longer_released_into_loses_its_copies(
     )
     assert served == ["materials/lectures/01_a/slides.html"]
     assert not stale.parent.exists()
+
+
+# ---------------------------------------------------- sessions with nothing to ship
+
+
+def test_a_session_event_is_a_row_of_its_kind_with_no_files(monkeypatch, tmp_path):
+    # Two lab groups, one handout: the release is group 1, an `events:` lab is group 2.
+    # It is "Lab 1" with the release's title, on the Labs tab, never "not yet released"
+    # and never news; an undated one is a TBC row; a lecture with no release still gets
+    # its Lectures tab. Exams stay `_events`.
+    sched = Schedule(
+        releases=[
+            Release("lab-1", _at(9, 2), [_copy("labs/01_intro")], title="Intro"),
+        ],
+        events=[
+            Event("lab-1-group-2", "", _at(9, 3), "lab", details="Group 2.", number=1),
+            Event("lab_02", "Trees", None, "lab", tbc=True),
+            Event("guest-1", "Guest talk", _at(9, 4), "lecture"),
+            Event("mid-term", "MidTerm", date(2026, 11, 3), "exam"),
+        ],
+    )
+    plan = _plan(monkeypatch, tmp_path, sched)
+    rows = _rows(plan)
+    sessions = {name: r for name, r in rows.items() if r.get("no_materials")}
+    assert set(sessions) == {"lab-01-lab-1-group-2.md", "lab-02.md", "session-01.md"}
+    group = sessions["lab-01-lab-1-group-2.md"]
+    assert (group["title"], group["subtitle"]) == ("Lab 1", "Intro")
+    assert group["details"] == "Group 2." and group["tabs"] == ["lab"]
+    assert "unreleased" not in group and not group.get("links")
+    assert str(group["date"]).startswith("2026-09-03")
+    tbc = sessions["lab-02.md"]
+    assert (tbc["title"], tbc["subtitle"]) == ("Lab 2", "Trees")
+    assert tbc["dateless"] is True and "date" not in tbc
+    assert sessions["session-01.md"]["title"] == "Lecture 1"
+    # The release's own row is untouched: still waiting for its files.
+    assert rows["lab-01.md"]["unreleased"] is True
+    assert "/lectures/" in plan.files["_data/nav.yml"]
+    events = plan.collections["_events"]
+    assert any("MidTerm" in text for text in events.values())
+    assert not any("lab-1-group-2" in name or "guest" in name for name in events)
