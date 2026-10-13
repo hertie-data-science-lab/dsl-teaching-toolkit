@@ -205,22 +205,29 @@ export const PROBLEM_AREA: Record<string, string> = {
   C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Course materials', C5: 'Template', C6: 'Public website',
 };
 
+const NOTHING_TO_RELEASE_ID = 'nothing_to_release:';
+
+/** Whether a set-aside id is a gap the course sets aside as intentional: a gap in a week, or a release with nothing to release. */
+export const isIntentionalGap = (id: string) => id.startsWith('empty_week:') || id.startsWith(NOTHING_TO_RELEASE_ID);
+
+const GAP_ID = /^empty_week:(\d{4})-(\d{2})-(\d{2})(?::(\w+))?$/;
+
+/** "week of 20 Oct" from a week's gap id (`empty_week:2026-10-20[:<kind>]`): the card's text says only "this week". Null for any other id. */
+export function gapWeek(id: string): string | null {
+  const m = GAP_ID.exec(id);
+  return m ? `week of ${+m[3]} ${MON[+m[2] - 1]}` : null;
+}
+
 /**
- * Problem kinds the console names itself: the card's bold word, the screen that fixes it, and
- * whether it can be set aside (decision 0032; the id goes in the course's `set_aside:`).
+ * "Empty week of 20 Oct" from `empty_week:2026-10-20`, "Missing lab, week of 20 Oct" from
+ * `empty_week:2026-10-20:lab`; null for any other id. For the Set aside list, whose ids no
+ * longer have a problem in the status to carry the engine's `label`.
  */
-export const PROBLEM_KIND: Record<string, { label: string; screen: string; aside?: boolean }> = {
-  EMPTY_WEEK: { label: 'Empty week', screen: 'schedule', aside: true },
-};
-
-/** Whether a problem can be set aside: today only an empty week (`empty_week:<monday>`). */
-export const asideable = (p: { kind?: string }) => !!(p.kind && PROBLEM_KIND[p.kind]?.aside);
-
-/** "Empty week of 20 Oct" from a set-aside id `empty_week:2026-10-20`; null for any other id. */
 export function emptyWeekLabel(id: string): string | null {
-  const m = /^empty_week:(\d{4})-(\d{2})-(\d{2})$/.exec(id);
-  if (!m) return null;
-  return `Empty week of ${+m[3]} ${'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[+m[2] - 1]}`;
+  const week = gapWeek(id);
+  if (!week) return null;
+  const kind = GAP_ID.exec(id)![4];
+  return kind ? `Missing ${kind}, ${week}` : `Empty ${week}`;
 }
 
 /** The engine's `late_window` keeps its name; the console says marking from the due date (decision 0037). */
@@ -352,4 +359,10 @@ function list(lines: string[]): string {
 /** As markdown does: a single newline is a space; a line ending in two spaces breaks. */
 function para(lines: string[]): string {
   return `<p>${inline(lines.map((l, i) => (i === lines.length - 1 ? l : / {2,}$/.test(l) ? `${l.trimEnd()}<br>` : `${l.trimEnd()} `)).join(''))}</p>`;
+}
+
+/** A set-aside gap's name from its id alone: `emptyWeekLabel`'s, or "Nothing to release, lecture-9" from `nothing_to_release:lecture-9`; null for any other id. */
+export function gapLabel(id: string): string | null {
+  if (id.startsWith(NOTHING_TO_RELEASE_ID)) return `Nothing to release, ${id.slice(NOTHING_TO_RELEASE_ID.length)}`;
+  return emptyWeekLabel(id);
 }

@@ -60,6 +60,9 @@ export function starterTier(): Tiers[string] {
   };
 }
 
+/** Whether the form hands out a starter, as the engine reads the saved file (`hands_out_starter`): not with `none` among its formats, nor handed in off GitHub. */
+export const handsOutStarter = (v: Values) => !((v.formats as string[] | undefined) ?? []).includes('none') && v.submit_via !== 'external';
+
 const bool = (v: unknown) => (v === true ? 'true' : v === false ? 'false' : v == null ? undefined : String(v));
 const isDrop = (v: Values) => v.submit_via === 'shared_dropbox_repo';
 

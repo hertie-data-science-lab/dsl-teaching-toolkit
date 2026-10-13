@@ -174,6 +174,11 @@ ASSIGNMENT_TYPES = ("individual", "group")
 STARTER_DERIVED = "derived"
 STARTER_HANDWRITTEN = "handwritten"
 STARTER_MODES = (STARTER_DERIVED, STARTER_HANDWRITTEN)
+# What a template's status says instead of a mode when it hands out no starter at all
+# (`formats: [none]`, or handed in off GitHub with no repo): the console offers no starter
+# controls for it. Never a value of the `starter:` key, which names how a starter is written.
+STARTER_NONE = "none"
+STARTER_STATES = (*STARTER_MODES, STARTER_NONE)
 # How a group assignment's teams come about. `none` is NOT one of them: it is the answer
 # an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
 # outright, and it is not a value an instructor ever writes.

@@ -2,7 +2,7 @@
 
 import type { ComponentChildren } from 'preact';
 import { encPath } from '../github/client';
-import { PROBLEM_AREA, PROBLEM_KIND, ago, asideable, markWord, md, opLabel, plural } from '../model/format';
+import { PROBLEM_AREA, ago, gapWeek, markWord, md, opLabel, plural } from '../model/format';
 import type { ReleaseMark } from '../model/readiness';
 import type { Operation, Outcome, Problem } from '../model/types';
 import { Alert, Check, Eye, Ext, Fail, Skip } from './icons';
@@ -102,6 +102,8 @@ export function Loading({ what = 'Loading' }: { what?: string }) {
 
 /** "schedule.yml, line 41" */
 function whereOf(p: Problem): string {
+  const week = gapWeek(p.id);
+  if (week) return week;
   if (!p.fix) return '';
   const file = p.fix.path.split('/').pop();
   return p.fix.line ? `${file}, line ${p.fix.line}` : (file ?? '');
@@ -109,7 +111,7 @@ function whereOf(p: Problem): string {
 
 export function fixHref(p: Problem): string | null {
   const f = p.fix;
-  if (!f?.screen) return p.kind && PROBLEM_KIND[p.kind] ? `#${PROBLEM_KIND[p.kind].screen}` : null;
+  if (!f?.screen) return null;
   return `#${f.screen}${f.entry ? `-${f.entry}` : ''}`;
 }
 
@@ -144,7 +146,7 @@ export function ProblemCards({ list, cohort, onSetAside }: { list: Problem[]; co
         return (
           <li class="problem" key={p.id}>
             <div class="p-where">
-              <b>{(p.kind && PROBLEM_KIND[p.kind]?.label) ?? PROBLEM_AREA[p.stage] ?? p.stage}</b>
+              <b>{p.label ?? PROBLEM_AREA[p.stage] ?? p.stage}</b>
               <span>{whereOf(p)}</span>
               {cohort && p.scope === 'course' ? <span>(course)</span> : null}
             </div>
@@ -152,7 +154,7 @@ export function ProblemCards({ list, cohort, onSetAside }: { list: Problem[]; co
             <p class="p-effect">{p.stops}</p>
             <div class="p-fix">
               {href ? <a class="btn small" href={href}>Fix</a> : null}
-              {onSetAside && asideable(p) ? <button class="btn small quiet" type="button" onClick={() => onSetAside(p)}>Set aside</button> : null}
+              {onSetAside && p.aside ? <button class="btn small quiet" type="button" onClick={() => onSetAside(p)}>Set aside</button> : null}
               {p.fix && org && repo ? <EditFile org={org} repo={repo} path={p.fix.path} branch={p.fix.ref ?? (p.fix.screen === 'template' ? 'solution' : 'main')} line={p.fix.line ?? undefined} /> : null}
             </div>
           </li>

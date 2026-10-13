@@ -169,6 +169,16 @@ describe('the schedule entry sheet model', () => {
     expect(y.text).toBe(src.replace('lectures/05_trees\n', 'lectures/05_trees_and_ensembles\n'));
   });
 
+  it('saves a release with nothing to release: the last line can be removed', () => {
+    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
+    const y = new YamlText(src);
+    const doc = y.toJS() as Record<string, unknown>;
+    const d = { ...(readDraft(doc, 's5') as ReleaseDraft), deploys: [] };
+    expect(draftErrors({ ...d, number: 5 }, { kind: 'lecture' })).toEqual({});
+    writeDraft(y, d, doc);
+    expect(y.text).toBe('releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n');
+  });
+
   it('keeps a moment as the file spells it when only the title changes', () => {
     const src =
       'releases:\n  s5:\n    event_datetime: "2026-10-08T10:00:00+01:00"\n    title: Trees\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n' +

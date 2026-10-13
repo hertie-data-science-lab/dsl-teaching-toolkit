@@ -171,13 +171,13 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
       <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', 'Shown to students under the title.')} />
       <Common d={d} set={set} />
       <div class="field">
-        <span class="label">What to release</span>
+        <span class="label">What to release <span class="default">optional</span></span>
         {d.deploys.map((dp, i) => {
           const tree = dp.repo ? p.files.tree(p.course.org, dp.repo) : null;
           const adv = [dp.dest && dp.dest !== DEFAULT_DEST_REPO, !!dp.path, dp.diff].filter(Boolean).length;
           return (
             <div class="deploy">
-              <div class="deploy-head">Deploy {i + 1}{d.deploys.length > 1 ? <button class="x" type="button" aria-label={`Remove deploy ${i + 1}`} onClick={() => set({ deploys: d.deploys.filter((_, j) => j !== i) })}>&times;</button> : null}</div>
+              <div class="deploy-head">Deploy {i + 1}<button class="x" type="button" aria-label={`Remove deploy ${i + 1}`} onClick={() => set({ deploys: d.deploys.filter((_, j) => j !== i) })}>&times;</button></div>
               <div class="row-2">
                 <div class="field">
                   <label for={`e-d${i}-repo`}>From repo</label>
@@ -218,7 +218,8 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
             </div>
           );
         })}
-        <div><button class="btn small quiet" type="button" onClick={() => set({ deploys: [...d.deploys, { repo: repos[0] ?? '', folder: '', dest: '', path: '', diff: false, atDate: '', atTime: '' }] })}>Add another deploy</button></div>
+        {d.deploys.length ? null : <p class="why">Nothing is released for this entry; its row still shows on the student site.</p>}
+        <div><button class="btn small quiet" type="button" onClick={() => set({ deploys: [...d.deploys, { repo: repos[0] ?? '', folder: '', dest: '', path: '', diff: false, atDate: '', atTime: '' }] })}>{d.deploys.length ? 'Add another deploy' : 'Add what to release'}</button></div>
       </div>
       {d.id ? <a class="textlink" href={`#release-${d.id}`}>Open release details</a> : null}
     </>
@@ -637,7 +638,7 @@ function View(p: ReadyProps) {
           </div>
           <div class="entry-foot">
             {rel ? (
-              !ref ? <div class="savebar"><span class="st-note">{NOTHING_TO_RELEASE}. Add a deploy above.</span></div>
+              !ref ? <div class="savebar"><span class="st-note">{NOTHING_TO_RELEASE}. Add one under What to release.</span></div>
               : rel.state === 'planned' ? <div class="savebar"><span class="footnote">Goes out at its time without you.</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small outline" label="Release early…" /></div>
               : rel.state === 'will_be_skipped' && needsANumber(status, rel.id) ? <div class="savebar"><span class="st-note">Give it a number first; it cannot be released until it has one.</span></div>
               : rel.state === 'released' ? <div class="savebar"><span class="footnote">Released.</span><a class="btn small quiet" href={`#release-${rel.id}`}>Release again…</a></div>

@@ -51,6 +51,10 @@ export interface Problem {
   kind?: string;
   /** The schedule entry it holds back, when it holds one. */
   release?: string;
+  /** The card's word where the engine names one (an empty week's "Missing lab"). */
+  label?: string;
+  /** A kind the course can set aside (decision 0032): a gap in a week, or a release with nothing to release. */
+  aside?: boolean;
 }
 
 export interface CourseStatus {
@@ -66,8 +70,8 @@ export interface CourseStatus {
   stage_need: Record<string, Need>;
   verdict?: VerdictState;
   materials: MaterialsState[];
-  /** `starter`: how main is written (decision 0028), the key or the engine's reading of the markers; `starter_applies` false: no starter is handed out (`formats: [none]` or `submit_via: external`), so it is not checked. */
-  templates: { repo: string; state: string; starter?: 'derived' | 'handwritten'; starter_applies?: boolean }[];
+  /** `starter`: how main is written (decision 0028), the key or the engine's reading of the markers; `none` when no starter is handed out (`formats: [none]` or `submit_via: external`), so it is not checked. */
+  templates: { repo: string; state: string; starter?: 'derived' | 'handwritten' | 'none' }[];
   semesters: string[];
   /** Work started and not finished (decision 0022); a needed template one a dated hand-out cites is a problem as well. */
   todo?: Todo[];

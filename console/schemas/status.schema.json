@@ -396,12 +396,10 @@
               "starter": {
                 "enum": [
                   "derived",
-                  "handwritten"
+                  "handwritten",
+                  "none"
                 ],
                 "type": "string"
-              },
-              "starter_applies": {
-                "type": "boolean"
               },
               "state": {
                 "type": "string"
@@ -580,6 +578,9 @@
     "problems": {
       "items": {
         "properties": {
+          "aside": {
+            "type": "boolean"
+          },
           "bites": {
             "enum": [
               "now",
@@ -631,6 +632,9 @@
             "type": "string"
           },
           "kind": {
+            "type": "string"
+          },
+          "label": {
             "type": "string"
           },
           "release": {

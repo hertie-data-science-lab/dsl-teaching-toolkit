@@ -38,7 +38,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -69,6 +69,7 @@ from .course import (
     SOLUTION_DIR,
     STARTER_DERIVED,
     STARTER_HANDWRITTEN,
+    STARTER_NONE,
     active_today,
     is_repo_root,
     pages_repo,
@@ -205,11 +206,10 @@ class TemplateFacts:
     faults: list[ConfigFault] = field(default_factory=list)
     # False for an `assignment-*` GitHub template without the `dsl-assignment` topic yet.
     topic: bool = True
-    # Decision 0028: how `main` is written (the key, else read off the solution tree).
+    # Decision 0028: how `main` is written (the key, else read off the solution tree), or
+    # `none` when no starter is handed out at all (`hands_out_starter`); then it is not
+    # checked.
     starter: str = STARTER_DERIVED
-    # False when no starter is handed out at all: `format: none`, or handed in off GitHub
-    # (`submit_via: external`, no repo). The starter is then not checked.
-    starter_applies: bool = True
     # What the starter still needs (`starter_check`), None when it is in place.
     starter_todo: str | None = None
     # Derived: the first recorded starter file whose blob on `main` is not Derive's.
@@ -1215,69 +1215,190 @@ def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
 
 
 EMPTY_WEEK = "EMPTY_WEEK"
+EMPTY_WEEK_KIND = "EMPTY_WEEK_KIND"
+# A gap's card word: the console shows the engine's `label` rather than naming the kind.
+_EMPTY_WEEK_LABEL = "Empty week"
+# The kinds a week is expected to carry one of each of, once the semester uses the kind, and
+# how the problem names the missing one.
+_WEEKLY_KINDS = {
+    "lecture": "No lecture seems",
+    "lab": "No lab seems",
+    "readings": "No readings seem",
+}
+_ASIDE_HINT = "If this is intentional, click 'Set aside'."
 
 
-def _scheduled_days(sched: schedule.Schedule) -> set[date]:
-    """Every day, in the semester's timezone, something dated in the schedule falls on: a
-    release (and a deploy of its own), an assignment's hand-out, due date and late cutoff,
-    an exam or event, the archive. A `tbc` entry has no day."""
-    tz = ZoneInfo(sched.timezone)
-    out: set[date] = set()
+def _local_day(when: date | datetime, tz: ZoneInfo) -> date:
+    """The day `when` falls on in the semester's timezone."""
+    if isinstance(when, datetime):
+        return when.astimezone(tz).date() if when.tzinfo else when.date()
+    return when
 
-    def add(when: date | datetime | None) -> None:
-        if isinstance(when, datetime):
-            out.add(when.astimezone(tz).date() if when.tzinfo else when.date())
-        elif isinstance(when, date):
-            out.add(when)
 
+# A dated moment of the schedule and the entry it belongs to (`schedule_moments`).
+ScheduledMoment = tuple[
+    date | datetime,
+    str,
+    str,
+    schedule.Release | schedule.AssignmentEntry | schedule.Event | schedule.ArchiveRow,
+]
+
+
+def schedule_moments(sched: schedule.Schedule) -> list[ScheduledMoment]:
+    """Every dated moment of the schedule, in plan order, as `(when, what, key, entry)`: a
+    release (`release`, and `deploy` for each copy's own moment), an assignment's
+    `hand_out`, `due` and late `cutoff`, an `exam` or `event`, and the `archive`. A `tbc`
+    entry has none. `this_week` lists some of them; the empty-week check counts them all."""
+    out: list = []
     for r in sched.releases:
-        add(r.when)
-        for d in r.deploy:
-            add(d.deploy_datetime)
+        out.append((r.when, "release", r.label, r))
+        out += [(d.deploy_datetime, "deploy", r.label, r) for d in r.deploy]
     for slug, a in sched.assignments.items():
-        add(a.handout_datetime)
-        add(a.due_datetime)
-        add(schedule.grading_cutoff_datetime(sched, slug))
+        out += [
+            (a.handout_datetime, "hand_out", slug, a),
+            (a.due_datetime, "due", slug, a),
+            (schedule.grading_cutoff_datetime(sched, slug), "cutoff", slug, a),
+        ]
     for e in sched.events:
-        add(e.when)
+        out.append((e.when, "exam" if e.kind == "exam" else "event", e.label, e))
     if sched.archive:
-        add(sched.archive.when)
-    return out
+        out.append((sched.archive.when, "archive", "", sched.archive))
+    return [m for m in out if m[0] is not None]
 
 
 def empty_week_problems(
-    facts: SemesterFacts, now: datetime, aside: frozenset[str] = frozenset()
+    facts: SemesterFacts, now: datetime, aside: Collection[str]
 ) -> list[dict]:
-    """`empty_week:<monday>` for each calendar week (Monday to Sunday, the semester's
-    timezone) of the term with nothing dated in it, dated at that Monday 00:00 so the tiers
-    place it. A week already begun is not raised, nor one the course has set aside
-    (decision 0032: a reading week or an exam week is dismissed that way)."""
+    """The gaps in each week of the term still to come, on the semester's week model
+    (`semester_weeks`: week 1 starts on `semester_start`, the console's strip numbers them
+    the same), dated at the week's first day 00:00 so the tiers place them:
+
+    - `empty_week:<monday>`: nothing dated in the week at all - and then only that;
+    - else `empty_week:<monday>:<kind>`: no release of a weekly kind (lecture, lab,
+      readings) the semester runs weekly - one with a dated release in at least half
+      (rounded up) of the term's planned weeks, those with anything dated in them, so a
+      course without readings, or with one further-readings entry, is never told it lacks
+      them. A hand-out, a due date or an exam is no lecture.
+
+    The id names the Monday of the week's first day. Each problem carries its card word
+    (`label`) and `aside: true` - a gap is what the course can set aside. A week already
+    begun is not raised, nor a gap the course has set aside (decision 0032: a reading week
+    or an exam week is dismissed that way)."""
     sched = facts.sched
     start, end = sched.semester_start, sched.semester_end
     if start is None or end is None or end < start:
         return []
     tz = ZoneInfo(sched.timezone)
     today = now.astimezone(tz).date()
-    days = _scheduled_days(sched)
+    days = {_local_day(when, tz) for when, *_ in schedule_moments(sched)}
+    aliases = lambda repo: facts.aliases.get(repo, {})
+    kinds = [(r, entry_kind(r, aliases)[0]) for r in sched.releases]
+    kind_days = {
+        k: {
+            _local_day(r.when, tz)
+            for r, kind in kinds
+            if kind == k and r.when is not None
+        }
+        for k in _WEEKLY_KINDS
+    }
+    _, weeks = semester_weeks(start, end, today)
+    spans = [
+        {start + timedelta(weeks=n, days=i) for i in range(7)} for n in range(weeks)
+    ]
+    planned = [span for span in spans if span & days]
+    # A weekly kind: dated in at least half the planned weeks, rounded up.
+    used = [
+        k
+        for k in _WEEKLY_KINDS
+        if kind_days[k]
+        and sum(1 for span in planned if span & kind_days[k]) * 2 >= len(planned)
+    ]
     out = []
-    monday = start - timedelta(days=start.weekday())
-    while monday <= end:
-        pid = f"empty_week:{monday.isoformat()}"
-        week = {monday + timedelta(days=i) for i in range(7)}
-        if monday > today and not week & days and pid not in aside:
+
+    def gap(
+        pid: str, kind: str, label: str, text: str, stops: str, first: date
+    ) -> None:
+        if pid not in aside:
             out.append(
                 {
                     "id": pid,
                     "scope": "semester",
                     "stage": "K4",
-                    "kind": EMPTY_WEEK,
-                    "text": f"Nothing is scheduled in the week of {monday.day} {monday:%b}.",
-                    "stops": "Students see an empty week. A reading or exam week can be set aside.",
+                    "kind": kind,
+                    "label": label,
+                    "aside": True,
+                    "text": f"{text} {_ASIDE_HINT}",
+                    "stops": stops,
                     "fix": _schedule_fix(facts.org, None, None),
-                    "when": datetime.combine(monday, time(), tz).isoformat(),
+                    "when": datetime.combine(first, time(), tz).isoformat(),
                 }
             )
-        monday += timedelta(days=7)
+
+    # From the first week still to come: the one under way (`week`) is not raised.
+    week, _ = semester_weeks(start, end, today)
+    for n in range(week + 1, weeks + 1):
+        first = start + timedelta(weeks=n - 1)
+        span = {first + timedelta(days=i) for i in range(7)}
+        pid = f"empty_week:{(first - timedelta(days=first.weekday())).isoformat()}"
+        if not span & days:
+            nothing = "Nothing seems to have been scheduled for this week."
+            stops = "Students see an empty week."
+            gap(pid, EMPTY_WEEK, _EMPTY_WEEK_LABEL, nothing, stops, first)
+        else:
+            for k in used:
+                if not span & kind_days[k]:
+                    text = f"{_WEEKLY_KINDS[k]} to have been scheduled for this week."
+                    stops = f"Students see a week with no {k}."
+                    gap(
+                        f"{pid}:{k}",
+                        EMPTY_WEEK_KIND,
+                        f"Missing {k}",
+                        text,
+                        stops,
+                        first,
+                    )
+    return out
+
+
+NOTHING_TO_RELEASE = "NOTHING_TO_RELEASE"
+
+
+def nothing_to_release_problems(
+    facts: SemesterFacts, now: datetime, aside: frozenset[str] = frozenset()
+) -> list[dict]:
+    """`nothing_to_release:<label>` for each dated release still to come with an empty
+    `deploy:` list, dated at its moment so the tiers place it: coming up while more than
+    the horizon away, a problem inside it. The engine keeps such an entry (its row still
+    shows); a session with nothing to hand out is set aside like an empty week. One
+    already past is not raised: the push comment reports it fired with nothing to ship.
+    An entry whose copies were all DROPPED (a parse fault) is not empty: its fault is
+    the problem, and a Set aside here would hide it."""
+    aliases = lambda repo: facts.aliases.get(repo, {})
+    faulted = [f.where for f in facts.sched.faults]
+    out = []
+    for r in facts.sched.releases:
+        pid = f"nothing_to_release:{r.label}"
+        if r.deploy or r.when is None or r.when <= now or pid in aside:
+            continue
+        copies = f"releases.{r.label}.deploy"
+        if any(w == copies or w.startswith(f"{copies}[") for w in faulted):
+            continue
+        n = schedule.own_number(r.number, r.label)
+        name = f"{policy.kind_label(entry_kind(r, aliases)[0])} {n}" if n else r.label
+        out.append(
+            {
+                "id": pid,
+                "scope": "semester",
+                "stage": "K4",
+                "kind": NOTHING_TO_RELEASE,
+                "label": "Nothing to release",
+                "aside": True,
+                "text": f"{name} has nothing to release. {_ASIDE_HINT}",
+                "stops": "Students get no files for it.",
+                "fix": _schedule_fix(facts.org, r.label, r.lines.get("deploy")),
+                "when": r.when.isoformat(),
+            }
+        )
     return out
 
 
@@ -1572,7 +1693,6 @@ def render_course(
                 "repo": t.repo,
                 "state": template_state(t),
                 "starter": t.starter,
-                "starter_applies": t.starter_applies,
             }
             for t in facts.templates
         ],
@@ -2007,9 +2127,7 @@ def this_week(
     end = start + timedelta(days=7)
     items: list[tuple[datetime, dict]] = []
 
-    def add(when: datetime | date | None, kind: str, ref: str, title: str, state: str):
-        if when is None:
-            return
+    def add(when: datetime | date, kind: str, ref: str, title: str, state: str):
         at = (
             when
             if isinstance(when, datetime)
@@ -2030,23 +2148,16 @@ def this_week(
             )
 
     by_id = {r["id"]: r for r in releases}
-    for r in sched.releases:
-        row = by_id.get(r.label, {})
-        add(r.when, "release", r.label, r.title or r.label, row.get("state", "planned"))
     by_slug = {a["slug"]: a for a in assignments}
-    for slug, entry in sched.assignments.items():
-        row = by_slug.get(slug, {})
-        title, state = row.get("title", slug), row.get("state", "declared")
-        add(entry.handout_datetime, "hand_out", slug, title, state)
-        add(entry.due_datetime, "due", slug, title, state)
-    for ev in sched.events:
-        add(
-            ev.when,
-            "exam" if ev.kind == "exam" else "event",
-            ev.label,
-            ev.title,
-            "planned",
-        )
+    for when, what, key, entry in schedule_moments(sched):
+        if what == "release":
+            state = by_id.get(key, {}).get("state", "planned")
+            add(when, what, key, entry.title or key, state)
+        elif what in ("hand_out", "due"):
+            row = by_slug.get(key, {})
+            add(when, what, key, row.get("title", key), row.get("state", "declared"))
+        elif what in ("exam", "event"):
+            add(when, what, key, entry.title, "planned")
     return [row for _, row in sorted(items, key=lambda p: p[0])]
 
 
@@ -2368,7 +2479,9 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
         problem_from_fault(f, course.org, now, moments) for f in facts.template_faults
     ]
     problems += number_problems(facts, now)
-    problems += empty_week_problems(facts, now, set_aside_ids(course.meta))
+    aside = set_aside_ids(course.meta)
+    problems += empty_week_problems(facts, now, aside)
+    problems += nothing_to_release_problems(facts, now, aside)
     problems += kindless_entry_problems(facts)
     problems += unwritten_problems(facts, course.org, now)
     problems += [
@@ -2553,8 +2666,9 @@ def gather_course(course_org: str) -> CourseFacts:
                 t.faults, spec = grades.grading_spec_faults(
                     name, name, course_org, text, None
                 )
-            t.starter_applies = starter_applies(spec)
-            if t.topic and t.starter_applies:
+            if not hands_out_starter(spec):
+                t.starter = STARTER_NONE
+            elif t.topic:
                 _starter_facts(course_org, t, text)
             facts.templates.append(t)
     facts.public_site = pages_repo(course_org) in listing
@@ -2574,7 +2688,7 @@ def gather_course(course_org: str) -> CourseFacts:
     return facts
 
 
-def starter_applies(spec: grades.GradingSpec | None) -> bool:
+def hands_out_starter(spec: grades.GradingSpec | None) -> bool:
     """Whether the template hands out a starter to check: not with `format: none` (no
     starter file), nor with `submit_via: external` (no repo is created). A file that does
     not parse keeps the check."""

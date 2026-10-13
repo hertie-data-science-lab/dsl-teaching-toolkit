@@ -216,8 +216,9 @@ def _materials(repo: str, syllabus: str | None = "# Syllabus", **over):
     )
 
 
-# The weeks of SCHEDULE with nothing dated in them after NOW: the fixture course sets them
-# aside (decision 0032), so only the empty-week tests see an EMPTY_WEEK problem.
+# The weeks of SCHEDULE with nothing dated in them after NOW, and those with an assignment
+# date but no lecture: the fixture course sets them aside (decision 0032), so only the
+# empty-week tests see an EMPTY_WEEK or EMPTY_WEEK_KIND problem.
 QUIET_WEEKS = [
     f"empty_week:{d}"
     for d in (
@@ -229,6 +230,9 @@ QUIET_WEEKS = [
         "2026-11-30",
         "2026-12-07",
         "2026-12-14",
+        "2026-10-19:lecture",
+        "2026-10-26:lecture",
+        "2026-11-09:lecture",
     )
 ]
 
@@ -616,7 +620,6 @@ def test_an_assignment_template_by_its_old_name_only_is_not_migrated():
             "repo": "assignment-1-f2025",
             "state": "problem",
             "starter": "derived",
-            "starter_applies": True,
         }
     ]
     (problem,) = [p for p in doc["problems"] if p["id"].startswith("template:")]
@@ -2469,11 +2472,11 @@ def test_the_starter_is_checked_only_where_a_starter_is_handed_out(
         status_json.sync_faculty, "read_course_config", lambda org, faults: None
     )
     (t,) = status_json.gather_course(COURSE).templates
-    assert t.starter_applies is applies
+    assert (t.starter != "none") is applies
     assert (t.starter_todo is not None) is applies
     doc = status_json.render_course_file(_course(templates=[t]), NOW)
     row = doc["course"]["templates"][0]
-    assert row["starter_applies"] is applies
+    assert (row["starter"] == "none") is not applies
     assert (
         any(x["id"] == "template:quiz:starter" for x in doc["course"]["todo"])
         is applies
@@ -3094,21 +3097,130 @@ def _empty_weeks(now: datetime, aside: tuple[str, ...] = ()) -> list[dict]:
 def test_a_week_with_nothing_dated_is_one_empty_week_problem():
     # Weeks of 5, 12 and 19 Oct: the release is in the first, the exam in the third.
     before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
-    (p,) = _empty_weeks(before)
+    p, lecture = _empty_weeks(before)
     assert p["id"] == "empty_week:2026-10-12"
     assert p["kind"] == "EMPTY_WEEK"
-    assert p["text"] == "Nothing is scheduled in the week of 12 Oct."
+    assert p["text"] == (
+        "Nothing seems to have been scheduled for this week. "
+        "If this is intentional, click 'Set aside'."
+    )
     assert p["when"] == "2026-10-12T00:00:00+02:00"
     assert p["fix"]["screen"] == "schedule"
+    # The card's word and the Set aside button come from here, not from the console.
+    assert (p["label"], p["aside"]) == ("Empty week", True)
+    # The empty week raises that one row, never a missing lecture as well. The exam's
+    # week has no lecture: an exam does not stand in for one.
+    assert lecture["id"] == "empty_week:2026-10-19:lecture"
+    assert lecture["kind"] == "EMPTY_WEEK_KIND"
+    assert (lecture["label"], lecture["aside"]) == ("Missing lecture", True)
+
+
+def test_the_weeks_are_the_semesters_own_counted_from_its_first_day():
+    # A Wednesday start: week 1 is Wed 7 to Tue 13 Oct, which the Monday release falls in;
+    # week 2, Wed 14 to Tue 20, has nothing. The id names that week's Monday.
+    text = """\
+timezone: Europe/Berlin
+semester_start: 2026-10-07
+semester_end: 2026-10-20
+releases:
+  lecture_1:
+    event_datetime: 2026-10-12T10:00
+    kind: lecture
+"""
+    facts = _semester(sched=_sched(text))
+    before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    (p,) = status_json.empty_week_problems(facts, before, frozenset())
+    assert p["id"] == "empty_week:2026-10-12"
+    assert p["when"] == "2026-10-14T00:00:00+02:00"
 
 
 def test_a_week_already_begun_is_not_raised():
-    assert _empty_weeks(datetime(2026, 10, 13, 9, 0, tzinfo=UTC)) == []
+    ids = [p["id"] for p in _empty_weeks(datetime(2026, 10, 13, 9, 0, tzinfo=UTC))]
+    assert ids == ["empty_week:2026-10-19:lecture"]
+    assert _empty_weeks(datetime(2026, 10, 20, 9, 0, tzinfo=UTC)) == []
+
+
+WEEKLY = """\
+timezone: Europe/Berlin
+semester_start: 2026-10-05
+semester_end: 2026-10-16
+releases:
+  lecture_1:
+    event_datetime: 2026-10-06T10:00
+    kind: lecture
+  lab_1:
+    event_datetime: 2026-10-08T10:00
+    kind: lab
+  lecture_2:
+    event_datetime: 2026-10-13T10:00
+    kind: lecture
+assignments:
+  a1:
+    course_source_repo: a1-f2026
+    handout_datetime: 2026-10-14T10:00
+    due_datetime: 2026-10-30T23:59
+"""
+
+
+def test_a_week_missing_only_its_lab_is_one_missing_lab_problem():
+    # Week 2 has a lecture and a hand-out but no lab; nothing in the plan is readings, so
+    # no week is ever told it lacks them.
+    facts = _semester(sched=_sched(WEEKLY))
+    before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    (p,) = status_json.empty_week_problems(facts, before, frozenset())
+    assert p["id"] == "empty_week:2026-10-12:lab"
+    assert p["kind"] == "EMPTY_WEEK_KIND"
+    assert p["text"] == (
+        "No lab seems to have been scheduled for this week. "
+        "If this is intentional, click 'Set aside'."
+    )
+    assert p["when"] == "2026-10-12T00:00:00+02:00"
+    assert status_json.empty_week_problems(facts, before, frozenset({p["id"]})) == []
+
+
+def _twelve_weeks(readings_weeks: int) -> list[str]:
+    """The kind gaps of a 12-week term (Mon 5 Oct to Fri 25 Dec) with a lecture every
+    week, readings in its first `readings_weeks` weeks and one lab that is `tbc`, read
+    before the term starts."""
+    releases = "".join(
+        f"  lecture_{n}:\n    event_datetime: {date(2026, 10, 6) + timedelta(weeks=n - 1)}T10:00\n"
+        "    kind: lecture\n"
+        for n in range(1, 13)
+    )
+    releases += "".join(
+        f"  readings_{n}:\n    event_datetime: {date(2026, 10, 7) + timedelta(weeks=n - 1)}T10:00\n"
+        "    kind: readings\n"
+        for n in range(1, readings_weeks + 1)
+    )
+    releases += "  lab_1:\n    event_datetime: tbc\n    kind: lab\n"
+    text = (
+        "timezone: Europe/Berlin\nsemester_start: 2026-10-05\n"
+        f"semester_end: 2026-12-25\nreleases:\n{releases}"
+    )
+    facts = _semester(sched=_sched(text))
+    before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    return [
+        p["id"] for p in status_json.empty_week_problems(facts, before, frozenset())
+    ]
+
+
+def test_a_kind_is_expected_weekly_only_when_dated_in_half_the_planned_weeks():
+    # One further-readings entry in twelve weeks is not a weekly kind: no week is told it
+    # lacks readings. Nor is a kind whose only release is `tbc` (the lab).
+    assert _twelve_weeks(1) == []
+    # Readings in 7 of the 12 weeks (at least half, rounded up): the other five lack them.
+    assert _twelve_weeks(7) == [
+        f"empty_week:{date(2026, 10, 5) + timedelta(weeks=n)}:readings"
+        for n in range(7, 12)
+    ]
+    # Five of twelve is under half: not weekly.
+    assert _twelve_weeks(5) == []
 
 
 def test_a_set_aside_empty_week_is_not_raised():
     before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
-    assert _empty_weeks(before, ("empty_week:2026-10-12",)) == []
+    aside = ("empty_week:2026-10-12", "empty_week:2026-10-19:lecture")
+    assert _empty_weeks(before, aside) == []
     # Through the render: the course's set_aside list hides it there too.
     course = _course()
     course.meta = {**course.meta, "set_aside": []}
@@ -3118,3 +3230,101 @@ def test_a_set_aside_empty_week_is_not_raised():
     course.meta = {**course.meta, "set_aside": ["empty_week:2026-10-12"]}
     ids = [p["id"] for p in _render(course, semester, before)["problems"]]
     assert "empty_week:2026-10-12" not in ids
+
+
+# ------------------------------------------------------------ nothing to release
+
+NOTHING_PLANNED = """\
+timezone: Europe/Berlin
+semester_start: 2026-10-05
+semester_end: 2026-12-18
+releases:
+  lecture_9:
+    event_datetime: 2026-11-05T10:00
+    kind: lecture
+  lab-2:
+    event_datetime: 2026-10-08T10:00
+    kind: lab
+    number: 2
+  lecture_10:
+    event_datetime: 2026-11-12T10:00
+    kind: lecture
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/10
+  lab-tbc:
+    event_datetime: tbc
+    kind: lab
+"""
+
+
+def _nothing(now: datetime, aside: tuple[str, ...] = ()) -> list[dict]:
+    facts = _semester(sched=_sched(NOTHING_PLANNED))
+    return status_json.nothing_to_release_problems(facts, now, frozenset(aside))
+
+
+def test_a_dated_release_with_no_files_is_nothing_to_release():
+    # Neither the entry with a deploy nor the tbc one is raised.
+    lab, lecture = sorted(
+        _nothing(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)), key=lambda p: p["when"]
+    )
+    assert lecture["id"] == "nothing_to_release:lecture_9"
+    assert lecture["kind"] == "NOTHING_TO_RELEASE"
+    assert lecture["label"] == "Nothing to release"
+    assert lecture["aside"] is True
+    assert lecture["text"] == (
+        "Lecture 9 has nothing to release. If this is intentional, click 'Set aside'."
+    )
+    assert lecture["when"] == "2026-11-05T10:00:00+01:00"
+    assert lecture["fix"]["screen"] == "schedule"
+    assert lecture["fix"]["entry"] == "lecture_9"
+    assert lab["text"].startswith("Lab 2 has nothing to release.")
+
+
+def test_nothing_to_release_is_coming_up_until_the_horizon_and_never_once_past():
+    now = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+    tiers = {p["id"]: p["bites"] for p in status_json._tier(_nothing(now), now)}
+    # The lab is 7 days off: a problem. The lecture is weeks off: coming up.
+    assert tiers == {
+        "nothing_to_release:lab-2": "soon",
+        "nothing_to_release:lecture_9": "later",
+    }
+    # Past: the push comment says it fired with nothing to ship; no problem here.
+    ids = [p["id"] for p in _nothing(datetime(2026, 10, 9, 9, 0, tzinfo=UTC))]
+    assert ids == ["nothing_to_release:lecture_9"]
+
+
+def test_a_release_whose_copies_were_all_dropped_is_not_nothing_to_release():
+    # Its deploy line is a parse fault, which is the problem; a Set aside must not hide it.
+    text = NOTHING_PLANNED.replace(
+        "    kind: lecture\n    deploy:\n      - course_source_repo: course-materials-f2026\n",
+        "    kind: lecture\n    deploy:\n      - course_source_repo: \n",
+    )
+    sched = _sched(text)
+    assert [f.where for f in sched.faults] == ["releases.lecture_10.deploy[0]"]
+    facts = _semester(sched=sched)
+    ids = [
+        p["id"]
+        for p in status_json.nothing_to_release_problems(
+            facts, datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+        )
+    ]
+    assert "nothing_to_release:lecture_10" not in ids
+    assert "nothing_to_release:lecture_9" in ids
+
+
+def test_a_set_aside_release_with_nothing_to_release_is_not_raised():
+    now = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+    assert [p["id"] for p in _nothing(now, ("nothing_to_release:lab-2",))] == [
+        "nothing_to_release:lecture_9"
+    ]
+    course = _course()
+    course.meta = {**course.meta, "set_aside": ["nothing_to_release:lecture_9"]}
+    ids = [
+        p["id"]
+        for p in _render(course, _semester(sched=_sched(NOTHING_PLANNED)), now)[
+            "problems"
+        ]
+    ]
+    assert "nothing_to_release:lab-2" in ids
+    assert "nothing_to_release:lecture_9" not in ids
