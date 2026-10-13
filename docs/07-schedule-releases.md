@@ -175,7 +175,7 @@ Each assignment's **dates**, keyed by a key you choose. `course_source_repo` nam
 | `course_source_repo` | **yes** | - | the course-org template one repo per student (or team) is generated from |
 | `handout_datetime` | no* | - | when repos are provisioned, automatically. *Omit it to hand out by hand |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
-| `solution_datetime` | no | - | when the model answer and rubric (the template's `solution/`) are pushed into every repo. Not the same as returning marks, and it cannot be undone for reuse. **No default**. Must be **after** `handout_datetime` (and needs it set), and **no earlier than the late cutoff** |
+| `solution_datetime` | no | - | when the model answer and rubric (the template's `solution/`) are pushed into every repo. Not the same as returning marks (marks go back without it), and it cannot be undone: think twice if the template is reused in a later semester. **No default**. Must be **after** `handout_datetime` (and needs it set), and **no earlier than the late cutoff** |
 | `marks_return_datetime` | no | - | when this assignment's marks go back, automatically (a scoped **Distribute grades** run), once every unit is marked; until then a problem says how many are not. If some emails fail they are retried only by pressing Return marks again; if every one fails, the next tick tries again. Internal: to show a "Marks expected" row, write it as `{event_datetime: 2026-10-27, show_on_site: true}` |
 | `details` | no | - | a sentence in the Details column of **both** its rows (out and due) |
 | `show_on_site` | no | `true` | `false` and the site says nothing about this assignment. It still hands out, snapshots and grades |
@@ -337,6 +337,8 @@ Parsed schedule.yml
   semester 2026-09-07 -> 2026-12-18  (Europe/Berlin)
   11 release(s), 19 deploy(s) | 3 assignment(s) | 4 event(s)
 ```
+
+**Empty weeks.** Each week of the term still to come with nothing dated in it (no release, hand-out, due date, late cutoff, exam, event or archive) is an *Empty week* problem on the console's Dashboard; a reading or exam week is dismissed with **Set aside**, which adds `empty_week:<monday>` to the course's `set_aside:` list.
 
 Three other ways to check, none of them required:
 

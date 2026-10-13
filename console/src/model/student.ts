@@ -656,15 +656,16 @@ export class StatusFileSource implements StudentData {
  * The site's home page (`index.md`, the instructors' own) as plain markdown: `{{ site.x }}`
  * filled from `_config.yml`, an `{% if site.x %}` block kept only when x is set, and any other
  * Liquid tag dropped. Enough for what a home page carries; the site itself is the reference.
+ * `keep` (the instructor's preview) leaves a tag about a key `cfg` lacks, and any other tag,
+ * as written, so it shows.
  */
-export function homeText(body: string, cfg: Record<string, unknown>): string {
+export function homeText(body: string, cfg: Record<string, unknown>, keep = false): string {
   const val = (k: string) => str(cfg[k]);
-  return body
-    .replace(/\{%-?\s*if\s+site\.(\w+)\s*-?%\}([\s\S]*?)\{%-?\s*endif\s*-?%\}/g, (_, k: string, inner: string) => (val(k) ? inner : ''))
-    .replace(/\{\{-?\s*site\.(\w+)\s*-?\}\}/g, (_, k: string) => val(k))
-    .replace(/\{%[\s\S]*?%\}|\{\{[\s\S]*?\}\}/g, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  const known = (k: string) => !keep || cfg[k] != null;
+  const out = body
+    .replace(/\{%-?\s*if\s+site\.(\w+)\s*-?%\}([\s\S]*?)\{%-?\s*endif\s*-?%\}/g, (m: string, k: string, inner: string) => (!known(k) ? m : val(k) ? inner : ''))
+    .replace(/\{\{-?\s*site\.(\w+)\s*-?\}\}/g, (m: string, k: string) => (known(k) ? val(k) : m));
+  return keep ? out : out.replace(/\{%[\s\S]*?%\}|\{\{[\s\S]*?\}\}/g, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function yamlOf(text: string | undefined): Record<string, unknown> {

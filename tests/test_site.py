@@ -1399,6 +1399,34 @@ def test_course_description_flows_from_course_metadata_into_config(
     assert yaml.safe_load(cfg)["course_code"] == "y"  # neighbours untouched
 
 
+def test_the_exported_config_keys_are_the_ones_the_sync_writes_and_the_seed_keeps(
+    monkeypatch, tmp_path
+):
+    # The console's Site settings read SYNCED_CONFIG_KEYS / INSTITUTION_CONFIG_KEYS
+    # (names.json): a key the sync starts writing, or the seed starts carrying, must
+    # land in the exported list too.
+    captured = {}
+    monkeypatch.setattr(
+        site,
+        "sync_site_repo",
+        lambda org, build: captured.update(plan=build(tmp_path)) or 0,
+    )
+    monkeypatch.setattr(site, "list_org_repos", lambda org: [])
+    monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
+    monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
+    meta = {"course_name": "Nets", "course_code": "E1", "course_description": "D."}
+    monkeypatch.setattr(site, "yaml_file", lambda *a: meta)
+    assert site.sync_site("Course-Org", "Semester-f2026") == 0
+    written = {*captured["plan"].config, "title"}  # `title` follows `course_name`
+    assert written == set(site_repo.SYNCED_CONFIG_KEYS)
+    seed = Path(__file__).resolve().parent.parent / "templates/site-seed/_config.yml"
+    assert set(site_repo.INSTITUTION_CONFIG_KEYS) <= set(
+        yaml.safe_load(seed.read_text())
+    )
+    assert not set(site_repo.INSTITUTION_CONFIG_KEYS) & written
+
+
 def test_replacing_a_config_scalar_writes_one_line_over_a_block_scalar():
     # A faculty `>` block in dsl-course.yml, and/or one already in _config.yml: either way
     # the result must stay valid YAML on one line, its body not stranded as loose text.

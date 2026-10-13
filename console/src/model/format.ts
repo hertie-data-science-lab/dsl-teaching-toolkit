@@ -93,21 +93,6 @@ export function fmtDate(iso: string, tz?: string, refYear?: number): string {
   return `${fmtShort(iso, tz)}${refYear !== undefined && z.y !== refYear ? ` ${z.y}` : ''}`;
 }
 
-/** Days as a sentence names them, one month said once: "8 and 15 Dec", "30 Nov and 8 Dec". */
-export function fmtDays(isos: string[], tz?: string, refYear?: number): string {
-  const groups: { key: string; days: number[]; tail: string }[] = [];
-  for (const iso of [...isos].sort()) {
-    const z = zoned(iso, tz);
-    const key = `${z.y}-${z.m}`;
-    const g = groups[groups.length - 1];
-    if (g?.key === key) {
-      if (!g.days.includes(z.d)) g.days.push(z.d);
-    } else groups.push({ key, days: [z.d], tail: fmtDate(iso, tz, refYear).replace(/^\d+ /, '') });
-  }
-  const parts = groups.flatMap((g) => g.days.map((d, i) => (i === g.days.length - 1 ? `${d} ${g.tail}` : String(d))));
-  return parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
-}
-
 export function dayKey(iso: string, tz?: string): string {
   const z = zoned(iso, tz);
   return `${z.y}-${String(z.m).padStart(2, '0')}-${String(z.d).padStart(2, '0')}`;
@@ -217,8 +202,26 @@ export function heldSentence(b: Bites, n: number): string {
 /** Where a problem sits, as the problem card's bold first word. */
 export const PROBLEM_AREA: Record<string, string> = {
   K1: 'Org', K2: 'Setup', K3: 'Instructors', K4: 'Schedule', K5: 'Roster', K6: 'Site',
-  C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Handout materials', C5: 'Template', C6: 'Public website',
+  C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Course materials', C5: 'Template', C6: 'Public website',
 };
+
+/**
+ * Problem kinds the console names itself: the card's bold word, the screen that fixes it, and
+ * whether it can be set aside (decision 0032; the id goes in the course's `set_aside:`).
+ */
+export const PROBLEM_KIND: Record<string, { label: string; screen: string; aside?: boolean }> = {
+  EMPTY_WEEK: { label: 'Empty week', screen: 'schedule', aside: true },
+};
+
+/** Whether a problem can be set aside: today only an empty week (`empty_week:<monday>`). */
+export const asideable = (p: { kind?: string }) => !!(p.kind && PROBLEM_KIND[p.kind]?.aside);
+
+/** "Empty week of 20 Oct" from a set-aside id `empty_week:2026-10-20`; null for any other id. */
+export function emptyWeekLabel(id: string): string | null {
+  const m = /^empty_week:(\d{4})-(\d{2})-(\d{2})$/.exec(id);
+  if (!m) return null;
+  return `Empty week of ${+m[3]} ${'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[+m[2] - 1]}`;
+}
 
 export const ASSIGNMENT_WORD: Record<AssignmentState, string> = {
   declared: 'declared', teams_forming: 'teams forming', blocked: 'blocked', open: 'open',
@@ -247,7 +250,7 @@ export const OP_LABEL: Record<string, string> = {
   'course.publish_website': 'Publish website',
   'assignment.derive_starter': 'Derive student version',
   'assignment.generate_syllabus': 'Generate the weekly plan',
-  'materials.create': 'New handout materials',
+  'materials.create': 'New course materials',
   'assignment.create': 'New assignment',
   'semester.bootstrap': 'New semester',
   'teams.open_window': 'Email students without a team',

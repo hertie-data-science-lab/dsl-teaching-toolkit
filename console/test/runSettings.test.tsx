@@ -113,6 +113,17 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
     expect(html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files: later })} />)).not.toContain('before its late cutoff');
   });
 
+  it('warns beside a scheduled solution that it is not returning marks, with a ? on reuse and Return marks', () => {
+    const shown = SCHEDULE.replace('    due_datetime: 2026-09-27T23:59\n', '    due_datetime: 2026-09-27T23:59\n    solution_datetime: 2026-10-05T09:00\n');
+    const files = filesWith({ [`${COHORT_ORG}/semester-config/schedule.yml`]: shown });
+    for (const out of [html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files })} />), html(<ScheduleScreen {...props({ entry: 'assignment-2', files })} />)]) {
+      expect(out).toContain('NB: this is not returning marks (marks can be returned without the solution), and it cannot be undone, so think twice if you reuse this assignment template in a future semester.');
+      expect(out).toContain('aria-label="About pushing the solution"');
+      expect(out).toContain('Return marks, on the assignment’s page, sends marks and feedback only.');
+      expect(out).toContain('07-schedule-releases.md#releasing-the-model-solution');
+    }
+  });
+
   it('says a solution set before the late cutoff is held until it', () => {
     const held: Assignment = { ...solo, state: 'late_window', grading_cutoff_datetime: '2026-10-02T23:59:00+02:00', solution_shown: '2026-09-30T09:00:00+02:00', solution_held_until: '2026-10-02T23:59:00+02:00' };
     const loaded: Loaded = { kind: 'ready', status: { ...status, assignments: [held] }, sha: 's', stale: [] };

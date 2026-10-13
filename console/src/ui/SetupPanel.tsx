@@ -117,15 +117,12 @@ export function readinessTabs({ items, scope, onCircle, onBack, busy = false }: 
   return [
     {
       key: 'suggestions', label: 'Suggestions', count: g.suggestions.length,
-      body: (
-        <>
-          {g.suggestions.length ? <ul class="setup">{g.suggestions.map((it) => <ItemRow it={it} onCircle={onCircle} />)}</ul> : <p class="footnote">No suggestions open.</p>}
-          <p class="footnote">Optional: the {course ? 'course works' : 'semester runs'} without these.{onCircle ? ' If you would rather skip one, click the circle before it to set it aside.' : ''}</p>
-        </>
-      ),
+      hint: <>Optional: the {course ? 'course works' : 'semester runs'} without these.{onCircle ? ' If you would rather skip one, click the circle before it to set it aside.' : ''}</>,
+      body: g.suggestions.length ? <ul class="setup">{g.suggestions.map((it) => <ItemRow it={it} onCircle={onCircle} />)}</ul> : <p class="footnote">No suggestions open.</p>,
     },
     {
       key: 'aside', label: 'Set aside', count: g.aside.length,
+      hint: <>Suggestions you choose to pass move here; bring one back at any time.</>,
       body: g.aside.length ? (
         <ul class="aside-list">
           {g.aside.map((r) => (
@@ -135,22 +132,18 @@ export function readinessTabs({ items, scope, onCircle, onBack, busy = false }: 
             </li>
           ))}
         </ul>
-      ) : <p class="footnote">Nothing set aside. Suggestions you choose to pass move here; bring one back at any time.</p>,
+      ) : <p class="footnote">Nothing set aside.</p>,
     },
     {
       key: 'setup', label: 'Setup', right: true, count: complete ? 'done' : `${done} of ${g.setup.length}`,
-      body: (
-        <>
-          <ul class="setup">{g.setup.map((it) => <ItemRow it={it} />)}</ul>
-          <p class="footnote">One-time setup: what the {course ? 'course needs before a semester can start' : 'semester needs before automation can run'}. Done stays done.</p>
-        </>
-      ),
+      hint: <>One-time setup: what the {course ? 'course needs before a semester can start' : 'semester needs before automation can run'}. Done stays done.</>,
+      body: <ul class="setup">{g.setup.map((it) => <ItemRow it={it} />)}</ul>,
     },
   ];
 }
 
 /**
- * The verdict line under a page's head: red ! with the problem count, a grey circle with what
+ * The verdict line under a page’s head: red ! with the problem count, a red ring with what
  * is missing, or a green tick. With `onOpen` its words are a button to the Problems tab: the
  * dashboard's one problem count (decision 0034, amended).
  */

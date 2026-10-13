@@ -82,6 +82,8 @@ export interface ArchiveDraft {
   details: string;
   show: boolean;
   tbc: boolean;
+  /** Which of the two alternatives sets the date: `date` (an explicit day, which wins in the engine) or `days` after the semester ends. */
+  when: 'date' | 'days';
   /** Days after the semester ends that the default archive date falls; '' while the box is empty. */
   graceDays: number | '';
 }
@@ -131,7 +133,8 @@ export function readDraft(doc: Raw, key: string): Draft | null {
   if (key === 'semester') return { kind: 'semester', start: s(doc.semester_start), end: s(doc.semester_end), tz: s(doc.timezone) };
   if (key === 'archive') {
     const a = doc.archive === undefined ? null : obj(doc.archive);
-    return { kind: 'archive', on: a !== null, date: splitWhen(a?.event_datetime)[0], title: s(a?.title), details: s(a?.details), show: a?.show_on_site !== false, tbc: a?.tbc === true, graceDays: typeof a?.grace_days === 'number' ? a.grace_days : ARCHIVE_GRACE_DAYS };
+    const date = splitWhen(a?.event_datetime)[0];
+    return { kind: 'archive', on: a !== null, when: date ? 'date' : 'days', date, title: s(a?.title), details: s(a?.details), show: a?.show_on_site !== false, tbc: a?.tbc === true, graceDays: typeof a?.grace_days === 'number' ? a.grace_days : ARCHIVE_GRACE_DAYS };
   }
   const b = blockOf(doc, key);
   if (!b) return null;
@@ -239,12 +242,13 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
     const raw = obj(doc.archive);
     y.assign(['archive'], {
       ...raw,
-      event_datetime: d.date ? whenOf(raw.event_datetime, d.date, splitWhen(raw.event_datetime)[1]) : 'event_datetime' in raw ? null : undefined,
+      // Only the chosen alternative is written: a date, or the days after the semester ends.
+      event_datetime: d.when === 'date' && d.date ? whenOf(raw.event_datetime, d.date, splitWhen(raw.event_datetime)[1]) : 'event_datetime' in raw ? null : undefined,
       title: text(d.title),
       details: text(d.details),
       show_on_site: keep(raw.show_on_site, d.show, true),
       tbc: keep(raw.tbc, d.tbc, false),
-      grace_days: keep(raw.grace_days, d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays, ARCHIVE_GRACE_DAYS),
+      grace_days: d.when === 'days' ? keep(raw.grace_days, d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays, ARCHIVE_GRACE_DAYS) : undefined,
     });
     return;
   }
@@ -401,7 +405,8 @@ export function draftErrors(d: Draft, others?: { templateUsers?: (template: stri
   } else if (d.kind === 'semester') {
     if (d.start && d.end && d.end <= d.start) e.end = 'The semester must end after it starts.';
   } else if (d.kind === 'archive') {
-    if (d.on && d.graceDays !== '' && !(Number.isInteger(d.graceDays) && d.graceDays >= 0)) e.graceDays = 'A whole number of days, 0 or more.';
+    if (d.on && d.when === 'days' && d.graceDays !== '' && !(Number.isInteger(d.graceDays) && d.graceDays >= 0)) e.graceDays = 'A whole number of days, 0 or more.';
+    if (d.on && d.when === 'date' && !d.date) e.date = 'Pick the date, or choose days after the semester ends.';
   }
   return e;
 }

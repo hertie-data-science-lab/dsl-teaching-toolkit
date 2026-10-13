@@ -2,7 +2,7 @@
 
 import type { ComponentChildren } from 'preact';
 import { encPath } from '../github/client';
-import { PROBLEM_AREA, ago, markWord, md, opLabel, plural } from '../model/format';
+import { PROBLEM_AREA, PROBLEM_KIND, ago, asideable, markWord, md, opLabel, plural } from '../model/format';
 import type { ReleaseMark } from '../model/readiness';
 import type { Operation, Outcome, Problem } from '../model/types';
 import { Alert, Check, Eye, Ext, Fail, Skip } from './icons';
@@ -70,25 +70,16 @@ export function Soon({ label, cls = 'btn', title = SOON }: { label: ComponentChi
 
 export const Prop = () => <span class="prop" title="Not in the engine today">proposed</span>;
 
-/** "Edit the file directly"; while the file does not exist (`exists` false), GitHub's new-file page instead. */
-export function EditFile({ org, repo, path, branch = 'main', line, exists = true }: { org: string; repo: string; path: string; branch?: string; line?: number; exists?: boolean }) {
-  return (
-    <a class="edit-file" href={exists ? editUrl(org, repo, path, branch, line) : newFileUrl(org, repo, path, branch)} target="_blank" rel="noopener">
-      {exists ? 'Edit the file directly' : 'Create the file on GitHub'} <Ext />
-    </a>
-  );
+/** The two file links: "Edit the file directly" (GitHub's edit page) or, while the file does not exist (`exists` false), "Create the file on GitHub" (its new-file page); the full `org/repo/path` is the tooltip. */
+function fileLinkText(exists: boolean): string {
+  return exists ? 'Edit the file directly' : 'Create the file on GitHub';
 }
 
-export function Lives({ org, repo, path, branch = 'main', exists = true }: { org: string; repo: string; path?: string; branch?: string; exists?: boolean }) {
-  const where = `${org}/${repo}${path ? `/${path}` : ''}`;
+export function EditFile({ org, repo, path, branch = 'main', line, exists = true, cls = 'edit-file' }: { org: string; repo: string; path: string; branch?: string; line?: number; exists?: boolean; cls?: string }) {
   return (
-    <p class="lives">
-      {path && !exists ? (
-        <a href={newFileUrl(org, repo, path, branch)} target="_blank" rel="noopener">Create {where} on GitHub</a>
-      ) : (
-        <a href={ghUrl(org, repo, path, branch)} target="_blank" rel="noopener">Lives in {where}</a>
-      )}
-    </p>
+    <a class={cls} href={exists ? editUrl(org, repo, path, branch, line) : newFileUrl(org, repo, path, branch)} target="_blank" rel="noopener" title={`${org}/${repo}/${path}`}>
+      {fileLinkText(exists)} <Ext />
+    </a>
   );
 }
 
@@ -118,7 +109,7 @@ function whereOf(p: Problem): string {
 
 export function fixHref(p: Problem): string | null {
   const f = p.fix;
-  if (!f?.screen) return null;
+  if (!f?.screen) return p.kind && PROBLEM_KIND[p.kind] ? `#${PROBLEM_KIND[p.kind].screen}` : null;
   return `#${f.screen}${f.entry ? `-${f.entry}` : ''}`;
 }
 
@@ -139,11 +130,11 @@ export function ReleaseMarks({ m, entry }: { m: ReleaseMark; entry: string }) {
   );
 }
 
-/** The problem cards. `cohort` marks the course's faults "(course)" on a semester's page. */
-export function ProblemCards({ list, cohort }: { list: Problem[]; cohort?: boolean }) {
+/** The problem cards. `cohort` marks the course's faults "(course)" on a semester's page; `onSetAside`, a Set aside button on the kinds that can be. */
+export function ProblemCards({ list, cohort, onSetAside }: { list: Problem[]; cohort?: boolean; onSetAside?: (p: Problem) => void }) {
   if (!list.length)
     return (
-      <div class="no-problems"><Check /><span>No problems. Everything automatic will happen on time.</span></div>
+      <div class="no-problems"><Check /><span>No problems.</span></div>
     );
   return (
     <ul class="problems">
@@ -153,7 +144,7 @@ export function ProblemCards({ list, cohort }: { list: Problem[]; cohort?: boole
         return (
           <li class="problem" key={p.id}>
             <div class="p-where">
-              <b>{PROBLEM_AREA[p.stage] ?? p.stage}</b>
+              <b>{(p.kind && PROBLEM_KIND[p.kind]?.label) ?? PROBLEM_AREA[p.stage] ?? p.stage}</b>
               <span>{whereOf(p)}</span>
               {cohort && p.scope === 'course' ? <span>(course)</span> : null}
             </div>
@@ -161,6 +152,7 @@ export function ProblemCards({ list, cohort }: { list: Problem[]; cohort?: boole
             <p class="p-effect">{p.stops}</p>
             <div class="p-fix">
               {href ? <a class="btn small" href={href}>Fix</a> : null}
+              {onSetAside && asideable(p) ? <button class="btn small quiet" type="button" onClick={() => onSetAside(p)}>Set aside</button> : null}
               {p.fix && org && repo ? <EditFile org={org} repo={repo} path={p.fix.path} branch={p.fix.ref ?? (p.fix.screen === 'template' ? 'solution' : 'main')} line={p.fix.line ?? undefined} /> : null}
             </div>
           </li>

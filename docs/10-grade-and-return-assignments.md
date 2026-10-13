@@ -146,6 +146,8 @@ repo's, so it would accuse the entire semester of one student's late push), and
    rows for students who have left. Delete a key and it stays deleted.
 5. **The late cutoff** (the due date plus the late window) freezes the
    pin and the sheet. Its header then reads `FROZEN`.
+   A late rule changed after the due date (the console's Overview says so before you save)
+   moves the cutoff and recomputes every late penalty; return the changed marks again.
 6. **Distribute grades** (button), `preview` first. Leave `assignment` empty to return every sheet, or name one to return only its marks; each gradebook still shows everything already returned, rendered from those sheets as they stand now, so a mark changed on an already-returned assignment goes out with it. A scoped run refuses when it cannot tell what was returned (the registrar export missing or unreadable); an unscoped run rewrites it. The preview writes no grades and sends
    no mail. It prints the counts, and posts who gets what - each changed grade, who is
    emailed, marks **held** for a hand decision, unmarked questions - as a *Distribute

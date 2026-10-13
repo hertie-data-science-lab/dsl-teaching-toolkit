@@ -35,5 +35,21 @@
     "team_formation": ".system/team-formation"
   },
   "registry_file": "semesters.yml",
+  "site_config": {
+    "institution": [
+      "schoolname",
+      "schoolurl",
+      "dsl_org_url",
+      "address"
+    ],
+    "synced": [
+      "course_name",
+      "title",
+      "course_code",
+      "course_description",
+      "course_semester",
+      "github_org"
+    ]
+  },
   "system_dir": ".system"
 }

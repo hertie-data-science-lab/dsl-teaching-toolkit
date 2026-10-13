@@ -1,7 +1,7 @@
 // A repo's files as a clickable tree over one withhold list (decision 0016). A click on a file
 // or folder adds or removes its exact line; a path a broader line withholds says which, and a
 // click re-includes it with `!path` only where git allows it. The badges follow the draft.
-// `exclude` mode (Handout materials, Public website) has a right-aligned button per row; `select` mode
+// `exclude` mode (Course materials, Public website) has a right-aligned button per row; `select` mode
 // (the import picker) has a tick per row, everything ticked until a line leaves it out. It reads as a
 // file tree (decision 0026 rule 5): indent guides, folder and file icons, withheld rows greyed with
 // the name struck through (`ft-out`), the kind chip on top folders.

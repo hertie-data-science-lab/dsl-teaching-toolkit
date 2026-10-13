@@ -404,7 +404,7 @@ def _lock_answers(lock_yml: str | None, slugs: list[str]) -> list[dict | None]:
     Skipped where there is no JS engine (Linux CI); the text guards run everywhere."""
     script = script_of("team-formation.yml", "form-team")
     start = script.index("const LOCK =")
-    end = script.index("\n  };", script.index("return formation === null")) + 5
+    end = script.index("\n  };", script.index("const lockEntry")) + 5
     block = (
         script[start:end]
         .replace("async (slug)", "(slug)")
@@ -770,6 +770,62 @@ def _lock_for(
 _TEAMS_CSV = _TEAMS_HEADER + (
     "assignment-2,team-alpha,ann\nassignment-2,team-alpha,bob\n"
 )
+
+
+@needs_js
+@pytest.mark.parametrize("window", ["closed", "pending"])
+def test_an_unknown_slug_with_no_team_assignment_open_is_told_so(window):
+    # The form says the same when nothing is open (`welcome.NO_TEAM_ASSIGNMENT_OPEN`):
+    # checking the slug would send the student hunting for an assignment that is not there.
+    from dsl_course import welcome
+
+    body = _form_body("assignment-9", "Create a new team", "team-zeta")
+    out = _run_form(_lock_for(window), _TEAMS_CSV, body)
+    assert out["writes"] == []
+    assert out["labels"] == ["team-refused"]
+    (said,) = out["comments"]
+    assert "`assignment-9` isn't an assignment in this semester." in said
+    sentence = welcome.NO_TEAM_ASSIGNMENT_OPEN.split(",")[0]
+    assert said.endswith(f"{sentence}.") and "Check the slug" not in said
+
+
+@needs_js
+def test_the_nothing_open_form_is_answered_with_its_own_sentence():
+    # The form with nothing open submits its one option; the refusal must say nothing is
+    # open, not "fill in all three fields".
+    from dsl_course import welcome
+
+    body = _form_body(
+        welcome.NO_TEAM_ASSIGNMENT_OPTION, "Create a new team", "team-zeta"
+    )
+    out = _run_form(_lock_for("closed"), _TEAMS_CSV, body)
+    assert out["writes"] == [] and out["labels"] == ["team-refused"]
+    (said,) = out["comments"]
+    sentence = welcome.NO_TEAM_ASSIGNMENT_OPEN.split(",")[0]
+    assert said.endswith(f"{sentence}.") and "all three fields" not in said
+
+
+@needs_js
+def test_a_lock_with_no_window_key_counts_as_open_for_an_unknown_slug():
+    # A lock from a toolkit older than the window: a missing key reads as open, so a
+    # mistyped slug is sent back to the slug rather than told nothing is open.
+    body = _form_body("assignment-9", "Create a new team", "team-zeta")
+    (said,) = _run_form(_LOCK_FILE, _TEAMS_CSV, body)["comments"]
+    assert "Check the slug on the course site" in said
+
+
+@needs_js
+def test_a_typed_slug_never_names_an_object_property():
+    body = _form_body("constructor", "Create a new team", "team-zeta")
+    (said,) = _run_form(_lock_for("open"), _TEAMS_CSV, body)["comments"]
+    assert "`constructor` isn't an assignment in this semester." in said
+
+
+@needs_js
+def test_an_unknown_slug_while_one_is_open_is_sent_back_to_the_slug():
+    body = _form_body("assignment-9", "Create a new team", "team-zeta")
+    (said,) = _run_form(_lock_for("open"), _TEAMS_CSV, body)["comments"]
+    assert "Check the slug on the course site" in said
 
 
 @needs_js
@@ -1167,10 +1223,36 @@ def test_nothing_opens_or_names_a_team_list_issue_any_more():
 # --- The generated Assignment field --------------------------------------------------
 
 
-def test_a_semester_with_nothing_open_keeps_the_free_text_assignment_field():
-    # A dropdown needs at least one option, and a form GitHub refuses to render is worse
-    # than an awkward one: it takes the Join-team route away from the semester entirely.
-    assert welcome.join_team_form({}) == welcome.template(welcome.JOIN_TEAM_FORM)
+def test_a_semester_with_nothing_open_says_the_form_is_not_needed():
+    # A free-text slug there invites one the workflow refuses, and a markdown block is not
+    # submitted, so the issue would carry no Assignment to parse. A one-option dropdown
+    # says nothing is open, and the workflow answers that option (see the JS test below).
+    form = welcome.join_team_form({})
+    doc = yaml.safe_load(form)
+    assert [b.get("id", b["type"]) for b in doc["body"]] == [
+        "markdown",
+        "assignment",
+        "action",
+        "team",
+    ]
+    field = doc["body"][1]
+    assert field["type"] == "dropdown"
+    assert field["attributes"]["label"] == "Assignment"
+    assert field["attributes"]["description"] == welcome.NO_TEAM_ASSIGNMENT_OPEN
+    assert field["attributes"]["options"] == [welcome.NO_TEAM_ASSIGNMENT_OPTION]
+    assert 'placeholder: "e.g. assignment-3"' not in form
+    # Everything outside the markers is the reviewed template, to the byte.
+    template = welcome.template(welcome.JOIN_TEAM_FORM)
+    head = template.index(welcome.ASSIGNMENT_FIELD_START)
+    tail = template.index(welcome.ASSIGNMENT_FIELD_END) + len(
+        welcome.ASSIGNMENT_FIELD_END
+    )
+    assert form.startswith(template[:head]) and form.endswith(template[tail:])
+
+
+def test_a_semester_whose_lock_was_not_read_keeps_the_free_text_assignment_field():
+    # Unread says nothing about what is open: the free-text form works in every semester.
+    assert welcome.join_team_form(None) == welcome.template(welcome.JOIN_TEAM_FORM)
 
 
 def test_the_open_assignments_become_a_dropdown_the_workflow_can_still_parse():
@@ -1282,6 +1364,9 @@ def test_only_the_assignments_whose_window_is_open_are_offered():
     # Each with the page the header links, read off the same lock.
     assert welcome.open_formations(lock) == {"a3": "https://c.github.io/a3"}
     assert welcome.open_formations("assignments:\n  {}\n") == {}
+    # A lock from a toolkit older than the window carries no window key: a self-select
+    # entry there is open, as the workflow reads it; the others are not offered.
+    assert welcome.open_formations(_LOCK_FILE) == {"project": ""}
 
 
 def test_a_semester_whose_lock_cannot_be_read_gets_the_free_text_form(monkeypatch):
@@ -1291,13 +1376,33 @@ def test_a_semester_whose_lock_cannot_be_read_gets_the_free_text_form(monkeypatc
         monkeypatch.setattr(
             welcome, "get_file_content", lambda *a, _answer=answer, **k: _answer
         )
-        assert welcome._open_formations("Org") == {}
+        assert welcome._open_formations("Org") is None
 
     def boom(*a, **k):
         raise RuntimeError("403")
 
     monkeypatch.setattr(welcome, "get_file_content", boom)
-    assert welcome._open_formations("Org") == {}
+    assert welcome._open_formations("Org") is None
+    assert welcome.join_team_form(None) == welcome.template(welcome.JOIN_TEAM_FORM)
+
+
+def test_a_lock_with_nothing_open_pushes_the_not_needed_form(monkeypatch):
+    from dsl_course import grades
+
+    lock = grades.team_lock_text(
+        {"a2": ("self_select", 4, "closed", "2026-09-01", "https://c.github.io/a2")}
+    )
+    monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: lock)
+    written: list[bytes] = []
+    monkeypatch.setattr(
+        welcome,
+        "put_file",
+        lambda org, repo, path, content, msg, **kw: written.append(content) or True,
+    )
+    assert welcome.refresh_join_team_form("Org") == 0
+    body = yaml.safe_load(written[0].decode())["body"]
+    (field,) = [b for b in body if b.get("id") == "assignment"]
+    assert field["attributes"]["options"] == [welcome.NO_TEAM_ASSIGNMENT_OPTION]
 
 
 def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):

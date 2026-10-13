@@ -66,8 +66,8 @@ export interface CourseStatus {
   stage_need: Record<string, Need>;
   verdict?: VerdictState;
   materials: MaterialsState[];
-  /** `starter`: how main is written (decision 0028), the key or the engine's reading of the markers. */
-  templates: { repo: string; state: string; starter?: 'derived' | 'handwritten' }[];
+  /** `starter`: how main is written (decision 0028), the key or the engine's reading of the markers; `starter_applies` false: no starter is handed out (`formats: [none]` or `submit_via: external`), so it is not checked. */
+  templates: { repo: string; state: string; starter?: 'derived' | 'handwritten'; starter_applies?: boolean }[];
   semesters: string[];
   /** Work started and not finished (decision 0022); a needed template one a dated hand-out cites is a problem as well. */
   todo?: Todo[];

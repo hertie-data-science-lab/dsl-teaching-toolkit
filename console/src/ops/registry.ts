@@ -23,19 +23,6 @@ export function opSpec(name: string): OpSpec {
   return s;
 }
 
-/**
- * Operations whose verb unlocks only after a preview in this session (inputs.md rule 5):
- * hand out, return marks, archive, update every copy, send new codes, publish website.
- */
-export const GATED = new Set([
-  'assignment.handout_now',
-  'grades.return',
-  'semester.archive',
-  'assignment.update_copies',
-  'roster.send_codes',
-  'course.publish_website',
-]);
-
 /** An op that is itself a look, never a change: it always runs as a preview. */
 export const PREVIEW_ONLY = new Set(['semester.preview_automation']);
 
@@ -57,16 +44,15 @@ export const PREVIEW_NOT_OFFERED = new Set([
   'assignment.collect_now',
 ]);
 
-export type OpMode = 'gated' | 'preview' | 'direct' | 'previewOnly';
+export type OpMode = 'preview' | 'direct' | 'previewOnly';
 
 /**
- * How the panel offers an op. A gated op whose engine has no preview cannot be previewed
- * (the engine refuses `preview: true` with NO_PREVIEW), so it runs direct and asks for an
- * explicit confirmation instead.
+ * How the panel offers an op: with a Preview where the engine has one the console offers
+ * (an op with none runs direct, behind its confirmation box where it has one).
  */
 export function modeOf(op: string): OpMode {
   const s = opSpec(op);
   if (PREVIEW_ONLY.has(op)) return 'previewOnly';
   if (!s.preview || PREVIEW_NOT_OFFERED.has(op)) return 'direct';
-  return GATED.has(op) ? 'gated' : 'preview';
+  return 'preview';
 }

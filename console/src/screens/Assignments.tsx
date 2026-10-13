@@ -5,6 +5,7 @@ import { readTable } from '../edit/csv';
 import { parseRoster } from '../model/people';
 import { ASSIGNMENT_WORD, assignmentIdent, assignmentTitle, fmtDay, fmtTime, fmtWhen } from '../model/format';
 import type { Assignment, AssignmentState, Status } from '../model/types';
+import { submissionsOf } from '../model/assignment';
 import { RepoChip } from '../ui/SetupPanel';
 import { templateReadinessIn, tier } from '../model/readiness';
 import { Check } from '../ui/icons';
@@ -162,7 +163,7 @@ function Overview(p: TabProps) {
   const subs = [
     'In the schedule',
     group ? (cur === 1 ? `${a.teams} teams so far` : cur >= 4 ? 'Closed' : cur > 1 ? 'Still open' : 'From hand out') : 'Skipped: students work alone',
-    cur === 2 ? `${a.submissions} of ${a.units} in` : cur > 2 ? `Closed ${fmtDay(a.due, tz, year)}` : `Opens ${a.handout ? fmtDay(a.handout, tz, year) : 'at hand out'}`,
+    cur === 2 ? `${submissionsOf(a)} of ${a.units} in` : cur > 2 ? `Closed ${fmtDay(a.due, tz, year)}` : `Opens ${a.handout ? fmtDay(a.handout, tz, year) : 'at hand out'}`,
     cur === 3 ? `Until ${fmtDay(a.grading_cutoff_datetime, tz, year)}` : cur > 3 ? `Closed ${fmtDay(a.grading_cutoff_datetime, tz, year)}` : `Opens after ${fmtDay(a.due, tz, year)}`,
     cur === 4 ? `${a.marks.filled} of ${a.marks.total} marked` : cur > 4 ? 'Done' : `Opens after ${fmtDay(a.grading_cutoff_datetime, tz, year)}`,
     cur === 5 ? 'Returned' : 'Opens after marks are returned',
@@ -174,14 +175,14 @@ function Overview(p: TabProps) {
     <li class={cls}><span class="sa-state">{state}</span><div class="sa-body"><span class="sa-why">{why}</span>{ops}</div></li>
   );
   const lede =
-    a.state === 'open' ? `Open. Due ${fmtDay(a.due, tz, year)} at ${fmtTime(a.due, tz)}; ${a.submissions} of ${a.units} submitted so far.`
-    : a.state === 'late_window' ? `Late window. Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions} of ${a.units} submitted.`
+    a.state === 'open' ? `Open. Due ${fmtDay(a.due, tz, year)} at ${fmtTime(a.due, tz)}; ${submissionsOf(a)} of ${a.units} submitted so far.`
+    : a.state === 'late_window' ? `Late window. Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${submissionsOf(a)} of ${a.units} submitted.`
     : a.state === 'marking' ? `Marking. ${a.marks.filled} of ${a.marks.total} marked.`
     : a.state === 'returned' ? 'Returned. Marks are with students.'
     : a.state === 'teams_forming' ? `Teams forming. Handed out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}; no team has formed yet.`
     : a.state === 'blocked' ? 'Blocked: handed out, but you have not assigned any team yet.'
     : a.handout ? `Declared. Hands out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}.` : 'Declared. You hand it out from this page.';
-  const big = cur === 4 || cur === 5 ? a.marks.filled : cur <= 1 ? (a.teams ?? 0) : (a.submissions ?? 0);
+  const big = cur === 4 || cur === 5 ? a.marks.filled : cur <= 1 ? (a.teams ?? 0) : submissionsOf(a);
   const bigOf = cur === 4 || cur === 5 ? a.marks.total : a.units;
   const scope = cohortScope(p);
   const ref: AsgRef = { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand', name: sheetName(p, a.slug) };
@@ -220,7 +221,7 @@ function Overview(p: TabProps) {
             <div class="big">{big} <small>/ {bigOf}</small></div>
             <div class="meter"><i style={`width:${bigOf ? ((big / bigOf) * 100).toFixed(1) : 0}%;background:var(--asg-ink)`} /></div>
             <p class="footnote">
-              {cur === 2 || cur === 3 ? `${a.units - (a.submissions ?? 0)} have not pushed since hand out.` : cur >= 4 ? `${a.marks.total - a.marks.filled} still to mark.` : group ? (cur === 1 ? 'Each team gets its repo as it forms; students without a team get none.' : 'Teams form from hand out until late work closes.') : 'Nothing handed out yet.'}
+              {cur === 2 || cur === 3 ? `${a.units - submissionsOf(a)} have not pushed since hand out.` : cur >= 4 ? `${a.marks.total - a.marks.filled} still to mark.` : group ? (cur === 1 ? 'Each team gets its repo as it forms; students without a team get none.' : 'Teams form from hand out until late work closes.') : 'Nothing handed out yet.'}
             </p>
           </section>
           <section class="panel section">

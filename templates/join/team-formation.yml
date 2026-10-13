@@ -137,7 +137,13 @@ jobs:
               // `page` is the assignment's page, which lists the teams that exist - ""
               // where the lock carries none, and the comment then names the page without
               // linking it.
+              //
+              // `anyOpen`, set by the same scan, says whether ANY self-select assignment's
+              // window is open - `open`, or no window key at all, read as open as above;
+              // what the form's own dropdown offers (dsl_course.welcome.open_formations) -
+              // so a slug the lock does not carry can be told there is nothing to join at all.
               const LOCK = '__LOCK__';
+              let anyOpen = false;
               const lockEntry = async (slug) => {
                 let text;
                 try {
@@ -147,26 +153,35 @@ jobs:
                   if (e.status !== 404) throw e;
                   return undefined;
                 }
-                let inSlug = false, formation = null, cap = null, window = null, closes = '', page = '';
+                // Every entry, in a Map so a typed slug can never name an Object property.
+                const entries = new Map();
+                let cur = null;
                 for (const raw of text.split(/\r?\n/)) {
                   // A comment is a `#` at the start or after a space, as in YAML: the page
                   // URL carries an `#assignment-<key>` fragment.
                   const line = raw.replace(/(^|\s)#.*$/, '').trimEnd();
                   const key = line.match(/^ {2}([\w.-]+):$/);
-                  if (key) { inSlug = key[1].toLowerCase() === slug; continue; }
-                  if (!inSlug) continue;
+                  if (key) {
+                    cur = { formation: null, cap: null, window: null, closes: '', page: '' };
+                    entries.set(key[1].toLowerCase(), cur);
+                    continue;
+                  }
+                  if (!cur) continue;
                   const f = line.match(/^ {4}team_formation:\s*(\w+)$/);
-                  if (f) formation = f[1].toLowerCase();
+                  if (f) cur.formation = f[1].toLowerCase();
                   const c = line.match(/^ {4}max_team_size:\s*(\d+)$/);
-                  if (c) cap = parseInt(c[1], 10);
+                  if (c) cur.cap = parseInt(c[1], 10);
                   const w = line.match(/^ {4}team_formation_window:\s*(\w+)$/);
-                  if (w) window = w[1].toLowerCase();
+                  if (w) cur.window = w[1].toLowerCase();
                   const d = line.match(/^ {4}team_formation_closes:\s*(\S*)$/);
-                  if (d) closes = d[1];
+                  if (d) cur.closes = d[1];
                   const u = line.match(/^ {4}team_formation_page:\s*(\S*)$/);
-                  if (u) page = u[1];
+                  if (u) cur.page = u[1];
                 }
-                return formation === null ? null : { formation, cap, window, closes, page };
+                anyOpen = [...entries.values()].some(
+                  (e) => e.formation === 'self_select' && (e.window === null || e.window === 'open'));
+                const entry = entries.get(slug);
+                return entry && entry.formation !== null ? entry : null;
               };
               // The close date is written as a bare ISO day and read by a student, so it is
               // spoken as one - `26th Oct`, dsl_course.grades.spoken_day's spelling, which
@@ -182,6 +197,12 @@ jobs:
                 return `${day}${suffix} ${MONTHS[parseInt(m[2], 10) - 1]}`;
               };
 
+              // The form a semester with nothing open receives offers this one Assignment
+              // option (dsl_course.welcome.NO_TEAM_ASSIGNMENT_OPTION), so its issue still
+              // parses; it is answered with the sentence the form itself shows.
+              const NO_OPEN = 'This semester has no team assignment open right now.';
+              if (/Assignment\s*[\r\n]+\s*No team assignment is open right now/i.test(issue.body || '')) return refuse(
+                `Thanks @${handle} - there is no team to form yet. ${NO_OPEN}`);
               if (!aMatch || !tMatch) return refuse(
                 `Thanks @${handle} - I couldn't read both an **Assignment** and a **Team** from the form. ` +
                 `[Open a new Join team issue](${newIssue('')}) and fill in all three fields.`);
@@ -283,7 +304,9 @@ jobs:
                 'needs-review');
               if (lock === null) return refuse(
                 `Thanks @${handle} - \`${assignment}\` isn't an assignment in this semester. ` +
-                `Check the slug on the course site, then [open a new Join team issue](${newIssue(team)}).`);
+                (anyOpen
+                  ? `Check the slug on the course site, then [open a new Join team issue](${newIssue(team)}).`
+                  : NO_OPEN));
               if (lock.formation === 'none') return refuse(
                 `Thanks @${handle} - \`${assignment}\` is an individual assignment, so there are no teams ` +
                 `to form. Nothing to do: your own repo arrives when it is handed out.`);

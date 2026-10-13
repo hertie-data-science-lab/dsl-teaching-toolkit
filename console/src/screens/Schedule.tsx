@@ -13,23 +13,23 @@ import {
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
-import { keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
+import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
 import { TIMEZONES } from '../tiers/course';
-import { EditFile, Lives, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
+import { EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
 import { Check } from '../ui/icons';
 import { NOTHING_TO_RELEASE, markClass, releaseRef, rowMark } from './Cohort';
 import { NotFound } from './Assignments';
-import { CheckNow, WithStatus, cohortScope, gradingConfig, tzOf, yearOf } from './common';
+import { CheckNow, WithStatus, cohortScope, gradingConfig, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, validSchedule, type Layers } from '../model/cascade';
 import { parse } from 'yaml';
-import { RunRows, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
+import { RunRows, SolutionNote, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
 import { CONTENT_KINDS, EMPTY_ENTRY_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
@@ -59,7 +59,7 @@ interface SchedFile {
   error: string | null;
 }
 
-function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
+export function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
   const f = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml');
   const text = f.kind === 'ready' ? f.text : null;
   const parsed = useMemo(() => {
@@ -74,9 +74,20 @@ function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
   return { text: f.text, sha: f.sha, ...parsed! };
 }
 
+/** schedule.yml after `drafts` (each under its final id) and `removed`, or why it would not be valid. */
+export function scheduleAfter(sf: SchedFile, drafts: Draft[], removed: Record<string, Block> = {}): { text: string } | { error: string } {
+  const y = new YamlText(sf.text);
+  for (const d of drafts) writeDraft(y, d, sf.doc);
+  for (const [id, b] of Object.entries(removed)) y.delete([b, id]);
+  return validSchedule(y.toJS()) ? { text: y.text } : { error: invalidText('the schedule', validSchedule) };
+}
+
 // ------------------------------------------------------------------ the entry sheet
 
 type Setter<T> = (patch: Partial<T>) => void;
+
+/** The Schedule's Check `?`: what Check semester setup looks at. */
+export const SCHEDULE_CHECK_HINT = 'Check re-reads the schedule, the course repos and the templates and reports anything that would stop a release, hand-out, collection or return from running: entries that do not parse, dates out of order, a release whose folder is missing, a template whose grading config is invalid. It changes nothing and sends nothing.';
 
 function F<T>({ id, k, t, d, set, error }: { id: string; k: keyof T & string; t: FieldTier; d: T; set: Setter<T>; error?: string }) {
   return <Field id={id} k={k} t={t} value={(d as Record<string, unknown>)[k]} values={d as Record<string, unknown>} error={error} set={(key, v) => set({ [key]: v ?? (t.widget === 'checkbox' ? false : '') } as Partial<T>)} />;
@@ -157,7 +168,7 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
         <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: `Automation releases at this time, ${tz}.` }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time' }} />
       </div>
-      <F id="e-det" k="details" d={d} set={set} t={MD('Details', 'Shown to students under the title.')} />
+      <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', 'Shown to students under the title.')} />
       <Common d={d} set={set} />
       <div class="field">
         <span class="label">What to release</span>
@@ -171,7 +182,7 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
                 <div class="field">
                   <label for={`e-d${i}-repo`}>From repo</label>
                   <select id={`e-d${i}-repo`} onChange={(e) => setDeploy(i, { repo: (e.target as HTMLSelectElement).value })}>
-                    <optgroup label="Handout materials repos">{from.materials.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup>
+                    <optgroup label="Course materials repos">{from.materials.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup>
                     {from.others.length ? <optgroup label="Other repos">{from.others.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup> : null}
                     {dp.repo && !from.materials.includes(dp.repo) && !from.others.includes(dp.repo) ? <option value={dp.repo} selected>{dp.repo}</option> : null}
                     {!dp.repo ? <option value="" selected>Choose a repo</option> : null}
@@ -309,14 +320,14 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { 
         <>
           <F id="e-solon" k="solutionOn" d={d} set={set} t={{ tier: 'default', label: 'Show the solution', widget: 'checkbox', defaultLabel: 'default: off' }} />
           {d.solutionOn ? (
-            <div class="cond"><div class="row-2">
+            <div class="cond"><SolutionNote /><div class="row-2">
               <F id="e-sol" k="solutionDate" d={d} set={set} error={errors.solution} t={{ tier: 'conditional', label: 'Solution shown on', widget: 'date', reason: 'After the hand out, and not before the late cutoff.' }} />
               <F id="e-solt" k="solutionTime" d={d} set={set} t={{ tier: 'conditional', label: 'At', widget: 'time' }} />
             </div></div>
           ) : null}
         </>
       )}
-      <F id="e-det" k="details" d={d} set={set} t={MD('Details', 'Shown to students under the title.')} />
+      <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', 'Shown to students under the title.')} />
       <Common d={d} set={set} />
       {d.id ? <a class="textlink" href={`#assignment-${d.id}`}>Open the assignment</a> : null}
     </>
@@ -334,13 +345,13 @@ function EventForm({ d, set, errors }: { d: EventDraft; set: Setter<EventDraft>;
         <F id="e-date" k="date" d={d} set={set} t={{ tier: 'ask', label: 'When', widget: 'date', reason: 'Leave the date empty and the student site shows TBC at the end of the semester.' }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time', defaultLabel: 'optional' }} />
       </div>
-      <F id="e-det" k="details" d={d} set={set} t={MD('Details')} />
+      <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)')} />
       <Common d={d} set={set} />
     </>
   );
 }
 
-function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Setter<SemesterDraft>; errors: Record<string, string> }) {
+export function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Setter<SemesterDraft>; errors: Record<string, string> }) {
   return (
     <>
       <div class="row-2">
@@ -363,14 +374,26 @@ function ArchiveForm({ d, set, errors }: { d: ArchiveDraft; set: Setter<ArchiveD
       <F id="e-aon" k="on" d={d} set={set} t={{ tier: 'default', label: 'Archive automatically', widget: 'checkbox', defaultLabel: 'off means never' }} />
       {d.on ? (
         <div class="cond">
-          <F id="e-ad" k="date" d={d} set={set} t={{ tier: 'default', label: 'Archive on', widget: 'date', defaultLabel: `default: ${d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the semester ends`, reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.' }} />
-          <F id="e-agrace" k="graceDays" d={d} set={set} error={errors.graceDays} t={{ tier: 'default', label: 'Days after semester end', widget: 'number', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS}`, reason: `Archiving happens this many days after the semester ends; ${ARCHIVE_GRACE_DAYS} by default.` }} />
+          <F id="e-awhen" k="when" d={d} set={set} t={{ tier: 'default', label: 'When', widget: 'radio', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS} days after the semester ends`, reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.', options: [{ value: 'date', label: 'On a date' }, { value: 'days', label: `${d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the semester ends` }] }} />
+          {d.when === 'date'
+            ? <F id="e-ad" k="date" d={d} set={set} error={errors.date} t={{ tier: 'default', label: 'Archive on', widget: 'date' }} />
+            : <F id="e-agrace" k="graceDays" d={d} set={set} error={errors.graceDays} t={{ tier: 'default', label: 'Days after the semester ends', widget: 'number', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS}` }} />}
           <F id="e-at" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'default: Semester archived' }} />
-          <F id="e-det" k="details" d={d} set={set} t={MD('Details', '{date} is filled in with the archive date.')} />
+          <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', '{date} is filled in with the archive date.')} />
           <Common d={d} set={set} />
         </div>
       ) : null}
     </>
+  );
+}
+
+/** What archiving does, beside the archive row and on its sheet (it replaced the Archive page). */
+function ArchiveHelp({ org }: { org: string }) {
+  return (
+    <Hint small label="About archiving" doc="10-grade-and-return-assignments.md">
+      Archiving makes every repo in {org} read-only: student repos, marks repos, the student site, the join form, the settings repo. Students and instructors keep read access; nothing is deleted and the student site stays online.
+      It happens on the date chosen here, or {ARCHIVE_GRACE_DAYS} days (or the number set here) after the semester ends; students get an Updates notice two weeks before. Without an archive entry it never happens by itself.
+    </Hint>
   );
 }
 
@@ -398,6 +421,11 @@ function View(p: ReadyProps) {
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const tz = tzOf(status), year = yearOf(now, tz);
   const scope = cohortScope(p);
+  // The archive date the engine reports, whether it has come, and whether the semester is archived already.
+  const archiveDate = status.semester?.archive_date ?? null;
+  const archiveWhen = archiveDate ? fmtDay(archiveDate, tz, year) : null;
+  const archivePassed = !!archiveDate && archiveDate.slice(0, 10) <= todayOf(now, tz);
+  const archived = status.semester?.live === false;
   const [filters, setFilters] = useState<Record<Block, boolean>>({ releases: true, assignments: true, events: true });
   const [drafts, setDrafts] = useState<Record<string, Draft>>((): Record<string, Draft> =>
     p.prefill && p.entry === 'new' ? { new: { ...(blankDraft('handout', { repo: '' }) as AssignmentDraft), template: p.prefill } } : {},
@@ -470,22 +498,17 @@ function View(p: ReadyProps) {
       setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
       return;
     }
-    const y = new YamlText(sf.text);
     let newId: string | null = null;
-    for (const k of dirtyKeys) {
+    const written = dirtyKeys.map((k): Draft => {
       const d = prefill(drafts[k]);
-      if (k === 'new' && (d.kind === 'releases' || d.kind === 'assignments' || d.kind === 'events')) {
-        newId = d.kind === 'assignments' ? assignmentKey(d.number)
-          : d.kind === 'releases' ? (d.number ? freshId(doc, 'releases', `${kindFor(d)}-${d.number}`) : unnumberedId(doc, kindFor(d) ?? 'lecture', d.title))
-          : freshId(doc, d.kind, d.title || 'event');
-        writeDraft(y, { ...d, id: newId }, doc);
-      } else writeDraft(y, d, doc);
-    }
-    for (const [id, b] of Object.entries(removed)) y.delete([b, id]);
-    if (!validSchedule(y.toJS())) {
-      setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
-      return;
-    }
+      if (k !== 'new' || !(d.kind === 'releases' || d.kind === 'assignments' || d.kind === 'events')) return d;
+      newId = d.kind === 'assignments' ? assignmentKey(d.number)
+        : d.kind === 'releases' ? (d.number ? freshId(doc, 'releases', `${kindFor(d)}-${d.number}`) : unnumberedId(doc, kindFor(d) ?? 'lecture', d.title))
+        : freshId(doc, d.kind, d.title || 'event');
+      return { ...d, id: newId };
+    });
+    const out = scheduleAfter(sf, written, removed);
+    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
     // assignments.yml follows the schedule (the new entry's run settings; no block left for a
     // removed one). It is built and checked BEFORE the schedule is written, so a refusal
     // writes nothing.
@@ -503,7 +526,7 @@ function View(p: ReadyProps) {
       }
     }
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${Object.keys(removed).join(', ')}` : `${dirty} changes`;
-    const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: y.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
+    const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: out.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
     // Once the schedule is written its drafts are gone, whatever happens to assignments.yml:
     // a retry must not add the entry a second time.
     await saveSteps(env, setSave, first, second, newAsg ? 'Entry saved without its run settings' : 'Entry removed, but its block is still in assignments.yml', () => {
@@ -580,7 +603,7 @@ function View(p: ReadyProps) {
       const rel = d.kind === 'releases' && key !== 'new' ? (status.releases ?? []).find((x) => x.id === key) : undefined;
       const ref = rel ? releaseRef(rel, tz, year) : null;
       const ident = identOf(d, current, kindFor(d) ?? '');
-      const title = d.kind === 'semester' ? <>Semester dates</> : d.kind === 'archive' ? <><b>Archive</b>: {d.title || 'Semester archived'}</> : <><b>{ident}</b>: {d.title || (current?.name ?? 'Untitled')}</>;
+      const title = d.kind === 'semester' ? <>Semester dates</> : d.kind === 'archive' ? <><b>Archive</b>: {d.title || 'Semester archived'} <ArchiveHelp org={p.cohort.org} /></> : <><b>{ident}</b>: {d.title || (current?.name ?? 'Untitled')}</>;
       const eyebrow = d.kind === 'semester' ? 'Semester' : d.kind === 'archive' ? 'Archive' : d.kind === 'assignments' ? 'Assignment entry' : `${TYPE_LABEL[d.kind === 'releases' ? d.type || 'lecture' : d.type] ?? ''}${d.date ? `, ${fmtDay(d.date, tz, year)}${d.time ? ` ${d.time}` : ''}` : ''}`;
       const probs = (status.problems ?? []).filter((x) => x.fix?.entry === key && x.fix.path === 'schedule.yml');
       const two = d.kind === 'releases' || d.kind === 'assignments';
@@ -620,6 +643,7 @@ function View(p: ReadyProps) {
               : rel.state === 'released' ? <div class="savebar"><span class="footnote">Released.</span><a class="btn small quiet" href={`#release-${rel.id}`}>Release again…</a></div>
               : null
             ) : null}
+            {d.kind === 'archive' && !archived ? <div class="savebar"><span class="footnote">{archivePassed ? 'The archive date has passed.' : 'Archiving before the scheduled date asks you to confirm.'}</span><OpButtons def={archive(scope, archiveWhen, archivePassed)} /></div> : null}
             <SaveLine state={save} />
             <div class="savebar">
               <button class="btn" type="button" disabled={save.kind === 'busy' || !dirty} onClick={() => void doSave()}>Save</button>
@@ -641,17 +665,14 @@ function View(p: ReadyProps) {
       <div class="page-head">
         <div>
           <h2 class="h1">Schedule <Hint doc="07-schedule-releases.md">The schedule drives everything automatic: releases, hand outs, collection and the student site’s calendar. Dates are in the semester’s timezone.</Hint></h2>
-          <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {heldLine || 'Every release has its folder.'}</p>
+          <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {heldLine || 'Every planned release has its associated folder.'}</p>
         </div>
-        <div class="actions"><CheckNow p={p} label="Check" /><a class="btn outline" href="#schedule-new">Add entry</a></div>
+        <div class="actions"><CheckNow p={p} label="Check" about={{ text: SCHEDULE_CHECK_HINT, doc: 'reference/actions-reference.md' }} /><a class="btn outline" href="#schedule-new">Add entry</a></div>
       </div>
-      <p class="site-note" style="margin-bottom:12px">
-        Every row here reads <b>Identifier</b>: Name. The student site shows the same two parts on two lines, the bold identifier then the name, with no colon; exams and events show only the bold title. Whether the site should switch to one line is a theme decision.
-      </p>
       <div class="term-meta">
         {sched?.start && sched?.end ? <span>Semester <b>{fmtDay(sched.start, tz, year)} to {fmtDay(sched.end, tz)}</b></span> : null}
         <span>Timezone <b>{sched?.timezone ?? tz}</b></span>
-        <span>Archive <b>{status.semester?.archive_date ? fmtDay(status.semester.archive_date, tz, year) : 'never'}</b></span>
+        <span>Archive <b>{archived ? 'done: every repo is read-only' : archiveWhen ?? 'never'}</b> <ArchiveHelp org={p.cohort.org} /></span>
         <a class="textlink" href="#schedule-semester">Edit semester dates</a>
         <a class="textlink" href="#schedule-archive">Archive settings</a>
       </div>
@@ -681,7 +702,7 @@ function View(p: ReadyProps) {
               <div class="savebar"><span class="footnote">See what automation’s next scheduled release run would do.</span><OpOpen def={scheduledPreview(scope)} cls="btn small outline" label="Preview scheduled releases" /></div>
             </div>
           </details>
-          <div style="margin-top:14px"><Lives org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} /></div>
+          <div style="margin-top:14px"><EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} /></div>
         </div>
         {sheet}
       </div>

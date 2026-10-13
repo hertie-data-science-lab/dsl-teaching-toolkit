@@ -1,12 +1,12 @@
-// Course-side editors: S3 Course details (dsl-course.yml), S20 Public website
-// (opencourse.yml), S19 Handout materials repo settings (materials.yml, .releaseignore).
+// Course-side editors: S3 Course details (dsl-course.yml), S20 Public OpenCourse website
+// (opencourse.yml), S19 Course materials repo settings (materials.yml, .releaseignore).
 
 import { useRef, useState } from 'preact/hooks';
 import materialsSchema from '../../schemas/materials.schema.json';
 import opencourseSchema from '../../schemas/opencourse.schema.json';
 import { useEnv, type Env } from '../env';
 import { badgeFiles, denylisted, neverMaterial } from '../edit/badges';
-import { invalidText, useSave } from '../edit/save';
+import { invalidText, useSave, type SaveState } from '../edit/save';
 import { YamlText, compact, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { termRank } from '../model/catalogue';
@@ -21,7 +21,7 @@ import { ABOUT, COURSE_FACTS, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
-import { CheckLine, EditFile, Lives, Loading, editUrl, newFileUrl } from '../ui/bits';
+import { CheckLine, EditFile, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { PatternTree } from '../ui/PatternTree';
@@ -106,6 +106,26 @@ export function courseFileAfter(text: string, before: Details, after: Details, m
   return validCourse(out.toJS()) ? { text: out.text } : { error: invalidText('dsl-course.yml', validCourse) };
 }
 
+/**
+ * Save dsl-course.yml with `after` written over `before`: refused on the save line, before any
+ * write, while the course's names are unconfirmed, while `errs` marks a field, when the file
+ * would not be valid, or when a new admin has no GitHub account. True once written.
+ */
+export async function saveCourseFile(
+  env: Env | null,
+  [run, report]: [ReturnType<typeof useSave>[1], (s: SaveState) => void],
+  o: { org: string; migrated?: boolean; file: { text: string; sha: string }; meta: Record<string, unknown>; before: Details; after: Details; errs: Record<string, string> },
+): Promise<boolean> {
+  const refuse = (text: string) => (report({ kind: 'bad', text }), false);
+  if (o.migrated === false) return refuse('Not saved: the console has not yet confirmed this course uses the current names.');
+  if (Object.keys(o.errs).length) return refuse('Fix the fields marked in red first.');
+  const out = courseFileAfter(o.file.text, o.before, o.after, o.meta);
+  if ('error' in out) return refuse(out.error);
+  const missing = await missingAdmin(env, o.before.admins, o.after.admins);
+  if (missing) return refuse(`There is no GitHub account called ${missing}.`);
+  return run({ owner: o.org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, o.file.sha, { message: 'course: edit the course details, from the DSL Teaching Console', statusRepo: [o.org, COURSE_REPO] });
+}
+
 /** The first new admin handle with no GitHub account, or null (a failed lookup counts as there). */
 export async function missingAdmin(env: Env | null, before: Admin[], after: Admin[]): Promise<string | null> {
   if (!env) return null;
@@ -187,7 +207,7 @@ export function WebsiteSwitch(p: CourseProps) {
     <div class="field web-switch">
       <label class="switch">
         <input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked={busy ? pending : before.enabled} disabled={busy || broken || !known || p.migrated === false} onChange={(e) => void flip((e.target as HTMLInputElement).checked)} />
-        <span>Public website</span>
+        <span>Public OpenCourse website <span class="chip">Beta</span></span>
       </label>
       <span class="footnote" id="cd-web-state" aria-live="polite">{word}</span> <a class="textlink" href="#website">Manage</a>
       {save.kind === 'bad' ? <CheckLine cls="bad">{save.text}</CheckLine> : null}
@@ -196,7 +216,7 @@ export function WebsiteSwitch(p: CourseProps) {
 }
 
 /** The one dsl-course.yml key the semester sites read for which files a row links (`site._link_extensions`). */
-export function LinkKindsField({ id, value, onInput }: { id: string; value: string; onInput: (v: string) => void }) {
+function LinkKindsField({ id, value, onInput }: { id: string; value: string; onInput: (v: string) => void }) {
   return (
     <div class="field">
       <label for={id}>File types linked on each semester’s student site <Hint label="About linked file types">
@@ -208,11 +228,10 @@ export function LinkKindsField({ id, value, onInput }: { id: string; value: stri
   );
 }
 
-/** A course file's Edit on GitHub link, on .github's default branch (main until the repo list is read); GitHub's new-file page when it does not exist yet. */
-export function courseFileUrl(files: CourseProps['files'], org: string, path: string, exists: boolean): string {
+/** The course's `.github` default branch, for its file links (main until the repo list is read). */
+function courseBranch(files: CourseProps['files'], org: string): string {
   const gh = files.repos(org);
-  const branch = (gh.kind === 'ready' ? gh.repos.find((r) => r.name === COURSE_REPO)?.default_branch : undefined) ?? 'main';
-  return exists ? editUrl(org, COURSE_REPO, path, branch) : newFileUrl(org, COURSE_REPO, path, branch);
+  return (gh.kind === 'ready' ? gh.repos.find((r) => r.name === COURSE_REPO)?.default_branch : undefined) ?? 'main';
 }
 
 export function DetailsScreen(p: CourseProps) {
@@ -229,25 +248,17 @@ export function DetailsScreen(p: CourseProps) {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
-  const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, COURSE_FACTS, d.about), ...fieldErrors(null, courseDefaultTiers(before.defaults), d.defaults) };
+  const defaultErrs = fieldErrors(null, courseDefaultTiers(before.defaults), d.defaults);
+  const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, COURSE_FACTS, d.about), ...defaultErrs };
   const doSave = async () => {
     if (!y || file.kind !== 'ready') return;
-    if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
-    if (Object.keys(errs).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    const after = d;
-    const out = courseFileAfter(file.text, before, after, meta);
-    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
-    const missing = await missingAdmin(env, before.admins, after.admins);
-    if (missing) return setSave({ kind: 'bad', text: `There is no GitHub account called ${missing}.` });
-    if (await runSave({ owner: course.org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, file.sha, { message: 'course: edit the course details, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) {
-      setDraft(null);
-    }
+    if (await saveCourseFile(env, [runSave, setSave], { org: course.org, migrated: p.migrated, file, meta, before, after: d, errs })) setDraft(null);
   };
   return (
     <>
       <div class="page-head">
         <div><h2 class="h1">Course details <Hint doc="01-new-course-org.md">Every semester of the course starts from these settings. Each semester and each assignment can set its own defaults.</Hint></h2><p class="lede">What every semester’s student site shows about the course, and the course’s defaults.</p></div>
-        <div class="actions"><a class="btn quiet" href={courseFileUrl(p.files, course.org, 'dsl-course.yml', file.kind !== 'absent')} target="_blank" rel="noopener">Edit on GitHub <Ext /></a></div>
+        <div class="actions"><EditFile cls="btn quiet" org={course.org} repo={COURSE_REPO} path="dsl-course.yml" branch={courseBranch(p.files, course.org)} exists={file.kind !== 'absent'} /></div>
       </div>
       {file.kind === 'loading' ? <Loading what="Reading dsl-course.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no dsl-course.yml in {course.org}/.github.</CheckLine> : null}
@@ -269,17 +280,22 @@ export function DetailsScreen(p: CourseProps) {
               <h3>Course admins <Hint label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, in every semester. Instructors and teaching assistants are set for each semester under Instructors, and change only that semester and the course’s materials and assignment templates.</Hint></h3>
               <AdminRows admins={d.admins} id="cda" onChange={(admins) => set({ admins })} />
             </div>
-            <div class="form-section">
-              <h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3>
-              <SchemaForm id="cdx" schema={null} tiers={courseDefaultTiers(before.defaults)} values={d.defaults} onChange={(v) => set({ defaults: v })} />
-            </div>
-            <div class="form-section">
-              <h3>Site links</h3>
-              <LinkKindsField id="cdk" value={d.links} onInput={(links) => set({ links })} />
-            </div>
+            {/* Folded by default; open while a field in it is marked, so the mark is seen. */}
+            <details class="fold" open={Object.keys(defaultErrs).length > 0}>
+              <summary>Advanced</summary>
+              <div class="fold-body">
+                <div class="form-section">
+                  <h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3>
+                  <SchemaForm id="cdx" schema={null} tiers={courseDefaultTiers(before.defaults)} values={d.defaults} onChange={(v) => set({ defaults: v })} />
+                </div>
+                <div class="form-section">
+                  <h3>Student site links</h3>
+                  <LinkKindsField id="cdk" value={d.links} onInput={(links) => set({ links })} />
+                </div>
+              </div>
+            </details>
             <div class="form-section">
               <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml', exists: file.kind !== 'absent' }} />
-              <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={file.kind !== 'absent'} />
             </div>
           </div>
         </div>
@@ -453,12 +469,13 @@ export function WebsiteScreen(p: CourseProps) {
     <>
       <div class="page-head">
         <div>
-          <h2 class="h1">Public website <Hint doc="reference/actions-reference.md">An open version of one handout materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h2>
-          <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : siteExists && !before.enabled ? 'Off' : 'Not published'}</span>{published ? 'Updates daily.' : siteExists && !before.enabled ? WEBSITE_OFF_LIVE : 'Optional: an open version of your materials for anyone.'}</p>
+          <h2 class="h1">Public OpenCourse website <span class="chip">Beta</span> <Hint doc="reference/actions-reference.md">An open version of one course materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h2>
+          <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : siteExists && !before.enabled ? 'Off' : 'Not published'}</span>{published ? 'Updates daily.' : siteExists && !before.enabled ? WEBSITE_OFF_LIVE : 'Optional: an open version of this course and its materials, available to anyone on the internet.'}</p>
+          <p class="footnote">Beta: leave this off for now - work in progress.</p>
         </div>
         <div class="actions">
           <OpButtons def={publishWebsite(courseScope(p), published)} />
-          <a class="btn quiet" href={courseFileUrl(p.files, course.org, OPENCOURSE_FILE, file.kind !== 'absent')} target="_blank" rel="noopener">Edit on GitHub <Ext /></a>
+          <EditFile cls="btn quiet" org={course.org} repo={COURSE_REPO} path={OPENCOURSE_FILE} branch={courseBranch(p.files, course.org)} exists={file.kind !== 'absent'} />
         </div>
       </div>
       {file.kind === 'loading' ? <Loading what={`Reading ${OPENCOURSE_FILE}`} /> : null}
@@ -466,7 +483,7 @@ export function WebsiteScreen(p: CourseProps) {
       <div class="grid-2">
         <section class="panel section">
           <h2>Settings</h2>
-          {repos.length ? <SchemaForm id="ws" schema={null} tiers={publishTiers(repos, siteExists)} values={values} onChange={onForm} /> : <p class="footnote">No handout materials repo yet: create one first.</p>}
+          {repos.length ? <SchemaForm id="ws" schema={null} tiers={publishTiers(repos, siteExists)} values={values} onChange={onForm} /> : <p class="footnote">No course materials repo yet: create one first.</p>}
           {before.enabled ? null : <p class="footnote">The website is off: Publish refuses until it is on and saved.</p>}
         </section>
         <section class="panel section">
@@ -489,7 +506,6 @@ export function WebsiteScreen(p: CourseProps) {
       ) : null}
       <section class="panel section">
         <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false || !!y?.errors.length} file={{ org: course.org, repo: COURSE_REPO, path: OPENCOURSE_FILE, exists: file.kind !== 'absent' }} />
-        <Lives org={course.org} repo={COURSE_REPO} path={OPENCOURSE_FILE} exists={file.kind !== 'absent'} />
       </section>
     </>
   );
@@ -632,7 +648,7 @@ export function MaterialsScreen(p: CourseProps) {
   return (
     <>
       <div class="page-head">
-        <div><h2 class="h1">{repo} <Hint doc="02-add-materials-to-course.md">Handout materials stay here, private to instructors, until a scheduled release copies them to a semester. Files withheld here never reach students.</Hint></h2><p class="lede">Handout materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
+        <div><h2 class="h1">{repo} <Hint doc="02-add-materials-to-course.md">Course materials stay here, private to instructors, until a scheduled release copies them to a semester. Files withheld here never reach students.</Hint></h2><p class="lede">Course materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
         <div class="actions">{r ? <RepoChip r={r} /> : null}<OpenButton org={course.org} repo={repo} quiet /></div>
       </div>
       <div class="stack">
@@ -694,7 +710,6 @@ export function MaterialsScreen(p: CourseProps) {
             </table>
           ) : <p class="footnote">{tree.kind === 'error' ? 'Could not read the repo’s folders; it is tried again shortly.' : 'No folders yet.'}</p>}
           <SaveBar state={kindSave} onSave={() => void saveMat({ syllabus: baseSyl, kinds: curKinds }, runKind, setKindSave, () => setKindsDraft(null))} small disabled={kindsDraft === null || deepEqual(kindsDraft, baseKinds) || declared === null} file={matRef} />
-          <Lives {...matRef} />
         </section>
         <section class="panel section">
           <h2>Withheld from students <Hint label="About withheld files">Everything in this repo is released to students as it stands, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
@@ -704,7 +719,6 @@ export function MaterialsScreen(p: CourseProps) {
           )}
           <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
           <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ignFile.kind === 'loading' || (ignFile.kind === 'ready' && ignOut === ignText)} file={ignRef} />
-          <Lives {...ignRef} />
         </section>
       </div>
     </>

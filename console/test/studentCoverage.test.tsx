@@ -389,6 +389,7 @@ describe('9. the About block', () => {
     expect(f.announcements).toEqual([{ when: '2026-09-22T09:00:00', title: 'Room change', details: 'From this week the lab meets in **room 2.30**.' }]);
     expect(f.syllabus).toMatchObject({ repo: 'materials', path: 'SYLLABUS.md', name: 'SYLLABUS.md' });
     expect(homeText('{% if site.x %}A{% endif %}{{ site.y }}{% include z.html %}', { x: 'on', y: 'B' })).toBe('AB');
+    expect(homeText('{% if site.x %}A{% endif %}{{ site.y }} {{ site.z }}{% include z.html %}', { x: 'on', y: 'B' }, true)).toBe('AB {{ site.z }}{% include z.html %}');
   });
 
   it('shows them on the semester’s Home (decision 0035 rule 4), and a new announcement as a week line', async () => {

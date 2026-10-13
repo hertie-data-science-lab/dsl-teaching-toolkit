@@ -20,6 +20,8 @@ export interface Names {
   records: Record<string, string>;
   /** The hidden first line that routes a Join issue opened through the API (its form's label is dropped). */
   join_markers: { join_course: string; join_team: string };
+  /** A semester site's `_config.yml`: the keys every sync rewrites, and the institution keys it leaves to the site (`site_repo` in the engine). */
+  site_config: { synced: string[]; institution: string[] };
 }
 
 export const NAMES: Names = names;
@@ -35,6 +37,7 @@ export const STATUS_PATH = NAMES.records.status;
 /** A semester's public facts for its students, in the semester org's `.github`. */
 export const STUDENT_STATUS_PATH = NAMES.records.student_status;
 export const JOIN_MARKERS = NAMES.join_markers;
+export const SITE_CONFIG = NAMES.site_config;
 export const OUTCOMES_DIR = NAMES.records.outcomes;
 export const LEDGER_PATH = NAMES.records.distributed;
 /** The semester's pointer to its course, in its config repo. */

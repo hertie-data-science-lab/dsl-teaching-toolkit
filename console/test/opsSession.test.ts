@@ -51,7 +51,7 @@ describe('following a run', () => {
     expect(s.runs.value.map((r) => r.run_id)).toEqual([5]);
   });
 
-  it('ends the watch on sign-out and forgets the runs and the previews', async () => {
+  it('ends the watch on sign-out and forgets the runs', async () => {
     const a = new Flaky(0);
     let finished = 0;
     const s = new OpsSession(a, { pollMs: 0, sleep: tick, outcomeTries: 1, onFinished: () => finished++ });
@@ -60,7 +60,6 @@ describe('following a run', () => {
     await s.start('preview');
     await (s.open(def), s.start('run'));
     expect(s.runs.value).toHaveLength(2);
-    expect(s.isPreviewed(def)).toBe(true);
     a.held = true;
     s.open(def);
     const p = s.start('run');
@@ -70,7 +69,21 @@ describe('following a run', () => {
     await p;
     expect(s.current.value).toBeNull();
     expect(s.runs.value).toEqual([]);
-    expect(s.isPreviewed(def)).toBe(false);
     expect(finished).toBe(1);
+  });
+});
+
+describe('a confirm-in-panel verb', () => {
+  it('only opens the panel, however often the page verb is pressed; the panel verb runs it', async () => {
+    const a = new Flaky(0);
+    const s = new OpsSession(a, { pollMs: 0, sleep: tick, outcomeTries: 1 });
+    const def = defs.archive(scope, '2026-12-20', true);
+    s.open(def, 'run');
+    s.open(def, 'run');
+    await tick();
+    expect(a.polls).toBe(0);
+    expect(s.current.value).toMatchObject({ phase: 'ready', running: null });
+    await s.start('run');
+    expect(s.runs.value.map((r) => r.run_id)).toEqual([5]);
   });
 });

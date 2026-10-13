@@ -20,7 +20,7 @@ import { useDraft } from '../wizards/drafts';
 import { courseOrgName, openAt } from '../wizards/model';
 import { allOk, checkCourseSetUp, checkOrg, useLive, usePoll, type Check } from '../wizards/verify';
 import { Checks, OrgSteps, OrgWhy, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
-import { AdminRows, LinkKindsField, courseFileAfter, detailsOf, missingAdmin, type Admin, type Details } from './CourseEdit';
+import { AdminRows, courseFileAfter, detailsOf, missingAdmin, type Admin, type Details } from './CourseEdit';
 import { COURSE_REPO } from '../model/names';
 
 const STEPS = [
@@ -41,7 +41,6 @@ export interface NcDraft {
   detailsSaved?: string;
   defaultsSaved?: string;
   defaults?: Values;
-  links?: string;
 }
 
 export function ncOrg(d: NcDraft): string {
@@ -171,21 +170,16 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
   } else if (step === 3) {
     title = 'Defaults';
     const defaults = d.defaults ?? before?.defaults ?? {};
-    const links = d.links ?? before?.links ?? '';
     const errs = fieldErrors(null, courseDefaultTiers(before?.defaults), defaults);
     body = (
       <>
         <div class="form-section"><h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3><SchemaForm id="ncx" schema={null} tiers={courseDefaultTiers(before?.defaults)} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
-        <div class="form-section">
-          <h3>Site links</h3>
-          <LinkKindsField id="nck" value={links} onInput={(v) => set({ links: v })} />
-        </div>
         <SaveLine state={save} />
       </>
     );
     foot = (
       <button class="btn" type="button" disabled={Object.keys(errs).length > 0 || save.kind === 'busy' || !before} onClick={async () => {
-        const after = { ...before!, defaults, links };
+        const after = { ...before!, defaults };
         if (deepEqual(after, before) || (await writeCourse(after, 'set the course defaults'))) {
           set({ defaultsSaved: org });
           go(4);
@@ -203,10 +197,10 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     body = (
       <>
         <Checks list={[...(orgChecks ?? []), ...(setUp ?? []), ...summary]} busy={orgLive.busy || setupLive.busy} />
-        <ul class="checks"><li><span class="ck todo" /><span>No handout materials yet</span></li><li><span class="ck todo" /><span>No assignment templates yet</span></li></ul>
-        <p>The course is set up. It is ready for a semester once it has handout materials and at least one assignment template.</p>
+        <ul class="checks"><li><span class="ck todo" /><span>No course materials yet</span></li><li><span class="ck todo" /><span>No assignment templates yet</span></li></ul>
+        <p>The course is set up. It is ready for a semester once it has course materials and at least one assignment template.</p>
         <div class="actions">
-          <a class="btn" href={`?course=${org}#new-materials`}>Add handout materials</a>
+          <a class="btn" href={`?course=${org}#new-materials`}>Add course materials</a>
           <a class="btn outline" href={`?course=${org}#new-assignment-1`}>New assignment</a>
         </div>
       </>

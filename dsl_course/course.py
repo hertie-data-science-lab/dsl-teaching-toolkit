@@ -401,8 +401,9 @@ SHAPE_NOTES = {
 # it carries SOLUTION_WARNING, because what it does cannot be taken back.
 SOLUTION_NOW = "now"
 SOLUTION_WARNING = (
-    "Pushes the model answer and rubric into every student's repo. This is not returning "
-    "marks, and cannot be undone for reuse."
+    "Pushes the model answer and rubric into every student's repo. NB: this is not "
+    "returning marks (marks can be returned without the solution), and it cannot be "
+    "undone, so think twice if you reuse this assignment template in a future semester."
 )
 # A `solution_datetime` before the late cutoff, refused by the schedule check and the
 # console's form and held by the scheduler: every surface says it in these words

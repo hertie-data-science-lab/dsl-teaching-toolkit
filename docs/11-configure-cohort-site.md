@@ -16,6 +16,7 @@ could show: the semester's dates, the schedule, the assignments' dates, rules an
 name and headcount, the instructor cards, the home text, announcements and the materials paths.
 
 You never edit what the site shows - you edit the file it reads, and it re-syncs itself.
+The console's Site > Site settings does this for you: each field saves into the file below.
 
 ## What you set, and where
 
@@ -27,6 +28,7 @@ You never edit what the site shows - you edit the file it reads, and it re-syncs
 | Instructor / TA cards | semester `semester-config/instructors.yml` ([05](05-manage-teaching-team.md)) | every field you declare displays, bar `github_handle`, `start`, `end` (access only) and `email` (private unless the entry adds `show_email: true`); a card needs a `name` to appear at all |
 | Instructor photos | site repo `<semester-org>.github.io` | commit the image under `_images/pp/`, then `photo: /_images/pp/jane.jpg`. Can also use a URL that allows hotlinking |
 | Schedule rows, exams, assignment due dates | semester `semester-config/schedule.yml` ([07](07-schedule-releases.md)) | `releases`, `events`, `assignments` (there is no `exams:` key - an exam is an `events:` entry with `kind: exam`) |
+| School name, links, footer address | site repo `_config.yml` | `schoolname`, `schoolurl`, `dsl_org_url`, `address` - never rewritten by the sync |
 | A hand-written entry in the **Updates** box | site repo | add a file under `_announcements/` with `date:` + `details:` front matter (the file's body works too). The box shows the newest 7 items (releases feed it automatically, and only once they have actually shipped); older ones roll off as new ones arrive - delete the file to pull one early |
 | Materials links | *nothing to set* | the row appears as soon as `schedule.yml` names the session, marked "not released yet"; the links fill in as you [release](08-release-materials-to-cohort.md) |
 | A session's name + blurb | semester `semester-config/schedule.yml` ([07](07-schedule-releases.md)) | `title`, `details` on the `releases:` entry - the Hertie syllabus's session title and learning objectives. `details` may run to several paragraphs, and shows in the schedule's Details column as well as on the session's tab |

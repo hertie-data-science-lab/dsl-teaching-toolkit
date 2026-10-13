@@ -23,7 +23,7 @@ import type { CourseStatus, Horizon, MaterialsCheck, Operation, Outcome, Problem
 import { nextEvent, nextEventWords, recentActivity, whoWord, type Activity } from '../model/status';
 import type { CohortRef } from '../model/discovery';
 import { outcomePath } from '../ops/adapter';
-import { CheckLine, Lives, Loading, OpMark, ProblemCards, Probs, Soon, fixHref, ghUrl, runUrl } from '../ui/bits';
+import { CheckLine, EditFile, Loading, OpMark, ProblemCards, Probs, Soon, fixHref, ghUrl, runUrl } from '../ui/bits';
 import { ItemRow, RepoChip, RepoWhy, TemplateSub, Verdict, readinessTabs, type Link, type SetupItem } from '../ui/SetupPanel';
 import { DASH_PANEL, DashboardTabs, showTab, type DashTab } from '../ui/DashboardTabs';
 import { Hint } from '../ui/Hint';
@@ -83,7 +83,7 @@ export const SETUP_STEPS: { id: string; name: string }[] = [
   { id: 'C1', name: 'Course org read' },
   { id: 'C2', name: 'Course set up on GitHub' },
   { id: 'C3', name: 'Course details filled in' },
-  { id: 'C4', name: 'Handout materials repo' },
+  { id: 'C4', name: 'Course materials repo' },
   { id: 'C5', name: 'Assignment template' },
   { id: 'C6', name: 'Public website' },
 ];
@@ -95,7 +95,7 @@ export function stepLink(id: string, c: CourseStatus): Link {
     case 'C1': return { href: ghUrl(org), label: 'Open on GitHub', ext: true };
     case 'C2': return { href: ghUrl(org, COURSE_REPO), label: 'Open .github', ext: true };
     case 'C3': return { href: '#details', label: 'Edit course details' };
-    case 'C4': return c.materials?.length ? { href: '#materials', label: 'Open handout materials' } : { href: `?course=${org}#new-materials`, label: 'New handout materials' };
+    case 'C4': return c.materials?.length ? { href: '#materials', label: 'Open course materials' } : { href: `?course=${org}#new-materials`, label: 'New course materials' };
     case 'C5': return c.templates?.length ? { href: '#templates', label: 'Open templates' } : { href: `?course=${org}#new-assignment-1`, label: 'New assignment' };
     default: return { href: '#website', label: 'Set up the public website' };
   }
@@ -108,7 +108,7 @@ const STEP_HINT: Record<string, string> = {
   C3: 'A name, code, description and at least one course admin, in Course details.',
   C4: 'A repo of lectures, labs and readings that semesters release from. Done once any one is ready.',
   C5: 'A repo that semesters hand assignments out from. Done once any one is ready.',
-  C6: 'Optional: an open version of your materials for anyone on the internet.',
+  C6: 'Optional: an open version of this course and its materials, available to anyone on the internet.',
 };
 
 /** Where a to-do is done: the repo's settings page. */
@@ -215,14 +215,16 @@ export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
   );
 }
 
-/** A template's needed checklist (the brief, the student version), from the course's open to-dos. */
-export function templateItems(repo: string, todo: Todo[], starter: 'derived' | 'handwritten' | undefined, tiered: Tiered[], now: number, horizon?: Horizon): SetupItem[] {
+/** A template's needed checklist (the brief, the student version where a starter is handed out), from the course's open to-dos. */
+export function templateItems(repo: string, todo: Todo[], tpl: { starter?: 'derived' | 'handwritten'; starter_applies?: boolean }, tiered: Tiered[], now: number, horizon?: Horizon): SetupItem[] {
   const row = (k: 'brief' | 'starter', label: string): SetupItem => {
     const t = todo.find((x) => x.kind === 'template' && x.repo === repo && x.check === k);
     const when = t ? handoutWords(tiered, repo, k, now, horizon) : undefined;
     return { id: k, label, kind: 'step', need: 'needed', state: t ? 'open' : 'done', why: t?.text, when, hint: TEMPLATE_TODO[k].hint, hintLabel: 'About this check' };
   };
-  return [row('brief', TEMPLATE_TODO.brief.label), row('starter', starter === 'handwritten' ? 'Starter files on main' : TEMPLATE_TODO.starter.label)];
+  const brief = row('brief', TEMPLATE_TODO.brief.label);
+  if (tpl.starter_applies === false) return [brief];
+  return [brief, row('starter', tpl.starter === 'handwritten' ? 'Starter files on main' : TEMPLATE_TODO.starter.label)];
 }
 
 /** Each grading_config.yml text read so far -> its title, so a re-render parses no YAML. */
@@ -439,12 +441,8 @@ export function CourseTabs({ items, problems: list, aside, tab, onTab }: { items
   const n = list.length;
   const problems: DashTab = {
     key: 'problems', label: 'Problems', count: n || 'done', bad: true,
-    body: n ? <ProblemCards list={list} /> : (
-      <>
-        <div class="no-problems"><Check /><span>No problems on the course.</span></div>
-        <p class="footnote">{COURSE_PROBLEMS_NOTE}</p>
-      </>
-    ),
+    hint: COURSE_PROBLEMS_NOTE,
+    body: n ? <ProblemCards list={list} /> : <div class="no-problems"><Check /><span>No problems on the course.</span></div>,
   };
   return (
     <div ref={aside.ref}>
@@ -480,7 +478,7 @@ export function CourseScreen(p: CourseProps) {
   const about = detailsOf(course.meta ?? {}).about;
   const description = typeof about.course_description === 'string' ? about.course_description.trim() : '';
   const fallback = (value: unknown, institution: string) => (value ? String(value) : <span class="footnote">{institution}, from the institution</span>);
-  // Under the tabbed panel, two columns (0031 rule 4): Handout materials and Assignment templates
+  // Under the tabbed panel, two columns (0031 rule 4): Course materials and Assignment templates
   // (one block) head the left, Semesters the right, and the rest go where the columns come out
   // closest in height. A semester's problems are on its own Dashboard (decision 0034).
   const panels: Record<string, ComponentChildren> = {
@@ -520,9 +518,9 @@ export function CourseScreen(p: CourseProps) {
           <dt>Late work <Hint small label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>
           <dt>Max team size <Hint small label="About max team size">This course’s default. Each assignment can set its own.</Hint></dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
         </dl>
-        <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={p.files.file(course.org, COURSE_REPO, 'dsl-course.yml').kind !== 'absent'} />
+        <EditFile org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={p.files.file(course.org, COURSE_REPO, 'dsl-course.yml').kind !== 'absent'} />
         <div class="website-block">
-          <h3>Public website <Hint label="About the public website">Optional: an open course version of your materials accessible to anyone on the internet, updated daily.</Hint></h3>
+          <h3>Public OpenCourse website <span class="chip">Beta</span> <Hint label="About the public website">Optional: an open version of this course and its materials, available to anyone on the internet. Beta: leave this off for now - work in progress.</Hint></h3>
           <SiteLive org={course.org} published={pub} last={lastPublish} running={publishing} now={p.now} />
           <div class="actions">
             {course.write ? <OpButtons def={publishWebsite(courseScope({ course }), pub)} small verbCls="btn small outline" /> : null}
@@ -535,7 +533,7 @@ export function CourseScreen(p: CourseProps) {
     handouts: (
       <>
         <section class="panel section" id="sec-materials">
-          <div class="section-head"><h2>Handout materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New handout materials</a></div>
+          <div class="section-head"><h2>Course materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New course materials</a></div>
           {v.course?.materials?.length ? (
             <ul class="rows">
               {v.course.materials.map((m) => {
@@ -657,6 +655,7 @@ export function TemplateScreen(p: CourseProps) {
   const read = fromConfig(cfg, v.course?.templates?.find((t) => t.repo === repo)?.starter);
   const base: Values = { ...read, formats: (read.formats as string[]).length ? read.formats : ['none'] };
   const cur = values ?? base;
+  const noStarter = (cur.formats as string[]).includes('none');
   const baseQ = questionRows(cfg.questions);
   const q = qdraft ?? baseQ;
   const fileErr = q.map((r) => questionFileError(r.file)).find(Boolean);
@@ -690,7 +689,7 @@ export function TemplateScreen(p: CourseProps) {
         <div><h2 class="h1">{heading} <Hint doc="03-add-assignment-to-course.md">Students get a copy of the assignment template at hand out; marking reads its solution branch. These settings apply to every semester, and after hand out they reach students only through Update every copy.</Hint></h2><p class="lede">This page sets up how the assignment is worked and marked, not its content. <span class="slug">{repo}</span></p></div>
         <div class="actions">{tplReady ? <RepoChip r={tplReady} /> : null}<OpenButton org={course.org} repo={repo} /></div>
       </div>
-      {tpl ? <section class="panel section" style="margin-bottom:18px"><RepoChecklist items={templateItems(repo, v.course?.todo ?? [], tpl.starter, v.tiered, p.now, v.horizon)} /></section> : null}
+      {tpl ? <section class="panel section" style="margin-bottom:18px"><RepoChecklist items={templateItems(repo, v.course?.todo ?? [], tpl, v.tiered, p.now, v.horizon)} /></section> : null}
       {problems.length ? <div style="margin-bottom:18px"><ProblemCards list={problems} /></div> : null}
       {file.kind === 'loading' ? <Loading what="Reading grading_config.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no grading_config.yml on the solution branch of {repo}.</CheckLine> : null}
@@ -701,7 +700,7 @@ export function TemplateScreen(p: CourseProps) {
             <div class="form-section">
               <h3>What it is</h3>
               <SchemaForm id="g1" schema={null} tiers={pick(tiers, ['title'])} values={cur} onChange={change} />
-              <Lives org={course.org} repo={repo} path="README.md" exists={tree.kind !== 'ready' || tree.paths.some((x) => x.path === 'README.md')} />
+              <EditFile org={course.org} repo={repo} path="README.md" exists={tree.kind !== 'ready' || tree.paths.some((x) => x.path === 'README.md')} />
             </div>
             <div class="form-section">
               <h3>How students work on it</h3>
@@ -714,13 +713,17 @@ export function TemplateScreen(p: CourseProps) {
             <div class="form-section">
               <h3>How it is marked <Hint label="About marking">Marking builds a mark sheet per student or team from these settings: the formats to read, whether tests run, and the questions below. You fill the sheet in Marks; totals and late penalties are worked out.</Hint></h3>
               <FormatPicker id="g-fmt" v={cur} set={change} fallback={null} />
-              <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['autograde', 'tests', 'starter'])} values={cur} onChange={change} />
+              <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['autograde', 'tests'])} values={cur} onChange={change} />
+              {/* "No starter file" ticked: the choice stays visible, greyed, as it applies once a format is. */}
+              <div class={noStarter ? 'starter-off' : undefined}>
+                <SchemaForm id="g3s" schema={null} tiers={pick(tiers, ['starter'])} values={cur} onChange={change} readOnly={noStarter} />
+                {noStarter ? <p class="off-why">No starter file: students get none, so there is nothing to derive or write.</p> : null}
+              </div>
               <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} files={files} />
               <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf'])} values={cur} onChange={change} />
-              <Lives org={course.org} repo={repo} path="grading_config.yml" branch="solution" exists={gradingExists} />
             </div>
             {/* A hand-written starter has nothing to derive: the radio's `?` says so (decision 0028 rule 4). */}
-            {cur.starter === 'derived' ? (
+            {cur.starter === 'derived' && !noStarter ? (
               <div class="form-section">
                 <h3>Student version <Hint label="About the student version" doc={STARTER_DOC}>Write the solution once and mark the answers; Derive builds the starter students get by blanking them. Run it after every change to the solution.</Hint></h3>
                 <div class="actions"><OpButtons def={derive(scope, repo, repo, heading)} small /></div>

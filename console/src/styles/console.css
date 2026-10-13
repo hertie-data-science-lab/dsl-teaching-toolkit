@@ -58,6 +58,7 @@ code, .mono { font-family: var(--font-code); font-size: 0.86em; }
 .sidenav a.nav-root:hover { color: var(--ink); }
 .sidenav .nav-anchor { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; padding: 7px 10px; border-radius: 8px; font-family: var(--font-display); font-weight: 700; font-size: 16px; line-height: 1.25; color: var(--ink); text-decoration: none; justify-content: flex-start; }
 .sidenav span.nav-anchor { cursor: default; }
+.sidenav .nav-org { font-family: var(--font-code); font-size: 11.5px; color: var(--muted); margin: -6px 10px 6px; overflow-wrap: anywhere; }
 .sidenav .row { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; }
 .sidenav .row > a { min-width: 0; }
 .sidenav .leaf { margin-left: 22px; }
@@ -113,8 +114,6 @@ main { min-width: 0; }
 .fold > summary::before, .a-card > summary.a-sum::before { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; margin-right: 2px; flex: none; }
 .fold[open] > summary::before, .a-card[open] > summary.a-sum::before { transform: rotate(45deg); }
 .lives { font-size: 12.5px; color: var(--muted); }
-.lives a { color: var(--muted); }
-.lives a:hover { color: var(--link); }
 .note { border: 1.5px dashed var(--rule-strong); border-radius: 10px; padding: 10px 14px; font-size: 13.5px; color: var(--ink-2); background: var(--surface-2); }
 .note b { font-family: var(--font-display); }
 
@@ -131,7 +130,6 @@ main { min-width: 0; }
 .textlink { font: inherit; font-size: 13.5px; color: var(--link); background: none; border: 0; padding: 4px 2px; min-height: 32px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; display: inline-flex; align-items: center; }
 .edit-file { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
 .edit-file:hover { color: var(--link); }
-.gate-hint { font-size: 12.5px; color: var(--muted); }
 
 /* ================= panels ================= */
 .panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 18px 20px; }
@@ -229,25 +227,28 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .setup .s-fix .btn.small { min-height: 26px; font-size: 12.5px; padding: 0 10px; }
 .sub-h { font-family: var(--font-display); font-weight: 700; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 10px 0 2px; }
 .sub-h:first-child { margin-top: 0; }
-/* The verdict line: red ! (fixing), grey circle (not ready / not set up), green tick (ready / on track). */
+/* The verdict line: red ! (fixing), red ring (not ready / not set up), green tick (ready / on track). */
 .verdict .vtag { font-weight: 400; color: var(--muted); }
 .verdict .vtag::before { content: "·"; margin-right: 8px; }
 .verdict .ex { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 999px; flex: none; font-family: var(--font-display); font-weight: 700; font-size: 12px; }
 .verdict.bad .ex { background: var(--bad); color: #fff; }
-.verdict.open .ex { border: 1.5px solid var(--idle); }
+.verdict.open .ex { border: 1.5px solid var(--bad); }
 /* A dashboard's one tabbed panel (decision 0034): the console's tab look as buttons, a count on each. */
-.ptabs { display: flex; gap: 4px; box-shadow: inset 0 -1px var(--rule-strong); margin: 0 0 14px; overflow-x: auto; scrollbar-width: none; }
-.ptabs button { font: inherit; font-family: var(--font-display); font-weight: 600; font-size: 14.5px; padding: 8px 14px; color: var(--ink-2); background: none; border: 0; border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; }
-.ptabs button:hover { color: var(--ink); }
-.ptabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.ptabs { display: flex; flex-wrap: wrap; gap: 4px; box-shadow: inset 0 -1px var(--rule-strong); margin: 0 0 14px; }
+.ptabs-list { display: contents; }
+.ptabs-list button { font: inherit; font-family: var(--font-display); font-weight: 600; font-size: 14.5px; padding: 8px 14px; color: var(--ink-2); background: none; border: 0; border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; }
+.ptabs-list button:hover { color: var(--ink); }
+.ptabs-list button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
 .ptabs .n { font-family: var(--font-display); font-weight: 700; font-size: 11.5px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--sunk); color: var(--ink-2); display: inline-grid; place-items: center; }
 .ptabs .n.bad { background: var(--bad); color: #fff; }
 .ptabs .n.ok { background: var(--ok-soft); color: var(--ok); }
 .ptabs .n.ok svg { width: 10px; height: 10px; }
 .ptabs .spacer { flex: 1; }
+/* The open tab's `?`, outside the tablist: wrapping, not scrolling, so its popover is not clipped. */
+.ptabs-hint { display: inline-flex; align-self: center; }
+.ptabs-hint > .hint-wrap { margin-left: 0; }
 .ptab[hidden] { display: none; }
 .ptab > .footnote { margin: 0 0 10px; }
-.ptab > .setup + .footnote, .ptab > .no-problems + .footnote { margin: 8px 0 0; }
 .verdict-btn { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .verdict-btn:hover, .verdict-btn:focus-visible { text-decoration: underline; }
 /* Coming up on the semester: what is needed later, by week. */
@@ -257,9 +258,10 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .ptab-coming li b { font-family: var(--font-display); font-weight: 700; color: var(--ink); }
 .ptab-coming li .textlink { min-height: 0; padding: 0; }
 @media (max-width: 760px) { .ptab-coming li { grid-template-columns: 80px minmax(0, 1fr); } .ptab-coming li .textlink { grid-column: 2; } }
-/* Repo chips: not ready is grey; suggestions dotted, never coloured. */
+/* Repo chips: not ready is grey in a row, red on a settings page's head; suggestions dotted, never coloured. */
 .chip.suggest { background: transparent; border: 1.5px dotted var(--idle); color: var(--ink-2); font-weight: 500; }
 .chip.notready { background: var(--sunk); color: var(--ink-2); }
+.page-head .actions > .chip.notready { background: var(--bad-soft); color: var(--bad-ink); }
 .page-note { color: var(--ink-2); font-size: 14px; margin: -6px 0 18px; max-width: 80ch; }
 
 /* ================= lists ================= */
@@ -304,27 +306,21 @@ table.kinds td select { min-width: 180px; }
 
 /* this week */
 .week { list-style: none; margin: 0; padding: 0; }
-.week li { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 4px 14px; padding: 12px 0; border-top: 1px solid var(--rule); }
+/* One line per row: when, chip, label, state, details (cut with an ellipsis), actions. */
+.week li { display: flex; align-items: center; gap: 14px; padding: 10px 0; border-top: 1px solid var(--rule); white-space: nowrap; }
 .week li:first-child { border-top: 0; }
-.week .when { font-family: var(--font-display); line-height: 1.2; }
-.week .when b { display: block; font-size: 15px; font-weight: 700; }
-.week .when span { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.week .what { display: grid; gap: 4px; min-width: 0; }
+.week .when { flex: none; width: 92px; font-family: var(--font-display); }
+.week .when b { font-size: 15px; font-weight: 700; }
+.week .when span { margin-left: 6px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.week .what { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.week .what > * { flex: none; }
 .week .what .t { font-weight: 600; }
-.week .what .d { font-size: 13.5px; color: var(--muted); }
-.week .actions { margin-top: 4px; }
+.week .what .d { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 13.5px; color: var(--muted); }
+.week .actions { flex: none; flex-wrap: nowrap; }
+.waiting-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .week .overdue { font-size: 13.5px; color: var(--muted); padding-top: 12px; border-top: 1px solid var(--rule); }
 
 /* assignment index */
-.asg-list { list-style: none; margin: 0; padding: 0; }
-.asg-list li { border-top: 1px solid var(--rule); }
-.asg-list li:first-child { border-top: 0; }
-.asg-list a { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; padding: 11px 0; color: var(--ink); text-decoration: none; }
-.asg-list a:hover .a-name { text-decoration: underline; }
-.asg-list .a-name { font-weight: 600; }
-.asg-list .a-sub { font-size: 13px; color: var(--muted); }
-.asg-list .a-side { grid-column: 2; grid-row: 1 / span 2; display: grid; justify-items: end; gap: 3px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.asg-list .a-flag { color: var(--bad-ink); font-weight: 600; font-size: 13px; }
 
 .table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); }
 table.grid { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px; }
@@ -340,8 +336,13 @@ table.grid a.rowlink:hover { text-decoration: underline; }
 table.grid tr.fault td { background: var(--bad-soft); }
 table.grid tr.fault td:first-child { box-shadow: inset 5px 0 0 var(--bad); }
 table.grid tr.changed td:not(.sys) { background: var(--amber-soft); }
+/* A row Edit roster marks for removal: struck through until Save drops it. */
+table.grid tr.removed td:not(.rm-cell), .rcard.removed > :not(.rc-top) { text-decoration: line-through; color: var(--muted); }
+table.grid td.rm-cell { width: 1%; white-space: nowrap; }
 table.grid td input, table.grid td select { border-color: transparent; background: transparent; padding: 4px 6px; min-height: 32px; }
 table.grid td input:hover, table.grid td select:hover { border-color: var(--rule-strong); }
+/* the roster in Edit roster: its inputs look like inputs */
+.roster-table.editing table.grid td input, .roster-table.editing table.grid td select { border-color: var(--rule-strong); background: var(--surface); }
 
 /* automation */
 .auto-head { display: flex; align-items: center; gap: 12px; }
@@ -416,7 +417,7 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 .st-chip.skip { background: var(--bad); color: #fff; }
 .st-chip.later { background: transparent; border: 1.5px dotted var(--idle); color: var(--ink-2); }
 /* A release row's red `!` (decision 0034), on the timeline and the agenda alike. */
-.st .ex, .week .actions .ex { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 999px; background: var(--bad); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 11px; }
+.st .ex, .week .what .ex { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 999px; background: var(--bad); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 11px; }
 .trow .st .btn.small { min-height: 26px; font-size: 12px; padding: 0 10px; }
 .st-note { font-size: 12.5px; font-weight: 600; color: var(--bad-ink); }
 .trow .btn.small { min-height: 30px; font-size: 12.5px; padding: 1px 10px; background: var(--surface); color: var(--ink); border-color: var(--ink-2); }
@@ -788,6 +789,9 @@ textarea.code { font-family: var(--font-code); font-size: 13px; min-height: 120p
 .fmt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
 .fmt-grid .check { padding: 8px 10px; border: 1px solid var(--rule); border-radius: 8px; min-height: 44px; align-items: center; }
 .fmt-grid .check.off { opacity: 0.5; }
+.starter-off .field { opacity: 0.55; }
+.photo-drop { border: 1.5px dashed transparent; border-radius: 8px; }
+.photo-drop.over { border-color: var(--idle); background: var(--sunk); }
 .fmt-grid .check input { margin-top: 0; }
 .off-why { font-size: 12.5px; color: var(--muted); }
 .qtable { border-collapse: collapse; font-size: 14px; width: 100%; max-width: 440px; }
@@ -805,7 +809,6 @@ textarea.code { font-family: var(--font-code); font-size: 13px; min-height: 120p
 .avatar img { width: 30px; height: 30px; border-radius: 50%; display: block; }
 .loading { color: var(--muted); padding: 24px 0; display: flex; gap: 10px; align-items: center; }
 [hidden] { display: none !important; }
-.asg-list .a-side .chip { align-self: start; }
 .cohort-card > .chip { justify-self: start; }
 
 /* the help screen's diagram: every colour a theme token */
@@ -917,6 +920,8 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .verdict svg { width: 14px; height: 14px; flex: none; }
 .verdict.ok { color: var(--ok); }
 .verdict.bad { color: var(--bad-ink); }
+/* Not ready is red as well; its words ("Not ready", not "Needs fixing") and the empty ring tell it from a problem. */
+.verdict.open { color: var(--bad-ink); }
 
 /* WP-S6 */
 /* The grey note beside a field title: a small gap from the title. */
@@ -970,7 +975,7 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .ops .o-head a { color: inherit; text-decoration: none; }
 .ops .o-head a:hover b { text-decoration: underline; }
 
-/* T6: handout materials (decision 0026 rule 5): withheld tree beside its patterns, file-tree look, line flash */
+/* T6: course materials (decision 0026 rule 5): withheld tree beside its patterns, file-tree look, line flash */
 .grid-2.withhold { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
 @media (max-width: 900px) { .grid-2.withhold { grid-template-columns: minmax(0, 1fr); } }
 .file-tree li > details > ul { margin-left: 6px; padding-left: 12px; border-left: 1px solid var(--rule-strong); }
@@ -1054,3 +1059,8 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .file-tree .ft-file.current { background: var(--sunk); border-radius: 6px; }
 .file-tree .ft-file a[aria-current], .session-files a[aria-current] { font-weight: 700; }
 @media (max-width: 860px) { .materials-split { grid-template-columns: minmax(0, 1fr); } }
+
+/* The course materials index: each repo's files as a read-only folder tree under its row. */
+.rows .r-files { grid-column: 1 / -1; margin-top: 6px; }
+.materials-tree .ft-count { font-size: 12px; color: var(--muted); }
+.materials-tree .ft-gh { margin-left: auto; font-size: 12px; color: var(--link); display: inline-flex; gap: 4px; align-items: center; }

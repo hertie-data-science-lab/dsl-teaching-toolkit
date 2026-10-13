@@ -17,8 +17,9 @@ body:
         Already in a team? Joining or creating another moves you out of your current one while team formation is open.
   # dsl:assignment-field:start - this semester's open assignments are spliced in here as a
   # dropdown by dsl_course.welcome.join_team_form; edits between these markers are
-  # overwritten on the next refresh. The free-text field below is what a semester with no
-  # assignment open for team formation receives.
+  # overwritten on the next refresh. A semester with no assignment open for team formation
+  # gets a one-option dropdown saying nothing is open; the free-text field below is what one whose
+  # lock could not be read receives.
   - type: input
     id: assignment
     attributes:

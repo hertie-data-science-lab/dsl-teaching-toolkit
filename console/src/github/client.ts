@@ -431,7 +431,8 @@ export class GitHubClient {
     owner: string;
     repo: string;
     path: string;
-    text: string;
+    /** The file's text, or its bytes (an uploaded image). */
+    text: string | Uint8Array;
     sha: string | null;
     message: string;
     author: Author;
@@ -439,7 +440,7 @@ export class GitHubClient {
   }): Promise<{ sha: string; commit: string }> {
     const body: Record<string, unknown> = {
       message: args.message,
-      content: encodeBase64(args.text),
+      content: typeof args.text === 'string' ? encodeBase64(args.text) : toBase64(args.text),
       author: args.author,
       committer: args.author,
     };

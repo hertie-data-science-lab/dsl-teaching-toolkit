@@ -146,11 +146,19 @@ def open_formations(lock_text: str) -> dict[str, str]:
     `open` is written only for a self-select group assignment inside its window, so this
     needs no second opinion about the shape either: every other assignment is one the form
     would refuse anyway, and offering it in the dropdown would be inviting a student to be
-    refused."""
+    refused. A self-select entry with no window key at all (a lock from a toolkit older
+    than the window) is open, as the workflow reads it."""
+
+    def is_open(entry: Mapping[str, str]) -> bool:
+        window = entry.get("team_formation_window")
+        if window is None:
+            return entry.get("team_formation", "").lower() == "self_select"
+        return window.lower() == "open"
+
     return {
         key: entry.get("team_formation_page", "")
         for key, entry in sorted(parse_team_lock(lock_text).items())
-        if entry.get("team_formation_window", "").lower() == "open"
+        if is_open(entry)
     }
 
 
@@ -187,42 +195,67 @@ def _team_list_header(opened: Mapping[str, str]) -> str:
     )
 
 
-def join_team_form(opened: Mapping[str, str]) -> str:
+# What a semester whose lock says no team assignment is open gets in place of the field:
+# the Assignment dropdown's one option, and the sentence under its label. The option is
+# what the issue body carries, and the workflow (`templates/join/team-formation.yml`)
+# answers it with that sentence.
+NO_TEAM_ASSIGNMENT_OPEN = (
+    "This semester has no team assignment open right now, so this form is not needed."
+)
+NO_TEAM_ASSIGNMENT_OPTION = "No team assignment is open right now"
+
+
+def join_team_form(opened: Mapping[str, str] | None) -> str:
     """The Join-team issue form for a semester whose open assignments are `opened`'s keys
-    (`open_formations`), in order.
+    (`open_formations`), in order; None when the semester's lock could not be read.
 
     With any, the Assignment field becomes a dropdown of exactly those: a free-text slug is
     a guess, and a guess that misses is answered by a workflow comment some minutes later,
     which is the slowest possible way to learn you typed a dash wrong.
 
-    With none, the template's own free-text field is returned untouched. A GitHub dropdown
-    needs at least one option - an empty `options:` list is a form GitHub refuses to
-    render, which would take the Join-team route away from a semester entirely rather than
-    merely leave it awkward.
+    With none (a lock read, nothing open), the dropdown offers one option saying nothing is
+    open, under a line saying the form is not needed: a free-text field there invites a
+    slug the workflow refuses, and a markdown block is not submitted, so an issue filed
+    from it would carry no Assignment at all. The workflow answers that option with the
+    same sentence.
+
+    Unread (None), the template's own free-text field is returned untouched: a lock that
+    could not be read says nothing about what is open, and the free-text form works in
+    every semester.
 
     `opened`'s values link each assignment's page from the header ("" =
     not known; the lock's `team_formation_page`). The form tells a student to type a
     team's name "exactly as that page spells it", so a page they cannot reach in one click
     is an instruction they cannot follow."""
+    if opened is None:
+        return template(JOIN_TEAM_FORM)
     form = template(JOIN_TEAM_FORM).replace(
         TEAM_LIST_SENTENCE, _team_list_header(opened)
     )
-    if not opened:
-        return form
     start = form.find(ASSIGNMENT_FIELD_START)
     end = form.find(ASSIGNMENT_FIELD_END)
     if start == -1 or end == -1 or end < start:
         return form
-    options = "\n".join(f"        - {slug}" for slug in opened)
-    block = (
+    head = (
         f"{ASSIGNMENT_FIELD_START} - AUTO-GENERATED from this semester's\n"
         "  # `semester-config/.system/assignments.lock.yml`: the assignments open for team\n"
         "  # formation right now. Edits between these markers are overwritten.\n"
+    )
+    description = (
+        "The group assignment you are forming a team for."
+        if opened
+        else NO_TEAM_ASSIGNMENT_OPEN
+    )
+    options = "\n".join(
+        f"        - {slug}" for slug in (opened or [NO_TEAM_ASSIGNMENT_OPTION])
+    )
+    block = (
+        f"{head}"
         "  - type: dropdown\n"
         "    id: assignment\n"
         "    attributes:\n"
         "      label: Assignment\n"
-        "      description: The group assignment you are forming a team for.\n"
+        f"      description: {description}\n"
         "      options:\n"
         f"{options}\n"
         "    validations:\n"
@@ -232,13 +265,14 @@ def join_team_form(opened: Mapping[str, str]) -> str:
     return form[:start] + block + form[end + len(ASSIGNMENT_FIELD_END) :]
 
 
-def _open_formations(org: str) -> dict[str, str]:
-    """`open_formations` for a live semester, or none of them.
+def _open_formations(org: str) -> dict[str, str] | None:
+    """`open_formations` for a live semester, or None when its lock was not read.
 
     Every way of not reading the lock lands on the free-text fallback: a semester seeded
     before the file existed, one whose sync has not run yet, and a read that failed for a
     reason nobody here can act on. The refresh's job is to leave a WORKING form behind, and
-    the free-text one has worked for every semester so far."""
+    the free-text one has worked for every semester so far; "nothing is open" is said only
+    off a lock that was read."""
     try:
         text = get_file_content(org, CONFIG_REPO, TEAM_LOCK_PATH)
     except RuntimeError as exc:
@@ -246,8 +280,8 @@ def _open_formations(org: str) -> dict[str, str]:
             f"could not read {TEAM_LOCK_PATH} in {org} ({exc}) - the Join-team form is "
             f"seeded with a free-text Assignment field this run"
         )
-        return {}
-    return open_formations(text) if text else {}
+        return None
+    return open_formations(text) if text else None
 
 
 JOIN_TEAM_FORM_PATH = ".github/ISSUE_TEMPLATE/02-join-team.yml"

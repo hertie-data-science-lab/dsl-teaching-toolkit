@@ -1,8 +1,8 @@
-// The operation panel's state: the one operation open at a time, what this session has
-// previewed (the gate), and the runs this session finished (for the Operations list). A run
+// The operation panel's state: the one operation open at a time, the text this session's
+// previews generated, and the runs this session finished (for the Operations list). A run
 // is followed with `poll`: every 3 s, every 10 s once it has run for 30 s, nothing while the
 // tab is hidden, and given up on after `maxMisses` unreadable polls in a row; sign-out
-// (`reset`) ends every watch and forgets the runs and the gate, so the next person starts clean.
+// (`reset`) ends every watch and forgets the runs and the previews, so the next person starts clean.
 
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
@@ -16,7 +16,7 @@ import { modeOf, type OpMode } from './registry';
 
 /** One operation as the panel offers it: the op, its derived args, and its copy. */
 export interface OpDef {
-  /** The gate's subject: a preview of `key` unlocks the verb for `key` only. */
+  /** What a preview is of: a preview of `key` is recorded for `key` only. */
   key: string;
   op: string;
   courseOrg: string;
@@ -42,6 +42,12 @@ export interface OpDef {
   previewLabel?: string;
   /** An information panel with no operation behind it (Export). */
   info?: ComponentChildren;
+  /**
+   * The page's verb only opens the panel, where the verb runs (13 Oct 2026 gate inspection):
+   * hand out, return marks, archive, update every copy, send new codes, publish website. A
+   * preview there is offered, never required.
+   */
+  confirmInPanel?: boolean;
   /** Where on GitHub the verb's change shows (a repo, branch or file): "See on GitHub" once it has run. A function reads the run's args. */
   target?: string | ((args: Record<string, unknown>) => string);
 }
@@ -92,17 +98,9 @@ function requestArgs(def: OpDef, values: Record<string, unknown>, checked: boole
   return args;
 }
 
-/** The args as one comparable string: sorted, blanks dropped as the request drops them. */
-function argsKey(args: Record<string, unknown>): string {
-  const kept = Object.entries(args).filter(([, v]) => v !== undefined && v !== null && v !== '');
-  return JSON.stringify(kept.sort(([a], [b]) => a.localeCompare(b)));
-}
-
 export class OpsSession {
   readonly current = signal<Current | null>(null);
   readonly runs = signal<(Operation & { cohort?: string; course: string })[]>([]);
-  /** The gate: per op and scope, the args its last good preview in this session ran with. */
-  readonly previewed = signal<Record<string, string>>({});
   /** Per op and scope, the generated text its last good preview carried (`outcome.block`). */
   readonly blocks = signal<Record<string, string>>({});
   readonly notice = signal<string | null>(null);
@@ -127,32 +125,23 @@ export class OpsSession {
     this.watches = new AbortController();
     this.current.value = null;
     this.runs.value = [];
-    this.previewed.value = {};
     this.blocks.value = {};
     this.notice.value = null;
   }
 
-  private gateKey(def: OpDef): string {
+  /** One op in one scope: what a preview's text, and the panel kept open, belong to. */
+  private opKey(def: OpDef): string {
     return `${def.op}|${def.cohortOrg ?? def.courseOrg}|${def.key}`;
-  }
-
-  /**
-   * Whether this session previewed `def` with exactly these options: a preview unlocks the
-   * run it showed, not one whose options were changed after it.
-   */
-  isPreviewed(def: OpDef, values: Record<string, unknown> = def.args, checked = false): boolean {
-    return this.previewed.value[this.gateKey(def)] === argsKey(requestArgs(def, values, checked));
   }
 
   /** The text the last good preview of `def` in this session generated, or null. */
   lastBlock(def: OpDef): string | null {
-    return this.blocks.value[this.gateKey(def)] ?? null;
+    return this.blocks.value[this.opKey(def)] ?? null;
   }
 
-  /** Whether the verb may run now: gated ops need this session's preview, a check box its tick. */
+  /** Whether the verb may run now: not while running, and a confirmation box needs its tick. A preview is never required. */
   canRun(c: Current): boolean {
     if (c.phase === 'running') return false;
-    if (c.mode === 'gated' && !this.isPreviewed(c.def, c.values, c.checked)) return false;
     if (c.def.needsCheck && !c.checked) return false;
     return true;
   }
@@ -171,12 +160,13 @@ export class OpsSession {
       return;
     }
     this.notice.value = null;
-    if (c && c.phase === 'ready' && this.gateKey(c.def) === this.gateKey(def) && !def.info) {
+    if (c && c.phase === 'ready' && this.opKey(c.def) === this.opKey(def) && !def.info) {
       // The same operation again (the page's verb after the panel's preview): keep its
-      // options and its preview rather than starting over.
+      // options and its preview rather than starting over. A confirm-in-panel verb still only
+      // focuses the panel: the panel's own verb is the one that runs it.
       this.patch({ min: false });
-      if (start === 'run' && this.canRun(this.current.value!)) void this.start(c.mode === 'previewOnly' ? 'preview' : 'run');
-      else if (start === 'preview' && (c.mode === 'gated' || c.mode === 'preview')) void this.start('preview');
+      if (start === 'run' && !def.confirmInPanel && this.canRun(this.current.value!)) void this.start(c.mode === 'previewOnly' ? 'preview' : 'run');
+      else if (start === 'preview' && c.mode === 'preview') void this.start('preview');
       return;
     }
     this.current.value = {
@@ -185,8 +175,8 @@ export class OpsSession {
     };
     if (def.info) return;
     const cur = this.current.value;
-    if (start === 'preview' && (cur.mode === 'gated' || cur.mode === 'preview')) void this.start('preview');
-    else if (start === 'run' && this.canRun(cur)) void this.start(cur.mode === 'previewOnly' ? 'preview' : 'run');
+    if (start === 'preview' && cur.mode === 'preview') void this.start('preview');
+    else if (start === 'run' && !def.confirmInPanel && this.canRun(cur)) void this.start(cur.mode === 'previewOnly' ? 'preview' : 'run');
   }
 
   setValues(values: Record<string, unknown>): void {
@@ -299,8 +289,7 @@ export class OpsSession {
       ...this.runs.value,
     ];
     const ok = !!o && o.conclusion !== 'failed';
-    if (preview && ok) this.previewed.value = { ...this.previewed.value, [this.gateKey(def)]: argsKey(args) };
-    if (preview && ok && o.block) this.blocks.value = { ...this.blocks.value, [this.gateKey(def)]: o.block };
+    if (preview && ok && o.block) this.blocks.value = { ...this.blocks.value, [this.opKey(def)]: o.block };
     if (this.current.value?.handle === handle) {
       // A refused cancel's error is about a run that has now ended either way.
       const ended = { running: null, stopping: false, stopped, error: null };
