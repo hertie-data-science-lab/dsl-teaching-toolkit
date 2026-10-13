@@ -59,10 +59,12 @@ describe('the assignment hub', () => {
     }
   });
 
-  it('opens on Teams while teams form, on Marks once marking starts, else Overview', () => {
+  it('opens on Teams while teams form, on Marks from the due date, else Overview', () => {
     const at = (state: AssignmentState, a: Assignment = team) => defaultTab({ ...a, state });
     expect(at('teams_forming')).toBe('teams');
     expect(at('blocked')).toBe('teams');
+    expect(at('late_window')).toBe('marks');
+    expect(at('late_window', solo)).toBe('marks');
     expect(at('marking')).toBe('marks');
     expect(at('returned', solo)).toBe('marks');
     expect(at('open')).toBe('overview');

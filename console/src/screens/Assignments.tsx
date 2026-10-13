@@ -1,5 +1,5 @@
 // S16 Assignments index and S10 Assignment detail: the hub, with tabs Overview | Teams |
-// Marks (decision 0008). Teams shows only when the template says teams.
+// Marks (decisions 0008, 0037). Teams shows only when the template says teams.
 
 import { readTable } from '../edit/csv';
 import { parseRoster } from '../model/people';
@@ -119,10 +119,10 @@ function stepOf(state: AssignmentState): number {
 
 export const isGroup = (a: Assignment) => a.teams !== null && a.teams !== undefined;
 
-/** The tab an assignment opens on: Teams while teams form, Marks once marking starts. */
+/** The tab an assignment opens on: Teams while teams form, Marks from the due date (decision 0037). */
 export function defaultTab(a: Assignment): AssignmentTab {
   if ((a.state === 'teams_forming' || a.state === 'blocked') && isGroup(a)) return 'teams';
-  if (a.state === 'marking' || a.state === 'returned') return 'marks';
+  if (a.state === 'late_window' || a.state === 'marking' || a.state === 'returned') return 'marks';
   return 'overview';
 }
 
