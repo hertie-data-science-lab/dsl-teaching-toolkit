@@ -255,7 +255,7 @@ describe('S6 schedule and S11 release', () => {
   it('lists the materials repos and the Other repos to release from', () => {
     const listed = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE }, {}, TREE, { [COURSE_ORG]: [{ name: '.github' }, { name: 'course-materials-f2026' }, { name: 'lecture-code-f2026' }, { name: 'assignment-3-f2026' }] });
     const out = html(<ScheduleScreen {...props({ entry: 's5', files: listed })} />);
-    expect(out).toMatch(/<optgroup label="Handout materials repos"><option value="course-materials-f2026" selected>/);
+    expect(out).toMatch(/<optgroup label="Course materials repos"><option value="course-materials-f2026" selected>/);
     expect(out).toContain('<optgroup label="Other repos"><option value="lecture-code-f2026">lecture-code-f2026</option></optgroup>');
   });
   it('renders a release with its source, destination and problem', () => {
@@ -564,8 +564,8 @@ describe('S2 course and S17 template', () => {
     const [left, right] = [cols.slice(0, second), cols.slice(second)];
     expect(left.indexOf('<section class="panel section" id="sec-materials"')).toBe(left.indexOf('<section'));
     expect(right.indexOf('<h2>Semesters</h2>')).toBeGreaterThan(-1);
-    for (const h of ['<h2>Semesters</h2>', '<h2>Course details</h2>', '<h2>Recent activity</h2>', '<h2>Handout materials</h2>']) expect(cols).toContain(h);
-    // Handout materials and Assignment templates sit one after the other.
+    for (const h of ['<h2>Semesters</h2>', '<h2>Course details</h2>', '<h2>Recent activity</h2>', '<h2>Course materials</h2>']) expect(cols).toContain(h);
+    // Course materials and Assignment templates sit one after the other.
     expect(left.indexOf('id="sec-templates"')).toBeGreaterThan(left.indexOf('id="sec-materials"'));
     expect(left.slice(left.indexOf('id="sec-materials"'), left.indexOf('id="sec-templates"')).match(/<section/g)).toHaveLength(1);
   });
@@ -623,7 +623,7 @@ describe('S2 course and S17 template', () => {
     // A problem beyond the horizon flags no stage (the engine's `_stage_states`): the step is open, not red.
     expect(rowsOf(courseItems({ ...base, stages: { ...base.stages, C5: 'todo' } }, [{ p: STATUS.problems![1], b: 'later' }], []))).not.toContain('class="problem"');
     expect(stepLink('C6', withWhy)).toEqual({ href: '#website', label: 'Set up the public website' });
-    expect(stepLink('C4', { ...withWhy, materials: [{ repo: 'm', state: 'todo' }] }).label).toBe('Open handout materials');
+    expect(stepLink('C4', { ...withWhy, materials: [{ repo: 'm', state: 'todo' }] }).label).toBe('Open course materials');
     expect(stepLink('C5', { ...withWhy, templates: [{ repo: 't', state: 'todo' }] }).label).toBe('Open templates');
   });
   it('reads a semester as live, ended but not archived, or archived', () => {

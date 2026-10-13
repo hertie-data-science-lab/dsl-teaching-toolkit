@@ -965,7 +965,7 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .ops .o-head a { color: inherit; text-decoration: none; }
 .ops .o-head a:hover b { text-decoration: underline; }
 
-/* T6: handout materials (decision 0026 rule 5): withheld tree beside its patterns, file-tree look, line flash */
+/* T6: course materials (decision 0026 rule 5): withheld tree beside its patterns, file-tree look, line flash */
 .grid-2.withhold { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
 @media (max-width: 900px) { .grid-2.withhold { grid-template-columns: minmax(0, 1fr); } }
 .file-tree li > details > ul { margin-left: 6px; padding-left: 12px; border-left: 1px solid var(--rule-strong); }

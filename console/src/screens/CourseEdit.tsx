@@ -1,5 +1,5 @@
 // Course-side editors: S3 Course details (dsl-course.yml), S20 Public OpenCourse website
-// (opencourse.yml), S19 Handout materials repo settings (materials.yml, .releaseignore).
+// (opencourse.yml), S19 Course materials repo settings (materials.yml, .releaseignore).
 
 import { useRef, useState } from 'preact/hooks';
 import materialsSchema from '../../schemas/materials.schema.json';
@@ -460,7 +460,7 @@ export function WebsiteScreen(p: CourseProps) {
     <>
       <div class="page-head">
         <div>
-          <h2 class="h1">Public OpenCourse website <span class="chip">Beta</span> <Hint doc="reference/actions-reference.md">An open version of one handout materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h2>
+          <h2 class="h1">Public OpenCourse website <span class="chip">Beta</span> <Hint doc="reference/actions-reference.md">An open version of one course materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h2>
           <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : siteExists && !before.enabled ? 'Off' : 'Not published'}</span>{published ? 'Updates daily.' : siteExists && !before.enabled ? WEBSITE_OFF_LIVE : 'Optional: an open version of this course and its materials, available to anyone on the internet.'}</p>
           <p class="footnote">Beta: leave this off for now - work in progress.</p>
         </div>
@@ -474,7 +474,7 @@ export function WebsiteScreen(p: CourseProps) {
       <div class="grid-2">
         <section class="panel section">
           <h2>Settings</h2>
-          {repos.length ? <SchemaForm id="ws" schema={null} tiers={publishTiers(repos, siteExists)} values={values} onChange={onForm} /> : <p class="footnote">No handout materials repo yet: create one first.</p>}
+          {repos.length ? <SchemaForm id="ws" schema={null} tiers={publishTiers(repos, siteExists)} values={values} onChange={onForm} /> : <p class="footnote">No course materials repo yet: create one first.</p>}
           {before.enabled ? null : <p class="footnote">The website is off: Publish refuses until it is on and saved.</p>}
         </section>
         <section class="panel section">
@@ -640,7 +640,7 @@ export function MaterialsScreen(p: CourseProps) {
   return (
     <>
       <div class="page-head">
-        <div><h2 class="h1">{repo} <Hint doc="02-add-materials-to-course.md">Handout materials stay here, private to instructors, until a scheduled release copies them to a semester. Files withheld here never reach students.</Hint></h2><p class="lede">Handout materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
+        <div><h2 class="h1">{repo} <Hint doc="02-add-materials-to-course.md">Course materials stay here, private to instructors, until a scheduled release copies them to a semester. Files withheld here never reach students.</Hint></h2><p class="lede">Course materials repo settings. <span class="slug">{course.org}/{repo}</span></p></div>
         <div class="actions">{r ? <RepoChip r={r} /> : null}<OpenButton org={course.org} repo={repo} quiet /></div>
       </div>
       <div class="stack">

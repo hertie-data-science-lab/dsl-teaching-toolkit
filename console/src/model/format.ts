@@ -217,7 +217,7 @@ export function heldSentence(b: Bites, n: number): string {
 /** Where a problem sits, as the problem card's bold first word. */
 export const PROBLEM_AREA: Record<string, string> = {
   K1: 'Org', K2: 'Setup', K3: 'Instructors', K4: 'Schedule', K5: 'Roster', K6: 'Site',
-  C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Handout materials', C5: 'Template', C6: 'Public website',
+  C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Course materials', C5: 'Template', C6: 'Public website',
 };
 
 /** The engine's `late_window` keeps its name; the console says marking from the due date (decision 0037). */
@@ -248,7 +248,7 @@ export const OP_LABEL: Record<string, string> = {
   'course.publish_website': 'Publish website',
   'assignment.derive_starter': 'Derive student version',
   'assignment.generate_syllabus': 'Generate the weekly plan',
-  'materials.create': 'New handout materials',
+  'materials.create': 'New course materials',
   'assignment.create': 'New assignment',
   'semester.bootstrap': 'New semester',
   'teams.open_window': 'Email students without a team',

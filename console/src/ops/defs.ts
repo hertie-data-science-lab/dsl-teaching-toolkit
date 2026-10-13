@@ -265,8 +265,8 @@ export function createAssignment(s: Scope, repo: string, title: string, args: Re
 
 export function createMaterials(s: Scope, repo: string, args: Record<string, unknown>): OpDef {
   return {
-    ...base(s, 'materials.create', repo), name: 'New handout materials', title: repo, where: s.where,
+    ...base(s, 'materials.create', repo), name: 'New course materials', title: repo, where: s.where,
     intro: `Creates ${repo}, private to instructors until releases copy it to a semester.`,
-    verb: 'Create handout materials repo', running: `Creating ${repo}`, cancel: 'Stop', args, target: ghUrl(s.courseOrg, repo),
+    verb: 'Create course materials repo', running: `Creating ${repo}`, cancel: 'Stop', args, target: ghUrl(s.courseOrg, repo),
   };
 }

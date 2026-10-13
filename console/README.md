@@ -202,7 +202,7 @@ needed to-do is never listed in the panel: it shows once, at its point of need, 
 ("Not ready" and the first missing needed item) and its settings checklist, split into Needed
 and Suggested.
 
-Under the course's tabbed panel, the other panels, Handout materials followed by Assignment
+Under the course's tabbed panel, the other panels, Course materials followed by Assignment
 templates (one block, heading the left), Semesters (heading the right; each with its next
 automatic event and its count), Course details (with the public website's indicator and Publish
 button) and Recent activity (the last five operations across the course and its live
@@ -371,7 +371,7 @@ a first visit, mostly free 304s after).
 - Automation's heartbeat: the course's Scheduled release run list.
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
   `students.csv`, `instructors.yml`, a template's `grading_config.yml`, the site's `index.md`.
-- Handout materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and
+- Course materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and
   last changes; a materials repo's recursive tree, badged from its `.releaseignore`.
 
 ## What it changes
@@ -381,7 +381,7 @@ a first visit, mostly free 304s after).
   `teams.csv`, `grading_sheets/<slug>.yml`, `.github/dsl-course.yml`, a template's
   `grading_config.yml` (on `solution`), a materials repo's `materials.yml` and `.releaseignore`,
   the course's `.github/opencourse.yml` (the public website),
-  the site's `index.md` and `_announcements/`. "Treat as handout materials" on an Other repos
+  the site's `index.md` and `_announcements/`. "Treat as course materials" on an Other repos
   row adds the `dsl-materials` topic to that repo (`PUT /repos/{o}/{r}/topics`). YAML is edited in place (`src/edit/yamlText.ts`):
   only the changed values' bytes move, so comments and their columns survive. After a write the
   console follows the commit's checks and says what they found.
@@ -399,7 +399,7 @@ a first visit, mostly free 304s after).
   (`POST .../actions/runs/{id}/cancel`), saying "Stopping…" until GitHub ends it and then
   "Stopped". Once a run ends, "See on GitHub" opens the op's `target` (`src/ops/defs.ts`):
   the repo, branch or folder it changed.
-- Wizards: New course, New semester, New assignment, New handout materials. Each step checks live state
+- Wizards: New course, New semester, New assignment, New course materials. Each step checks live state
   before it lets you continue (the org exists, `hertie-dsl-bot` is an owner, the set-up left
   its repos, the template has both branches and a settings file that parses), and unfinished
   answers stay in this browser so leaving loses nothing. Setting up a course is the one
