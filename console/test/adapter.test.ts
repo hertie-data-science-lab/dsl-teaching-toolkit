@@ -124,10 +124,13 @@ describe('the gate', () => {
     expect(s.current.value?.dry?.outcome?.summary).toBe(publicOutcome.summary);
     expect(s.canRun(s.current.value!)).toBe(true);
     expect(s.runs.value[0]).toMatchObject({ run_id: 77, op: 'roster.send_codes', conclusion: 'previewed' });
-    // The page's verb after the panel's preview keeps the preview and runs for real.
+    // The page's verb after the panel's preview keeps the preview and still only focuses the panel.
     s.open(def, 'run');
     await new Promise((r) => setTimeout(r, 0));
-    await new Promise((r) => setTimeout(r, 0));
+    expect(e.gh.seen.filter((x) => x.method === 'POST')).toHaveLength(1);
+    expect(s.current.value?.dry?.outcome?.summary).toBe(publicOutcome.summary);
+    // The panel's own verb runs it for real.
+    await s.start('run');
     const posts = e.gh.seen.filter((x) => x.method === 'POST').map((x) => JSON.parse((x.body as { inputs: { request: string } }).inputs.request).preview);
     expect(posts).toEqual([true, false]);
   });

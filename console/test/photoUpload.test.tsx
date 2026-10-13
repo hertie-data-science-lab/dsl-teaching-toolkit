@@ -13,6 +13,7 @@ import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
 import { InstructorsScreen } from '../src/screens/People';
+import { photoName } from '../src/tiers/people';
 import { StaticFiles } from './staticFiles';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, json } from './fake';
@@ -72,4 +73,11 @@ it('refuses a file that is not a PNG, JPEG or WebP image, inline, and uploads no
 it('says the Photo field takes a URL link or a path', async () => {
   const el = await mount(new FakeGitHub());
   expect(el.textContent).toContain('A URL link, or a path in the student site repo.');
+});
+
+it('names an uploaded photo by its kebab-cased stem and lowercased extension', () => {
+  expect(photoName(' Jane Doe (1).JPG')).toBe('jane-doe-1.jpg');
+  expect(photoName('--Ana_Lopez--.webp')).toBe('ana-lopez.webp');
+  expect(photoName('portrait')).toBe('portrait');
+  expect(photoName('().png')).toBe('photo.png');
 });

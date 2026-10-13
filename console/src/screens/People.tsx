@@ -10,7 +10,7 @@ import { fmtShort } from '../model/format';
 import { ROLE_WORD, ROSTER_HEADER, ROSTER_SAVE_NOTE, parseInstructors, pendingSummary, roleSplit, sameHandle, type Person } from '../model/people';
 import { checkAccess, sendCodes, syncMembershipUrl } from '../ops/defs';
 import { OpOpen } from '../ops/Panel';
-import { PERSON, PHOTO_DIR, displayOnly, photoError } from '../tiers/people';
+import { PERSON, PHOTO_DIR, displayOnly, photoError, photoName } from '../tiers/people';
 import { pick } from '../tiers/types';
 import { GitHubError, authorOf } from '../github/client';
 import { CheckLine, EditFile, Loading, ProblemCards, ghUrl } from '../ui/bits';
@@ -409,7 +409,7 @@ function PhotoField({ p, values, set }: { p: ReadyProps; values: Record<string, 
     if (!f || !env) return;
     const err = photoError(f);
     if (err) return setState({ kind: 'bad', text: err });
-    const name = f.name.toLowerCase().replace(/[^a-z0-9.]+/g, '-');
+    const name = photoName(f.name);
     setState({ kind: 'busy', text: `Uploading ${name}…` });
     try {
       await env.client.putContents({ owner: p.cohort.org, repo, path: `${PHOTO_DIR}/${name}`, text: new Uint8Array(await f.arrayBuffer()), sha: null, message: `site: add the photo ${name}, from the DSL Teaching Console`, author: authorOf(env.user) });

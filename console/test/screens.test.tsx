@@ -475,10 +475,13 @@ describe('S2 course and S17 template', () => {
   });
   it('opens on the Problems tab, then Suggestions, Set aside and Setup', () => {
     const out = html(<CourseScreen {...cp} />);
-    expect(out).toContain('<section class="panel section dash-tabs" id="dash-problems" tabindex="-1"><div class="ptabs" role="tablist">');
-    expect(out).toContain('aria-selected="true" aria-controls="dash-panel-problems">Problems<span class="n bad">1</span>');
-    expect(out).toContain('<span class="spacer" aria-hidden="true"></span><button type="button" role="tab" id="dash-tab-setup" data-key="setup" aria-selected="false" aria-controls="dash-panel-setup">Setup<span class="n">4 of 5</span>');
+    expect(out).toContain('<section class="panel section dash-tabs" id="dash-problems" tabindex="-1"><div class="ptabs"><div class="ptabs-list" role="tablist">');
+    expect(out).toContain('aria-selected="true" aria-controls="dash-panel-problems" style="order:0;">Problems<span class="n bad">1</span>');
+    expect(out).toContain('<span class="spacer" aria-hidden="true" style="order:6;"></span><button type="button" role="tab" id="dash-tab-setup" data-key="setup" aria-selected="false" aria-controls="dash-panel-setup" style="order:8;">Setup<span class="n">4 of 5</span>');
     expect(out).not.toContain('Coming up');
+    // The open tab's `?` sits outside the tablist (only tabs belong in one), ordered right after that tab.
+    expect(out).toContain('</div><span class="ptabs-hint" style="order:1;"><span class="hint-wrap"><button class="hint-btn" type="button" aria-label="About Problems"');
+    expect(out.slice(out.indexOf('role="tablist"'), out.indexOf('class="ptabs-hint"'))).not.toContain('hint-wrap');
   });
   it('lists suggestions on their tab and a needed to-do only on its repo’s row', () => {
     const sug = panel(base, 'suggestions');
@@ -504,8 +507,8 @@ describe('S2 course and S17 template', () => {
   it('ticks Setup once every needed step is done, and says No problems on the course', () => {
     const done = { ...base, stages: { ...base.stages, C5: 'done' } } as typeof base;
     const out = html(<CourseScreen {...cp} loaded={{ kind: 'ready', status: { ...STATUS, problems: [], course: done }, sha: 's', stale: [] }} />);
-    expect(out).toContain('aria-controls="dash-panel-setup">Setup<span class="n ok" aria-label="done">');
-    expect(out).toContain('aria-controls="dash-panel-problems">Problems<span class="n ok" aria-label="done">');
+    expect(out).toContain('aria-controls="dash-panel-setup" style="order:8;">Setup<span class="n ok" aria-label="done">');
+    expect(out).toContain('aria-controls="dash-panel-problems" style="order:0;">Problems<span class="n ok" aria-label="done">');
     expect(out).toContain('<div class="no-problems"><svg');
     expect(out).toContain('No problems on the course.');
   });

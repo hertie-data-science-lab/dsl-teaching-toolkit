@@ -72,3 +72,18 @@ describe('following a run', () => {
     expect(finished).toBe(1);
   });
 });
+
+describe('a confirm-in-panel verb', () => {
+  it('only opens the panel, however often the page verb is pressed; the panel verb runs it', async () => {
+    const a = new Flaky(0);
+    const s = new OpsSession(a, { pollMs: 0, sleep: tick, outcomeTries: 1 });
+    const def = defs.archive(scope, '2026-12-20', true);
+    s.open(def, 'run');
+    s.open(def, 'run');
+    await tick();
+    expect(a.polls).toBe(0);
+    expect(s.current.value).toMatchObject({ phase: 'ready', running: null });
+    await s.start('run');
+    expect(s.runs.value.map((r) => r.run_id)).toEqual([5]);
+  });
+});

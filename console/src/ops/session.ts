@@ -162,9 +162,10 @@ export class OpsSession {
     this.notice.value = null;
     if (c && c.phase === 'ready' && this.opKey(c.def) === this.opKey(def) && !def.info) {
       // The same operation again (the page's verb after the panel's preview): keep its
-      // options and its preview rather than starting over.
+      // options and its preview rather than starting over. A confirm-in-panel verb still only
+      // focuses the panel: the panel's own verb is the one that runs it.
       this.patch({ min: false });
-      if (start === 'run' && this.canRun(this.current.value!)) void this.start(c.mode === 'previewOnly' ? 'preview' : 'run');
+      if (start === 'run' && !def.confirmInPanel && this.canRun(this.current.value!)) void this.start(c.mode === 'previewOnly' ? 'preview' : 'run');
       else if (start === 'preview' && c.mode === 'preview') void this.start('preview');
       return;
     }

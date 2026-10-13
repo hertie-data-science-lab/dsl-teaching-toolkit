@@ -4,7 +4,7 @@
 // problems). Problems is the default tab; a tab may sit at the right, after a spacer (Setup).
 // What a tab is for sits in a `?` after its label while it is open, so its body starts with the rows.
 
-import { Fragment, type ComponentChildren } from 'preact';
+import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import { Hint } from './Hint';
 import { Check } from './icons';
@@ -30,23 +30,30 @@ export function DashboardTabs({ tabs, selected, onSelect }: { tabs: DashTab[]; s
   const [own, setOwn] = useState(tabs[0]?.key ?? '');
   const cur = tabs.some((t) => t.key === (selected ?? own)) ? (selected ?? own) : tabs[0]?.key;
   const pick = (key: string) => (onSelect ? onSelect(key) : setOwn(key));
+  // The row is the flex box; the tablist inside it lays out as `display: contents`, so the open
+  // tab's `?` can sit right after that tab while staying outside the tablist (only tabs belong
+  // in one). `order` places it: tabs, spacer and `?` in visual slots 2v, the `?` at 2v + 1.
+  const left = tabs.filter((t) => !t.right);
+  const right = tabs.filter((t) => t.right);
+  const slot = (t: DashTab) => 2 * (t.right ? left.length + 1 + right.indexOf(t) : left.indexOf(t));
+  const open = tabs.find((t) => t.key === cur);
   const tab = (t: DashTab) => (
-    <Fragment key={t.key}>
-      <button type="button" role="tab" id={`dash-tab-${t.key}`} data-key={t.key} aria-selected={t.key === cur} aria-controls={`dash-panel-${t.key}`} onClick={() => pick(t.key)}>
-        {t.label}
-        {t.count === 'done'
-          ? <span class="n ok" aria-label="done"><Check /></span>
-          : <span class={`n${t.bad && t.count ? ' bad' : ''}`}>{t.count}</span>}
-      </button>
-      {t.key === cur && t.hint ? <Hint label={`About ${t.label}`}>{t.hint}</Hint> : null}
-    </Fragment>
+    <button key={t.key} type="button" role="tab" id={`dash-tab-${t.key}`} data-key={t.key} aria-selected={t.key === cur} aria-controls={`dash-panel-${t.key}`} style={{ order: slot(t) }} onClick={() => pick(t.key)}>
+      {t.label}
+      {t.count === 'done'
+        ? <span class="n ok" aria-label="done"><Check /></span>
+        : <span class={`n${t.bad && t.count ? ' bad' : ''}`}>{t.count}</span>}
+    </button>
   );
   return (
     <section class="panel section dash-tabs" id={DASH_PANEL} tabIndex={-1}>
-      <div class="ptabs" role="tablist">
-        {tabs.filter((t) => !t.right).map(tab)}
-        <span class="spacer" aria-hidden="true" />
-        {tabs.filter((t) => t.right).map(tab)}
+      <div class="ptabs">
+        <div class="ptabs-list" role="tablist">
+          {left.map(tab)}
+          <span class="spacer" aria-hidden="true" style={{ order: 2 * left.length }} />
+          {right.map(tab)}
+        </div>
+        {open?.hint ? <span class="ptabs-hint" style={{ order: slot(open) + 1 }}><Hint label={`About ${open.label}`}>{open.hint}</Hint></span> : null}
       </div>
       {/* Only the current tab's body renders; the others stay as empty panels for `aria-controls`. */}
       {tabs.map((t) => (

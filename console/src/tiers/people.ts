@@ -2,6 +2,7 @@
 
 import { EMAIL_RE } from '../edit/csv';
 import { blank } from '../edit/yamlText';
+import { kebab } from '../model/format';
 import { HANDLE_RE } from '../model/policy';
 import type { Tiers } from './types';
 
@@ -41,4 +42,11 @@ export function photoError(f: { type: string; size: number }): string | null {
   if (!PHOTO_TYPES.includes(f.type)) return 'Not uploaded: a photo must be a PNG, JPEG or WebP image.';
   if (f.size > PHOTO_MAX) return 'Not uploaded: the image is over 2 MB.';
   return null;
+}
+
+/** An uploaded photo's file name: the stem kebab-cased, the extension lowercased (` Jane Doe (1).JPG` -> `jane-doe-1.jpg`). */
+export function photoName(file: string): string {
+  const dot = file.lastIndexOf('.');
+  const stem = kebab(dot > 0 ? file.slice(0, dot) : file) || 'photo';
+  return dot > 0 ? `${stem}.${file.slice(dot + 1).toLowerCase()}` : stem;
 }
