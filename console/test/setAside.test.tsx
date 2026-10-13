@@ -310,7 +310,13 @@ describe('an empty week on the semester dashboard', () => {
     fix: { repo: `${COHORT}/semester-config`, path: 'schedule.yml', line: null, screen: 'schedule', entry: null },
     when: `${monday}T00:00:00+02:00`,
   });
-  const status: Status = { ...base, problems: [week('2026-09-28', 'soon'), week('2026-10-12', 'later'), week('2026-10-05', 'soon', 'lab')] };
+  const nothing = {
+    id: 'nothing_to_release:lecture_9', scope: 'semester' as const, stage: 'K4', kind: 'NOTHING_TO_RELEASE', label: 'Nothing to release', aside: true, bites: 'soon' as const,
+    text: "Lecture 9 has nothing to release. If this is intentional, click 'Set aside'.", stops: 'Students get no files for it.',
+    fix: { repo: `${COHORT}/semester-config`, path: 'schedule.yml', line: 12, screen: 'schedule', entry: 'lecture_9' },
+    when: '2026-09-29T10:00:00+02:00',
+  };
+  const status: Status = { ...base, problems: [week('2026-09-28', 'soon'), week('2026-10-12', 'later'), week('2026-10-05', 'soon', 'lab'), nothing] };
   async function mountCohort(meta: string, gh = github()) {
     const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: meta });
     root ??= document.body.appendChild(document.createElement('div'));
@@ -361,6 +367,26 @@ describe('an empty week on the semester dashboard', () => {
   it('labels each missing kind in the Set aside list, where only the id is left', () => {
     for (const k of ['lecture', 'lab', 'readings']) expect(emptyWeekLabel(`empty_week:2026-10-05:${k}`)).toBe(`Missing ${k}, week of 5 Oct`);
     expect(emptyWeekLabel('empty_week:2026-10-05')).toBe('Empty week of 5 Oct');
+  });
+
+  it('names a release with nothing to release, and sets it aside as an intentional gap', async () => {
+    const gh = await mountCohort(META);
+    const card = [...root!.querySelectorAll('li.problem')].find((li) => li.textContent!.includes('Lecture 9'))!;
+    expect(card.querySelector('.p-where b')!.textContent).toBe('Nothing to release');
+    expect(card.querySelector('.p-say')!.textContent).toBe("Lecture 9 has nothing to release. If this is intentional, click 'Set aside'.");
+    await act(() => [...card.querySelectorAll('button')].find((b) => b.textContent === 'Set aside')!.click());
+    expect(dialog()!.textContent).toContain('Set aside “Nothing to release, lecture_9”?');
+    expect(dialog()!.textContent).toContain('Setting this aside tells the console the gap is intentional.');
+    await act(() => button('Set aside').click());
+    await settle(() => puts(gh).length > 0);
+    expect(body(puts(gh)[0])).toBe(`${META}set_aside:\n  - nothing_to_release:lecture_9\n`);
+  });
+
+  it('lists a set-aside release with nothing to release under Set aside', async () => {
+    await mountCohort(`${META}set_aside:\n  - nothing_to_release:lecture_9\n`);
+    expect(root!.textContent).not.toContain('Lecture 9 has nothing');
+    await show('aside');
+    expect(aside()).toEqual(['Nothing to release, lecture_9 · Bring back']);
   });
 
   it('once set aside, leaves the problems and is listed under Set aside to bring back', async () => {

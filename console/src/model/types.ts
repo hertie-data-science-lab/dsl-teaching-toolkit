@@ -53,7 +53,7 @@ export interface Problem {
   release?: string;
   /** The card's word where the engine names one (an empty week's "Missing lab"). */
   label?: string;
-  /** A kind the course can set aside (decision 0032): today a gap in a week. */
+  /** A kind the course can set aside (decision 0032): a gap in a week, or a release with nothing to release. */
   aside?: boolean;
 }
 

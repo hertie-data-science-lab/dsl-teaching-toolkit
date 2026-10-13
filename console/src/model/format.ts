@@ -205,8 +205,10 @@ export const PROBLEM_AREA: Record<string, string> = {
   C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Course materials', C5: 'Template', C6: 'Public website',
 };
 
-/** Whether a set-aside id is a gap in a week, which the course sets aside as intentional. */
-export const isWeekGap = (id: string) => id.startsWith('empty_week:');
+const NOTHING_TO_RELEASE_ID = 'nothing_to_release:';
+
+/** Whether a set-aside id is a gap the course sets aside as intentional: a gap in a week, or a release with nothing to release. */
+export const isIntentionalGap = (id: string) => id.startsWith('empty_week:') || id.startsWith(NOTHING_TO_RELEASE_ID);
 
 const GAP_ID = /^empty_week:(\d{4})-(\d{2})-(\d{2})(?::(\w+))?$/;
 
@@ -357,4 +359,10 @@ function list(lines: string[]): string {
 /** As markdown does: a single newline is a space; a line ending in two spaces breaks. */
 function para(lines: string[]): string {
   return `<p>${inline(lines.map((l, i) => (i === lines.length - 1 ? l : / {2,}$/.test(l) ? `${l.trimEnd()}<br>` : `${l.trimEnd()} `)).join(''))}</p>`;
+}
+
+/** A set-aside gap's name from its id alone: `emptyWeekLabel`'s, or "Nothing to release, lecture-9" from `nothing_to_release:lecture-9`; null for any other id. */
+export function gapLabel(id: string): string | null {
+  if (id.startsWith(NOTHING_TO_RELEASE_ID)) return `Nothing to release, ${id.slice(NOTHING_TO_RELEASE_ID.length)}`;
+  return emptyWeekLabel(id);
 }

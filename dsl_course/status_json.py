@@ -1360,6 +1360,42 @@ def empty_week_problems(
     return out
 
 
+NOTHING_TO_RELEASE = "NOTHING_TO_RELEASE"
+
+
+def nothing_to_release_problems(
+    facts: SemesterFacts, now: datetime, aside: frozenset[str] = frozenset()
+) -> list[dict]:
+    """`nothing_to_release:<label>` for each dated release still to come with an empty
+    `deploy:` list, dated at its moment so the tiers place it: coming up while more than
+    the horizon away, a problem inside it. The engine keeps such an entry (its row still
+    shows); a session with nothing to hand out is set aside like an empty week. One
+    already past is not raised: the push comment reports it fired with nothing to ship."""
+    aliases = lambda repo: facts.aliases.get(repo, {})
+    out = []
+    for r in facts.sched.releases:
+        pid = f"nothing_to_release:{r.label}"
+        if r.deploy or r.when is None or r.when <= now or pid in aside:
+            continue
+        n = schedule.own_number(r.number, r.label)
+        name = f"{policy.kind_label(entry_kind(r, aliases)[0])} {n}" if n else r.label
+        out.append(
+            {
+                "id": pid,
+                "scope": "semester",
+                "stage": "K4",
+                "kind": NOTHING_TO_RELEASE,
+                "label": "Nothing to release",
+                "aside": True,
+                "text": f"{name} has nothing to release. {_ASIDE_HINT}",
+                "stops": "Students get no files for it.",
+                "fix": _schedule_fix(facts.org, r.label, r.lines.get("deploy")),
+                "when": r.when.isoformat(),
+            }
+        )
+    return out
+
+
 MAIN_EDITED = "MAIN_EDITED"
 # The branch a template hands out: the starter students receive (decision 0028).
 TEMPLATE_MAIN = "main"
@@ -2437,7 +2473,9 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
         problem_from_fault(f, course.org, now, moments) for f in facts.template_faults
     ]
     problems += number_problems(facts, now)
-    problems += empty_week_problems(facts, now, set_aside_ids(course.meta))
+    aside = set_aside_ids(course.meta)
+    problems += empty_week_problems(facts, now, aside)
+    problems += nothing_to_release_problems(facts, now, aside)
     problems += kindless_entry_problems(facts)
     problems += unwritten_problems(facts, course.org, now)
     problems += [

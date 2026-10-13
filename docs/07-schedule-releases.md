@@ -340,6 +340,8 @@ Parsed schedule.yml
 
 **Empty weeks.** Each week of the term still to come (counted from `semester_start`, as the Dashboard's week strip numbers them) with nothing dated in it (no release, hand-out, due date, late cutoff, exam, event or archive) is an *Empty week* problem on the console's Dashboard. A week with something dated but no lecture, lab or readings release - for each of those kinds the semester runs weekly, that is, with a dated release in at least half (rounded up) of the weeks that have anything dated - is a *Missing lab* (etc.) problem instead; a hand-out or exam does not count, and one further-readings entry does not make readings weekly. An intentional gap (a reading or exam week) is dismissed with **Set aside**, which adds `empty_week:<monday>` (or `empty_week:<monday>:<kind>`, the Monday of the week's first day) to the course's `set_aside:` list.
 
+**Nothing to release.** A dated release still to come with no `deploy:` (or none left) is a *Nothing to release* problem: coming up while more than a week away, a problem inside the week. Its row still shows; if the session really ships nothing, **Set aside** adds `nothing_to_release:<label>` to the same list.
+
 Three other ways to check, none of them required:
 
 1. **Read the counts.** **Check semester setup** reports the release plan and semester dates, and flags `N entry/ies DROPPED`.

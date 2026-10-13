@@ -187,6 +187,16 @@ describe('the schedule entry sheet model', () => {
     expect(y.text).toBe('releases:\n  lab-3:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/03_solutions   # later\n        deploy_datetime: 2026-10-12T18:00\n');
   });
 
+  it('saves a release with nothing to release: the last line can be removed', () => {
+    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
+    const y = new YamlText(src);
+    const doc = y.toJS() as Record<string, unknown>;
+    const d = { ...(readDraft(doc, 's5') as ReleaseDraft), deploys: [] };
+    expect(draftErrors({ ...d, number: 5 }, { kind: 'lecture' })).toEqual({});
+    writeDraft(y, d, doc);
+    expect(y.text).toBe('releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n');
+  });
+
   it('writes a line’s own release time only when given; blank ships at the entry’s time', () => {
     const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n        deploy_datetime: 2026-10-07T09:00\n';
     const y = new YamlText(src);

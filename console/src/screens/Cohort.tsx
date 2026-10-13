@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'preact/hooks';
 import {
   NOT_READY_YET, TYPE_CLASS, TYPE_LABEL, addDays, ago, daysBetween, fmtDate, fmtDay, fmtShort, fmtTime, fmtWhen, markWord, plural, releaseIdent,
-  emptyWeekLabel,
+  gapLabel,
 } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekStart, type Row, type Schedule, type Term, type WeekGroup, type WeekKey, termOf } from '../model/schedule';
 import type { Assignment, Problem, Status } from '../model/types';
@@ -321,9 +321,9 @@ export function semesterItems(status: Status, tiered: Tiered[], list: string[] |
       aside: todoAside(t, list),
     };
   });
-  // A set-aside empty week (decision 0032) has no row of its own once set aside: list it here so it can be brought back.
+  // A set-aside gap (an empty week, decision 0032, or a release with nothing to release) has no row of its own once set aside: list it here so it can be brought back.
   const weeks: SetupItem[] = (list ?? []).flatMap((id) => {
-    const label = emptyWeekLabel(id);
+    const label = gapLabel(id);
     return label ? [{ id, label, kind: 'todo' as const, need: 'suggested' as const, state: 'open' as const, aside: true }] : [];
   });
   return [...steps, ...todos, ...weeks];
@@ -458,7 +458,7 @@ function Overview(p: ReadyProps) {
   const tiered = useMemo(() => tier(status).filter(({ p: x }) => !(x.aside && aside.list?.includes(x.id))), [status, aside.list?.join('\n')]);
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const problems = standing(tiered);
-  const setAsideProblem = aside.onCircle ? (x: Problem) => aside.onCircle!({ id: x.id, label: emptyWeekLabel(x.id) ?? x.text }) : undefined;
+  const setAsideProblem = aside.onCircle ? (x: Problem) => aside.onCircle!({ id: x.id, label: gapLabel(x.id) ?? x.text }) : undefined;
   const items = semesterItems(status, tiered, aside.list);
   const coming = comingRows(status, tiered);
   const days = horizonDays(status.horizon);

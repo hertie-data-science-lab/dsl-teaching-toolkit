@@ -3230,3 +3230,82 @@ def test_a_set_aside_empty_week_is_not_raised():
     course.meta = {**course.meta, "set_aside": ["empty_week:2026-10-12"]}
     ids = [p["id"] for p in _render(course, semester, before)["problems"]]
     assert "empty_week:2026-10-12" not in ids
+
+
+# ------------------------------------------------------------ nothing to release
+
+NOTHING_PLANNED = """\
+timezone: Europe/Berlin
+semester_start: 2026-10-05
+semester_end: 2026-12-18
+releases:
+  lecture_9:
+    event_datetime: 2026-11-05T10:00
+    kind: lecture
+  lab-2:
+    event_datetime: 2026-10-08T10:00
+    kind: lab
+    number: 2
+  lecture_10:
+    event_datetime: 2026-11-12T10:00
+    kind: lecture
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/10
+  lab-tbc:
+    event_datetime: tbc
+    kind: lab
+"""
+
+
+def _nothing(now: datetime, aside: tuple[str, ...] = ()) -> list[dict]:
+    facts = _semester(sched=_sched(NOTHING_PLANNED))
+    return status_json.nothing_to_release_problems(facts, now, frozenset(aside))
+
+
+def test_a_dated_release_with_no_files_is_nothing_to_release():
+    # Neither the entry with a deploy nor the tbc one is raised.
+    lab, lecture = sorted(
+        _nothing(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)), key=lambda p: p["when"]
+    )
+    assert lecture["id"] == "nothing_to_release:lecture_9"
+    assert lecture["kind"] == "NOTHING_TO_RELEASE"
+    assert lecture["label"] == "Nothing to release"
+    assert lecture["aside"] is True
+    assert lecture["text"] == (
+        "Lecture 9 has nothing to release. If this is intentional, click 'Set aside'."
+    )
+    assert lecture["when"] == "2026-11-05T10:00:00+01:00"
+    assert lecture["fix"]["screen"] == "schedule"
+    assert lecture["fix"]["entry"] == "lecture_9"
+    assert lab["text"].startswith("Lab 2 has nothing to release.")
+
+
+def test_nothing_to_release_is_coming_up_until_the_horizon_and_never_once_past():
+    now = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+    tiers = {p["id"]: p["bites"] for p in status_json._tier(_nothing(now), now)}
+    # The lab is 7 days off: a problem. The lecture is weeks off: coming up.
+    assert tiers == {
+        "nothing_to_release:lab-2": "soon",
+        "nothing_to_release:lecture_9": "later",
+    }
+    # Past: the push comment says it fired with nothing to ship; no problem here.
+    ids = [p["id"] for p in _nothing(datetime(2026, 10, 9, 9, 0, tzinfo=UTC))]
+    assert ids == ["nothing_to_release:lecture_9"]
+
+
+def test_a_set_aside_release_with_nothing_to_release_is_not_raised():
+    now = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+    assert [p["id"] for p in _nothing(now, ("nothing_to_release:lab-2",))] == [
+        "nothing_to_release:lecture_9"
+    ]
+    course = _course()
+    course.meta = {**course.meta, "set_aside": ["nothing_to_release:lecture_9"]}
+    ids = [
+        p["id"]
+        for p in _render(course, _semester(sched=_sched(NOTHING_PLANNED)), now)[
+            "problems"
+        ]
+    ]
+    assert "nothing_to_release:lab-2" in ids
+    assert "nothing_to_release:lecture_9" not in ids
