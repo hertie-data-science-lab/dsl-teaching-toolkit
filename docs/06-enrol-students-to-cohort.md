@@ -15,6 +15,7 @@ Live example roster: [`example-course/semester-org/students.csv`](../example-cou
 1. **Add the students to the roster.**
    - Edit `semester-config/students.csv` in the **semester** org
    - Editing directly via the web UI is fine, or edit the repo locally, commit & push
+   - Or use the console's **Students** tab: **Edit roster**, then **Add a student** or a row's remove control (struck through, with Undo, until you save); **Save** writes one commit
    - One row per student: fill the first three columns - `hertie_email`, `name`, and optionally `role` (blank means enrolled; `auditor` gets the materials but no assignments or grades)
    - Leave the rest (`github_handle`, `github_id`, `enrol_code`) blank - onboarding and step 2 fill them in for you
 

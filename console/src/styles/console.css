@@ -336,6 +336,9 @@ table.grid a.rowlink:hover { text-decoration: underline; }
 table.grid tr.fault td { background: var(--bad-soft); }
 table.grid tr.fault td:first-child { box-shadow: inset 5px 0 0 var(--bad); }
 table.grid tr.changed td:not(.sys) { background: var(--amber-soft); }
+/* A row Edit roster marks for removal: struck through until Save drops it. */
+table.grid tr.removed td:not(.rm-cell), .rcard.removed > :not(.rc-top) { text-decoration: line-through; color: var(--muted); }
+table.grid td.rm-cell { width: 1%; white-space: nowrap; }
 table.grid td input, table.grid td select { border-color: transparent; background: transparent; padding: 4px 6px; min-height: 32px; }
 table.grid td input:hover, table.grid td select:hover { border-color: var(--rule-strong); }
 /* the roster in Edit roster: its inputs look like inputs */

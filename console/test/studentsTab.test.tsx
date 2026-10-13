@@ -6,9 +6,9 @@ import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
-import { GitHubClient } from '../src/github/client';
+import { GitHubClient, decodeBase64 } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { roleSplit } from '../src/model/people';
+import { pendingSummary, roleSplit } from '../src/model/people';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
@@ -17,7 +17,7 @@ import { OpsSession } from '../src/ops/session';
 import { StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
-import { FakeGitHub, json } from './fake';
+import { FakeGitHub, json, type Seen } from './fake';
 import { StaticFiles } from './staticFiles';
 
 const COURSE_ORG = 'hertie-dsl-demo-course-e1234';
@@ -63,6 +63,19 @@ const button = (text: string) => [...root!.querySelectorAll('button')].find((b) 
 async function click(el: Element) {
   await act(() => (el as HTMLElement).click());
 }
+async function type(sel: string, value: string) {
+  await act(() => {
+    const el = q<HTMLInputElement>(sel);
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+async function settle(until: () => boolean) {
+  for (let i = 0; i < 200 && !until(); i++) await act(() => new Promise((r) => setTimeout(r, 0)));
+}
+const puts = (gh: FakeGitHub) => gh.seen.filter((s) => s.method === 'PUT' && s.url.endsWith('/contents/students.csv'));
+const body = (s: Seen) => decodeBase64((s.body as { content: string }).content);
+const note = () => q('.savebar').closest('.panel')!.textContent!;
 
 describe('the Students header line', () => {
   it('splits the roster by role, as the engine reads it, beside the codes sent and joined', async () => {
@@ -96,5 +109,70 @@ describe('the Students action row', () => {
     const a = [...root!.querySelectorAll('a')].find((x) => x.textContent === 'Sync now')!;
     expect(a.getAttribute('href')).toBe(`https://github.com/${COURSE_ORG}/.github/actions/workflows/sync-membership.yml`);
     expect(a.getAttribute('target')).toBe('_blank');
+  });
+});
+
+describe('Edit roster: add and remove', () => {
+  const SENTENCE = 'Added students are mailed a code on save. A removed student who had joined loses access at the next sync; their repos are kept.';
+
+  it('marks a removed row struck through, with Undo, and deletes nothing until Save', async () => {
+    const gh = await mount();
+    expect(root!.querySelector('button[aria-label="Remove line 3"]')).toBeNull(); // read view: no control
+    await click(button('Edit roster'));
+    await click(q('button[aria-label="Remove line 3"]'));
+    expect(q('#line-3').className).toContain('removed');
+    // Its cells are text now, not inputs.
+    expect(root!.querySelector('input[aria-label="Name, line 3"]')).toBeNull();
+    expect(note()).toContain(`1 removed. ${SENTENCE}`);
+    expect(puts(gh)).toEqual([]);
+    await click(q('button[aria-label="Undo removing line 3"]'));
+    expect(q('#line-3').className).not.toContain('removed');
+    expect(note()).toContain('No unsaved changes');
+  });
+
+  it('keeps the blank Add a student row at the bottom, and drops one at once', async () => {
+    await mount();
+    await click(button('Add a student'));
+    const ids = [...root!.querySelectorAll('.roster-table tbody tr')].map((tr) => tr.id);
+    expect(ids).toEqual(['line-2', 'line-3', 'line-4', 'line-5']);
+    await click(q('button[aria-label="Remove line 5"]'));
+    expect(root!.querySelector('#line-5')).toBeNull();
+  });
+
+  it('sums the pending commit and saves it as one students.csv, the removed rows dropped', async () => {
+    const gh = await mount();
+    await click(button('Add a student'));
+    await type('input[aria-label="Email, line 5"]', 'dan@x.org');
+    await type('input[aria-label="Name, line 5"]', 'Dan Dorn');
+    await type('input[aria-label="Name, line 3"]', 'Ben B. Baker');
+    await click(q('button[aria-label="Remove line 2"]'));
+    expect(note()).toContain(`1 added, 1 removed, 1 changed. ${SENTENCE}`);
+    await click(button('Save and send 1 code'));
+    await settle(() => puts(gh).length > 0);
+    expect(puts(gh)).toHaveLength(1);
+    const text = body(puts(gh)[0]);
+    expect(text).not.toContain('anna@x.org');
+    expect(text).toContain('ben@x.org,Ben B. Baker,enrolled,');
+    expect(text).toContain('cara@x.org,Cara Cole,Auditor,');
+    expect(text).toContain('dan@x.org,Dan Dorn,enrolled,');
+    expect((puts(gh)[0].body as { message: string }).message).toBe('roster: 1 added, 1 removed, 1 changed, from the DSL Teaching Console');
+  });
+
+  it('refuses an added row without a name, or with an email that is not an address', async () => {
+    const gh = await mount();
+    await click(button('Add a student'));
+    await type('input[aria-label="Email, line 5"]', 'dan@x.org');
+    await click(button('Save and send 1 code'));
+    expect(root!.textContent).toContain('1 added row has no name.');
+    await type('input[aria-label="Name, line 5"]', 'Dan Dorn');
+    await type('input[aria-label="Email, line 5"]', 'dan');
+    await click(button('Save 1 change'));
+    expect(root!.textContent).toContain('1 row has an email that is not an address');
+    expect(puts(gh)).toEqual([]);
+  });
+
+  it('words the summary without the parts that are none', () => {
+    expect(pendingSummary({ added: 2, removed: 1, changed: 3 })).toBe('2 added, 1 removed, 3 changed');
+    expect(pendingSummary({ added: 0, removed: 2, changed: 0 })).toBe('2 removed');
   });
 });

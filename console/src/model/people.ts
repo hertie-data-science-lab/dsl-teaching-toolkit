@@ -48,6 +48,14 @@ export function parseRoster(text: string): { rows: RosterRow[]; error: string | 
   };
 }
 
+/** A pending roster commit in words: "2 added, 1 removed, 3 changed", leaving out what is none. */
+export function pendingSummary(n: { added: number; removed: number; changed: number }): string {
+  return ([['added', n.added], ['removed', n.removed], ['changed', n.changed]] as const).filter(([, k]) => k).map(([w, k]) => `${k} ${w}`).join(', ');
+}
+
+/** The Save bar's sentence after the summary: what a save does to added and removed students. */
+export const ROSTER_SAVE_NOTE = 'Added students are mailed a code on save. A removed student who had joined loses access at the next sync; their repos are kept.';
+
 export interface Person {
   handle: string;
   email: string;
