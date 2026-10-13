@@ -271,10 +271,10 @@ export function cohortFlags(l: Loaded | undefined): { problems: number | null; a
   return { problems: problemCount(l.status), archived: l.status.semester?.live === false };
 }
 
-/** The nine semester pages, in nav order. */
+/** The eight semester pages, in nav order. */
 const SEMESTER_PAGES: [string, string][] = [
   ['dashboard', 'Dashboard'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['students', 'Students'],
-  ['instructors', 'Instructors'], ['site', 'Site'], ['archive', 'Archive'], ['operations', 'Operations'],
+  ['instructors', 'Instructors'], ['site', 'Site'], ['operations', 'Operations'],
 ];
 
 /** One sub-page under a course nav item: a repo's settings page, or a repo on GitHub (`ext`). */
@@ -301,7 +301,8 @@ export type SubWanted = { materials: boolean; templates: boolean };
  * Assignment templates open on a page inside them, or with their chevron), then its semesters as
  * nodes: being set up first, every live one, then past ones newest first to three rows and the
  * rest under Older semesters. The open semester is expanded to its pages, else on a course page
- * the newest live one. The person's student semesters are not here: they are on All courses.
+ * the newest live one. The course's org login sits under its name, so two courses of one name
+ * tell apart. The person's student semesters are not here: they are on All courses.
  * `cohort` is the semester whose page is open, none on a course page; `site` the semester whose
  * public site the external links name (the URL's, on any page of the course, read only too).
  */
@@ -337,7 +338,7 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
     const node: NavNode = { id: k, label: t, href, what, pages: list.map((x) => ({ href: x.href, t: x.label, ext: x.ext, current: onPage && x.repo === entry })) };
     return <TreeNode node={node} open={shownGroup(k)} current={current === k && !onPage} onToggle={() => setOpen({ ...open, [k]: !shownGroup(k) })} />;
   };
-  const leaf = (key: string, href: string, t: string) => <Leaf l={{ href, t, current: key === current }} />;
+  const leaf = (key: string, href: string, t: ComponentChildren) => <Leaf l={{ href, t, current: key === current }} />;
   // Semesters: live is neither archived nor past its end (the status's, else the key's).
   const flags = (k: CohortRef) => {
     const l = cohortStates[k.org];
@@ -368,7 +369,7 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
   ];
   const expanded = cohort?.org ?? ordered.find((k) => !flags(k).over)?.org ?? null;
   return (
-    <NavTree root={root} anchor={<NavAnchor href={`?course=${course.org}#course`}>{course.name}</NavAnchor>}>
+    <NavTree root={root} anchor={<><NavAnchor href={`?course=${course.org}#course`}>{course.name}</NavAnchor><div class="nav-org">{course.org}</div></>}>
       {course.write ? (
         <>
           <ul class="tree">
@@ -376,7 +377,7 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
             {leaf('details', '#details', 'Course details')}
             {group('materials', '#materials', 'Handout materials', 'the handout materials repos')}
             {group('templates', '#templates', 'Assignment templates', 'the assignment templates')}
-            {leaf('website', '#website', 'Public website')}
+            {leaf('website', '#website', <>Public OpenCourse website <span class="chip">Beta</span></>)}
           </ul>
           {nodes.length ? (
             <>

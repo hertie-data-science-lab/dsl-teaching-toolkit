@@ -141,7 +141,7 @@ goes, as a semester's Dashboard is where its name goes; a read-only course shows
 then its semesters as nodes: being set up
 first, every live one (a green dot), then past ones ("ended" or "archived") newest first to
 three rows, the rest under "Older semesters (n)". A semester node carries its problem count
-(now or soon only, `problemCount`); its Dashboard leaf does not repeat it. The open semester is expanded to its nine
+(now or soon only, `problemCount`); its Dashboard leaf does not repeat it. The open semester is expanded to its eight
 pages, else on a course page the newest live one; one at a time. Other courses are reached
 through All courses, and so are the person's own student semesters. A student's tree is
 inverted, since a student takes each course once: the open semester's term is the anchor, its
@@ -210,7 +210,8 @@ semesters; who ran each comes from its outcome file), go wherever the two column
 closest in height (`splitColumns`, from each panel's estimated height). Until the course's and
 every semester's status has loaded the columns keep a fixed layout (`SETTLING_COLUMNS`), so
 panels do not move as each arrives. The semester Dashboard's line under its title says only
-what the banner does not: the exams and the archive date.
+what the banner does not: the exams and the archive date. It has no Assignments panel: each
+assignment's state and progress are on the Assignments tab.
 
 The semester Dashboard's week strip filters its agenda only: This week on load, any set of
 weeks picked, none picked for all of them; the agenda panel's heading names the selection
@@ -389,8 +390,9 @@ a first visit, mostly free 304s after).
   `return_run_details`, polls the run's job listing alone (`src/github/poll.ts`, the one poll loop: every 3 s, every
   10 s after 30 s, nothing while the tab is hidden), and reads the public `dsl-outcome` annotation and the
   private outcome file. Hand out, return marks, archive, update every copy and send new codes
-  unlock only after a preview in the same session; publishing the public website, which has no
-  engine preview, asks for a confirmation instead. Other previews are offered only where they
+  offer a preview beside the verb, never required: the page's verb opens the panel and the
+  panel's verb runs, behind the op's confirmation box where it has one; publishing the public website, which has no
+  engine preview, asks for a confirmation. Other previews are offered only where they
   show something you act on (`PREVIEW_NOT_OFFERED` in `src/ops/registry.ts` lists the ones
   that are not). The run popup lists each job step once (GitHub's "Post ..." steps are left
   out), resizes by its bottom-left grip, and its Stop cancels the workflow run
@@ -436,7 +438,8 @@ Hash tokens as in the design mockup: `#dashboard`, `#schedule-s5`, `#assignment-
 the schedule editor also opens `#schedule-new`, `#schedule-semester` and `#schedule-archive`.
 Renamed hashes redirect: `#cohort` and `#semester` to `#dashboard`, `#staff` to
 `#instructors`, `#new-cohort-<n>` to `#new-semester-<n>`, `#schedule-term` to
-`#schedule-semester`, `#setup` to `#profile`.
+`#schedule-semester`, `#setup` to `#profile`, and the retired Archive page `#archive` to
+`#schedule-archive` (its explanation is the `?` on the archive row, its Archive button on that entry).
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
 opens a new assignment entry for that template; `?wizard=new-semester-3` adds a link back.

@@ -110,7 +110,7 @@ export function MoreMenu({ p }: { p?: Pick<CohortProps, 'course' | 'cohort'> }) 
         <button type="button" role="menuitem" disabled={!scope} onClick={() => go(scope && previewNext(scope))}>Preview the next automatic run</button>
         <button type="button" role="menuitem" disabled={!scope} onClick={() => go(scope && keepFuture(scope))}>Keep for future semesters</button>
         <button type="button" role="menuitem" disabled={!scope} onClick={() => go(exportDef)}>Export <span class="pm-sub">roster, marks, schedule</span></button>
-        <a href="#archive" role="menuitem" onClick={() => setOpen(false)}>Archive this semester</a>
+        <a href="#schedule-archive" role="menuitem" onClick={() => setOpen(false)}>Archive this semester</a>
       </div>
     </div>
   );

@@ -522,7 +522,7 @@ export function CourseScreen(p: CourseProps) {
         </dl>
         <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={p.files.file(course.org, COURSE_REPO, 'dsl-course.yml').kind !== 'absent'} />
         <div class="website-block">
-          <h3>Public website <Hint label="About the public website">Optional: an open course version of your materials accessible to anyone on the internet, updated daily.</Hint></h3>
+          <h3>Public OpenCourse website <span class="chip">Beta</span> <Hint label="About the public website">Optional: an open version of this course and its materials, available to anyone on the internet. Beta: leave this off for now - work in progress.</Hint></h3>
           <SiteLive org={course.org} published={pub} last={lastPublish} running={publishing} now={p.now} />
           <div class="actions">
             {course.write ? <OpButtons def={publishWebsite(courseScope({ course }), pub)} small verbCls="btn small outline" /> : null}
@@ -657,6 +657,7 @@ export function TemplateScreen(p: CourseProps) {
   const read = fromConfig(cfg, v.course?.templates?.find((t) => t.repo === repo)?.starter);
   const base: Values = { ...read, formats: (read.formats as string[]).length ? read.formats : ['none'] };
   const cur = values ?? base;
+  const noStarter = (cur.formats as string[]).includes('none');
   const baseQ = questionRows(cfg.questions);
   const q = qdraft ?? baseQ;
   const fileErr = q.map((r) => questionFileError(r.file)).find(Boolean);
@@ -714,13 +715,18 @@ export function TemplateScreen(p: CourseProps) {
             <div class="form-section">
               <h3>How it is marked <Hint label="About marking">Marking builds a mark sheet per student or team from these settings: the formats to read, whether tests run, and the questions below. You fill the sheet in Marks; totals and late penalties are worked out.</Hint></h3>
               <FormatPicker id="g-fmt" v={cur} set={change} fallback={null} />
-              <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['autograde', 'tests', 'starter'])} values={cur} onChange={change} />
+              <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['autograde', 'tests'])} values={cur} onChange={change} />
+              {/* "No starter file" ticked: the choice stays visible, greyed, as it applies once a format is. */}
+              <div class={noStarter ? 'starter-off' : undefined}>
+                <SchemaForm id="g3s" schema={null} tiers={pick(tiers, ['starter'])} values={cur} onChange={change} readOnly={noStarter} />
+                {noStarter ? <p class="off-why">No starter file: students get none, so there is nothing to derive or write.</p> : null}
+              </div>
               <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} files={files} />
               <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf'])} values={cur} onChange={change} />
               <Lives org={course.org} repo={repo} path="grading_config.yml" branch="solution" exists={gradingExists} />
             </div>
             {/* A hand-written starter has nothing to derive: the radio's `?` says so (decision 0028 rule 4). */}
-            {cur.starter === 'derived' ? (
+            {cur.starter === 'derived' && !noStarter ? (
               <div class="form-section">
                 <h3>Student version <Hint label="About the student version" doc={STARTER_DOC}>Write the solution once and mark the answers; Derive builds the starter students get by blanking them. Run it after every change to the solution.</Hint></h3>
                 <div class="actions"><OpButtons def={derive(scope, repo, repo, heading)} small /></div>

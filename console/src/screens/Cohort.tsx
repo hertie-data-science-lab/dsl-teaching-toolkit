@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'preact/hooks';
 import {
-  ASSIGNMENT_WORD, NOT_READY_YET, TYPE_CLASS, TYPE_LABEL, addDays, ago, assignmentTitle, daysBetween, fmtDate, fmtDay, fmtDays, fmtShort, fmtTime, fmtWhen, markWord, plural, releaseIdent,
+  NOT_READY_YET, TYPE_CLASS, TYPE_LABEL, addDays, ago, daysBetween, fmtDate, fmtDay, fmtDays, fmtShort, fmtTime, fmtWhen, markWord, plural, releaseIdent,
 } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekStart, type Row, type Schedule, type Term, type WeekGroup, type WeekKey, termOf } from '../model/schedule';
 import type { Assignment, Problem, Status } from '../model/types';
@@ -27,9 +27,9 @@ export function readSchedule(p: CohortProps): Schedule | null {
 export function asgSummary(a: Assignment, tz: string, year: number): string {
   switch (a.state) {
     case 'open':
-      return `Due ${fmtWhen(a.due, tz, year)}; ${a.submissions} of ${a.units} submitted`;
+      return `Due ${fmtWhen(a.due, tz, year)}; ${a.submissions ?? 0} of ${a.units} submitted`;
     case 'late_window':
-      return `Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions} of ${a.units} submitted`;
+      return `Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions ?? 0} of ${a.units} submitted`;
     case 'marking':
       return `${a.marks.filled} of ${a.marks.total} marked`;
     case 'returned':
@@ -37,26 +37,6 @@ export function asgSummary(a: Assignment, tz: string, year: number): string {
     default:
       return `Hands out ${a.handout ? fmtDay(a.handout, tz, year) : 'by hand'}${a.teams !== null && a.teams !== undefined ? `; ${a.teams} teams so far` : ''}`;
   }
-}
-
-export function AsgRows({ status, now }: { status: Status; now: number }) {
-  const tz = tzOf(status), year = yearOf(now, tz);
-  return (
-    <>
-      {(status.assignments ?? []).map((a) => (
-        <li>
-          <a href={`#assignment-${a.slug}`}>
-            <span class="a-name">{assignmentTitle(a)}</span>
-            <span class="a-sub">{asgSummary(a, tz, year)}</span>
-            <span class="a-side">
-              <span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span>
-              {a.problem ? <span class="a-flag">Assignment template has a problem</span> : null}
-            </span>
-          </a>
-        </li>
-      ))}
-    </>
-  );
 }
 
 /**
@@ -129,7 +109,7 @@ export function TermStrip({ rows, term, tz, today, counts, selected, onToggle }:
       <div class="strip-legend">
         <span><i class="m lec" />Lecture</span><span><i class="m lab" />Lab</span><span><i class="m asg" />Assignment</span>
         <span><i class="m exam" />Exam</span><span><i class="m evt" />Event</span><span><i class="m term" />Semester date</span>
-        <span><span class="lg-count" aria-hidden="true">2</span>problems</span><span><span class="lg-count later" aria-hidden="true">2</span>{NOT_READY_YET}</span>
+        <span><span class="lg-count" aria-hidden="true">n</span>problems</span><span><span class="lg-count later" aria-hidden="true">n</span>{NOT_READY_YET}</span>
       </div>
     </div>
   );
@@ -213,7 +193,7 @@ function RowItem({ r, status, p, marks }: { r: Row; status: Status; p: CohortPro
   } else if (r.type === 'due' || r.type === 'handout') {
     const asg = (status.assignments ?? []).find((a) => a.slug === r.entry);
     chip = r.type === 'due' ? 'Due' : 'Hand out';
-    detail = r.type === 'due' && asg ? `${asg.submissions} of ${asg.units} submitted so far.` : 'Hands out at its time.';
+    detail = r.type === 'due' && asg ? `${asg.submissions ?? 0} of ${asg.units} submitted so far.` : 'Hands out at its time.';
     buttons = <a class="btn small quiet" href={`#assignment-${r.entry}`}>Open assignment</a>;
   } else {
     chip = chip.charAt(0).toUpperCase() + chip.slice(1);
@@ -506,17 +486,11 @@ function Overview(p: ReadyProps) {
           ]} />
           {aside.after}
         </div>
-        <div class="grid-2">
-          <section class="panel section">
+        <section class="panel section agenda">
             <div class="section-head"><h2>{plannedHeading(name)} <Hint label="About what is planned">Every release and deadline in the picked weeks, with its state. Late means its date has passed and it has not gone out. Pick weeks in the Semester strip above.</Hint></h2>{selected.length === 1 ? <span class="meta">{fmtDay(weekStart(term, selected[0]), tz).replace(/ \w+$/, '')} to {fmtDay(addDays(weekStart(term, selected[0]), 6), tz, year)}</span> : null}</div>
             <WeekRows status={status} p={p} rows={rows} term={term} selected={selected} name={name} marks={marks} />
             <p class="overdue">{late.length ? `${late.length} release${late.length > 1 ? 's are' : ' is'} late: ${late.map((r) => releaseIdent(r)).join(', ')}.` : 'Nothing overdue.'}</p>
-          </section>
-          <section class="panel section">
-            <div class="section-head"><h2>Assignments</h2><a class="btn small quiet" href="#assignments">All assignments</a></div>
-            <ul class="asg-list"><AsgRows status={status} now={now} /></ul>
-          </section>
-        </div>
+        </section>
         <div class="grid-2">
           <section class="panel section">
             <div class="section-head"><h2>Students</h2><a class="btn small quiet" href="#students">Open roster</a></div>

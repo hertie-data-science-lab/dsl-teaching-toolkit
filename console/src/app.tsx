@@ -19,7 +19,6 @@ import { StatusStore, type Loaded } from './model/status';
 import { DispatchAdapter, outcomePath } from './ops/adapter';
 import { OpPanel } from './ops/Panel';
 import { OpsSession } from './ops/session';
-import { ArchiveScreen } from './screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
 import { takeInstallReturn } from './wizards/drafts';
 import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, studentNavKey, wizardOf } from './router';
@@ -304,7 +303,6 @@ export function App({ state: s }: { state: AppState }) {
       site: () => <SiteScreen {...cp} />,
       operations: () => <OperationsScreen {...cp} />,
       marks: () => <MarksOverviewScreen {...cp} />,
-      archive: () => <ArchiveScreen {...cp} />,
     };
     body = (screens[screen] ?? screens.dashboard)();
     const sem = cohortLoaded?.kind === 'ready' ? cohortLoaded.status.semester : undefined;

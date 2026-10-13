@@ -24,8 +24,10 @@ export function opSpec(name: string): OpSpec {
 }
 
 /**
- * Operations whose verb unlocks only after a preview in this session (inputs.md rule 5):
- * hand out, return marks, archive, update every copy, send new codes, publish website.
+ * Operations the console offers a preview for first (inputs.md rule 5): hand out, return
+ * marks, archive, update every copy, send new codes, publish website. The preview is
+ * offered, never required (13 Oct 2026 gate inspection): the page's verb opens the panel, and
+ * the panel's verb runs, behind the op's confirmation box where it has one.
  */
 export const GATED = new Set([
   'assignment.handout_now',

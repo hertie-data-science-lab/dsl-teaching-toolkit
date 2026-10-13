@@ -173,14 +173,14 @@ describe('the Dashboard', () => {
     expect(cell(h, 5).getAttribute('aria-pressed')).toBe('true');
     expect(h.textContent).toContain('Planned in weeks 3 and 5');
     expect(problemsText(h)).toEqual(before);
-    const listed = h.querySelector('.grid-2 .panel')!.textContent!;
+    const listed = h.querySelector('.agenda')!.textContent!;
     expect(listed).toContain('Trees and ensembles');
     expect(listed).toContain('37 of 48 submitted so far.');
     expect(listed).not.toContain('Midterm');
     expect(listed).not.toContain('Before the semester');
     click(cell(h, 3));
     click(cell(h, 5)); // nothing selected is all weeks
-    const all = h.querySelector('.grid-2 .panel')!.textContent!;
+    const all = h.querySelector('.agenda')!.textContent!;
     expect(all).toContain('Midterm');
     expect(all).toContain('Before the semester');
     expect(all).toContain('After the semester');
@@ -192,7 +192,7 @@ describe('the Dashboard', () => {
     const late: Status = { ...STATUS, releases: STATUS.releases!.map((r) => (r.id === 's5' ? { ...r, state: 'late' as const } : r)) };
     const h = mount(late);
     click(cell(h, 5));
-    const listed = h.querySelector('.grid-2 .panel')!;
+    const listed = h.querySelector('.agenda')!;
     expect(listed.textContent).toContain('Late: due Thu 8 Oct, not released yet.');
     expect(listed.textContent).not.toContain('Goes to students at its time');
     expect(listed.querySelector('a[href="#release-s5"]')!.textContent).toBe('Details');
@@ -202,7 +202,7 @@ describe('the Dashboard', () => {
     const h = mount();
     click(cell(h, 3));
     click(cell(h, 2));
-    const listed = h.querySelector('.grid-2 .panel')!;
+    const listed = h.querySelector('.agenda')!;
     expect(listed.textContent).toContain('Hand out');
     expect(listed.textContent).toContain('Hands out at its time.');
     expect(listed.querySelector('a[href="#assignment-assignment-2"]')!.textContent).toBe('Open assignment');
@@ -245,7 +245,7 @@ describe('the Dashboard', () => {
 
   it('names the agenda panel for what it plans, with a ?', () => {
     const h = mount();
-    const head = () => h.querySelector('.grid-2 .panel .section-head h2')!;
+    const head = () => h.querySelector('.agenda .section-head h2')!;
     expect(head().textContent).toMatch(/^Planned this week \?/);
     expect(head().querySelector('.hint-wrap')).not.toBeNull();
     click(cell(h, 5));
@@ -401,7 +401,7 @@ describe('release rows by time (decision 0034 §6)', () => {
   it('marks the agenda rows the same way, and keeps the late sentence', () => {
     const h = mount(heldStatus(STATUS, COHORT_ORG));
     click(cell(h, 3)); // all weeks
-    const row = (id: string) => h.querySelector(`.grid-2 .panel a[href="#release-${id}"]`)!.closest('li')!;
+    const row = (id: string) => h.querySelector(`.agenda a[href="#release-${id}"]`)!.closest('li')!;
     expect(marks(row('s2'))).toMatchObject({ ex: true, chip: 'was skipped', links: ['Fix #schedule-s2 btn small', 'Details #release-s2 textlink'] });
     expect(marks(row('s4'))).toMatchObject({ ex: true, chip: 'will be skipped', links: ['Fix #schedule-s4 btn small', 'Details #release-s4 textlink'] });
     expect(row('s4').textContent).toContain('Will be skipped: its folder was not found.');
@@ -423,7 +423,7 @@ describe('release rows by time (decision 0034 §6)', () => {
     expect(badge(6)).toBeNull();
     expect(cell(h, 5).getAttribute('aria-label')).toContain('; 1 not ready yet');
     const legend = h.querySelector('.strip-legend')!;
-    expect(legend.textContent).toContain('2problems');
-    expect(legend.querySelector('.lg-count.later')!.parentElement!.textContent).toBe('2not ready yet');
+    expect(legend.textContent).toContain('nproblems');
+    expect(legend.querySelector('.lg-count.later')!.parentElement!.textContent).toBe('nnot ready yet');
   });
 });

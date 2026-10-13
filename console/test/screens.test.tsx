@@ -140,7 +140,7 @@ describe('S1 home', () => {
 describe('S4 cohort overview', () => {
   const out = html(<CohortScreen {...props()} />);
   const t = text(<CohortScreen {...props()} />);
-  it('leads with the header, term strip, problems, this week and assignments', () => {
+  it('leads with the header, term strip, problems and this week; the assignments are on their tab', () => {
     expect(html(<CohortScreen {...props()} />)).not.toContain('class="crumbs"'); // the semester banner replaces them
     expect(t).toContain('Dashboard ? What this semester has planned');
     expect(t).toContain('Exam 22 Oct. Archive 31 Jan 2027.');
@@ -159,7 +159,8 @@ describe('S4 cohort overview', () => {
     expect(t).not.toContain('Session 5 cites folder lectures/05_trees');
     expect(out).toContain('href="#template-assignment-3-f2026"');
     expect(t).toContain('(course)');
-    expect(t).toContain('Assignment 2: Regression');
+    expect(out).not.toContain('<h2>Assignments</h2>');
+    expect(out).not.toContain('All assignments');
     expect(t).toContain('37 of 48 submitted so far.');
   });
   it('shows students beside automation, heartbeat from the run list', () => {
@@ -381,6 +382,14 @@ describe('S14 site and S18 operations', () => {
     expect(out).not.toContain('layout: home');
     expect(out).toContain('2026-09-21-scikit');
   });
+  it('fills the site’s Liquid in the home text preview with the semester’s values, leaving an unknown tag visible', () => {
+    const liquid = new StaticFiles({
+      [`${COHORT_ORG}/${COHORT_ORG}.github.io/index.md`]: '---\nlayout: home\n---\nWelcome to **{{ site.course_name }}**, {{ site.course_semester }}, in [{{site.github_org}}]({{ site.dsl_org_url }}). {{ site.mystery }}\n',
+      [`${COHORT_ORG}/${COHORT_ORG}.github.io/_config.yml`]: 'course_name: "Course Name (Code)"\ndsl_org_url: "https://github.com/hertie-data-science-lab"\n',
+    });
+    const out = html(<SiteScreen {...props({ files: liquid })} />);
+    expect(out).toContain(`Welcome to <b>Machine Learning</b>, Fall 2026, in <a href="https://github.com/hertie-data-science-lab" target="_blank" rel="noopener">${COHORT_ORG}</a>. {{ site.mystery }}`);
+  });
   it('lists operations with the outcome sentence, details fold and the run', () => {
     const out = html(<OperationsScreen {...props()} />);
     expect(out).toContain('Released Session 3: 7 files to materials.');
@@ -507,7 +516,7 @@ describe('S2 course and S17 template', () => {
     const out = html(<CourseScreen {...cp} loaded={pub} />);
     expect(out).toContain(`href="https://${COURSE_ORG}.github.io"`);
     const t = text(<CourseScreen {...cp} loaded={pub} />);
-    expect(t).toContain('Optional: an open course version of your materials accessible to anyone on the internet, updated daily.');
+    expect(t).toContain('Optional: an open version of this course and its materials, available to anyone on the internet. Beta: leave this off for now - work in progress.');
     expect(t).toContain('Edit website details');
     expect(t).not.toContain('Public website settings');
     expect(out).toContain('<button class="btn small outline" type="button">Republish website</button>');
@@ -638,6 +647,11 @@ describe('S2 course and S17 template', () => {
     expect(out).toMatch(/id="g-fmt-fmt-none" checked/);
     expect(out).not.toMatch(/id="g-fmt-fmt-ipynb" checked/);
     expect(out).not.toContain('institution default');
+    // The starter choice stays, greyed and disabled, with why.
+    expect(out).toContain('<div class="starter-off">');
+    expect(out).toMatch(/value="handwritten" checked disabled/);
+    expect(out).toContain('No starter file: students get none, so there is nothing to derive or write.');
+    expect(out).toContain('Starter files');
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);

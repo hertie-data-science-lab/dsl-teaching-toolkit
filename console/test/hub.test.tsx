@@ -106,6 +106,13 @@ describe('the assignment hub', () => {
     expect(out).not.toContain('>Hand out now<');
   });
 
+  it('reads 0, not null, when the gradebook does not say how many submitted', () => {
+    const unknown: Status = { ...status, assignments: [{ ...solo, submissions: null }, team] };
+    const out = render(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', loaded: { ...ready, status: unknown } })} />);
+    expect(out).toContain(`0 of ${solo.units} submitted so far.`);
+    expect(out).not.toContain('null');
+  });
+
   it('an assigned-teams assignment has no window on its Teams tab', () => {
     const assigned = new StaticFiles({
       [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\n',
@@ -182,7 +189,7 @@ describe('the cohort nav', () => {
     const nav = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="marks" />);
     const first = nav.slice(nav.indexOf('href="#dashboard"') - 9, nav.indexOf('</ul>', nav.indexOf('href="#dashboard"')));
     const names = [...first.matchAll(/<a href="#[a-z]+"[^>]*>([A-Za-z ]+)/g)].map((m) => m[1]);
-    expect(names).toEqual(['Dashboard', 'Schedule', 'Assignments', 'Marks', 'Students', 'Instructors', 'Site', 'Archive', 'Operations']);
+    expect(names).toEqual(['Dashboard', 'Schedule', 'Assignments', 'Marks', 'Students', 'Instructors', 'Site', 'Operations']);
     expect(nav).toContain('href="#marks" aria-current="page"');
     expect(nav).not.toContain('href="#teams"');
   });

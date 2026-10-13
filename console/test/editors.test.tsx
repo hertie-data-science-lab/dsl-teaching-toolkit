@@ -23,10 +23,11 @@ import { DispatchAdapter } from '../src/ops/adapter';
 import * as defs from '../src/ops/defs';
 import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
-import { ArchiveScreen } from '../src/screens/Archive';
 import { cohortFlags } from '../src/ui/shell';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen, courseFileAfter, detailsOf, missingAdmin } from '../src/screens/CourseEdit';
 import { AssignmentScreen } from '../src/screens/Assignments';
+import { ScheduleScreen } from '../src/screens/Schedule';
+import { parseHash } from '../src/router';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
@@ -234,6 +235,26 @@ describe('the schedule entry sheet model', () => {
     expect(draftErrors({ ...d, graceDays: 1.5 }, { templateUsers: () => 0 }).graceDays).toBeDefined();
     expect(draftErrors({ ...d, graceDays: 0 }, { templateUsers: () => 0 })).toEqual({});
   });
+
+  it('writes only the archive alternative chosen: a date, or the days after the semester ends', () => {
+    const y = new YamlText(SEEDED);
+    const doc = y.toJS() as Record<string, unknown>;
+    const d = readDraft(doc, 'archive') as ArchiveDraft;
+    expect(d.when).toBe('days');
+    writeDraft(y, { ...d, when: 'date', date: '2027-02-15', graceDays: 90 }, doc);
+    const dated = parse(y.text).archive;
+    expect(String(dated.event_datetime)).toContain('2027-02-15');
+    expect(dated).not.toHaveProperty('grace_days');
+    const y2 = new YamlText(y.text);
+    const doc2 = y2.toJS() as Record<string, unknown>;
+    const d2 = readDraft(doc2, 'archive') as ArchiveDraft;
+    expect(d2.when).toBe('date');
+    writeDraft(y2, { ...d2, when: 'days', graceDays: 90 }, doc2);
+    const days = parse(y2.text).archive;
+    expect(days.event_datetime ?? null).toBeNull();
+    expect(days.grace_days).toBe(90);
+    expect(draftErrors({ ...d, when: 'date', date: '' }, { templateUsers: () => 0 }).date).toBeDefined();
+  });
 });
 
 // ------------------------------------------------------------------ marks model
@@ -276,7 +297,7 @@ describe('marks arithmetic, as grades.py does it', () => {
 // ------------------------------------------------------------------ the panel
 
 describe('the operation panel', () => {
-  it('opens with Preview filled and the gated verb shut, and names the op, scope and intro', () => {
+  it('opens with Preview filled and the gated verb live, and names the op, scope and intro', () => {
     const gh = new FakeGitHub();
     const env = saveEnv(gh);
     env.ops.open(defs.sendCodes({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 6));
@@ -284,8 +305,8 @@ describe('the operation panel', () => {
     expect(out).toContain('Send new codes, Fall 2026');
     expect(out).toContain('Their old codes stop working.');
     expect(out).toContain('<button class="btn" type="button">Preview</button>');
-    expect(out).toMatch(/<button class="btn outline" type="button" disabled>Send 6 new codes<\/button>/);
-    expect(out).toContain('Send 6 new codes unlocks when the preview finishes.');
+    expect(out).toMatch(/<button class="btn outline" type="button">Send 6 new codes<\/button>/);
+    expect(out).not.toContain('unlocks when the preview finishes');
     env.ops.minimise();
     expect(render(<EnvCtx.Provider value={env}><OpPanel /></EnvCtx.Provider>)).toContain('class="opbar"');
   });
@@ -392,15 +413,16 @@ describe('editing screens', () => {
     expect(out).toContain('/ 25 · <code>report.tex</code>');
     expect(out).not.toContain('[object Object]');
   });
-  it('archive offers Preview and the gated verb', () => {
-    const out = html(<ArchiveScreen {...props()} />);
+  it('the schedule’s archive entry explains archiving and offers Preview and the verb', () => {
+    const withSched = new StaticFiles({ ...FILES, [`${COHORT_ORG}/semester-config/schedule.yml`]: SEEDED }, {}, TREES);
+    const out = html(<ScheduleScreen {...props({ entry: 'archive', files: withSched })} />);
+    expect(out).toContain('aria-label="About archiving"');
+    expect(out).toContain('Students and instructors keep read access; nothing is deleted');
     expect(out).toContain('Archive Fall 2026');
-    expect(out).toMatch(/disabled title="Preview first">Archive Fall 2026/);
+    expect(out).not.toContain('Preview first');
+    expect(parseHash('#archive')).toEqual({ screen: 'schedule', entry: 'archive' });
   });
-  it('archive says archived for a semester archived before it had a status, and offers no Refresh', () => {
-    const out = html(<ArchiveScreen {...props({ loaded: { kind: 'absent', archived: true } })} />);
-    expect(out).toContain('Archived: every repo is read-only.');
-    expect(out).not.toContain('Status not computed yet');
+  it('a semester archived before it had a status counts as archived', () => {
     expect(cohortFlags({ kind: 'absent', archived: true })).toEqual({ problems: null, archived: true });
     expect(cohortFlags({ kind: 'absent' })).toEqual({ problems: null, archived: false });
   });
@@ -414,7 +436,7 @@ describe('editing screens', () => {
     expect(html(<DetailsScreen {...cp} files={trunk} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/trunk?filename=dsl-course.yml"`);
     expect(out).toContain('value="Machine Learning"');
     expect(out).toContain('value="a@staff.example.org"');
-    expect(out).toContain('Defaults for this course’s assignments');
+    expect(out).toMatch(/<details class="fold"><summary>Advanced<\/summary>[^]*Defaults for this course’s assignments[^]*Student site links[^]*<\/details>/);
     expect(out).not.toContain('Semester defaults'); // the engine reads none from dsl-course.yml
   });
   it('course details asks for the contact and licence, with the institution’s in grey', () => {
@@ -423,9 +445,9 @@ describe('editing screens', () => {
     expect(out).toContain(`institution default: ${POLICY.licences[0].name}`);
     expect(out).toContain(`<option value="${POLICY.licences[1].name}"`);
     // The website's on/off is a switch here, beside the link to its own tab.
-    expect(out).toMatch(/<input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked\/><span>Public website<\/span><\/label><span class="footnote" id="cd-web-state" aria-live="polite">On: updates daily<\/span> <a class="textlink" href="#website">Manage<\/a>/);
+    expect(out).toMatch(/<input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked\/><span>Public OpenCourse website <span class="chip">Beta<\/span><\/span><\/label><span class="footnote" id="cd-web-state" aria-live="polite">On: updates daily<\/span> <a class="textlink" href="#website">Manage<\/a>/);
     const off = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: false\n' }, {}, TREES);
-    expect(html(<DetailsScreen {...cp} files={off} />)).toContain('aria-describedby="cd-web-state"/><span>Public website</span></label><span class="footnote" id="cd-web-state" aria-live="polite">Off</span>');
+    expect(html(<DetailsScreen {...cp} files={off} />)).toContain('aria-describedby="cd-web-state"/><span>Public OpenCourse website <span class="chip">Beta</span></span></label><span class="footnote" id="cd-web-state" aria-live="polite">Off</span>');
     const none = Object.fromEntries(Object.entries(FILES).filter(([k]) => !k.endsWith('opencourse.yml')));
     expect(html(<DetailsScreen {...cp} files={new StaticFiles(none, {}, TREES)} />)).toContain('aria-live="polite">Off</span>');
     const broken = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: [\n' }, {}, TREES);
@@ -487,6 +509,8 @@ describe('editing screens', () => {
   });
   it('the public website edits opencourse.yml and asks for the confirmation the engine’s missing preview needs', () => {
     const out = html(<WebsiteScreen {...cp} />);
+    expect(out).toContain('Public OpenCourse website <span class="chip">Beta</span>');
+    expect(out).toContain('Beta: leave this off for now - work in progress.');
     expect(out).toContain('<button class="btn" type="button">Publish website</button>');
     expect(out).toContain(`<a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/opencourse.yml" target="_blank" rel="noopener">Edit on GitHub`);
     expect(out).not.toContain('New semester');

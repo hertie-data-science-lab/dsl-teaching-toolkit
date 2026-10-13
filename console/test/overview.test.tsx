@@ -102,7 +102,7 @@ describe('the public website indicator', () => {
   it('sits inside Course details, with Publish and Edit website details', () => {
     const out = render(<CourseScreen course={course} loaded={{ kind: 'absent' }} cohortStates={{ [COHORT_ORG]: ready(STATUS) }} files={new StaticFiles()} now={NOW} />);
     const details = panelOf(out, '<h2>Course details');
-    expect(details).toContain('<h3>Public website');
+    expect(details).toContain('<h3>Public OpenCourse website <span class="chip">Beta</span>');
     expect(details).toContain('Not published');
     expect(details).toContain('>Publish website</button>');
     expect(details).toContain('href="#website">Edit website details</a>');

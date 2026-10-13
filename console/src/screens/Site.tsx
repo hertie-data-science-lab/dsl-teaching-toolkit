@@ -7,7 +7,8 @@ import { render } from '../edit/yamlText';
 import { Field } from '../forms/Form';
 import { ago, fmtWhen } from '../model/format';
 import { parseInstructors } from '../model/people';
-import { bodyOf, frontMatter } from '../model/student';
+import { bodyOf, frontMatter, homeText } from '../model/student';
+import { parse } from 'yaml';
 import type { Outcome } from '../model/types';
 import { outcomePath } from '../ops/adapter';
 import { updateSite } from '../ops/defs';
@@ -48,6 +49,22 @@ function Announcement({ p, repo, path, sha }: { p: ReadyProps; repo: string; pat
   );
 }
 
+function configOf(text: string): Record<string, unknown> {
+  try {
+    const v = parse(text);
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The `_config.yml` keys every site update rewrites from the course and the semester (`site.py`), those set. */
+function rewritten(p: ReadyProps): Record<string, string> {
+  const { course, cohort } = p;
+  const all: Record<string, string> = { course_name: course.name, title: course.name, course_code: course.code, course_description: course.description, course_semester: cohort.termLabel, github_org: cohort.org };
+  return Object.fromEntries(Object.entries(all).filter(([, v]) => !!v));
+}
+
 function Site(p: ReadyProps) {
   const { status, now } = p;
   const env = useEnv();
@@ -63,8 +80,11 @@ function Site(p: ReadyProps) {
   const [homeSave, runHome] = useSave(env);
   const [newAnn, setNewAnn] = useState<{ date: string; text: string }>({ date: todayOf(now, tz), text: '' });
   const [annSave, runAnn, setAnnSave] = useSave(env);
-  const homeText = home.kind === 'ready' ? bodyOf(home.text) : '';
-  const shown = body ?? homeText;
+  const homeBody = home.kind === 'ready' ? bodyOf(home.text) : '';
+  const shown = body ?? homeBody;
+  // The site's `_config.yml`, with the keys every update rewrites (`site.py`) as they will be.
+  const cfgFile = p.files.file(p.cohort.org, repo, '_config.yml');
+  const siteVars = { ...configOf(cfgFile.kind === 'ready' ? cfgFile.text : ''), ...rewritten(p) };
   const saveHome = async () => {
     if (home.kind !== 'ready' || body === null) return;
     const front = home.text.slice(0, home.text.length - bodyOf(home.text).length);
@@ -98,9 +118,9 @@ function Site(p: ReadyProps) {
         <section class="panel section">
           <h2>Home text</h2>
           {home.kind === 'loading' ? <Loading what="Reading the home page" /> : home.kind === 'ready' ? (
-            <Field id="site-home" k="home" t={{ tier: 'ask', label: 'Home page', widget: 'markdown', reason: 'The first thing students read.' }} value={shown} values={{}} set={(_, v) => setBody(String(v ?? ''))} />
+            <Field id="site-home" k="home" t={{ tier: 'ask', label: 'Home page', widget: 'markdown', reason: 'The first thing students read.' }} value={shown} values={{}} set={(_, v) => setBody(String(v ?? ''))} shown={(t) => homeText(t, siteVars, true)} />
           ) : <p class="footnote">No home page yet: it appears when the site is set up.</p>}
-          <SaveBar state={homeSave} onSave={() => void saveHome()} small disabled={body === null || body === homeText} file={{ org: p.cohort.org, repo, path: 'index.md', exists: home.kind !== 'absent' }} />
+          <SaveBar state={homeSave} onSave={() => void saveHome()} small disabled={body === null || body === homeBody} file={{ org: p.cohort.org, repo, path: 'index.md', exists: home.kind !== 'absent' }} />
           <Lives org={p.cohort.org} repo={repo} path="index.md" exists={home.kind !== 'absent'} />
         </section>
         <section class="panel section">
@@ -125,7 +145,7 @@ function Site(p: ReadyProps) {
             {people.map((x) => (
               <li>
                 <span class="r-title">{x.name || x.handle} {x.photo ? <span class="chip ok">Photo</span> : <span class="chip">No photo</span>}</span>
-                <span class="r-sub">{x.photo || 'Add one on Instructors; upload the image to the site repo’s images folder.'}</span>
+                <span class="r-sub">{x.photo || 'Add one on Instructors: a link, or an image dropped on the Photo field there.'}</span>
                 <span class="r-side"><a class="btn small quiet" href="#instructors">Instructors</a></span>
               </li>
             ))}

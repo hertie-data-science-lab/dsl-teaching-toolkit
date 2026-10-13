@@ -13,7 +13,7 @@ import {
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
-import { keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
+import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
 import { TIMEZONES } from '../tiers/course';
@@ -24,7 +24,7 @@ import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseM
 import { Check } from '../ui/icons';
 import { NOTHING_TO_RELEASE, markClass, releaseRef, rowMark } from './Cohort';
 import { NotFound } from './Assignments';
-import { CheckNow, WithStatus, cohortScope, gradingConfig, tzOf, yearOf } from './common';
+import { CheckNow, WithStatus, cohortScope, gradingConfig, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, validSchedule, type Layers } from '../model/cascade';
@@ -157,7 +157,7 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
         <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: `Automation releases at this time, ${tz}.` }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time' }} />
       </div>
-      <F id="e-det" k="details" d={d} set={set} t={MD('Details', 'Shown to students under the title.')} />
+      <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', 'Shown to students under the title.')} />
       <Common d={d} set={set} />
       <div class="field">
         <span class="label">What to release</span>
@@ -316,7 +316,7 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { 
           ) : null}
         </>
       )}
-      <F id="e-det" k="details" d={d} set={set} t={MD('Details', 'Shown to students under the title.')} />
+      <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', 'Shown to students under the title.')} />
       <Common d={d} set={set} />
       {d.id ? <a class="textlink" href={`#assignment-${d.id}`}>Open the assignment</a> : null}
     </>
@@ -334,7 +334,7 @@ function EventForm({ d, set, errors }: { d: EventDraft; set: Setter<EventDraft>;
         <F id="e-date" k="date" d={d} set={set} t={{ tier: 'ask', label: 'When', widget: 'date', reason: 'Leave the date empty and the student site shows TBC at the end of the semester.' }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time', defaultLabel: 'optional' }} />
       </div>
-      <F id="e-det" k="details" d={d} set={set} t={MD('Details')} />
+      <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)')} />
       <Common d={d} set={set} />
     </>
   );
@@ -363,14 +363,26 @@ function ArchiveForm({ d, set, errors }: { d: ArchiveDraft; set: Setter<ArchiveD
       <F id="e-aon" k="on" d={d} set={set} t={{ tier: 'default', label: 'Archive automatically', widget: 'checkbox', defaultLabel: 'off means never' }} />
       {d.on ? (
         <div class="cond">
-          <F id="e-ad" k="date" d={d} set={set} t={{ tier: 'default', label: 'Archive on', widget: 'date', defaultLabel: `default: ${d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the semester ends`, reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.' }} />
-          <F id="e-agrace" k="graceDays" d={d} set={set} error={errors.graceDays} t={{ tier: 'default', label: 'Days after semester end', widget: 'number', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS}`, reason: `Archiving happens this many days after the semester ends; ${ARCHIVE_GRACE_DAYS} by default.` }} />
+          <F id="e-awhen" k="when" d={d} set={set} t={{ tier: 'default', label: 'When', widget: 'radio', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS} days after the semester ends`, reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.', options: [{ value: 'date', label: 'On a date' }, { value: 'days', label: `${d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the semester ends` }] }} />
+          {d.when === 'date'
+            ? <F id="e-ad" k="date" d={d} set={set} error={errors.date} t={{ tier: 'default', label: 'Archive on', widget: 'date' }} />
+            : <F id="e-agrace" k="graceDays" d={d} set={set} error={errors.graceDays} t={{ tier: 'default', label: 'Days after the semester ends', widget: 'number', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS}` }} />}
           <F id="e-at" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'default: Semester archived' }} />
-          <F id="e-det" k="details" d={d} set={set} t={MD('Details', '{date} is filled in with the archive date.')} />
+          <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', '{date} is filled in with the archive date.')} />
           <Common d={d} set={set} />
         </div>
       ) : null}
     </>
+  );
+}
+
+/** What archiving does, beside the archive row and on its sheet (it replaced the Archive page). */
+function ArchiveHelp({ org }: { org: string }) {
+  return (
+    <Hint small label="About archiving" doc="10-grade-and-return-assignments.md">
+      Archiving makes every repo in {org} read-only: student repos, marks repos, the student site, the join form, the settings repo. Students and instructors keep read access; nothing is deleted and the student site stays online.
+      It happens on the date chosen here, or {ARCHIVE_GRACE_DAYS} days (or the number set here) after the semester ends; students get an Updates notice two weeks before. Without an archive entry it never happens by itself.
+    </Hint>
   );
 }
 
@@ -398,6 +410,11 @@ function View(p: ReadyProps) {
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const tz = tzOf(status), year = yearOf(now, tz);
   const scope = cohortScope(p);
+  // The archive date the engine reports, whether it has come, and whether the semester is archived already.
+  const archiveDate = status.semester?.archive_date ?? null;
+  const archiveWhen = archiveDate ? fmtDay(archiveDate, tz, year) : null;
+  const archivePassed = !!archiveDate && archiveDate.slice(0, 10) <= todayOf(now, tz);
+  const archived = status.semester?.live === false;
   const [filters, setFilters] = useState<Record<Block, boolean>>({ releases: true, assignments: true, events: true });
   const [drafts, setDrafts] = useState<Record<string, Draft>>((): Record<string, Draft> =>
     p.prefill && p.entry === 'new' ? { new: { ...(blankDraft('handout', { repo: '' }) as AssignmentDraft), template: p.prefill } } : {},
@@ -580,7 +597,7 @@ function View(p: ReadyProps) {
       const rel = d.kind === 'releases' && key !== 'new' ? (status.releases ?? []).find((x) => x.id === key) : undefined;
       const ref = rel ? releaseRef(rel, tz, year) : null;
       const ident = identOf(d, current, kindFor(d) ?? '');
-      const title = d.kind === 'semester' ? <>Semester dates</> : d.kind === 'archive' ? <><b>Archive</b>: {d.title || 'Semester archived'}</> : <><b>{ident}</b>: {d.title || (current?.name ?? 'Untitled')}</>;
+      const title = d.kind === 'semester' ? <>Semester dates</> : d.kind === 'archive' ? <><b>Archive</b>: {d.title || 'Semester archived'} <ArchiveHelp org={p.cohort.org} /></> : <><b>{ident}</b>: {d.title || (current?.name ?? 'Untitled')}</>;
       const eyebrow = d.kind === 'semester' ? 'Semester' : d.kind === 'archive' ? 'Archive' : d.kind === 'assignments' ? 'Assignment entry' : `${TYPE_LABEL[d.kind === 'releases' ? d.type || 'lecture' : d.type] ?? ''}${d.date ? `, ${fmtDay(d.date, tz, year)}${d.time ? ` ${d.time}` : ''}` : ''}`;
       const probs = (status.problems ?? []).filter((x) => x.fix?.entry === key && x.fix.path === 'schedule.yml');
       const two = d.kind === 'releases' || d.kind === 'assignments';
@@ -620,6 +637,7 @@ function View(p: ReadyProps) {
               : rel.state === 'released' ? <div class="savebar"><span class="footnote">Released.</span><a class="btn small quiet" href={`#release-${rel.id}`}>Release again…</a></div>
               : null
             ) : null}
+            {d.kind === 'archive' && !archived ? <div class="savebar"><span class="footnote">{archivePassed ? 'The archive date has passed.' : 'Archiving before the scheduled date asks you to confirm.'}</span><OpButtons def={archive(scope, archiveWhen, archivePassed)} /></div> : null}
             <SaveLine state={save} />
             <div class="savebar">
               <button class="btn" type="button" disabled={save.kind === 'busy' || !dirty} onClick={() => void doSave()}>Save</button>
@@ -645,13 +663,10 @@ function View(p: ReadyProps) {
         </div>
         <div class="actions"><CheckNow p={p} label="Check" /><a class="btn outline" href="#schedule-new">Add entry</a></div>
       </div>
-      <p class="site-note" style="margin-bottom:12px">
-        Every row here reads <b>Identifier</b>: Name. The student site shows the same two parts on two lines, the bold identifier then the name, with no colon; exams and events show only the bold title. Whether the site should switch to one line is a theme decision.
-      </p>
       <div class="term-meta">
         {sched?.start && sched?.end ? <span>Semester <b>{fmtDay(sched.start, tz, year)} to {fmtDay(sched.end, tz)}</b></span> : null}
         <span>Timezone <b>{sched?.timezone ?? tz}</b></span>
-        <span>Archive <b>{status.semester?.archive_date ? fmtDay(status.semester.archive_date, tz, year) : 'never'}</b></span>
+        <span>Archive <b>{archived ? 'done: every repo is read-only' : archiveWhen ?? 'never'}</b> <ArchiveHelp org={p.cohort.org} /></span>
         <a class="textlink" href="#schedule-semester">Edit semester dates</a>
         <a class="textlink" href="#schedule-archive">Archive settings</a>
       </div>
