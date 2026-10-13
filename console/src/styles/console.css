@@ -333,6 +333,8 @@ table.grid tr.fault td:first-child { box-shadow: inset 5px 0 0 var(--bad); }
 table.grid tr.changed td:not(.sys) { background: var(--amber-soft); }
 table.grid td input, table.grid td select { border-color: transparent; background: transparent; padding: 4px 6px; min-height: 32px; }
 table.grid td input:hover, table.grid td select:hover { border-color: var(--rule-strong); }
+/* the roster in Edit roster: its inputs look like inputs */
+.roster-table.editing table.grid td input, .roster-table.editing table.grid td select { border-color: var(--rule-strong); background: var(--surface); }
 
 /* automation */
 .auto-head { display: flex; align-items: center; gap: 12px; }

@@ -378,9 +378,11 @@ const props = (over: Partial<CohortProps> = {}): CohortProps => ({ course, cohor
 const html = (v: preact.VNode) => render(v);
 
 describe('editing screens', () => {
-  it('the roster grid edits your columns only and keeps the code out of the page', () => {
+  it('the roster grid reads until Edit roster, and keeps the code out of the page', () => {
     const out = html(<StudentsScreen {...props()} />);
-    expect(out).toContain('value="anna@x.org"');
+    expect(out).toContain('anna@x.org');
+    expect(out).not.toContain('value="anna@x.org"');
+    expect(out).toContain('>Edit roster<');
     expect(out).toContain('Add a student');
     expect(out).toContain('Replace from CSV');
     expect(out).toContain('Send new codes to students who have not joined');
