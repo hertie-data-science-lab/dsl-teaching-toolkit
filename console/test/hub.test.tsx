@@ -131,6 +131,18 @@ describe('the assignment hub', () => {
     expect(misrouted(solo, 'marks')).toBeNull();
   });
 
+  it('has one Marking step from the due date, naming the late cutoff while late work arrives (decision 0037)', () => {
+    const step = (state: AssignmentState) => {
+      const a = { ...solo, state, marks: { filled: 12, total: 48 } };
+      const out = render(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', loaded: { kind: 'ready', status: { ...status, assignments: [a, team] }, sha: 's', stale: [] } })} />);
+      expect(out).not.toContain('Late window</span>');
+      const m = /<li class="now" aria-current="step">.*?<span class="ln">([^<]+)<\/span><span class="ls">([^<]+)<\/span>/.exec(out);
+      return m ? `${m[1]} · ${m[2]}` : null;
+    };
+    expect(step('late_window')).toBe('Marking · late work until Wed 7 Oct · 12 of 48 marked');
+    expect(step('marking')).toBe('Marking · 12 of 48 marked');
+  });
+
   it('renders the named tab over the default one', () => {
     const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'overview' })} />);
     expect(current(out)).toBe('Overview');
