@@ -216,8 +216,9 @@ def _materials(repo: str, syllabus: str | None = "# Syllabus", **over):
     )
 
 
-# The weeks of SCHEDULE with nothing dated in them after NOW: the fixture course sets them
-# aside (decision 0032), so only the empty-week tests see an EMPTY_WEEK problem.
+# The weeks of SCHEDULE with nothing dated in them after NOW, and those with an assignment
+# date but no lecture: the fixture course sets them aside (decision 0032), so only the
+# empty-week tests see an EMPTY_WEEK or EMPTY_WEEK_KIND problem.
 QUIET_WEEKS = [
     f"empty_week:{d}"
     for d in (
@@ -229,6 +230,9 @@ QUIET_WEEKS = [
         "2026-11-30",
         "2026-12-07",
         "2026-12-14",
+        "2026-10-19:lecture",
+        "2026-10-26:lecture",
+        "2026-11-09:lecture",
     )
 ]
 
@@ -3094,21 +3098,103 @@ def _empty_weeks(now: datetime, aside: tuple[str, ...] = ()) -> list[dict]:
 def test_a_week_with_nothing_dated_is_one_empty_week_problem():
     # Weeks of 5, 12 and 19 Oct: the release is in the first, the exam in the third.
     before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
-    (p,) = _empty_weeks(before)
+    p, lecture = _empty_weeks(before)
     assert p["id"] == "empty_week:2026-10-12"
     assert p["kind"] == "EMPTY_WEEK"
-    assert p["text"] == "Nothing is scheduled in the week of 12 Oct."
+    assert p["text"] == (
+        "Nothing seems to have been scheduled for this week. "
+        "If this is intentional, click 'Set aside'."
+    )
     assert p["when"] == "2026-10-12T00:00:00+02:00"
     assert p["fix"]["screen"] == "schedule"
+    # The empty week raises that one row, never a missing lecture as well. The exam's
+    # week has no lecture: an exam does not stand in for one.
+    assert lecture["id"] == "empty_week:2026-10-19:lecture"
+    assert lecture["kind"] == "EMPTY_WEEK_KIND"
 
 
 def test_a_week_already_begun_is_not_raised():
-    assert _empty_weeks(datetime(2026, 10, 13, 9, 0, tzinfo=UTC)) == []
+    ids = [p["id"] for p in _empty_weeks(datetime(2026, 10, 13, 9, 0, tzinfo=UTC))]
+    assert ids == ["empty_week:2026-10-19:lecture"]
+    assert _empty_weeks(datetime(2026, 10, 20, 9, 0, tzinfo=UTC)) == []
+
+
+WEEKLY = """\
+timezone: Europe/Berlin
+semester_start: 2026-10-05
+semester_end: 2026-10-16
+releases:
+  lecture_1:
+    event_datetime: 2026-10-06T10:00
+    kind: lecture
+  lab_1:
+    event_datetime: 2026-10-08T10:00
+    kind: lab
+  lecture_2:
+    event_datetime: 2026-10-13T10:00
+    kind: lecture
+assignments:
+  a1:
+    course_source_repo: a1-f2026
+    handout_datetime: 2026-10-14T10:00
+    due_datetime: 2026-10-30T23:59
+"""
+
+
+def test_a_week_missing_only_its_lab_is_one_missing_lab_problem():
+    # Week 2 has a lecture and a hand-out but no lab; nothing in the plan is readings, so
+    # no week is ever told it lacks them.
+    facts = _semester(sched=_sched(WEEKLY))
+    before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    (p,) = status_json.empty_week_problems(facts, before)
+    assert p["id"] == "empty_week:2026-10-12:lab"
+    assert p["kind"] == "EMPTY_WEEK_KIND"
+    assert p["text"] == (
+        "No lab seems to have been scheduled for this week. "
+        "If this is intentional, click 'Set aside'."
+    )
+    assert p["when"] == "2026-10-12T00:00:00+02:00"
+    assert status_json.empty_week_problems(facts, before, frozenset({p["id"]})) == []
+
+
+def test_a_kind_used_only_by_a_tbc_release_is_still_expected_weekly():
+    # The only lab is `tbc`: the course still has labs, so each week lacks one.
+    text = """\
+timezone: Europe/Berlin
+semester_start: 2026-10-05
+semester_end: 2026-10-16
+releases:
+  lecture_1:
+    event_datetime: 2026-10-06T10:00
+    kind: lecture
+  r1:
+    event_datetime: 2026-10-07T10:00
+    kind: readings
+  lab_1:
+    event_datetime: tbc
+    kind: lab
+  lecture_2:
+    event_datetime: 2026-10-13T10:00
+    kind: lecture
+"""
+    facts = _semester(sched=_sched(text))
+    ids = [
+        p["id"]
+        for p in status_json.empty_week_problems(
+            facts, datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+        )
+    ]
+    assert ids == [
+        "empty_week:2026-10-05:lab",
+        "empty_week:2026-10-12:lab",
+        "empty_week:2026-10-12:readings",
+    ]
 
 
 def test_a_set_aside_empty_week_is_not_raised():
     before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
-    assert _empty_weeks(before, ("empty_week:2026-10-12",)) == []
+    aside = ("empty_week:2026-10-12", "empty_week:2026-10-19:lecture")
+    assert _empty_weeks(before, aside) == []
     # Through the render: the course's set_aside list hides it there too.
     course = _course()
     course.meta = {**course.meta, "set_aside": []}
