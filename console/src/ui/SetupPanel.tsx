@@ -117,12 +117,8 @@ export function readinessTabs({ items, scope, onCircle, onBack, busy = false }: 
   return [
     {
       key: 'suggestions', label: 'Suggestions', count: g.suggestions.length,
-      body: (
-        <>
-          {g.suggestions.length ? <ul class="setup">{g.suggestions.map((it) => <ItemRow it={it} onCircle={onCircle} />)}</ul> : <p class="footnote">No suggestions open.</p>}
-          <p class="footnote">Optional: the {course ? 'course works' : 'semester runs'} without these.{onCircle ? ' If you would rather skip one, click the circle before it to set it aside.' : ''}</p>
-        </>
-      ),
+      hint: <>Optional: the {course ? 'course works' : 'semester runs'} without these.{onCircle ? ' If you would rather skip one, click the circle before it to set it aside.' : ''}</>,
+      body: g.suggestions.length ? <ul class="setup">{g.suggestions.map((it) => <ItemRow it={it} onCircle={onCircle} />)}</ul> : <p class="footnote">No suggestions open.</p>,
     },
     {
       key: 'aside', label: 'Set aside', count: g.aside.length,
@@ -139,12 +135,8 @@ export function readinessTabs({ items, scope, onCircle, onBack, busy = false }: 
     },
     {
       key: 'setup', label: 'Setup', right: true, count: complete ? 'done' : `${done} of ${g.setup.length}`,
-      body: (
-        <>
-          <ul class="setup">{g.setup.map((it) => <ItemRow it={it} />)}</ul>
-          <p class="footnote">One-time setup: what the {course ? 'course needs before a semester can start' : 'semester needs before automation can run'}. Done stays done.</p>
-        </>
-      ),
+      hint: <>One-time setup: what the {course ? 'course needs before a semester can start' : 'semester needs before automation can run'}. Done stays done.</>,
+      body: <ul class="setup">{g.setup.map((it) => <ItemRow it={it} />)}</ul>,
     },
   ];
 }
