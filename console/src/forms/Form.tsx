@@ -122,9 +122,11 @@ interface FieldProps {
   error?: string;
   set: (k: string, v: unknown) => void;
   readOnly?: boolean;
+  /** A markdown field's text as students will see it, before it is rendered (the site's Liquid filled in). */
+  shown?: (text: string) => string;
 }
 
-export function Field({ id, k, t, value, values, error, set, readOnly }: FieldProps) {
+export function Field({ id, k, t, value, values, error, set, readOnly, shown = (x) => x }: FieldProps) {
   const forced = t.forced?.(values);
   if (forced)
     return (
@@ -196,7 +198,7 @@ export function Field({ id, k, t, value, values, error, set, readOnly }: FieldPr
       {w === 'markdown' ? (
         <div class="md-prev" aria-live="polite">
           <span class="lbl">What students see</span>
-          {str(value).trim() ? <div dangerouslySetInnerHTML={{ __html: md(str(value)) }} /> : <span class="empty">Nothing</span>}
+          {str(value).trim() ? <div dangerouslySetInnerHTML={{ __html: md(shown(str(value))) }} /> : <span class="empty">Nothing</span>}
         </div>
       ) : null}
       {why}
