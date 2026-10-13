@@ -151,11 +151,16 @@ export function collect(s: Scope, a: AsgRef): OpDef {
   };
 }
 
-/** `name`: the assignment's semester-side name (`semester_dest_repo`, else its key), what the engine returns by. */
-export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string): OpDef {
+/**
+ * `name`: the assignment's semester-side name (`semester_dest_repo`, else its key), what the engine returns by.
+ * `lateUntil`: the late cutoff as shown, while it has not passed; the dialog then says late work can still change marks (decision 0037).
+ */
+export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, lateUntil?: string | null): OpDef {
+  const units = `${a.units} ${a.group ? 'team' : 'student'}${a.units === 1 ? '' : 's'}`;
   return {
     ...base(s, 'grades.return', a.slug), name: 'Return marks', title: a.title, where: 'Marking',
     intro: 'Sends each student their marks and feedback for this assignment, beside the ones already returned. Your private notes stay private.',
+    confirm: lateUntil ? `${units} can still submit late until ${lateUntil}. Their penalty updates and you return the changed marks again.` : undefined,
     verb: `Return marks to ${marked} ${a.group ? 'teams' : 'students'}`, running: 'Returning marks', cancel: 'Stop; marks already returned stay returned',
     args: { assignment: name }, options: RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
     target: reposLike(s.cohortOrg ?? s.courseOrg, 'grades-'),

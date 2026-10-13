@@ -447,8 +447,10 @@ Hash tokens as in the design mockup: `#dashboard`, `#schedule-s5`, `#assignment-
 the schedule editor also opens `#schedule-new`, `#schedule-semester` and `#schedule-archive`.
 Renamed hashes redirect: `#cohort` and `#semester` to `#dashboard`, `#staff` to
 `#instructors`, `#new-cohort-<n>` to `#new-semester-<n>`, `#schedule-term` to
-`#schedule-semester`, `#setup` to `#profile`, and the retired Archive page `#archive` to
-`#schedule-archive` (its explanation is the `?` on the archive row, its Archive button on that entry).
+`#schedule-semester`, `#setup` to `#profile`, `#marks` to `#assignments` (decision 0037: each
+assignment's Marks tab, and the index's Marked and Returned columns, replace the semester's Marks page),
+and the retired Archive page `#archive` to `#schedule-archive` (its explanation is the `?` on the
+archive row, its Archive button on that entry).
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
 opens a new assignment entry for that template; `?folder=<repo>/<path>#materials` the materials

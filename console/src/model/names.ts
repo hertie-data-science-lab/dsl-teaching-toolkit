@@ -36,7 +36,6 @@ export const STATUS_PATH = NAMES.records.status;
 export const STUDENT_STATUS_PATH = NAMES.records.student_status;
 export const JOIN_MARKERS = NAMES.join_markers;
 export const OUTCOMES_DIR = NAMES.records.outcomes;
-export const LEDGER_PATH = NAMES.records.distributed;
 /** The semester's pointer to its course, in its config repo. */
 export const POINTER_PATH = NAMES.records.pointer;
 /** The course's own repo: its settings, its status, the Console workflow. Its name is GitHub's. */
