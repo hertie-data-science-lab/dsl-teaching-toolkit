@@ -1,4 +1,4 @@
-// Course-side editors: S3 Course details (dsl-course.yml), S20 Public website
+// Course-side editors: S3 Course details (dsl-course.yml), S20 Public OpenCourse website
 // (opencourse.yml), S19 Handout materials repo settings (materials.yml, .releaseignore).
 
 import { useRef, useState } from 'preact/hooks';
@@ -187,7 +187,7 @@ export function WebsiteSwitch(p: CourseProps) {
     <div class="field web-switch">
       <label class="switch">
         <input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked={busy ? pending : before.enabled} disabled={busy || broken || !known || p.migrated === false} onChange={(e) => void flip((e.target as HTMLInputElement).checked)} />
-        <span>Public website</span>
+        <span>Public OpenCourse website <span class="chip">Beta</span></span>
       </label>
       <span class="footnote" id="cd-web-state" aria-live="polite">{word}</span> <a class="textlink" href="#website">Manage</a>
       {save.kind === 'bad' ? <CheckLine cls="bad">{save.text}</CheckLine> : null}
@@ -460,8 +460,9 @@ export function WebsiteScreen(p: CourseProps) {
     <>
       <div class="page-head">
         <div>
-          <h2 class="h1">Public website <Hint doc="reference/actions-reference.md">An open version of one handout materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h2>
-          <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : siteExists && !before.enabled ? 'Off' : 'Not published'}</span>{published ? 'Updates daily.' : siteExists && !before.enabled ? WEBSITE_OFF_LIVE : 'Optional: an open version of your materials for anyone.'}</p>
+          <h2 class="h1">Public OpenCourse website <span class="chip">Beta</span> <Hint doc="reference/actions-reference.md">An open version of one handout materials repo, for anyone. Save, then publish; it updates daily while on.</Hint></h2>
+          <p class="lede"><span class={`chip ${published ? 'ok' : ''}`}>{published ? 'Published' : siteExists && !before.enabled ? 'Off' : 'Not published'}</span>{published ? 'Updates daily.' : siteExists && !before.enabled ? WEBSITE_OFF_LIVE : 'Optional: an open version of this course and its materials, available to anyone on the internet.'}</p>
+          <p class="footnote">Beta: leave this off for now - work in progress.</p>
         </div>
         <div class="actions">
           <OpButtons def={publishWebsite(courseScope(p), published)} />

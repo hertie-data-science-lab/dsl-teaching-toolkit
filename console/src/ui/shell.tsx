@@ -338,7 +338,7 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
     const node: NavNode = { id: k, label: t, href, what, pages: list.map((x) => ({ href: x.href, t: x.label, ext: x.ext, current: onPage && x.repo === entry })) };
     return <TreeNode node={node} open={shownGroup(k)} current={current === k && !onPage} onToggle={() => setOpen({ ...open, [k]: !shownGroup(k) })} />;
   };
-  const leaf = (key: string, href: string, t: string) => <Leaf l={{ href, t, current: key === current }} />;
+  const leaf = (key: string, href: string, t: ComponentChildren) => <Leaf l={{ href, t, current: key === current }} />;
   // Semesters: live is neither archived nor past its end (the status's, else the key's).
   const flags = (k: CohortRef) => {
     const l = cohortStates[k.org];
@@ -377,7 +377,7 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
             {leaf('details', '#details', 'Course details')}
             {group('materials', '#materials', 'Handout materials', 'the handout materials repos')}
             {group('templates', '#templates', 'Assignment templates', 'the assignment templates')}
-            {leaf('website', '#website', 'Public website')}
+            {leaf('website', '#website', <>Public OpenCourse website <span class="chip">Beta</span></>)}
           </ul>
           {nodes.length ? (
             <>

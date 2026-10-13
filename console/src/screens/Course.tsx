@@ -522,7 +522,7 @@ export function CourseScreen(p: CourseProps) {
         </dl>
         <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={p.files.file(course.org, COURSE_REPO, 'dsl-course.yml').kind !== 'absent'} />
         <div class="website-block">
-          <h3>Public website <Hint label="About the public website">Optional: an open course version of your materials accessible to anyone on the internet, updated daily.</Hint></h3>
+          <h3>Public OpenCourse website <span class="chip">Beta</span> <Hint label="About the public website">Optional: an open version of this course and its materials, available to anyone on the internet. Beta: leave this off for now - work in progress.</Hint></h3>
           <SiteLive org={course.org} published={pub} last={lastPublish} running={publishing} now={p.now} />
           <div class="actions">
             {course.write ? <OpButtons def={publishWebsite(courseScope({ course }), pub)} small verbCls="btn small outline" /> : null}

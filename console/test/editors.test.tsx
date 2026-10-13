@@ -444,9 +444,9 @@ describe('editing screens', () => {
     expect(out).toContain(`institution default: ${POLICY.licences[0].name}`);
     expect(out).toContain(`<option value="${POLICY.licences[1].name}"`);
     // The website's on/off is a switch here, beside the link to its own tab.
-    expect(out).toMatch(/<input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked\/><span>Public website<\/span><\/label><span class="footnote" id="cd-web-state" aria-live="polite">On: updates daily<\/span> <a class="textlink" href="#website">Manage<\/a>/);
+    expect(out).toMatch(/<input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked\/><span>Public OpenCourse website <span class="chip">Beta<\/span><\/span><\/label><span class="footnote" id="cd-web-state" aria-live="polite">On: updates daily<\/span> <a class="textlink" href="#website">Manage<\/a>/);
     const off = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: false\n' }, {}, TREES);
-    expect(html(<DetailsScreen {...cp} files={off} />)).toContain('aria-describedby="cd-web-state"/><span>Public website</span></label><span class="footnote" id="cd-web-state" aria-live="polite">Off</span>');
+    expect(html(<DetailsScreen {...cp} files={off} />)).toContain('aria-describedby="cd-web-state"/><span>Public OpenCourse website <span class="chip">Beta</span></span></label><span class="footnote" id="cd-web-state" aria-live="polite">Off</span>');
     const none = Object.fromEntries(Object.entries(FILES).filter(([k]) => !k.endsWith('opencourse.yml')));
     expect(html(<DetailsScreen {...cp} files={new StaticFiles(none, {}, TREES)} />)).toContain('aria-live="polite">Off</span>');
     const broken = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: [\n' }, {}, TREES);
@@ -508,6 +508,8 @@ describe('editing screens', () => {
   });
   it('the public website edits opencourse.yml and asks for the confirmation the engine’s missing preview needs', () => {
     const out = html(<WebsiteScreen {...cp} />);
+    expect(out).toContain('Public OpenCourse website <span class="chip">Beta</span>');
+    expect(out).toContain('Beta: leave this off for now - work in progress.');
     expect(out).toContain('<button class="btn" type="button">Publish website</button>');
     expect(out).toContain(`<a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/opencourse.yml" target="_blank" rel="noopener">Edit on GitHub`);
     expect(out).not.toContain('New semester');

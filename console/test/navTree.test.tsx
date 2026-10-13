@@ -63,7 +63,7 @@ describe('the instructor tree', () => {
     expect(cur[0].textContent).toBe('Dashboard');
     expect(cur[0].getAttribute('href')).toBe(anchor.getAttribute('href'));
     const leaves = [...h.querySelectorAll('ul.tree > li > a.leaf, ul.tree > li > .row > a')].map((a) => a.textContent);
-    expect(leaves.slice(0, 5)).toEqual(['Dashboard', 'Course details', 'Handout materials', 'Assignment templates', 'Public website']);
+    expect(leaves.slice(0, 5)).toEqual(['Dashboard', 'Course details', 'Handout materials', 'Assignment templates', 'Public OpenCourse website Beta']);
     const t = h.textContent!;
     expect(t.indexOf('Public website')).toBeLessThan(t.indexOf('Semesters'));
     expect(h.querySelector('.switcher, .popmenu')).toBeNull();

@@ -507,7 +507,7 @@ describe('S2 course and S17 template', () => {
     const out = html(<CourseScreen {...cp} loaded={pub} />);
     expect(out).toContain(`href="https://${COURSE_ORG}.github.io"`);
     const t = text(<CourseScreen {...cp} loaded={pub} />);
-    expect(t).toContain('Optional: an open course version of your materials accessible to anyone on the internet, updated daily.');
+    expect(t).toContain('Optional: an open version of this course and its materials, available to anyone on the internet. Beta: leave this off for now - work in progress.');
     expect(t).toContain('Edit website details');
     expect(t).not.toContain('Public website settings');
     expect(out).toContain('<button class="btn small outline" type="button">Republish website</button>');
