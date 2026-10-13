@@ -83,7 +83,7 @@ export function MarksTab(p: TabProps) {
   const top = <>{head}{p.tabs}</>;
   if (file.kind === 'loading') return <>{top}<Loading what="Reading the mark sheet" /></>;
   if (file.kind !== 'ready')
-    return <>{top}<section class="panel section stub"><h2>No mark sheet yet</h2><p>The mark sheet appears at hand out, with a row for every student or team.</p></section></>;
+    return <>{top}<section class="panel section stub"><h2>No mark sheet yet</h2><p>{group && !a.teams ? 'No teams yet, so no mark sheet: it appears with the first team.' : 'The mark sheet appears at hand out, with a row for every student or team.'}</p></section></>;
   if (!parsed?.sheet)
     return <>{top}<CheckLine cls="bad">The mark sheet does not parse ({parsed?.error}). Fix it with Edit the file directly.</CheckLine></>;
   const { sheet } = parsed;

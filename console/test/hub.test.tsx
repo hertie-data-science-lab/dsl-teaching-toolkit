@@ -145,6 +145,15 @@ describe('the assignment hub', () => {
     expect(step('marking')).toBe('Marking · 12 of 48 marked');
   });
 
+  it('says a team assignment with no teams has no mark sheet until the first team (decision 0037)', () => {
+    const none = { ...team, state: 'blocked' as const, teams: 0 };
+    const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'marks', loaded: { kind: 'ready', status: { ...status, assignments: [solo, none] }, sha: 's', stale: [] } })} />);
+    expect(out).toContain('No teams yet, so no mark sheet: it appears with the first team.');
+    expect(out).not.toContain('appears at hand out');
+    const alone = render(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks' })} />);
+    expect(alone).toContain('The mark sheet appears at hand out');
+  });
+
   it('renders the named tab over the default one', () => {
     const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'overview' })} />);
     expect(current(out)).toBe('Overview');
