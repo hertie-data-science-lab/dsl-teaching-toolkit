@@ -19,6 +19,15 @@ export interface RosterRow {
 
 export const ROSTER_HEADER = ['hertie_email', 'name', 'role'];
 
+/** The roster's role value for an auditor (`roster.ROLE_AUDITOR`); any other value reads as enrolled. */
+export const AUDITOR = 'auditor';
+
+/** How many roster rows are students (enrolled) and how many auditors, as `roster.normalise_role` reads the role. */
+export function roleSplit(rows: { role?: string }[]): { students: number; auditors: number } {
+  const auditors = rows.filter((r) => (r.role ?? '').trim().toLowerCase() === AUDITOR).length;
+  return { students: rows.length - auditors, auditors };
+}
+
 export function parseRoster(text: string): { rows: RosterRow[]; error: string | null } {
   const t = readTable(text);
   if (!t.header.length) return { rows: [], error: null };

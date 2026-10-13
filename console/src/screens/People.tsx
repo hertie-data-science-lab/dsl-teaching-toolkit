@@ -6,8 +6,8 @@ import { EMAIL_RE, diffRoster, missingColumns, readTable, writeTable, type Roste
 import { useSave } from '../edit/save';
 import { YamlText } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
-import { fmtShort } from '../model/format';
-import { ROLE_WORD, ROSTER_HEADER, parseInstructors, sameHandle, type Person } from '../model/people';
+import { fmtShort, plural } from '../model/format';
+import { ROLE_WORD, ROSTER_HEADER, parseInstructors, roleSplit, sameHandle, type Person } from '../model/people';
 import { checkAccess, sendCodes } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import { PERSON, PHOTO_DIR, displayOnly, photoError } from '../tiers/people';
@@ -54,6 +54,8 @@ function Students(p: ReadyProps) {
   const waiting = Math.max(0, s.codes_sent - s.joined);
 
   const base = table?.rows ?? [];
+  // The role split is the file's: the status counts rows, not roles.
+  const split = table && !missing.length ? roleSplit(base) : null;
   // Edits are keyed by row index. `lines` is each row's line in the file (blank lines and quoted
   // newlines move it), shown and matched with the engine's faults; a row added here, or a
   // replacement's, is numbered on from the file's last row.
@@ -118,7 +120,7 @@ function Students(p: ReadyProps) {
   return (
     <>
       <div class="page-head">
-        <div><h2 class="h1">Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h2><p class="lede">{s.rows} on the roster. {s.codes_sent} codes sent; {s.joined} joined.</p></div>
+        <div><h2 class="h1">Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h2><p class="lede">{split ? `${base.length} on the roster: ${plural(split.students, 'student')}, ${plural(split.auditors, 'auditor')}.` : `${s.rows} on the roster.`} {s.codes_sent} codes sent; {s.joined} joined.</p></div>
         <div class="actions">
           <button class={`btn${editing ? ' quiet' : ''}`} type="button" aria-pressed={editing} disabled={!table || !!missing.length || !!replacement} onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit roster'}</button>
           <button class="btn quiet" type="button" aria-expanded={upload.open} onClick={() => setUpload({ ...upload, open: !upload.open })}>Replace from CSV</button>
