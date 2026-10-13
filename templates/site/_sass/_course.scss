@@ -240,12 +240,13 @@
     color: $grey-color-dark;
 }
 
-/* The chevron beside a file link and its menu - every way to have the file, under two
-   headings, the same four in every menu: Open (`view`, `GitHub`) written in Liquid
-   (_includes/file_link.html), Edit (`in browser`, the reader's editor) written greyed there
-   and made live by script once the browser holds the profile they need
-   (_includes/open_in.html). The student console draws the same control
-   (console/src/styles/open.css `.file-menu`), so the two look alike.
+/* The chevron beside a file link and its menu - every way to have the file, one-line rows
+   and no headings: `View here` (only for a hosted copy) and `View on GitHub` written in
+   Liquid (_includes/file_link.html), a hairline, then `Edit in browser` and `Edit in
+   <editor>`, written greyed there and made live by script once the browser holds the
+   profile they need (_includes/open_in.html). Each row is an icon, the label, and a short
+   muted status on the right - where it goes, or why it is off. The student console draws
+   the same control (console/src/styles/open.css `.file-menu`), so the two look alike.
 
    The chevron is small and outlined: a session page carries a dozen file rows and the All
    Materials tree hundreds, and the names are what a reader scans for. It still makes a
@@ -290,28 +291,35 @@
     z-index: 20;
     top: calc(100% + 4px);
     left: 0;
-    min-width: 240px;
-    max-width: calc(100vw - 32px);
+    min-width: 18rem;
+    /* Escaped: Ruby Sass and libsass read a bare `min()` as their own function. */
+    max-width: unquote("min(26rem, calc(100vw - 32px))");
     margin: 0;
-    padding: 6px;
+    padding: 6px 0;
     list-style: none;
     background: #fff;
     border: 1px solid #d8d8d8;
     border-radius: 8px;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     line-height: 1.35;
 
     li {
-        display: block;
         margin: 0;
+        list-style: none;
+    }
+
+    /* A row: icon and label take the width, the status sits at the right. */
+    a,
+    .file-menu-off {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 14px;
+        white-space: nowrap;
     }
 
     a {
-        display: grid;
-        gap: 1px;
-        padding: 6px 8px;
-        border-radius: 6px;
         color: inherit !important;
         text-decoration: none !important;
 
@@ -322,54 +330,52 @@
     }
 
     small {
-        color: $grey-color-dark;
-        font-size: 0.85em;
+        flex: none;
+        color: mix($grey-color-dark, #fff, 80%);
+        font-size: 0.75rem;
     }
 
     svg {
-        width: 13px;
-        height: 13px;
+        width: 16px;
+        height: 16px;
         fill: none;
         stroke: currentColor;
-        stroke-width: 2;
+        stroke-width: 1.8;
         stroke-linecap: round;
         stroke-linejoin: round;
         flex: none;
     }
 }
 
-/* Icon, then label, on one line; the description goes under it. */
 .file-menu-lbl {
     display: inline-flex;
+    flex-grow: 1;
     align-items: center;
-    gap: 6px;
-    font-weight: 600;
+    gap: 10px;
 }
 
-.file-menu-h {
-    padding: 6px 8px 2px;
-    color: $grey-color-dark;
-    font-size: 0.7em;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+/* The hairline between the two Open rows and the two Edit rows. */
+.file-menu-sep {
+    height: 1px;
+    margin: 4px 14px !important;
+    background: #ececec;
 }
 
-/* An item this file does not have, still listed so every menu reads the same: greyed, not
-   a link, with the reason under it. The reason's own Profile link stays a link. */
+/* A row this file does not have, still listed so every menu reads the same: muted, not a
+   link, its reason as the status. The reason's own Profile link stays a link. */
 .file-menu-off {
-    display: grid;
-    gap: 1px;
-    padding: 6px 8px;
-    color: $grey-color-dark;
+    color: mix($grey-color-dark, #fff, 55%);
     cursor: default;
 
-    .file-menu-lbl {
-        opacity: 0.55;
+    small {
+        color: inherit;
     }
 
     small a {
+        display: inline;
+        padding: 0;
         color: $brand-color !important;
+        text-decoration: underline !important;
     }
 }
 
