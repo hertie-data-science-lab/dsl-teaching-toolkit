@@ -55,13 +55,13 @@ function Index(p: ReadyProps) {
   const { status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
   const list = status.assignments ?? [];
-  const open = list.filter((a) => a.state === 'open' || a.state === 'late_window').length;
-  const marking = list.filter((a) => a.state === 'marking').length;
+  const open = list.filter((a) => a.state === 'open').length;
+  const marking = list.filter((a) => a.state === 'late_window' || a.state === 'marking').length;
   return (
     <>
       <div class="page-head">
         <div>
-          <h2 class="h1">Assignments <Hint doc="09-release-assignment-to-cohort.md">An assignment opens at hand out, has a late window after the due date, then is marked and returned; dates live in the schedule. This semester’s defaults are below the list.</Hint></h2>
+          <h2 class="h1">Assignments <Hint doc="09-release-assignment-to-cohort.md">An assignment opens at hand out and is marked from the due date, while late work still arrives until the late cutoff; then marks are returned. Dates live in the schedule. This semester’s defaults are below the list.</Hint></h2>
           <p class="lede">
             {list.length === 1 ? 'One' : list.length} this semester.{open ? ` ${open === 1 ? 'One is' : `${open} are`} open.` : ''}{marking ? ` ${marking === 1 ? 'One is' : `${marking} are`} being marked.` : ''}
           </p>
@@ -80,7 +80,10 @@ function Index(p: ReadyProps) {
                   <a class="rowlink" href={`#assignment-${a.slug}`}>{assignmentTitle(a)}</a><br />
                   <span class="footnote">{a.teams !== null && a.teams !== undefined ? 'In teams' : 'Alone'}</span>
                 </td>
-                <td><span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span></td>
+                <td>
+                  <span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span>
+                  {a.state === 'late_window' ? <><br /><span class="footnote">late work to {fmtDay(a.grading_cutoff_datetime, tz, year)}</span></> : null}
+                </td>
                 <td class="num">{nextDate(a, tz, year)}</td>
                 <td class="num">{asgSummary(a, tz, year).split('; ').pop()}</td>
                 <td class="num">{isGroup(a) ? <>{a.teams} formed{free !== null ? <><br /><span class="footnote">{free} without a team</span></> : null}</> : <span class="footnote">—</span>}</td>

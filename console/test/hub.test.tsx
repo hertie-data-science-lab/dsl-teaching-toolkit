@@ -178,6 +178,13 @@ describe('the Assignments index', () => {
     expect(out).toContain('<td class="num">40 / 48</td>');
     expect(out).toContain('<span class="chip ok">Yes</span>');
   });
+  it('shows an assignment in its late window as marking, with the late cutoff under the chip (decision 0037)', () => {
+    const late = { ...solo, state: 'late_window' as const, marks: { filled: 12, total: 48 } };
+    const out = render(<AssignmentsScreen {...props({ loaded: { kind: 'ready', status: { ...status, assignments: [late] }, sha: 's', stale: [] } })} />);
+    expect(out).toContain('<span class="chip ">marking</span><br/><span class="footnote">late work to Wed 7 Oct</span>');
+    expect(out).toContain('One this semester. One is being marked.');
+    expect(out).not.toContain('late window');
+  });
 });
 
 describe('entry releases', () => {
