@@ -60,6 +60,14 @@ releases:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/02_trees
         semester_dest_repo: materials
+  lecture_03:
+    event_datetime: tbc
+    kind: lecture
+    title: Forests
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/03_forests
+        semester_dest_repo: materials
 events:
   midterm:
     kind: exam
@@ -644,3 +652,15 @@ def test_the_console_reads_a_fresh_render():
 @pytest.mark.parametrize("points,expected", [("10", 10), ("7.5", 7.5), ("", None)])
 def test_points_are_numbers(points, expected):
     assert student_status._number(points) == expected
+
+
+def test_an_undated_release_is_a_dateless_row_after_its_kind():
+    # `event_datetime: tbc`: on the schedule as the site has it - after the last dated
+    # lecture, flagged `dateless` so the console prints no date, and not released.
+    rows = _render()["rows"]
+    ids = [r["id"] for r in rows]
+    tbc = rows[ids.index("lecture_03")]
+    assert tbc["dateless"] is True and tbc["released"] is False
+    assert tbc["title"] == "Lecture 3" and tbc["subtitle"] == "Forests"
+    assert ids.index("lecture_03") > ids.index("lecture_02")
+    assert not any(r["dateless"] for r in rows if r["id"] != "lecture_03")

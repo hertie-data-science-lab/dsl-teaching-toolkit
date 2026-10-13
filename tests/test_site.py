@@ -1447,9 +1447,10 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
     assert "is NOT valid YAML" in capsys.readouterr().err
 
 
-def test_an_undated_release_raises_no_placeholder_row(monkeypatch, tmp_path):
-    # `event_datetime: tbc` cannot place a session on a dated table, so it stays off the
-    # schedule until faculty give it a date - same rule `schedule_plan.planned_rows` applies.
+def test_an_undated_release_is_a_tbc_row(monkeypatch, tmp_path):
+    # `event_datetime: tbc` is a row on the schedule and its tab, flagged `dateless` so
+    # the templates print "TBC" and keep it out of the Updates box; its `date:` only
+    # places it, after the last dated lecture.
     plan = _plan(
         monkeypatch,
         tmp_path,
@@ -1459,11 +1460,23 @@ def test_an_undated_release_raises_no_placeholder_row(monkeypatch, tmp_path):
                     "lecture-9",
                     None,
                     deploy=[Deploy("cm", "lectures/09_week-9", "materials", None)],
-                )
+                    number=9,
+                ),
+                Release(
+                    "lecture-8",
+                    datetime(2026, 11, 2, 10, 0),
+                    deploy=[Deploy("cm", "lectures/08_week-8", "materials", None)],
+                    number=8,
+                ),
             ]
         ),
     )
-    assert plan.collections["_lectures"] == {}
+    row = plan.collections["_lectures"]["session-09.md"]
+    assert "dateless: true\n" in row
+    assert "unreleased: true\n" in row
+    assert "undated: true" not in row
+    assert "date: 2026-11-02T10:01:00\n" in row
+    assert "dateless" not in plan.collections["_lectures"]["session-08.md"]
 
 
 def test_events_render_as_their_declared_types(monkeypatch, tmp_path):

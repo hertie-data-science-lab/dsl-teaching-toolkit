@@ -795,6 +795,7 @@ class _Row:
     when: date | datetime | None = None  # None: an off-plan folder, on its tab only
     number: int | None = None
     tbc: bool = False
+    dateless: bool = False  # `event_datetime: tbc`: `when` only places it
     off_schedule: bool = False
     landed: list[_Landed] = field(default_factory=list)
     readings: list[_Landed] = field(default_factory=list)
@@ -821,7 +822,10 @@ def _row_entry(
     Nothing landed (its own copies or its readings) is the not-yet-released row:
     `unreleased: true` and a line naming where the copies will land. `readings_pending`:
     readings attached to it that have not landed yet. `off_schedule`: a `show_on_site: false`
-    row, left off the schedule and the Updates box. `undated`: an off-plan folder."""
+    row, left off the schedule and the Updates box. `undated`: an off-plan folder.
+    `dateless`: an `event_datetime: tbc` entry - on the schedule and its tab, where its
+    `date:` only places it (after its kind's last dated row) and "TBC" is printed instead,
+    and never in the Updates box."""
     label = policy.kind_label(row.kind)
     title = f"{label} {row.number}" if row.number is not None else label
     # `row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
@@ -848,6 +852,8 @@ def _row_entry(
     # row still fires exactly when its entry says.
     if row.tbc:
         flags += "tbc: true\n"
+    if row.dateless:
+        flags += "dateless: true\n"
     if row.off_schedule:
         flags += "off_schedule: true\n"
     if row.readings_pending:
@@ -984,6 +990,7 @@ def _site_rows(
             when=r.when,
             number=sr.number,
             tbc=r.tbc,
+            dateless=r.undated,
             off_schedule=not r.shown,
             landed=landed,
             readings=readings,

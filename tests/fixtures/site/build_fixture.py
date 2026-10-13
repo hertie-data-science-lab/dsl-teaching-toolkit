@@ -315,6 +315,9 @@ SCHEDULE = schedule.Schedule(
             title="Convolutions",
             details="Why weight sharing works.\n\nAnd where it does not.",
         ),
+        # `event_datetime: tbc`: a "TBC" row after lab 1 on the schedule and the Labs tab,
+        # never in the Updates box.
+        _release("lab-3", None, "labs/03_week-3", title="Attention lab"),
     ],
 )
 

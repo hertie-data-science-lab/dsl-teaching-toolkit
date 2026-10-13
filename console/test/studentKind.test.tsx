@@ -31,7 +31,16 @@ function facts() {
 
 describe('a kind tab', () => {
   it('lists the dated rows by date, then the undated in the engine’s order, off-schedule ones too', () => {
-    expect(kindRows(facts(), 'lecture').rows.map((r) => r.id)).toEqual(['lecture_00', 'lecture_01', 'hidden', 'lecture_02', 'extra_b', 'extra_a']);
+    expect(kindRows(facts(), 'lecture').rows.map((r) => r.id)).toEqual(['lecture_00', 'lecture_01', 'hidden', 'lecture_02', 'lecture_03', 'extra_b', 'extra_a']);
+  });
+
+  it('marks a row with no date yet TBC, after its kind’s last dated row, on its tab and the Schedule', () => {
+    // lecture_03 is `event_datetime: tbc` in the engine's render: placed after lecture 2.
+    const t = text(<KindView facts={facts()} kind="lecture" org={ORG} now={NOW} />);
+    expect(t).toMatch(/Lecture 3 : Forests not released yet TBC/);
+    const s = text(<ScheduleView facts={facts()} mine={null} now={NOW} org={ORG} />);
+    expect(s).toMatch(/No date yet lecture TBC Lecture 3 : Forests/);
+    expect(text(<HomeView facts={{ ...facts(), rows: facts().rows.map((r) => (r.id === 'lecture_03' ? { ...r, released: true } : r)) }} now={NOW} org={ORG} />)).not.toContain('Forests');
   });
 
   it('puts the kind’s own event last, and leaves other kinds’ rows off', () => {
