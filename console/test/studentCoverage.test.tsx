@@ -156,7 +156,7 @@ describe('3. the whole receipts thread', () => {
     expect(t).toContain('Every comment on Submission receipts 3');
     expect(t).toContain('Files updated');
     // A file row: GitHub draws markdown, so view opens the blob page; in browser edits it.
-    expect(t).toContain('Fill in CONTRIBUTIONS.md ▾ Open view Rendered, on GitHub GitHub The file on GitHub Edit in browser VS Code in your browser Set up your editor in Profile in your team repo before the deadline.');
+    expect(t).toContain('Fill in CONTRIBUTIONS.md ▾ Open view Rendered, on GitHub GitHub The file on GitHub Edit in browser VS Code in your browser VS Code Set up your editor in Profile in your team repo before the deadline.');
     expect(render(v)).toContain(`href="https://github.com/${ORG}/assignment-3-project-team-latency/blob/HEAD/CONTRIBUTIONS.md" role="menuitem" tabindex="-1" target="_blank" rel="noopener">`);
   });
 
@@ -338,11 +338,11 @@ describe('7. readings per session', () => {
     expect(sched).toContain(`href="${href}"`);
     expect(sched).toContain('Readings to come.');
     const html = render(<ReadingsView org={ORG} facts={f} now={NOW} />);
-    // Each reading file gets the menu (decision 0035 rule 10): GitHub; a pdf takes no Edit.
+    // Each reading file gets the menu (decision 0035 rule 10): GitHub; a pdf's Edit greyed.
     expect(html).toContain(`href="${href}"`);
     expect(html).toContain('class="file-chev"');
     expect(html).toContain('</svg>GitHub</span>');
-    expect(html).not.toContain('>Edit</div>');
+    expect(html).toContain('>in browser</span><small>Not an editable format</small>');
     const mat = text(<ReadingsView org={ORG} facts={f} now={NOW} />);
     expect(mat).toMatch(/Session 1 ?: Deep learning in public policy/);
     expect(mat).toContain('Session 1 readings');
