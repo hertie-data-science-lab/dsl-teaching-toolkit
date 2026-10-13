@@ -3,11 +3,14 @@
 
 import { parse } from 'yaml';
 import { obj } from '../edit/yamlText';
-import { ASSIGNMENT_WORD, RELEASE_WORD, addDays, assignmentIdent, dayKey, daysBetween, releaseIdent, sortKey, zoned } from './format';
+import { ASSIGNMENT_WORD, KIND_LABEL, RELEASE_WORD, addDays, assignmentIdent, dayKey, daysBetween, labelNumber, releaseIdent, sortKey, zoned } from './format';
+import { ASSETS_KIND, CONTENT_KINDS } from './materialsRules';
 import type { Release, Status } from './types';
 
 export interface SchedEntry {
   title: string;
+  /** Its `number:`, when the file writes a whole number. */
+  number: number | null;
   details: string;
   tbc: boolean;
   show: boolean;
@@ -35,6 +38,7 @@ function entry(raw: unknown, dflt: Partial<SchedEntry> = {}): SchedEntry {
   const when = s(e.event_datetime ?? e.due_datetime);
   return {
     title: s(e.title) || dflt.title || '',
+    number: Number.isInteger(e.number) && (e.number as number) > 0 ? (e.number as number) : null,
     details: s(e.details),
     tbc: e.tbc === true || when.toLowerCase() === 'tbc',
     show: e.show_on_site !== false,
@@ -42,6 +46,13 @@ function entry(raw: unknown, dflt: Partial<SchedEntry> = {}): SchedEntry {
     kind: s(e.kind) || dflt.kind || '',
   };
 }
+
+/** The kinds an `events:` entry may take besides special_event (`schedule.SESSION_KINDS`): every content kind that is a row. */
+export const EVENT_KINDS = CONTENT_KINDS.filter((k) => k !== ASSETS_KIND);
+/** Whether an event kind is a session with nothing to ship (`schedule.is_session`): any but exam and special_event. */
+export const isSession = (kind: string) => kind !== 'exam' && EVENT_KINDS.includes(kind);
+/** An event's kind as the engine reads it: an unknown one is a special event. */
+const eventKind = (kind: string) => (EVENT_KINDS.includes(kind.trim().toLowerCase()) ? kind.trim().toLowerCase() : 'special_event');
 
 function pretty(id: string): string {
   const t = id.replace(/[-_]+/g, ' ').trim();
@@ -62,7 +73,12 @@ export function parseSchedule(text: string | null | undefined): Schedule | null 
   for (const [k, v] of Object.entries(obj(doc.releases))) releases[k] = entry(v);
   const assignments: Record<string, SchedEntry> = {};
   for (const [k, v] of Object.entries(obj(doc.assignments))) assignments[k] = entry(v);
-  const events = Object.entries(obj(doc.events)).map(([k, v]) => ({ id: k, ...entry(v, { title: pretty(k), kind: 'special_event' }) }));
+  const events = Object.entries(obj(doc.events)).map(([k, v]) => {
+    const e = entry(v, { kind: 'special_event' });
+    const kind = eventKind(e.kind);
+    // A session's title is its own, else its release's (`scheduleRows`); the others' default to the key.
+    return { id: k, ...e, kind, title: e.title || (isSession(kind) ? '' : pretty(k)) };
+  });
   return {
     timezone: s(doc.timezone) || null,
     start: s(doc.semester_start) || null,
@@ -114,11 +130,18 @@ export function scheduleRows(status: Status, sched: Schedule | null, now: number
     if (a.due) rows.push({ ...base, type: 'due', when: a.due });
   }
   if (sched) {
-    for (const ev of sched.events)
+    // A session with nothing to ship ("Lab 1", group 2) is named as the site names it: its kind and number, its own title else its release's.
+    const releaseTitle = (kind: string, n: number | null) => (n === null ? '' : releases.find((r) => r.kind === kind && (r.number ?? labelNumber(r.id)) === n)?.title ?? '');
+    for (const ev of sched.events) {
+      const session = isSession(ev.kind);
+      const n = session ? ev.number ?? labelNumber(ev.id) : null;
+      const word = KIND_LABEL[ev.kind] ?? ev.kind;
       rows.push({
-        entry: ev.id, block: 'events', type: ev.kind === 'exam' ? 'exam' : 'special_event', when: ev.when, ident: ev.kind === 'exam' ? 'Exam' : 'Event',
-        name: ev.title, state: ev.when ? (past(ev.when) ? 'past' : 'upcoming') : 'upcoming', details: ev.details, tbc: ev.tbc, show: ev.show,
+        entry: ev.id, block: 'events', type: ev.kind, when: ev.when,
+        ident: session ? (n === null ? word : `${word} ${n}`) : ev.kind === 'exam' ? 'Exam' : 'Event',
+        name: session ? ev.title || releaseTitle(ev.kind, n) : ev.title, state: ev.when ? (past(ev.when) ? 'past' : 'upcoming') : 'upcoming', details: ev.details, tbc: ev.tbc, show: ev.show,
       });
+    }
     if (sched.start) rows.push({ entry: 'semester', block: 'events', type: 'term', when: sched.start, ident: 'Semester', name: 'Starts', state: past(sched.start) ? 'past' : 'upcoming', details: '', tbc: false, show: true });
     if (sched.end) rows.push({ entry: 'semester', block: 'events', type: 'term', when: sched.end, ident: 'Semester', name: 'Ends', state: past(sched.end) ? 'past' : 'upcoming', details: '', tbc: false, show: true });
   }

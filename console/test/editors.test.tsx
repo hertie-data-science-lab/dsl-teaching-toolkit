@@ -17,6 +17,7 @@ import { POLICY, penaltyRate } from '../src/model/policy';
 import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
 import { assignmentKey, blankDeploy, blankDraft, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
+import { validSchedule } from '../src/model/cascade';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
@@ -187,14 +188,52 @@ describe('the schedule entry sheet model', () => {
     expect(y.text).toBe('releases:\n  lab-3:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/03_solutions   # later\n        deploy_datetime: 2026-10-12T18:00\n');
   });
 
-  it('saves a release with nothing to release: the last line can be removed', () => {
-    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
+  it('moves a session with nothing left to release to events, and back when it gains a line', () => {
+    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n    title: Trees\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
     const y = new YamlText(src);
     const doc = y.toJS() as Record<string, unknown>;
     const d = { ...(readDraft(doc, 's5') as ReleaseDraft), deploys: [] };
-    expect(draftErrors({ ...d, number: 5 }, { kind: 'lecture' })).toEqual({});
+    // No number is asked of it: an event takes its key's (s5), as on a release.
+    expect(draftErrors(d, { kind: 'lecture' })).toEqual({});
     writeDraft(y, d, doc);
-    expect(y.text).toBe('releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n');
+    const out = parse(y.text);
+    expect(out.releases).toEqual({});
+    expect(validSchedule(out)).toBe(true);
+    expect(out.events.s5).toEqual({ event_datetime: '2026-10-08T10:00', kind: 'lecture', title: 'Trees' });
+    // Read back it is the same sheet, with nothing to release; a line moves it back.
+    const doc2 = y.toJS() as Record<string, unknown>;
+    const back = readDraft(doc2, 's5') as ReleaseDraft;
+    expect(back).toEqual(d);
+    writeDraft(y, { ...back, deploys: [{ ...blankDeploy('m'), folder: 'l' }] }, doc2);
+    const again = parse(y.text);
+    expect(again.events).toEqual({});
+    expect(again.releases.s5).toEqual({ event_datetime: '2026-10-08T10:00', kind: 'lecture', title: 'Trees', deploy: [{ course_source_repo: 'm', course_source_path: 'l' }] });
+  });
+
+  it('writes a new session with nothing to release under events: its kind, its number, TBC without a date', () => {
+    const y = new YamlText('releases:\n  lab-1:\n    event_datetime: 2026-09-16T08:00\n    kind: lab\n    title: Intro\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/01\n');
+    const doc = y.toJS() as Record<string, unknown>;
+    const d = { ...(blankDraft('lab', { repo: 'm' }) as ReleaseDraft), deploys: [], number: 1 as const, details: 'Group 2', date: '2026-09-17', time: '18:00' };
+    expect(draftErrors(d, { kind: 'lab' })).toEqual({});
+    const id = freshId(doc, 'releases', 'lab-1');
+    expect(id).toBe('lab-1-b');
+    writeDraft(y, { ...d, id }, doc);
+    expect(parse(y.text).events[id]).toEqual({ event_datetime: '2026-09-17T18:00', kind: 'lab', number: 1, details: 'Group 2' });
+    expect(validSchedule(parse(y.text))).toBe(true);
+    expect(parse(y.text).releases['lab-1'].deploy).toHaveLength(1);
+    // Without a date it is TBC; a release still needs one.
+    const tbc = { ...d, date: '', time: '' };
+    expect(draftErrors(tbc, { kind: 'lab' })).toEqual({});
+    writeDraft(y, { ...tbc, id: 'lab-2' }, doc);
+    expect(parse(y.text).events['lab-2'].event_datetime).toBe('tbc');
+    expect(draftErrors({ ...tbc, deploys: [{ ...blankDeploy('m'), folder: 'l' }] }, { kind: 'lab' }).date).toBe('When is needed.');
+  });
+
+  it('keeps an exam or a special event on its own sheet, and an unknown kind is a special event', () => {
+    const doc = { events: { mid: { kind: 'exam', event_datetime: '2026-11-03' }, clinic: { event_datetime: '2026-11-04' }, odd: { kind: 'assets', event_datetime: '2026-11-05' } } };
+    expect(readDraft(doc, 'mid')?.kind).toBe('events');
+    expect(readDraft(doc, 'clinic')).toMatchObject({ kind: 'events', type: 'special_event' });
+    expect(readDraft(doc, 'odd')?.kind).toBe('events');
   });
 
   it('writes a line’s own release time only when given; blank ships at the entry’s time', () => {
@@ -617,8 +656,10 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
     expect((readDraft(doc, 'lab_03') as ReleaseDraft).number).toBe(3);
     const intro = readDraft(doc, 'intro') as ReleaseDraft;
     expect(intro.number).toBe('');
-    const ok = { ...intro, date: '2026-09-10', deploys: [] };
+    const ok = { ...intro, date: '2026-09-10', deploys: [{ ...blankDeploy('m'), folder: 'l' }] };
     expect(draftErrors(ok, { kind: 'lecture' }).number).toBe('A number is needed.');
+    // With nothing to release it is an `events:` session: no number is asked of it.
+    expect(draftErrors({ ...ok, deploys: [] }, { kind: 'lecture' }).number).toBeUndefined();
     expect(draftErrors({ ...ok, show: false }, { kind: 'lecture' }).number).toBeUndefined();
     expect(draftErrors(ok, { kind: 'readings' }).number).toBeUndefined();
     // A readings key that carries a number joins that lecture: clearing the field cannot undo it.
@@ -627,7 +668,8 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
   });
 
   it('writes number: when typed, and leaves a label-numbered entry as it is written', () => {
-    const src = 'releases:\n  intro:\n    event_datetime: 2026-09-10T10:00\n    kind: lecture\n  lecture-2:\n    event_datetime: 2026-09-17T10:00\n';
+    const copy = '    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
+    const src = `releases:\n  intro:\n    event_datetime: 2026-09-10T10:00\n    kind: lecture\n${copy}  lecture-2:\n    event_datetime: 2026-09-17T10:00\n${copy}`;
     const y = new YamlText(src);
     const d0 = y.toJS() as Record<string, unknown>;
     writeDraft(y, { ...(readDraft(d0, 'intro') as ReleaseDraft), number: 1 }, d0);

@@ -6,7 +6,9 @@
 import { obj, type YamlText } from '../edit/yamlText';
 import { kebab, labelNumber } from './format';
 import { solutionBeforeCutoff } from './labels';
+import { EMPTY_ENTRY_KIND } from './materialsRules';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO } from './policy';
+import { isSession } from './schedule';
 
 export type Block = 'releases' | 'assignments' | 'events';
 
@@ -22,6 +24,11 @@ export interface DeployDraft {
   src?: number;
 }
 
+/**
+ * A session's draft, whichever block holds it: what it releases (`deploys`) decides that on
+ * save (`sessionBlock`). With none, a session kind is written under `events:` (a session with
+ * nothing to ship, a lab's second group); with one or more, under `releases:`.
+ */
 export interface ReleaseDraft {
   kind: 'releases';
   id: string;
@@ -57,6 +64,7 @@ export interface AssignmentDraft {
   tbc: boolean;
 }
 
+/** An exam or a special event: no deploys, ever. */
 export interface EventDraft {
   kind: 'events';
   id: string;
@@ -162,7 +170,16 @@ export function readDraft(doc: Raw, key: string): Draft | null {
     };
   }
   const [date, time] = splitWhen(e.event_datetime);
-  return { kind: 'events', ...common, type: s(e.kind) || 'special_event', date, time, tbc: common.tbc || s(e.event_datetime).toLowerCase() === 'tbc' };
+  const tbc = common.tbc || s(e.event_datetime).toLowerCase() === 'tbc';
+  const type = s(e.kind).trim().toLowerCase();
+  // A session with nothing to ship is a session's draft with no deploys (`sessionBlock`).
+  if (isSession(type)) return { kind: 'releases', ...common, tbc, type, number, date, time, deploys: [] };
+  return { kind: 'events', ...common, type: type || 'special_event', date, time, tbc };
+}
+
+/** The block a session's draft is written under: `releases:` when it releases something (or its kind is no session kind), else `events:`. */
+export function sessionBlock(d: ReleaseDraft): 'releases' | 'events' {
+  return d.deploys.length || !isSession(d.type || EMPTY_ENTRY_KIND) ? 'releases' : 'events';
 }
 
 /** A value to write: `v`, unless it is the default and the file did not already spell it. */
@@ -190,6 +207,12 @@ function numberValue(d: ReleaseDraft | AssignmentDraft, raw: Raw, fresh: boolean
 export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEntry: unknown): Raw {
   const raw = obj(rawEntry);
   const fresh = rawEntry === undefined;
+  if (d.kind === 'releases' && sessionBlock(d) === 'events') {
+    return {
+      ...raw, deploy: undefined, kind: d.type || EMPTY_ENTRY_KIND, number: numberValue(d, raw, fresh), ...display(raw, d),
+      event_datetime: whenOf(raw.event_datetime, d.date, d.time) ?? 'tbc', tbc: d.date ? keep(raw.tbc, d.tbc, false) : undefined,
+    };
+  }
   if (d.kind === 'releases') {
     const rawDeploys = Array.isArray(raw.deploy) ? raw.deploy : [];
     return {
@@ -255,8 +278,15 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
     });
     return;
   }
-  if (d.kind === 'releases') dropRemovedDeploys(y, d, obj(doc.releases)[d.id]);
-  y.assign([d.kind, d.id], entryValue(d, obj(doc[d.kind])[d.id]));
+  // A session moves between `releases:` and `events:` as it gains or loses what it releases.
+  const block = d.kind === 'releases' ? sessionBlock(d) : d.kind;
+  const from = blockOf(doc, d.id);
+  if (from && from !== block) {
+    // The block it leaves stays a mapping (`releases: {}`), as the schema wants, when it was its last entry.
+    if (Object.keys(obj(doc[from])).length === 1) y.set([from], {});
+    else y.delete([from, d.id]);
+  } else if (d.kind === 'releases') dropRemovedDeploys(y, d, obj(doc.releases)[d.id]);
+  y.assign([block, d.id], entryValue(d, obj(doc[from ?? block])[d.id]));
 }
 
 /**
@@ -329,9 +359,9 @@ const spelledKind: KindOf = (_key, entry) => s(obj(entry).kind) || 'lecture';
  */
 const UNNUMBERED_KINDS = ['readings', 'assets'];
 
-/** Whether an entry must carry a number (decision 0020): every assignment, and every release row the site shows of a numbered kind. */
+/** Whether an entry must carry a number (decision 0020): every assignment, and every release row the site shows of a numbered kind. A session with nothing to ship (`events:`) takes its key's or none. */
 export function needsNumber(d: ReleaseDraft | AssignmentDraft, kind: string): boolean {
-  return d.kind === 'assignments' || (d.show && !UNNUMBERED_KINDS.includes(kind));
+  return d.kind === 'assignments' || (d.show && sessionBlock(d) === 'releases' && !UNNUMBERED_KINDS.includes(kind));
 }
 
 /**
@@ -399,7 +429,7 @@ export function draftErrors(d: Draft, others?: { templateUsers?: (template: stri
     else if (d.kind === 'assignments' && !d.id && others?.doc && takenKeys(others.doc).has(assignmentKey(d.number))) e.number = `${assignmentKey(d.number)} is already in this schedule.`;
   }
   if (d.kind === 'releases') {
-    if (!d.date) e.date = 'When is needed.';
+    if (!d.date && sessionBlock(d) === 'releases') e.date = 'When is needed.';
     d.deploys.forEach((dp, i) => {
       if (!dp.repo) e[`deploy${i}.repo`] = 'Choose the repo.';
       if (!dp.folder) e[`deploy${i}.folder`] = 'Name the folder or file.';
