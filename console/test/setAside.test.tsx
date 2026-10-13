@@ -288,3 +288,58 @@ describe('the semester dashboard’s circle (an un-migrated course)', () => {
     expect(puts(gh)).toEqual([]);
   });
 });
+
+describe('an empty week on the semester dashboard', () => {
+  const COHORT = 'hertie-dsl-demo-f2026';
+  const cohort = { org: COHORT, term: 'f2026', termLabel: 'Fall 2026' };
+  const course = { org: ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
+  const base = example as unknown as Status;
+  const week = (monday: string, bites: 'soon' | 'later') => ({
+    id: `empty_week:${monday}`, scope: 'semester' as const, stage: 'K4', kind: 'EMPTY_WEEK', bites,
+    text: `Nothing is scheduled in the week of ${Number(monday.slice(8))} ${monday.slice(5, 7) === '09' ? 'Sep' : 'Oct'}.`,
+    stops: 'Students see an empty week. A reading or exam week can be set aside.',
+    fix: { repo: `${COHORT}/semester-config`, path: 'schedule.yml', line: null, screen: 'schedule', entry: null },
+    when: `${monday}T00:00:00+02:00`,
+  });
+  const status: Status = { ...base, problems: [week('2026-09-28', 'soon'), week('2026-10-12', 'later')] };
+  async function mountCohort(meta: string, gh = github()) {
+    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: meta });
+    root ??= document.body.appendChild(document.createElement('div'));
+    await act(() => render(
+      <EnvCtx.Provider value={envOf(gh, f)}>
+        <CohortScreen course={course} cohort={cohort} loaded={{ kind: 'ready', status, sha: 's', stale: [] }} files={f} now={Date.parse('2026-09-23T10:00:00+02:00')} heartbeat={null} />
+      </EnvCtx.Provider>, root!));
+    return gh;
+  }
+
+  it('shows as an Empty week problem, and later in Coming up, each with Set aside', async () => {
+    await mountCohort(META);
+    const card = [...root!.querySelectorAll('li.problem')].find((li) => li.textContent!.includes('week of 28 Sep'))!;
+    expect(card.querySelector('.p-where b')!.textContent).toBe('Empty week');
+    expect(card.querySelector<HTMLAnchorElement>('.p-fix a.btn')!.getAttribute('href')).toBe('#schedule');
+    expect([...card.querySelectorAll('button')].some((b) => b.textContent === 'Set aside')).toBe(true);
+    await show('coming');
+    const row = [...root!.querySelectorAll('#dash-coming li, li')].find((li) => li.textContent!.includes('week of 12 Oct'))!;
+    expect([...row.querySelectorAll('button')].some((b) => b.textContent === 'Set aside')).toBe(true);
+  });
+
+  it('writes its id into set_aside through the dialog', async () => {
+    const gh = await mountCohort(META);
+    const card = [...root!.querySelectorAll('li.problem')].find((li) => li.textContent!.includes('week of 28 Sep'))!;
+    await act(() => [...card.querySelectorAll('button')].find((b) => b.textContent === 'Set aside')!.click());
+    expect(dialog()!.textContent).toContain('Nothing is scheduled in the week of 28 Sep.');
+    await act(() => button('Set aside').click());
+    await settle(() => puts(gh).length > 0);
+    expect(body(puts(gh)[0])).toBe(`${META}set_aside:\n  - empty_week:2026-09-28\n`);
+  });
+
+  it('once set aside, leaves the problems and is listed under Set aside to bring back', async () => {
+    const gh = await mountCohort(`${META}set_aside:\n  - empty_week:2026-09-28\n`);
+    expect(root!.textContent).not.toContain('week of 28 Sep');
+    await show('aside');
+    expect(aside()).toEqual(['Empty week of 28 Sep · Bring back']);
+    await act(() => root!.querySelector<HTMLButtonElement>('.aside-list button')!.click());
+    await settle(() => puts(gh).length > 0);
+    expect(body(puts(gh)[0])).toBe(META);
+  });
+});

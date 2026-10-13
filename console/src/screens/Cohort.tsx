@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'preact/hooks';
 import {
   NOT_READY_YET, TYPE_CLASS, TYPE_LABEL, addDays, ago, daysBetween, fmtDate, fmtDay, fmtShort, fmtTime, fmtWhen, markWord, plural, releaseIdent,
+  asideable, emptyWeekLabel,
 } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekStart, type Row, type Schedule, type Term, type WeekGroup, type WeekKey, termOf } from '../model/schedule';
 import type { Assignment, Problem, Status } from '../model/types';
@@ -319,7 +320,12 @@ export function semesterItems(status: Status, tiered: Tiered[], list: string[] |
       aside: todoAside(t, list),
     };
   });
-  return [...steps, ...todos];
+  // A set-aside empty week (decision 0032) has no row of its own once set aside: list it here so it can be brought back.
+  const weeks: SetupItem[] = (list ?? []).flatMap((id) => {
+    const label = emptyWeekLabel(id);
+    return label ? [{ id, label, kind: 'todo' as const, need: 'suggested' as const, state: 'open' as const, aside: true }] : [];
+  });
+  return [...steps, ...todos, ...weeks];
 }
 
 /** One line of the semester's Coming up: a `later` problem. */
@@ -331,6 +337,8 @@ export interface ComingRow {
   text: string;
   href: string;
   link: string;
+  /** The problem itself, when it can be set aside (an empty week). */
+  aside?: Problem;
 }
 
 /**
@@ -340,6 +348,7 @@ export interface ComingRow {
 export function comingRows(status: Status, tiered: Tiered[]): ComingRow[] {
   return tiered.filter((x) => x.b === 'later').map(({ p }) => ({
     key: p.id, when: p.when, from: p.when ? problemFromDay(p.when, status.horizon) : undefined, text: p.text, href: fixHref(p) ?? '#schedule', link: 'Fix',
+    aside: asideable(p) ? p : undefined,
   }));
 }
 
@@ -351,7 +360,7 @@ export function comingGroups(rows: ComingRow[], term: Term, tz: string): WeekGro
 }
 
 /** The Coming up fold's body: by week, each week saying when its items become problems. */
-export function ComingUp({ rows, term, tz, year }: { rows: ComingRow[]; term: Term; tz: string; year: number }) {
+export function ComingUp({ rows, term, tz, year, onSetAside }: { rows: ComingRow[]; term: Term; tz: string; year: number; onSetAside?: (p: Problem) => void }) {
   return (
     <>
       {comingGroups(rows, term, tz).map((g) => {
@@ -361,7 +370,7 @@ export function ComingUp({ rows, term, tz, year }: { rows: ComingRow[]; term: Te
             <h3 class="week-h">{g.label}{g.from || from ? <span>{g.from ? ` from ${fmtShort(g.from)}` : ''}{from ? ` · problems from ${fmtShort(from)}` : ''}</span> : null}</h3>
             <ul>
               {g.rows.map((r) => (
-                <li key={r.key}><b>{r.when ? fmtDay(r.when, tz, year) : 'No date'}</b><span>{r.text}</span><a class="textlink" href={r.href}>{r.link}</a></li>
+                <li key={r.key}><b>{r.when ? fmtDay(r.when, tz, year) : 'No date'}</b><span>{r.text}</span><a class="textlink" href={r.href}>{r.link}</a>{onSetAside && r.aside ? <button class="textlink" type="button" onClick={() => onSetAside(r.aside!)}>Set aside</button> : null}</li>
               ))}
             </ul>
           </section>
@@ -441,10 +450,12 @@ function Overview(p: ReadyProps) {
   const [selected, setSelected] = useState<number[]>(thisWeek);
   // Every problem with its time, once per render (decision 0034): now or soon are the strip's red
   // counts and the Problems tab; later ones are Coming up.
-  const tiered = useMemo(() => tier(status), [status]);
+  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.courseMigrated, write: p.course.write });
+  // An empty week the course set aside leaves the moment the list says so, before the status is rewritten.
+  const tiered = useMemo(() => tier(status).filter(({ p: x }) => !(asideable(x) && aside.list?.includes(x.id))), [status, aside.list?.join('\n')]);
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const problems = standing(tiered);
-  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.courseMigrated, write: p.course.write });
+  const setAsideProblem = aside.onCircle ? (x: Problem) => aside.onCircle!({ id: x.id, label: x.text }) : undefined;
   const items = semesterItems(status, tiered, aside.list);
   const coming = comingRows(status, tiered);
   const days = horizonDays(status.horizon);
@@ -494,7 +505,7 @@ function Overview(p: ReadyProps) {
                   {shown.map((g) => (
                     <div class={`p-${g.key}`}>
                       <h3 class="week-h">{g.label}</h3>
-                      <ProblemCards list={g.rows} cohort />
+                      <ProblemCards list={g.rows} cohort onSetAside={setAsideProblem} />
                     </div>
                   ))}
                 </>
@@ -503,7 +514,7 @@ function Overview(p: ReadyProps) {
             {
               key: 'coming', label: 'Coming up', count: coming.length,
               hint: <>Needed later, by week. Each item becomes a problem {days} days before the date it is needed by, and is listed here until then.</>,
-              body: coming.length ? <ComingUp rows={coming} term={term} tz={tz} year={year} /> : <p class="footnote">Nothing is needed later.</p>,
+              body: coming.length ? <ComingUp rows={coming} term={term} tz={tz} year={year} onSetAside={setAsideProblem} /> : <p class="footnote">Nothing is needed later.</p>,
             },
             ...readinessTabs({ items, scope: 'semester', busy: aside.busy, onCircle: aside.onCircle, onBack: aside.onBack(items) }),
           ]} />

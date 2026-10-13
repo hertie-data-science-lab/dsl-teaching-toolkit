@@ -338,6 +338,8 @@ Parsed schedule.yml
   11 release(s), 19 deploy(s) | 3 assignment(s) | 4 event(s)
 ```
 
+**Empty weeks.** Each week of the term still to come with nothing dated in it (no release, hand-out, due date, late cutoff, exam, event or archive) is an *Empty week* problem on the console's Dashboard; a reading or exam week is dismissed with **Set aside**, which adds `empty_week:<monday>` to the course's `set_aside:` list.
+
 Three other ways to check, none of them required:
 
 1. **Read the counts.** **Check semester setup** reports the release plan and semester dates, and flags `N entry/ies DROPPED`.
