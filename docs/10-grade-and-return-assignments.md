@@ -199,8 +199,8 @@ count lands in `info.autograde` (`7/9`) for your information only - it is never 
 itself and a student never sees it. Per-test detail goes to `semester-config/.system/autograde/`.
 To regrade, delete `.system/autograde/<slug>/`.
 
-**Writing the tests.** One test function per behaviour, with a docstring saying what it checks:
-that line is what you read in the per-test detail. Import the student's module by its starter
+**Writing the tests.** One test function per behaviour, named for it: the per-test detail lists
+each test by name with pass or fail. Import the student's module by its starter
 name (`from starter import fit`) - the runner puts the submission on `sys.path`. Plain
 `assert`s, `pytest.approx` for numbers, `pytest.raises` for errors; count on the standard
 library and pytest, nothing more.
