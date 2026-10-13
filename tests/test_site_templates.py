@@ -232,7 +232,7 @@ _OWN_CLASSES = frozenset(
         "file-chev",
         "file-menu-list",
         "file-menu-lbl",
-        "file-menu-h",
+        "file-menu-sep",
         "file-menu-off",
         "open-in-line",
         "profile-steps",
@@ -675,50 +675,56 @@ def test_every_item_in_a_file_menu_opens_a_new_tab():
     assert 'target="_blank"' not in body.split('<details class="file-menu">')[0]
 
 
-def test_a_file_menu_is_one_chevron_with_two_headed_sections():
-    # One small control per file, "More ways to open", rather than a row of buttons: Open is
-    # Liquid's, and Edit is the script's, appended under its own heading.
+def test_a_file_menu_is_one_chevron_with_one_unheaded_list():
+    # One small control per file, "More ways to open", rather than a row of buttons. The
+    # list has no headings (option B): the View rows are Liquid's, a hairline, then the
+    # two Edit rows the script replaces.
     body = _strip_comments(_templates()["_includes/file_link.html"])
     assert '<summary class="file-chev" title="More ways to open"' in body
-    assert '<li class="file-menu-h">Open</li>' in body
-    assert '<li class="file-menu-h">Edit</li>' in body
+    assert "file-menu-h" not in body
+    menu = body.split('<ul class="file-menu-list">')[1].split("</ul>")[0]
+    sep = '<li class="file-menu-sep" role="separator"></li>'
+    assert menu.count(sep) == 1
+    assert menu.index("View on GitHub") < menu.index(sep) < menu.index("data-edit=")
     script = _strip_comments(_open_in())
-    # Before a profile the Edit items stay, greyed, each naming the Profile step it needs.
-    assert 'fork: "Set up your fork in "' in script
-    assert 'editor: "Set up your editor in "' in script
+    # A directory's menu, built by the script, has the same hairline and no heading.
+    assert "separator()" in script and "heading(" not in script
+    # Before a profile the Edit rows stay, greyed, pointing at the Profile step they need.
+    assert 'profile: "set up in "' in script
     # And the script, not the reader, closes a menu left open.
     assert "wireMenus();" in script
 
 
-_MENU_ITEM = re.compile(r"</svg>(view|GitHub|in browser|VS Code)</span>")
+_MENU_ITEM = re.compile(
+    r"</svg>(View here|View on GitHub|Edit in browser|Edit in VS Code)</span>"
+)
 
 
-def test_every_file_menu_lists_the_same_four_items_in_order():
-    # Decision 13 Oct (D10): a menu of a different length on every row taught a reader
-    # nothing; four fixed items, the missing ones greyed with a reason, does.
+def test_every_file_menu_lists_its_rows_in_order():
+    # Three rows on every file, `View here` first only where the site hosts a copy; the
+    # Edit pair is always listed, greyed with a reason where unavailable.
     body = _strip_comments(_templates()["_includes/file_link.html"])
     menu = body.split('<ul class="file-menu-list">')[1].split("</ul>")[0]
-    # `view` twice - live in the view_url branch, greyed in the other - then one each.
     assert [m[1] for m in _MENU_ITEM.finditer(menu)] == [
-        "view",
-        "view",
-        "GitHub",
-        "in browser",
-        "VS Code",
+        "View here",
+        "View on GitHub",
+        "Edit in browser",
+        "Edit in VS Code",
     ]
+    # No greyed `View here`: without a hosted copy the row is simply not there.
+    assert "{% else %}" not in menu.split("{% endif %}")[0]
     greyed = '<span class="file-menu-lbl" role="link" aria-disabled="true">'
     off = menu.split('<li class="file-menu-off"')[1:]
-    assert len(off) == 3
+    assert len(off) == 2
     for item in off:
         assert greyed in item and "<small>" in item
-        # No href on the item itself - only the Profile link inside its reason has one.
+        # No href on the row itself - only the Profile link inside its reason has one.
         assert "href" not in item.split("<small>")[0]
-    assert "<small>Not published on this site</small>" in off[0]
-    for item in off[1:]:
-        assert "Not an editable format" in item
+        assert "not an editable format" in item
+        assert "not editable from this site" in item
         assert ">Profile</a>" in item
     # The Edit pair carries what the script replaces it by.
-    assert 'data-edit="online"' in off[1] and 'data-edit="local"' in off[2]
+    assert 'data-edit="online"' in off[0] and 'data-edit="local"' in off[1]
 
 
 def test_the_script_greys_what_it_cannot_open_with_the_reason():
@@ -729,12 +735,7 @@ def test_the_script_greys_what_it_cannot_open_with_the_reason():
     assert files.count("offItem(") == 4
     # The reasons Liquid writes, spelt the same.
     link = _strip_comments(_templates()["_includes/file_link.html"])
-    for reason in (
-        "Not published on this site",
-        "Not an editable format",
-        "Set up your fork in ",
-        "Set up your editor in ",
-    ):
+    for reason in ("not an editable format", "set up in "):
         assert f'"{reason}"' in script and reason in link
     off = script.split("function offItem(")[1].split("\n  }")[0]
     assert (
@@ -1378,23 +1379,23 @@ _VIEW_BRANCH = re.compile(
 
 
 def test_view_is_offered_only_where_the_site_hosts_a_copy():
-    # `view` opens the semester site's own copy, which exists only for a published file a
-    # browser draws (html, pdf). Rendered unconditionally it is an item to a 404 on every
+    # `View here` opens the semester site's own copy, which exists only for a published file
+    # a browser draws (html, pdf). Rendered unconditionally it is a row to a 404 on every
     # other row of every site.
     body = _strip_comments(_templates()["_includes/file_link.html"])
     branches = [m["shown"].split("{% else %}")[0] for m in _VIEW_BRANCH.finditer(body)]
     assert branches, "file_link.html does not branch on view_url"
-    # The live item - a link to the hosted copy - only in the branch; without one it is
-    # still listed (every menu has the same four items) but greyed, with no href.
+    # The row - a link to the hosted copy - only in the branch; without one it is absent.
     view = '<li><a target="_blank" rel="noopener" href="{{ include.view_url }}">'
     assert body.count(view) == sum(b.count(view) for b in branches) == 1
-    assert "</svg>view</span><small>Not published on this site</small>" in body
-    # `GitHub` is the opposite: unconditional in the menu, because the file's home on
+    assert body.count("</svg>View here</span>") == 1
+    assert "</svg>View here</span><small>rendered here</small>" in body
+    # `View on GitHub` is the opposite: unconditional in the menu, because the file's home on
     # GitHub is worth an item whether or not anything else is. The Updates box's inline
     # shape keeps it conditional - there the name itself goes to GitHub unless a hosted
     # copy has taken it.
-    assert body.count("</svg>GitHub</span>") == 1
-    assert sum(b.count("</svg>GitHub</span>") for b in branches) == 0
+    assert body.count("</svg>View on GitHub</span>") == 1
+    assert sum(b.count("</svg>View on GitHub</span>") for b in branches) == 0
     assert body.count(">GitHub</a>") == 1
     assert sum(b.count(">GitHub</a>") for b in branches) == 1
     # And the FIRST branch is the name's own href, so a hosted copy is what it opens.

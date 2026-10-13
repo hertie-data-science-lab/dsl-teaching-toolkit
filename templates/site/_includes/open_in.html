@@ -3,22 +3,23 @@ SYSTEM-OWNED - do not edit. Written by the DSL course sync from templates/site/ 
 toolkit; every sync rewrites it.
 {%- endcomment -%}
 {% comment %}
-The quiet set-up line, and the one script on this site: the Edit section of the menu
-beside a file link - `in browser` and the reader's editor by name - opening the same file in
-the student's own fork or their own clone, for the files of the materials repo /profile/
-sets up (the first of `site.data.materials.repos`), the only repo it forks and clones. It
-also closes those menus: on an outside click, on Escape, and when another one opens.
+The quiet set-up line, and the one script on this site: the two Edit rows of the menu
+beside a file link - `Edit in browser` and `Edit in <the reader's editor>` - opening the
+same file in the student's own fork or their own clone, for the files of the materials repo
+/profile/ sets up (the first of `site.data.materials.repos`), the only repo it forks and
+clones. It also closes those menus: on an outside click, on Escape, and when another one
+opens.
 
-Every menu lists the same four items - Open: `view`, `GitHub`; Edit: `in browser`, the
-editor by name - and greys the ones this file lacks, with the reason under them.
-`file_link.html` writes all four in Liquid, which knows the Open URLs without being told,
-and writes both Edit items disabled. Those cannot be decided there: they depend on WHO is
-reading, and the settings that say so live in the reader's own browser (/profile/ writes
-them), because the site is one public page for the whole semester. This script replaces
-them: live where it can build the URL, else greyed with why - "Not an editable format",
-"Not in your copy of the materials" (a file of any other repo), or the Profile step still
-missing ("Set up your fork in Profile" for `in browser`, which opens the reader's fork by
-their handle; "Set up your editor in Profile" for the editor, which needs their folder).
+Every menu is one list of one-line rows - `View here` (only for a file the site hosts a
+copy of), `View on GitHub`, a hairline, `Edit in browser`, `Edit in <editor>` - each with a
+short status on the right; an Edit row this file lacks is greyed with the reason as that
+status. `file_link.html` writes them in Liquid, which knows the View URLs without being
+told, and writes both Edit rows disabled. Those cannot be decided there: they depend on WHO is reading, and the settings
+that say so live in the reader's own browser (/profile/ writes them), because the site is
+one public page for the whole semester. This script replaces them: live where it can build
+the URL ("your fork", "your clone"), else greyed with why - "not an editable format", "not
+in your copy" (a file of any other repo), or "set up in Profile" (`Edit in browser` needs
+the reader's handle for their fork, the editor row their folder).
 
 `_layouts/default.html` belongs to the shared theme, so there is no <head> to put this in:
 a body-inline script is the only place it can go, which is why it is small and loads
@@ -56,12 +57,12 @@ that prints it would break the day that sentence is reworded.
   var VSCODE = "vscode://file/{path}";
   /* The shape site_repo.gh_url writes: github.com/<org>/<repo>/(blob|tree)/<branch>/<path>. */
   var SOURCE = /^https?:\/\/github\.com\/([^\/?#]+)\/([^\/?#]+)\/(blob|tree)\/([^\/?#]+)\/([^?#]*)$/;
-  /* What the editor item says, by the scheme of the editor's link. The student console's
+  /* What the editor row is called, by the scheme of the editor's link. The student console's
      `editorName` (console/src/model/open.ts) keeps the same list, so a file menu reads the
-     same on both. Any other scheme says `local`. */
+     same on both. Any other scheme reads `Edit locally`. */
   var EDITOR_NAMES = { vscode: "VS Code", cursor: "Cursor", windsurf: "Windsurf", pycharm: "PyCharm", zed: "Zed" };
-  /* Formats no editor and no browser IDE opens usefully: both Edit items stay greyed with
-     WHY.format. A pdf is exactly the thing worth reading in `view`. */
+  /* Formats no editor and no browser IDE opens usefully: both Edit rows stay greyed with
+     WHY.format. A pdf is exactly the thing worth reading on its GitHub page. */
   var SKIP = /\.(pdf|pptx|docx|xlsx|zip)$/i;
   /* Only lists of released FILES, and never an item already in a menu - those point at
      the very URL this reads, not at a second file. Deliberately not the Updates box (a
@@ -70,18 +71,16 @@ that prints it would break the day that sentence is reworded.
   var SCOPE = ".session-files a[href]:not(.file-menu a), " +
               "#archive a[href]:not(.file-menu a), " +
               ".course-documents a[href]:not(.file-menu a)";
-  /* Why an item is greyed - the reasons file_link.html writes, spelt the same. */
+  /* Why a row is greyed - the statuses file_link.html writes, spelt the same; `profile`
+     ends in a link to /profile/. */
   var WHY = {
-    view: "Not published on this site",
-    format: "Not an editable format",
-    other: "Not in your copy of the materials",
-    fork: "Set up your fork in ",
-    editor: "Set up your editor in "
+    format: "not an editable format",
+    other: "not in your copy",
+    profile: "set up in "
   };
-  /* The menu items' glyphs, as file_link.html draws them; the Open two are needed here only
-     for a directory's menu, which Liquid does not write. */
+  /* The rows' glyphs, as file_link.html draws them; `code` is needed here only for a
+     directory's menu, which Liquid does not write. */
   var ICONS = {
-    eye: '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
     code: '<path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/>',
     pencil: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
     laptop: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/>'
@@ -240,23 +239,22 @@ that prints it would break the day that sentence is reworded.
     return lbl;
   }
 
-  /* One menu item, as file_link.html writes them: icon and label on a line, a description
-     under it. */
-  function menuItem(href, icon, label, desc) {
+  /* One menu row, as file_link.html writes them: icon and label, the status on the right. */
+  function menuItem(href, icon, label, status) {
     var li = document.createElement("li");
     var a = document.createElement("a");
     a.setAttribute("href", href);
     newTab(a, href);
     a.appendChild(menuLabel(icon, label));
     var small = document.createElement("small");
-    small.appendChild(document.createTextNode(desc));
+    small.appendChild(document.createTextNode(status));
     a.appendChild(small);
     li.appendChild(a);
     return li;
   }
 
-  /* The same item greyed: no href, `aria-disabled`, and the reason under it - ending in a
-     link to /profile/ when the reason is a step there. */
+  /* The same row greyed: no href, `aria-disabled`, and the reason as its status - ending in
+     a link to /profile/ when the reason is a step there. */
   function offItem(icon, label, reason, profile) {
     var li = document.createElement("li");
     li.className = "file-menu-off";
@@ -277,17 +275,18 @@ that prints it would break the day that sentence is reworded.
     return li;
   }
 
-  function heading(text) {
+  /* The hairline between the two Open rows and the two Edit rows. */
+  function separator() {
     var li = document.createElement("li");
-    li.className = "file-menu-h";
-    li.appendChild(document.createTextNode(text));
+    li.className = "file-menu-sep";
+    li.setAttribute("role", "separator");
     return li;
   }
 
   /* A menu for a directory of the All Materials tree: its name is the GitHub URL, so
      file_link.html gave it no menu, but it still has a fork and a clone to open. The same
-     four items as a file's: `view` greyed (a folder is never published), `GitHub` its
-     tree, and the Edit section that decorateFiles fills in. */
+     rows as an unpublished file's: `View on GitHub` its tree, the hairline, and the two
+     Edit rows that decorateFiles fills in. */
   function dirMenu(what, href) {
     var d = document.createElement("details");
     d.className = "file-menu";
@@ -299,10 +298,8 @@ that prints it would break the day that sentence is reworded.
     d.appendChild(s);
     var ul = document.createElement("ul");
     ul.className = "file-menu-list";
-    ul.appendChild(heading("Open"));
-    ul.appendChild(offItem("eye", "view", WHY.view));
-    ul.appendChild(menuItem(href, "code", "GitHub", "The folder in the course repo"));
-    ul.appendChild(heading("Edit"));
+    ul.appendChild(menuItem(href, "code", "View on GitHub", "course repo"));
+    ul.appendChild(separator());
     d.appendChild(ul);
     return d;
   }
@@ -408,8 +405,8 @@ that prints it would break the day that sentence is reworded.
       /* SCOPE says the same; this is for a browser whose `:not()` takes no descendant. */
       if (a.getAttribute("data-dsl-open-in") || a.closest(".file-menu")) { continue; }
       /* A published file's NAME opens the site's own hosted copy, so the GitHub URL is
-         the menu's `GitHub` item that file_link.html puts immediately after it - the one
-         item there of the SOURCE shape, since `view` is the site's own. A directory in the
+         the menu's `View on GitHub` row that file_link.html puts right after `View here` - the
+         one row there of the SOURCE shape, since `View here` is the site's own. A directory in the
          All Materials tree has no menu at all - its name IS the GitHub URL. */
       var after = a.nextElementSibling;
       var menu = (after && after.matches("details.file-menu")) ? after : null;
@@ -429,7 +426,7 @@ that prints it would break the day that sentence is reworded.
         ? onlineUrl(me.handle, m[2], "/" + m[3] + "/" + m[4] + "/" + m[5])
         : "";
       var local = why ? "" : localUrl(me.editor, me.materials, m[2], m[5]);
-      /* A directory gets a menu only for something to open; four items with nothing live
+      /* A directory gets a menu only for something to open; rows with nothing live
          in them would put a chevron on every folder of the tree. */
       if (!menu && !online && !local) { continue; }
       a.setAttribute("data-dsl-open-in", "1");
@@ -438,19 +435,20 @@ that prints it would break the day that sentence is reworded.
         a.parentNode.insertBefore(menu, a.nextSibling);
       }
       var list = menu.querySelector(".file-menu-list");
-      /* Liquid's two greyed Edit items, replaced by the reader's own. */
+      /* Liquid's two greyed Edit rows, replaced by the reader's own. */
       var old = list.querySelectorAll("li[data-edit]");
       for (var k = 0; k < old.length; k++) { list.removeChild(old[k]); }
       var profilePage = root.getAttribute("data-profile") || "/profile/";
-      var editor = editorName(me.editor) || "local";
+      var name = editorName(me.editor);
+      var editor = name ? "Edit in " + name : "Edit locally";
       var inBrowser = online
-        ? menuItem(online, "pencil", "in browser", "VS Code in your browser, in your fork")
-        : (why ? offItem("pencil", "in browser", why)
-          : offItem("pencil", "in browser", WHY.fork, profilePage));
+        ? menuItem(online, "pencil", "Edit in browser", "your fork")
+        : (why ? offItem("pencil", "Edit in browser", why)
+          : offItem("pencil", "Edit in browser", WHY.profile, profilePage));
       var inEditor = local
-        ? menuItem(local, "laptop", editor, "In your local copy: " + me.materials)
+        ? menuItem(local, "laptop", editor, "your clone")
         : (why ? offItem("laptop", editor, why)
-          : offItem("laptop", editor, WHY.editor, profilePage));
+          : offItem("laptop", editor, WHY.profile, profilePage));
       inBrowser.setAttribute("data-edit", "online");
       inEditor.setAttribute("data-edit", "local");
       list.appendChild(inBrowser);

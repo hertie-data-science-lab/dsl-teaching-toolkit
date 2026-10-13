@@ -145,7 +145,7 @@ describe('the assignment page', () => {
     const link = { name: 'data.csv', repo: 'materials', path: 'a1/data.csv', url: `https://github.com/${ORG}/materials/blob/main/a1/data.csv` };
     const row = { id: 'a1:handout', kind: 'assignment', when: '2026-09-28T09:00:00', allDay: false, title: 'Assignment 1', subtitle: '', details: '', assignment: 'a1', released: true, links: [link], tbc: false, readings: [], readingList: '', readingsPending: false, tabs: ['assignment'] };
     const out = render(<AssignmentPage slug="a1" org={ORG} facts={{ ...facts([A]), rows: [row] }} mine={mine()} now={NOW} studentView={false} receipts={{}} login={LOGIN} />);
-    expect(out).toMatch(/<ul class="session-files">.*data\.csv.*class="file-chev".*>GitHub<\/span>.*<\/ul><article class="a-brief">/);
+    expect(out).toMatch(/<ul class="session-files">.*data\.csv.*class="file-chev".*>View on GitHub<\/span>.*<\/ul><article class="a-brief">/);
     expect(render(page(A, mine()))).not.toContain('session-files');
   });
 
