@@ -363,8 +363,10 @@ function ArchiveForm({ d, set, errors }: { d: ArchiveDraft; set: Setter<ArchiveD
       <F id="e-aon" k="on" d={d} set={set} t={{ tier: 'default', label: 'Archive automatically', widget: 'checkbox', defaultLabel: 'off means never' }} />
       {d.on ? (
         <div class="cond">
-          <F id="e-ad" k="date" d={d} set={set} t={{ tier: 'default', label: 'Archive on', widget: 'date', defaultLabel: `default: ${d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the semester ends`, reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.' }} />
-          <F id="e-agrace" k="graceDays" d={d} set={set} error={errors.graceDays} t={{ tier: 'default', label: 'Days after semester end', widget: 'number', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS}`, reason: `Archiving happens this many days after the semester ends; ${ARCHIVE_GRACE_DAYS} by default.` }} />
+          <F id="e-awhen" k="when" d={d} set={set} t={{ tier: 'default', label: 'When', widget: 'radio', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS} days after the semester ends`, reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.', options: [{ value: 'date', label: 'On a date' }, { value: 'days', label: `${d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the semester ends` }] }} />
+          {d.when === 'date'
+            ? <F id="e-ad" k="date" d={d} set={set} error={errors.date} t={{ tier: 'default', label: 'Archive on', widget: 'date' }} />
+            : <F id="e-agrace" k="graceDays" d={d} set={set} error={errors.graceDays} t={{ tier: 'default', label: 'Days after the semester ends', widget: 'number', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS}` }} />}
           <F id="e-at" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'default: Semester archived' }} />
           <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', '{date} is filled in with the archive date.')} />
           <Common d={d} set={set} />

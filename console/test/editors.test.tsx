@@ -234,6 +234,26 @@ describe('the schedule entry sheet model', () => {
     expect(draftErrors({ ...d, graceDays: 1.5 }, { templateUsers: () => 0 }).graceDays).toBeDefined();
     expect(draftErrors({ ...d, graceDays: 0 }, { templateUsers: () => 0 })).toEqual({});
   });
+
+  it('writes only the archive alternative chosen: a date, or the days after the semester ends', () => {
+    const y = new YamlText(SEEDED);
+    const doc = y.toJS() as Record<string, unknown>;
+    const d = readDraft(doc, 'archive') as ArchiveDraft;
+    expect(d.when).toBe('days');
+    writeDraft(y, { ...d, when: 'date', date: '2027-02-15', graceDays: 90 }, doc);
+    const dated = parse(y.text).archive;
+    expect(String(dated.event_datetime)).toContain('2027-02-15');
+    expect(dated).not.toHaveProperty('grace_days');
+    const y2 = new YamlText(y.text);
+    const doc2 = y2.toJS() as Record<string, unknown>;
+    const d2 = readDraft(doc2, 'archive') as ArchiveDraft;
+    expect(d2.when).toBe('date');
+    writeDraft(y2, { ...d2, when: 'days', graceDays: 90 }, doc2);
+    const days = parse(y2.text).archive;
+    expect(days.event_datetime ?? null).toBeNull();
+    expect(days.grace_days).toBe(90);
+    expect(draftErrors({ ...d, when: 'date', date: '' }, { templateUsers: () => 0 }).date).toBeDefined();
+  });
 });
 
 // ------------------------------------------------------------------ marks model
