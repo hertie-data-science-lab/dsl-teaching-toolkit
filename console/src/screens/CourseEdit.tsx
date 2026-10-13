@@ -196,7 +196,7 @@ export function WebsiteSwitch(p: CourseProps) {
 }
 
 /** The one dsl-course.yml key the semester sites read for which files a row links (`site._link_extensions`). */
-export function LinkKindsField({ id, value, onInput }: { id: string; value: string; onInput: (v: string) => void }) {
+function LinkKindsField({ id, value, onInput }: { id: string; value: string; onInput: (v: string) => void }) {
   return (
     <div class="field">
       <label for={id}>File types linked on each semester’s student site <Hint label="About linked file types">
@@ -278,12 +278,12 @@ export function DetailsScreen(p: CourseProps) {
                   <h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3>
                   <SchemaForm id="cdx" schema={null} tiers={courseDefaultTiers(before.defaults)} values={d.defaults} onChange={(v) => set({ defaults: v })} />
                 </div>
+                <div class="form-section">
+                  <h3>Student site links</h3>
+                  <LinkKindsField id="cdk" value={d.links} onInput={(links) => set({ links })} />
+                </div>
               </div>
             </details>
-            <div class="form-section">
-              <h3>Site links</h3>
-              <LinkKindsField id="cdk" value={d.links} onInput={(links) => set({ links })} />
-            </div>
             <div class="form-section">
               <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml', exists: file.kind !== 'absent' }} />
               <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={file.kind !== 'absent'} />
