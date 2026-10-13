@@ -51,5 +51,8 @@
 .file-menu-list .fm-lbl svg { width: 13px; height: 13px; flex: none; }
 .file-menu-list small { color: var(--muted); font-size: 12px; }
 .file-menu-list .pm-h { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
-.file-menu-list a.muted { color: var(--muted); font-style: italic; }
-.file-menu-list a.muted .fm-lbl { font-weight: 400; }
+/* An item this file lacks, still listed so every menu reads the same: greyed, not a link, the
+   reason under it; a reason's Profile link stays a link. As the site's `.file-menu-off`. */
+.file-menu-list .fm-off { display: grid; gap: 1px; padding: 7px 10px; font-size: 14px; color: var(--muted); cursor: default; }
+.file-menu-list .fm-off .fm-lbl { opacity: 0.55; }
+.file-menu-list .fm-off small a { display: inline; width: auto; min-height: 0; padding: 0; font-size: inherit; color: var(--link); text-decoration: underline; }
