@@ -157,7 +157,7 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
         <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: `Automation releases at this time, ${tz}.` }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time' }} />
       </div>
-      <F id="e-det" k="details" d={d} set={set} t={MD('Details', 'Shown to students under the title.')} />
+      <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', 'Shown to students under the title.')} />
       <Common d={d} set={set} />
       <div class="field">
         <span class="label">What to release</span>
@@ -316,7 +316,7 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { 
           ) : null}
         </>
       )}
-      <F id="e-det" k="details" d={d} set={set} t={MD('Details', 'Shown to students under the title.')} />
+      <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', 'Shown to students under the title.')} />
       <Common d={d} set={set} />
       {d.id ? <a class="textlink" href={`#assignment-${d.id}`}>Open the assignment</a> : null}
     </>
@@ -334,7 +334,7 @@ function EventForm({ d, set, errors }: { d: EventDraft; set: Setter<EventDraft>;
         <F id="e-date" k="date" d={d} set={set} t={{ tier: 'ask', label: 'When', widget: 'date', reason: 'Leave the date empty and the student site shows TBC at the end of the semester.' }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time', defaultLabel: 'optional' }} />
       </div>
-      <F id="e-det" k="details" d={d} set={set} t={MD('Details')} />
+      <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)')} />
       <Common d={d} set={set} />
     </>
   );
@@ -366,7 +366,7 @@ function ArchiveForm({ d, set, errors }: { d: ArchiveDraft; set: Setter<ArchiveD
           <F id="e-ad" k="date" d={d} set={set} t={{ tier: 'default', label: 'Archive on', widget: 'date', defaultLabel: `default: ${d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the semester ends`, reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.' }} />
           <F id="e-agrace" k="graceDays" d={d} set={set} error={errors.graceDays} t={{ tier: 'default', label: 'Days after semester end', widget: 'number', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS}`, reason: `Archiving happens this many days after the semester ends; ${ARCHIVE_GRACE_DAYS} by default.` }} />
           <F id="e-at" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'default: Semester archived' }} />
-          <F id="e-det" k="details" d={d} set={set} t={MD('Details', '{date} is filled in with the archive date.')} />
+          <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', '{date} is filled in with the archive date.')} />
           <Common d={d} set={set} />
         </div>
       ) : null}
@@ -645,9 +645,6 @@ function View(p: ReadyProps) {
         </div>
         <div class="actions"><CheckNow p={p} label="Check" /><a class="btn outline" href="#schedule-new">Add entry</a></div>
       </div>
-      <p class="site-note" style="margin-bottom:12px">
-        Every row here reads <b>Identifier</b>: Name. The student site shows the same two parts on two lines, the bold identifier then the name, with no colon; exams and events show only the bold title. Whether the site should switch to one line is a theme decision.
-      </p>
       <div class="term-meta">
         {sched?.start && sched?.end ? <span>Semester <b>{fmtDay(sched.start, tz, year)} to {fmtDay(sched.end, tz)}</b></span> : null}
         <span>Timezone <b>{sched?.timezone ?? tz}</b></span>
