@@ -103,7 +103,8 @@
       "readings_pending": false,
       "tabs": [
         "term_date"
-      ]
+      ],
+      "no_materials": false
     },
     {
       "id": "lecture_01",
@@ -152,7 +153,31 @@
       "tabs": [
         "lecture",
         "readings"
-      ]
+      ],
+      "no_materials": false
+    },
+    {
+      "id": "lecture-1-online",
+      "kind": "lecture",
+      "when": "2026-09-09T18:00:00+02:00",
+      "sort_at": "2026-09-09T18:00:00+02:00",
+      "all_day": false,
+      "title": "Lecture 1",
+      "subtitle": "Intro",
+      "details": "The same lecture, online.",
+      "assignment": null,
+      "released": true,
+      "tbc": false,
+      "dateless": false,
+      "off_schedule": false,
+      "links": [],
+      "readings": [],
+      "reading_list": "",
+      "readings_pending": false,
+      "tabs": [
+        "lecture"
+      ],
+      "no_materials": true
     },
     {
       "id": "assignment-1:handout",
@@ -174,7 +199,8 @@
       "readings_pending": false,
       "tabs": [
         "assignment"
-      ]
+      ],
+      "no_materials": false
     },
     {
       "id": "assignment-2-project:handout",
@@ -196,7 +222,8 @@
       "readings_pending": false,
       "tabs": [
         "assignment"
-      ]
+      ],
+      "no_materials": false
     },
     {
       "id": "assignment-1:due",
@@ -218,7 +245,8 @@
       "readings_pending": false,
       "tabs": [
         "due"
-      ]
+      ],
+      "no_materials": false
     },
     {
       "id": "lecture_02",
@@ -240,7 +268,8 @@
       "readings_pending": false,
       "tabs": [
         "lecture"
-      ]
+      ],
+      "no_materials": false
     },
     {
       "id": "lecture_03",
@@ -262,7 +291,8 @@
       "readings_pending": false,
       "tabs": [
         "lecture"
-      ]
+      ],
+      "no_materials": false
     },
     {
       "id": "assignment-3:handout",
@@ -284,7 +314,8 @@
       "readings_pending": false,
       "tabs": [
         "assignment"
-      ]
+      ],
+      "no_materials": false
     },
     {
       "id": "midterm",
@@ -306,7 +337,8 @@
       "readings_pending": false,
       "tabs": [
         "exam"
-      ]
+      ],
+      "no_materials": false
     },
     {
       "id": "assignment-2-project:due",
@@ -328,7 +360,8 @@
       "readings_pending": false,
       "tabs": [
         "due"
-      ]
+      ],
+      "no_materials": false
     },
     {
       "id": "assignment-3:due",
@@ -350,7 +383,8 @@
       "readings_pending": false,
       "tabs": [
         "due"
-      ]
+      ],
+      "no_materials": false
     },
     {
       "id": "term-end",
@@ -372,7 +406,8 @@
       "readings_pending": false,
       "tabs": [
         "term_date"
-      ]
+      ],
+      "no_materials": false
     }
   ],
   "assignments": [

@@ -73,6 +73,11 @@ events:
     kind: exam
     event_datetime: 2026-10-28T09:00
     title: Midterm
+  lecture-1-online:
+    kind: lecture
+    number: 1
+    details: The same lecture, online.
+    event_datetime: 2026-09-09T18:00
 assignments:
   assignment-1:
     course_source_repo: assignment-1-f2026
@@ -678,3 +683,23 @@ def test_an_undated_event_is_a_dateless_row_with_no_when():
     (row,) = [r for r in student_status.event_rows(facts) if r["id"] == "resit"]
     assert row["when"] is None and row["dateless"] is True and row["tbc"] is True
     assert row["sort_at"].startswith(facts.sched.semester_end.isoformat())
+
+
+def test_a_session_event_is_a_row_of_its_kind_with_nothing_to_ship():
+    # An `events:` entry of a policy kind: "Lecture 1" with the release's title, on the
+    # Lectures tab, no files and nothing pending - and no exam/special-event row.
+    rows = {r["id"]: r for r in _render()["rows"]}
+    row = rows["lecture-1-online"]
+    assert (row["kind"], row["title"], row["subtitle"]) == (
+        "lecture",
+        "Lecture 1",
+        "Intro",
+    )
+    assert row["details"] == "The same lecture, online."
+    assert row["released"] is True and row["no_materials"] is True
+    assert row["links"] == [] and row["tabs"] == ["lecture"]
+    assert row["when"].startswith("2026-09-09T18:00")
+    assert not rows["lecture_01"]["no_materials"]
+    assert "lecture-1-online" not in {
+        r["id"] for r in student_status.event_rows(_facts())
+    }

@@ -34,14 +34,19 @@ lifecycle, `events` are display-only calendar rows.
                                      # cutoff is due + `late_window_days` (assignments.yml).
         marks_return_datetime: 2026-10-27  # optional: marks go back then, once all marked
     events:                          # display-only rows - nothing deploys, the site just
-      mid-term:                      # shows them. `kind` is `exam` or `special_event`
-        kind: exam                   # (the default when omitted). `event_datetime` is a
-        title: MidTerm Exam          # whole day, or a full datetime when the start time
-        details: Open book, 2 hours  # is known.
+      mid-term:                      # shows them. `kind` is `exam`, `special_event` (the
+        kind: exam                   # default when omitted) or any policy kind (lab, ...).
+        title: MidTerm Exam          # `event_datetime` is a whole day, or a full datetime
+        details: Open book, 2 hours  # when the start time is known.
         event_datetime: 2026-11-03
       project-clinic:
         title: Project Clinic
         event_datetime: 2026-10-14T10:00
+      lab-01-group-2:                # a session with nothing to ship: a "Lab 1" row,
+        kind: lab                    # no files. `number:` as on a release; the title
+        number: 1                    # defaults to the release of the same kind+number.
+        details: Group 2, room 2.32
+        event_datetime: 2026-09-17T18:00
     semester_start: 2026-09-07
     semester_end: 2026-12-18
     archive:                         # OPTIONAL - and the SWITCH: with no block, nothing
@@ -444,7 +449,8 @@ class Event:
     # A bare date = whole day; a datetime = real start time; None = `event_datetime: tbc`
     # (the site shows a TBC row). `tbc: true` next to a real date = provisional, "(TBC)".
     when: date | datetime | None
-    # 'exam' | 'special_event'. Exams render as their own (red) row on the site.
+    # 'exam' | 'special_event' | a session kind (`SESSION_KINDS`: lecture, lab, ...).
+    # Exams render as their own row; a session kind as a row of that kind with no files.
     kind: str = "special_event"
     tbc: bool = False
     # Display-only: the row's Details cell. `title` says which row this is, `details` what
@@ -455,6 +461,9 @@ class Event:
     # fires nothing, so this is the whole of what it does here; the twin of a silent
     # release, for a date faculty keep in the file without publishing it.
     show_on_site: bool = True
+    # A session row's number ("Lab 1"), when the entry writes one; else the label's own
+    # number (`own_number`), as on a release.
+    number: int | None = None
 
 
 @dataclass
@@ -800,8 +809,18 @@ def not_migrated_keys(
 
 
 KNOWN_EVENT = frozenset(
-    {"kind", "title", "details", "event_datetime", "tbc", "show_on_site"}
+    {"kind", "number", "title", "details", "event_datetime", "tbc", "show_on_site"}
 )
+# The kinds an `events:` entry may declare besides `special_event`: every content kind
+# that is a row (supporting files never are, decision 0026). One of them other than `exam`
+# makes a session with nothing to ship (`is_session`); `exam` keeps its own row.
+SESSION_KINDS = tuple(k for k in policy.content_kinds() if k != "assets")
+
+
+def is_session(event: Event) -> bool:
+    """Whether `event` is a session row of a policy kind ("Lab 1", no files) rather than
+    an exam or a special event."""
+    return event.kind not in ("exam", "special_event")
 
 
 def _flag_unknown_keys(
@@ -1416,8 +1435,9 @@ def _parse_assignments(
 
 
 def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
-    """Parse `events:` (label -> {type, title, event_datetime}) into display-only rows,
-    in calendar order.
+    """Parse `events:` (label -> {kind, title, event_datetime}) into display-only rows,
+    in calendar order. `kind:` is `special_event` (the default), `exam`, or another
+    session kind (`SESSION_KINDS`); anything else is flagged and shown as a special event.
 
     `event_datetime` is a whole-day date, or a full datetime when the start time is known
     (the website then shows that time instead of its placeholder). `event_datetime: tbc`
@@ -1459,8 +1479,8 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
             "that setting is ignored",
             lines,
         )
-        kind = str(entry.get("kind") or "").strip().lower()
-        if kind and kind not in ("exam", "special_event"):
+        kind = str(entry.get("kind") or "").strip().lower() or "special_event"
+        if kind != "special_event" and kind not in SESSION_KINDS:
             # A typo'd `kind` (e.g. `exma`) still shows the row, but as a plain special
             # event - the exam styling, and "this is an exam", quietly disappear.
             _flag_bad_value(
@@ -1468,10 +1488,15 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
                 where,
                 "kind",
                 kind,
-                "the row is shown as a plain special event, not an exam "
-                "(expected 'exam' or 'special_event')",
+                "the row is shown as a plain special event, not an exam or a session "
+                "(expected `special_event` "
+                f"or one of {', '.join(SESSION_KINDS)})",
                 lines,
             )
+            kind = "special_event"
+        number = _parse_number(
+            entry, where, drops, lines, "the row is numbered from its label instead"
+        )
         out.append(
             Event(
                 label=str(label),
@@ -1487,9 +1512,8 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
                     lines,
                 ),
                 when=when,
-                # anything other than the two known values -> the display-only default:
-                # a typo'd `type` still shows the row (flagged above, not silent)
-                kind="exam" if kind == "exam" else "special_event",
+                kind=kind,
+                number=number,
                 tbc=tbc,
             )
         )
@@ -2485,6 +2509,11 @@ def _validate_report(sched: Schedule, source: str) -> str:
             f"  {len(sched.releases)} release(s), "
             f"{sum(len(r.deploy) for r in sched.releases)} deploy(s) | "
             f"{len(sched.assignments)} assignment(s) | {len(sched.events)} event(s)"
+            + (
+                f", {n} of them session(s)"
+                if (n := sum(map(is_session, sched.events)))
+                else ""
+            )
         ),
     ]
     if sched.dropped:

@@ -73,6 +73,7 @@ from .schedule import (
     KNOWN_RELEASE,
     KNOWN_ROW_KINDS,
     KNOWN_TOP_LEVEL,
+    SESSION_KINDS,
 )
 from .settings import (
     ASSIGNMENT_DEFAULTS_KEY,
@@ -91,7 +92,8 @@ DEFAULT_OUT = Path("console/schemas")
 # The schema-level types of the keys whose parser accepts more than a string. Anything not
 # named here is a string: the parsers read dates, paths and titles as text.
 _FLAGS = {"tbc", "show_on_site"}
-_EVENT_KINDS = ("exam", "special_event")
+# `special_event` and every session kind (`schedule.SESSION_KINDS`, exam among them).
+_EVENT_KINDS = ("special_event", *SESSION_KINDS)
 # instructors.yml entry keys (sync_faculty and the site read them by name; no constant holds them).
 PEOPLE_ENTRY_KEYS = (
     "github_handle",
@@ -583,7 +585,15 @@ def schedule_schema() -> dict:
         ),
         ("due_datetime", "course_source_repo"),
     )
-    event = _obj(_keys(KNOWN_EVENT, {"kind": _enum(_EVENT_KINDS)}))
+    event = _obj(
+        _keys(
+            KNOWN_EVENT,
+            {
+                "kind": _enum(_EVENT_KINDS),
+                "number": {"type": "integer", "minimum": 1},
+            },
+        )
+    )
     archive = _obj(_keys(KNOWN_ARCHIVE, {"grace_days": {"type": "integer"}}))
     # A bare `archive:` asks for the default date (`schedule._parse_archive`).
     archive["type"] = ["object", "null"]

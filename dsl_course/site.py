@@ -31,7 +31,7 @@ import shutil
 import stat
 import sys
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from functools import cache
@@ -93,6 +93,7 @@ from .schedule_plan import (
     deploy_section,
     offplan_folders,
     planned_rows,
+    session_rows,
     site_rows,
 )
 from .site_repo import (
@@ -803,6 +804,8 @@ class _Row:
     readings_pending: bool = False
     dests: list[str] = field(default_factory=list)
     order: str = ""  # an off-plan row's place on its tab
+    # An `events:` session (`schedule_plan.session_rows`): nothing ships, nothing pends.
+    no_materials: bool = False
 
     @property
     def tabs(self) -> list[str]:
@@ -825,7 +828,9 @@ def _row_entry(
     readings attached to it that have not landed yet. `off_schedule`: a `show_on_site: false`
     row, left off the schedule and the Updates box. `undated`: an off-plan folder.
     `dateless`: an `event_datetime: tbc` entry - on the schedule and its tab, with no
-    `date:` ("TBC" is printed instead), and never in the Updates box. `sort_at` is where
+    `date:` ("TBC" is printed instead), and never in the Updates box. `no_materials`: an
+    `events:` session (`schedule_plan.session_rows`) - no files, never "not yet released",
+    never in the Updates box. `sort_at` is where
     every dated or dateless row sorts (`schedule_plan.planned_rows`; the date itself on a
     dated row): the templates order by it and show only `date:`."""
     label = policy.kind_label(row.kind)
@@ -840,7 +845,9 @@ def _row_entry(
         + [(READINGS_LINKS, item.links) for item in row.readings]
     )
     flags, body = "", ""
-    if not row.landed and not row.readings:
+    if row.no_materials:
+        flags = "no_materials: true\n"
+    elif not row.landed and not row.readings:
         flags = "unreleased: true\n"
         where = ", ".join(_dest_link(semester_org, d, live_repos) for d in row.dests)
         # Italic, with the lead in bold: this is the one line on an unreleased row.
@@ -952,9 +959,11 @@ def _site_rows(
     live_repos: frozenset[str],
     aliases: Aliases,
     hosted: Hosted,
+    sessions: Iterable[PlannedRow] = (),
 ) -> tuple[dict[str, str], list[str]]:
     """The `_lectures` collection - one file per site row (`schedule_plan.site_rows`),
-    plus the off-plan folders' rows - and the kind tabs it needs.
+    plus the `events:` sessions (`sessions`, no files) and the off-plan folders' rows -
+    and the kind tabs it needs.
 
     Every row the schedule shows is written, released or not, so the whole term reads as
     a syllabus from the day it is written. A silent readings row is written only once
@@ -1002,6 +1011,19 @@ def _site_rows(
             dests=list(dict.fromkeys([*r.dests, *pending_dests])),
         )
         built.append((r.key, row))
+    for r in sessions:
+        session = _Row(
+            r.kind,
+            subtitle=r.subtitle,
+            details=r.details,
+            when=r.when,
+            sort_at=r.sort_at,
+            number=schedule.own_number(r.number, r.key),
+            tbc=r.tbc,
+            dateless=r.undated,
+            no_materials=True,
+        )
+        built.append((r.key, session))
     built += _offplan_rows(semester_org, rows, allow, live_repos, aliases, hosted)
     out: dict[str, str] = {}
     tabs: dict[str, None] = {}
@@ -1583,7 +1605,15 @@ def sync_site(course_org: str, semester_org: str) -> int:
                 )
         else:
             hosted = _mirror_public(site_wd, semester_org, policies)
-        rows, present = _site_rows(semester_org, planned, allow, live, kinds, hosted)
+        rows, present = _site_rows(
+            semester_org,
+            planned,
+            allow,
+            live,
+            kinds,
+            hosted,
+            session_rows(sched, planned),
+        )
         # ONE read of teams.csv for every self-select group assignment (`_formed_teams`).
         formed_teams = _formed_teams(semester_org)
         log_step(
@@ -1615,10 +1645,11 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # Enumerated over EVERY event and filtered after, not before: the ordinal is the
         # entry's position in the plan, so hiding one leaves the rest of the term's event
         # pages at the filenames - and so the URLs - they already have.
+        # A session kind's event is a `_lectures` row of its kind instead (`_site_rows`).
         event_entries = {
             f"{i + 1:02d}-{slug(e.label)}.md": _event_entry(e, end)
             for i, e in enumerate(sched.events)
-            if e.show_on_site
+            if e.show_on_site and not schedule.is_session(e)
         }
         # Every course has exams, so a schedule that names none still gets stub mid/end
         # dates of a ~15-week semester (bounded by semester_end when set) - a placeholder

@@ -3352,3 +3352,49 @@ def test_an_assignment_carries_its_semester_side_name():
     doc = _render(semester=_semester(sched=sched))
     row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
     assert row["semester_name"] == "project-2"
+
+
+# ------------------------------------------------------------------ sessions without files
+
+SESSIONS = (
+    WEEKLY
+    + """\
+events:
+  lab-2-only-group:
+    kind: lab
+    number: 2
+    title: Trees
+    event_datetime: 2026-10-15T18:00
+  lab-1-group-2:
+    kind: lab
+    number: 1
+    event_datetime: 2026-10-09T18:00
+"""
+)
+
+
+def test_a_session_event_fills_its_kinds_week():
+    # Week 2's only lab is an `events:` session: not a week with no lab.
+    facts = _semester(sched=_sched(SESSIONS))
+    before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    assert status_json.empty_week_problems(facts, before, frozenset()) == []
+
+
+def test_this_week_lists_a_session_event_under_its_kind():
+    sched = _sched(SESSIONS)
+    now = datetime(2026, 10, 13, 9, 0, tzinfo=UTC)
+    rows = status_json.this_week(sched, [], [], now)
+    (lab,) = [r for r in rows if r["ref"] == "lab-2-only-group"]
+    assert (lab["kind"], lab["title"], lab["state"]) == ("lab", "Trees", "planned")
+    early = status_json.this_week(
+        sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC)
+    )
+    (group,) = [r for r in early if r["ref"] == "lab-1-group-2"]
+    assert group["title"] == "Lab 1"
+
+
+def test_a_session_event_is_never_nothing_to_release():
+    facts = _semester(sched=_sched(SESSIONS))
+    now = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    ids = {p["id"] for p in status_json.nothing_to_release_problems(facts, now)}
+    assert not any("group" in i for i in ids)
