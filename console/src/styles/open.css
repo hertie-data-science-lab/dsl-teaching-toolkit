@@ -37,22 +37,22 @@
 .course-folders li p.hint { flex-basis: 100%; margin: 0; }
 /* ================= a file's menu (screens/StudentFiles.tsx, decision 0035 rule 10) =================
    The name, then one small outlined chevron, as on the semester site (`_course.scss`
-   `.file-menu`), so the names stay what the eye scans for; its menu is a `.popmenu` with Open and
-   Edit headings, each item an icon and label on one line over a muted description. */
+   `.file-menu`), so the names stay what the eye scans for; its menu is a `.popmenu` of one-line
+   rows with no headings - icon, label, a muted status on the right - a hairline between the two
+   View rows and the two Edit rows. */
 .file-link { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 0; }
 .file-menu { position: relative; display: inline-block; margin-left: 4px; }
 .file-chev { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 0 6px; border: 1px solid var(--link); border-radius: 999px; background: transparent; color: var(--link); font: inherit; font-size: 11px; line-height: 1; cursor: pointer; }
 .file-chev:hover, .file-chev[aria-expanded="true"] { background: var(--link); color: var(--surface); }
 .file-chev:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.file-menu .file-menu-list { right: auto; width: max-content; min-width: 240px; max-width: calc(100vw - 32px); }
-.file-menu-list a { display: grid; justify-content: stretch; gap: 1px; }
-.file-menu-list a:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--sunk); }
-.file-menu-list .fm-lbl { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
-.file-menu-list .fm-lbl svg { width: 13px; height: 13px; flex: none; }
-.file-menu-list small { color: var(--muted); font-size: 12px; }
-.file-menu-list .pm-h { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
-/* An item this file lacks, still listed so every menu reads the same: greyed, not a link, the
-   reason under it; a reason's Profile link stays a link. As the site's `.file-menu-off`. */
-.file-menu-list .fm-off { display: grid; gap: 1px; padding: 7px 10px; font-size: 14px; color: var(--muted); cursor: default; }
-.file-menu-list .fm-off .fm-lbl { opacity: 0.55; }
+.file-menu .file-menu-list { right: auto; width: max-content; min-width: 18rem; max-width: min(26rem, calc(100vw - 32px)); padding: 6px 0; gap: 0; }
+.file-menu-list > a, .file-menu-list .fm-off { display: flex; align-items: center; gap: 10px; padding: 7px 14px; border-radius: 0; font-size: 14px; white-space: nowrap; }
+.file-menu-list > a:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--sunk); }
+.file-menu-list .fm-lbl { display: inline-flex; flex-grow: 1; align-items: center; gap: 10px; }
+.file-menu-list .fm-lbl svg { width: 16px; height: 16px; flex: none; }
+.file-menu-list small { flex: none; color: var(--muted); font-size: 12px; }
+.file-menu-list .fm-sep { height: 1px; margin: 4px 14px; background: var(--rule); }
+/* A row this file lacks, still listed so every menu reads the same: muted, not a link, its
+   reason as the status; a reason's Profile link stays a link. As the site's `.file-menu-off`. */
+.file-menu-list .fm-off { color: var(--muted); cursor: default; }
 .file-menu-list .fm-off small a { display: inline; width: auto; min-height: 0; padding: 0; font-size: inherit; color: var(--link); text-decoration: underline; }
