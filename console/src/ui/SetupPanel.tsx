@@ -122,6 +122,7 @@ export function readinessTabs({ items, scope, onCircle, onBack, busy = false }: 
     },
     {
       key: 'aside', label: 'Set aside', count: g.aside.length,
+      hint: <>Suggestions you choose to pass move here; bring one back at any time.</>,
       body: g.aside.length ? (
         <ul class="aside-list">
           {g.aside.map((r) => (
@@ -131,7 +132,7 @@ export function readinessTabs({ items, scope, onCircle, onBack, busy = false }: 
             </li>
           ))}
         </ul>
-      ) : <p class="footnote">Nothing set aside. Suggestions you choose to pass move here; bring one back at any time.</p>,
+      ) : <p class="footnote">Nothing set aside.</p>,
     },
     {
       key: 'setup', label: 'Setup', right: true, count: complete ? 'done' : `${done} of ${g.setup.length}`,

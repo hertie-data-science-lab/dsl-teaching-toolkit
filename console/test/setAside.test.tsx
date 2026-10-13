@@ -257,6 +257,13 @@ describe('a read-only viewer', () => {
     expect(root!.querySelector('.aside-fold button')).toBeNull();
   });
 
+  it('the Set aside tab says what it holds behind its ?, the body only its rows', async () => {
+    await mount(BASE, files());
+    await show('aside');
+    expect(root!.querySelector('.ptabs .hint-pop')!.textContent).toBe('Suggestions you choose to pass move here; bring one back at any time.');
+    expect(root!.querySelector('#dash-panel-aside')!.textContent).toBe('Nothing set aside.');
+  });
+
   it('a writer’s Suggestions tab says how to set aside', async () => {
     await mount(BASE, files());
     await show('suggestions');
@@ -319,7 +326,7 @@ describe('an empty week on the semester dashboard', () => {
     expect(card.querySelector<HTMLAnchorElement>('.p-fix a.btn')!.getAttribute('href')).toBe('#schedule');
     expect([...card.querySelectorAll('button')].some((b) => b.textContent === 'Set aside')).toBe(true);
     await show('coming');
-    const row = [...root!.querySelectorAll('#dash-coming li, li')].find((li) => li.textContent!.includes('week of 12 Oct'))!;
+    const row = [...root!.querySelectorAll('#dash-panel-coming li')].find((li) => li.textContent!.includes('week of 12 Oct'))!;
     expect([...row.querySelectorAll('button')].some((b) => b.textContent === 'Set aside')).toBe(true);
   });
 
