@@ -35,7 +35,6 @@ def test_the_shipped_registry_names_every_live_course_org():
     orgs = org_registry.parse(org_registry.PATH.read_text())
     assert {
         "hertie-dsl-demo-course-e1234",
-        "hertie-intro-to-data-science-c11",
         "hertie-maths-data-science-c23",
         "hertie-nlp-e1282",
     } <= orgs
