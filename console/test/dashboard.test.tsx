@@ -459,20 +459,22 @@ describe('the agenda rows', () => {
   });
 });
 
-describe('the Students notice', () => {
+describe('the Students panel', () => {
   const withStudents = (students: Status['students']) => ({ ...STATUS, students });
   const lines = (h: HTMLElement) => [...h.querySelectorAll('.waiting-list a')].map((a) => `${a.textContent} ${a.getAttribute('href')}`);
 
-  it('counts who waits at each step, each line opening the Students tab', () => {
+  it('shows the roster meter and every state, each line opening the Students tab', () => {
     const h = mount(withStudents({ rows: 36, codes_sent: 30, joined: 29 }));
-    expect(lines(h)).toEqual(['6 on the roster, code not sent yet #students', '1 code sent, not joined yet #students']);
-    // Counts only: no meter, no totals.
-    expect(h.querySelector('.waiting .meter')).toBeNull();
+    expect(lines(h)).toEqual(['6 on the roster, code not sent yet #students', '1 code sent, not joined yet #students', '29 joined #students']);
+    expect(h.querySelector('.waiting .meter')).not.toBeNull();
+    expect(h.querySelector('.waiting .counts')!.textContent).toBe('36on the roster30codes sent29joined');
+    expect(h.querySelector('.waiting')!.textContent).toContain('Incomplete: 7 of 36 not joined yet.');
+    expect(h.querySelector<HTMLAnchorElement>('.waiting .section-head a')!.getAttribute('href')).toBe('#students');
   });
 
-  it('leaves out a step nobody waits at', () => {
+  it('keeps a state nobody is in, as a zero', () => {
     const h = mount(withStudents({ rows: 36, codes_sent: 36, joined: 30 }));
-    expect(lines(h)).toEqual(['6 codes sent, not joined yet #students']);
+    expect(lines(h)).toEqual(['0 on the roster, code not sent yet #students', '6 codes sent, not joined yet #students', '30 joined #students']);
   });
 
   it('is hidden when nobody waits', () => {

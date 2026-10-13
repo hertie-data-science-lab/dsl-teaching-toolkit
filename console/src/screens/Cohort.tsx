@@ -397,27 +397,27 @@ export function StudentCounts({ status, split }: { status: Status; split?: { stu
 }
 
 /**
- * The roster's waiting states, as counts the status carries: each line opens the Students tab.
- * Whether a joined student has accepted the org invitation is not in the status, so it is not
- * counted here. Hidden when nobody is waiting.
+ * The roster's states, as counts the status carries, every one shown (a zero too): each opens the
+ * Students tab. Whether a joined student has accepted the org invitation is not in the status,
+ * so it is not counted here.
  */
-export function waitingLines(status: Status): string[] {
+export function studentLines(status: Status): string[] {
   const s = status.students;
   if (!s) return [];
   const notSent = Math.max(0, s.rows - s.codes_sent), notJoined = Math.max(0, s.codes_sent - s.joined);
-  return [
-    notSent ? `${notSent} on the roster, code not sent yet` : '',
-    notJoined ? `${plural(notJoined, 'code')} sent, not joined yet` : '',
-  ].filter(Boolean);
+  return [`${notSent} on the roster, code not sent yet`, `${plural(notJoined, 'code')} sent, not joined yet`, `${s.joined} joined`];
 }
 
-function StudentsWaiting({ status }: { status: Status }) {
-  const lines = waitingLines(status);
-  if (!lines.length) return null;
+/** The Dashboard's Students panel, in the roster meter's look; hidden once every row has joined. */
+function StudentsPanel({ status }: { status: Status }) {
+  const s = status.students;
+  if (!s || s.joined >= s.rows) return null;
   return (
     <section class="panel section waiting">
-      <div class="section-head"><h2>Students</h2></div>
-      <ul class="waiting-list">{lines.map((l) => <li><a class="textlink" href="#students">{l}</a></li>)}</ul>
+      <div class="section-head"><h2>Students</h2><a class="btn small quiet" href="#students">Open roster</a></div>
+      <StudentCounts status={status} />
+      <p class="footnote">Incomplete: {s.rows - s.joined} of {s.rows} not joined yet.</p>
+      <ul class="waiting-list">{studentLines(status).map((l) => <li><a class="textlink" href="#students">{l}</a></li>)}</ul>
     </section>
   );
 }
@@ -528,7 +528,7 @@ function Overview(p: ReadyProps) {
             <p class="overdue">{late.length ? `${late.length} release${late.length > 1 ? 's are' : ' is'} late: ${late.map((r) => releaseIdent(r)).join(', ')}.` : 'Nothing overdue.'}</p>
         </section>
         <div class="grid-2">
-          <StudentsWaiting status={status} />
+          <StudentsPanel status={status} />
           <section class="panel section">
             <div class="section-head">
               <h2>Automation</h2>

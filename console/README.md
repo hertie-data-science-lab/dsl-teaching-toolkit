@@ -210,11 +210,12 @@ semesters; who ran each comes from its outcome file), go wherever the two column
 closest in height (`splitColumns`, from each panel's estimated height). Until the course's and
 every semester's status has loaded the columns keep a fixed layout (`SETTLING_COLUMNS`), so
 panels do not move as each arrives. The semester Dashboard's line under its title says only
-what the banner does not: the exams and the archive date. It has no Assignments panel: each
-assignment's state and progress are on the Assignments tab. Its Students notice lists only
-who waits, each line opening the Students tab: on the roster with no code sent yet, and codes
-sent but not joined yet (`status.json` does not say who has an org invitation still to accept,
-so that step is not counted); it is hidden when nobody waits.
+what the banner does not: the start, while the semester has no end date (the exams and the
+archive date are on the Schedule and the agenda). It has no Assignments panel: each
+assignment's state and progress are on the Assignments tab. Its Students panel is the roster
+meter plus every state, each line opening the Students tab: on the roster with no code sent
+yet, codes sent but not joined yet, and joined (`status.json` does not say who has an org
+invitation still to accept, so that step is not counted); it is hidden once every row has joined.
 
 The semester Dashboard's week strip filters its agenda only: This week on load, any set of
 weeks picked, none picked for all of them; the agenda panel's heading names the selection
