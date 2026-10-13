@@ -385,7 +385,8 @@ describe('editing screens', () => {
     expect(out).toContain('>Edit roster<');
     expect(out).toContain('Add a student');
     expect(out).toContain('Replace from CSV');
-    expect(out).toContain('Send new codes to students who have not joined');
+    expect(out).toContain('>Send codes<');
+    expect(out).toContain('>Sync now<');
     expect(out).not.toContain('SECRET');
   });
   it('staff has Add a person and Check instructor access', () => {

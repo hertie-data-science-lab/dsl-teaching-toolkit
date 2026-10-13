@@ -8,8 +8,8 @@ import { YamlText } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { fmtShort, plural } from '../model/format';
 import { ROLE_WORD, ROSTER_HEADER, parseInstructors, roleSplit, sameHandle, type Person } from '../model/people';
-import { checkAccess, sendCodes } from '../ops/defs';
-import { OpButtons, OpOpen } from '../ops/Panel';
+import { checkAccess, sendCodes, syncMembershipUrl } from '../ops/defs';
+import { OpOpen } from '../ops/Panel';
 import { PERSON, PHOTO_DIR, displayOnly, photoError } from '../tiers/people';
 import { pick } from '../tiers/types';
 import { authorOf } from '../github/client';
@@ -124,7 +124,9 @@ function Students(p: ReadyProps) {
         <div class="actions">
           <button class={`btn${editing ? ' quiet' : ''}`} type="button" aria-pressed={editing} disabled={!table || !!missing.length || !!replacement} onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit roster'}</button>
           <button class="btn quiet" type="button" aria-expanded={upload.open} onClick={() => setUpload({ ...upload, open: !upload.open })}>Replace from CSV</button>
-          <OpButtons def={sendCodes(scope, waiting)} label="Send new codes to students who have not joined" />
+          {/* Preview lives in each op's panel, not beside the button. */}
+          <OpOpen def={sendCodes(scope, waiting)} cls="btn quiet" label="Send codes" />
+          <a class="btn quiet" href={syncMembershipUrl(scope)} target="_blank" rel="noopener" title="Opens Sync membership on GitHub: press Run workflow there. Saving the roster starts it anyway.">Sync now</a>
         </div>
       </div>
       <div class="stack">

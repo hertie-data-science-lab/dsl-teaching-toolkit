@@ -176,6 +176,12 @@ export function sendCodes(s: Scope, waiting: number): OpDef {
   };
 }
 
+/**
+ * Sync membership is a course-org workflow, not a Console op: its manual run is GitHub's own
+ * Run workflow button, which this opens. A push to students.csv already starts it.
+ */
+export const syncMembershipUrl = (s: Scope) => `${ghUrl(s.courseOrg, COURSE_REPO)}/actions/workflows/sync-membership.yml`;
+
 export function updateSite(s: Scope): OpDef {
   return {
     ...base(s, 'site.update', 'site'), name: 'Update site', title: 'Student site', where: s.where,

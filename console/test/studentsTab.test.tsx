@@ -12,6 +12,7 @@ import { roleSplit } from '../src/model/people';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
+import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
 import { StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
@@ -53,11 +54,15 @@ async function mount() {
   const props: CohortProps = { course, cohort, loaded: ready, files: f, now: Date.parse('2026-09-23T10:00:00+02:00') };
   root = document.createElement('div');
   document.body.appendChild(root);
-  await act(() => render(<EnvCtx.Provider value={envOf(gh, f)}><StudentsScreen {...props} /></EnvCtx.Provider>, root!));
+  await act(() => render(<EnvCtx.Provider value={envOf(gh, f)}><StudentsScreen {...props} /><OpPanel /></EnvCtx.Provider>, root!));
   return gh;
 }
 
 const q = <T extends Element>(sel: string) => root!.querySelector<T>(sel)!;
+const button = (text: string) => [...root!.querySelectorAll('button')].find((b) => b.textContent?.trim() === text)!;
+async function click(el: Element) {
+  await act(() => (el as HTMLElement).click());
+}
 
 describe('the Students header line', () => {
   it('splits the roster by role, as the engine reads it, beside the codes sent and joined', async () => {
@@ -67,5 +72,29 @@ describe('the Students header line', () => {
 
   it('reads a blank or unknown role as a student', () => {
     expect(roleSplit([{ role: '' }, { role: 'enroled' }, { role: ' AUDITOR ' }, {}])).toEqual({ students: 3, auditors: 1 });
+  });
+});
+
+describe('the Students action row', () => {
+  it('is Edit roster, Replace from CSV, Send codes, Sync now, with no Preview of its own', async () => {
+    await mount();
+    const row = [...q('.page-head .actions').children].map((c) => c.textContent?.trim());
+    expect(row).toEqual(['Edit roster', 'Replace from CSV', 'Send codes', 'Sync now']);
+    expect(button('Preview')).toBeUndefined();
+  });
+
+  it('opens the send-new-codes panel, where Preview and the verb live', async () => {
+    await mount();
+    await click(button('Send codes'));
+    const drawer = q('aside.drawer');
+    expect(drawer.querySelector('#drawer-title')!.textContent).toBe('Students who have not joined');
+    expect([...drawer.querySelectorAll('.drawer-foot button')].map((b) => b.textContent)).toEqual(['Preview', 'Send 1 new code']);
+  });
+
+  it('opens Sync membership on GitHub for Sync now', async () => {
+    await mount();
+    const a = [...root!.querySelectorAll('a')].find((x) => x.textContent === 'Sync now')!;
+    expect(a.getAttribute('href')).toBe(`https://github.com/${COURSE_ORG}/.github/actions/workflows/sync-membership.yml`);
+    expect(a.getAttribute('target')).toBe('_blank');
   });
 });
