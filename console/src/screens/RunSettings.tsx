@@ -23,7 +23,7 @@ import { penaltyRate } from '../model/policy';
 import { round } from '../model/marks';
 import { RUN_LABEL, lateError, runTier, runTiers } from '../tiers/runSettings';
 import type { FieldTier, Values } from '../tiers/types';
-import { CheckLine, Lives, Loading } from '../ui/bits';
+import { CheckLine, EditFile, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { gradingConfig, tzOf, yearOf } from './common';
@@ -115,7 +115,7 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
           <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE, exists }} />
         </>
       )}
-      <Lives org={p.cohort.org} repo={CONFIG_REPO} path={ASSIGNMENTS_FILE} exists={exists} />
+      {f.error ? <div class="savebar"><EditFile org={p.cohort.org} repo={CONFIG_REPO} path={ASSIGNMENTS_FILE} exists={exists} /></div> : null}
     </>
   );
 }

@@ -17,7 +17,7 @@ import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseN
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
 import { TIMEZONES } from '../tiers/course';
-import { EditFile, Lives, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
+import { EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
@@ -696,7 +696,7 @@ function View(p: ReadyProps) {
               <div class="savebar"><span class="footnote">See what automation’s next scheduled release run would do.</span><OpOpen def={scheduledPreview(scope)} cls="btn small outline" label="Preview scheduled releases" /></div>
             </div>
           </details>
-          <div style="margin-top:14px"><Lives org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} /></div>
+          <div style="margin-top:14px"><EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} /></div>
         </div>
         {sheet}
       </div>

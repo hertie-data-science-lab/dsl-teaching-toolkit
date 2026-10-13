@@ -447,7 +447,7 @@ describe('editing screens', () => {
   const cp = { course, loaded: { kind: 'absent' } as Loaded, cohortStates: { [COHORT_ORG]: ready }, files, now: NOW };
   it('course details edits admins with emails and the defaults', () => {
     const out = html(<DetailsScreen {...cp} />);
-    expect(out).toContain(`<div class="actions"><a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/dsl-course.yml" target="_blank" rel="noopener">Edit on GitHub`);
+    expect(out).toContain(`<div class="actions"><a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/dsl-course.yml" target="_blank" rel="noopener" title="${COURSE_ORG}/.github/dsl-course.yml">Edit the file directly`);
     expect(out).not.toContain('New semester');
     // On .github's own default branch; GitHub's new-file page while dsl-course.yml does not exist.
     const trunk = new StaticFiles({}, {}, {}, { [COURSE_ORG]: [{ name: '.github', default_branch: 'trunk' }] });
@@ -530,14 +530,14 @@ describe('editing screens', () => {
     expect(out).toContain('Public OpenCourse website <span class="chip">Beta</span>');
     expect(out).toContain('Beta: leave this off for now - work in progress.');
     expect(out).toContain('<button class="btn" type="button">Publish website</button>');
-    expect(out).toContain(`<a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/opencourse.yml" target="_blank" rel="noopener">Edit on GitHub`);
+    expect(out).toContain(`<a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/opencourse.yml" target="_blank" rel="noopener" title="${COURSE_ORG}/.github/opencourse.yml">Edit the file directly`);
     expect(out).not.toContain('New semester');
-    // No opencourse.yml yet: Edit on GitHub opens GitHub's new-file page with the name filled in.
+    // No opencourse.yml yet: Create the file on GitHub opens GitHub's new-file page with the name filled in.
     expect(html(<WebsiteScreen {...cp} files={new StaticFiles({}, {}, {})} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/main?filename=opencourse.yml"`);
     expect(out).toContain('Source materials');
     expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">kept off<\/span>/);
     expect(out).toContain('Keep the website updated');
-    expect(out).toContain('Lives in hertie-dsl-demo-course-e1234/.github/opencourse.yml');
+    expect(out).not.toContain('Lives in');
     expect(out).toContain('href="#details"');
   });
 });

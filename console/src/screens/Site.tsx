@@ -13,7 +13,7 @@ import type { Outcome } from '../model/types';
 import { outcomePath } from '../ops/adapter';
 import { updateSite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { CheckLine, Lives, Loading, OpsList } from '../ui/bits';
+import { CheckLine, EditFile, Loading, OpsList } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { Ext } from '../ui/icons';
@@ -121,7 +121,6 @@ function Site(p: ReadyProps) {
             <Field id="site-home" k="home" t={{ tier: 'ask', label: 'Home page', widget: 'markdown', reason: 'The first thing students read.' }} value={shown} values={{}} set={(_, v) => setBody(String(v ?? ''))} shown={(t) => homeText(t, siteVars, true)} />
           ) : <p class="footnote">No home page yet: it appears when the site is set up.</p>}
           <SaveBar state={homeSave} onSave={() => void saveHome()} small disabled={body === null || body === homeBody} file={{ org: p.cohort.org, repo, path: 'index.md', exists: home.kind !== 'absent' }} />
-          <Lives org={p.cohort.org} repo={repo} path="index.md" exists={home.kind !== 'absent'} />
         </section>
         <section class="panel section">
           <div class="section-head"><h2>Announcements</h2><span class="meta">Shown in the Updates box with released sessions and hand outs</span></div>
@@ -137,7 +136,6 @@ function Site(p: ReadyProps) {
             </div>
           </div>
           <SaveBar state={annSave} onSave={() => void addAnn()} label="Add an announcement" small disabled={!newAnn.text.trim()} file={{ org: p.cohort.org, repo, path: '_announcements/', exists: false }} />
-          <Lives org={p.cohort.org} repo={repo} path="_announcements/" exists={ann.kind !== 'absent'} />
         </section>
         <section class="panel section">
           <h2>Instructor photos</h2>
@@ -158,7 +156,7 @@ function Site(p: ReadyProps) {
             <dt>Semester</dt><dd>{p.cohort.termLabel} <span class="footnote">rewritten</span></dd>
             <dt>GitHub org</dt><dd>{p.cohort.org} <span class="footnote">rewritten</span></dd>
           </dl>
-          <Lives org={p.cohort.org} repo={repo} path="_config.yml" exists={p.files.file(p.cohort.org, repo, '_config.yml').kind !== 'absent'} />
+          <p class="lives"><EditFile org={p.cohort.org} repo={repo} path="_config.yml" exists={p.files.file(p.cohort.org, repo, '_config.yml').kind !== 'absent'} /></p>
         </section>
       </div>
     </>

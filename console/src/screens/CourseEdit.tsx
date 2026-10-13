@@ -21,7 +21,7 @@ import { ABOUT, COURSE_FACTS, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
-import { CheckLine, EditFile, Lives, Loading, editUrl, newFileUrl } from '../ui/bits';
+import { CheckLine, EditFile, Loading, editUrl, fileLinkText, newFileUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { PatternTree } from '../ui/PatternTree';
@@ -208,7 +208,7 @@ function LinkKindsField({ id, value, onInput }: { id: string; value: string; onI
   );
 }
 
-/** A course file's Edit on GitHub link, on .github's default branch (main until the repo list is read); GitHub's new-file page when it does not exist yet. */
+/** A course file's edit link (Edit the file directly), on .github's default branch (main until the repo list is read); GitHub's new-file page when it does not exist yet. */
 export function courseFileUrl(files: CourseProps['files'], org: string, path: string, exists: boolean): string {
   const gh = files.repos(org);
   const branch = (gh.kind === 'ready' ? gh.repos.find((r) => r.name === COURSE_REPO)?.default_branch : undefined) ?? 'main';
@@ -248,7 +248,7 @@ export function DetailsScreen(p: CourseProps) {
     <>
       <div class="page-head">
         <div><h2 class="h1">Course details <Hint doc="01-new-course-org.md">Every semester of the course starts from these settings. Each semester and each assignment can set its own defaults.</Hint></h2><p class="lede">What every semester’s student site shows about the course, and the course’s defaults.</p></div>
-        <div class="actions"><a class="btn quiet" href={courseFileUrl(p.files, course.org, 'dsl-course.yml', file.kind !== 'absent')} target="_blank" rel="noopener">Edit on GitHub <Ext /></a></div>
+        <div class="actions"><a class="btn quiet" href={courseFileUrl(p.files, course.org, 'dsl-course.yml', file.kind !== 'absent')} target="_blank" rel="noopener" title={`${course.org}/${COURSE_REPO}/${'dsl-course.yml'}`}>{fileLinkText(file.kind !== 'absent')} <Ext /></a></div>
       </div>
       {file.kind === 'loading' ? <Loading what="Reading dsl-course.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no dsl-course.yml in {course.org}/.github.</CheckLine> : null}
@@ -286,7 +286,6 @@ export function DetailsScreen(p: CourseProps) {
             </details>
             <div class="form-section">
               <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml', exists: file.kind !== 'absent' }} />
-              <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={file.kind !== 'absent'} />
             </div>
           </div>
         </div>
@@ -466,7 +465,7 @@ export function WebsiteScreen(p: CourseProps) {
         </div>
         <div class="actions">
           <OpButtons def={publishWebsite(courseScope(p), published)} />
-          <a class="btn quiet" href={courseFileUrl(p.files, course.org, OPENCOURSE_FILE, file.kind !== 'absent')} target="_blank" rel="noopener">Edit on GitHub <Ext /></a>
+          <a class="btn quiet" href={courseFileUrl(p.files, course.org, OPENCOURSE_FILE, file.kind !== 'absent')} target="_blank" rel="noopener" title={`${course.org}/${COURSE_REPO}/${OPENCOURSE_FILE}`}>{fileLinkText(file.kind !== 'absent')} <Ext /></a>
         </div>
       </div>
       {file.kind === 'loading' ? <Loading what={`Reading ${OPENCOURSE_FILE}`} /> : null}
@@ -497,7 +496,6 @@ export function WebsiteScreen(p: CourseProps) {
       ) : null}
       <section class="panel section">
         <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false || !!y?.errors.length} file={{ org: course.org, repo: COURSE_REPO, path: OPENCOURSE_FILE, exists: file.kind !== 'absent' }} />
-        <Lives org={course.org} repo={COURSE_REPO} path={OPENCOURSE_FILE} exists={file.kind !== 'absent'} />
       </section>
     </>
   );
@@ -702,7 +700,6 @@ export function MaterialsScreen(p: CourseProps) {
             </table>
           ) : <p class="footnote">{tree.kind === 'error' ? 'Could not read the repo’s folders; it is tried again shortly.' : 'No folders yet.'}</p>}
           <SaveBar state={kindSave} onSave={() => void saveMat({ syllabus: baseSyl, kinds: curKinds }, runKind, setKindSave, () => setKindsDraft(null))} small disabled={kindsDraft === null || deepEqual(kindsDraft, baseKinds) || declared === null} file={matRef} />
-          <Lives {...matRef} />
         </section>
         <section class="panel section">
           <h2>Withheld from students <Hint label="About withheld files">Everything in this repo is released to students as it stands, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
@@ -712,7 +709,6 @@ export function MaterialsScreen(p: CourseProps) {
           )}
           <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
           <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ignFile.kind === 'loading' || (ignFile.kind === 'ready' && ignOut === ignText)} file={ignRef} />
-          <Lives {...ignRef} />
         </section>
       </div>
     </>

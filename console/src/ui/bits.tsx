@@ -70,25 +70,16 @@ export function Soon({ label, cls = 'btn', title = SOON }: { label: ComponentChi
 
 export const Prop = () => <span class="prop" title="Not in the engine today">proposed</span>;
 
-/** "Edit the file directly"; while the file does not exist (`exists` false), GitHub's new-file page instead. */
-export function EditFile({ org, repo, path, branch = 'main', line, exists = true }: { org: string; repo: string; path: string; branch?: string; line?: number; exists?: boolean }) {
-  return (
-    <a class="edit-file" href={exists ? editUrl(org, repo, path, branch, line) : newFileUrl(org, repo, path, branch)} target="_blank" rel="noopener">
-      {exists ? 'Edit the file directly' : 'Create the file on GitHub'} <Ext />
-    </a>
-  );
+/** The two file links: "Edit the file directly" (GitHub's edit page) or, while the file does not exist (`exists` false), "Create the file on GitHub" (its new-file page); the full `org/repo/path` is the tooltip. */
+export function fileLinkText(exists: boolean): string {
+  return exists ? 'Edit the file directly' : 'Create the file on GitHub';
 }
 
-export function Lives({ org, repo, path, branch = 'main', exists = true }: { org: string; repo: string; path?: string; branch?: string; exists?: boolean }) {
-  const where = `${org}/${repo}${path ? `/${path}` : ''}`;
+export function EditFile({ org, repo, path, branch = 'main', line, exists = true, cls = 'edit-file' }: { org: string; repo: string; path: string; branch?: string; line?: number; exists?: boolean; cls?: string }) {
   return (
-    <p class="lives">
-      {path && !exists ? (
-        <a href={newFileUrl(org, repo, path, branch)} target="_blank" rel="noopener">Create {where} on GitHub</a>
-      ) : (
-        <a href={ghUrl(org, repo, path, branch)} target="_blank" rel="noopener">Lives in {where}</a>
-      )}
-    </p>
+    <a class={cls} href={exists ? editUrl(org, repo, path, branch, line) : newFileUrl(org, repo, path, branch)} target="_blank" rel="noopener" title={`${org}/${repo}/${path}`}>
+      {fileLinkText(exists)} <Ext />
+    </a>
   );
 }
 

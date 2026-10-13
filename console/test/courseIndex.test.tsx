@@ -17,7 +17,7 @@ import { MaterialsScreen, WebsiteScreen, folderKinds, kindChoices, resetLabel, w
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { REVIEWED_MARK, withMark } from '../src/model/materialsRules';
-import { EditFile, Lives, newFileUrl } from '../src/ui/bits';
+import { EditFile, newFileUrl } from '../src/ui/bits';
 import { Sidenav } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
 
@@ -383,8 +383,17 @@ describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () 
     expect(absent).toContain('href="https://github.com/o/r/new/main?filename=materials.yml"');
     expect(absent).toContain('Create the file on GitHub');
     expect(render(<EditFile org="o" repo="r" path="materials.yml" />)).toContain('href="https://github.com/o/r/edit/main/materials.yml"');
-    expect(render(<Lives org="o" repo="r" path=".releaseignore" exists={false} />)).toContain('href="https://github.com/o/r/new/main?filename=.releaseignore"');
-    expect(render(<Lives org="o" repo="r" path=".releaseignore" />)).toContain('href="https://github.com/o/r/blob/main/.releaseignore"');
+  });
+
+  it('keeps two short file links, with the full org/repo/path as the tooltip', () => {
+    const absent = render(<EditFile org="o" repo="r" path="materials.yml" exists={false} />);
+    const present = render(<EditFile org="o" repo="r" path="materials.yml" />);
+    expect(absent).toContain('title="o/r/materials.yml"');
+    expect(present).toContain('title="o/r/materials.yml"');
+    expect(present).toContain('target="_blank"');
+    expect(present).toContain('Edit the file directly');
+    expect(absent).not.toContain('Create o/r');
+    expect(present).not.toContain('Lives in');
   });
 
   it('on the settings screen: new-file links for an absent materials.yml, the editor for a present .releaseignore', () => {

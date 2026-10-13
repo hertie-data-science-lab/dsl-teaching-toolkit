@@ -13,7 +13,7 @@ import { OpOpen } from '../ops/Panel';
 import { PERSON, PHOTO_DIR, displayOnly, photoError } from '../tiers/people';
 import { pick } from '../tiers/types';
 import { authorOf } from '../github/client';
-import { CheckLine, EditFile, Lives, Loading, ProblemCards, ghUrl } from '../ui/bits';
+import { CheckLine, EditFile, Loading, ProblemCards, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar, SaveLine } from '../ui/edit';
 import { StudentCounts } from './Cohort';
@@ -235,7 +235,6 @@ function Students(p: ReadyProps) {
         ) : null}
         <div class="panel" style="display:grid;gap:10px">
           <SaveBar state={save} onSave={() => void doSave()} label={saveLabel} disabled={!nEdits} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv', exists: file.kind !== 'absent' }} note={nEdits ? `${pendingSummary(counts)}. ${ROSTER_SAVE_NOTE}` : 'No unsaved changes'} />
-          <Lives org={p.cohort.org} repo={CONFIG_REPO} path="students.csv" exists={file.kind !== 'absent'} />
         </div>
       </div>
     </>
@@ -390,7 +389,6 @@ function Instructors(p: ReadyProps) {
             <div class="savebar"><EditFile org={p.cohort.org} repo={CONFIG_REPO} path={INSTRUCTORS_FILE} exists={file.kind !== 'absent'} /></div>
           </>
         ) : null}
-        <Lives org={p.cohort.org} repo={CONFIG_REPO} path={INSTRUCTORS_FILE} exists={file.kind !== 'absent'} />
       </div>
     </>
   );
