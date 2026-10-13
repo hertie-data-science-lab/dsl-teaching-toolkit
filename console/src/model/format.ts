@@ -205,24 +205,6 @@ export const PROBLEM_AREA: Record<string, string> = {
   C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Course materials', C5: 'Template', C6: 'Public website',
 };
 
-/**
- * Problem kinds the console names itself: the card's bold word, the screen that fixes it, and
- * whether it can be set aside (decision 0032; the id goes in the course's `set_aside:`).
- */
-export const PROBLEM_KIND: Record<string, { label: string; screen: string; aside?: boolean }> = {
-  EMPTY_WEEK: { label: 'Empty week', screen: 'schedule', aside: true },
-  EMPTY_WEEK_KIND: { label: 'Missing', screen: 'schedule', aside: true },
-};
-
-/** A problem card's bold word: "Missing lab" for a week's missing kind (`empty_week:<monday>:<kind>`), else its kind's label. */
-export function problemLabel(p: { id: string; kind?: string }): string | undefined {
-  if (p.kind === 'EMPTY_WEEK_KIND') return `Missing ${p.id.split(':')[2] ?? ''}`.trim();
-  return p.kind ? PROBLEM_KIND[p.kind]?.label : undefined;
-}
-
-/** Whether a problem can be set aside: today only a gap in a week (`empty_week:<monday>[:<kind>]`). */
-export const asideable = (p: { kind?: string }) => !!(p.kind && PROBLEM_KIND[p.kind]?.aside);
-
 /** Whether a set-aside id is a gap in a week, which the course sets aside as intentional. */
 export const isWeekGap = (id: string) => id.startsWith('empty_week:');
 
@@ -234,7 +216,11 @@ export function gapWeek(id: string): string | null {
   return m ? `week of ${+m[3]} ${MON[+m[2] - 1]}` : null;
 }
 
-/** "Empty week of 20 Oct" from `empty_week:2026-10-20`, "Missing lab, week of 20 Oct" from `empty_week:2026-10-20:lab`; null for any other id. */
+/**
+ * "Empty week of 20 Oct" from `empty_week:2026-10-20`, "Missing lab, week of 20 Oct" from
+ * `empty_week:2026-10-20:lab`; null for any other id. For the Set aside list, whose ids no
+ * longer have a problem in the status to carry the engine's `label`.
+ */
 export function emptyWeekLabel(id: string): string | null {
   const week = gapWeek(id);
   if (!week) return null;

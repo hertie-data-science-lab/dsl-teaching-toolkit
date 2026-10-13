@@ -670,6 +670,12 @@ describe('S2 course and S17 template', () => {
     expect(out).toContain('No starter file: students get none, so there is nothing to derive or write.');
     expect(out).toContain('Starter files');
   });
+  it('greys the starter controls of a template handed in outside GitHub, as it hands out none', () => {
+    const ext = new StaticFiles({ [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: GRADING.replace('submit_via: assignment_repo', 'submit_via: external') });
+    const out = html(<TemplateScreen {...cp} files={ext} entry="assignment-3-f2026" />);
+    expect(out).toContain('<div class="starter-off">');
+    expect(out).not.toContain('Derive student version');
+  });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3-f2026" />);
     expect(out).toContain('<h2 class="h1">Group project <span class="hint-wrap">');
@@ -724,11 +730,11 @@ describe('S2 course and S17 template', () => {
 describe('a template’s checklist', () => {
   it('lists the starter only where the engine says one is handed out', () => {
     const todo = [{ id: 'template:a1:starter', kind: 'template' as const, check: 'starter', repo: 'a1', text: 'Derive has not been run yet.', need: 'needed' as const }];
-    const ids = (tpl: { starter?: 'derived' | 'handwritten'; starter_applies?: boolean }) => templateItems('a1', todo, tpl, [], 0).map((i) => `${i.id}:${i.state}`);
+    const ids = (tpl: { starter?: 'derived' | 'handwritten' | 'none' }) => templateItems('a1', todo, tpl, [], 0).map((i) => `${i.id}:${i.state}`);
     expect(ids({ starter: 'derived' })).toEqual(['brief:done', 'starter:open']);
-    expect(ids({ starter: 'derived', starter_applies: true })).toEqual(['brief:done', 'starter:open']);
+    expect(ids({})).toEqual(['brief:done', 'starter:open']);
     // `formats: [none]` or `submit_via: external`: no starter row at all, not a tick.
-    expect(ids({ starter: 'derived', starter_applies: false })).toEqual(['brief:done']);
+    expect(ids({ starter: 'none' })).toEqual(['brief:done']);
   });
 });
 

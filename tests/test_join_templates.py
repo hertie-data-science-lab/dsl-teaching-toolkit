@@ -773,6 +773,30 @@ _TEAMS_CSV = _TEAMS_HEADER + (
 
 
 @needs_js
+@pytest.mark.parametrize("window", ["closed", "pending"])
+def test_an_unknown_slug_with_no_team_assignment_open_is_told_so(window):
+    # The form says the same when nothing is open (`welcome.NO_TEAM_ASSIGNMENT_OPEN`):
+    # checking the slug would send the student hunting for an assignment that is not there.
+    from dsl_course import welcome
+
+    body = _form_body("assignment-9", "Create a new team", "team-zeta")
+    out = _run_form(_lock_for(window), _TEAMS_CSV, body)
+    assert out["writes"] == []
+    assert out["labels"] == ["team-refused"]
+    (said,) = out["comments"]
+    assert "`assignment-9` isn't an assignment in this semester." in said
+    sentence = welcome.NO_TEAM_ASSIGNMENT_OPEN.split(",")[0]
+    assert said.endswith(f"{sentence}.") and "Check the slug" not in said
+
+
+@needs_js
+def test_an_unknown_slug_while_one_is_open_is_sent_back_to_the_slug():
+    body = _form_body("assignment-9", "Create a new team", "team-zeta")
+    (said,) = _run_form(_lock_for("open"), _TEAMS_CSV, body)["comments"]
+    assert "Check the slug on the course site" in said
+
+
+@needs_js
 def test_a_shut_window_refuses_and_says_which_day_it_shut():
     out = _run_form(
         _lock_for("closed"),

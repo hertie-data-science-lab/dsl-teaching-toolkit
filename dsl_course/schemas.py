@@ -44,6 +44,7 @@ from .course import (
     SOLUTION_BEFORE_CUTOFF,
     SOLUTION_WARNING,
     STARTER_MODES,
+    STARTER_STATES,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
@@ -305,9 +306,8 @@ def status_schema(*, closed: bool = True) -> dict:
         {
             "repo": _str(),
             "state": _str(),
-            "starter": _enum(STARTER_MODES),
-            # False: no starter is handed out (`format: none` or `submit_via: external`).
-            "starter_applies": {"type": "boolean"},
+            # `none`: no starter is handed out (`format: none` or `submit_via: external`).
+            "starter": _enum(STARTER_STATES),
         },
         ("repo", "state"),
     )
@@ -408,6 +408,10 @@ def status_schema(*, closed: bool = True) -> dict:
             # schedule entry it holds back, when it holds one.
             "kind": _str(),
             "release": _str(),
+            # The card's word where the engine names it (an empty week's "Missing lab"),
+            # and `aside: true` on the kinds the course can set aside (decision 0032).
+            "label": _str(),
+            "aside": {"type": "boolean"},
             "text": _str(),
             "stops": _str(),
             "fix": fix,

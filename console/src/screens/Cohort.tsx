@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'preact/hooks';
 import {
   NOT_READY_YET, TYPE_CLASS, TYPE_LABEL, addDays, ago, daysBetween, fmtDate, fmtDay, fmtShort, fmtTime, fmtWhen, markWord, plural, releaseIdent,
-  asideable, emptyWeekLabel,
+  emptyWeekLabel,
 } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekStart, type Row, type Schedule, type Term, type WeekGroup, type WeekKey, termOf } from '../model/schedule';
 import type { Assignment, Problem, Status } from '../model/types';
@@ -349,7 +349,7 @@ export interface ComingRow {
 export function comingRows(status: Status, tiered: Tiered[]): ComingRow[] {
   return tiered.filter((x) => x.b === 'later').map(({ p }) => ({
     key: p.id, when: p.when, from: p.when ? problemFromDay(p.when, status.horizon) : undefined, text: p.text, href: fixHref(p) ?? '#schedule', link: 'Fix',
-    aside: asideable(p) ? p : undefined,
+    aside: p.aside ? p : undefined,
   }));
 }
 
@@ -455,7 +455,7 @@ function Overview(p: ReadyProps) {
   // counts and the Problems tab; later ones are Coming up.
   const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.courseMigrated, write: p.course.write });
   // An empty week the course set aside leaves the moment the list says so, before the status is rewritten.
-  const tiered = useMemo(() => tier(status).filter(({ p: x }) => !(asideable(x) && aside.list?.includes(x.id))), [status, aside.list?.join('\n')]);
+  const tiered = useMemo(() => tier(status).filter(({ p: x }) => !(x.aside && aside.list?.includes(x.id))), [status, aside.list?.join('\n')]);
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
   const problems = standing(tiered);
   const setAsideProblem = aside.onCircle ? (x: Problem) => aside.onCircle!({ id: x.id, label: emptyWeekLabel(x.id) ?? x.text }) : undefined;

@@ -15,7 +15,7 @@ import { CONFLICT } from '../src/edit/save';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
 import { CohortScreen } from '../src/screens/Cohort';
-import { emptyWeekLabel, problemLabel } from '../src/model/format';
+import { emptyWeekLabel } from '../src/model/format';
 import { CourseTabs, courseReadiness, courseView } from '../src/screens/Course';
 import { setAsideText, useSetAside } from '../src/screens/SetAside';
 import type { Files } from '../src/model/files';
@@ -304,6 +304,7 @@ describe('an empty week on the semester dashboard', () => {
   const base = example as unknown as Status;
   const week = (monday: string, bites: 'soon' | 'later', kind?: string) => ({
     id: `empty_week:${monday}${kind ? `:${kind}` : ''}`, scope: 'semester' as const, stage: 'K4', kind: kind ? 'EMPTY_WEEK_KIND' : 'EMPTY_WEEK', bites,
+    label: kind ? `Missing ${kind}` : 'Empty week', aside: true,
     text: `${kind ? `No ${kind} seems` : 'Nothing seems'} to have been scheduled for this week. If this is intentional, click 'Set aside'.`,
     stops: kind ? `Students see a week with no ${kind}.` : 'Students see an empty week.',
     fix: { repo: `${COHORT}/semester-config`, path: 'schedule.yml', line: null, screen: 'schedule', entry: null },
@@ -356,12 +357,9 @@ describe('an empty week on the semester dashboard', () => {
     expect(body(puts(gh)[0])).toBe(`${META}set_aside:\n  - empty_week:2026-10-05:lab\n`);
   });
 
-  it('labels each missing kind, on its card and in the Set aside list', () => {
-    for (const k of ['lecture', 'lab', 'readings']) {
-      expect(problemLabel({ id: `empty_week:2026-10-05:${k}`, kind: 'EMPTY_WEEK_KIND' })).toBe(`Missing ${k}`);
-      expect(emptyWeekLabel(`empty_week:2026-10-05:${k}`)).toBe(`Missing ${k}, week of 5 Oct`);
-    }
-    expect(problemLabel({ id: 'empty_week:2026-10-05', kind: 'EMPTY_WEEK' })).toBe('Empty week');
+  it('labels each missing kind in the Set aside list, where only the id is left', () => {
+    for (const k of ['lecture', 'lab', 'readings']) expect(emptyWeekLabel(`empty_week:2026-10-05:${k}`)).toBe(`Missing ${k}, week of 5 Oct`);
+    expect(emptyWeekLabel('empty_week:2026-10-05')).toBe('Empty week of 5 Oct');
   });
 
   it('once set aside, leaves the problems and is listed under Set aside to bring back', async () => {

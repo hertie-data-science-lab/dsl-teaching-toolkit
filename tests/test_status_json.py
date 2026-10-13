@@ -620,7 +620,6 @@ def test_an_assignment_template_by_its_old_name_only_is_not_migrated():
             "repo": "assignment-1-f2025",
             "state": "problem",
             "starter": "derived",
-            "starter_applies": True,
         }
     ]
     (problem,) = [p for p in doc["problems"] if p["id"].startswith("template:")]
@@ -2473,11 +2472,11 @@ def test_the_starter_is_checked_only_where_a_starter_is_handed_out(
         status_json.sync_faculty, "read_course_config", lambda org, faults: None
     )
     (t,) = status_json.gather_course(COURSE).templates
-    assert t.starter_applies is applies
+    assert (t.starter != "none") is applies
     assert (t.starter_todo is not None) is applies
     doc = status_json.render_course_file(_course(templates=[t]), NOW)
     row = doc["course"]["templates"][0]
-    assert row["starter_applies"] is applies
+    assert (row["starter"] == "none") is not applies
     assert (
         any(x["id"] == "template:quiz:starter" for x in doc["course"]["todo"])
         is applies
@@ -3107,10 +3106,32 @@ def test_a_week_with_nothing_dated_is_one_empty_week_problem():
     )
     assert p["when"] == "2026-10-12T00:00:00+02:00"
     assert p["fix"]["screen"] == "schedule"
+    # The card's word and the Set aside button come from here, not from the console.
+    assert (p["label"], p["aside"]) == ("Empty week", True)
     # The empty week raises that one row, never a missing lecture as well. The exam's
     # week has no lecture: an exam does not stand in for one.
     assert lecture["id"] == "empty_week:2026-10-19:lecture"
     assert lecture["kind"] == "EMPTY_WEEK_KIND"
+    assert (lecture["label"], lecture["aside"]) == ("Missing lecture", True)
+
+
+def test_the_weeks_are_the_semesters_own_counted_from_its_first_day():
+    # A Wednesday start: week 1 is Wed 7 to Tue 13 Oct, which the Monday release falls in;
+    # week 2, Wed 14 to Tue 20, has nothing. The id names that week's Monday.
+    text = """\
+timezone: Europe/Berlin
+semester_start: 2026-10-07
+semester_end: 2026-10-20
+releases:
+  lecture_1:
+    event_datetime: 2026-10-12T10:00
+    kind: lecture
+"""
+    facts = _semester(sched=_sched(text))
+    before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    (p,) = status_json.empty_week_problems(facts, before, frozenset())
+    assert p["id"] == "empty_week:2026-10-12"
+    assert p["when"] == "2026-10-14T00:00:00+02:00"
 
 
 def test_a_week_already_begun_is_not_raised():
@@ -3146,7 +3167,7 @@ def test_a_week_missing_only_its_lab_is_one_missing_lab_problem():
     # no week is ever told it lacks them.
     facts = _semester(sched=_sched(WEEKLY))
     before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
-    (p,) = status_json.empty_week_problems(facts, before)
+    (p,) = status_json.empty_week_problems(facts, before, frozenset())
     assert p["id"] == "empty_week:2026-10-12:lab"
     assert p["kind"] == "EMPTY_WEEK_KIND"
     assert p["text"] == (
@@ -3181,7 +3202,7 @@ releases:
     ids = [
         p["id"]
         for p in status_json.empty_week_problems(
-            facts, datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+            facts, datetime(2026, 9, 30, 9, 0, tzinfo=UTC), frozenset()
         )
     ]
     assert ids == [

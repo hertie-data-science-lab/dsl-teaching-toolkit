@@ -16,7 +16,7 @@ import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
 import { courseBlock, institutionLayer, lateWord, resolve, validGrading, valueWord, type Layers } from '../model/cascade';
 import { POLICY } from '../model/policy';
-import { fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
+import { fromConfig, handsOutStarter, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import { pick, type Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
 import type { CourseStatus, Horizon, MaterialsCheck, Operation, Outcome, Problem, SemesterStatus, Status, Todo } from '../model/types';
@@ -216,14 +216,14 @@ export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
 }
 
 /** A template's needed checklist (the brief, the student version where a starter is handed out), from the course's open to-dos. */
-export function templateItems(repo: string, todo: Todo[], tpl: { starter?: 'derived' | 'handwritten'; starter_applies?: boolean }, tiered: Tiered[], now: number, horizon?: Horizon): SetupItem[] {
+export function templateItems(repo: string, todo: Todo[], tpl: { starter?: 'derived' | 'handwritten' | 'none' }, tiered: Tiered[], now: number, horizon?: Horizon): SetupItem[] {
   const row = (k: 'brief' | 'starter', label: string): SetupItem => {
     const t = todo.find((x) => x.kind === 'template' && x.repo === repo && x.check === k);
     const when = t ? handoutWords(tiered, repo, k, now, horizon) : undefined;
     return { id: k, label, kind: 'step', need: 'needed', state: t ? 'open' : 'done', why: t?.text, when, hint: TEMPLATE_TODO[k].hint, hintLabel: 'About this check' };
   };
   const brief = row('brief', TEMPLATE_TODO.brief.label);
-  if (tpl.starter_applies === false) return [brief];
+  if (tpl.starter === 'none') return [brief];
   return [brief, row('starter', tpl.starter === 'handwritten' ? 'Starter files on main' : TEMPLATE_TODO.starter.label)];
 }
 
@@ -652,10 +652,11 @@ export function TemplateScreen(p: CourseProps) {
   const tiers = settingsTiers();
   // A template that lists no formats runs as `none` (no starter, no completion check): the course's
   // default answers New assignment only. Shown ticked, written only when changed.
-  const read = fromConfig(cfg, v.course?.templates?.find((t) => t.repo === repo)?.starter);
+  const read = fromConfig(cfg, tpl?.starter);
   const base: Values = { ...read, formats: (read.formats as string[]).length ? read.formats : ['none'] };
   const cur = values ?? base;
-  const noStarter = (cur.formats as string[]).includes('none');
+  // No starter handed out (the engine's `starter: none`), read off the form so an edit greys it at once.
+  const noStarter = !handsOutStarter(cur);
   const baseQ = questionRows(cfg.questions);
   const q = qdraft ?? baseQ;
   const fileErr = q.map((r) => questionFileError(r.file)).find(Boolean);
