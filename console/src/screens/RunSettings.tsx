@@ -24,6 +24,7 @@ import { round } from '../model/marks';
 import { RUN_LABEL, lateError, runTier, runTiers } from '../tiers/runSettings';
 import type { FieldTier, Values } from '../tiers/types';
 import { CheckLine, Lives, Loading } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { gradingConfig, tzOf, yearOf } from './common';
 import type { ReadyProps } from './types';
@@ -231,6 +232,18 @@ export function cutoffOf(dueDate: string, dueTime: string, days: unknown): strin
   return dueTime ? `${day}T${dueTime}` : day;
 }
 
+/** What showing the solution does, said beside every switch that schedules it, with the ? on reuse and returning marks. */
+export function SolutionNote() {
+  return (
+    <p class="note">
+      {SOLUTION_WARNING}{' '}
+      <Hint small label="About pushing the solution" doc="07-schedule-releases.md#releasing-the-model-solution">
+        Copies the template’s solution branch, the model answer and rubric, into every student’s repo, where it stays: nothing takes it back. Reuse this assignment template in a later semester and its answers are already out with this semester’s students. Marks go back without it: Return marks, on the assignment’s page, sends marks and feedback only.
+      </Hint>
+    </p>
+  );
+}
+
 const T = (label: string, widget: FieldTier['widget'], extra: Partial<FieldTier> = {}): FieldTier => ({ tier: 'default', label, widget, ...extra });
 
 /** Timings as the Overview form edits them: hand out, due, the computed late cutoff, solution shown. */
@@ -263,7 +276,7 @@ function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year }
           {F('solutionOn', T('Show the solution', 'checkbox', { defaultLabel: 'default: off' }))}
           {d.solutionOn ? (
             <div class="cond">
-              <p class="note">{SOLUTION_WARNING}</p>
+              <SolutionNote />
               <div class="row-2">{F('solutionDate', T('Solution shown on', 'date', { reason: 'After the hand out, and not before the late cutoff.' }), errors.solution)}{F('solutionTime', T('At', 'time'))}</div>
             </div>
           ) : null}
