@@ -1,5 +1,5 @@
 // The assignment hub's Marks tab (S12, the grading sheet as a grid) and Teams tab (S9,
-// teams.csv for a team assignment), and the semester's read-only Marks overview.
+// teams.csv for a team assignment).
 
 import { useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
@@ -7,8 +7,8 @@ import { readTable, writeTable } from '../edit/csv';
 import { useSave } from '../edit/save';
 import { YamlText, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
-import { ASSIGNMENT_WORD, assignmentTitle, fmtDay, fmtWhen, str } from '../model/format';
-import { NOTES_KEY, cellValue, finalGrade, gradebookWrites, penaltyText, questionFile, questionPoints, readSheet, returnedOn, round, scoreTotal, type Unit } from '../model/marks';
+import { assignmentTitle, fmtDay, fmtWhen, str } from '../model/format';
+import { NOTES_KEY, cellValue, finalGrade, penaltyText, questionFile, questionPoints, readSheet, round, scoreTotal, type Unit } from '../model/marks';
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
 import { assignmentSettings, sheetName } from './RunSettings';
 import { penaltyRate } from '../model/policy';
@@ -22,9 +22,14 @@ import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { Check, Lock } from '../ui/icons';
 import type { TabProps } from './Assignments';
-import { WithStatus, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
-import type { CohortProps, ReadyProps } from './types';
-import { CONFIG_REPO, LEDGER_PATH } from '../model/names';
+import { cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
+import { CONFIG_REPO } from '../model/names';
+
+/** The late cutoff as the Return marks dialog names it, while it has not passed; null after it. */
+export function lateUntil(a: Assignment, now: number, tz: string, year: number): string | null {
+  const at = a.grading_cutoff_datetime;
+  return at && Date.parse(at) > now ? fmtWhen(at, tz, year) : null;
+}
 
 function asgRef(a: Assignment, group: boolean): AsgRef {
   return { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: 'Marking' };
@@ -46,7 +51,8 @@ function penaltyOf(a: Assignment): number | null {
 }
 
 export function MarksTab(p: TabProps) {
-  const { a } = p;
+  const { a, status, now } = p;
+  const tz = tzOf(status), year = yearOf(now, tz);
   const env = useEnv();
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   // Folds, by unit: `m:<unit>` hides a team's members, `q:<unit>` shows its feedback per question.
@@ -71,13 +77,13 @@ export function MarksTab(p: TabProps) {
   const head = (
     <div class="page-head">
       <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. {group ? 'A team’s marks and feedback reach every member once you return marks.' : 'Nothing reaches a student until you return marks.'}</Hint></h2><p class="lede">{a.marks.filled} of {a.marks.total} marked. {rate !== null ? `Totals and late penalties (${round(rate * 100)}% of the total per late day) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p></div>
-      <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name)} /></div>
+      <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name, lateUntil(a, now, tz, year))} /></div>
     </div>
   );
   const top = <>{head}{p.tabs}</>;
   if (file.kind === 'loading') return <>{top}<Loading what="Reading the mark sheet" /></>;
   if (file.kind !== 'ready')
-    return <>{top}<section class="panel section stub"><h2>No mark sheet yet</h2><p>The mark sheet appears at hand out, with a row for every student or team.</p></section></>;
+    return <>{top}<section class="panel section stub"><h2>No mark sheet yet</h2><p>{group && !a.teams ? 'No teams yet, so no mark sheet: it appears with the first team.' : 'The mark sheet appears at hand out, with a row for every student or team.'}</p></section></>;
   if (!parsed?.sheet)
     return <>{top}<CheckLine cls="bad">The mark sheet does not parse ({parsed?.error}). Fix it with Edit the file directly.</CheckLine></>;
   const { sheet } = parsed;
@@ -380,77 +386,4 @@ export function TeamsTab(p: TabProps) {
       </div>
     </>
   );
-}
-
-// --------------------------------------------------------------------------- overview
-
-const SHEETS = 'grading_sheets';
-const LEDGER = LEDGER_PATH;
-
-function OverviewRow(p: ReadyProps & { a: Assignment; hasSheet: boolean; writes: Map<string, string> | null }) {
-  const { a, status, now } = p;
-  const tz = tzOf(status), year = yearOf(now, tz);
-  const path = `${SHEETS}/${sheetName(p, a.slug)}.yml`;
-  const changed = p.hasSheet ? p.files.lastChange(p.cohort.org, CONFIG_REPO, path) : null;
-  const sheet = a.returned && p.hasSheet ? p.files.file(p.cohort.org, CONFIG_REPO, path) : null;
-  const text = sheet?.kind === 'ready' ? sheet.text : null;
-  const writes = p.writes;
-  const on = useMemo(() => {
-    if (text === null || !writes) return null;
-    const doc = new YamlText(text);
-    return doc.errors.length ? null : returnedOn(readSheet(text, doc.toJS()), writes);
-  }, [text, writes]);
-  return (
-    <tr>
-      <td><a class="rowlink" href={tabHref(a.slug, 'marks')}>{assignmentTitle(a)}</a></td>
-      <td><span class={`chip ${a.state === 'marking' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span></td>
-      <td class="num">{p.hasSheet ? `${a.marks.filled} / ${a.marks.total}` : <span class="footnote">No mark sheet yet</span>}</td>
-      <td>{a.returned ? <span class="chip ok">Yes</span> : 'No'}</td>
-      <td class="num">{on ? fmtDay(on, tz, year) : ''}</td>
-      <td class="num">{changed === undefined ? '…' : changed ? fmtWhen(changed, tz, year) : ''}</td>
-    </tr>
-  );
-}
-
-function MarksOverview(p: ReadyProps) {
-  const list = p.status.assignments ?? [];
-  const dir = p.files.dir(p.cohort.org, CONFIG_REPO, SHEETS);
-  const sheets = new Set(dir.kind === 'ready' ? dir.entries.map((e) => e.name) : []);
-  const ledger = p.files.file(p.cohort.org, CONFIG_REPO, LEDGER);
-  const ledgerText = ledger.kind === 'ready' ? ledger.text : null;
-  const writes = useMemo(() => (ledgerText !== null ? gradebookWrites(ledgerText) : ledger.kind === 'loading' ? null : new Map<string, string>()), [ledgerText, ledger.kind]);
-  const returned = list.filter((a) => a.returned).length;
-  const toMark = list.reduce((n, a) => n + (sheets.has(`${sheetName(p, a.slug)}.yml`) ? a.marks.total - a.marks.filled : 0), 0);
-  return (
-    <>
-      <div class="page-head">
-        <div>
-          <h2 class="h1">Marks <Hint doc="10-grade-and-return-assignments.md">This page only reads. Open an assignment to enter and return its marks.</Hint></h2>
-          <p class="lede">{sheets.size ? `${returned} of ${list.length} assignment${list.length === 1 ? '' : 's'} returned; ${toMark} mark${toMark === 1 ? '' : 's'} still to enter.` : 'Where marking stands this semester, one row per assignment.'}</p>
-        </div>
-      </div>
-      {dir.kind === 'loading' ? <Loading what="Reading the mark sheets" /> : dir.kind === 'error' ? (
-        <CheckLine cls="bad">Could not list the mark sheets in {CONFIG_REPO}/{SHEETS}: {dir.message}</CheckLine>
-      ) : !sheets.size ? (
-        <section class="panel section stub">
-          <h2>No mark sheets yet</h2>
-          <p>A mark sheet appears when an assignment is handed out, with a row for every student or team.</p>
-        </section>
-      ) : (
-        <>
-          <div class="table-wrap">
-            <table class="grid" style="min-width:820px">
-              <thead><tr><th>Assignment</th><th>State</th><th>Marked</th><th>Returned</th><th>Gradebooks last updated</th><th>Last change</th></tr></thead>
-              <tbody>{list.map((a) => <OverviewRow {...p} a={a} hasSheet={sheets.has(`${sheetName(p, a.slug)}.yml`)} writes={writes} />)}</tbody>
-            </table>
-          </div>
-          <p class="footnote" style="margin-top:8px">Gradebooks last updated: the newest write to this assignment’s students’ gradebooks. Every return rewrites every student’s gradebook, so this date moves forward for all returned assignments whenever any assignment is returned. Last change: the newest edit to the mark sheet.</p>
-        </>
-      )}
-    </>
-  );
-}
-
-export function MarksOverviewScreen(p: CohortProps) {
-  return <WithStatus props={p} title="Marks">{(r) => <MarksOverview {...r} />}</WithStatus>;
 }

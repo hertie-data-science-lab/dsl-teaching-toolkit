@@ -3,8 +3,8 @@
 // ride after a slash (`#assignment-assignment-2/marks`); the retired `#teams-<slug>` and
 // `#marks-<slug>` screens parse to those tabs, and the hashes decisions 0012 and 0015 renamed
 // (`#cohort`, `#staff`, `#new-cohort-<n>`, `#schedule-term`; `#semester` to `#dashboard`), 0021
-// (`#setup` to `#profile`), the retired `#archive` (to `#schedule-archive`) and 0035 (a student's `#marks` and `#join` to `#assignments`, their
-// `#setup` to `#profile` too) to their new names, so old links still land. Which course or semester the page is about rides in the query string
+// (`#setup` to `#profile`), the retired `#archive` (to `#schedule-archive`), 0035 (a student's `#marks` and `#join` to `#assignments`, their
+// `#setup` to `#profile` too) and 0037 (an instructor's `#marks` to `#assignments`) to their new names, so old links still land. Which course or semester the page is about rides in the query string
 // (`?cohort=<org>` or `?course=<org>`: `?semester=` is taken by the student screens), so a
 // link from a fault mail can name both. `?semester=<org>` opens that semester's student screens:
 // a student's own, or an instructor's Student view. `?join=<org>` opens the Join course form
@@ -29,14 +29,15 @@ const TABS: AssignmentTab[] = ['overview', 'teams', 'marks'];
 
 const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'marks', 'teams', 'materials'];
 
-/** Hashes decisions 0012, 0015, 0021 and 0035 renamed (and the retired Archive page, now the schedule's archive entry), old -> new; the last flag marks a student-only rename. */
+/** Hashes decisions 0012, 0015, 0021, 0035 and 0037 renamed (and the retired Archive page, now the schedule's archive entry), old -> new; the last flag marks a student-only rename. */
 const RENAMED: [RegExp, string, boolean?][] = [
   [/^(cohort|semester)$/, 'dashboard'],
   [/^staff$/, 'instructors'],
   [/^new-cohort(-\d)?$/, 'new-semester$1'],
   [/^schedule-term$/, 'schedule-semester'],
   [/^setup$/, 'profile'],
-  [/^(marks|join)$/, 'assignments', true],
+  [/^marks$/, 'assignments'],
+  [/^join$/, 'assignments', true],
   [/^archive$/, 'schedule-archive'],
 ];
 
@@ -132,7 +133,7 @@ export function parseSearch(search: string): Selection {
 /** Screens that need a semester, and the nav key each lights up. */
 export const COHORT_SCREENS: Record<string, string> = {
   dashboard: 'dashboard', schedule: 'schedule', release: 'schedule', assignments: 'assignments', assignment: 'assignments',
-  students: 'students', roster: 'students', marks: 'marks', instructors: 'instructors', site: 'site', operations: 'operations',
+  students: 'students', roster: 'students', marks: 'assignments', instructors: 'instructors', site: 'site', operations: 'operations',
 };
 /** Screens about the course. */
 export const COURSE_SCREENS: Record<string, string> = {

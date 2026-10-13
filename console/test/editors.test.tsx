@@ -28,6 +28,7 @@ import { DetailsScreen, MaterialsScreen, WebsiteScreen, courseFileAfter, details
 import { AssignmentScreen } from '../src/screens/Assignments';
 import { ScheduleScreen } from '../src/screens/Schedule';
 import { parseHash } from '../src/router';
+import { lateUntil } from '../src/screens/Marking';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
@@ -328,6 +329,20 @@ describe('the operation panel', () => {
     expect(out).toContain('Email students whose marks changed');
     expect(out).toContain('Post a note on each Submission receipts issue');
     expect(out).toContain('Include the feedback text in the email');
+  });
+
+  it('says late work can still change marks only while the late cutoff has not passed (decision 0037)', () => {
+    const a = (example as unknown as Status).assignments![0]; // late cutoff Wed 7 Oct 23:59, Berlin
+    const ref = { slug: 'assignment-2', title: 'Assignment 2: Regression', template: 'assignment-2-f2026', units: 48, group: false, when: 'Marking' };
+    const dialog = (now: string) => {
+      const env = saveEnv(new FakeGitHub());
+      env.ops.open(defs.returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, ref, 40, 'assignment-2', lateUntil(a, Date.parse(now), 'Europe/Berlin', 2026)));
+      return render(<EnvCtx.Provider value={env}><OpPanel /></EnvCtx.Provider>);
+    };
+    expect(dialog('2026-10-01T10:00:00+02:00')).toContain('<p class="op-confirm">48 students can still submit late until Wed 7 Oct 23:59. Their penalty updates and you return the changed marks again.</p>');
+    const after = dialog('2026-10-08T10:00:00+02:00');
+    expect(after).not.toContain('op-confirm');
+    expect(after).not.toContain('can still submit late');
   });
 });
 

@@ -29,7 +29,7 @@ export function asgSummary(a: Assignment, tz: string, year: number): string {
     case 'open':
       return `Due ${fmtWhen(a.due, tz, year)}; ${a.submissions ?? 0} of ${a.units} submitted`;
     case 'late_window':
-      return `Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions ?? 0} of ${a.units} submitted`;
+      return `Late work to ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.marks.filled} of ${a.marks.total} marked`;
     case 'marking':
       return `${a.marks.filled} of ${a.marks.total} marked`;
     case 'returned':

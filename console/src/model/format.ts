@@ -220,9 +220,10 @@ export const PROBLEM_AREA: Record<string, string> = {
   C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Handout materials', C5: 'Template', C6: 'Public website',
 };
 
+/** The engine's `late_window` keeps its name; the console says marking from the due date (decision 0037). */
 export const ASSIGNMENT_WORD: Record<AssignmentState, string> = {
   declared: 'declared', teams_forming: 'teams forming', blocked: 'blocked', open: 'open',
-  late_window: 'late window', marking: 'marking', returned: 'returned',
+  late_window: 'marking', marking: 'marking', returned: 'returned',
 };
 
 export const RELEASE_WORD: Record<ReleaseState, string> = {

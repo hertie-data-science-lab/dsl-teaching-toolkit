@@ -32,7 +32,6 @@ import { ReleaseScreen, ScheduleScreen } from './screens/Schedule';
 import { OperationsScreen, SiteScreen } from './screens/Site';
 import { HelpScreen } from './screens/Help';
 import { SetupScreen } from './screens/Setup';
-import { MarksOverviewScreen } from './screens/Marking';
 import { NewAssignmentScreen } from './screens/NewAssignment';
 import { NewCohortScreen } from './screens/NewCohort';
 import { NewCourseScreen } from './screens/NewCourse';
@@ -98,7 +97,7 @@ export function App({ state: s }: { state: AppState }) {
     };
   }, []);
 
-  // A semester's student screens rename their own old hashes (`#marks`, `#join` to Assignments).
+  // A semester's student screens rename their own old hashes (`#join` to Assignments; `#marks` goes there in both).
   // Until discovery answers, a `?semester=` URL is taken as the student screens' (nothing is
   // rewritten yet); after, only when the person holds a role in that semester.
   const asked = parseSearch(s.search.value);
@@ -302,7 +301,6 @@ export function App({ state: s }: { state: AppState }) {
       instructors: () => <InstructorsScreen {...cp} />,
       site: () => <SiteScreen {...cp} />,
       operations: () => <OperationsScreen {...cp} />,
-      marks: () => <MarksOverviewScreen {...cp} />,
     };
     body = (screens[screen] ?? screens.dashboard)();
     const sem = cohortLoaded?.kind === 'ready' ? cohortLoaded.status.semester : undefined;
