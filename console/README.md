@@ -141,7 +141,7 @@ goes, as a semester's Dashboard is where its name goes; a read-only course shows
 then its semesters as nodes: being set up
 first, every live one (a green dot), then past ones ("ended" or "archived") newest first to
 three rows, the rest under "Older semesters (n)". A semester node carries its problem count
-(now or soon only, `problemCount`); its Dashboard leaf does not repeat it. The open semester is expanded to its nine
+(now or soon only, `problemCount`); its Dashboard leaf does not repeat it. The open semester is expanded to its eight
 pages, else on a course page the newest live one; one at a time. Other courses are reached
 through All courses, and so are the person's own student semesters. A student's tree is
 inverted, since a student takes each course once: the open semester's term is the anchor, its
@@ -210,7 +210,8 @@ semesters; who ran each comes from its outcome file), go wherever the two column
 closest in height (`splitColumns`, from each panel's estimated height). Until the course's and
 every semester's status has loaded the columns keep a fixed layout (`SETTLING_COLUMNS`), so
 panels do not move as each arrives. The semester Dashboard's line under its title says only
-what the banner does not: the exams and the archive date.
+what the banner does not: the exams and the archive date. It has no Assignments panel: each
+assignment's state and progress are on the Assignments tab.
 
 The semester Dashboard's week strip filters its agenda only: This week on load, any set of
 weeks picked, none picked for all of them; the agenda panel's heading names the selection

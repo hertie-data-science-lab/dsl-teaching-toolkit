@@ -316,15 +316,6 @@ table.kinds td select { min-width: 180px; }
 .week .overdue { font-size: 13.5px; color: var(--muted); padding-top: 12px; border-top: 1px solid var(--rule); }
 
 /* assignment index */
-.asg-list { list-style: none; margin: 0; padding: 0; }
-.asg-list li { border-top: 1px solid var(--rule); }
-.asg-list li:first-child { border-top: 0; }
-.asg-list a { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; padding: 11px 0; color: var(--ink); text-decoration: none; }
-.asg-list a:hover .a-name { text-decoration: underline; }
-.asg-list .a-name { font-weight: 600; }
-.asg-list .a-sub { font-size: 13px; color: var(--muted); }
-.asg-list .a-side { grid-column: 2; grid-row: 1 / span 2; display: grid; justify-items: end; gap: 3px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.asg-list .a-flag { color: var(--bad-ink); font-weight: 600; font-size: 13px; }
 
 .table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); }
 table.grid { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px; }
@@ -808,7 +799,6 @@ textarea.code { font-family: var(--font-code); font-size: 13px; min-height: 120p
 .avatar img { width: 30px; height: 30px; border-radius: 50%; display: block; }
 .loading { color: var(--muted); padding: 24px 0; display: flex; gap: 10px; align-items: center; }
 [hidden] { display: none !important; }
-.asg-list .a-side .chip { align-self: start; }
 .cohort-card > .chip { justify-self: start; }
 
 /* the help screen's diagram: every colour a theme token */

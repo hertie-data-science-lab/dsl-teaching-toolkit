@@ -140,7 +140,7 @@ describe('S1 home', () => {
 describe('S4 cohort overview', () => {
   const out = html(<CohortScreen {...props()} />);
   const t = text(<CohortScreen {...props()} />);
-  it('leads with the header, term strip, problems, this week and assignments', () => {
+  it('leads with the header, term strip, problems and this week; the assignments are on their tab', () => {
     expect(html(<CohortScreen {...props()} />)).not.toContain('class="crumbs"'); // the semester banner replaces them
     expect(t).toContain('Dashboard ? What this semester has planned');
     expect(t).toContain('Exam 22 Oct. Archive 31 Jan 2027.');
@@ -159,7 +159,8 @@ describe('S4 cohort overview', () => {
     expect(t).not.toContain('Session 5 cites folder lectures/05_trees');
     expect(out).toContain('href="#template-assignment-3-f2026"');
     expect(t).toContain('(course)');
-    expect(t).toContain('Assignment 2: Regression');
+    expect(out).not.toContain('<h2>Assignments</h2>');
+    expect(out).not.toContain('All assignments');
     expect(t).toContain('37 of 48 submitted so far.');
   });
   it('shows students beside automation, heartbeat from the run list', () => {
