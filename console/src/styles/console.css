@@ -257,7 +257,8 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .ptab-coming li { display: grid; grid-template-columns: 90px minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 13.5px; padding: 4px 0; border-top: 1px solid var(--rule); color: var(--ink-2); }
 .ptab-coming li b { font-family: var(--font-display); font-weight: 700; color: var(--ink); }
 .ptab-coming li .textlink { min-height: 0; padding: 0; }
-@media (max-width: 760px) { .ptab-coming li { grid-template-columns: 80px minmax(0, 1fr); } .ptab-coming li .textlink { grid-column: 2; } }
+.ptab-coming li .row-acts { display: grid; justify-items: end; gap: 2px; }
+@media (max-width: 760px) { .ptab-coming li { grid-template-columns: 80px minmax(0, 1fr); } .ptab-coming li .row-acts { grid-column: 2; display: flex; gap: 12px; } }
 /* Repo chips: not ready is grey in a row, red on a settings page's head; suggestions dotted, never coloured. */
 .chip.suggest { background: transparent; border: 1.5px dotted var(--idle); color: var(--ink-2); font-weight: 500; }
 .chip.notready { background: var(--sunk); color: var(--ink-2); }

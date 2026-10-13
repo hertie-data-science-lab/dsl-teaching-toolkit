@@ -287,7 +287,7 @@ describe('the Dashboard and the horizon (decision 0034)', () => {
     expect(h.querySelector('.ptabs .hint-pop')!.textContent).toBe('What will not happen until you fix it: overdue, and the next 7 days.');
     click(h.querySelector<HTMLButtonElement>('[role="tab"][data-key="coming"]')!);
     const coming = h.querySelector('#dash-panel-coming')!;
-    expect(coming.querySelector('.week-h')!.textContent).toBe('Week 5 from 5 Oct · problems from 1 Oct');
+    expect(coming.querySelector('.week-h')!.textContent).toBe('Week 5 from 5 Oct · escalates to a problem from 1 Oct');
     expect(coming.querySelector('li')!.textContent).toContain('Session 5 cites folder lectures/05_trees');
     expect(coming.querySelector('li a')!.getAttribute('href')).toBe('#schedule-s5');
     // What the tab is for is in the `?` after its label; the body starts with the weeks.
@@ -306,7 +306,7 @@ describe('the Dashboard and the horizon (decision 0034)', () => {
     click(h.querySelector<HTMLButtonElement>('[role="tab"][data-key="coming"]')!);
     const rows = [...h.querySelectorAll('#dash-panel-coming li')];
     expect(rows.map((li) => li.querySelector('a')!.getAttribute('href'))).toEqual(['#schedule-s5', '#template-assignment-3-f2026']);
-    expect(h.querySelector('#dash-panel-coming')!.textContent).toContain('Week 7 from 19 Oct · problems from 13 Oct');
+    expect(h.querySelector('#dash-panel-coming')!.textContent).toContain('Week 7 from 19 Oct · escalates to a problem from 13 Oct');
   });
 
   it('says the term’s health over the horizon, with what is coming up, and prints the engine’s days', () => {

@@ -329,7 +329,8 @@ describe('an empty week on the semester dashboard', () => {
     expect([...card.querySelectorAll('button')].some((b) => b.textContent === 'Set aside')).toBe(true);
     await show('coming');
     const row = [...root!.querySelectorAll('#dash-panel-coming li')].find((li) => li.textContent!.includes('12 Oct') && li.textContent!.includes('Nothing seems'))!;
-    expect([...row.querySelectorAll('button')].some((b) => b.textContent === 'Set aside')).toBe(true);
+    // Set aside sits under Fix, in the row's right-hand actions, not in the text.
+    expect([...row.querySelector('.row-acts')!.children].map((c) => c.textContent)).toEqual(['Fix', 'Set aside']);
   });
 
   it('writes its id into set_aside through the dialog', async () => {

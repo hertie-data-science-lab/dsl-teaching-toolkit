@@ -368,10 +368,10 @@ export function ComingUp({ rows, term, tz, year, onSetAside }: { rows: ComingRow
         const from = g.rows.map((r) => r.from).filter((x): x is string => !!x).sort()[0];
         return (
           <section aria-label={g.label}>
-            <h3 class="week-h">{g.label}{g.from || from ? <span>{g.from ? ` from ${fmtShort(g.from)}` : ''}{from ? ` · problems from ${fmtShort(from)}` : ''}</span> : null}</h3>
+            <h3 class="week-h">{g.label}{g.from || from ? <span>{g.from ? ` from ${fmtShort(g.from)}` : ''}{from ? ` · escalates to a problem from ${fmtShort(from)}` : ''}</span> : null}</h3>
             <ul>
               {g.rows.map((r) => (
-                <li key={r.key}><b>{r.when ? fmtDay(r.when, tz, year) : 'No date'}</b><span>{r.text}</span><a class="textlink" href={r.href}>{r.link}</a>{onSetAside && r.aside ? <button class="textlink" type="button" onClick={() => onSetAside(r.aside!)}>Set aside</button> : null}</li>
+                <li key={r.key}><b>{r.when ? fmtDay(r.when, tz, year) : 'No date'}</b><span>{r.text}</span><span class="row-acts"><a class="textlink" href={r.href}>{r.link}</a>{onSetAside && r.aside ? <button class="textlink" type="button" onClick={() => onSetAside(r.aside!)}>Set aside</button> : null}</span></li>
               ))}
             </ul>
           </section>
