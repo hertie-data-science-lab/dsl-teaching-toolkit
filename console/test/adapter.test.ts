@@ -111,20 +111,18 @@ describe('DispatchAdapter', () => {
 describe('the gate', () => {
   const run = (e: ReturnType<typeof engine>) => new OpsSession(new DispatchAdapter(e.client, () => 'a-example'), { pollMs: 0, sleep: async () => {} });
 
-  it('never holds a gated verb back for a preview; the page’s verb opens the panel without running', async () => {
+  it('never holds a confirm-in-panel verb back for a preview; the page’s verb opens the panel without running', async () => {
     const e = engine({ annotation: publicOutcome, privateFile: privateOutcome });
     const s = run(e);
     const def = defs.sendCodes(scope, 7);
-    expect(modeOf(def.op)).toBe('gated');
+    expect([modeOf(def.op), def.confirmInPanel]).toEqual(['preview', true]);
     s.open(def, 'run');
     await new Promise((r) => setTimeout(r, 0));
     expect(e.gh.seen.filter((x) => x.method === 'POST')).toHaveLength(0);
     expect(s.canRun(s.current.value!)).toBe(true);
     await s.start('preview');
     expect(s.current.value?.dry?.outcome?.summary).toBe(publicOutcome.summary);
-    expect(s.isPreviewed(def)).toBe(true);
     expect(s.canRun(s.current.value!)).toBe(true);
-    expect(s.isPreviewed(defs.sendCodes({ ...scope, cohortOrg: 'hertie-dsl-demo-s2027' }, 7))).toBe(false);
     expect(s.runs.value[0]).toMatchObject({ run_id: 77, op: 'roster.send_codes', conclusion: 'previewed' });
     // The page's verb after the panel's preview keeps the preview and runs for real.
     s.open(def, 'run');
@@ -140,21 +138,10 @@ describe('the gate', () => {
     s.open(defs.archive(scope, 'Sun 31 Jan 2027', false));
     expect(s.canRun(s.current.value!)).toBe(false);
     await s.start('preview');
-    // Previewed without archiving early; ticking it is a different run, not previewed, and may run.
+    // Previewed without archiving early: the verb still waits for the tick.
     expect(s.canRun(s.current.value!)).toBe(false);
     s.setChecked(true);
-    expect(s.isPreviewed(s.current.value!.def, s.current.value!.values, true)).toBe(false);
     expect(s.canRun(s.current.value!)).toBe(true);
-  });
-
-  it('does not unlock on a failed preview', async () => {
-    const e = engine({ annotation: { ...publicOutcome, conclusion: 'failed' } });
-    const s = run(e);
-    const def = defs.sendCodes(scope, 7);
-    s.open(def, 'preview');
-    await new Promise((r) => setTimeout(r, 0));
-    await s.start('preview');
-    expect(s.isPreviewed(def)).toBe(false);
   });
 
   it('runs a direct op without a preview, and asks for the tick where the engine has none', () => {

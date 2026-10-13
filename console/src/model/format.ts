@@ -93,21 +93,6 @@ export function fmtDate(iso: string, tz?: string, refYear?: number): string {
   return `${fmtShort(iso, tz)}${refYear !== undefined && z.y !== refYear ? ` ${z.y}` : ''}`;
 }
 
-/** Days as a sentence names them, one month said once: "8 and 15 Dec", "30 Nov and 8 Dec". */
-export function fmtDays(isos: string[], tz?: string, refYear?: number): string {
-  const groups: { key: string; days: number[]; tail: string }[] = [];
-  for (const iso of [...isos].sort()) {
-    const z = zoned(iso, tz);
-    const key = `${z.y}-${z.m}`;
-    const g = groups[groups.length - 1];
-    if (g?.key === key) {
-      if (!g.days.includes(z.d)) g.days.push(z.d);
-    } else groups.push({ key, days: [z.d], tail: fmtDate(iso, tz, refYear).replace(/^\d+ /, '') });
-  }
-  const parts = groups.flatMap((g) => g.days.map((d, i) => (i === g.days.length - 1 ? `${d} ${g.tail}` : String(d))));
-  return parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
-}
-
 export function dayKey(iso: string, tz?: string): string {
   const z = zoned(iso, tz);
   return `${z.y}-${String(z.m).padStart(2, '0')}-${String(z.d).padStart(2, '0')}`;
@@ -246,7 +231,7 @@ const GAP_ID = /^empty_week:(\d{4})-(\d{2})-(\d{2})(?::(\w+))?$/;
 /** "week of 20 Oct" from a week's gap id (`empty_week:2026-10-20[:<kind>]`): the card's text says only "this week". Null for any other id. */
 export function gapWeek(id: string): string | null {
   const m = GAP_ID.exec(id);
-  return m ? `week of ${+m[3]} ${'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[+m[2] - 1]}` : null;
+  return m ? `week of ${+m[3]} ${MON[+m[2] - 1]}` : null;
 }
 
 /** "Empty week of 20 Oct" from `empty_week:2026-10-20`, "Missing lab, week of 20 Oct" from `empty_week:2026-10-20:lab`; null for any other id. */

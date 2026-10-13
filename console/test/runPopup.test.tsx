@@ -13,7 +13,7 @@ import { StatusStore } from '../src/model/status';
 import { DispatchAdapter, stepsOf, type Adapter, type Handle, type Progress, type Result } from '../src/ops/adapter';
 import * as defs from '../src/ops/defs';
 import { OpButtons, OpPanel, targetOf } from '../src/ops/Panel';
-import { GATED, PREVIEW_NOT_OFFERED, modeOf, opSpec } from '../src/ops/registry';
+import { PREVIEW_NOT_OFFERED, modeOf, opSpec } from '../src/ops/registry';
 import { OpsSession, type OpDef } from '../src/ops/session';
 import { MARKED_FROM_HINT, Questions } from '../src/screens/Course';
 import { FakeGitHub, json } from './fake';
@@ -266,7 +266,7 @@ describe('Stop', () => {
       ops.open(def);
       if (def.needsCheck) ops.setChecked(true);
       const mode = modeOf(def.op);
-      const p = ops.start(mode === 'gated' || mode === 'previewOnly' ? 'preview' : 'run');
+      const p = ops.start(def.confirmInPanel || mode === 'previewOnly' ? 'preview' : 'run');
       await tick();
       expect(def.cancel, def.op).toBeTruthy();
       await ops.cancel();
@@ -322,7 +322,7 @@ describe('Preview buttons', () => {
 
   it('keeps the gate’s Preview and drops the ones nobody acts on', () => {
     // Publishing has no engine preview at all: it asks for a tick instead.
-    for (const op of GATED) expect(modeOf(op), op).toBe(opSpec(op).preview ? 'gated' : 'direct');
+    for (const def of ALL.filter((d) => d.confirmInPanel)) expect(modeOf(def.op), def.op).toBe(opSpec(def.op).preview ? 'preview' : 'direct');
     for (const op of PREVIEW_NOT_OFFERED) expect(modeOf(op), op).toBe('direct');
     expect(modeOf('semester.preview_automation')).toBe('previewOnly');
   });

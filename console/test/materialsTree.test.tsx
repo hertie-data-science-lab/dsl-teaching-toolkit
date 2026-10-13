@@ -11,12 +11,12 @@ import { MaterialsTree, folderHref } from '../src/ui/MaterialsTree';
 
 const ORG = 'demo-course';
 const REPO = 'course-materials-f2026';
-const FILES = ['SYLLABUS.md', '.github/x.yml', 'lectures/01/slides.pdf', 'lectures/01/notes.md', 'lectures/02/a.ipynb', 'labs/lab.ipynb'];
+const PATHS = ['SYLLABUS.md', '.github/x.yml', 'lectures/01/slides.pdf', 'lectures/01/notes.md', 'lectures/02/a.ipynb', 'labs/lab.ipynb'].map((path) => ({ path, dir: false }));
 
 async function mounted(focus?: string) {
   const root = document.createElement('div');
   document.body.appendChild(root);
-  await act(() => mount(<MaterialsTree org={ORG} repo={REPO} files={FILES} focus={focus} />, root));
+  await act(() => mount(<MaterialsTree org={ORG} repo={REPO} paths={PATHS} focus={focus} />, root));
   const folder = (path: string) => root.querySelector<HTMLLIElement>(`li[data-folder="${path}"]`)!;
   const details = (path: string) => folder(path).querySelector('details')!;
   // What a click on a summary does in a browser: flip `open`, then fire `toggle`.

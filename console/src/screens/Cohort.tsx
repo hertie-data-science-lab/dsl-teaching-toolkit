@@ -7,6 +7,7 @@ import {
 } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekStart, type Row, type Schedule, type Term, type WeekGroup, type WeekKey, termOf } from '../model/schedule';
 import type { Assignment, Problem, Status } from '../model/types';
+import { submissionsOf } from '../model/assignment';
 import { checkAccess, checkNow, releaseEarly, type ReleaseRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { Release } from '../model/types';
@@ -28,7 +29,7 @@ export function readSchedule(p: CohortProps): Schedule | null {
 export function asgSummary(a: Assignment, tz: string, year: number): string {
   switch (a.state) {
     case 'open':
-      return `Due ${fmtWhen(a.due, tz, year)}; ${a.submissions ?? 0} of ${a.units} submitted`;
+      return `Due ${fmtWhen(a.due, tz, year)}; ${submissionsOf(a)} of ${a.units} submitted`;
     case 'late_window':
       return `Late work to ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.marks.filled} of ${a.marks.total} marked`;
     case 'marking':
@@ -195,7 +196,7 @@ function RowItem({ r, status, p, marks }: { r: Row; status: Status; p: CohortPro
   } else if (r.type === 'due' || r.type === 'handout') {
     const asg = (status.assignments ?? []).find((a) => a.slug === r.entry);
     chip = r.type === 'due' ? 'Due' : 'Hand out';
-    detail = r.type === 'due' && asg ? `${asg.submissions ?? 0} of ${asg.units} submitted so far.` : 'Hands out at its time.';
+    detail = r.type === 'due' && asg ? `${submissionsOf(asg)} of ${asg.units} submitted so far.` : 'Hands out at its time.';
     buttons = <a class="btn small quiet" href={`#assignment-${r.entry}`}>Open assignment</a>;
   } else {
     chip = chip.charAt(0).toUpperCase() + chip.slice(1);
@@ -401,7 +402,7 @@ export function StudentCounts({ status, split }: { status: Status; split?: { stu
  * Students tab. Whether a joined student has accepted the org invitation is not in the status,
  * so it is not counted here.
  */
-export function studentLines(status: Status): string[] {
+function studentLines(status: Status): string[] {
   const s = status.students;
   if (!s) return [];
   const notSent = Math.max(0, s.rows - s.codes_sent), notJoined = Math.max(0, s.codes_sent - s.joined);
@@ -470,12 +471,13 @@ function Overview(p: ReadyProps) {
   const toggle = (w: number) => setSelected(selected.includes(w) ? selected.filter((k) => k !== w) : [...selected, w]);
   const name = selectionName(selected, thisWeek);
   const shown = problemGroups(problems, now, days);
+  const header = headerLine(status, sched, tz, year);
   return (
     <>
       <div class="page-head">
         <div>
           <h2 class="h1">Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h2>
-          {headerLine(status, sched, tz, year) ? <p class="lede"><span>{headerLine(status, sched, tz, year)}</span></p> : null}
+          {header ? <p class="lede"><span>{header}</span></p> : null}
         </div>
         <div class="actions"><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
       </div>

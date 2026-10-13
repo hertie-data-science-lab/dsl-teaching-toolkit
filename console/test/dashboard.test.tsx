@@ -9,7 +9,6 @@ import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
-import { fmtDays } from '../src/model/format';
 import { inWeeks, parseSchedule, scheduleRows, termOf, weekGroups, weekOf } from '../src/model/schedule';
 import type { Status } from '../src/model/types';
 import { CohortScreen, headerLine } from '../src/screens/Cohort';
@@ -102,12 +101,6 @@ describe('the header line', () => {
     // No start date: the year is said against this year.
     const bare = { ...STATUS, semester: { ...STATUS.semester!, start: null, end: null, archive_date: '2027-01-12' } };
     expect(headerLine(bare, null, TZ, 2026)).toBe('');
-  });
-
-  it('names a month once', () => {
-    expect(fmtDays(['2026-12-08', '2026-12-15'], TZ, 2026)).toBe('8 and 15 Dec');
-    expect(fmtDays(['2026-12-01', '2026-12-08', '2026-12-15'], TZ, 2026)).toBe('1, 8 and 15 Dec');
-    expect(fmtDays(['2027-01-05'], TZ, 2026)).toBe('5 Jan 2027');
   });
 });
 

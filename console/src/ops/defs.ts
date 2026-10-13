@@ -122,7 +122,7 @@ export interface AsgRef {
 
 export function handout(s: Scope, a: AsgRef): OpDef {
   return {
-    ...base(s, 'assignment.handout_now', a.slug), name: 'Hand out', title: a.title, where: a.when,
+    ...base(s, 'assignment.handout_now', a.slug), confirmInPanel: true, name: 'Hand out', title: a.title, where: a.when,
     intro: 'Creates each student’s or team’s repo now instead of at the scheduled time.',
     verb: `Hand out to ${a.units} ${a.group ? 'teams' : 'students'}`, running: 'Handing out', cancel: 'Stop after the current repo; repos already made stay',
     args: { course_source_repo: a.template }, options: HANDOUT, target: reposLike(s.cohortOrg ?? s.courseOrg, a.name || a.slug),
@@ -131,7 +131,7 @@ export function handout(s: Scope, a: AsgRef): OpDef {
 
 export function updateCopies(s: Scope, a: AsgRef, files: string[]): OpDef {
   return {
-    ...base(s, 'assignment.update_copies', a.slug), name: 'Update every copy', title: a.title, where: `${a.units} student repos`,
+    ...base(s, 'assignment.update_copies', a.slug), confirmInPanel: true, name: 'Update every copy', title: a.title, where: `${a.units} student repos`,
     intro: 'Pushes an assignment template file to every student copy and posts a note on each Submission receipts issue.',
     verb: `Update ${a.units} copies`, running: 'Updating every copy', cancel: 'Stop; copies already updated stay updated',
     // The schedule key: which entry, when two hand out from one template.
@@ -158,7 +158,7 @@ export function collect(s: Scope, a: AsgRef): OpDef {
 export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, lateUntil?: string | null): OpDef {
   const units = `${a.units} ${a.group ? 'team' : 'student'}${a.units === 1 ? '' : 's'}`;
   return {
-    ...base(s, 'grades.return', a.slug), name: 'Return marks', title: a.title, where: 'Marking',
+    ...base(s, 'grades.return', a.slug), confirmInPanel: true, name: 'Return marks', title: a.title, where: 'Marking',
     intro: 'Sends each student their marks and feedback for this assignment, beside the ones already returned. Your private notes stay private.',
     confirm: lateUntil ? `${units} can still submit late until ${lateUntil}. Their penalty updates and you return the changed marks again.` : undefined,
     verb: `Return marks to ${marked} ${a.group ? 'teams' : 'students'}`, running: 'Returning marks', cancel: 'Stop; marks already returned stay returned',
@@ -169,7 +169,7 @@ export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, l
 
 export function sendCodes(s: Scope, waiting: number): OpDef {
   return {
-    ...base(s, 'roster.send_codes', 'roster'), name: 'Send new codes', title: 'Students who have not joined', where: s.where,
+    ...base(s, 'roster.send_codes', 'roster'), confirmInPanel: true, name: 'Send new codes', title: 'Students who have not joined', where: s.where,
     intro: 'Sends a fresh code to each student who has a code but has not joined.', confirm: 'Their old codes stop working.',
     verb: `Send ${waiting} new code${waiting === 1 ? '' : 's'}`, running: 'Sending new codes', cancel: 'Stop sending; codes already sent stay valid',
     args: {}, fixed: [{ label: `Everyone with a code who has not joined (${waiting})`, note: 'default' }],
@@ -202,7 +202,7 @@ export function checkAccess(s: Scope): OpDef {
 
 export function archive(s: Scope, scheduled: string | null, passed: boolean): OpDef {
   return {
-    ...base(s, 'semester.archive', 'cohort'), name: 'Archive', title: s.where, where: scheduled ? `Scheduled ${scheduled}` : 'Not scheduled',
+    ...base(s, 'semester.archive', 'cohort'), confirmInPanel: true, name: 'Archive', title: s.where, where: scheduled ? `Scheduled ${scheduled}` : 'Not scheduled',
     intro: 'Every repo becomes read-only. Students keep access. Nothing is deleted.',
     verb: `Archive ${s.where}`, running: `Archiving ${s.where}`, cancel: 'Stop; repos already archived stay archived', args: {},
     target: reposLike(s.cohortOrg ?? s.courseOrg),
@@ -212,7 +212,7 @@ export function archive(s: Scope, scheduled: string | null, passed: boolean): Op
 
 export function publishWebsite(s: Scope, published: boolean): OpDef {
   return {
-    ...base(s, 'course.publish_website', 'website'), name: 'Publish website', title: `${s.courseOrg}.github.io`, where: s.where,
+    ...base(s, 'course.publish_website', 'website'), confirmInPanel: true, name: 'Publish website', title: `${s.courseOrg}.github.io`, where: s.where,
     intro: 'Publishes the public website as its saved settings say. A daily update keeps it current.',
     verb: published ? 'Republish website' : 'Publish website', running: 'Publishing the public website', cancel: 'Stop; nothing is public until the last step',
     args: {}, target: ghUrl(s.courseOrg, `${s.courseOrg}.github.io`),

@@ -42,7 +42,7 @@ it('says it is retrying while GitHub does not answer for the saved token, and ke
 it('forgets the runs and previews of this session on sign-out', () => {
   const s = createState({ auth: new ConsoleAuth(new PatAuth({ store: null }), null), client: new GitHubClient({ token: () => 't', fetch: new FakeGitHub().fetch }) });
   s.ops.runs.value = [{ run_id: 1, op: 'check.now', conclusion: 'done', summary: '', finished: 'f', course: 'c' }];
-  s.ops.previewed.value = { 'roster.send_codes|o|k': '[]' };
+  s.ops.blocks.value = { 'roster.send_codes|o|k': '## Codes' };
   s.signOut();
-  expect([s.ops.runs.value, s.ops.previewed.value, s.ops.current.value]).toEqual([[], {}, null]);
+  expect([s.ops.runs.value, s.ops.blocks.value, s.ops.current.value]).toEqual([[], {}, null]);
 });

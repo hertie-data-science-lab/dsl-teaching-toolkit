@@ -4,7 +4,8 @@
 import { readTable } from '../edit/csv';
 import { parseRoster } from '../model/people';
 import { ASSIGNMENT_WORD, assignmentIdent, assignmentTitle, fmtDay, fmtTime, fmtWhen } from '../model/format';
-import type { Assignment, AssignmentState, Status } from '../model/types';
+import type { Assignment, Status } from '../model/types';
+import { pastDue, phaseOf, submissionsOf, type Phase } from '../model/assignment';
 import { RepoChip } from '../ui/SetupPanel';
 import { templateReadinessIn, tier } from '../model/readiness';
 import { Check } from '../ui/icons';
@@ -56,7 +57,7 @@ function Index(p: ReadyProps) {
   const tz = tzOf(status), year = yearOf(now, tz);
   const list = status.assignments ?? [];
   const open = list.filter((a) => a.state === 'open').length;
-  const marking = list.filter((a) => a.state === 'late_window' || a.state === 'marking').length;
+  const marking = list.filter((a) => phaseOf(a) === 'marking').length;
   return (
     <>
       <div class="page-head">
@@ -107,17 +108,16 @@ export function AssignmentsScreen(p: CohortProps) {
 
 // --------------------------------------------------------------------------- detail
 
-const LIFE: [string, AssignmentState[]][] = [
-  ['Declared', ['declared']],
-  ['Teams forming', ['teams_forming', 'blocked']],
-  ['Open', ['open']],
-  // One step from the due date until marks are returned (decision 0037): late work still arrives in its first part.
-  ['Marking', ['late_window', 'marking']],
-  ['Returned', ['returned']],
+const LIFE: [string, Phase][] = [
+  ['Declared', 'declared'],
+  ['Teams forming', 'teams_forming'],
+  ['Open', 'open'],
+  ['Marking', 'marking'],
+  ['Returned', 'returned'],
 ];
 
-function stepOf(state: AssignmentState): number {
-  return LIFE.findIndex(([, s]) => s.includes(state));
+function stepOf(a: Assignment): number {
+  return LIFE.findIndex(([, ph]) => ph === phaseOf(a));
 }
 
 export const isGroup = (a: Assignment) => a.teams !== null && a.teams !== undefined;
@@ -125,7 +125,7 @@ export const isGroup = (a: Assignment) => a.teams !== null && a.teams !== undefi
 /** The tab an assignment opens on: Teams while teams form, Marks from the due date (decision 0037). */
 export function defaultTab(a: Assignment): AssignmentTab {
   if ((a.state === 'teams_forming' || a.state === 'blocked') && isGroup(a)) return 'teams';
-  if (a.state === 'late_window' || a.state === 'marking' || a.state === 'returned') return 'marks';
+  if (pastDue(a)) return 'marks';
   return 'overview';
 }
 
@@ -159,7 +159,7 @@ export interface TabProps extends ReadyProps {
 function Overview(p: TabProps) {
   const { status, now, a } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
-  const cur = stepOf(a.state), group = isGroup(a);
+  const cur = stepOf(a), group = isGroup(a);
   // A group assignment is handed out when its teams start forming: each team's repo follows.
   const handedOut = cur >= 1;
   const late = a.state === 'late_window';
@@ -170,7 +170,7 @@ function Overview(p: TabProps) {
   const subs = [
     'In the schedule',
     group ? (cur === 1 ? `${a.teams} teams so far` : cutoffPassed ? 'Closed' : cur > 1 ? 'Still open' : 'From hand out') : 'Skipped: students work alone',
-    cur === 2 ? `${a.submissions ?? 0} of ${a.units} in` : cur > 2 ? `Closed ${fmtDay(a.due, tz, year)}` : `Opens ${a.handout ? fmtDay(a.handout, tz, year) : 'at hand out'}`,
+    cur === 2 ? `${submissionsOf(a)} of ${a.units} in` : cur > 2 ? `Closed ${fmtDay(a.due, tz, year)}` : `Opens ${a.handout ? fmtDay(a.handout, tz, year) : 'at hand out'}`,
     cur === 3 ? (late ? `late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)} · ${marked}` : marked) : cur > 3 ? 'Done' : `Opens after ${fmtDay(a.due, tz, year)}`,
     cur === 4 ? 'Returned' : 'Opens after marks are returned',
   ];
@@ -181,14 +181,14 @@ function Overview(p: TabProps) {
     <li class={cls}><span class="sa-state">{state}</span><div class="sa-body"><span class="sa-why">{why}</span>{ops}</div></li>
   );
   const lede =
-    a.state === 'open' ? `Open. Due ${fmtDay(a.due, tz, year)} at ${fmtTime(a.due, tz)}; ${a.submissions ?? 0} of ${a.units} submitted so far.`
-    : a.state === 'late_window' ? `Marking. Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${marked}, ${a.submissions ?? 0} of ${a.units} submitted.`
+    a.state === 'open' ? `Open. Due ${fmtDay(a.due, tz, year)} at ${fmtTime(a.due, tz)}; ${submissionsOf(a)} of ${a.units} submitted so far.`
+    : a.state === 'late_window' ? `Marking. Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${marked}, ${submissionsOf(a)} of ${a.units} submitted.`
     : a.state === 'marking' ? `Marking. ${marked}.`
     : a.state === 'returned' ? 'Returned. Marks are with students.'
     : a.state === 'teams_forming' ? `Teams forming. Handed out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}; no team has formed yet.`
     : a.state === 'blocked' ? 'Blocked: handed out, but you have not assigned any team yet.'
     : a.handout ? `Declared. Hands out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}.` : 'Declared. You hand it out from this page.';
-  const big = cur >= 3 ? a.marks.filled : cur <= 1 ? (a.teams ?? 0) : (a.submissions ?? 0);
+  const big = cur >= 3 ? a.marks.filled : cur <= 1 ? (a.teams ?? 0) : (submissionsOf(a));
   const bigOf = cur >= 3 ? a.marks.total : a.units;
   const scope = cohortScope(p);
   const ref: AsgRef = { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand', name: sheetName(p, a.slug) };
@@ -236,7 +236,7 @@ function Overview(p: TabProps) {
             <div class="big">{big} <small>/ {bigOf}</small></div>
             <div class="meter"><i style={`width:${bigOf ? ((big / bigOf) * 100).toFixed(1) : 0}%;background:var(--asg-ink)`} /></div>
             <p class="footnote">
-              {cur === 2 ? `${a.units - (a.submissions ?? 0)} have not pushed since hand out.` : late ? `${a.marks.total - a.marks.filled} still to mark; ${a.units - (a.submissions ?? 0)} have not pushed yet.` : cur >= 3 ? `${a.marks.total - a.marks.filled} still to mark.` : group ? (cur === 1 ? 'Each team gets its repo as it forms; students without a team get none.' : 'Teams form from hand out until late work closes.') : 'Nothing handed out yet.'}
+              {cur === 2 ? `${a.units - (submissionsOf(a))} have not pushed since hand out.` : late ? `${a.marks.total - a.marks.filled} still to mark; ${a.units - (submissionsOf(a))} have not pushed yet.` : cur >= 3 ? `${a.marks.total - a.marks.filled} still to mark.` : group ? (cur === 1 ? 'Each team gets its repo as it forms; students without a team get none.' : 'Teams form from hand out until late work closes.') : 'Nothing handed out yet.'}
             </p>
           </section>
           <section class="panel section">

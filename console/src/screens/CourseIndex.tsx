@@ -95,7 +95,7 @@ function RepoFiles({ files, org, repo, focus }: { files: Files; org: string; rep
   return (
     <div class="r-files">
       {t.truncated ? <p class="footnote">GitHub returned only part of this repo’s file list.</p> : null}
-      <MaterialsTree org={org} repo={repo} files={t.paths.filter((x) => !x.dir).map((x) => x.path)} focus={focus} />
+      <MaterialsTree org={org} repo={repo} paths={t.paths} focus={focus} />
     </div>
   );
 }

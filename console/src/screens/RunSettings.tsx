@@ -19,6 +19,7 @@ import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { draftErrors, readDraft, writeDraft, type AssignmentDraft } from '../model/scheduleEdit';
 import { SOLUTION_WARNING } from '../model/labels';
 import type { Assignment } from '../model/types';
+import { pastDue } from '../model/assignment';
 import { penaltyRate } from '../model/policy';
 import { round } from '../model/marks';
 import { RUN_LABEL, lateError, runTier, runTiers } from '../tiers/runSettings';
@@ -285,9 +286,6 @@ function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year }
     </>
   );
 }
-
-/** Whether an assignment's due date has passed, by the engine's state. */
-export const pastDue = (a: Assignment) => a.state === 'late_window' || a.state === 'marking' || a.state === 'returned';
 
 export const LATE_MOVES = 'The due date has passed: this moves the late cutoff and the late penalties of this assignment, and the engine recomputes them.';
 

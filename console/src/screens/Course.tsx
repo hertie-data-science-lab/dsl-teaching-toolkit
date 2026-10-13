@@ -108,7 +108,7 @@ const STEP_HINT: Record<string, string> = {
   C3: 'A name, code, description and at least one course admin, in Course details.',
   C4: 'A repo of lectures, labs and readings that semesters release from. Done once any one is ready.',
   C5: 'A repo that semesters hand assignments out from. Done once any one is ready.',
-  C6: 'Optional: an open version of your materials for anyone on the internet.',
+  C6: 'Optional: an open version of this course and its materials, available to anyone on the internet.',
 };
 
 /** Where a to-do is done: the repo's settings page. */
