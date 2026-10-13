@@ -1142,7 +1142,7 @@ PROPOSAL_HEADER = f"""\
 # These folders of this semester were released outside the plan (no `releases:` entry
 # copies them): the site shows them unnumbered on their kind's tab, off the Schedule. To
 # put them in the plan, copy the entries you want under `releases:` in schedule.yml,
-# check each date and title, then delete this file. Each is dated by the commit that
+# check each date (and title, where one is given), then delete this file. Each is dated by the commit that
 # first landed its folder in this semester. The dates have passed, so the next tick
 # copies each folder again from its course repo (nothing changes where the source has
 # not). `course_source_repo: {SETTING_PLACEHOLDER}`: no one course repo holds that
@@ -1155,10 +1155,17 @@ def _folder_slug(name: str) -> str:
 
 
 def _folder_title(name: str) -> str:
-    """A folder's name as the site's off-plan row titles it (`01_session-1` -> `Session
-    1`), so the row reads the same once it is in the plan."""
+    """A folder's name as a title (`02_transformers-and-attention` -> `Transformers and
+    attention`)."""
     name = re.sub(r"^0*\d+_", "", name)
     return name.replace("-", " ").replace("_", " ").strip().capitalize()
+
+
+# A title that only restates a number (`Session 1`): the site's row would read `Lecture 1
+# - Session 1`, so the entry gets none and the row reads `Lecture 1` from its label.
+NUMBER_ONLY_TITLE = re.compile(
+    r"(session|lecture|lab|week|readings?)\s*\d+", re.IGNORECASE
+)
 
 
 def proposed_entries(
@@ -1169,7 +1176,8 @@ def proposed_entries(
     """The `releases:` block for `folders` (`(semester repo, folder, kind, landed, course
     repo)`), in date order (an undated one last, `tbc`), each label `<kind>-NN` from the
     folder's number (else its name), never one `taken`. A readings entry has no title; its
-    label's number joins it to its lecture (decision 0013 item 3)."""
+    label's number joins it to its lecture (decision 0013 item 3). Nor has a folder whose
+    name only restates its number (`01_session-1`): its row reads `<Kind> N`, as off-plan."""
     taken = set(taken)
     rows = []
     for repo, folder, kind, landed, source in sorted(
@@ -1184,8 +1192,9 @@ def proposed_entries(
         taken.add(label)
         when = f"{landed.astimezone(tz):%Y-%m-%dT%H:%M}" if landed else "tbc"
         rows += [f"  {label}:", f"    event_datetime: {when}"]
-        if kind != "readings":
-            rows.append(f"    title: {_scalar(_folder_title(name))}")
+        title = _folder_title(name)
+        if kind != "readings" and not NUMBER_ONLY_TITLE.fullmatch(title):
+            rows.append(f"    title: {_scalar(title)}")
         rows += [
             f"    kind: {kind}",
             "    show_on_site: true",

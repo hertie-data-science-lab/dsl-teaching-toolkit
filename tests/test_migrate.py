@@ -2601,7 +2601,8 @@ def test_the_proposal_is_written_beside_the_schedule_never_into_it(
         + [f"readings-0{n}" for n in range(1, 7)]
     )
     lab = by_label["lab-01"]
-    assert (lab.kind, lab.title, lab.show_on_site) == ("lab", "Session 1", True)
+    # `01_session-1` only restates the number: no title, so the row reads `Lab 1`.
+    assert (lab.kind, lab.title, lab.show_on_site) == ("lab", "", True)
     assert lab.when.isoformat() == "2026-09-01T21:26:00+02:00"
     assert [(d.course_source_repo, d.course_source_path, d.semester_dest_repo)
             for d in lab.deploy] == [
@@ -2618,6 +2619,22 @@ def test_the_proposal_is_written_beside_the_schedule_never_into_it(
     commits = list(fake.commits)
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     assert fake.commits == commits
+
+
+def test_a_proposal_titles_only_a_folder_whose_name_says_more_than_its_number():
+    landed = datetime(2026, 9, 1, 12, tzinfo=UTC)
+    folders = [
+        ("materials", "lectures/01_session-1", "lecture", landed, "c"),
+        ("materials", "lectures/02_transformers-and-attention", "lecture", landed, "c"),
+        ("materials", "labs/03_Week_3", "lab", landed, "c"),
+        ("materials", "readings/02_readings-2", "readings", landed, "c"),
+    ]
+    text = migrate.proposed_entries(folders, set(), UTC)
+    entries = yaml.safe_load(text)["releases"]
+    assert "title" not in entries["lecture-01"]
+    assert entries["lecture-02"]["title"] == "Transformers and attention"
+    assert "title" not in entries["lab-03"]
+    assert "title" not in entries["readings-02"]
 
 
 def test_a_folder_no_one_course_repo_holds_names_no_source(fake, semester, monkeypatch):
