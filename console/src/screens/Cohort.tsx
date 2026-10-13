@@ -129,7 +129,7 @@ export function TermStrip({ rows, term, tz, today, counts, selected, onToggle }:
       <div class="strip-legend">
         <span><i class="m lec" />Lecture</span><span><i class="m lab" />Lab</span><span><i class="m asg" />Assignment</span>
         <span><i class="m exam" />Exam</span><span><i class="m evt" />Event</span><span><i class="m term" />Semester date</span>
-        <span><span class="lg-count" aria-hidden="true">2</span>problems</span><span><span class="lg-count later" aria-hidden="true">2</span>{NOT_READY_YET}</span>
+        <span><span class="lg-count" aria-hidden="true">n</span>problems</span><span><span class="lg-count later" aria-hidden="true">n</span>{NOT_READY_YET}</span>
       </div>
     </div>
   );

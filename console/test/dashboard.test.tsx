@@ -423,7 +423,7 @@ describe('release rows by time (decision 0034 §6)', () => {
     expect(badge(6)).toBeNull();
     expect(cell(h, 5).getAttribute('aria-label')).toContain('; 1 not ready yet');
     const legend = h.querySelector('.strip-legend')!;
-    expect(legend.textContent).toContain('2problems');
-    expect(legend.querySelector('.lg-count.later')!.parentElement!.textContent).toBe('2not ready yet');
+    expect(legend.textContent).toContain('nproblems');
+    expect(legend.querySelector('.lg-count.later')!.parentElement!.textContent).toBe('nnot ready yet');
   });
 });
