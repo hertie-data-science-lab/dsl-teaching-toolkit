@@ -23,10 +23,11 @@ import { DispatchAdapter } from '../src/ops/adapter';
 import * as defs from '../src/ops/defs';
 import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
-import { ArchiveScreen } from '../src/screens/Archive';
 import { cohortFlags } from '../src/ui/shell';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen, courseFileAfter, detailsOf, missingAdmin } from '../src/screens/CourseEdit';
 import { AssignmentScreen } from '../src/screens/Assignments';
+import { ScheduleScreen } from '../src/screens/Schedule';
+import { parseHash } from '../src/router';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
@@ -412,15 +413,15 @@ describe('editing screens', () => {
     expect(out).toContain('/ 25 · <code>report.tex</code>');
     expect(out).not.toContain('[object Object]');
   });
-  it('archive offers Preview and the gated verb', () => {
-    const out = html(<ArchiveScreen {...props()} />);
+  it('the schedule’s archive entry explains archiving and offers Preview and the verb', () => {
+    const withSched = new StaticFiles({ ...FILES, [`${COHORT_ORG}/semester-config/schedule.yml`]: SEEDED }, {}, TREES);
+    const out = html(<ScheduleScreen {...props({ entry: 'archive', files: withSched })} />);
+    expect(out).toContain('aria-label="About archiving"');
+    expect(out).toContain('Students and instructors keep read access; nothing is deleted');
     expect(out).toContain('Archive Fall 2026');
-    expect(out).toMatch(/disabled title="Preview first">Archive Fall 2026/);
+    expect(parseHash('#archive')).toEqual({ screen: 'schedule', entry: 'archive' });
   });
-  it('archive says archived for a semester archived before it had a status, and offers no Refresh', () => {
-    const out = html(<ArchiveScreen {...props({ loaded: { kind: 'absent', archived: true } })} />);
-    expect(out).toContain('Archived: every repo is read-only.');
-    expect(out).not.toContain('Status not computed yet');
+  it('a semester archived before it had a status counts as archived', () => {
     expect(cohortFlags({ kind: 'absent', archived: true })).toEqual({ problems: null, archived: true });
     expect(cohortFlags({ kind: 'absent' })).toEqual({ problems: null, archived: false });
   });

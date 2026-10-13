@@ -271,10 +271,10 @@ export function cohortFlags(l: Loaded | undefined): { problems: number | null; a
   return { problems: problemCount(l.status), archived: l.status.semester?.live === false };
 }
 
-/** The nine semester pages, in nav order. */
+/** The eight semester pages, in nav order. */
 const SEMESTER_PAGES: [string, string][] = [
   ['dashboard', 'Dashboard'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['students', 'Students'],
-  ['instructors', 'Instructors'], ['site', 'Site'], ['archive', 'Archive'], ['operations', 'Operations'],
+  ['instructors', 'Instructors'], ['site', 'Site'], ['operations', 'Operations'],
 ];
 
 /** One sub-page under a course nav item: a repo's settings page, or a repo on GitHub (`ext`). */
