@@ -1,4 +1,4 @@
-// The course's Handout materials and Assignment templates index screens.
+// The Course materials and Assignment templates index screens.
 
 import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
@@ -47,12 +47,12 @@ function repoOf(files: Files, org: string, name: string): GhRepo | undefined {
 
 // --------------------------------------------------------------------------- materials
 
-/** What "Treat as handout materials" says once it has run, or why it could not. */
+/** What "Treat as course materials" says once it has run, or why it could not. */
 type TreatState = { kind: 'idle' | 'busy' | 'done' } | { kind: 'bad'; text: string };
 
 /**
  * One Other repos row (decision 0026 rule 2): Open, and on a course the person can change,
- * "Treat as handout materials", which adds the `dsl-materials` topic to the repo's topics as
+ * "Treat as course materials", which adds the `dsl-materials` topic to the repo's topics as
  * GitHub has them at the click.
  */
 export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; write: boolean }) {
@@ -73,11 +73,11 @@ export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; 
   return (
     <li>
       <span class="r-title">{repo.name}</span>
-      <span class="r-sub">{st.kind === 'done' ? 'Added. It shows under Handout materials after the next Refresh.' : 'Not handout materials, so nothing to set up here. Can be released to a semester from the schedule.'}</span>
+      <span class="r-sub">{st.kind === 'done' ? 'Added. It shows under Course materials after the next Refresh.' : 'Not course materials, so nothing to set up here. Can be released to a semester from the schedule.'}</span>
       {st.kind === 'bad' ? <CheckLine cls="bad">{st.text}</CheckLine> : null}
       <span class="r-side">
         <OpenButton org={org} repo={repo.name} small quiet />
-        {write && st.kind !== 'done' ? <button class="btn small quiet" type="button" disabled={st.kind === 'busy' || !env} onClick={() => void treat()}>Treat as handout materials</button> : null}
+        {write && st.kind !== 'done' ? <button class="btn small quiet" type="button" disabled={st.kind === 'busy' || !env} onClick={() => void treat()}>Treat as course materials</button> : null}
       </span>
     </li>
   );
@@ -93,12 +93,12 @@ export function MaterialsIndexScreen(p: CourseProps) {
   return (
     <>
       <div class="page-head">
-        <div><h2 class="h1">Handout materials <Hint doc="02-add-materials-to-course.md">Handout materials live here privately until a scheduled release copies them to a semester. Files can be withheld from students.</Hint></h2><p class="lede">The course’s handout materials repos. A scheduled or manual release copies their folders to a semester. This page checks that the set-up files are in place, not their content; change content by pushing to the repo’s main branch.</p></div>
+        <div><h2 class="h1">Course materials <Hint doc="02-add-materials-to-course.md">Course materials live here privately until a scheduled release copies them to a semester. Files can be withheld from students.</Hint></h2><p class="lede">The course’s materials repos. A scheduled or manual release copies their folders to a semester. This page checks that the set-up files are in place, not their content; change content by pushing to the repo’s main branch.</p></div>
         <div class="actions"><a class="btn quiet" href={topicUrl(course.org, MATERIALS_TOPIC)} target="_blank" rel="noopener">See on GitHub <Ext /></a></div>
       </div>
       <div class="stack">
         <section class="panel section">
-          <div class="section-head"><h2>Handout materials repos</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New handout materials</a></div>
+          <div class="section-head"><h2>Course materials repos</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New course materials</a></div>
           {materials.length ? (
             <ul class="rows">
               {materials.map((m) => {
@@ -115,11 +115,11 @@ export function MaterialsIndexScreen(p: CourseProps) {
                 );
               })}
             </ul>
-          ) : <p class="footnote">{c ? 'No handout materials repos yet.' : 'Handout materials appear once the course has been checked.'}</p>}
+          ) : <p class="footnote">{c ? 'No course materials repos yet.' : 'Course materials appear once the course has been checked.'}</p>}
         </section>
         <section class="panel section">
           <h2>Other repos</h2>
-          <p class="footnote">Repos in the course that are neither handout materials nor assignment templates. Can be released to a semester from the schedule.</p>
+          <p class="footnote">Repos in the course that are neither course materials nor assignment templates. Can be released to a semester from the schedule.</p>
           {repos.kind === 'loading' ? <Loading what="Listing the course’s repos" /> : others.length ? (
             <ul class="rows">
               {others.map((r) => <OtherRepoRow org={course.org} repo={r} write={course.write} />)}

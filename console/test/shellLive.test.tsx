@@ -236,7 +236,7 @@ describe('the course nav’s sub-pages', () => {
   const group = (h: HTMLElement, label: string) => [...h.querySelectorAll('.sidenav li, li')].find((g) => g.querySelector(':scope > .row > a')?.textContent === label)!;
   it('is collapsed by default, and the chevron opens and closes it', () => {
     const h = show('course');
-    const mat = group(h, 'Handout materials');
+    const mat = group(h, 'Course materials');
     const chev = mat.querySelector<HTMLButtonElement>('button.chev')!;
     expect(chev.getAttribute('aria-expanded')).toBe('false');
     expect(mat.querySelector<HTMLElement>('ul.lvl2')!.hidden).toBe(true);
@@ -259,7 +259,7 @@ describe('the course nav’s sub-pages', () => {
     expect(tpl.querySelector(':scope > .row > a')!.getAttribute('aria-current')).toBeNull();
     const cur = tpl.querySelector('ul.lvl2 a[aria-current="page"]')!;
     expect(cur.textContent).toBe('Group project');
-    expect(group(h, 'Handout materials').querySelector('button.chev')!.getAttribute('aria-expanded')).toBe('false');
+    expect(group(h, 'Course materials').querySelector('button.chev')!.getAttribute('aria-expanded')).toBe('false');
     // On the index itself, the index is the current page.
     render(null, root!);
     root!.remove();

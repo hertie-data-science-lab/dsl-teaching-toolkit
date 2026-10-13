@@ -109,15 +109,15 @@ describe('index screens', () => {
     expect(t).toContain('Fall 2026');
     expect(t).not.toContain('public website');
     expect(t).toContain('Last change');
-    expect(t).toContain('Handout materials repos');
-    expect(t).toContain('New handout materials');
+    expect(t).toContain('Course materials repos');
+    expect(t).toContain('New course materials');
     expect(t).toContain('lecture-code-f2026');
-    expect(t).toContain('Not handout materials, so nothing to set up here. Can be released to a semester from the schedule.');
+    expect(t).toContain('Not course materials, so nothing to set up here. Can be released to a semester from the schedule.');
     // Other repos get the Open button, not a GitHub link.
     const other = render(<MaterialsIndexScreen {...cp()} />).split('<li>').find((li) => li.includes('lecture-code-f2026'))!;
     expect(other).toContain('aria-label="More ways to open lecture-code-f2026"');
     expect(other).not.toContain('<a class="btn small quiet"');
-    expect(other).toContain('>Treat as handout materials</button>');
+    expect(other).toContain('>Treat as course materials</button>');
     expect(t).not.toContain('assignment-9-draft');
     expect(t).not.toContain('old-thing');
     expect(render(<MaterialsIndexScreen {...cp()} />)).toContain(`href="#materials-${MAT}"`);

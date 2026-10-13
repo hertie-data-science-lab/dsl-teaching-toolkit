@@ -297,7 +297,7 @@ export type SubWanted = { materials: boolean; templates: boolean };
 /**
  * The instructor's side nav (decision 0031 rule 11): one course, anchored. The root link (All
  * courses), the course as the anchor (a link to its dashboard), the course's pages (Dashboard first,
- * where the anchor goes, as a semester's Dashboard is where its name goes; Handout materials and
+ * where the anchor goes, as a semester's Dashboard is where its name goes; Course materials and
  * Assignment templates open on a page inside them, or with their chevron), then its semesters as
  * nodes: being set up first, every live one, then past ones newest first to three rows and the
  * rest under Older semesters. The open semester is expanded to its pages, else on a course page
@@ -375,7 +375,7 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
           <ul class="tree">
             {leaf('course', `?course=${course.org}#course`, 'Dashboard')}
             {leaf('details', '#details', 'Course details')}
-            {group('materials', '#materials', 'Handout materials', 'the handout materials repos')}
+            {group('materials', '#materials', 'Course materials', 'the course materials repos')}
             {group('templates', '#templates', 'Assignment templates', 'the assignment templates')}
             {leaf('website', '#website', <>Public OpenCourse website <span class="chip">Beta</span></>)}
           </ul>

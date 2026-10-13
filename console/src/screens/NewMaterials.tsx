@@ -44,7 +44,7 @@ export function NewMaterialsScreen(p: CourseProps) {
 
   return (
     <>
-      <div class="page-head"><div><h2 class="h1">New handout materials <Hint doc="02-add-materials-to-course.md">Handout materials are usually per semester. Each semester’s repo is named after it, so the semester that uses it is clear.</Hint></h2><p class="lede">One repo of lectures, labs and readings, kept private until releases copy it to a semester.</p></div></div>
+      <div class="page-head"><div><h2 class="h1">New course materials <Hint doc="02-add-materials-to-course.md">Course materials are usually per semester. Each semester’s repo is named after it, so the semester that uses it is clear.</Hint></h2><p class="lede">One repo of lectures, labs and readings, kept private until releases copy it to a semester.</p></div></div>
       <div class="panel">
         <div class="form" style="max-width:640px">
           <p class="footnote ctx">For {course.name}</p>
@@ -57,14 +57,14 @@ export function NewMaterialsScreen(p: CourseProps) {
               <Verified>Created. Write its syllabus, then add its folders to a semester’s schedule.</Verified>
               <div class="actions">
                 <EditFile org={course.org} repo={repo} path="SYLLABUS.md" exists={p.files.file(course.org, repo, 'SYLLABUS.md').kind !== 'absent'} />
-                <a class="btn outline" href={`#materials-${repo}`}>Handout materials settings</a>
+                <a class="btn outline" href={`#materials-${repo}`}>Course materials settings</a>
                 <button class="btn small quiet" type="button" onClick={clear}>Start another</button>
               </div>
             </>
           ) : (
             <div class="actions">
               {d.submitted === repo ? <button class="btn small outline" type="button" disabled={live.busy} onClick={() => live.run()}>Check again</button> : null}
-              <button class="btn" type="button" disabled={!env || free.busy || Object.keys(errs).length > 0} onClick={() => void create()}>Create handout materials repo</button>
+              <button class="btn" type="button" disabled={!env || free.busy || Object.keys(errs).length > 0} onClick={() => void create()}>Create course materials repo</button>
               <a class="btn quiet" href="#materials">Cancel</a>
             </div>
           )}

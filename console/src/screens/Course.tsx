@@ -83,7 +83,7 @@ export const SETUP_STEPS: { id: string; name: string }[] = [
   { id: 'C1', name: 'Course org read' },
   { id: 'C2', name: 'Course set up on GitHub' },
   { id: 'C3', name: 'Course details filled in' },
-  { id: 'C4', name: 'Handout materials repo' },
+  { id: 'C4', name: 'Course materials repo' },
   { id: 'C5', name: 'Assignment template' },
   { id: 'C6', name: 'Public website' },
 ];
@@ -95,7 +95,7 @@ export function stepLink(id: string, c: CourseStatus): Link {
     case 'C1': return { href: ghUrl(org), label: 'Open on GitHub', ext: true };
     case 'C2': return { href: ghUrl(org, COURSE_REPO), label: 'Open .github', ext: true };
     case 'C3': return { href: '#details', label: 'Edit course details' };
-    case 'C4': return c.materials?.length ? { href: '#materials', label: 'Open handout materials' } : { href: `?course=${org}#new-materials`, label: 'New handout materials' };
+    case 'C4': return c.materials?.length ? { href: '#materials', label: 'Open course materials' } : { href: `?course=${org}#new-materials`, label: 'New course materials' };
     case 'C5': return c.templates?.length ? { href: '#templates', label: 'Open templates' } : { href: `?course=${org}#new-assignment-1`, label: 'New assignment' };
     default: return { href: '#website', label: 'Set up the public website' };
   }
@@ -480,7 +480,7 @@ export function CourseScreen(p: CourseProps) {
   const about = detailsOf(course.meta ?? {}).about;
   const description = typeof about.course_description === 'string' ? about.course_description.trim() : '';
   const fallback = (value: unknown, institution: string) => (value ? String(value) : <span class="footnote">{institution}, from the institution</span>);
-  // Under the tabbed panel, two columns (0031 rule 4): Handout materials and Assignment templates
+  // Under the tabbed panel, two columns (0031 rule 4): Course materials and Assignment templates
   // (one block) head the left, Semesters the right, and the rest go where the columns come out
   // closest in height. A semester's problems are on its own Dashboard (decision 0034).
   const panels: Record<string, ComponentChildren> = {
@@ -535,7 +535,7 @@ export function CourseScreen(p: CourseProps) {
     handouts: (
       <>
         <section class="panel section" id="sec-materials">
-          <div class="section-head"><h2>Handout materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New handout materials</a></div>
+          <div class="section-head"><h2>Course materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New course materials</a></div>
           {v.course?.materials?.length ? (
             <ul class="rows">
               {v.course.materials.map((m) => {
