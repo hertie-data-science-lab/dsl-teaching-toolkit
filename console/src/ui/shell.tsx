@@ -271,9 +271,9 @@ export function cohortFlags(l: Loaded | undefined): { problems: number | null; a
   return { problems: problemCount(l.status), archived: l.status.semester?.live === false };
 }
 
-/** The eight semester pages, in nav order. */
+/** The seven semester pages, in nav order (decision 0037: no top-level Marks). */
 const SEMESTER_PAGES: [string, string][] = [
-  ['dashboard', 'Dashboard'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['students', 'Students'],
+  ['dashboard', 'Dashboard'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['students', 'Students'],
   ['instructors', 'Instructors'], ['site', 'Site'], ['operations', 'Operations'],
 ];
 
