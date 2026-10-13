@@ -29,7 +29,7 @@ import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, validSchedule, type Layers } from '../model/cascade';
 import { parse } from 'yaml';
-import { RunRows, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
+import { RunRows, SolutionNote, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
 import { CONTENT_KINDS, EMPTY_ENTRY_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
@@ -309,7 +309,7 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { 
         <>
           <F id="e-solon" k="solutionOn" d={d} set={set} t={{ tier: 'default', label: 'Show the solution', widget: 'checkbox', defaultLabel: 'default: off' }} />
           {d.solutionOn ? (
-            <div class="cond"><div class="row-2">
+            <div class="cond"><SolutionNote /><div class="row-2">
               <F id="e-sol" k="solutionDate" d={d} set={set} error={errors.solution} t={{ tier: 'conditional', label: 'Solution shown on', widget: 'date', reason: 'After the hand out, and not before the late cutoff.' }} />
               <F id="e-solt" k="solutionTime" d={d} set={set} t={{ tier: 'conditional', label: 'At', widget: 'time' }} />
             </div></div>

@@ -26,7 +26,7 @@
     }
   },
   "solution_before_cutoff": "The solution for {slug} is set to be shown on {solution}, before its late cutoff on {cutoff}. Students can still hand in until the late cutoff, so the solution must be shown on or after it.",
-  "solution_warning": "Pushes the model answer and rubric into every student's repo. This is not returning marks, and cannot be undone for reuse.",
+  "solution_warning": "Pushes the model answer and rubric into every student's repo. NB: this is not returning marks (marks can be returned without the solution), and it cannot be undone, so think twice if you reuse this assignment template in a future semester.",
   "submit_via": {
     "assignment_repo": {
       "help": "Private to the student and instructors.",

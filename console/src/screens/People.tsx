@@ -42,6 +42,9 @@ function Students(p: ReadyProps) {
   const [added, setAdded] = useState<Row[]>([]);
   const [replacement, setReplacement] = useState<{ rows: Row[]; diff: RosterDiff; name: string } | null>(null);
   const [upload, setUpload] = useState<{ open: boolean; error: string; pending: { rows: Row[]; diff: RosterDiff; name: string } | null }>({ open: false, error: '', pending: null });
+  // Read view until Edit roster: the grid then shows inputs for your columns (and a joined
+  // row's handle), saved together by the Save bar below.
+  const [editing, setEditing] = useState(false);
   const [save, runSave, setSave] = useSave(env);
   const table = file.kind === 'ready' ? readTable(file.text) : null;
   const missing = table ? missingColumns(table.header, [...ROSTER_HEADER]) : [];
@@ -101,22 +104,23 @@ function Students(p: ReadyProps) {
       setReplacement(null);
     }
   };
-  const input = (i: number, r: Row, k: string, label: string, type = 'text') => (
+  const input = (i: number, r: Row, k: string, label: string, type = 'text') => (!editing ? (r[k] ?? '') : (
     <input type={type} value={r[k] ?? ''} aria-label={`${label}, line ${lines[i]}`} aria-invalid={k === 'hertie_email' && (r.hertie_email || r.name) && !EMAIL_RE.test(r.hertie_email ?? '') ? 'true' : undefined} disabled={!!replacement}
       onInput={(e) => setCell(i, k, (e.target as HTMLInputElement).value)} />
-  );
-  const role = (i: number, r: Row) => (
+  ));
+  const role = (i: number, r: Row) => (!editing ? (r.role || 'enrolled') : (
     <select aria-label={`Role, line ${lines[i]}`} disabled={!!replacement} onChange={(e) => setCell(i, 'role', (e.target as HTMLSelectElement).value)}>
       <option value="enrolled" selected={(r.role || 'enrolled') === 'enrolled'}>enrolled</option>
       <option value="auditor" selected={r.role === 'auditor'}>auditor</option>
     </select>
-  );
+  ));
   const d = upload.pending?.diff;
   return (
     <>
       <div class="page-head">
         <div><h2 class="h1">Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h2><p class="lede">{s.rows} on the roster. {s.codes_sent} codes sent; {s.joined} joined.</p></div>
         <div class="actions">
+          <button class={`btn${editing ? ' quiet' : ''}`} type="button" aria-pressed={editing} disabled={!table || !!missing.length || !!replacement} onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit roster'}</button>
           <button class="btn quiet" type="button" aria-expanded={upload.open} onClick={() => setUpload({ ...upload, open: !upload.open })}>Replace from CSV</button>
           <OpButtons def={sendCodes(scope, waiting)} label="Send new codes to students who have not joined" />
         </div>
@@ -156,7 +160,7 @@ function Students(p: ReadyProps) {
         {missing.length ? <CheckLine cls="bad">students.csv is missing the {missing.join(', ')} column{missing.length > 1 ? 's' : ''}.</CheckLine> : null}
         {table && !missing.length ? (
           <div>
-            <div class="table-wrap roster-table" style="max-height:600px;overflow:auto">
+            <div class={`table-wrap roster-table${editing ? ' editing' : ''}`} style="max-height:600px;overflow:auto">
               <table class="grid" style="min-width:980px">
                 <thead>
                   <tr>
@@ -185,7 +189,7 @@ function Students(p: ReadyProps) {
                 </tbody>
               </table>
             </div>
-            <ul class="roster-cards">
+            <ul class={`roster-cards${editing ? ' editing' : ''}`}>
               {current.map((r, i) => (
                 <li class={`rcard${faultLines.has(lines[i]) ? ' fault' : ''}`}>
                   <div class="rc-top">{r.name}<span>line {lines[i]}</span></div>
@@ -195,7 +199,7 @@ function Students(p: ReadyProps) {
                 </li>
               ))}
             </ul>
-            <div style="margin-top:10px"><button class="btn small quiet" type="button" disabled={!!replacement} onClick={() => setAdded([...added, { hertie_email: '', name: '', role: 'enrolled' }])}>Add a student</button></div>
+            <div style="margin-top:10px"><button class="btn small quiet" type="button" disabled={!!replacement} onClick={() => { setEditing(true); setAdded([...added, { hertie_email: '', name: '', role: 'enrolled' }]); }}>Add a student</button></div>
           </div>
         ) : null}
         <div class="panel" style="display:grid;gap:10px">

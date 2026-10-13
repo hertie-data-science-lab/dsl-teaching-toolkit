@@ -11,7 +11,7 @@ import { YamlText, compact, deepEqual, obj, type Path } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { Modal } from '../ui/Modal';
 import {
-  REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
+  LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
   validAssignments, validSchedule, valueWord, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
 } from '../model/cascade';
 import { addDays, fmtWhen } from '../model/format';
@@ -24,6 +24,7 @@ import { round } from '../model/marks';
 import { RUN_LABEL, lateError, runTier, runTiers } from '../tiers/runSettings';
 import type { FieldTier, Values } from '../tiers/types';
 import { CheckLine, Lives, Loading } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { gradingConfig, tzOf, yearOf } from './common';
 import type { ReadyProps } from './types';
@@ -231,6 +232,18 @@ export function cutoffOf(dueDate: string, dueTime: string, days: unknown): strin
   return dueTime ? `${day}T${dueTime}` : day;
 }
 
+/** What showing the solution does, said beside every switch that schedules it, with the ? on reuse and returning marks. */
+export function SolutionNote() {
+  return (
+    <p class="note">
+      {SOLUTION_WARNING}{' '}
+      <Hint small label="About pushing the solution" doc="07-schedule-releases.md#releasing-the-model-solution">
+        Copies the template’s solution branch, the model answer and rubric, into every student’s repo, where it stays: nothing takes it back. Reuse this assignment template in a later semester and its answers are already out with this semester’s students. Marks go back without it: Return marks, on the assignment’s page, sends marks and feedback only.
+      </Hint>
+    </p>
+  );
+}
+
 const T = (label: string, widget: FieldTier['widget'], extra: Partial<FieldTier> = {}): FieldTier => ({ tier: 'default', label, widget, ...extra });
 
 /** Timings as the Overview form edits them: hand out, due, the computed late cutoff, solution shown. */
@@ -263,7 +276,7 @@ function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year }
           {F('solutionOn', T('Show the solution', 'checkbox', { defaultLabel: 'default: off' }))}
           {d.solutionOn ? (
             <div class="cond">
-              <p class="note">{SOLUTION_WARNING}</p>
+              <SolutionNote />
               <div class="row-2">{F('solutionDate', T('Solution shown on', 'date', { reason: 'After the hand out, and not before the late cutoff.' }), errors.solution)}{F('solutionTime', T('At', 'time'))}</div>
             </div>
           ) : null}
@@ -272,6 +285,11 @@ function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year }
     </>
   );
 }
+
+/** Whether an assignment's due date has passed, by the engine's state. */
+export const pastDue = (a: Assignment) => a.state === 'late_window' || a.state === 'marking' || a.state === 'returned';
+
+export const LATE_MOVES = 'The due date has passed: this moves the late cutoff and the late penalties of this assignment, and the engine recomputes them.';
 
 /** The assignment's Overview form: its schedule entry and its assignments.yml block, saved together. */
 export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; group: boolean }) {
@@ -303,6 +321,8 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   const rErr = { ...runErrors(keys, layers, r), ...repoNameError(r.semester_dest_repo) };
   const dirtyT = timing !== null && !deepEqual(timing, baseT);
   const dirtyR = run !== null && !deepEqual(compact(run), compact(beforeRun));
+  // Past the due date the engine recomputes the cutoff and every late deduction off a changed late rule.
+  const lateMoved = dirtyR && pastDue(a) && LATE_PAIR.some((k) => !deepEqual(compact({ k: r[k] }), compact({ k: beforeRun[k] })));
   const change = (patch: Partial<AssignmentDraft>) => { setTiming({ ...d, ...patch }); setSave({ kind: 'idle' }); };
   const doSave = async () => {
     if (Object.keys(tErr).length || Object.keys(rErr).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
@@ -348,6 +368,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
           </details>
         </div>
         <div class="form-section">
+          {lateMoved ? <CheckLine cls="warn">{LATE_MOVES}</CheckLine> : null}
           <SaveBar state={save} onSave={() => void doSave()} disabled={!dirtyT && !dirtyR} file={dirtyR && !dirtyT ? { org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE, exists: p.files.file(p.cohort.org, CONFIG_REPO, ASSIGNMENTS_FILE).kind !== 'absent' } : { org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
           <p class="lives">Dates live in <code>{CONFIG_REPO}/schedule.yml</code>; run settings in <code>{CONFIG_REPO}/{ASSIGNMENTS_FILE}</code>.</p>
         </div>
