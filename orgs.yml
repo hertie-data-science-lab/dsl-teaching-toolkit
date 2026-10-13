@@ -5,7 +5,8 @@
 # Semester orgs are not listed: each course's semesters.yml registers its own.
 course_orgs:
   - hertie-dsl-demo-course-e1234
-  - hertie-intro-to-data-science-c11
+  # hertie-intro-to-data-science-c11 is parked (no live cohort; its semester orgs were
+  # deleted 2026-10-13 and Actions on its .github are off). Re-add it when it is picked up.
   - hertie-maths-data-science-C23
   - hertie-nlp-e1282
   # Throwaway staging copies of NLP and Maths for the console preview; delete when done.
