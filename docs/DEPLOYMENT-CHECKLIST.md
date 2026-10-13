@@ -300,7 +300,7 @@ actions. A deploy item may carry its own `deploy_datetime` to ship earlier or la
 the calendar event.
 An assignment's dates (handout_datetime/due_datetime/solution_datetime/marks_return_datetime)
 live under `assignments:` below; how the semester runs it is `assignments.yml`.
-Anything that ships nothing - an exam, a clinic, a guest lecture - goes under `events:`.
+Anything that ships nothing - an exam, a clinic, a guest lecture, a second lab group - goes under `events:`.
 Uncertain dates:
 `tbc: true` beside a date = provisional, shown "(TBC)" but fires; `event_datetime: tbc`
 = undated TBC row, nothing fires.
@@ -402,8 +402,9 @@ the row simply appears on the site's schedule.
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `event_datetime` | **yes** | - (entry dropped without it) | when it happens; a bare date is a whole day, shown as 09:00 |
-| `kind` | no | `special_event` | `exam` / `special_event` - which colour the row takes |
-| `title` | no | prettified label | site row label |
+| `kind` | no | `special_event` | `exam` / `special_event`, or a release kind (`lab`, ...): a session row of that kind with no files |
+| `number` | no | the label's number | a session's number (`Lab 1`) |
+| `title` | no | prettified label | site row label; a session's defaults to its release's |
 | `details` | no | - | the row's Details column: the room, the format, what to bring |
 | `tbc` | no | `false` | provisional date - shown "(TBC)" |
 | `show_on_site` | no | `true` | `false` keeps the row off the site |
@@ -459,7 +460,7 @@ type, and the type is never a field you set - it follows from where the row came
 
 | Row type | Comes from |
 |---|---|
-| lecture, lab, readings, drop-in, ... | a `releases:` entry, of its `kind` (declared, or inferred from the folder its first copy lands in) |
+| lecture, lab, readings, drop-in, ... | a `releases:` entry, of its `kind` (declared, or inferred from the folder its first copy lands in), or an `events:` entry of that `kind` (no files) |
 | assignment | an `assignments:` entry - shown on **both** its handout date and its due date |
 | exam | an `events:` entry with `kind: exam` |
 | special_event | an `events:` entry with no `kind` (clinic, guest lecture, revision session), and the `archive` block's date - the "Semester archived" row |

@@ -22,7 +22,7 @@ Three blocks carry the whole semester, and each is defined by what it **does**:
 
 - **`releases:`** - the entries that **deploy**: file(s) copied from course org staging -> the semester org, where students can access them.
 - **`assignments:`** - each assignment's whole lifecycle: hand-out, due date, grading.
-- **`events:`** - **display-only** calendar rows. Nothing deploys; the row simply appears on the semester site.
+- **`events:`** - **display-only** calendar rows. Nothing deploys; the row simply appears on the semester site (an exam, a clinic, or a session with nothing to ship).
 
 Two scalars sit alongside them - `semester_start:` and `semester_end:` - which bookend the semester and render as rows of their own. An optional `archive:` block freezes the semester read-only - writing it is what turns that on.
 
@@ -57,7 +57,7 @@ Each entry is one row on the semester site, in date order. The site names the ro
 | `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written and the entry is no row of its own (its files are in the semester site's All Materials). Readings are the exception; see [Silent releases](#silent-releases) |
 
 
-NB: **the calendar event is not the release.** If nothing needs to ship at all, the row belongs under `events:`, not here.
+NB: **the calendar event is not the release.** If nothing needs to ship at all, the row belongs under `events:` with the same `kind:`, not here (see [Sessions with nothing to ship](#sessions-with-nothing-to-ship)).
 
 ### Silent releases
 
@@ -228,13 +228,14 @@ Adding or renaming an assignment wakes **Sync membership**, which rewrites `seme
 
 ## `events:` 
 
-Could be an exam, a drop-in clinic, a guest lecture, a revision session: anything students should see on the calendar that releases no files.
+Could be an exam, a drop-in clinic, a guest lecture, a revision session, a second lab group: anything students should see on the calendar that releases no files.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `event_datetime` | **yes** | - | when it happens; as displayed on the deployed site schedule |
-| `kind` | no | `special_event` | e.g. `exam` or `special_event` - affects which colour the row takes |
-| `title` | no | prettified label | the row label on the site |
+| `kind` | no | `special_event` | `special_event`, `exam`, or any other row kind of `releases:` (`lecture`, `lab`, ...) - see below. An unknown value is flagged and shown as `special_event` |
+| `number` | no | the label's number | a session's number (`Lab 1`), as on a release |
+| `title` | no | prettified label | the row label on the site; a session's defaults to the title of the release of the same kind and number |
 | `details` | no | - | what the row's Details column says: the room, the format, what to bring. There is no default - an exam with no `details:` says nothing, rather than the "Details to be confirmed." the toolkit used to write into every one |
 | `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)** |
 | `show_on_site` | no | `true` | `false` keeps the row in this file and off the site |
@@ -256,6 +257,30 @@ events:
     event_datetime: tbc # site will show just TBC, no proposed datetime
                        # sorted end-of-term until a real date replaces
 ```
+
+### Sessions with nothing to ship
+
+An event of a row kind (`lecture`, `lab`, `readings`, ...) is a session of that kind with no files: a row named like a release (`Lab 1`), in its colour, on the Schedule and its kind's tab, never "not yet released" and never in Updates. It counts for its week (no *Missing lab*), and is never *Nothing to release*. Two lab groups, one handout:
+
+```yaml
+releases:
+  lab-01:                               # group 1, with the files
+    kind: lab
+    title: Introduction
+    event_datetime: 2026-09-16T08:00
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/01_intro
+        deploy_datetime: 2026-09-15T18:00  # the evening before group 1
+events:
+  lab-01-group-2:                       # group 2: "Lab 1 - Introduction", no files
+    kind: lab
+    number: 1                           # the label alone would say 2
+    details: Group 2, room 2.32
+    event_datetime: 2026-09-17T18:00
+```
+
+In the console it is the same sheet as a release: leave **What to release** empty and it is saved here; add a line and it moves to `releases:`.
 
 ## `archive:`
 
@@ -338,9 +363,9 @@ Parsed schedule.yml
   11 release(s), 19 deploy(s) | 3 assignment(s) | 4 event(s)
 ```
 
-**Empty weeks.** Each week of the term still to come (counted from `semester_start`, as the Dashboard's week strip numbers them) with nothing dated in it (no release, hand-out, due date, late cutoff, exam, event or archive) is an *Empty week* problem on the console's Dashboard. A week with something dated but no lecture, lab or readings release - for each of those kinds the semester runs weekly, that is, with a dated release in at least half (rounded up) of the weeks that have anything dated - is a *Missing lab* (etc.) problem instead; a hand-out or exam does not count, and one further-readings entry does not make readings weekly. An intentional gap (a reading or exam week) is dismissed with **Set aside**, which adds `empty_week:<monday>` (or `empty_week:<monday>:<kind>`, the Monday of the week's first day) to the course's `set_aside:` list.
+**Empty weeks.** Each week of the term still to come (counted from `semester_start`, as the Dashboard's week strip numbers them) with nothing dated in it (no release, hand-out, due date, late cutoff, exam, event or archive) is an *Empty week* problem on the console's Dashboard. A week with something dated but no lecture, lab or readings release or session - for each of those kinds the semester runs weekly, that is, with a dated release in at least half (rounded up) of the weeks that have anything dated - is a *Missing lab* (etc.) problem instead; a hand-out or exam does not count, and one further-readings entry does not make readings weekly. An intentional gap (a reading or exam week) is dismissed with **Set aside**, which adds `empty_week:<monday>` (or `empty_week:<monday>:<kind>`, the Monday of the week's first day) to the course's `set_aside:` list.
 
-**Nothing to release.** A dated release still to come with no `deploy:` (or an empty one) is a *Nothing to release* problem: under **Coming up** until its date is within the next 7 days, then a problem. A release whose copies were all dropped is not one: the dropped copy is the problem. Its row still shows; if the session really ships nothing, **Set aside** adds `nothing_to_release:<label>` to the same list.
+**Nothing to release.** A dated release still to come with no `deploy:` (or an empty one) is a *Nothing to release* problem: under **Coming up** until its date is within the next 7 days, then a problem. A release whose copies were all dropped is not one: the dropped copy is the problem. Its row still shows; if the session really ships nothing, move it to [`events:`](#sessions-with-nothing-to-ship), or **Set aside** adds `nothing_to_release:<label>` to the same list.
 
 Three other ways to check, none of them required:
 
