@@ -49,6 +49,7 @@ from .course import (
     TEAM_FORMATIONS,
     VISIBILITIES,
 )
+from .course import submit_shape as course_submit_shape
 from .discovery import SEMESTERS_PATH
 from .grades import TEMPLATE_KEYS
 from .log import CLIParser, log_ok
@@ -219,6 +220,12 @@ def outcome_schema() -> dict:
 
 
 STAGE_STATES = ("done", "todo", "blocked", "problem")
+# `course.submit_shape`'s words: every `submit_via` crossed with a per-unit repo's visibility.
+SUBMIT_SHAPES = tuple(
+    dict.fromkeys(
+        course_submit_shape(via, vis) for via in SUBMIT_VIA for vis in VISIBILITIES
+    )
+)
 ASSIGNMENT_STATES = (
     "declared",
     "teams_forming",
@@ -473,6 +480,8 @@ def status_schema(*, closed: bool = True) -> dict:
             "marks": obj({"filled": {"type": "integer"}, "total": {"type": "integer"}}),
             "returned": {"type": "boolean"},
             "problem": {"type": "boolean"},
+            # Where the work is handed in, in the site's one word (`course.submit_shape`).
+            "submit_shape": _enum(SUBMIT_SHAPES),
             # Each run setting's effective value and the layer that gave it (`settings`).
             "settings": obj(
                 {

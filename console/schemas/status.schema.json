@@ -233,6 +233,16 @@
               "null"
             ]
           },
+          "submit_shape": {
+            "enum": [
+              "assignment-repo-private",
+              "assignment-repo-public",
+              "assignment-repo-student-choice",
+              "shared-dropbox-repo",
+              "external"
+            ],
+            "type": "string"
+          },
           "teams": {
             "type": [
               "integer",

@@ -6,18 +6,18 @@ import { compileAll, matchRules } from '../edit/glob';
 import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
-import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
+import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
   assignmentKey, blankDeploy, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft,
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
-import type { Release } from '../model/types';
+import type { Assignment, Release } from '../model/types';
 import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
 import { TIMEZONES } from '../tiers/course';
-import { EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
+import { DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
@@ -37,15 +37,21 @@ import { otherRepos } from './CourseIndex';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
 
-/** What the student site shows in the Details cell. */
-function Details({ r }: { r: Row }) {
+/** The address an external assignment names, once handed out: the site links it only then. */
+function submitUrlOnce(a: Assignment, now: number): string | undefined {
+  const url = a.settings?.submit_url?.value;
+  return typeof url === 'string' && url && a.handout && Date.parse(a.handout) <= now ? url : undefined;
+}
+
+/** What the student site shows in the Details cell; `a`, the due row's assignment, says where to submit as the site does. */
+function Details({ r, a, now }: { r: Row; a?: Assignment; now: number }) {
   if (r.entry === 'semester') return <span class="det" />;
   if (!r.show) return <span class="det"><span class="gen">Hidden from the student site; still {r.block === 'releases' ? 'released' : 'runs'}.</span></span>;
   return (
     <span class="det">
       <Md src={r.details} />
       {r.block === 'releases' && r.state !== 'released' ? <p class="gen">Materials for {r.ident} are not yet released.</p> : null}
-      {r.block === 'assignments' && r.type === 'due' && !r.details ? <span>Submit via <code>{r.entry}-&lt;your-handle&gt;</code></span> : null}
+      {r.type === 'due' && a?.submit_shape ? <DueSubmit shape={a.submit_shape} slug={a.slug} group={a.teams !== null} url={submitUrlOnce(a, now)} /> : null}
     </span>
   );
 }
@@ -450,6 +456,7 @@ function View(p: ReadyProps) {
   const doc = sf?.doc ?? {};
   const sched = useMemo(() => (sf && !sf.error ? parseSchedule(sf.text) : null), [sf?.text]);
   const rows = scheduleRows(status, sched, now, tz);
+  const assignmentOf = new Map((status.assignments ?? []).map((a) => [a.slug, a]));
   const key = p.entry;
   const current = key && key !== 'new' && key !== 'semester' && key !== 'archive' ? rows.find((r) => r.entry === key) : undefined;
   const repos = (status.course?.materials ?? []).map((m) => m.repo);
@@ -577,10 +584,10 @@ function View(p: ReadyProps) {
       : <span class="st-chip">{r.state}</span>;
     items.push(
       <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === r.entry ? ' current' : ''}${gone ? ' removed' : ''}`} data-entry={r.entry}>
-        <span class="k">{TYPE_LABEL[r.type] ?? r.type}</span>
+        <span class="k">{siteRowWord(r.type)}</span>
         <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'No date yet'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}{r.tbc ? ' (TBC)' : ''}</span> : r.tbc && r.when ? <span>(TBC)</span> : null}</span>
         <span class="ttl"><a href={`#schedule-${r.entry}`}><b>{r.ident}</b>: {r.name}</a></span>
-        <Details r={r} />
+        <Details r={r} a={r.block === 'assignments' ? assignmentOf.get(r.entry) : undefined} now={now} />
         <span class="st">{st}</span>
       </li>,
     );

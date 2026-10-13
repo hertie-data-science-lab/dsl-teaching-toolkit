@@ -258,6 +258,26 @@ describe('S6 schedule and S11 release', () => {
     expect(out).toContain('docs/07-schedule-releases.md');
     expect(t).not.toContain('A hand out is an assignment entry');
   });
+  it('words each row’s kind and an assignment’s due row exactly as the student site does', () => {
+    const out = html(<ScheduleScreen {...props()} />);
+    const words = [...out.matchAll(/<span class="k">([^<]+)<\/span>/g)].map((m) => m[1]);
+    expect(words).toEqual(['Semester', 'Assignment out', 'Assignment due', 'Lecture', 'Exam', 'Event', 'Semester', 'Archive']);
+    expect(out).toContain('Submit via <code>assignment-2-&lt;your-handle></code>');
+    const shaped = (submit_shape: string, extra: Partial<NonNullable<Status['assignments']>[number]> = {}): Loaded => ({
+      kind: 'ready', sha: 's', stale: [],
+      status: { ...STATUS, assignments: (STATUS.assignments ?? []).map((a) => ({ ...a, submit_shape, ...extra })) },
+    });
+    const external = text(<ScheduleScreen {...props({ loaded: shaped('external') })} />);
+    expect(external).toContain('Handed in outside GitHub - see the brief');
+    expect(external).not.toContain('Submit via');
+    // Once handed out, the address the assignment names is linked by its host.
+    const linked = html(<ScheduleScreen {...props({ loaded: shaped('external', { settings: { submit_url: { value: 'https://moodle.example.org/mod/assign/1', source: 'assignment' } } }) })} />);
+    expect(linked).toContain('Handed in outside GitHub - <a href="https://moodle.example.org/mod/assign/1" target="_blank" rel="noopener">moodle.example.org</a>');
+    expect(html(<ScheduleScreen {...props({ loaded: shaped('shared-dropbox-repo') })} />)).toContain('Submit via <code>assignment-2-submissions</code> (&lt;your-handle>/ folder)');
+    expect(html(<ScheduleScreen {...props({ loaded: shaped('assignment-repo-public', { teams: 4 }) })} />)).toContain('Submit via <code>assignment-2-&lt;your-team></code> (public)');
+    expect(html(<ScheduleScreen {...props({ loaded: shaped('assignment-repo-student-choice') })} />)).toContain(' (yours to publish)');
+  });
+
   it('names both ends of a line From and To, explains what to release, and offers one more line', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
     for (const l of ['From: repo', 'From: path', 'To: repo', 'To: path', 'Release at']) expect(out).toContain(`>${l}`);
@@ -312,7 +332,7 @@ describe('S6 schedule and S11 release', () => {
   it('renders a release with no deploy block as nothing to release, with no Release early', () => {
     const out = html(<ScheduleScreen {...props({ loaded: unstaged })} />);
     expect(out).toContain('<b>Lecture 12</b>: Review');
-    expect(out).toMatch(/<li class="trow lec" data-entry="lecture-12"><span class="k">lecture<\/span>/);
+    expect(out).toMatch(/<li class="trow lec" data-entry="lecture-12"><span class="k">Lecture<\/span>/);
     expect(out).toContain('Nothing to release yet: this entry has no deploy block');
     expect(out).toContain('href="#schedule-lecture-12"');
     expect(out).not.toContain('Release early');

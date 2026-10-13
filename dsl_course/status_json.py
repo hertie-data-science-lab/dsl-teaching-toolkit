@@ -2057,6 +2057,9 @@ def render_assignments(
                 "returned": returned,
                 "problem": slug in flagged or entry.course_source_repo in flagged,
                 "settings": run_settings(spec),
+                # The site's due-row word (`course.submit_shape`), so the console's
+                # schedule says where to submit exactly as the site does.
+                "submit_shape": spec.submit_shape,
             }
         )
     return rows

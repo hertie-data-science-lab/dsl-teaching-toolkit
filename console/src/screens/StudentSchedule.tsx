@@ -4,13 +4,13 @@
 // (decision 0035 rule 12).
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
-import { dayKey, fmtDay, fmtTime, sortKey } from '../model/format';
+import { dayKey, fmtDay, fmtTime, siteRowWord, sortKey } from '../model/format';
 import { isMarked, type Mine } from '../model/mine';
 import { weekGroups } from '../model/schedule';
 import { MY_STATE_WORD, instant, myState, sortedRows, type ScheduleRow, type SemesterFacts } from '../model/student';
-import { ROW_CLASS, ROW_WORD, termOfFacts } from '../model/week';
+import { ROW_CLASS, termOfFacts } from '../model/week';
 import { assignmentHref, studentHref } from '../router';
-import { Md } from '../ui/bits';
+import { DueSubmit, Md } from '../ui/bits';
 import { FileChips } from './StudentFiles';
 
 export function ArchiveNotice({ when, tz, now }: { when: string; tz: string; now: number }) {
@@ -81,11 +81,12 @@ export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; 
               const k = ROW_CLASS[r.kind] ? undefined : facts.kinds?.[r.kind];
               out.push(
                 <li class={`trow ${ROW_CLASS[r.kind] ?? 'evt'}${yours?.repo ? ' mine' : ''}`} style={k?.background ? { background: k.background } : undefined}>
-                  <span class="k" style={k?.colour ? { color: k.colour } : undefined}>{ROW_WORD[r.kind] ?? k?.label.toLowerCase() ?? r.kind}</span>
+                  <span class="k" style={k?.colour ? { color: k.colour } : undefined}>{siteRowWord(r.kind)}</span>
                   <span class="d">{r.when ? <>{fmtDay(r.when, tz, year)}{!r.allDay && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}</span> : null}{r.tbc ? <span class="tbc">TBC</span> : null}</> : 'TBC'}</span>
                   <span class="ttl">
                     <b>{r.title}</b>{r.subtitle ? `: ${r.subtitle}` : ''}
                     {r.details ? <Md class="t-details" src={r.details} /> : null}
+                    {r.kind === 'due' && a ? <span class="t-details"><DueSubmit shape={a.shape} slug={a.slug} group={a.group} url={a.submitUrl || undefined} /></span> : null}
                     {r.readings.length || r.readingList ? (
                       <span class="t-readings">Readings: <FileChips org={org} repos={facts.materialsRepos} links={r.readings} />{r.readingList ? <a class="st-chip" href={studentHref(org, 'materials')}>reading list</a> : null}</span>
                     ) : r.readingsPending ? <span class="t-readings footnote">Readings to come.</span> : null}

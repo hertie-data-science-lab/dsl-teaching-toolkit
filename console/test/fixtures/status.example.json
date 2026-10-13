@@ -251,6 +251,7 @@
       },
       "returned": false,
       "problem": false,
+      "submit_shape": "assignment-repo-private",
       "settings": {
         "late_penalty_per_day": {
           "value": "10%",

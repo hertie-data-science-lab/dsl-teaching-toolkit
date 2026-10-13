@@ -177,6 +177,8 @@ export interface Assignment {
   problem: boolean;
   /** Each run setting's effective value and where it came from (`status_json.run_settings`). */
   settings?: Record<string, { value: string | number | null; source: 'assignment' | 'semester' | 'course' | 'institution' }>;
+  /** Where the work is handed in, in the site's one word (`course.submit_shape`). Absent in an older status. */
+  submit_shape?: string;
 }
 
 export interface Operation {
