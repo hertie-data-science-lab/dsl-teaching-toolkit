@@ -77,10 +77,12 @@ const puts = (gh: FakeGitHub) => gh.seen.filter((s) => s.method === 'PUT' && s.u
 const body = (s: Seen) => decodeBase64((s.body as { content: string }).content);
 const note = () => q('.savebar').closest('.panel')!.textContent!;
 
-describe('the Students header line', () => {
-  it('splits the roster by role, as the engine reads it, beside the codes sent and joined', async () => {
+describe('the Students roster meter', () => {
+  it('splits the roster by role inside the meter panel, and the header says no counts', async () => {
     await mount();
-    expect(q('.page-head .lede').textContent).toBe('3 on the roster: 2 students, 1 auditor. 2 codes sent; 1 joined.');
+    expect(root!.querySelector('.page-head .lede')).toBeNull();
+    expect(q('.roster-split').textContent).toBe('2 students, 1 auditor');
+    expect(q('.roster-split').closest('.panel')!.querySelector('.meter')).not.toBeNull();
   });
 
   it('reads a blank or unknown role as a student', () => {

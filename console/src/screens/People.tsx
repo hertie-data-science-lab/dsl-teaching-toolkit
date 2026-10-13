@@ -6,7 +6,7 @@ import { EMAIL_RE, diffRoster, missingColumns, readTable, writeTable, type Roste
 import { useSave } from '../edit/save';
 import { YamlText } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
-import { fmtShort, plural } from '../model/format';
+import { fmtShort } from '../model/format';
 import { ROLE_WORD, ROSTER_HEADER, ROSTER_SAVE_NOTE, parseInstructors, pendingSummary, roleSplit, sameHandle, type Person } from '../model/people';
 import { checkAccess, sendCodes, syncMembershipUrl } from '../ops/defs';
 import { OpOpen } from '../ops/Panel';
@@ -145,7 +145,7 @@ function Students(p: ReadyProps) {
   return (
     <>
       <div class="page-head">
-        <div><h2 class="h1">Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h2><p class="lede">{split ? `${base.length} on the roster: ${plural(split.students, 'student')}, ${plural(split.auditors, 'auditor')}.` : `${s.rows} on the roster.`} {s.codes_sent} codes sent; {s.joined} joined.</p></div>
+        <div><h2 class="h1">Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h2></div>
         <div class="actions">
           <button class={`btn${editing ? ' quiet' : ''}`} type="button" aria-pressed={editing} disabled={!table || !!missing.length || !!replacement} onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit roster'}</button>
           <button class="btn quiet" type="button" aria-expanded={upload.open} onClick={() => setUpload({ ...upload, open: !upload.open })}>Replace from CSV</button>
@@ -155,7 +155,7 @@ function Students(p: ReadyProps) {
         </div>
       </div>
       <div class="stack">
-        <div class="panel"><StudentCounts status={status} /></div>
+        <div class="panel"><StudentCounts status={status} split={split} /></div>
         {problems.length ? <ProblemCards list={problems} /> : null}
         {upload.open ? (
           <div class="upload">

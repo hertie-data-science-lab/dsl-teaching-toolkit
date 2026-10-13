@@ -380,7 +380,8 @@ export function ComingUp({ rows, term, tz, year, onSetAside }: { rows: ComingRow
   );
 }
 
-export function StudentCounts({ status }: { status: Status }) {
+/** The roster meter: rows, codes sent, joined; `split` (the Students tab reads the file) adds the students and auditors under it. */
+export function StudentCounts({ status, split }: { status: Status; split?: { students: number; auditors: number } | null }) {
   const s = status.students ?? { rows: 0, codes_sent: 0, joined: 0 };
   return (
     <>
@@ -390,6 +391,7 @@ export function StudentCounts({ status }: { status: Status }) {
         <div><span class="n">{s.joined}</span><span class="l">joined</span></div>
       </div>
       <div class="meter"><i style={`width:${s.rows ? ((s.joined / s.rows) * 100).toFixed(1) : 0}%`} /></div>
+      {split ? <p class="footnote roster-split">{plural(split.students, 'student')}, {plural(split.auditors, 'auditor')}</p> : null}
     </>
   );
 }
