@@ -936,36 +936,53 @@ def penalty_rate(text: object) -> Decimal | None:
     return read_penalty(text)[0]
 
 
-def _late_choice(late_penalty: object) -> str:
-    """A unit's `late_penalty` as one word to compare: "" (absent or blank), `apply`,
-    `waive`, or the text of whatever else was written."""
+class LateChoice(NamedTuple):
+    """A unit's `late_penalty` (`LATE_PENALTY_KEY`), read once: `apply` (what an absent or
+    blank one means too), `waive`, `set` - the whole penalty is `fraction` - or `invalid`,
+    which nobody can apply."""
+
+    mode: str
+    fraction: Decimal | None = None
+
+
+def late_choice(late_penalty: object) -> LateChoice:
+    """The grader's `late_penalty` as a `LateChoice`: a percent or fraction (`10%`, `0.1`)
+    sets the whole penalty; anything else that is not apply or waive is `invalid`."""
     text = "" if late_penalty is None else str(late_penalty).strip()
-    return text.casefold() if text.casefold() in ("apply", "waive") else text
+    if text.casefold() in ("", "apply"):
+        return LateChoice("apply")
+    if text.casefold() == "waive":
+        return LateChoice("waive")
+    fraction = read_penalty(text)[0]
+    return LateChoice("invalid") if fraction is None else LateChoice("set", fraction)
+
+
+class Penalty(NamedTuple):
+    """What a unit loses for lateness (`effective_penalty`): `fraction` of its earned
+    total, and the `mode` of the grader's `LateChoice` behind it."""
+
+    fraction: Decimal
+    mode: str
 
 
 def effective_penalty(
     rate: object, days_late: object, late_penalty: object = None
-) -> Decimal | None:
-    """The fraction of the earned total a unit loses for lateness.
+) -> Penalty:
+    """The fraction of the earned total a unit loses for lateness, and why.
 
-    `late_penalty` is the grader's say (`LATE_PENALTY_KEY`): absent or `apply` is `rate x
-    days_late`, `waive` is nothing, and a percent or fraction is the WHOLE penalty in place
-    of that arithmetic. A unit that is not late loses nothing whatever is written. None for
-    anything else - not a penalty anybody can apply, so `sheet_hold_reasons` holds it for
-    a hand decision rather than guess."""
-    choice = _late_choice(late_penalty)
-    override = None
-    if choice not in ("", "apply", "waive"):
-        override = read_penalty(choice)[0]
-        if override is None:
-            return None
+    `late_penalty` is the grader's say (`late_choice`): absent or `apply` is `rate x
+    days_late`, `waive` is nothing, and a percent or fraction (`set`) is the WHOLE penalty
+    in place of that arithmetic. A unit that is not late loses nothing whatever is written.
+    An `invalid` one keeps the late rule's arithmetic - not a penalty anybody can apply,
+    so `sheet_hold_reasons` holds the unit for a hand decision rather than guess."""
+    choice = late_choice(late_penalty)
     days = as_decimal(days_late)
-    if days is None or days <= 0 or choice == "waive":
-        return Decimal(0)
-    if override is not None:
-        return override
+    if days is None or days <= 0 or choice.mode == "waive":
+        return Penalty(Decimal(0), choice.mode)
+    if choice.fraction is not None:
+        return Penalty(choice.fraction, choice.mode)
     per_day = as_decimal(rate)
-    return per_day * days if per_day is not None else Decimal(0)
+    return Penalty(per_day * days if per_day is not None else Decimal(0), choice.mode)
 
 
 def final_grade(
@@ -987,10 +1004,7 @@ def final_grade(
     earned = as_decimal(total)
     if earned is None:
         return None
-    penalty = effective_penalty(rate, days_late, late_penalty)
-    if penalty is None:
-        penalty = effective_penalty(rate, days_late)
-    earned *= Decimal(1) - penalty
+    earned *= Decimal(1) - effective_penalty(rate, days_late, late_penalty).fraction
     return max(Decimal(0), earned + (as_decimal(adjustment) or Decimal(0)))
 
 
@@ -2566,13 +2580,12 @@ def _penalty_display(
     days = as_decimal(days_late)
     if days is None or days <= 0:
         return ""
-    choice = _late_choice(late_penalty)
-    if choice == "waive":
+    penalty = effective_penalty(rate, days, late_penalty)
+    if penalty.mode == "waive":
         return "waived"
-    override = effective_penalty(rate, days, late_penalty)
-    if choice not in ("", "apply") and override is not None:
-        return f"{_percent_off(override)} (set by hand)"
-    return _percent_off(rate * days) if rate is not None else ""
+    if penalty.mode == "set":
+        return f"{_percent_off(penalty.fraction)} (set by hand)"
+    return _percent_off(penalty.fraction) if rate is not None else ""
 
 
 def _submitted_display(value: object, external: bool = False) -> str:
@@ -2816,7 +2829,7 @@ def sheet_hold_reasons(
     for unit_key, block in _units(spec, sheet):
         fault = _score_fault(spec, block.get(spec.score_key)) or (
             "late_penalty"
-            if effective_penalty(None, None, block.get(LATE_PENALTY_KEY)) is None
+            if late_choice(block.get(LATE_PENALTY_KEY)).mode == "invalid"
             else ""
         )
         for handle, person in _people(spec, unit_key, block).items():
@@ -3077,23 +3090,38 @@ def semester_sheet_faults(
     found.extend(faults)
 
 
-def needs_hand_decision(view: dict) -> bool:
-    """Whether this mark needs a person to settle it: a score that is not a number, under
-    a late penalty that cannot be applied to it.
+def needs_hand_decision(spec: SheetSpec, block: dict) -> bool:
+    """Whether this unit's mark needs a person to settle it: a score that is not a number,
+    under a late penalty that takes something off (`effective_penalty`).
 
     `pass`, two days late, is not `-20% of pass`. The distribute dry run counts these so
     that a grader decides them before anything is sent, rather than after a student reads
     it.
 
     A row with NOTHING typed in it yet is not one of them - there is no decision to take
-    about a mark nobody has written. It carries a penalty (the toolkit counted the days)
-    and no `final_grade`, which is how the two are told apart. A WAIVED penalty takes
-    nothing off, so there is nothing to decide."""
-    return (
-        str(view.get("penalty", "")).startswith("-")
-        and "final_grade" in view
-        and as_decimal(view["final_grade"]) is None
+    about a mark nobody has written - nor is one whose penalty is waived or nothing: it
+    takes nothing off, so there is nothing to decide."""
+    score = block.get(spec.score_key)
+    if score_total(score, spec.questions) is not None or not _verbatim(score):
+        return False
+    info = block.get(INFO_KEY) or {}
+    penalty = effective_penalty(
+        penalty_rate(spec.late_penalty_per_day),
+        info.get("days_late"),
+        block.get(LATE_PENALTY_KEY),
     )
+    return penalty.fraction > 0
+
+
+def undecided_marks(spec: SheetSpec, sheet: dict) -> dict[str, str]:
+    """`{handle: "penalty"}` for everyone in this sheet whose mark needs a person to settle
+    it (`needs_hand_decision`) - the shape `sheet_hold_reasons` gives."""
+    return {
+        handle: "penalty"
+        for unit_key, block in _units(spec, sheet)
+        if needs_hand_decision(spec, block)
+        for handle in _people(spec, unit_key, block)
+    }
 
 
 def _views_from_sheet(spec: SheetSpec, sheet: dict) -> dict[str, dict]:
@@ -4020,11 +4048,11 @@ def _hold_undecided(
 ) -> dict[str, dict[str, tuple[str, str]]]:
     """Take every mark that still needs a person out of the books, and say whose it was.
 
-    Two kinds arrive here. `reasons` is what a grader TYPED that cannot be acted on
-    (`sheet_hold_reasons`); the rest is arithmetic that could not be done - `pass`, two
-    days late, is not `pass minus 20%`. Sending either puts a line a student can read
-    where a decision should have been, and the dry run that counted it has already gone
-    by. So the mark is HELD: no gradebook entry, no column in the registrar's export, no
+    Two kinds arrive in `reasons`: what a grader TYPED that cannot be acted on
+    (`sheet_hold_reasons`), and arithmetic that could not be done (`undecided_marks`) -
+    `pass`, two days late, is not `pass minus 20%`. Sending either puts a line a student
+    can read where a decision should have been, and the dry run that counted it has
+    already gone by. So the mark is HELD: no gradebook entry, no column in the registrar's export, no
     email, until a grader settles it in the sheet. Nothing else that student has is held
     with it - unless the held mark is one they were already sent (`_hold_returned`).
 
@@ -4041,9 +4069,7 @@ def _hold_undecided(
     }
     for handle, book in books.items():
         for slug, view in list(book.items()):
-            reason = (folded.get(slug) or {}).get(handle.casefold()) or (
-                "penalty" if needs_hand_decision(view) else ""
-            )
+            reason = (folded.get(slug) or {}).get(handle.casefold())
             if not reason:
                 continue
             held.setdefault(slug, {})[handle] = (view.get("team") or handle, reason)
@@ -4523,10 +4549,12 @@ def distribute(
         # None: the export is missing or unreadable while gradebooks went out already.
         told_known = _already_returned(wd) is not None
 
+    # What a grader typed outranks the arithmetic, as one reason per handle.
     held = _hold_undecided(
         books,
         {
-            slug: sheet_hold_reasons(specs[slug], sheet)
+            slug: undecided_marks(specs[slug], sheet)
+            | sheet_hold_reasons(specs[slug], sheet)
             for slug, sheet in sheets.items()
         },
     )

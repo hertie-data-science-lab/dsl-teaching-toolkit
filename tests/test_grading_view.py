@@ -261,7 +261,9 @@ def test_a_score_no_arithmetic_applies_to_is_passed_through_as_typed():
     )
     assert view["final_grade"] == "pass"
     assert view["penalty"] == "-20%"
-    assert needs_hand_decision(view), "a penalty on `pass` must reach a person"
+    assert needs_hand_decision(
+        individual_spec(late_penalty_per_day="10%", late_window_days=7), block
+    ), "a penalty on `pass` must reach a person"
 
 
 @pytest.mark.parametrize(
@@ -276,7 +278,7 @@ def test_a_score_no_arithmetic_applies_to_is_passed_through_as_typed():
 )
 def test_a_mark_nobody_has_to_decide_is_not_flagged(block):
     spec = individual_spec(late_penalty_per_day="10%", late_window_days=7)
-    assert not needs_hand_decision(student_view(spec, "ada-l", block, "ada-l"))
+    assert not needs_hand_decision(spec, block)
 
 
 def test_an_individual_keeps_their_own_per_question_breakdown():
@@ -553,11 +555,11 @@ def test_an_on_time_unit_shows_no_penalty_whatever_is_written():
 def test_a_waived_penalty_on_pass_needs_no_hand_decision():
     spec = individual_spec(late_penalty_per_day="10%", late_window_days=7)
     block = {"info": {"days_late": 2}, "score_individual": "pass"}
-    assert needs_hand_decision(student_view(spec, "ada-l", block, "ada-l"))
+    assert needs_hand_decision(spec, block)
     block["late_penalty"] = "waive"
-    assert not needs_hand_decision(student_view(spec, "ada-l", block, "ada-l"))
+    assert not needs_hand_decision(spec, block)
     block["late_penalty"] = "5%"
-    assert needs_hand_decision(student_view(spec, "ada-l", block, "ada-l"))
+    assert needs_hand_decision(spec, block)
 
 
 def test_only_a_unit_whose_penalty_moved_its_mark_is_mailed_again():

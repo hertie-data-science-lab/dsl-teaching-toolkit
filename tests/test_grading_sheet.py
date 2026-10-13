@@ -907,23 +907,41 @@ def test_a_question_marked_from_another_file_names_it_beside_its_maximum():
         ("15%", Decimal("0.15")),  # the WHOLE penalty, not a rate per day
         (0.15, Decimal("0.15")),
         ("0%", Decimal(0)),
-        ("15", None),  # bare: neither 1500% nor silently 15%
-        ("waived", None),
-        ("half", None),
-        (True, None),
+        # Nobody can apply these: the late rule's arithmetic, and the unit held.
+        ("15", Decimal("0.20")),  # bare: neither 1500% nor silently 15%
+        ("waived", Decimal("0.20")),
+        ("half", Decimal("0.20")),
+        (True, Decimal("0.20")),
     ],
 )
 def test_effective_penalty_reads_apply_waive_or_the_whole_penalty(
     late_penalty, expected
 ):
-    assert grades.effective_penalty(penalty_rate("10%"), 2, late_penalty) == expected
+    penalty = grades.effective_penalty(penalty_rate("10%"), 2, late_penalty)
+    assert penalty.fraction == expected
+
+
+@pytest.mark.parametrize(
+    "late_penalty,mode",
+    [
+        (None, "apply"),
+        (" Apply ", "apply"),
+        ("WAIVE", "waive"),
+        ("15%", "set"),
+        ("0.15", "set"),
+        ("15", "invalid"),
+        ("waived", "invalid"),
+    ],
+)
+def test_late_choice_reads_the_graders_say_once(late_penalty, mode):
+    assert grades.late_choice(late_penalty).mode == mode
+    assert grades.effective_penalty(penalty_rate("10%"), 2, late_penalty).mode == mode
 
 
 def test_a_unit_that_is_not_late_loses_nothing_whatever_is_written():
-    for late_penalty in (None, "apply", "waive", "15%"):
-        assert grades.effective_penalty(penalty_rate("10%"), 0, late_penalty) == 0
-    # but a word nobody can apply is still not a penalty, late or not
-    assert grades.effective_penalty(penalty_rate("10%"), 0, "half") is None
+    for late_penalty in (None, "apply", "waive", "15%", "half"):
+        penalty = grades.effective_penalty(penalty_rate("10%"), 0, late_penalty)
+        assert penalty.fraction == 0
 
 
 def test_final_grade_applies_the_penalty_the_grader_chose():
