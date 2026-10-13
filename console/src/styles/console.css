@@ -410,6 +410,8 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 .trow.later.current { box-shadow: inset 5px 0 0 var(--idle), inset 0 0 0 2px var(--ink); }
 .trow.later .ttl, .trow.later .k { opacity: 0.8; }
 .trow.removed { opacity: 0.55; }
+/* An entry the student site does not show: muted throughout, with its Not shown badge. */
+.trow.off-site, .trow.off-site .k, .trow.off-site .ttl a, .trow.off-site .d { color: var(--muted); }
 .trow.removed .ttl { text-decoration: line-through; }
 .trow.removed .st .textlink { text-decoration: underline; opacity: 1; }
 .st-chip { font-family: var(--font-display); font-weight: 600; font-size: 11.5px; padding: 0 8px; border-radius: 999px; background: rgba(255,255,255,0.55); white-space: nowrap; }

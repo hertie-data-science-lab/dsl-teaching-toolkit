@@ -46,7 +46,13 @@ function submitUrlOnce(a: Assignment, now: number): string | undefined {
 /** What the student site shows in the Details cell; `a`, the due row's assignment, says where to submit as the site does. */
 function Details({ r, a, now }: { r: Row; a?: Assignment; now: number }) {
   if (r.entry === 'semester') return <span class="det" />;
-  if (!r.show) return <span class="det"><span class="gen">Hidden from the student site; still {r.block === 'releases' ? 'released' : 'runs'}.</span></span>;
+  if (!r.show) {
+    return (
+      <span class="det">
+        <span class="prop">Not shown</span> <Hint small label="About Not shown">This entry is not displayed on the student site or in the student console. The engine still acts on it (a hidden release still ships at its time). Edit the entry to show it.</Hint>
+      </span>
+    );
+  }
   return (
     <span class="det">
       <Md src={r.details} />
@@ -583,7 +589,7 @@ function View(p: ReadyProps) {
       : ref && rel?.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small" label="Release early" /></>
       : <span class="st-chip">{r.state}</span>;
     items.push(
-      <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === r.entry ? ' current' : ''}${gone ? ' removed' : ''}`} data-entry={r.entry}>
+      <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === r.entry ? ' current' : ''}${gone ? ' removed' : ''}${r.show ? '' : ' off-site'}`} data-entry={r.entry}>
         <span class="k">{siteRowWord(r.type)}</span>
         <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'No date yet'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}{r.tbc ? ' (TBC)' : ''}</span> : r.tbc && r.when ? <span>(TBC)</span> : null}</span>
         <span class="ttl"><a href={`#schedule-${r.entry}`}><b>{r.ident}</b>: {r.name}</a></span>

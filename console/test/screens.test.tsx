@@ -278,6 +278,21 @@ describe('S6 schedule and S11 release', () => {
     expect(html(<ScheduleScreen {...props({ loaded: shaped('assignment-repo-student-choice') })} />)).toContain(' (yours to publish)');
   });
 
+  it('mutes an entry the student site does not show, with a Not shown badge that says why', () => {
+    const HIDDEN = SCHEDULE.replace('    details: Room 2.61, closed book.\n', '    details: Room 2.61, closed book.\n    show_on_site: false\n');
+    const hiddenFiles = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: HIDDEN }, {}, TREE);
+    const out = html(<ScheduleScreen {...props({ files: hiddenFiles })} />);
+    const rows = [...out.matchAll(/<li class="trow ([^"]+)" data-entry="([^"]+)">(.*?)<\/li>/g)];
+    const midterm = rows.find((m) => m[2] === 'midterm')!;
+    expect(midterm[1]).toContain('off-site');
+    expect(midterm[3]).toContain('<span class="prop">Not shown</span>');
+    expect(midterm[3]).toContain('This entry is not displayed on the student site or in the student console. The engine still acts on it (a hidden release still ships at its time). Edit the entry to show it.');
+    for (const m of rows.filter((x) => x[2] !== 'midterm')) {
+      expect(m[1]).not.toContain('off-site');
+      expect(m[3]).not.toContain('Not shown');
+    }
+  });
+
   it('names both ends of a line From and To, explains what to release, and offers one more line', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
     for (const l of ['From: repo', 'From: path', 'To: repo', 'To: path', 'Release at']) expect(out).toContain(`>${l}`);
