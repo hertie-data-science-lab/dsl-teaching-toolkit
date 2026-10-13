@@ -389,8 +389,9 @@ a first visit, mostly free 304s after).
   `return_run_details`, polls the run's job listing alone (`src/github/poll.ts`, the one poll loop: every 3 s, every
   10 s after 30 s, nothing while the tab is hidden), and reads the public `dsl-outcome` annotation and the
   private outcome file. Hand out, return marks, archive, update every copy and send new codes
-  unlock only after a preview in the same session; publishing the public website, which has no
-  engine preview, asks for a confirmation instead. Other previews are offered only where they
+  offer a preview beside the verb, never required: the page's verb opens the panel and the
+  panel's verb runs, behind the op's confirmation box where it has one; publishing the public website, which has no
+  engine preview, asks for a confirmation. Other previews are offered only where they
   show something you act on (`PREVIEW_NOT_OFFERED` in `src/ops/registry.ts` lists the ones
   that are not). The run popup lists each job step once (GitHub's "Post ..." steps are left
   out), resizes by its bottom-left grip, and its Stop cancels the workflow run

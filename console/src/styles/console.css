@@ -132,7 +132,6 @@ main { min-width: 0; }
 .textlink { font: inherit; font-size: 13.5px; color: var(--link); background: none; border: 0; padding: 4px 2px; min-height: 32px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; display: inline-flex; align-items: center; }
 .edit-file { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
 .edit-file:hover { color: var(--link); }
-.gate-hint { font-size: 12.5px; color: var(--muted); }
 
 /* ================= panels ================= */
 .panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 18px 20px; }

@@ -1,8 +1,8 @@
 // The operation panel's state: the one operation open at a time, what this session has
-// previewed (the gate), and the runs this session finished (for the Operations list). A run
+// previewed (recorded, never required), and the runs this session finished (for the Operations list). A run
 // is followed with `poll`: every 3 s, every 10 s once it has run for 30 s, nothing while the
 // tab is hidden, and given up on after `maxMisses` unreadable polls in a row; sign-out
-// (`reset`) ends every watch and forgets the runs and the gate, so the next person starts clean.
+// (`reset`) ends every watch and forgets the runs and the previews, so the next person starts clean.
 
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
@@ -16,7 +16,7 @@ import { modeOf, type OpMode } from './registry';
 
 /** One operation as the panel offers it: the op, its derived args, and its copy. */
 export interface OpDef {
-  /** The gate's subject: a preview of `key` unlocks the verb for `key` only. */
+  /** What a preview is of: a preview of `key` is recorded for `key` only. */
   key: string;
   op: string;
   courseOrg: string;
@@ -137,7 +137,7 @@ export class OpsSession {
   }
 
   /**
-   * Whether this session previewed `def` with exactly these options: a preview unlocks the
+   * Whether this session previewed `def` with exactly these options: a preview stands for the
    * run it showed, not one whose options were changed after it.
    */
   isPreviewed(def: OpDef, values: Record<string, unknown> = def.args, checked = false): boolean {
@@ -149,10 +149,9 @@ export class OpsSession {
     return this.blocks.value[this.gateKey(def)] ?? null;
   }
 
-  /** Whether the verb may run now: gated ops need this session's preview, a check box its tick. */
+  /** Whether the verb may run now: not while running, and a confirmation box needs its tick. A preview is never required. */
   canRun(c: Current): boolean {
     if (c.phase === 'running') return false;
-    if (c.mode === 'gated' && !this.isPreviewed(c.def, c.values, c.checked)) return false;
     if (c.def.needsCheck && !c.checked) return false;
     return true;
   }
@@ -185,8 +184,9 @@ export class OpsSession {
     };
     if (def.info) return;
     const cur = this.current.value;
+    // A gated op's verb on a page opens the panel and runs nothing: its verb there is the confirmation.
     if (start === 'preview' && (cur.mode === 'gated' || cur.mode === 'preview')) void this.start('preview');
-    else if (start === 'run' && this.canRun(cur)) void this.start(cur.mode === 'previewOnly' ? 'preview' : 'run');
+    else if (start === 'run' && cur.mode !== 'gated' && this.canRun(cur)) void this.start(cur.mode === 'previewOnly' ? 'preview' : 'run');
   }
 
   setValues(values: Record<string, unknown>): void {

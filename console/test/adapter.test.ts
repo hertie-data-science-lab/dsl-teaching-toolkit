@@ -111,15 +111,15 @@ describe('DispatchAdapter', () => {
 describe('the gate', () => {
   const run = (e: ReturnType<typeof engine>) => new OpsSession(new DispatchAdapter(e.client, () => 'a-example'), { pollMs: 0, sleep: async () => {} });
 
-  it('keeps a gated verb shut until a preview in this session finishes', async () => {
+  it('never holds a gated verb back for a preview; the page’s verb opens the panel without running', async () => {
     const e = engine({ annotation: publicOutcome, privateFile: privateOutcome });
     const s = run(e);
     const def = defs.sendCodes(scope, 7);
     expect(modeOf(def.op)).toBe('gated');
-    s.open(def);
-    expect(s.canRun(s.current.value!)).toBe(false);
-    await s.start('run');
+    s.open(def, 'run');
+    await new Promise((r) => setTimeout(r, 0));
     expect(e.gh.seen.filter((x) => x.method === 'POST')).toHaveLength(0);
+    expect(s.canRun(s.current.value!)).toBe(true);
     await s.start('preview');
     expect(s.current.value?.dry?.outcome?.summary).toBe(publicOutcome.summary);
     expect(s.isPreviewed(def)).toBe(true);
@@ -134,17 +134,16 @@ describe('the gate', () => {
     expect(posts).toEqual([true, false]);
   });
 
-  it('shuts the verb again when an option changes after the preview', async () => {
+  it('holds the verb behind its confirmation box, previewed or not', async () => {
     const e = engine({ annotation: { ...publicOutcome, op: 'semester.archive' } });
     const s = run(e);
     s.open(defs.archive(scope, 'Sun 31 Jan 2027', false));
-    await s.start('preview');
-    // Previewed without archiving early; ticking it is a different run, not yet previewed.
-    s.setChecked(true);
     expect(s.canRun(s.current.value!)).toBe(false);
-    await s.start('run');
-    expect(e.gh.seen.filter((x) => x.method === 'POST')).toHaveLength(1);
     await s.start('preview');
+    // Previewed without archiving early; ticking it is a different run, not previewed, and may run.
+    expect(s.canRun(s.current.value!)).toBe(false);
+    s.setChecked(true);
+    expect(s.isPreviewed(s.current.value!.def, s.current.value!.values, true)).toBe(false);
     expect(s.canRun(s.current.value!)).toBe(true);
   });
 

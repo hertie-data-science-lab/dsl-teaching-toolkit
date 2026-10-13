@@ -297,7 +297,7 @@ describe('marks arithmetic, as grades.py does it', () => {
 // ------------------------------------------------------------------ the panel
 
 describe('the operation panel', () => {
-  it('opens with Preview filled and the gated verb shut, and names the op, scope and intro', () => {
+  it('opens with Preview filled and the gated verb live, and names the op, scope and intro', () => {
     const gh = new FakeGitHub();
     const env = saveEnv(gh);
     env.ops.open(defs.sendCodes({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 6));
@@ -305,8 +305,8 @@ describe('the operation panel', () => {
     expect(out).toContain('Send new codes, Fall 2026');
     expect(out).toContain('Their old codes stop working.');
     expect(out).toContain('<button class="btn" type="button">Preview</button>');
-    expect(out).toMatch(/<button class="btn outline" type="button" disabled>Send 6 new codes<\/button>/);
-    expect(out).toContain('Send 6 new codes unlocks when the preview finishes.');
+    expect(out).toMatch(/<button class="btn outline" type="button">Send 6 new codes<\/button>/);
+    expect(out).not.toContain('unlocks when the preview finishes');
     env.ops.minimise();
     expect(render(<EnvCtx.Provider value={env}><OpPanel /></EnvCtx.Provider>)).toContain('class="opbar"');
   });
@@ -419,6 +419,7 @@ describe('editing screens', () => {
     expect(out).toContain('aria-label="About archiving"');
     expect(out).toContain('Students and instructors keep read access; nothing is deleted');
     expect(out).toContain('Archive Fall 2026');
+    expect(out).not.toContain('Preview first');
     expect(parseHash('#archive')).toEqual({ screen: 'schedule', entry: 'archive' });
   });
   it('a semester archived before it had a status counts as archived', () => {
