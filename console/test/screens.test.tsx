@@ -837,3 +837,11 @@ describe('schedule lede', () => {
     expect(t).not.toContain('Every release has its folder.');
   });
 });
+
+describe('schedule Check hint', () => {
+  it('says what Check reads and links the Check semester setup docs', () => {
+    const out = html(<ScheduleScreen {...props()} />);
+    expect(out).toContain('Check re-reads the schedule, the course repos and the templates and reports anything that would stop a release, hand-out, collection or return from running: entries that do not parse, dates out of order, a release whose folder is missing, a template whose grading config is invalid. It changes nothing and sends nothing.');
+    expect(out).toContain('reference/actions-reference.md');
+  });
+});

@@ -78,6 +78,9 @@ export function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
 
 type Setter<T> = (patch: Partial<T>) => void;
 
+/** The Schedule's Check `?`: what Check semester setup looks at. */
+export const SCHEDULE_CHECK_HINT = 'Check re-reads the schedule, the course repos and the templates and reports anything that would stop a release, hand-out, collection or return from running: entries that do not parse, dates out of order, a release whose folder is missing, a template whose grading config is invalid. It changes nothing and sends nothing.';
+
 function F<T>({ id, k, t, d, set, error }: { id: string; k: keyof T & string; t: FieldTier; d: T; set: Setter<T>; error?: string }) {
   return <Field id={id} k={k} t={t} value={(d as Record<string, unknown>)[k]} values={d as Record<string, unknown>} error={error} set={(key, v) => set({ [key]: v ?? (t.widget === 'checkbox' ? false : '') } as Partial<T>)} />;
 }
@@ -661,7 +664,7 @@ function View(p: ReadyProps) {
           <h2 class="h1">Schedule <Hint doc="07-schedule-releases.md">The schedule drives everything automatic: releases, hand outs, collection and the student site’s calendar. Dates are in the semester’s timezone.</Hint></h2>
           <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {heldLine || 'Every planned release has its associated folder.'}</p>
         </div>
-        <div class="actions"><CheckNow p={p} label="Check" /><a class="btn outline" href="#schedule-new">Add entry</a></div>
+        <div class="actions"><CheckNow p={p} label="Check" about={{ text: SCHEDULE_CHECK_HINT, doc: 'reference/actions-reference.md' }} /><a class="btn outline" href="#schedule-new">Add entry</a></div>
       </div>
       <div class="term-meta">
         {sched?.start && sched?.end ? <span>Semester <b>{fmtDay(sched.start, tz, year)} to {fmtDay(sched.end, tz)}</b></span> : null}
