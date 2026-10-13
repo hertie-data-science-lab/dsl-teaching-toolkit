@@ -215,7 +215,8 @@ assignment's state and progress are on the Assignments tab.
 
 The semester Dashboard's week strip filters its agenda only: This week on load, any set of
 weeks picked, none picked for all of them; the agenda panel's heading names the selection
-("Planned this week", "Planned in weeks 3 and 5", "Planned, all weeks"). A red number on a week
+("Planned this week", "Planned in weeks 3 and 5", "Planned, all weeks"). Each agenda row is one line: type chip, label, state, then the
+details, cut with an ellipsis (the row's title holds the whole text), and its actions. A red number on a week
 counts its problems now or soon; a hollow one its later problems (a week with both shows the red
 one), and the legend shows both. A release row, on the expanded strip, in the agenda and on the
 Schedule page alike, marks the problem that holds it (`problemForRelease`, `releaseMark`): now, a

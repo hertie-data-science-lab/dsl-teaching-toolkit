@@ -174,18 +174,21 @@ function releaseDetail(status: Status, rel: Release | undefined, m: ReleaseMark 
   return 'Goes to students at its time; the site row goes live.';
 }
 
+/**
+ * One agenda row, on one line: type chip, label, state, details (cut with an ellipsis; the row's
+ * title carries the whole of it), then its actions.
+ */
 function RowItem({ r, status, p, marks }: { r: Row; status: Status; p: CohortProps; marks: Marks }) {
   const tz = tzOf(status), releases = status.releases ?? [];
   let chip = TYPE_LABEL[r.type] ?? r.type, cls = TYPE_CLASS[r.type] ?? 'evt', detail = '', buttons = null;
+  const m = rowMark(marks, r);
   if (r.block === 'releases') {
     const rel = releases.find((x) => x.id === r.entry);
     const ref = rel && r.when ? releaseRef(rel, tz, Number(r.when.slice(0, 4))) : null;
-    const m = rowMark(marks, r);
     chip = 'Release';
     detail = releaseDetail(status, rel, m, tz);
     buttons = (
       <>
-        {m ? <ReleaseMarks m={m} entry={r.entry} /> : null}
         {ref && rel?.state === 'planned' ? <OpButtons def={releaseEarly(cohortScope(p), ref)} small label={`Release ${r.ident} early`} /> : null}
         <a class="textlink" href={`#release-${r.entry}`}>Details</a>
       </>
@@ -198,15 +201,18 @@ function RowItem({ r, status, p, marks }: { r: Row; status: Status; p: CohortPro
   } else {
     chip = chip.charAt(0).toUpperCase() + chip.slice(1);
   }
+  const state = m ? markWord(m) : r.state;
+  const details = [r.name, detail].filter(Boolean).join('. ');
   return (
-    <li>
+    <li title={[chip, r.ident, state, details].filter(Boolean).join(' · ')}>
       <span class="when">{r.when ? <><b>{fmtDay(r.when, tz).replace(/ \w+$/, '')}</b><span>{fmtTime(r.when, tz)}</span></> : <b>TBC</b>}</span>
       <span class="what">
-        <span><span class={`chip ${cls}`}>{chip}</span></span>
-        <span class="t"><b>{r.ident}</b>: {r.name}</span>
-        {detail ? <span class="d">{detail}</span> : null}
-        {buttons ? <span class="actions">{buttons}</span> : null}
+        <span class={`chip ${cls}`}>{chip}</span>
+        <b class="t">{r.ident}</b>
+        {m ? <ReleaseMarks m={m} entry={r.entry} /> : state ? <span class="st-chip">{state}</span> : null}
+        {details ? <span class="d">{details}</span> : null}
       </span>
+      {buttons ? <span class="actions">{buttons}</span> : null}
     </li>
   );
 }

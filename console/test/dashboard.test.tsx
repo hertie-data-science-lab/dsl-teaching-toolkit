@@ -3,6 +3,7 @@
 // with a before and an after bucket; the header line; the week cells as filters for the agenda;
 // the Problems list (now and soon, whatever the strip picks); the expanded timeline.
 
+import { readFileSync } from 'node:fs';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -428,5 +429,32 @@ describe('release rows by time (decision 0034 §6)', () => {
     const legend = h.querySelector('.strip-legend')!;
     expect(legend.textContent).toContain('nproblems');
     expect(legend.querySelector('.lg-count.later')!.parentElement!.textContent).toBe('nnot ready yet');
+  });
+});
+
+describe('the agenda rows', () => {
+  it('put each row on one line: when, chip, label, state, details, actions; the title holds it all', () => {
+    const h = mount();
+    const rows = [...h.querySelectorAll<HTMLLIElement>('.agenda ul.week > li')];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const li of rows) {
+      // No stacked lines: the row's own children sit side by side, and nothing breaks inside them.
+      expect([...li.children].map((c) => c.className)).toEqual(expect.arrayContaining(['when', 'what']));
+      expect(li.querySelector('br')).toBeNull();
+      const what = li.querySelector('.what')!;
+      expect(what.children[0].classList.contains('chip')).toBe(true);
+      expect(what.children[1].matches('b.t')).toBe(true);
+      expect(li.getAttribute('title')).toContain(what.children[1].textContent!);
+    }
+    expect(rows[0].getAttribute('title')).toBe('Due · Assignment 2 · open · Regression. 37 of 48 submitted so far.');
+    expect(rows[0].querySelector('.what .st-chip')!.textContent).toBe('open');
+    expect(rows[0].querySelector('.what .d')!.textContent).toBe('Regression. 37 of 48 submitted so far.');
+    expect(rows[0].querySelector(':scope > .actions')!.textContent).toBe('Open assignment');
+  });
+
+  it('cut long details with an ellipsis instead of wrapping', () => {
+    const css = readFileSync(`${__dirname}/../src/styles/console.css`, 'utf8');
+    expect(css).toMatch(/\.week li \{[^}]*display: flex;[^}]*white-space: nowrap;/);
+    expect(css).toMatch(/\.week \.what \.d \{[^}]*overflow: hidden; text-overflow: ellipsis;/);
   });
 });

@@ -306,15 +306,17 @@ table.kinds td select { min-width: 180px; }
 
 /* this week */
 .week { list-style: none; margin: 0; padding: 0; }
-.week li { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 4px 14px; padding: 12px 0; border-top: 1px solid var(--rule); }
+/* One line per row: when, chip, label, state, details (cut with an ellipsis), actions. */
+.week li { display: flex; align-items: center; gap: 14px; padding: 10px 0; border-top: 1px solid var(--rule); white-space: nowrap; }
 .week li:first-child { border-top: 0; }
-.week .when { font-family: var(--font-display); line-height: 1.2; }
-.week .when b { display: block; font-size: 15px; font-weight: 700; }
-.week .when span { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.week .what { display: grid; gap: 4px; min-width: 0; }
+.week .when { flex: none; width: 92px; font-family: var(--font-display); }
+.week .when b { font-size: 15px; font-weight: 700; }
+.week .when span { margin-left: 6px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.week .what { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.week .what > * { flex: none; }
 .week .what .t { font-weight: 600; }
-.week .what .d { font-size: 13.5px; color: var(--muted); }
-.week .actions { margin-top: 4px; }
+.week .what .d { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 13.5px; color: var(--muted); }
+.week .actions { flex: none; flex-wrap: nowrap; }
 .week .overdue { font-size: 13.5px; color: var(--muted); padding-top: 12px; border-top: 1px solid var(--rule); }
 
 /* assignment index */
@@ -411,7 +413,7 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 .st-chip.skip { background: var(--bad); color: #fff; }
 .st-chip.later { background: transparent; border: 1.5px dotted var(--idle); color: var(--ink-2); }
 /* A release row's red `!` (decision 0034), on the timeline and the agenda alike. */
-.st .ex, .week .actions .ex { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 999px; background: var(--bad); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 11px; }
+.st .ex, .week .what .ex { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 999px; background: var(--bad); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 11px; }
 .trow .st .btn.small { min-height: 26px; font-size: 12px; padding: 0 10px; }
 .st-note { font-size: 12.5px; font-weight: 600; color: var(--bad-ink); }
 .trow .btn.small { min-height: 30px; font-size: 12.5px; padding: 1px 10px; background: var(--surface); color: var(--ink); border-color: var(--ink-2); }
