@@ -372,7 +372,11 @@ a first visit, mostly free 304s after).
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
   `students.csv`, `instructors.yml`, a template's `grading_config.yml`, the site's `index.md`.
 - Course materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and
-  last changes; a materials repo's recursive tree, badged from its `.releaseignore`.
+  last changes; a materials repo's recursive tree, badged from its `.releaseignore` on its
+  settings page. The index lists each materials repo's files under its row as a read-only folder
+  tree (`ui/MaterialsTree.tsx`): every folder collapsed, "N files" beside it while it is, a
+  GitHub link to its tree page; a file opens its blob page on GitHub. The folders a viewer opens
+  are kept per repo in sessionStorage; `?folder=<repo>/<path>#materials` opens that folder.
 
 ## What it changes
 
@@ -444,7 +448,8 @@ and the retired Archive page `#archive` to `#schedule-archive` (its explanation 
 archive row, its Archive button on that entry).
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
-opens a new assignment entry for that template; `?wizard=new-semester-3` adds a link back.
+opens a new assignment entry for that template; `?folder=<repo>/<path>#materials` the materials
+index with that folder open; `?wizard=new-semester-3` adds a link back.
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
 The course or semester rides in the query string: `?cohort=<org>` or `?course=<org>`
 (`?semester=` opens the student screens).

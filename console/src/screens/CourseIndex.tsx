@@ -12,6 +12,7 @@ import { formatWord, formatsList } from '../tiers/grading';
 import { CheckLine, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
+import { MaterialsTree } from '../ui/MaterialsTree';
 import { OpenButton } from '../ui/OpenButton';
 import { courseOf, useCourseView } from './Course';
 import { RepoChip, RepoWhy, TemplateSub } from '../ui/SetupPanel';
@@ -83,6 +84,22 @@ export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; 
   );
 }
 
+/** The folder `?folder=<repo>/<path>` names inside `repo`, if it is that repo's. */
+export const focusIn = (folder: string | undefined, repo: string) => (folder?.startsWith(`${repo}/`) ? folder.slice(repo.length + 1).replace(/\/+$/, '') || undefined : undefined);
+
+/** A materials repo's files under its row, as a folder tree. */
+function RepoFiles({ files, org, repo, focus }: { files: Files; org: string; repo: string; focus?: string }) {
+  const t = files.tree(org, repo);
+  if (t.kind === 'loading') return <div class="r-files"><Loading what="Reading the repo" /></div>;
+  if (t.kind !== 'ready') return <p class="r-sub">Could not read the repo’s files.</p>;
+  return (
+    <div class="r-files">
+      {t.truncated ? <p class="footnote">GitHub returned only part of this repo’s file list.</p> : null}
+      <MaterialsTree org={org} repo={repo} files={t.paths.filter((x) => !x.dir).map((x) => x.path)} focus={focus} />
+    </div>
+  );
+}
+
 export function MaterialsIndexScreen(p: CourseProps) {
   const { course, files } = p;
   const c = courseOf(p);
@@ -111,6 +128,7 @@ export function MaterialsIndexScreen(p: CourseProps) {
                     <RepoWhy r={r} />
                     {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
+                    <RepoFiles files={files} org={course.org} repo={m.repo} focus={focusIn(p.folder, m.repo)} />
                   </li>
                 );
               })}
