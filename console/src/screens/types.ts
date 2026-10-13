@@ -37,6 +37,8 @@ export interface CourseProps {
   files: Files;
   now: number;
   entry?: string;
+  /** A folder to open on the course materials index (`?folder=<repo>/<path>`). */
+  folder?: string;
 }
 
 export interface HomeProps {

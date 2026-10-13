@@ -115,6 +115,8 @@ export interface Selection {
   wizard?: string;
   /** A template to prefill a new schedule entry with (New assignment's last step). */
   template?: string;
+  /** A folder to open on the course materials index, `<repo>/<path>`. */
+  folder?: string;
 }
 
 export function parseSearch(search: string): Selection {
@@ -127,6 +129,7 @@ export function parseSearch(search: string): Selection {
     join: ORG_NAME_RE.test(q.get('join') ?? '') ? q.get('join')! : undefined,
     wizard: wizard && WIZARD_RE.test(wizard) ? wizard : undefined,
     template: q.get('template') ?? undefined,
+    folder: q.get('folder') ?? undefined,
   };
 }
 
