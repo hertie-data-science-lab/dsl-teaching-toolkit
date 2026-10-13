@@ -232,8 +232,8 @@ _OWN_CLASSES = frozenset(
         "file-chev",
         "file-menu-list",
         "file-menu-lbl",
-        "file-menu-h",
-        "file-menu-muted",
+        "file-menu-sep",
+        "file-menu-off",
         "open-in-line",
         "profile-steps",
         "profile-step",
@@ -675,19 +675,90 @@ def test_every_item_in_a_file_menu_opens_a_new_tab():
     assert 'target="_blank"' not in body.split('<details class="file-menu">')[0]
 
 
-def test_a_file_menu_is_one_chevron_with_two_headed_sections():
-    # One small control per file, "More ways to open", rather than a row of buttons: Open is
-    # Liquid's, and Edit is the script's, appended under its own heading.
+def test_a_file_menu_is_one_chevron_with_one_unheaded_list():
+    # One small control per file, "More ways to open", rather than a row of buttons. The
+    # list has no headings (option B): the View rows are Liquid's, a hairline, then the
+    # two Edit rows the script replaces.
     body = _strip_comments(_templates()["_includes/file_link.html"])
     assert '<summary class="file-chev" title="More ways to open"' in body
-    assert '<li class="file-menu-h">Open</li>' in body
+    assert "file-menu-h" not in body
+    menu = body.split('<ul class="file-menu-list">')[1].split("</ul>")[0]
+    sep = '<li class="file-menu-sep" role="separator"></li>'
+    assert menu.count(sep) == 1
+    assert menu.index("View on GitHub") < menu.index(sep) < menu.index("data-edit=")
     script = _strip_comments(_open_in())
-    files = script.split("function decorateFiles(root, me) {")[1].split("\n  }")[0]
-    assert 'head.appendChild(document.createTextNode("Edit"));' in files
-    # Before a profile there is still one Edit item: the way to set one up.
-    assert '"Set up your editor in Profile"' in files
+    # A directory's menu, built by the script, has the same hairline and no heading.
+    assert "separator()" in script and "heading(" not in script
+    # Before a profile the Edit rows stay, greyed, pointing at the Profile step they need.
+    assert 'profile: "set up in "' in script
     # And the script, not the reader, closes a menu left open.
     assert "wireMenus();" in script
+
+
+# A label ends its span, or - the Edit pair's loop - its half of the `if` on the row.
+_MENU_ITEM = re.compile(
+    r"</svg>(View here|View on GitHub|Edit in browser|Edit in VS Code)"
+    r"(?:</span>|\{% else %\}|\{% endif %\}</span>)"
+)
+
+
+def test_every_file_menu_lists_its_rows_in_order():
+    # Three rows on every file, `View here` first only where the site hosts a copy; the
+    # Edit pair is always listed, greyed with a reason where unavailable.
+    body = _strip_comments(_templates()["_includes/file_link.html"])
+    menu = body.split('<ul class="file-menu-list">')[1].split("</ul>")[0]
+    assert [m[1] for m in _MENU_ITEM.finditer(menu)] == [
+        "View here",
+        "View on GitHub",
+        "Edit in browser",
+        "Edit in VS Code",
+    ]
+    # No greyed `View here`: without a hosted copy the row is simply not there.
+    assert "{% else %}" not in menu.split("{% endif %}")[0]
+    greyed = '<span class="file-menu-lbl" role="link" aria-disabled="true">'
+    # The Edit pair is ONE greyed row written twice by a loop.
+    off = menu.split('<li class="file-menu-off"')[1:]
+    assert len(off) == 1 and "{% for edit in (1..2) %}" in menu
+    item = off[0]
+    assert greyed in item and "<small>" in item
+    # No href on the row itself - only the Profile link inside its reason has one.
+    assert "href" not in item.split("<small>")[0]
+    # The reason, and the format answer the script reads, come from the one include.
+    why = "{% include edit_why.html url=include.url"
+    assert item.count(why) == 2 and 'data-edit-why="' + why in item
+    reasons = _strip_comments(_templates()["_includes/edit_why.html"])
+    assert "not an editable format" in reasons
+    assert "not editable from this site" in reasons
+    assert ">Profile</a>" in reasons
+    # The Edit pair carries what the script replaces it by.
+    assert 'data-edit="{% if forloop.first %}online{% else %}local{% endif %}"' in item
+
+
+def test_the_menu_row_rule_leaves_the_reasons_profile_link_inline():
+    # The row rule is `display: flex !important` with padding: on every `a` in the menu it
+    # also caught the Profile link inside a greyed row's reason and broke the one-line status.
+    scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
+    menu = scss.split(".file-menu-list {")[1].split("\n}\n")[0]
+    assert "> li > a,\n    > .file-menu-off {" in menu
+    assert not re.search(r"^    a[ ,{]", menu, re.MULTILINE)
+
+
+def test_the_script_greys_what_it_cannot_open_with_the_reason():
+    script = _strip_comments(_open_in())
+    files = script.split("function decorateFiles(root, me) {")[1].split("\n  }\n")[0]
+    # It replaces Liquid's greyed pair rather than appending a second Edit section.
+    assert 'list.querySelectorAll("li[data-edit]")' in files
+    assert files.count("offItem(") == 2
+    # The format is Liquid's answer, read off its rows, not tested a second time here.
+    assert 'getAttribute("data-edit-why") === "format"' in files
+    # The reasons Liquid writes, spelt the same.
+    link = _strip_comments(_templates()["_includes/edit_why.html"])
+    for reason in ("not an editable format", "set up in "):
+        assert f'"{reason}"' in script and reason in link
+    off = script.split("function offItem(")[1].split("\n  }")[0]
+    assert (
+        '"aria-disabled", "true"' in off and "href" not in off.split("if (profile)")[0]
+    )
 
 
 def test_the_updates_box_takes_the_inline_shape_of_the_source_link():
@@ -1326,20 +1397,23 @@ _VIEW_BRANCH = re.compile(
 
 
 def test_view_is_offered_only_where_the_site_hosts_a_copy():
-    # `view` opens the semester site's own copy, which exists only for a published file a
-    # browser draws (html, pdf). Rendered unconditionally it is an item to a 404 on every
+    # `View here` opens the semester site's own copy, which exists only for a published file
+    # a browser draws (html, pdf). Rendered unconditionally it is a row to a 404 on every
     # other row of every site.
     body = _strip_comments(_templates()["_includes/file_link.html"])
-    branches = [m["shown"] for m in _VIEW_BRANCH.finditer(body)]
+    branches = [m["shown"].split("{% else %}")[0] for m in _VIEW_BRANCH.finditer(body)]
     assert branches, "file_link.html does not branch on view_url"
-    view = "</svg>view</span>"
+    # The row - a link to the hosted copy - only in the branch; without one it is absent.
+    view = '<li><a target="_blank" rel="noopener" href="{{ include.view_url }}">'
     assert body.count(view) == sum(b.count(view) for b in branches) == 1
-    # `GitHub` is the opposite: unconditional in the menu, because the file's home on
+    assert body.count("</svg>View here</span>") == 1
+    assert "</svg>View here</span><small>rendered here</small>" in body
+    # `View on GitHub` is the opposite: unconditional in the menu, because the file's home on
     # GitHub is worth an item whether or not anything else is. The Updates box's inline
     # shape keeps it conditional - there the name itself goes to GitHub unless a hosted
     # copy has taken it.
-    assert body.count("</svg>GitHub</span>") == 1
-    assert sum(b.count("</svg>GitHub</span>") for b in branches) == 0
+    assert body.count("</svg>View on GitHub</span>") == 1
+    assert sum(b.count("</svg>View on GitHub</span>") for b in branches) == 0
     assert body.count(">GitHub</a>") == 1
     assert sum(b.count(">GitHub</a>") for b in branches) == 1
     # And the FIRST branch is the name's own href, so a hosted copy is what it opens.
@@ -1551,7 +1625,11 @@ def test_edit_items_are_offered_only_for_the_repo_the_profile_set_up():
     assert 'data-materials-repo="{{ site.data.materials.repos | first }}"' in body
     files = body.split("function decorateFiles(root, me) {")[1].split("\n  }")[0]
     assert 'var mine = root.getAttribute("data-materials-repo") || "";' in files
-    assert "if (m[2].toLowerCase() !== mine.toLowerCase()) { continue; }" in files
+    assert "m[2].toLowerCase() === mine.toLowerCase()" in files
+    # Greyed with that reason, rather than dropped: every menu lists the same four items.
+    assert ': (ours ? "" : WHY.other);' in files
+    assert 'var local = why ? "" :' in files
+    assert "var online = !why && me.handle" in files
 
 
 def test_the_folder_examples_are_respelt_for_the_readers_platform():
