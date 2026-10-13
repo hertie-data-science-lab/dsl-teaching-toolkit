@@ -106,6 +106,13 @@ describe('the assignment hub', () => {
     expect(out).not.toContain('>Hand out now<');
   });
 
+  it('reads 0, not null, when the gradebook does not say how many submitted', () => {
+    const unknown: Status = { ...status, assignments: [{ ...solo, submissions: null }, team] };
+    const out = render(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', loaded: { ...ready, status: unknown } })} />);
+    expect(out).toContain(`0 of ${solo.units} submitted so far.`);
+    expect(out).not.toContain('null');
+  });
+
   it('an assigned-teams assignment has no window on its Teams tab', () => {
     const assigned = new StaticFiles({
       [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\n',

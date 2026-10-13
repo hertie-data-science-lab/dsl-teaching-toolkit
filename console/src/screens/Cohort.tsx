@@ -27,9 +27,9 @@ export function readSchedule(p: CohortProps): Schedule | null {
 export function asgSummary(a: Assignment, tz: string, year: number): string {
   switch (a.state) {
     case 'open':
-      return `Due ${fmtWhen(a.due, tz, year)}; ${a.submissions} of ${a.units} submitted`;
+      return `Due ${fmtWhen(a.due, tz, year)}; ${a.submissions ?? 0} of ${a.units} submitted`;
     case 'late_window':
-      return `Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions} of ${a.units} submitted`;
+      return `Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions ?? 0} of ${a.units} submitted`;
     case 'marking':
       return `${a.marks.filled} of ${a.marks.total} marked`;
     case 'returned':
@@ -213,7 +213,7 @@ function RowItem({ r, status, p, marks }: { r: Row; status: Status; p: CohortPro
   } else if (r.type === 'due' || r.type === 'handout') {
     const asg = (status.assignments ?? []).find((a) => a.slug === r.entry);
     chip = r.type === 'due' ? 'Due' : 'Hand out';
-    detail = r.type === 'due' && asg ? `${asg.submissions} of ${asg.units} submitted so far.` : 'Hands out at its time.';
+    detail = r.type === 'due' && asg ? `${asg.submissions ?? 0} of ${asg.units} submitted so far.` : 'Hands out at its time.';
     buttons = <a class="btn small quiet" href={`#assignment-${r.entry}`}>Open assignment</a>;
   } else {
     chip = chip.charAt(0).toUpperCase() + chip.slice(1);
