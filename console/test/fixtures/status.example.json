@@ -235,6 +235,7 @@
   "assignments": [
     {
       "slug": "assignment-2",
+      "semester_name": "assignment-2",
       "title": "Regression",
       "template": "assignment-2-f2026",
       "state": "open",
@@ -251,6 +252,7 @@
       },
       "returned": false,
       "problem": false,
+      "submit_shape": "assignment-repo-private",
       "settings": {
         "late_penalty_per_day": {
           "value": "10%",

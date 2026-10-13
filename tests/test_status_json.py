@@ -3328,3 +3328,27 @@ def test_a_set_aside_release_with_nothing_to_release_is_not_raised():
     ]
     assert "nothing_to_release:lab-2" in ids
     assert "nothing_to_release:lecture_9" not in ids
+
+
+def test_an_assignment_carries_the_site_s_submit_shape():
+    # The console words the due row from it, as the site's schedule_row_due.html does.
+    for via, shape in (
+        ("assignment_repo", "assignment-repo-private"),
+        ("shared_dropbox_repo", "shared-dropbox-repo"),
+        ("external", "external"),
+    ):
+        spec = grades.GradingSpec(submit_via=via)
+        doc = _render(semester=_semester(specs={"assignment-2": spec}))
+        row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+        assert row["submit_shape"] == shape
+
+
+def test_an_assignment_carries_its_semester_side_name():
+    # The per-unit repos are `<semester_dest_repo>-<handle>`, not `<key>-<handle>`.
+    dest = settings.parse_instance(
+        "assignments:\n  assignment-2:\n    semester_dest_repo: project-2\n"
+    )
+    sched = schedule.parse(load_yaml_lines(SCHEDULE), dest)
+    doc = _render(semester=_semester(sched=sched))
+    row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+    assert row["semester_name"] == "project-2"

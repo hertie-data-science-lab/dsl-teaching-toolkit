@@ -48,6 +48,7 @@ from .course import (
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
+    submit_shape,
 )
 from .discovery import SEMESTERS_PATH
 from .grades import TEMPLATE_KEYS
@@ -219,6 +220,10 @@ def outcome_schema() -> dict:
 
 
 STAGE_STATES = ("done", "todo", "blocked", "problem")
+# `course.submit_shape`'s words: every `submit_via` crossed with a per-unit repo's visibility.
+SUBMIT_SHAPES = tuple(
+    dict.fromkeys(submit_shape(via, vis) for via in SUBMIT_VIA for vis in VISIBILITIES)
+)
 ASSIGNMENT_STATES = (
     "declared",
     "teams_forming",
@@ -457,6 +462,8 @@ def status_schema(*, closed: bool = True) -> dict:
     assignment = obj(
         {
             "slug": _str(),
+            # The semester-side name, the per-unit repos' stem (`schedule.semester_name`).
+            "semester_name": _str(),
             # The entry's own number (decision 0020); null: it has none.
             "number": {"type": ["integer", "null"]},
             "title": _str(),
@@ -473,6 +480,8 @@ def status_schema(*, closed: bool = True) -> dict:
             "marks": obj({"filled": {"type": "integer"}, "total": {"type": "integer"}}),
             "returned": {"type": "boolean"},
             "problem": {"type": "boolean"},
+            # Where the work is handed in, in the site's one word (`course.submit_shape`).
+            "submit_shape": _enum(SUBMIT_SHAPES),
             # Each run setting's effective value and the layer that gave it (`settings`).
             "settings": obj(
                 {

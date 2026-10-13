@@ -2033,6 +2033,9 @@ def render_assignments(
         rows.append(
             {
                 "slug": slug,
+                # The semester-side name (`semester_dest_repo`, else the key): the stem of
+                # every per-unit repo, so the console names `<name>-<handle>` as the site does.
+                "semester_name": name,
                 # Its number (decision 0020), or None: the console never counts one.
                 "number": own_number(entry.number, slug),
                 "title": facts.titles.get(slug) or spec.title or slug,
@@ -2063,6 +2066,9 @@ def render_assignments(
                 "returned": returned,
                 "problem": slug in flagged or entry.course_source_repo in flagged,
                 "settings": run_settings(spec),
+                # The site's due-row word (`course.submit_shape`), so the console's
+                # schedule says where to submit exactly as the site does.
+                "submit_shape": spec.submit_shape,
             }
         )
     return rows

@@ -1,6 +1,7 @@
 // Words and dates, in the vocabulary of design/vocabulary.md. Engine identifiers (K4,
 // will_be_skipped, release.entry) never reach the screen except through these maps.
 
+import { hostOf } from './cascade';
 import { DEFAULT_TIMEZONE } from './policy';
 import type { Assignment, AssignmentState, Bites, Need, Release, ReleaseState } from './types';
 import type { ItemState, ReleaseMark, RepoReadiness, Verdict } from './readiness';
@@ -319,6 +320,47 @@ export const TYPE_LABEL: Record<string, string> = {
   lecture: 'lecture', lab: 'lab', readings: 'readings', handout: 'hand out', due: 'due', exam: 'exam',
   special_event: 'event', event: 'event', term: 'semester', archive: 'archive', release: 'release',
 };
+
+/**
+ * The schedule's first column as the student site words it (`templates/site/_includes/schedule_row_*.html`):
+ * an assignment's two rows, an exam, an event, a semester date; a release takes its kind's label from
+ * policy (as `schedule_row_lecture.html` does). `assignment` and `term_date` are the student facts' names
+ * for a hand out and a semester date. The archive has no site row; the console calls it Archive.
+ */
+const SITE_ROW_WORD: Record<string, string> = {
+  handout: 'Assignment out', assignment: 'Assignment out', due: 'Assignment due', exam: 'Exam',
+  special_event: 'Event', event: 'Event', term: 'Semester', term_date: 'Semester', archive: 'Archive',
+};
+/** `own`: the site's own label for a kind the semester's file declares (`kinds[type].label`), ahead of the policy's. */
+export const siteRowWord = (type: string, own?: string): string => SITE_ROW_WORD[type] || own || KIND_LABEL[type] || type;
+
+/** Where an assignment is handed in, in the site's one word (`course.submit_shape`). */
+export type SubmitShape = 'assignment-repo-private' | 'assignment-repo-public' | 'assignment-repo-student-choice' | 'shared-dropbox-repo' | 'external';
+
+/**
+ * The due row's sentence on the student site (`schedule_row_due.html`), in parts: `lead`, then a repo
+ * name in `code`, then `tail`; or, handed in outside GitHub, a `link` to where once the brief names one.
+ * Null for a shape the console does not know (an older status), so no sentence is guessed.
+ */
+export function dueSubmit(a: { shape: string; slug: string; group: boolean; url?: string }): { lead: string; code?: string; tail?: string; link?: { href: string; host: string } } | null {
+  const whose = a.group ? '<your-team>' : '<your-handle>';
+  switch (a.shape as SubmitShape) {
+    case 'external': {
+      const host = a.url ? hostOf(a.url) : '';
+      return host ? { lead: 'Handed in outside GitHub - ', link: { href: a.url!, host } } : { lead: 'Handed in outside GitHub - see the brief' };
+    }
+    case 'shared-dropbox-repo':
+      return { lead: 'Submit via ', code: `${a.slug}-submissions`, tail: ` (${whose}/ folder)` };
+    case 'assignment-repo-private':
+      return { lead: 'Submit via ', code: `${a.slug}-${whose}` };
+    case 'assignment-repo-public':
+      return { lead: 'Submit via ', code: `${a.slug}-${whose}`, tail: ' (public)' };
+    case 'assignment-repo-student-choice':
+      return { lead: 'Submit via ', code: `${a.slug}-${whose}`, tail: ' (yours to publish)' };
+    default:
+      return null;
+  }
+}
 
 // ------------------------------------------------------------------ markdown (as the site renders `details`)
 

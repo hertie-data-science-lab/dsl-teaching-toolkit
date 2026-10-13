@@ -248,6 +248,64 @@ describe('S6 schedule and S11 release', () => {
     expect(out).toContain('lectures/05_trees_and_ensembles');
     expect(out).toContain('schedule.yml#L5');
   });
+  it('offers the kinds of entry, Assignment among them, with a ? saying what each does', () => {
+    const out = html(<ScheduleScreen {...props({ entry: 'new' })} />);
+    expect([...out.matchAll(/<button type="button" class="trow [a-z]+"[^>]*>([^<]+)<\/button>/g)].map((m) => m[1])).toEqual(['Lecture', 'Lab', 'Readings', 'Assignment', 'Exam', 'Event']);
+    expect(out).toContain('aria-label="About the kinds of entry"');
+    const t = text(<ScheduleScreen {...props({ entry: 'new' })} />);
+    for (const k of ['Lecture, Lab, Readings : a session’s materials.', 'Assignment : work students hand in.', 'Exam : a dated row', 'Event : any other dated row', 'Archive (under Archive settings)']) expect(t).toContain(k);
+    expect(t).toContain('none when work is handed in outside GitHub');
+    expect(out).toContain('docs/07-schedule-releases.md');
+    expect(t).not.toContain('A hand out is an assignment entry');
+  });
+  it('words each row’s kind and an assignment’s due row exactly as the student site does', () => {
+    const out = html(<ScheduleScreen {...props()} />);
+    const words = [...out.matchAll(/<span class="k">([^<]+)<\/span>/g)].map((m) => m[1]);
+    expect(words).toEqual(['Semester', 'Assignment out', 'Assignment due', 'Lecture', 'Exam', 'Event', 'Semester', 'Archive']);
+    expect(out).toContain('Submit via <code>assignment-2-&lt;your-handle></code>');
+    const shaped = (submit_shape: string, extra: Partial<NonNullable<Status['assignments']>[number]> = {}): Loaded => ({
+      kind: 'ready', sha: 's', stale: [],
+      status: { ...STATUS, assignments: (STATUS.assignments ?? []).map((a) => ({ ...a, submit_shape, ...extra })) },
+    });
+    const external = text(<ScheduleScreen {...props({ loaded: shaped('external') })} />);
+    expect(external).toContain('Handed in outside GitHub - see the brief');
+    expect(external).not.toContain('Submit via');
+    // Once handed out, the address the assignment names is linked by its host.
+    const linked = html(<ScheduleScreen {...props({ loaded: shaped('external', { settings: { submit_url: { value: 'https://moodle.example.org/mod/assign/1', source: 'assignment' } } }) })} />);
+    expect(linked).toContain('Handed in outside GitHub - <a href="https://moodle.example.org/mod/assign/1" target="_blank" rel="noopener">moodle.example.org</a>');
+    expect(html(<ScheduleScreen {...props({ loaded: shaped('shared-dropbox-repo') })} />)).toContain('Submit via <code>assignment-2-submissions</code> (&lt;your-handle>/ folder)');
+    expect(html(<ScheduleScreen {...props({ loaded: shaped('assignment-repo-public', { teams: 4 }) })} />)).toContain('Submit via <code>assignment-2-&lt;your-team></code> (public)');
+    expect(html(<ScheduleScreen {...props({ loaded: shaped('assignment-repo-student-choice') })} />)).toContain(' (yours to publish)');
+    // A renamed entry (`semester_dest_repo`) names its repos by the semester-side name, never the key.
+    expect(html(<ScheduleScreen {...props({ loaded: shaped('assignment-repo-private', { semester_name: 'project-2' }) })} />)).toContain('Submit via <code>project-2-&lt;your-handle></code>');
+  });
+
+  it('mutes an entry the student site does not show, with a Not shown badge that says why', () => {
+    const HIDDEN = SCHEDULE.replace('    details: Room 2.61, closed book.\n', '    details: Room 2.61, closed book.\n    show_on_site: false\n');
+    const hiddenFiles = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: HIDDEN }, {}, TREE);
+    const out = html(<ScheduleScreen {...props({ files: hiddenFiles })} />);
+    const rows = [...out.matchAll(/<li class="trow ([^"]+)" data-entry="([^"]+)">(.*?)<\/li>/g)];
+    const midterm = rows.find((m) => m[2] === 'midterm')!;
+    expect(midterm[1]).toContain('off-site');
+    expect(midterm[3]).toContain('<span class="prop">Not shown</span>');
+    expect(midterm[3]).toContain('This entry is not displayed on the student site or in the student console. The engine still acts on it (a hidden release still ships at its time). Edit the entry to show it.');
+    for (const m of rows.filter((x) => x[2] !== 'midterm')) {
+      expect(m[1]).not.toContain('off-site');
+      expect(m[3]).not.toContain('Not shown');
+    }
+  });
+
+  it('names both ends of a line From and To, explains what to release, and offers one more line', () => {
+    const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
+    for (const l of ['From: repo', 'From: path', 'To: repo', 'To: path', 'Release at']) expect(out).toContain(`>${l}`);
+    const t = text(<ScheduleScreen {...props({ entry: 's5' })} />);
+    expect(t).toContain('Name the repo and path where the files will be, even if they are not written yet. At release time the engine copies whatever is at that path.');
+    expect(t).toContain('Ships the files at this moment, before or after the session. Leave blank to ship when the session starts.');
+    // One line, its own time blank: the default is the entry's.
+    expect(out.match(/class="deploy"/g)).toHaveLength(1);
+    expect(out).toContain('id="e-d0-at" placeholder="2026-10-08" value/>');
+    expect(out).toContain('>Add another</button>');
+  });
   it('never says a folder is missing when the repo could not be read, or was listed only in part', () => {
     const withTree = (tree: TreeState): Files => Object.assign(Object.create(files), { tree: () => tree });
     const failed = html(<ScheduleScreen {...props({ entry: 's5', files: withTree({ kind: 'error', message: 'HTTP 502' }) })} />);
@@ -291,7 +349,7 @@ describe('S6 schedule and S11 release', () => {
   it('renders a release with no deploy block as nothing to release, with no Release early', () => {
     const out = html(<ScheduleScreen {...props({ loaded: unstaged })} />);
     expect(out).toContain('<b>Lecture 12</b>: Review');
-    expect(out).toMatch(/<li class="trow lec" data-entry="lecture-12"><span class="k">lecture<\/span>/);
+    expect(out).toMatch(/<li class="trow lec" data-entry="lecture-12"><span class="k">Lecture<\/span>/);
     expect(out).toContain('Nothing to release yet: this entry has no deploy block');
     expect(out).toContain('href="#schedule-lecture-12"');
     expect(out).not.toContain('Release early');

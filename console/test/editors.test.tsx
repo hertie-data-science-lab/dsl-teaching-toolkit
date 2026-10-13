@@ -15,7 +15,7 @@ import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
 import { POLICY, penaltyRate } from '../src/model/policy';
 import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { assignmentKey, blankDraft, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { assignmentKey, blankDeploy, blankDraft, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
@@ -169,6 +169,24 @@ describe('the schedule entry sheet model', () => {
     expect(y.text).toBe(src.replace('lectures/05_trees\n', 'lectures/05_trees_and_ensembles\n'));
   });
 
+  it('edits each line of what to release on its own, keeping untouched lines byte for byte', () => {
+    // Maths-style: the lab files at the session, the solutions days later.
+    const src =
+      'releases:\n  lab-3:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n' +
+      '      - course_source_repo: m   # the lab\n        course_source_path: labs/03\n' +
+      '      - course_source_repo: m\n        course_source_path: labs/03_solutions   # later\n        deploy_datetime: 2026-10-12T18:00\n';
+    const y = new YamlText(src);
+    const doc = y.toJS() as Record<string, unknown>;
+    const d = readDraft(doc, 'lab-3') as ReleaseDraft;
+    expect(d.deploys.map((x) => [x.folder, x.atDate, x.atTime])).toEqual([['labs/03', '', ''], ['labs/03_solutions', '2026-10-12', '18:00']]);
+    // Untouched: nothing changes.
+    writeDraft(y, d, doc);
+    expect(y.text).toBe(src);
+    // Removing the first line leaves the second exactly as written.
+    writeDraft(y, { ...d, deploys: [d.deploys[1]] }, doc);
+    expect(y.text).toBe('releases:\n  lab-3:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/03_solutions   # later\n        deploy_datetime: 2026-10-12T18:00\n');
+  });
+
   it('saves a release with nothing to release: the last line can be removed', () => {
     const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
     const y = new YamlText(src);
@@ -177,6 +195,16 @@ describe('the schedule entry sheet model', () => {
     expect(draftErrors({ ...d, number: 5 }, { kind: 'lecture' })).toEqual({});
     writeDraft(y, d, doc);
     expect(y.text).toBe('releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n');
+  });
+
+  it('writes a line’s own release time only when given; blank ships at the entry’s time', () => {
+    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n        deploy_datetime: 2026-10-07T09:00\n';
+    const y = new YamlText(src);
+    const doc = y.toJS() as Record<string, unknown>;
+    const d = readDraft(doc, 's5') as ReleaseDraft;
+    writeDraft(y, { ...d, deploys: [{ ...d.deploys[0], atDate: '', atTime: '' }, { ...blankDeploy('m'), folder: 'l2', atDate: '2026-10-10', atTime: '' }] }, doc);
+    expect(parse(y.text).releases.s5.deploy).toEqual([{ course_source_repo: 'm', course_source_path: 'l' }, { course_source_repo: 'm', course_source_path: 'l2', deploy_datetime: '2026-10-10' }]);
+    expect(draftErrors({ ...d, deploys: [{ ...d.deploys[0], atDate: '', atTime: '09:00' }] }, { kind: 'lecture' })['deploy0.at']).toBe('Give the date too, or clear the time.');
   });
 
   it('keeps a moment as the file spells it when only the title changes', () => {

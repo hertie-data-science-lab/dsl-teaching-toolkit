@@ -15,9 +15,11 @@ export interface DeployDraft {
   folder: string;
   dest: string;
   path: string;
-  diff: boolean;
+  /** Its own release time (`deploy_datetime`); blank ships it at the entry's time. */
   atDate: string;
   atTime: string;
+  /** Its index in the file's `deploy:` list; none for a line added here. */
+  src?: number;
 }
 
 export interface ReleaseDraft {
@@ -143,10 +145,10 @@ export function readDraft(doc: Raw, key: string): Draft | null {
   const number = entryNumber(key, e) ?? '';
   if (b === 'releases') {
     const [date, time] = splitWhen(e.event_datetime);
-    const deploys = (Array.isArray(e.deploy) ? e.deploy : []).map((d: unknown) => {
+    const deploys = (Array.isArray(e.deploy) ? e.deploy : []).map((d: unknown, src: number) => {
       const x = obj(d);
       const [atDate, atTime] = splitWhen(x.deploy_datetime);
-      return { repo: s(x.course_source_repo), folder: s(x.course_source_path), dest: s(x.semester_dest_repo), path: s(x.semester_dest_path), diff: !!x.deploy_datetime, atDate, atTime };
+      return { repo: s(x.course_source_repo), folder: s(x.course_source_path), dest: s(x.semester_dest_repo), path: s(x.semester_dest_path), atDate, atTime, src };
     });
     return { kind: 'releases', ...common, type: s(e.kind), number, date, time, deploys };
   }
@@ -197,12 +199,13 @@ export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEn
       number: numberValue(d, raw, fresh),
       ...display(raw, d),
       deploy: d.deploys.length
-        ? d.deploys.map((dp, i) => {
-            const r = obj(rawDeploys[i]);
+        ? d.deploys.map((dp) => {
+            // Merged over its own line in the file, so a removed line above it lends it nothing.
+            const r = dp.src === undefined ? {} : obj(rawDeploys[dp.src]);
             return {
               ...r, course_source_repo: dp.repo, course_source_path: dp.folder,
               semester_dest_repo: dp.dest && (dp.dest !== DEFAULT_DEST_REPO || r.semester_dest_repo) ? dp.dest : undefined,
-              semester_dest_path: text(dp.path), deploy_datetime: dp.diff ? whenOf(r.deploy_datetime, dp.atDate, dp.atTime) : undefined,
+              semester_dest_path: text(dp.path), deploy_datetime: dp.atDate ? whenOf(r.deploy_datetime, dp.atDate, dp.atTime) : undefined,
             };
           })
         : undefined,
@@ -252,7 +255,20 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
     });
     return;
   }
+  if (d.kind === 'releases') dropRemovedDeploys(y, d, obj(doc.releases)[d.id]);
   y.assign([d.kind, d.id], entryValue(d, obj(doc[d.kind])[d.id]));
+}
+
+/**
+ * Delete the file's `deploy:` lines the draft removed, from the last up, so each line left
+ * is written over its own text and an untouched one stays byte for byte. The editor only
+ * removes and appends lines, so those left keep their order.
+ */
+function dropRemovedDeploys(y: YamlText, d: ReleaseDraft, rawEntry: unknown): void {
+  const raw = obj(rawEntry).deploy;
+  if (!Array.isArray(raw) || !d.deploys.length) return;
+  const kept = d.deploys.map((dp) => dp.src).filter((i): i is number => i !== undefined);
+  for (let i = raw.length - 1; i >= 0; i--) if (!kept.includes(i)) y.delete([d.kind, d.id, 'deploy', i]);
 }
 
 /**
@@ -350,12 +366,15 @@ export function withNumber<T extends Draft>(d: T, doc: Raw, kindOf: KindOf = spe
   return n === null ? d : { ...d, number: n };
 }
 
+/** A new line of what to release: from `repo`, at the entry's time. */
+export const blankDeploy = (repo: string): DeployDraft => ({ repo, folder: '', dest: '', path: '', atDate: '', atTime: '' });
+
 export function blankDraft(type: string, defaults: { repo: string }): ReleaseDraft | AssignmentDraft | EventDraft {
   const common = { id: '', title: '', details: '', show: true, tbc: false };
   if (type === 'handout')
     return { kind: 'assignments', ...common, template: '', manual: false, handoutDate: '', handoutTime: '10:00', dueDate: '', dueTime: '23:59', solutionOn: false, solutionDate: '', solutionTime: '' };
   if (type === 'exam' || type === 'special_event') return { kind: 'events', ...common, type, date: '', time: '' };
-  return { kind: 'releases', ...common, type, date: '', time: '10:00', deploys: [{ repo: defaults.repo, folder: '', dest: '', path: '', diff: false, atDate: '', atTime: '' }] };
+  return { kind: 'releases', ...common, type, date: '', time: '10:00', deploys: [blankDeploy(defaults.repo)] };
 }
 
 /** A sheet moment as the engine reads it, sortable: a bare day at its start, or (a due date) its end. */
@@ -384,7 +403,7 @@ export function draftErrors(d: Draft, others?: { templateUsers?: (template: stri
     d.deploys.forEach((dp, i) => {
       if (!dp.repo) e[`deploy${i}.repo`] = 'Choose the repo.';
       if (!dp.folder) e[`deploy${i}.folder`] = 'Name the folder or file.';
-      if (dp.diff && !dp.atDate) e[`deploy${i}.at`] = 'Give its own time, or untick.';
+      if (dp.atTime && !dp.atDate) e[`deploy${i}.at`] = 'Give the date too, or clear the time.';
     });
   } else if (d.kind === 'assignments') {
     if (!d.template) e.template = 'Choose the template.';

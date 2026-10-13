@@ -39,7 +39,7 @@ describe('a kind tab', () => {
     const t = text(<KindView facts={facts()} kind="lecture" org={ORG} now={NOW} />);
     expect(t).toMatch(/Lecture 3 : Forests not released yet TBC/);
     const s = text(<ScheduleView facts={facts()} mine={null} now={NOW} org={ORG} />);
-    expect(s).toMatch(/No date yet lecture TBC Lecture 3 : Forests/);
+    expect(s).toMatch(/No date yet Lecture TBC Lecture 3 : Forests/);
     expect(text(<HomeView facts={{ ...facts(), rows: facts().rows.map((r) => (r.id === 'lecture_03' ? { ...r, released: true } : r)) }} now={NOW} org={ORG} />)).not.toContain('Forests');
   });
 
@@ -50,7 +50,7 @@ describe('a kind tab', () => {
     const f = factsFromStatus(d);
     expect(kindRows(f, 'exam').events.map((r) => r.id)).toEqual(['midterm', 'resit']);
     expect(text(<KindView facts={f} kind="exam" org={ORG} now={NOW} />)).toMatch(/Resit TBC$/);
-    expect(text(<ScheduleView facts={f} mine={null} now={NOW} org={ORG} />)).toMatch(/No date yet .* exam TBC Resit Archive/);
+    expect(text(<ScheduleView facts={f} mine={null} now={NOW} org={ORG} />)).toMatch(/No date yet .* Exam TBC Resit Archive/);
   });
 
   it('puts the kind’s own event last, and leaves other kinds’ rows off', () => {
@@ -100,5 +100,24 @@ describe('the archive notice (decision 0035 rule 12)', () => {
     expect(text(<ScheduleView facts={{ ...f, rows: [] }} mine={null} now={NOW} org={ORG} />)).toContain('Archive.');
     expect(text(<HomeView facts={f} org={ORG} now={NOW} />)).not.toContain('Archive.');
     expect(text(<KindView facts={f} kind="lecture" org={ORG} now={NOW} />)).not.toContain('Archive.');
+  });
+});
+
+describe('the student schedule says what the site says', () => {
+  it('words each row kind as the site, and says on a due row where to submit', () => {
+    const f = facts();
+    const s = text(<ScheduleView facts={f} mine={null} now={NOW} org={ORG} />);
+    for (const w of ['Semester', 'Assignment out', 'Assignment due', 'Exam', 'Lecture']) expect(s).toContain(w);
+    expect(s).not.toMatch(/\bhand out\b/);
+    expect(s).toContain('Submit via assignment-1-&lt;your-handle>');
+    expect(s).toContain('Submit via assignment-2-project-&lt;your-team>');
+    const external = { ...f, assignments: f.assignments.map((a) => (a.slug === 'assignment-3' ? { ...a, shape: 'external', submitVia: 'external' as const } : a)) };
+    expect(text(<ScheduleView facts={external} mine={null} now={NOW} org={ORG} />)).toContain('Handed in outside GitHub - see the brief');
+  });
+  it('words a kind the site declares by the site’s own label', () => {
+    const f = facts();
+    const base = f.rows.find((r) => r.id === 'lecture_02')!;
+    const own = { ...f, rows: [...f.rows, { ...base, id: 'clinic_1', kind: 'clinic', title: 'Clinic 1' }], kinds: { ...f.kinds, clinic: { label: 'Coding clinic', colour: '', background: '', tab: false } } };
+    expect(text(<ScheduleView facts={own} mine={null} now={NOW} org={ORG} />)).toMatch(/Coding clinic .*Clinic 1/);
   });
 });

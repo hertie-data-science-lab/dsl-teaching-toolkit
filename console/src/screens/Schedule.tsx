@@ -6,18 +6,18 @@ import { compileAll, matchRules } from '../edit/glob';
 import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
-import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
+import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  assignmentKey, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft,
+  assignmentKey, blankDeploy, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft,
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
-import type { Release } from '../model/types';
+import type { Assignment, Release } from '../model/types';
 import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
 import { TIMEZONES } from '../tiers/course';
-import { EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
+import { DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
@@ -37,15 +37,27 @@ import { otherRepos } from './CourseIndex';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
 
-/** What the student site shows in the Details cell. */
-function Details({ r }: { r: Row }) {
+/** The address an external assignment names, once handed out: the site links it only then. */
+function submitUrlOnce(a: Assignment, now: number): string | undefined {
+  const url = a.settings?.submit_url?.value;
+  return typeof url === 'string' && url && a.handout && Date.parse(a.handout) <= now ? url : undefined;
+}
+
+/** What the student site shows in the Details cell; `a`, the due row's assignment, says where to submit as the site does. */
+function Details({ r, a, now }: { r: Row; a?: Assignment; now: number }) {
   if (r.entry === 'semester') return <span class="det" />;
-  if (!r.show) return <span class="det"><span class="gen">Hidden from the student site; still {r.block === 'releases' ? 'released' : 'runs'}.</span></span>;
+  if (!r.show) {
+    return (
+      <span class="det">
+        <span class="prop">Not shown</span> <Hint small label="About Not shown">This entry is not displayed on the student site or in the student console. The engine still acts on it (a hidden release still ships at its time). Edit the entry to show it.</Hint>
+      </span>
+    );
+  }
   return (
     <span class="det">
       <Md src={r.details} />
       {r.block === 'releases' && r.state !== 'released' ? <p class="gen">Materials for {r.ident} are not yet released.</p> : null}
-      {r.block === 'assignments' && r.type === 'due' && !r.details ? <span>Submit via <code>{r.entry}-&lt;your-handle&gt;</code></span> : null}
+      {r.type === 'due' && a?.submit_shape ? <DueSubmit shape={a.submit_shape} slug={a.semester_name ?? a.slug} group={a.teams !== null} url={submitUrlOnce(a, now)} /> : null}
     </span>
   );
 }
@@ -171,16 +183,16 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
       <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', 'Shown to students under the title.')} />
       <Common d={d} set={set} />
       <div class="field">
-        <span class="label">What to release <span class="default">optional</span></span>
+        <span class="label">What to release <span class="default">optional</span> <Hint small label="About what to release">Name the repo and path where the files will be, even if they are not written yet. At release time the engine copies whatever is at that path.</Hint></span>
         {d.deploys.map((dp, i) => {
           const tree = dp.repo ? p.files.tree(p.course.org, dp.repo) : null;
-          const adv = [dp.dest && dp.dest !== DEFAULT_DEST_REPO, !!dp.path, dp.diff].filter(Boolean).length;
+          const adv = [dp.dest && dp.dest !== DEFAULT_DEST_REPO, !!dp.path, !!(dp.atDate || dp.atTime)].filter(Boolean).length;
           return (
             <div class="deploy">
               <div class="deploy-head">Deploy {i + 1}<button class="x" type="button" aria-label={`Remove deploy ${i + 1}`} onClick={() => set({ deploys: d.deploys.filter((_, j) => j !== i) })}>&times;</button></div>
               <div class="row-2">
                 <div class="field">
-                  <label for={`e-d${i}-repo`}>From repo</label>
+                  <label for={`e-d${i}-repo`}>From: repo</label>
                   <select id={`e-d${i}-repo`} onChange={(e) => setDeploy(i, { repo: (e.target as HTMLSelectElement).value })}>
                     <optgroup label="Course materials repos">{from.materials.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup>
                     {from.others.length ? <optgroup label="Other repos">{from.others.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup> : null}
@@ -191,7 +203,7 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
                   {errors[`deploy${i}.repo`] ? <Invalid>{errors[`deploy${i}.repo`]}</Invalid> : null}
                 </div>
                 <div class="field">
-                  <label for={`e-d${i}-folder`}>Folder</label>
+                  <label for={`e-d${i}-folder`}>From: path</label>
                   <input type="text" id={`e-d${i}-folder`} list={`folders-${i}`} value={dp.folder} aria-invalid={errors[`deploy${i}.folder`] ? 'true' : undefined} onInput={(e) => setDeploy(i, { folder: (e.target as HTMLInputElement).value })} />
                   {tree?.kind === 'ready' ? <datalist id={`folders-${i}`}>{tree.paths.filter((x) => x.dir).map((x) => <option value={x.path} />)}</datalist> : null}
                   {errors[`deploy${i}.folder`] ? <Invalid>{errors[`deploy${i}.folder`]}</Invalid> : <FolderCheck p={p} dp={dp} i={i} onSuggest={(v) => setDeploy(i, { folder: v })} />}
@@ -201,25 +213,20 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
                 <summary>Advanced <span class={`cnt${adv ? ' changed' : ''}`}>({adv ? `${adv} changed` : 'none changed'})</span></summary>
                 <div class="fold-body">
                   <div class="row-2">
-                    <div class="field"><label for={`e-d${i}-dest`}>To repo <span class="default">default: {DEFAULT_DEST_REPO}</span></label><input type="text" id={`e-d${i}-dest`} placeholder={DEFAULT_DEST_REPO} value={dp.dest} onInput={(e) => setDeploy(i, { dest: (e.target as HTMLInputElement).value })} /><p class="why">In the semester. Blank means {DEFAULT_DEST_REPO}.</p></div>
-                    <div class="field"><label for={`e-d${i}-path`}>To path <span class="default">default: same as the folder</span></label><input type="text" id={`e-d${i}-path`} placeholder={dp.folder} value={dp.path} onInput={(e) => setDeploy(i, { path: (e.target as HTMLInputElement).value })} /></div>
+                    <div class="field"><label for={`e-d${i}-dest`}>To: repo <span class="default">default: {DEFAULT_DEST_REPO}</span></label><input type="text" id={`e-d${i}-dest`} placeholder={DEFAULT_DEST_REPO} value={dp.dest} onInput={(e) => setDeploy(i, { dest: (e.target as HTMLInputElement).value })} /><p class="why">In the semester. Blank means {DEFAULT_DEST_REPO}.</p></div>
+                    <div class="field"><label for={`e-d${i}-path`}>To: path <span class="default">default: same as From</span></label><input type="text" id={`e-d${i}-path`} placeholder={dp.folder} value={dp.path} onInput={(e) => setDeploy(i, { path: (e.target as HTMLInputElement).value })} /></div>
                   </div>
-                  <label class="check"><input type="checkbox" checked={dp.diff} onChange={(e) => setDeploy(i, { diff: (e.target as HTMLInputElement).checked })} /><span>Release at a different time than the session</span></label>
-                  {dp.diff ? (
-                    <div class="cond">
-                      <div class="row-2">
-                        <div class="field"><label for={`e-d${i}-at`}>Release this deploy at</label><input type="date" id={`e-d${i}-at`} value={dp.atDate || d.date} onInput={(e) => setDeploy(i, { atDate: (e.target as HTMLInputElement).value })} />{errors[`deploy${i}.at`] ? <Invalid>{errors[`deploy${i}.at`]}</Invalid> : null}</div>
-                        <div class="field"><label for={`e-d${i}-att`}>At</label><input type="time" id={`e-d${i}-att`} value={dp.atTime} onInput={(e) => setDeploy(i, { atTime: (e.target as HTMLInputElement).value })} /></div>
-                      </div>
-                    </div>
-                  ) : null}
+                  <div class="row-2">
+                    <div class="field"><label for={`e-d${i}-at`}>Release at <span class="default">default: {d.date ? `${d.date}${d.time ? ` ${d.time}` : ''}` : 'when the session starts'}</span></label> <Hint small label="About the release time">Ships the files at this moment, before or after the session. Leave blank to ship when the session starts.</Hint><input type="date" id={`e-d${i}-at`} placeholder={d.date} value={dp.atDate} onInput={(e) => setDeploy(i, { atDate: (e.target as HTMLInputElement).value })} />{errors[`deploy${i}.at`] ? <Invalid>{errors[`deploy${i}.at`]}</Invalid> : null}</div>
+                    <div class="field"><label for={`e-d${i}-att`}>At</label><input type="time" id={`e-d${i}-att`} placeholder={d.time} value={dp.atTime} onInput={(e) => setDeploy(i, { atTime: (e.target as HTMLInputElement).value })} /></div>
+                  </div>
                 </div>
               </details>
             </div>
           );
         })}
         {d.deploys.length ? null : <p class="why">Nothing is released for this entry; its row still shows on the student site.</p>}
-        <div><button class="btn small quiet" type="button" onClick={() => set({ deploys: [...d.deploys, { repo: repos[0] ?? '', folder: '', dest: '', path: '', diff: false, atDate: '', atTime: '' }] })}>{d.deploys.length ? 'Add another deploy' : 'Add what to release'}</button></div>
+        <div><button class="btn small quiet" type="button" onClick={() => set({ deploys: [...d.deploys, blankDeploy(repos[0] ?? '')] })}>{d.deploys.length ? 'Add another' : 'Add what to release'}</button></div>
       </div>
       {d.id ? <a class="textlink" href={`#release-${d.id}`}>Open release details</a> : null}
     </>
@@ -398,7 +405,23 @@ function ArchiveHelp({ org }: { org: string }) {
   );
 }
 
-const NEW_TYPES: [string, string, string][] = [['lecture', 'lecture', 'lec'], ['lab', 'lab', 'lab'], ['readings', 'readings', 'lec'], ['handout', 'hand out', 'asg'], ['exam', 'exam', 'exam'], ['special_event', 'event', 'evt']];
+// The New entry picker: [draft type, label, row colour]. An assignment's draft type stays `handout`.
+const NEW_TYPES: [string, string, string][] = [['lecture', 'Lecture', 'lec'], ['lab', 'Lab', 'lab'], ['readings', 'Readings', 'lec'], ['handout', 'Assignment', 'asg'], ['exam', 'Exam', 'exam'], ['special_event', 'Event', 'evt']];
+
+/** The New entry picker's `?`: what each kind is for, what students see, and what automation does with it. */
+function KindHelp() {
+  return (
+    <Hint label="About the kinds of entry" doc="07-schedule-releases.md">
+      <span class="kind-help">
+        <span><b>Lecture, Lab, Readings</b>: a session’s materials. The student site shows a dated row of that kind, linking the files once they are out. At the release time, automation copies the files you name from the course repo into the semester’s materials.</span>
+        <span><b>Assignment</b>: work students hand in. The site shows its hand out and due date and gives it a page. At the hand out, automation creates the repos students work in from the template (none when work is handed in outside GitHub); it collects at the late cutoff, and returns marks at their return date or when you press Return marks.</span>
+        <span><b>Exam</b>: a dated row on the student site and in the calendar. Nothing is copied or collected.</span>
+        <span><b>Event</b>: any other dated row, such as a guest talk or a reading week. Nothing is copied or collected.</span>
+        <span><b>Archive</b> (under Archive settings): on its date, automation makes the semester’s repos read-only. Nothing is deleted.</span>
+      </span>
+    </Hint>
+  );
+}
 
 /** A new entry's identifier, from the number it will be written with (decision 0020); a saved entry's is its row's. */
 function identOf(d: Draft, row: Row | undefined, kind: string): string {
@@ -439,6 +462,7 @@ function View(p: ReadyProps) {
   const doc = sf?.doc ?? {};
   const sched = useMemo(() => (sf && !sf.error ? parseSchedule(sf.text) : null), [sf?.text]);
   const rows = scheduleRows(status, sched, now, tz);
+  const assignmentOf = new Map((status.assignments ?? []).map((a) => [a.slug, a]));
   const key = p.entry;
   const current = key && key !== 'new' && key !== 'semester' && key !== 'archive' ? rows.find((r) => r.entry === key) : undefined;
   const repos = (status.course?.materials ?? []).map((m) => m.repo);
@@ -565,11 +589,11 @@ function View(p: ReadyProps) {
       : ref && rel?.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small" label="Release early" /></>
       : <span class="st-chip">{r.state}</span>;
     items.push(
-      <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === r.entry ? ' current' : ''}${gone ? ' removed' : ''}`} data-entry={r.entry}>
-        <span class="k">{TYPE_LABEL[r.type] ?? r.type}</span>
+      <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === r.entry ? ' current' : ''}${gone ? ' removed' : ''}${r.show ? '' : ' off-site'}`} data-entry={r.entry}>
+        <span class="k">{siteRowWord(r.type)}</span>
         <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'No date yet'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}{r.tbc ? ' (TBC)' : ''}</span> : r.tbc && r.when ? <span>(TBC)</span> : null}</span>
         <span class="ttl"><a href={`#schedule-${r.entry}`}><b>{r.ident}</b>: {r.name}</a></span>
-        <Details r={r} />
+        <Details r={r} a={r.block === 'assignments' ? assignmentOf.get(r.entry) : undefined} now={now} />
         <span class="st">{st}</span>
       </li>,
     );
@@ -582,10 +606,9 @@ function View(p: ReadyProps) {
     if (key === 'new' && !d) {
       sheet = (
         <div class="entry" role="dialog" aria-labelledby="entry-title">
-          <div class="entry-head"><div><div class="eyebrow">New entry</div><h2 id="entry-title">What kind of entry?</h2></div>{close}</div>
+          <div class="entry-head"><div><div class="eyebrow">New entry</div><h2 id="entry-title">What kind of entry? <KindHelp /></h2></div>{close}</div>
           <div class="entry-body">
             <div class="type-pick">{NEW_TYPES.map(([t, label, cls]) => <button type="button" class={`trow ${cls}`} style="display:block;min-height:44px" onClick={() => setDraft('new', blankDraft(t, { repo: repos[0] ?? '' }))}>{label}</button>)}</div>
-            <p class="footnote">A hand out is an assignment entry: assignment template, hand out, due and late work together.</p>
             <SaveLine state={save} />
           </div>
         </div>

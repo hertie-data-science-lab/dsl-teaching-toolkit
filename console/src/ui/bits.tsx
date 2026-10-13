@@ -2,7 +2,7 @@
 
 import type { ComponentChildren } from 'preact';
 import { encPath } from '../github/client';
-import { PROBLEM_AREA, ago, gapWeek, markWord, md, opLabel, plural } from '../model/format';
+import { PROBLEM_AREA, ago, dueSubmit, gapWeek, markWord, md, opLabel, plural } from '../model/format';
 import type { ReleaseMark } from '../model/readiness';
 import type { Operation, Outcome, Problem } from '../model/types';
 import { Alert, Check, Eye, Ext, Fail, Skip } from './icons';
@@ -223,4 +223,11 @@ export function OpsList({
       })}
     </ul>
   );
+}
+
+/** An assignment's due row: where to submit, as the student site says it (`format.dueSubmit`). Nothing for a shape not known. */
+export function DueSubmit(p: { shape: string; slug: string; group: boolean; url?: string }) {
+  const s = dueSubmit(p);
+  if (!s) return null;
+  return <span class="due-submit">{s.lead}{s.code ? <code>{s.code}</code> : null}{s.tail ?? ''}{s.link ? <a href={s.link.href} target="_blank" rel="noopener">{s.link.host}</a> : null}</span>;
 }
