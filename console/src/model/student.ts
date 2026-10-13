@@ -663,20 +663,30 @@ export class StatusFileSource implements StudentData {
   }
 }
 
+const IF_SITE = /\{%-?\s*if\s+site\.(\w+)\s*-?%\}([\s\S]*?)\{%-?\s*endif\s*-?%\}/g;
+const VAR_SITE = /\{\{-?\s*site\.(\w+)\s*-?\}\}/g;
+
 /**
  * The site's home page (`index.md`, the instructors' own) as plain markdown: `{{ site.x }}`
  * filled from `_config.yml`, an `{% if site.x %}` block kept only when x is set, and any other
  * Liquid tag dropped. Enough for what a home page carries; the site itself is the reference.
- * `keep` (the instructor's preview) leaves a tag about a key `cfg` lacks, and any other tag,
- * as written, so it shows.
+ * Both consoles show this one reading: the instructor's preview is what students see.
  */
-export function homeText(body: string, cfg: Record<string, unknown>, keep = false): string {
+export function homeText(body: string, cfg: Record<string, unknown>): string {
   const val = (k: string) => str(cfg[k]);
-  const known = (k: string) => !keep || cfg[k] != null;
-  const out = body
-    .replace(/\{%-?\s*if\s+site\.(\w+)\s*-?%\}([\s\S]*?)\{%-?\s*endif\s*-?%\}/g, (m: string, k: string, inner: string) => (!known(k) ? m : val(k) ? inner : ''))
-    .replace(/\{\{-?\s*site\.(\w+)\s*-?\}\}/g, (m: string, k: string) => (known(k) ? val(k) : m));
-  return keep ? out : out.replace(/\{%[\s\S]*?%\}|\{\{[\s\S]*?\}\}/g, '').replace(/\n{3,}/g, '\n\n').trim();
+  return body
+    .replace(IF_SITE, (_m: string, k: string, inner: string) => (val(k) ? inner : ''))
+    .replace(VAR_SITE, (_m: string, k: string) => val(k))
+    .replace(/\{%[\s\S]*?%\}|\{\{[\s\S]*?\}\}/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** The `site.x` keys `body` reads (in `{{ site.x }}` or `{% if site.x %}`) that `cfg` leaves empty, so `homeText` shows nothing for them. */
+export function unsetSiteKeys(body: string, cfg: Record<string, unknown>): string[] {
+  const keys = new Set<string>();
+  for (const re of [IF_SITE, VAR_SITE]) for (const m of body.matchAll(re)) if (!str(cfg[m[1]])) keys.add(m[1]);
+  return [...keys];
 }
 
 function yamlOf(text: string | undefined): Record<string, unknown> {
