@@ -18,12 +18,14 @@ import { COURSE_REPO, STUDENT_STATUS_PATH } from './names';
 import { dataUrl, extOf, viewKind } from './viewer';
 import { ghUrl } from '../ui/bits';
 
-/** One row of the semester calendar. `when` is wall-clock time in the semester's timezone ("2026-09-22T10:00:00") or a full ISO instant. */
+/** One row of the semester calendar. `when` is wall-clock time in the semester's timezone ("2026-09-22T10:00:00") or a full ISO instant; null for a row with no date yet (`dateless`). */
 export interface ScheduleRow {
   id: string;
   /** lecture | lab | assignment (hand out) | due | exam | special_event | term_date, or a kind added later. */
   kind: string;
-  when: string;
+  when: string | null;
+  /** Where the row sorts: its `when`, or a dateless row's place after its kind's last dated one. Orders, never shown. */
+  sortAt: string;
   /** The row is about a day, not a time (term dates, the archive). */
   allDay: boolean;
   title: string;
@@ -37,7 +39,7 @@ export interface ScheduleRow {
   links: FileLink[];
   /** The date is provisional ("TBC"); the row still happens when it says. */
   tbc: boolean;
-  /** No date yet (`event_datetime: tbc`): `when` only places the row, after its kind's last dated one, and is never shown. */
+  /** No date yet (`event_datetime: tbc`): `when` is null, and `sortAt` places the row after its kind's last dated one. */
   dateless?: boolean;
   /** The released reading files of the session (also among `links`). */
   readings: FileLink[];
@@ -371,13 +373,15 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     const slug = id.replace(/^\d+-/, '');
     const due = fm.due_event as Record<string, unknown> | undefined;
     const out: ScheduleRow[] = [];
-    if (fm.date) out.push({ ...base, id: `${id}:handout`, kind: 'assignment', when: str(fm.date), assignment: slug, tabs: ['assignment'] });
-    if (due?.date) out.push({ ...base, id: `${id}:due`, kind: 'due', when: str(due.date), assignment: slug, details: str(due.details), tbc: due.tbc === true || base.tbc, tabs: ['due'] });
+    if (fm.date) out.push({ ...base, id: `${id}:handout`, kind: 'assignment', when: str(fm.date), sortAt: str(fm.date), assignment: slug, tabs: ['assignment'] });
+    if (due?.date) out.push({ ...base, id: `${id}:due`, kind: 'due', when: str(due.date), sortAt: str(due.date), assignment: slug, details: str(due.details), tbc: due.tbc === true || base.tbc, tabs: ['due'] });
     return out;
   }
   // A row with `show_on_site: false` is on its kind's tab only, and an undated one (a
-  // folder released outside the plan) has no place on a schedule.
-  if (!fm.date || fm.off_schedule === true) return [];
+  // folder released outside the plan: neither) has no place on a schedule. A dateless one
+  // has no `date:`, only its place (`sort_at`); a site written before `sort_at` dated it.
+  const place = fm.sort_at ?? fm.date;
+  if (!place || fm.off_schedule === true) return [];
   const raw = Array.isArray(fm.links) ? (fm.links as Record<string, unknown>[]) : [];
   const links = raw.map((l) => {
     const url = str(l.url);
@@ -389,7 +393,8 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     ...base,
     id,
     kind,
-    when: str(fm.date),
+    when: fm.date && fm.dateless !== true ? str(fm.date) : null,
+    sortAt: str(place),
     tabs: tabsOf(fm.tabs, kind),
     links,
     readings: links.filter((_, i) => /^readings?$/.test(str(raw[i].section))),
@@ -537,7 +542,9 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
     return {
       id: str(r.id),
       kind: str(r.kind),
-      when: str(r.when),
+      // A dateless row has no `when` (a file written before `sort_at` gave it a placeholder).
+      when: r.when && r.dateless !== true ? str(r.when) : null,
+      sortAt: str(r.sort_at ?? r.when),
       allDay: r.all_day === true,
       title: str(r.title),
       subtitle: str(r.subtitle),
@@ -553,7 +560,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
       tabs: tabsOf(r.tabs, str(r.kind)),
     };
   });
-  const rows = tabRows.filter((_, i) => docRows[i].when && docRows[i].off_schedule !== true);
+  const rows = tabRows.filter((r, i) => r.sortAt && docRows[i].off_schedule !== true);
   const assignments: SemesterAssignment[] = arr(doc.assignments).map((a) => {
     const tf = a.team_formation as Obj | null | undefined;
     const via = str(a.submit_via);
@@ -694,5 +701,5 @@ export function materialsReposOf(text: string, org: string): string[] {
 
 /** The rows sorted by when they happen. */
 export function sortedRows(rows: ScheduleRow[], tz = DEFAULT_TIMEZONE): ScheduleRow[] {
-  return [...rows].sort((a, b) => instant(a.when, tz) - instant(b.when, tz) || a.id.localeCompare(b.id));
+  return [...rows].sort((a, b) => instant(a.sortAt, tz) - instant(b.sortAt, tz) || a.id.localeCompare(b.id));
 }

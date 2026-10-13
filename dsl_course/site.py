@@ -792,10 +792,11 @@ class _Row:
     kind: str
     subtitle: str = ""
     details: str = ""
-    when: date | datetime | None = None  # None: an off-plan folder, on its tab only
+    when: date | datetime | None = None  # None: dateless, or an off-plan folder
+    sort_at: date | datetime | None = None  # None: an off-plan folder, on its tab only
     number: int | None = None
     tbc: bool = False
-    dateless: bool = False  # `event_datetime: tbc`: `when` only places it
+    dateless: bool = False  # `event_datetime: tbc`: no `date:`, only `sort_at`
     off_schedule: bool = False
     landed: list[_Landed] = field(default_factory=list)
     readings: list[_Landed] = field(default_factory=list)
@@ -823,9 +824,10 @@ def _row_entry(
     `unreleased: true` and a line naming where the copies will land. `readings_pending`:
     readings attached to it that have not landed yet. `off_schedule`: a `show_on_site: false`
     row, left off the schedule and the Updates box. `undated`: an off-plan folder.
-    `dateless`: an `event_datetime: tbc` entry - on the schedule and its tab, where its
-    `date:` only places it (after its kind's last dated row) and "TBC" is printed instead,
-    and never in the Updates box."""
+    `dateless`: an `event_datetime: tbc` entry - on the schedule and its tab, with no
+    `date:` ("TBC" is printed instead), and never in the Updates box. `sort_at` is where
+    every dated or dateless row sorts (`schedule_plan.planned_rows`; the date itself on a
+    dated row): the templates order by it and show only `date:`."""
     label = policy.kind_label(row.kind)
     title = f"{label} {row.number}" if row.number is not None else label
     # `row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
@@ -858,13 +860,14 @@ def _row_entry(
         flags += "off_schedule: true\n"
     if row.readings_pending:
         flags += "readings_pending: true\n"
-    if row.when is None:
+    if row.sort_at is None:
         flags += f'undated: true\norder: "{q(row.order)}"\n'
     return (
         f"---\n"
         f"kind: {row.kind}\n"
         + (f"number: {row.number}\n" if row.number is not None else "")
         + (f"date: {iso_when(row.when)}\n" if row.when is not None else "")
+        + (f"sort_at: {iso_when(row.sort_at)}\n" if row.sort_at is not None else "")
         + f'title: "{q(title)}"\n'
         + (f'subtitle: "{q(subtitle)}"\n' if subtitle else "")
         + _details(details)
@@ -988,6 +991,7 @@ def _site_rows(
             subtitle=r.subtitle,
             details=r.details,
             when=r.when,
+            sort_at=r.sort_at,
             number=sr.number,
             tbc=r.tbc,
             dateless=r.undated,
@@ -1278,6 +1282,7 @@ def _assignment_entry(
         f"---\n"
         f"kind: assignment\n"
         f"date: {released}\n"
+        f"sort_at: {released}\n"
         f'title: "{q(title)}"\n'
         f"{sub_fm}"
         f"{details_fm}"
@@ -1292,6 +1297,7 @@ def _assignment_entry(
         f"due_event:\n"
         f"    kind: due\n"
         f"    date: {due}\n"
+        f"    sort_at: {due}\n"
         f'    title: "{q(title)}"\n'
         f"{sub_due}"
         f"{details_due}"
@@ -1349,17 +1355,19 @@ def _event_row(
     it knows nothing about, and one nobody could delete by editing their schedule. There
     is no default now: a row says what its `details:` says, or nothing.
 
-    TBC: an undated entry (`event_datetime: tbc`) still needs a sortable `date:` for the
-    theme, so the caller passes end-of-term as `when` plus `dateless=True` - the theme
-    then prints "TBC" instead of the placeholder. A dated entry with `tbc=True` keeps its
-    date and gains a "(TBC)" marker."""
+    TBC: an undated entry (`event_datetime: tbc`) has no date, but sorts with the rest,
+    so the caller passes end-of-term as `when` plus `dateless=True`: it is written as
+    `sort_at:` only, never as a `date:`, and the template prints "TBC". A dated entry with
+    `tbc=True` keeps its date and gains a "(TBC)" marker. Every row carries `sort_at:`,
+    which is what the schedule orders by."""
     flags = ""
     if tbc or dateless:
         flags = "tbc: true\n" + ("dateless: true\n" if dateless else "")
     return (
         f"---\n"
         f"kind: {kind}\n"
-        f"date: {iso_when(when)}\n"
+        + ("" if dateless else f"date: {iso_when(when)}\n")
+        + f"sort_at: {iso_when(when)}\n"
         f"{flags}"
         f'title: "{q(title)}"\n'
         f"{_details(details)}"
@@ -1446,6 +1454,7 @@ def _archive_entry(archive: schedule.ArchiveRow, today: date) -> str:
         f"---\n"
         f"kind: special_event\n"
         f"date: {iso_when(when)}\n"
+        f"sort_at: {iso_when(when)}\n"
         f"{flags}"
         f'title: "{q(archive.title)}"\n'
         f"{_details(dated)}"
@@ -1466,6 +1475,7 @@ def _term_date_entry(name: str, when: date) -> str:
         f"---\n"
         f"kind: term_date\n"
         f"date: {iso_when(when)}\n"
+        f"sort_at: {iso_when(when)}\n"
         f"hide_time: true\n"
         f'title: "{q(name)}"\n'
         f"---\n"

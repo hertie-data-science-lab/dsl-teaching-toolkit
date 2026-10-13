@@ -28,7 +28,7 @@ const sem: Semester = { org: ORG, term: 'f2026', termLabel: 'Fall 2026', courseO
 /** The fixture with a lab, a lecture whose readings shipped, an undated drop-in folder and an off-schedule lab. */
 function doc() {
   const d = structuredClone(DOC);
-  const row = (id: string, kind: string, when: string | null, extra: object = {}) => ({ ...d.rows[1], id, kind, when, links: [], readings: [], off_schedule: false, ...extra });
+  const row = (id: string, kind: string, when: string | null, extra: object = {}) => ({ ...d.rows[1], id, kind, when, sort_at: when, links: [], readings: [], off_schedule: false, ...extra });
   d.kinds['drop-in'].tab = true;
   d.kinds.exam.tab = false;
   d.rows.find((r: { id: string }) => r.id === 'lecture_01').tabs = ['lecture', 'readings'];
@@ -62,7 +62,7 @@ describe('the student status’s tab fields', () => {
     expect(f.rows.map((r) => r.id)).not.toContain('extra');
     expect(f.rows.map((r) => r.id)).not.toContain('lab_x');
     expect(f.tabRows!.map((r) => r.id)).toEqual(expect.arrayContaining(['extra', 'lab_x', 'lab_01', 'lecture_01']));
-    expect(f.tabRows!.find((r) => r.id === 'extra')!.when).toBe('');
+    expect(f.tabRows!.find((r) => r.id === 'extra')!.when).toBeNull();
   });
 });
 

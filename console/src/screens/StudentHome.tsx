@@ -38,7 +38,7 @@ export type Update =
 export function homeUpdates(facts: SemesterFacts, now: number): Update[] {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const out: Update[] = [];
-  for (const row of facts.rows) if (!isEventRow(row) && row.released && !row.dateless) out.push({ at: instant(row.when, tz), row });
+  for (const row of facts.rows) if (!isEventRow(row) && row.released && row.when) out.push({ at: instant(row.when, tz), row });
   // Dated as the site dates it (site.py `_assignment_entry`): the hand-out, else, for an
   // assignment handed out by hand with no scheduled hand-out, the due date, the only one known.
   for (const a of facts.assignments) {

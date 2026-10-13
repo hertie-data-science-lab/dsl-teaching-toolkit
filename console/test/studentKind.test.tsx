@@ -19,10 +19,10 @@ function facts() {
   const d = structuredClone(DOC);
   const base = d.rows.find((r: { id: string }) => r.id === 'lecture_02');
   d.rows.push(
-    { ...base, id: 'lecture_00', title: 'Lecture 0', when: '2026-09-01T10:00:00+02:00', released: true, tabs: ['lecture'] },
-    { ...base, id: 'extra_b', title: 'Extra B', when: null, released: true, tabs: ['lecture'] },
-    { ...base, id: 'extra_a', title: 'Extra A', when: null, released: true, tabs: ['lecture'] },
-    { ...base, id: 'hidden', title: 'Off plan', when: '2026-09-20T10:00:00+02:00', off_schedule: true, released: true, tabs: ['lecture'] },
+    { ...base, id: 'lecture_00', title: 'Lecture 0', when: '2026-09-01T10:00:00+02:00', sort_at: '2026-09-01T10:00:00+02:00', released: true, tabs: ['lecture'] },
+    { ...base, id: 'extra_b', title: 'Extra B', when: null, sort_at: null, released: true, tabs: ['lecture'] },
+    { ...base, id: 'extra_a', title: 'Extra A', when: null, sort_at: null, released: true, tabs: ['lecture'] },
+    { ...base, id: 'hidden', title: 'Off plan', when: '2026-09-20T10:00:00+02:00', sort_at: '2026-09-20T10:00:00+02:00', off_schedule: true, released: true, tabs: ['lecture'] },
   );
   const l1 = d.rows.find((r: { id: string }) => r.id === 'lecture_01');
   l1.readings_pending = true;
@@ -41,6 +41,16 @@ describe('a kind tab', () => {
     const s = text(<ScheduleView facts={facts()} mine={null} now={NOW} org={ORG} />);
     expect(s).toMatch(/No date yet lecture TBC Lecture 3 : Forests/);
     expect(text(<HomeView facts={{ ...facts(), rows: facts().rows.map((r) => (r.id === 'lecture_03' ? { ...r, released: true } : r)) }} now={NOW} org={ORG} />)).not.toContain('Forests');
+  });
+
+  it('lists an exam with no date yet as TBC, never a placeholder date', () => {
+    const d = structuredClone(DOC);
+    const mid = d.rows.find((r: { id: string }) => r.id === 'midterm');
+    d.rows.push({ ...mid, id: 'resit', title: 'Resit', when: null, sort_at: '2026-12-18T23:00:00+01:00', dateless: true, tbc: true });
+    const f = factsFromStatus(d);
+    expect(kindRows(f, 'exam').events.map((r) => r.id)).toEqual(['midterm', 'resit']);
+    expect(text(<KindView facts={f} kind="exam" org={ORG} now={NOW} />)).toMatch(/Resit TBC$/);
+    expect(text(<ScheduleView facts={f} mine={null} now={NOW} org={ORG} />)).toMatch(/No date yet .* exam TBC Resit Archive/);
   });
 
   it('puts the kind’s own event last, and leaves other kinds’ rows off', () => {

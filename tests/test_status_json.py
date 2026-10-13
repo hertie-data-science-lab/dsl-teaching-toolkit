@@ -3178,38 +3178,43 @@ def test_a_week_missing_only_its_lab_is_one_missing_lab_problem():
     assert status_json.empty_week_problems(facts, before, frozenset({p["id"]})) == []
 
 
-def test_a_kind_used_only_by_a_tbc_release_is_still_expected_weekly():
-    # The only lab is `tbc`: the course still has labs, so each week lacks one.
-    text = """\
-timezone: Europe/Berlin
-semester_start: 2026-10-05
-semester_end: 2026-10-16
-releases:
-  lecture_1:
-    event_datetime: 2026-10-06T10:00
-    kind: lecture
-  r1:
-    event_datetime: 2026-10-07T10:00
-    kind: readings
-  lab_1:
-    event_datetime: tbc
-    kind: lab
-  lecture_2:
-    event_datetime: 2026-10-13T10:00
-    kind: lecture
-"""
+def _twelve_weeks(readings_weeks: int) -> list[str]:
+    """The kind gaps of a 12-week term (Mon 5 Oct to Fri 25 Dec) with a lecture every
+    week, readings in its first `readings_weeks` weeks and one lab that is `tbc`, read
+    before the term starts."""
+    releases = "".join(
+        f"  lecture_{n}:\n    event_datetime: {date(2026, 10, 6) + timedelta(weeks=n - 1)}T10:00\n"
+        "    kind: lecture\n"
+        for n in range(1, 13)
+    )
+    releases += "".join(
+        f"  readings_{n}:\n    event_datetime: {date(2026, 10, 7) + timedelta(weeks=n - 1)}T10:00\n"
+        "    kind: readings\n"
+        for n in range(1, readings_weeks + 1)
+    )
+    releases += "  lab_1:\n    event_datetime: tbc\n    kind: lab\n"
+    text = (
+        "timezone: Europe/Berlin\nsemester_start: 2026-10-05\n"
+        f"semester_end: 2026-12-25\nreleases:\n{releases}"
+    )
     facts = _semester(sched=_sched(text))
-    ids = [
-        p["id"]
-        for p in status_json.empty_week_problems(
-            facts, datetime(2026, 9, 30, 9, 0, tzinfo=UTC), frozenset()
-        )
+    before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    return [
+        p["id"] for p in status_json.empty_week_problems(facts, before, frozenset())
     ]
-    assert ids == [
-        "empty_week:2026-10-05:lab",
-        "empty_week:2026-10-12:lab",
-        "empty_week:2026-10-12:readings",
+
+
+def test_a_kind_is_expected_weekly_only_when_dated_in_half_the_planned_weeks():
+    # One further-readings entry in twelve weeks is not a weekly kind: no week is told it
+    # lacks readings. Nor is a kind whose only release is `tbc` (the lab).
+    assert _twelve_weeks(1) == []
+    # Readings in 7 of the 12 weeks (at least half, rounded up): the other five lack them.
+    assert _twelve_weeks(7) == [
+        f"empty_week:{date(2026, 10, 5) + timedelta(weeks=n)}:readings"
+        for n in range(7, 12)
     ]
+    # Five of twelve is under half: not weekly.
+    assert _twelve_weeks(5) == []
 
 
 def test_a_set_aside_empty_week_is_not_raised():

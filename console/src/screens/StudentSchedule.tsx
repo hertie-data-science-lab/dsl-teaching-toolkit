@@ -41,13 +41,14 @@ function mondayOf(iso: string, tz: string): string {
 function rowWeeks(rows: ScheduleRow[], facts: SemesterFacts, tz: string): { label: string; from?: string; rows: ScheduleRow[] }[] {
   const term = termOfFacts(facts);
   // A row with no date yet is under No date yet, as on the instructor's schedule.
-  if (term) return weekGroups(rows, (r) => (r.dateless ? null : r.when), term, tz, 'all').filter((g) => g.rows.length);
+  if (term) return weekGroups(rows, (r) => r.when, term, tz, 'all').filter((g) => g.rows.length);
   const byMonday = new Map<string, ScheduleRow[]>();
-  for (const r of rows.filter((x) => !x.dateless)) {
+  for (const r of rows) {
+    if (!r.when) continue;
     const k = mondayOf(r.when, tz);
     byMonday.set(k, [...(byMonday.get(k) ?? []), r]);
   }
-  const undated = rows.filter((r) => r.dateless);
+  const undated = rows.filter((r) => !r.when);
   return [...[...byMonday].map(([from, list], i) => ({ label: `Week ${i + 1}`, from, rows: list })), ...(undated.length ? [{ label: 'No date yet', rows: undated }] : [])];
 }
 
@@ -68,7 +69,7 @@ export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; 
           <ul class="timeline">
             {g.rows.flatMap((r) => {
               const out = [];
-              if (!todayDone && !r.dateless && sortKey(r.when, tz) >= nowKey) {
+              if (!todayDone && r.when && sortKey(r.when, tz) >= nowKey) {
                 todayDone = true;
                 out.push(<li class="today-line">Today, {fmtDay(new Date(now).toISOString(), tz, year)}</li>);
               }
@@ -81,7 +82,7 @@ export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; 
               out.push(
                 <li class={`trow ${ROW_CLASS[r.kind] ?? 'evt'}${yours?.repo ? ' mine' : ''}`} style={k?.background ? { background: k.background } : undefined}>
                   <span class="k" style={k?.colour ? { color: k.colour } : undefined}>{ROW_WORD[r.kind] ?? k?.label.toLowerCase() ?? r.kind}</span>
-                  <span class="d">{r.dateless ? 'TBC' : <>{fmtDay(r.when, tz, year)}{!r.allDay && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}</span> : null}{r.tbc ? <span class="tbc">TBC</span> : null}</>}</span>
+                  <span class="d">{r.when ? <>{fmtDay(r.when, tz, year)}{!r.allDay && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}</span> : null}{r.tbc ? <span class="tbc">TBC</span> : null}</> : 'TBC'}</span>
                   <span class="ttl">
                     <b>{r.title}</b>{r.subtitle ? `: ${r.subtitle}` : ''}
                     {r.details ? <Md class="t-details" src={r.details} /> : null}

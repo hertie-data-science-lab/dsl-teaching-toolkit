@@ -1275,9 +1275,10 @@ def empty_week_problems(
 
     - `empty_week:<monday>`: nothing dated in the week at all - and then only that;
     - else `empty_week:<monday>:<kind>`: no release of a weekly kind (lecture, lab,
-      readings) the semester uses - one with a release anywhere in its plan, dated or
-      `tbc`, so a course without readings is never told it lacks them. A hand-out, a due
-      date or an exam is no lecture.
+      readings) the semester runs weekly - one with a dated release in at least half
+      (rounded up) of the term's planned weeks, those with anything dated in them, so a
+      course without readings, or with one further-readings entry, is never told it lacks
+      them. A hand-out, a due date or an exam is no lecture.
 
     The id names the Monday of the week's first day. Each problem carries its card word
     (`label`) and `aside: true` - a gap is what the course can set aside. A week already
@@ -1292,15 +1293,26 @@ def empty_week_problems(
     days = {_local_day(when, tz) for when, *_ in schedule_moments(sched)}
     aliases = lambda repo: facts.aliases.get(repo, {})
     kinds = [(r, entry_kind(r, aliases)[0]) for r in sched.releases]
-    used = [k for k in _WEEKLY_KINDS if any(kind == k for _, kind in kinds)]
     kind_days = {
         k: {
             _local_day(r.when, tz)
             for r, kind in kinds
             if kind == k and r.when is not None
         }
-        for k in used
+        for k in _WEEKLY_KINDS
     }
+    _, weeks = semester_weeks(start, end, today)
+    spans = [
+        {start + timedelta(weeks=n, days=i) for i in range(7)} for n in range(weeks)
+    ]
+    planned = [span for span in spans if span & days]
+    # A weekly kind: dated in at least half the planned weeks, rounded up.
+    used = [
+        k
+        for k in _WEEKLY_KINDS
+        if kind_days[k]
+        and sum(1 for span in planned if span & kind_days[k]) * 2 >= len(planned)
+    ]
     out = []
 
     def gap(
@@ -1323,7 +1335,7 @@ def empty_week_problems(
             )
 
     # From the first week still to come: the one under way (`week`) is not raised.
-    week, weeks = semester_weeks(start, end, today)
+    week, _ = semester_weeks(start, end, today)
     for n in range(week + 1, weeks + 1):
         first = start + timedelta(weeks=n - 1)
         span = {first + timedelta(days=i) for i in range(7)}

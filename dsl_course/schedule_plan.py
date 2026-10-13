@@ -108,12 +108,14 @@ class PlannedRow:
     order, which is what the row links once they have landed. `shown` is the entry's
     `show_on_site`: a silent row stays off the schedule and the Updates box.
 
-    `undated`: the entry is `event_datetime: tbc`. Its `when` is then no date at all but
-    the place it sorts at (`planned_rows`), which nothing may show or fire on."""
+    `when` is the entry's date, None when it is `event_datetime: tbc` (`undated`).
+    `sort_at` is where the row sorts (`planned_rows`): its `when` when dated. It orders and
+    nothing else - nothing shows it or fires on it."""
 
     key: str
     kind: str
-    when: date | datetime
+    when: date | datetime | None
+    sort_at: date | datetime
     tbc: bool = False
     undated: bool = False
     subtitle: str = ""
@@ -139,18 +141,18 @@ def planned_rows(
     """One row per `releases:` entry: the dated ones in date order (ties in plan order),
     then the undated (`event_datetime: tbc`) ones in plan order, flagged `undated`.
 
-    An undated row sorts at the END of its kind: a minute after the last dated row of
-    that kind, one more per undated row before it - so "Lab 9, TBC" follows Lab 8 on the
-    schedule rather than piling up after the exams. A kind with no dated row sorts at
-    the end of term. That `when` is a sort key only: the site prints "TBC", and nothing
-    fires on it (`Release.due_deploys` reads the entry, whose `when` is None)."""
+    An undated row's `when` is None, and it sorts (`sort_at`) at the END of its kind: a
+    minute after the last dated row of that kind, one more per undated row before it - so
+    "Lab 9, TBC" follows Lab 8 on the schedule rather than piling up after the exams. A
+    kind with no dated row sorts at the end of term."""
 
-    def row(release: schedule.Release, when: date | datetime) -> PlannedRow:
+    def row(release: schedule.Release, sort_at: date | datetime) -> PlannedRow:
         kind, _ = entry_kind(release, aliases)
         return PlannedRow(
             key=release.label,
             kind=kind,
-            when=when,
+            when=release.when,
+            sort_at=sort_at,
             tbc=release.tbc,
             undated=release.when is None,
             subtitle=release.title,
@@ -162,8 +164,8 @@ def planned_rows(
 
     dated = [r for r in sched.releases if r.when is not None]
     rows = [row(r, r.when) for r in sorted(dated, key=lambda r: r.when)]
-    last: dict[str, datetime] = {r.kind: r.when for r in rows}
-    end = _term_end(sched, [r.when for r in rows])
+    last: dict[str, datetime] = {r.kind: r.sort_at for r in rows}
+    end = term_end(sched, [r.sort_at for r in rows])
     taken: dict[str, int] = {}
     for release in sched.releases:
         if release.when is None:
@@ -174,7 +176,7 @@ def planned_rows(
     return rows
 
 
-def _term_end(sched: schedule.Schedule, dated: list[datetime]) -> datetime:
+def term_end(sched: schedule.Schedule, dated: list[datetime]) -> datetime:
     """Where an undated row of a kind with no dated row sorts: the end of term, else the
     last dated row, else the start of term (else today)."""
     tz = ZoneInfo(sched.timezone)

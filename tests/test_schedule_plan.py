@@ -48,8 +48,8 @@ def test_one_row_per_dated_entry_in_plan_order():
 
 
 def test_an_undated_entry_sorts_after_the_last_dated_row_of_its_kind():
-    # `event_datetime: tbc` is a row, flagged undated, placed a minute after the last
-    # lab - so it follows Lab 2 on the schedule, ahead of the lecture after it.
+    # `event_datetime: tbc` is a row, flagged undated, with no `when`, sorted a minute
+    # after the last lab - so it follows Lab 2 on the schedule, ahead of the lecture after it.
     minute = timedelta(minutes=1)
     rows = _rows(
         [
@@ -60,12 +60,13 @@ def test_an_undated_entry_sorts_after_the_last_dated_row_of_its_kind():
             Release("lecture-1", _at(10), [Deploy("cm", "lectures/01_a")]),
         ]
     )
-    assert [(r.key, r.when, r.undated) for r in rows] == [
-        ("lab-1", _at(8), False),
-        ("lab-2", _at(9), False),
-        ("lecture-1", _at(10), False),
-        ("lab-3", _at(9) + minute, True),
-        ("lab-4", _at(9) + 2 * minute, True),
+    assert [(r.key, r.when, r.sort_at, r.undated) for r in rows] == [
+        ("lab-1", _at(8), _at(8), False),
+        ("lab-2", _at(9), _at(9), False),
+        ("lecture-1", _at(10), _at(10), False),
+        # No date of its own: `when` is None, and `sort_at` only places it.
+        ("lab-3", None, _at(9) + minute, True),
+        ("lab-4", None, _at(9) + 2 * minute, True),
     ]
 
 
@@ -79,8 +80,9 @@ def test_an_undated_entry_of_a_kind_with_no_dated_row_sorts_at_term_end():
     )
     lab = schedule_plan.planned_rows(sched)[-1]
     assert (lab.key, lab.undated) == ("lab-1", True)
-    assert lab.when.date() == date(2026, 12, 18)
-    assert lab.when > _at(7)
+    assert lab.when is None
+    assert lab.sort_at.date() == date(2026, 12, 18)
+    assert lab.sort_at > _at(7)
 
 
 def test_nothing_fires_for_an_undated_entry():

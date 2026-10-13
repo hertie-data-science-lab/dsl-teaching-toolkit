@@ -17,11 +17,12 @@ import { FileBeside } from './StudentMaterials';
 export function kindRows(facts: SemesterFacts, kind: string): { rows: ScheduleRow[]; events: ScheduleRow[] } {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const on = (facts.tabRows ?? facts.rows).filter((r) => r.tabs.includes(kind));
-  const byDate = (a: ScheduleRow, b: ScheduleRow) => instant(a.when, tz) - instant(b.when, tz);
+  // In place (`sortAt`, a dateless row after its kind's last dated one), then the rows with none.
+  const byPlace = (a: ScheduleRow, b: ScheduleRow) => instant(a.sortAt, tz) - instant(b.sortAt, tz);
   const sessions = on.filter((r) => !isEventRow(r));
   return {
-    rows: [...sessions.filter((r) => r.when).sort(byDate), ...sessions.filter((r) => !r.when)],
-    events: on.filter((r) => isEventRow(r) && r.kind === kind && r.when).sort(byDate),
+    rows: [...sessions.filter((r) => r.sortAt).sort(byPlace), ...sessions.filter((r) => !r.sortAt)],
+    events: on.filter((r) => isEventRow(r) && r.kind === kind && r.sortAt).sort(byPlace),
   };
 }
 
@@ -57,7 +58,7 @@ function KindList({ facts, kind, org, now, tab, current }: { facts: SemesterFact
       {events.map((e) => (
         <section class="session" aria-label={e.title}>
           <h2 class="session-title">{e.title}</h2>
-          <p>{fmtDay(e.when, tz, year)}{e.tbc ? <> <b>(TBC)</b></> : null}</p>
+          <p>{e.when ? <>{fmtDay(e.when, tz, year)}{e.tbc ? <> <b>(TBC)</b></> : null}</> : <b>TBC</b>}</p>
           {e.details ? <Md src={e.details} /> : null}
         </section>
       ))}

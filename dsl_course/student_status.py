@@ -63,6 +63,7 @@ from .schedule_plan import (
     deploy_dest,
     planned_rows,
     site_rows,
+    term_end,
 )
 from .site_repo import (
     landed_links,
@@ -108,6 +109,7 @@ ROW_KEYS = (
     "id",
     "kind",
     "when",
+    "sort_at",
     "all_day",
     "title",
     "subtitle",
@@ -187,6 +189,7 @@ def json_schema() -> dict:
         "off_schedule": _B,
         "readings_pending": _B,
         "when": _SN,
+        "sort_at": _SN,
         "assignment": _SN,
         "links": _list(link),
         "readings": _list(link),
@@ -341,6 +344,7 @@ def _row(
     when: datetime | date | None,
     title: str,
     *,
+    sort_at: datetime | date | None = None,
     all_day: bool | None = None,
     subtitle: str = "",
     details: str = "",
@@ -359,6 +363,9 @@ def _row(
         "id": id_,
         "kind": kind,
         "when": _iso(when),
+        # Where the row sorts: its `when`, or for a `dateless` one (`when` null) its place
+        # after its kind's last dated row (`schedule_plan.planned_rows`).
+        "sort_at": _iso(when if sort_at is None else sort_at),
         "all_day": _all_day(when) if all_day is None else all_day,
         "title": title,
         "subtitle": subtitle,
@@ -366,7 +373,7 @@ def _row(
         "assignment": assignment,
         "released": released,
         "tbc": tbc,
-        # `event_datetime: tbc`: `when` only places the row (the site's `dateless`).
+        # `event_datetime: tbc`: no `when` (the site's `dateless`).
         "dateless": dateless,
         "off_schedule": off_schedule,
         "links": links or [],
@@ -404,6 +411,7 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
                 r.kind,
                 r.when,
                 title,
+                sort_at=r.sort_at,
                 subtitle=row_name(r.subtitle, title),
                 details=r.details,
                 released=landed or bool(readings),
@@ -474,16 +482,18 @@ def event_rows(facts: SemesterFacts) -> list[dict]:
     for ev in sched.events:
         if not ev.show_on_site:
             continue
-        # An undated event (`event_datetime: tbc`) sorts at the end of term, marked TBC.
-        when = ev.when if ev.when is not None else sched.semester_end
+        # An undated event (`event_datetime: tbc`) has no `when` and sorts at the end of
+        # term (the site's `_event_entry`), marked TBC.
         out.append(
             _row(
                 ev.label,
                 "exam" if ev.kind == "exam" else "special_event",
-                when,
+                ev.when,
                 ev.title or ev.label.replace("-", " ").replace("_", " ").title(),
+                sort_at=ev.when or term_end(sched, []),
                 details=ev.details,
                 tbc=ev.tbc or ev.when is None,
+                dateless=ev.when is None,
             )
         )
     for id_, title, when in (
@@ -690,7 +700,7 @@ def render(
     """The document. Pure: everything it names was read by `gather` or is in `facts`."""
     sched = facts.sched
     rows = release_rows(facts, extra) + event_rows(facts)
-    rows.sort(key=lambda r: (r["when"] is None, str(r["when"] or ""), r["id"]))
+    rows.sort(key=lambda r: (r["sort_at"] is None, str(r["sort_at"] or ""), r["id"]))
     assignments = render_assignments(facts, extra, now)
     late = list(dict.fromkeys(a["late_rule"] for a in assignments if a["late_rule"]))
     return {

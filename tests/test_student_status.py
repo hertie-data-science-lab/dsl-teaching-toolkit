@@ -664,3 +664,17 @@ def test_an_undated_release_is_a_dateless_row_after_its_kind():
     assert tbc["title"] == "Lecture 3" and tbc["subtitle"] == "Forests"
     assert ids.index("lecture_03") > ids.index("lecture_02")
     assert not any(r["dateless"] for r in rows if r["id"] != "lecture_03")
+    # No date of its own: `when` is null, and `sort_at` alone places it after lecture 2.
+    assert tbc["when"] is None
+    lec2 = rows[ids.index("lecture_02")]
+    assert tbc["sort_at"] > lec2["sort_at"] == lec2["when"]
+
+
+def test_an_undated_event_is_a_dateless_row_with_no_when():
+    from dsl_course.schedule import Event
+
+    facts = _facts()
+    facts.sched.events.append(Event("resit", "Resit", None, "exam"))
+    (row,) = [r for r in student_status.event_rows(facts) if r["id"] == "resit"]
+    assert row["when"] is None and row["dateless"] is True and row["tbc"] is True
+    assert row["sort_at"].startswith(facts.sched.semester_end.isoformat())

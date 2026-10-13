@@ -119,19 +119,19 @@ def test_event_entry_title_falls_back_to_the_prettified_label():
 
 
 def test_tbc_rows_render_with_theme_flags():
-    # Undated (event_datetime: tbc): sortable end-of-term placeholder + dateless flag,
-    # so the theme prints "TBC" instead of the placeholder date.
+    # Undated (event_datetime: tbc): no `date:` at all, an end-of-term `sort_at:` that
+    # only places it, and the dateless flag, so the template prints "TBC".
     undated = Event("guest-lecture", "Guest lecture", None, tbc=True)
     out = site._event_entry(undated, END_OF_TERM)
     assert "tbc: true" in out and "dateless: true" in out
-    assert "date: 2026-12-18T09:00:00" in out
+    assert "sort_at: 2026-12-18T09:00:00" in out and "\ndate:" not in out
     # Provisionally dated (tbc: true): real date kept, marker only.
     dated = Event(
         "project-clinic", "", datetime(2026, 11, 17, 10, 0, tzinfo=BERLIN), tbc=True
     )
     out = site._event_entry(dated, END_OF_TERM)
     assert "tbc: true" in out and "dateless" not in out
-    assert "date: 2026-11-17T10:00:00" in out
+    assert "date: 2026-11-17T10:00:00" in out and "sort_at: 2026-11-17T10:00:00" in out
     # Exams: same two shapes.
     out = site._event_entry(
         Event("resit", "Resit Exam", None, "exam", True), END_OF_TERM
@@ -1477,8 +1477,8 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
 
 def test_an_undated_release_is_a_tbc_row(monkeypatch, tmp_path):
     # `event_datetime: tbc` is a row on the schedule and its tab, flagged `dateless` so
-    # the templates print "TBC" and keep it out of the Updates box; its `date:` only
-    # places it, after the last dated lecture.
+    # the templates print "TBC" and keep it out of the Updates box. It has no `date:`;
+    # its `sort_at:` places it after the last dated lecture.
     plan = _plan(
         monkeypatch,
         tmp_path,
@@ -1503,7 +1503,7 @@ def test_an_undated_release_is_a_tbc_row(monkeypatch, tmp_path):
     assert "dateless: true\n" in row
     assert "unreleased: true\n" in row
     assert "undated: true" not in row
-    assert "date: 2026-11-02T10:01:00\n" in row
+    assert "sort_at: 2026-11-02T10:01:00\n" in row and "\ndate:" not in row
     assert "dateless" not in plan.collections["_lectures"]["session-08.md"]
 
 

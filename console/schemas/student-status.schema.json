@@ -382,6 +382,12 @@
           "released": {
             "type": "boolean"
           },
+          "sort_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "subtitle": {
             "type": "string"
           },
@@ -408,6 +414,7 @@
           "id",
           "kind",
           "when",
+          "sort_at",
           "all_day",
           "title",
           "subtitle",
