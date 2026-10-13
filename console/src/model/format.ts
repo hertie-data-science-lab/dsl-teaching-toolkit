@@ -223,9 +223,10 @@ export function emptyWeekLabel(id: string): string | null {
   return `Empty week of ${+m[3]} ${'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[+m[2] - 1]}`;
 }
 
+/** The engine's `late_window` keeps its name; the console says marking from the due date (decision 0037). */
 export const ASSIGNMENT_WORD: Record<AssignmentState, string> = {
   declared: 'declared', teams_forming: 'teams forming', blocked: 'blocked', open: 'open',
-  late_window: 'late window', marking: 'marking', returned: 'returned',
+  late_window: 'marking', marking: 'marking', returned: 'returned',
 };
 
 export const RELEASE_WORD: Record<ReleaseState, string> = {

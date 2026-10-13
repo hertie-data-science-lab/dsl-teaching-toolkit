@@ -1,11 +1,11 @@
 // S16 Assignments index and S10 Assignment detail: the hub, with tabs Overview | Teams |
-// Marks (decision 0008). Teams shows only when the template says teams.
+// Marks (decisions 0008, 0037). Teams shows only when the template says teams.
 
 import { readTable } from '../edit/csv';
 import { parseRoster } from '../model/people';
 import { ASSIGNMENT_WORD, assignmentIdent, assignmentTitle, fmtDay, fmtTime, fmtWhen } from '../model/format';
-import type { Assignment, AssignmentState, Status } from '../model/types';
-import { submissionsOf } from '../model/assignment';
+import type { Assignment, Status } from '../model/types';
+import { pastDue, phaseOf, submissionsOf, type Phase } from '../model/assignment';
 import { RepoChip } from '../ui/SetupPanel';
 import { templateReadinessIn, tier } from '../model/readiness';
 import { Check } from '../ui/icons';
@@ -16,7 +16,7 @@ import { replaceHash, tabHref, type AssignmentTab } from '../router';
 import { ProblemCards } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { asgSummary } from './Cohort';
-import { MarksTab, TeamsTab } from './Marking';
+import { MarksTab, TeamsTab, lateUntil } from './Marking';
 import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
 import { WithStatus, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -56,13 +56,13 @@ function Index(p: ReadyProps) {
   const { status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
   const list = status.assignments ?? [];
-  const open = list.filter((a) => a.state === 'open' || a.state === 'late_window').length;
-  const marking = list.filter((a) => a.state === 'marking').length;
+  const open = list.filter((a) => a.state === 'open').length;
+  const marking = list.filter((a) => phaseOf(a) === 'marking').length;
   return (
     <>
       <div class="page-head">
         <div>
-          <h2 class="h1">Assignments <Hint doc="09-release-assignment-to-cohort.md">An assignment opens at hand out, has a late window after the due date, then is marked and returned; dates live in the schedule. This semester’s defaults are below the list.</Hint></h2>
+          <h2 class="h1">Assignments <Hint doc="09-release-assignment-to-cohort.md">An assignment opens at hand out and is marked from the due date, while late work still arrives until the late cutoff; then marks are returned. Dates live in the schedule. This semester’s defaults are below the list.</Hint></h2>
           <p class="lede">
             {list.length === 1 ? 'One' : list.length} this semester.{open ? ` ${open === 1 ? 'One is' : `${open} are`} open.` : ''}{marking ? ` ${marking === 1 ? 'One is' : `${marking} are`} being marked.` : ''}
           </p>
@@ -81,7 +81,10 @@ function Index(p: ReadyProps) {
                   <a class="rowlink" href={`#assignment-${a.slug}`}>{assignmentTitle(a)}</a><br />
                   <span class="footnote">{a.teams !== null && a.teams !== undefined ? 'In teams' : 'Alone'}</span>
                 </td>
-                <td><span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span></td>
+                <td>
+                  <span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span>
+                  {a.state === 'late_window' ? <><br /><span class="footnote">late work to {fmtDay(a.grading_cutoff_datetime, tz, year)}</span></> : null}
+                </td>
                 <td class="num">{nextDate(a, tz, year)}</td>
                 <td class="num">{asgSummary(a, tz, year).split('; ').pop()}</td>
                 <td class="num">{isGroup(a) ? <>{a.teams} formed{free !== null ? <><br /><span class="footnote">{free} without a team</span></> : null}</> : <span class="footnote">—</span>}</td>
@@ -105,25 +108,24 @@ export function AssignmentsScreen(p: CohortProps) {
 
 // --------------------------------------------------------------------------- detail
 
-const LIFE: [string, AssignmentState[]][] = [
-  ['Declared', ['declared']],
-  ['Teams forming', ['teams_forming', 'blocked']],
-  ['Open', ['open']],
-  ['Late window', ['late_window']],
-  ['Marking', ['marking']],
-  ['Returned', ['returned']],
+const LIFE: [string, Phase][] = [
+  ['Declared', 'declared'],
+  ['Teams forming', 'teams_forming'],
+  ['Open', 'open'],
+  ['Marking', 'marking'],
+  ['Returned', 'returned'],
 ];
 
-function stepOf(state: AssignmentState): number {
-  return LIFE.findIndex(([, s]) => s.includes(state));
+function stepOf(a: Assignment): number {
+  return LIFE.findIndex(([, ph]) => ph === phaseOf(a));
 }
 
 export const isGroup = (a: Assignment) => a.teams !== null && a.teams !== undefined;
 
-/** The tab an assignment opens on: Teams while teams form, Marks once marking starts. */
+/** The tab an assignment opens on: Teams while teams form, Marks from the due date (decision 0037). */
 export function defaultTab(a: Assignment): AssignmentTab {
   if ((a.state === 'teams_forming' || a.state === 'blocked') && isGroup(a)) return 'teams';
-  if (a.state === 'marking' || a.state === 'returned') return 'marks';
+  if (pastDue(a)) return 'marks';
   return 'overview';
 }
 
@@ -157,16 +159,20 @@ export interface TabProps extends ReadyProps {
 function Overview(p: TabProps) {
   const { status, now, a } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
-  const cur = stepOf(a.state), group = isGroup(a);
+  const cur = stepOf(a), group = isGroup(a);
   // A group assignment is handed out when its teams start forming: each team's repo follows.
   const handedOut = cur >= 1;
+  const late = a.state === 'late_window';
+  const lateTo = lateUntil(a, now, tz, year);
+  // Teams form until the late cutoff.
+  const cutoffPassed = a.state === 'marking' || a.state === 'returned';
+  const marked = `${a.marks.filled} of ${a.marks.total} marked`;
   const subs = [
     'In the schedule',
-    group ? (cur === 1 ? `${a.teams} teams so far` : cur >= 4 ? 'Closed' : cur > 1 ? 'Still open' : 'From hand out') : 'Skipped: students work alone',
+    group ? (cur === 1 ? `${a.teams} teams so far` : cutoffPassed ? 'Closed' : cur > 1 ? 'Still open' : 'From hand out') : 'Skipped: students work alone',
     cur === 2 ? `${submissionsOf(a)} of ${a.units} in` : cur > 2 ? `Closed ${fmtDay(a.due, tz, year)}` : `Opens ${a.handout ? fmtDay(a.handout, tz, year) : 'at hand out'}`,
-    cur === 3 ? `Until ${fmtDay(a.grading_cutoff_datetime, tz, year)}` : cur > 3 ? `Closed ${fmtDay(a.grading_cutoff_datetime, tz, year)}` : `Opens after ${fmtDay(a.due, tz, year)}`,
-    cur === 4 ? `${a.marks.filled} of ${a.marks.total} marked` : cur > 4 ? 'Done' : `Opens after ${fmtDay(a.grading_cutoff_datetime, tz, year)}`,
-    cur === 5 ? 'Returned' : 'Opens after marks are returned',
+    cur === 3 ? (late ? `late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)} · ${marked}` : marked) : cur > 3 ? 'Done' : `Opens after ${fmtDay(a.due, tz, year)}`,
+    cur === 4 ? 'Returned' : 'Opens after marks are returned',
   ];
   const tiered = tier(status);
   const tpl = templateReadinessIn(status.course, a.template, tiered);
@@ -176,23 +182,32 @@ function Overview(p: TabProps) {
   );
   const lede =
     a.state === 'open' ? `Open. Due ${fmtDay(a.due, tz, year)} at ${fmtTime(a.due, tz)}; ${submissionsOf(a)} of ${a.units} submitted so far.`
-    : a.state === 'late_window' ? `Late window. Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${submissionsOf(a)} of ${a.units} submitted.`
-    : a.state === 'marking' ? `Marking. ${a.marks.filled} of ${a.marks.total} marked.`
+    : a.state === 'late_window' ? `Marking. Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${marked}, ${submissionsOf(a)} of ${a.units} submitted.`
+    : a.state === 'marking' ? `Marking. ${marked}.`
     : a.state === 'returned' ? 'Returned. Marks are with students.'
     : a.state === 'teams_forming' ? `Teams forming. Handed out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}; no team has formed yet.`
     : a.state === 'blocked' ? 'Blocked: handed out, but you have not assigned any team yet.'
     : a.handout ? `Declared. Hands out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}.` : 'Declared. You hand it out from this page.';
-  const big = cur === 4 || cur === 5 ? a.marks.filled : cur <= 1 ? (a.teams ?? 0) : submissionsOf(a);
-  const bigOf = cur === 4 || cur === 5 ? a.marks.total : a.units;
+  const big = cur >= 3 ? a.marks.filled : cur <= 1 ? (a.teams ?? 0) : (submissionsOf(a));
+  const bigOf = cur >= 3 ? a.marks.total : a.units;
   const scope = cohortScope(p);
   const ref: AsgRef = { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand', name: sheetName(p, a.slug) };
   const tree = p.files.tree(p.course.org, a.template);
   const templateFiles = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.github/')).map((x) => x.path) : [];
+  // While students can push: from hand out until the late cutoff.
+  const pushWhy = 'Update every copy pushes an assignment template file to every student and posts a note on each Submission receipts issue. Collect now pulls the latest work.';
+  const pushOps = (
+    <>
+      <div class="sa-op"><span class="opname">Update every copy</span><OpButtons def={updateCopies(scope, ref, templateFiles)} small /></div>
+      <div class="sa-op"><span class="opname">Collect now</span><OpOpen def={collect({ ...scope }, { ...ref, when: a.due ? `Due ${fmtDay(a.due, tz, year)}` : ref.when })} cls="btn small" label="Collect now" /></div>
+    </>
+  );
   return (
     <>
       <div class="page-head">
-        <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">{a.state === 'open' || a.state === 'late_window'
+        <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">{a.state === 'open'
             ? 'Students push to their own repo until the due date. Late work is accepted with the penalty until the late cutoff.'
+            : late ? 'Mark from the due date. Late work is accepted with the penalty until the late cutoff; its submission details update under your marks. Return marks previews first.'
             : a.state === 'marking' ? 'Marks and feedback go to students; your private notes do not. Return marks previews first.'
             : a.state === 'teams_forming' ? 'Students form teams on the assignment’s page until late work closes, and you can assign the rest. Students without a team get no repo.'
             : a.state === 'blocked' ? 'Assign this assignment’s teams on the Teams tab; each team gets its repo once saved. Students without a team get none.'
@@ -217,11 +232,11 @@ function Overview(p: TabProps) {
         <AssignmentRun p={p} a={a} group={group} />
         <div class="grid-2">
           <section class="panel section">
-            <div class="section-head"><h2>{cur >= 4 ? 'Marking' : cur <= 1 ? (group ? 'Teams' : 'Submissions') : 'Submissions'}</h2></div>
+            <div class="section-head"><h2>{cur >= 3 ? 'Marking' : cur <= 1 ? (group ? 'Teams' : 'Submissions') : 'Submissions'}</h2></div>
             <div class="big">{big} <small>/ {bigOf}</small></div>
             <div class="meter"><i style={`width:${bigOf ? ((big / bigOf) * 100).toFixed(1) : 0}%;background:var(--asg-ink)`} /></div>
             <p class="footnote">
-              {cur === 2 || cur === 3 ? `${a.units - submissionsOf(a)} have not pushed since hand out.` : cur >= 4 ? `${a.marks.total - a.marks.filled} still to mark.` : group ? (cur === 1 ? 'Each team gets its repo as it forms; students without a team get none.' : 'Teams form from hand out until late work closes.') : 'Nothing handed out yet.'}
+              {cur === 2 ? `${a.units - (submissionsOf(a))} have not pushed since hand out.` : late ? `${a.marks.total - a.marks.filled} still to mark; ${a.units - (submissionsOf(a))} have not pushed yet.` : cur >= 3 ? `${a.marks.total - a.marks.filled} still to mark.` : group ? (cur === 1 ? 'Each team gets its repo as it forms; students without a team get none.' : 'Teams form from hand out until late work closes.') : 'Nothing handed out yet.'}
             </p>
           </section>
           <section class="panel section">
@@ -238,27 +253,25 @@ function Overview(p: TabProps) {
             {row(cur === 0 ? 'now' : 'past', 'Declared', handedOut ? `Handed out ${fmtWhen(a.handout, tz, year)} to ${a.units} ${group ? 'teams' : 'students'}.` : 'Hands out at its time, or now.',
               handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><OpButtons def={handout(scope, ref)} small /></div>)}
             {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the assignment’s page in the student console; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={tabHref(a.slug, 'teams')}>Open teams</a></div>) : null}
-            {row(cur === 2 || cur === 3 ? 'now' : cur > 3 ? 'past' : 'later', 'Open, late window',
-              cur < 2 ? 'Opens after hand out.' : cur > 3 ? `Closed ${fmtDay(a.grading_cutoff_datetime, tz, year)}.` : 'Update every copy pushes an assignment template file to every student and posts a note on each Submission receipts issue. Collect now pulls the latest work.',
-              cur === 2 || cur === 3 ? (
+            {row(cur === 2 ? 'now' : cur > 2 ? 'past' : 'later', 'Open',
+              cur < 2 ? 'Opens after hand out.' : cur > 2 ? `Closed ${fmtDay(a.due, tz, year)}.` : pushWhy,
+              cur === 2 ? pushOps : null)}
+            {row(cur === 3 ? 'now' : cur > 3 ? 'past' : 'later', 'Marking',
+              cur < 3 ? `Opens after the due date${a.due ? `, ${fmtDay(a.due, tz, year)}` : ''}.`
+                : late ? `Marks and feedback go to students; your private notes do not. Late work arrives until ${fmtDay(a.grading_cutoff_datetime, tz, year)}. ${pushWhy}`
+                : 'Marks and feedback go to students; your private notes do not.',
+              cur === 3 ? (
                 <>
-                  <div class="sa-op"><span class="opname">Update every copy</span><OpButtons def={updateCopies(scope, ref, templateFiles)} small /></div>
-                  <div class="sa-op"><span class="opname">Collect now</span><OpOpen def={collect({ ...scope }, { ...ref, when: a.due ? `Due ${fmtDay(a.due, tz, year)}` : ref.when })} cls="btn small" label="Collect now" /></div>
+                  <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={tabHref(a.slug, 'marks')}>Open marks</a></div>
+                  <div class="sa-op"><span class="opname">Return marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled, sheetName(p, a.slug), lateTo)} small /></div>
+                  {late ? pushOps : null}
                 </>
               ) : null)}
-            {row(cur === 4 ? 'now' : cur > 4 ? 'past' : 'later', 'Marking',
-              cur < 4 ? `Opens after late work closes${a.grading_cutoff_datetime ? `, ${fmtDay(a.grading_cutoff_datetime, tz, year)}` : ''}.` : 'Marks and feedback go to students; your private notes do not.',
+            {row(cur === 4 ? 'now' : 'later', 'Returned', cur === 4 ? 'Marks are with students. Changed marks can be returned again.' : 'Opens after marks are returned. Changed marks can then be returned again.',
               cur === 4 ? (
                 <>
                   <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={tabHref(a.slug, 'marks')}>Open marks</a></div>
-                  <div class="sa-op"><span class="opname">Return marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled, sheetName(p, a.slug))} small /></div>
-                </>
-              ) : null)}
-            {row(cur === 5 ? 'now' : 'later', 'Returned', cur === 5 ? 'Marks are with students. Changed marks can be returned again.' : 'Opens after marks are returned. Changed marks can then be returned again.',
-              cur === 5 ? (
-                <>
-                  <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={tabHref(a.slug, 'marks')}>Open marks</a></div>
-                  <div class="sa-op"><span class="opname">Return changed marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled, sheetName(p, a.slug))} small label="Return changed marks" /></div>
+                  <div class="sa-op"><span class="opname">Return changed marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled, sheetName(p, a.slug), lateTo)} small label="Return changed marks" /></div>
                 </>
               ) : null)}
           </ul>

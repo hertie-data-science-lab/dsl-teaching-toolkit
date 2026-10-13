@@ -23,13 +23,14 @@ const course: Course = { org: 'hertie-dsl-demo-course-e1234', name: 'Machine Lea
 const text = (v: preact.VNode) => render(v).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&rsquo;/g, '’').replace(/\s+/g, ' ');
 
 describe('router', () => {
-  it('lands an old #setup on Profile in both consoles, and a student’s #marks and #join on Assignments', () => {
+  it('lands an old #setup on Profile and #marks on Assignments in both consoles, and a student’s #join on Assignments', () => {
     expect(parseHash('#setup')).toEqual({ screen: 'profile' });
     expect(movedHash('#setup')).toBe('#profile');
     expect(parseHash('#setup', true)).toEqual({ screen: 'profile' });
     expect(movedHash('#setup', true)).toBe('#profile');
     for (const old of ['#marks', '#join']) expect(movedHash(old, true)).toBe('#assignments');
-    expect(movedHash('#marks')).toBeNull();
+    expect(movedHash('#marks')).toBe('#assignments');
+    expect(movedHash('#join')).toBeNull();
     expect(movedHash('#profile')).toBeNull();
   });
   it('makes Home about no course or semester, whatever the query names', () => {
