@@ -11,7 +11,7 @@ import { YamlText, compact, deepEqual, obj, type Path } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { Modal } from '../ui/Modal';
 import {
-  REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
+  LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
   validAssignments, validSchedule, valueWord, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
 } from '../model/cascade';
 import { addDays, fmtWhen } from '../model/format';
@@ -273,6 +273,11 @@ function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year }
   );
 }
 
+/** Whether an assignment's due date has passed, by the engine's state. */
+export const pastDue = (a: Assignment) => a.state === 'late_window' || a.state === 'marking' || a.state === 'returned';
+
+export const LATE_MOVES = 'The due date has passed: this moves the late cutoff and the late penalties of this assignment, and the engine recomputes them.';
+
 /** The assignment's Overview form: its schedule entry and its assignments.yml block, saved together. */
 export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; group: boolean }) {
   const env = useEnv();
@@ -303,6 +308,8 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   const rErr = { ...runErrors(keys, layers, r), ...repoNameError(r.semester_dest_repo) };
   const dirtyT = timing !== null && !deepEqual(timing, baseT);
   const dirtyR = run !== null && !deepEqual(compact(run), compact(beforeRun));
+  // Past the due date the engine recomputes the cutoff and every late deduction off a changed late rule.
+  const lateMoved = dirtyR && pastDue(a) && LATE_PAIR.some((k) => !deepEqual(compact({ k: r[k] }), compact({ k: beforeRun[k] })));
   const change = (patch: Partial<AssignmentDraft>) => { setTiming({ ...d, ...patch }); setSave({ kind: 'idle' }); };
   const doSave = async () => {
     if (Object.keys(tErr).length || Object.keys(rErr).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
@@ -348,6 +355,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
           </details>
         </div>
         <div class="form-section">
+          {lateMoved ? <CheckLine cls="warn">{LATE_MOVES}</CheckLine> : null}
           <SaveBar state={save} onSave={() => void doSave()} disabled={!dirtyT && !dirtyR} file={dirtyR && !dirtyT ? { org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE, exists: p.files.file(p.cohort.org, CONFIG_REPO, ASSIGNMENTS_FILE).kind !== 'absent' } : { org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
           <p class="lives">Dates live in <code>{CONFIG_REPO}/schedule.yml</code>; run settings in <code>{CONFIG_REPO}/{ASSIGNMENTS_FILE}</code>.</p>
         </div>

@@ -113,6 +113,30 @@ describe('Save on the Overview form', () => {
     expect(parse(body(puts(gh, 'assignments.yml')[0])).assignments).toEqual({ 'assignment-2': { late_window_days: 3, late_penalty_per_day: '2%' } });
   });
 
+  it('warns that a late rule changed after the due date moves the cutoff and penalties, and still writes only the pair', async () => {
+    const gh = github(), f = files();
+    const past: Loaded = { ...ready, status: { ...ready.status, assignments: [{ ...solo, state: 'marking' }, team] } };
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-2', tab: 'overview', loaded: past })} />);
+    expect(root!.textContent).not.toContain('The due date has passed');
+    await click(buttons('Change for this assignment')[0]);
+    await type('#ov-late_window_days', '3');
+    await type('#ov-late_penalty_per_day', '2%');
+    expect(root!.textContent).toContain('The due date has passed: this moves the late cutoff and the late penalties of this assignment');
+    await click(button('Save'));
+    await settle(() => puts(gh, 'assignments.yml').length > 0 && !root!.textContent!.includes('Checking'));
+    expect(gh.seen.filter((x) => x.method === 'PUT').map((x) => x.url.split('/contents/')[1])).toEqual(['assignments.yml']);
+    expect(body(puts(gh, 'assignments.yml')[0])).toBe(`${ASSIGNMENTS}assignments:\n  assignment-2:\n    late_window_days: 3\n    late_penalty_per_day: 2%\n`);
+  });
+
+  it('says nothing about moved penalties before the due date', async () => {
+    const gh = github(), f = files();
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-2', tab: 'overview' })} />);
+    await click(buttons('Change for this assignment')[0]);
+    await type('#ov-late_window_days', '3');
+    await type('#ov-late_penalty_per_day', '2%');
+    expect(root!.textContent).not.toContain('The due date has passed');
+  });
+
   it('saves a schedule carrying blank keys: an unfilled details slot, the seeded archive date', async () => {
     const blank = `${SCHEDULE}    details:\nevents:\n  midterm:\n    kind: exam\n    event_datetime: 2026-10-20\n    details:\narchive:\n  event_datetime:\n`;
     const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: blank });
