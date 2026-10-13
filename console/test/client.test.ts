@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ConflictError, GitHubClient, authorOf, decodeBase64 } from '../src/github/client';
+import { ConflictError, GitHubClient, authorOf, decodeBase64, fromBase64 } from '../src/github/client';
+import { photoError } from '../src/tiers/people';
 import { FakeGitHub, fileBody, json } from './fake';
 
 const client = (gh: FakeGitHub, onRateLimit?: (r: unknown) => void) =>
@@ -70,6 +71,12 @@ describe('GitHubClient', () => {
     expect((gh.seen[0].body as Record<string, unknown>).sha).toBeUndefined();
   });
 
+  it('writes bytes as they are (an uploaded photo)', async () => {
+    const gh = new FakeGitHub().on('PUT', /contents\/_images\/pp\/a\.png$/, { content: { sha: 'n' }, commit: { sha: 'c' } });
+    await client(gh).putContents({ owner: 'o', repo: 'o.github.io', path: '_images/pp/a.png', text: new Uint8Array([0x89, 0x50, 0xff]), sha: null, message: 'm', author: { name: 'a', email: 'a@x' } });
+    expect([...fromBase64((gh.seen[0].body as Record<string, string>).content)]).toEqual([0x89, 0x50, 0xff]);
+  });
+
   it('raises ConflictError when the file moved on', async () => {
     const gh = new FakeGitHub().on('PUT', /contents/, () => json({ message: 'is at abc but expected def' }, 409));
     await expect(
@@ -130,5 +137,11 @@ describe('GitHubClient', () => {
     expect(await c.getRepoTopics('o', 'r')).toEqual(['dsl-course-hub']);
     expect((await c.listTree('o', 'r', 'HEAD'))?.sha).toBe('t');
     expect((await c.searchRepos('org:o course-materials'))[0].name).toBe('course-materials-f2026');
+  });
+  it('takes a PNG, JPEG or WebP photo up to 2 MB, and says why not otherwise', () => {
+    expect(photoError({ type: 'image/png', size: 2 * 1024 * 1024 })).toBeNull();
+    expect(photoError({ type: 'image/webp', size: 10 })).toBeNull();
+    expect(photoError({ type: 'image/gif', size: 10 })).toBe('Not uploaded: a photo must be a PNG, JPEG or WebP image.');
+    expect(photoError({ type: 'image/jpeg', size: 2 * 1024 * 1024 + 1 })).toBe('Not uploaded: the image is over 2 MB.');
   });
 });

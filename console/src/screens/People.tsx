@@ -5,13 +5,15 @@ import { useEnv } from '../env';
 import { EMAIL_RE, diffRoster, missingColumns, readTable, writeTable, type RosterDiff } from '../edit/csv';
 import { useSave } from '../edit/save';
 import { YamlText } from '../edit/yamlText';
-import { SchemaForm, fieldErrors } from '../forms/Form';
+import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { fmtShort } from '../model/format';
 import { ROLE_WORD, ROSTER_HEADER, parseInstructors, sameHandle, type Person } from '../model/people';
 import { checkAccess, sendCodes } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
-import { PERSON, displayOnly } from '../tiers/people';
-import { CheckLine, EditFile, Lives, Loading, ProblemCards } from '../ui/bits';
+import { PERSON, PHOTO_DIR, displayOnly, photoError } from '../tiers/people';
+import { pick } from '../tiers/types';
+import { authorOf } from '../github/client';
+import { CheckLine, EditFile, Lives, Loading, ProblemCards, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar, SaveLine } from '../ui/edit';
 import { StudentCounts } from './Cohort';
@@ -340,7 +342,8 @@ function Instructors(p: ReadyProps) {
         {editing ? (
           <div class="person-form">
             <h3>{editing.idx === 'new' ? 'Add a person' : `Edit ${people[editing.idx]?.name || people[editing.idx]?.handle}`}</h3>
-            <SchemaForm id="p" schema={null} tiers={PERSON} values={editing.values} onChange={(v) => setEditing({ ...editing, values: v })} />
+            <SchemaForm id="p" schema={null} tiers={pick(PERSON, Object.keys(PERSON).filter((k) => k !== 'photo'))} values={editing.values} onChange={(v) => setEditing({ ...editing, values: v })} />
+            <PhotoField p={p} values={editing.values} set={(photo) => setEditing({ ...editing, values: { ...editing.values, photo } })} />
             {displayOnly(editing.values) ? <CheckLine cls="warn">Display only: this person gets a card on the student site, no GitHub access and no problem emails.</CheckLine> : null}
             <SaveBar state={save} onSave={() => void saveForm()} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: INSTRUCTORS_FILE, exists: file.kind !== 'absent' }}>
               <button class="btn quiet" type="button" onClick={() => setEditing(null)}>Cancel</button>
@@ -355,6 +358,49 @@ function Instructors(p: ReadyProps) {
         <Lives org={p.cohort.org} repo={CONFIG_REPO} path={INSTRUCTORS_FILE} exists={file.kind !== 'absent'} />
       </div>
     </>
+  );
+}
+
+/**
+ * The Photo field: a link or a path typed in, or an image dropped on it (or chosen) that is
+ * uploaded to the site repo's photo folder, the path then filled in.
+ */
+function PhotoField({ p, values, set }: { p: ReadyProps; values: Record<string, unknown>; set: (v: string | undefined) => void }) {
+  const env = useEnv();
+  const [state, setState] = useState<{ kind: 'idle' | 'busy' | 'bad'; text?: string }>({ kind: 'idle' });
+  const [over, setOver] = useState(false);
+  const repo = `${p.cohort.org}.github.io`;
+  const dir = p.files.dir(p.cohort.org, repo, PHOTO_DIR);
+  const folder = dir.kind === 'absent' ? ghUrl(p.cohort.org, repo) : ghUrl(p.cohort.org, repo, PHOTO_DIR, 'main', 'tree');
+  const upload = async (f: File | undefined) => {
+    if (!f || !env) return;
+    const err = photoError(f);
+    if (err) return setState({ kind: 'bad', text: err });
+    const name = f.name.toLowerCase().replace(/[^a-z0-9.]+/g, '-');
+    setState({ kind: 'busy', text: `Uploading ${name}…` });
+    try {
+      await env.client.putContents({ owner: p.cohort.org, repo, path: `${PHOTO_DIR}/${name}`, text: new Uint8Array(await f.arrayBuffer()), sha: null, message: `site: add the photo ${name}, from the DSL Teaching Console`, author: authorOf(env.user) });
+    } catch (e) {
+      const taken = e instanceof Error && 'status' in e && (e as { status: number }).status === 422;
+      return setState({ kind: 'bad', text: taken ? `${name} is already in the folder: rename the image, or type its path.` : `Not uploaded: ${e instanceof Error ? e.message : String(e)}` });
+    }
+    setState({ kind: 'idle' });
+    set(`/${PHOTO_DIR}/${name}`);
+  };
+  return (
+    <div
+      class={`photo-drop${over ? ' over' : ''}`}
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); void upload(e.dataTransfer?.files[0]); }}
+    >
+      <Field id="p-photo" k="photo" t={PERSON.photo} value={values.photo} values={values} error={fieldErrors(null, { photo: PERSON.photo }, values).photo} set={(_, v) => set(v === undefined ? undefined : String(v))} />
+      <p class="why">
+        Drop an image here, or <label class="textlink" for="p-photo-file">choose one</label>, to upload it to the site repo’s <a class="textlink" href={folder} target="_blank" rel="noopener">photo folder</a> (PNG, JPEG or WebP, up to 2 MB).
+        <input type="file" id="p-photo-file" class="sr" accept="image/png,image/jpeg,image/webp" onChange={(e) => void upload((e.target as HTMLInputElement).files?.[0])} />
+      </p>
+      {state.kind === 'busy' ? <CheckLine cls="busy">{state.text}</CheckLine> : state.kind === 'bad' ? <CheckLine cls="bad">{state.text}</CheckLine> : null}
+    </div>
   );
 }
 
