@@ -187,37 +187,59 @@ def _team_list_header(opened: Mapping[str, str]) -> str:
     )
 
 
-def join_team_form(opened: Mapping[str, str]) -> str:
+# What a semester whose lock says no team assignment is open gets in place of the field.
+NO_TEAM_ASSIGNMENT_OPEN = (
+    "This semester has no team assignment open right now, so this form is not needed."
+)
+
+
+def join_team_form(opened: Mapping[str, str] | None) -> str:
     """The Join-team issue form for a semester whose open assignments are `opened`'s keys
-    (`open_formations`), in order.
+    (`open_formations`), in order; None when the semester's lock could not be read.
 
     With any, the Assignment field becomes a dropdown of exactly those: a free-text slug is
     a guess, and a guess that misses is answered by a workflow comment some minutes later,
     which is the slowest possible way to learn you typed a dash wrong.
 
-    With none, the template's own free-text field is returned untouched. A GitHub dropdown
-    needs at least one option - an empty `options:` list is a form GitHub refuses to
-    render, which would take the Join-team route away from a semester entirely rather than
-    merely leave it awkward.
+    With none (a lock read, nothing open), the field becomes a markdown line saying the
+    form is not needed: a free-text field there invites a slug the workflow refuses. The
+    Action and Team inputs stay, so the form still renders (GitHub refuses a form with no
+    input, as it refuses a dropdown with no option).
+
+    Unread (None), the template's own free-text field is returned untouched: a lock that
+    could not be read says nothing about what is open, and the free-text form works in
+    every semester.
 
     `opened`'s values link each assignment's page from the header ("" =
     not known; the lock's `team_formation_page`). The form tells a student to type a
     team's name "exactly as that page spells it", so a page they cannot reach in one click
     is an instruction they cannot follow."""
+    if opened is None:
+        return template(JOIN_TEAM_FORM)
     form = template(JOIN_TEAM_FORM).replace(
         TEAM_LIST_SENTENCE, _team_list_header(opened)
     )
-    if not opened:
-        return form
     start = form.find(ASSIGNMENT_FIELD_START)
     end = form.find(ASSIGNMENT_FIELD_END)
     if start == -1 or end == -1 or end < start:
         return form
-    options = "\n".join(f"        - {slug}" for slug in opened)
-    block = (
+    head = (
         f"{ASSIGNMENT_FIELD_START} - AUTO-GENERATED from this semester's\n"
         "  # `semester-config/.system/assignments.lock.yml`: the assignments open for team\n"
         "  # formation right now. Edits between these markers are overwritten.\n"
+    )
+    if not opened:
+        block = (
+            f"{head}"
+            "  - type: markdown\n"
+            "    attributes:\n"
+            f"      value: {NO_TEAM_ASSIGNMENT_OPEN}\n"
+            f"  {ASSIGNMENT_FIELD_END}"
+        )
+        return form[:start] + block + form[end + len(ASSIGNMENT_FIELD_END) :]
+    options = "\n".join(f"        - {slug}" for slug in opened)
+    block = (
+        f"{head}"
         "  - type: dropdown\n"
         "    id: assignment\n"
         "    attributes:\n"
@@ -232,13 +254,14 @@ def join_team_form(opened: Mapping[str, str]) -> str:
     return form[:start] + block + form[end + len(ASSIGNMENT_FIELD_END) :]
 
 
-def _open_formations(org: str) -> dict[str, str]:
-    """`open_formations` for a live semester, or none of them.
+def _open_formations(org: str) -> dict[str, str] | None:
+    """`open_formations` for a live semester, or None when its lock was not read.
 
     Every way of not reading the lock lands on the free-text fallback: a semester seeded
     before the file existed, one whose sync has not run yet, and a read that failed for a
     reason nobody here can act on. The refresh's job is to leave a WORKING form behind, and
-    the free-text one has worked for every semester so far."""
+    the free-text one has worked for every semester so far; "nothing is open" is said only
+    off a lock that was read."""
     try:
         text = get_file_content(org, CONFIG_REPO, TEAM_LOCK_PATH)
     except RuntimeError as exc:
@@ -246,8 +269,8 @@ def _open_formations(org: str) -> dict[str, str]:
             f"could not read {TEAM_LOCK_PATH} in {org} ({exc}) - the Join-team form is "
             f"seeded with a free-text Assignment field this run"
         )
-        return {}
-    return open_formations(text) if text else {}
+        return None
+    return open_formations(text) if text else None
 
 
 JOIN_TEAM_FORM_PATH = ".github/ISSUE_TEMPLATE/02-join-team.yml"
