@@ -229,7 +229,8 @@ export function DetailsScreen(p: CourseProps) {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
-  const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, COURSE_FACTS, d.about), ...fieldErrors(null, courseDefaultTiers(before.defaults), d.defaults) };
+  const defaultErrs = fieldErrors(null, courseDefaultTiers(before.defaults), d.defaults);
+  const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, COURSE_FACTS, d.about), ...defaultErrs };
   const doSave = async () => {
     if (!y || file.kind !== 'ready') return;
     if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
@@ -269,10 +270,16 @@ export function DetailsScreen(p: CourseProps) {
               <h3>Course admins <Hint label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, in every semester. Instructors and teaching assistants are set for each semester under Instructors, and change only that semester and the course’s materials and assignment templates.</Hint></h3>
               <AdminRows admins={d.admins} id="cda" onChange={(admins) => set({ admins })} />
             </div>
-            <div class="form-section">
-              <h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3>
-              <SchemaForm id="cdx" schema={null} tiers={courseDefaultTiers(before.defaults)} values={d.defaults} onChange={(v) => set({ defaults: v })} />
-            </div>
+            {/* Folded by default; open while a field in it is marked, so the mark is seen. */}
+            <details class="fold" open={Object.keys(defaultErrs).length > 0}>
+              <summary>Advanced</summary>
+              <div class="fold-body">
+                <div class="form-section">
+                  <h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3>
+                  <SchemaForm id="cdx" schema={null} tiers={courseDefaultTiers(before.defaults)} values={d.defaults} onChange={(v) => set({ defaults: v })} />
+                </div>
+              </div>
+            </details>
             <div class="form-section">
               <h3>Site links</h3>
               <LinkKindsField id="cdk" value={d.links} onInput={(links) => set({ links })} />

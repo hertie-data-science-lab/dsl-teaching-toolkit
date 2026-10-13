@@ -435,7 +435,7 @@ describe('editing screens', () => {
     expect(html(<DetailsScreen {...cp} files={trunk} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/trunk?filename=dsl-course.yml"`);
     expect(out).toContain('value="Machine Learning"');
     expect(out).toContain('value="a@staff.example.org"');
-    expect(out).toContain('Defaults for this course’s assignments');
+    expect(out).toMatch(/<details class="fold"><summary>Advanced<\/summary>[^]*Defaults for this course’s assignments/);
     expect(out).not.toContain('Semester defaults'); // the engine reads none from dsl-course.yml
   });
   it('course details asks for the contact and licence, with the institution’s in grey', () => {
