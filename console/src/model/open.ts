@@ -213,7 +213,7 @@ export function editorName(setup: Setup | null): string {
   return EDITOR_NAMES[(setup.scheme ?? '').trim().split(':')[0].toLowerCase()] ?? '';
 }
 
-/** Files an editor opens: everything but the documents and archives the 0.9.0 site left out. */
+/** Files an editor opens: everything but the documents and archives the 0.9.0 site left out. The semester site's copy of the list is `templates/site/_includes/edit_why.html`; StudentFiles' menus read this one. */
 const NOT_EDITABLE = ['pdf', 'pptx', 'docx', 'xlsx', 'zip'];
 export const editableFile = (path: string) => {
   const name = path.split('/').pop() ?? '';

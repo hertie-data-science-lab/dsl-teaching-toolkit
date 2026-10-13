@@ -111,6 +111,7 @@ type MenuItem =
 function FileMenu({ org, repos, link, setup, tab }: { org: string; repos: string[]; link: FileLink; setup: Setup | null; tab?: string }) {
   const env = useEnv();
   const at = inOrg(org, link);
+  // The same format test the semester site makes once per link (templates/site/_includes/edit_why.html).
   const edit = !!at && editableFile(at.path);
   const fork = useFork(org, at?.repo ?? '', edit);
   const menu = useMenu<HTMLSpanElement>();

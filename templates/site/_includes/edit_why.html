@@ -1,0 +1,23 @@
+{%- comment -%}
+SYSTEM-OWNED - do not edit. Written by the DSL course sync from templates/site/ in the
+toolkit; every sync rewrites it.
+{%- endcomment -%}
+{%- comment -%}
+Why a file's Edit rows are greyed before the script runs, in ONE place: `file_link.html`
+asks it for each Edit row, and `_includes/open_in.html` reads the answer off the row
+rather than testing the format again. Params: `url`, and `text`.
+
+Without `text`, only the format: `format` for a pdf/pptx/docx/xlsx/zip, else nothing - the
+row's `data-edit-why`. With `text`, the reason a reader sees: "not an editable format",
+else "set up in Profile" - or, on a site with no materials repo (no /profile/, no script),
+"not editable from this site". The format test is a `contains` (no filters inside an `if`,
+and no `assign`: this is included from inside materials_entry.html's recursion). The
+student console keeps its own copy of the list (`NOT_EDITABLE`, console/src/model/open.ts).
+
+No newline at the end: the answer lands inside an attribute.
+{%- endcomment -%}
+{%- if include.url contains '.pdf' or include.url contains '.pptx' or include.url contains '.docx' or include.url contains '.xlsx' or include.url contains '.zip' -%}
+{%- if include.text %}not an editable format{% else %}format{% endif -%}
+{%- elsif include.text -%}
+{%- if site.data.materials.repos %}set up in <a target="_blank" rel="noopener" href="{{ '/profile/' | prepend: site.baseurl }}">Profile</a>{% else %}not editable from this site{% endif -%}
+{%- endif -%}

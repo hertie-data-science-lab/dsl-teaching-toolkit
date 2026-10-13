@@ -695,8 +695,10 @@ def test_a_file_menu_is_one_chevron_with_one_unheaded_list():
     assert "wireMenus();" in script
 
 
+# A label ends its span, or - the Edit pair's loop - its half of the `if` on the row.
 _MENU_ITEM = re.compile(
-    r"</svg>(View here|View on GitHub|Edit in browser|Edit in VS Code)</span>"
+    r"</svg>(View here|View on GitHub|Edit in browser|Edit in VS Code)"
+    r"(?:</span>|\{% else %\}|\{% endif %\}</span>)"
 )
 
 
@@ -714,17 +716,22 @@ def test_every_file_menu_lists_its_rows_in_order():
     # No greyed `View here`: without a hosted copy the row is simply not there.
     assert "{% else %}" not in menu.split("{% endif %}")[0]
     greyed = '<span class="file-menu-lbl" role="link" aria-disabled="true">'
+    # The Edit pair is ONE greyed row written twice by a loop.
     off = menu.split('<li class="file-menu-off"')[1:]
-    assert len(off) == 2
-    for item in off:
-        assert greyed in item and "<small>" in item
-        # No href on the row itself - only the Profile link inside its reason has one.
-        assert "href" not in item.split("<small>")[0]
-        assert "not an editable format" in item
-        assert "not editable from this site" in item
-        assert ">Profile</a>" in item
+    assert len(off) == 1 and "{% for edit in (1..2) %}" in menu
+    item = off[0]
+    assert greyed in item and "<small>" in item
+    # No href on the row itself - only the Profile link inside its reason has one.
+    assert "href" not in item.split("<small>")[0]
+    # The reason, and the format answer the script reads, come from the one include.
+    why = "{% include edit_why.html url=include.url"
+    assert item.count(why) == 2 and 'data-edit-why="' + why in item
+    reasons = _strip_comments(_templates()["_includes/edit_why.html"])
+    assert "not an editable format" in reasons
+    assert "not editable from this site" in reasons
+    assert ">Profile</a>" in reasons
     # The Edit pair carries what the script replaces it by.
-    assert 'data-edit="online"' in off[0] and 'data-edit="local"' in off[1]
+    assert 'data-edit="{% if forloop.first %}online{% else %}local{% endif %}"' in item
 
 
 def test_the_script_greys_what_it_cannot_open_with_the_reason():
@@ -732,9 +739,11 @@ def test_the_script_greys_what_it_cannot_open_with_the_reason():
     files = script.split("function decorateFiles(root, me) {")[1].split("\n  }\n")[0]
     # It replaces Liquid's greyed pair rather than appending a second Edit section.
     assert 'list.querySelectorAll("li[data-edit]")' in files
-    assert files.count("offItem(") == 4
+    assert files.count("offItem(") == 2
+    # The format is Liquid's answer, read off its rows, not tested a second time here.
+    assert 'getAttribute("data-edit-why") === "format"' in files
     # The reasons Liquid writes, spelt the same.
-    link = _strip_comments(_templates()["_includes/file_link.html"])
+    link = _strip_comments(_templates()["_includes/edit_why.html"])
     for reason in ("not an editable format", "set up in "):
         assert f'"{reason}"' in script and reason in link
     off = script.split("function offItem(")[1].split("\n  }")[0]

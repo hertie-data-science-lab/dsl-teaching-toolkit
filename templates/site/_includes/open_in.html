@@ -61,9 +61,6 @@ that prints it would break the day that sentence is reworded.
      `editorName` (console/src/model/open.ts) keeps the same list, so a file menu reads the
      same on both. Any other scheme reads `Edit locally`. */
   var EDITOR_NAMES = { vscode: "VS Code", cursor: "Cursor", windsurf: "Windsurf", pycharm: "PyCharm", zed: "Zed" };
-  /* Formats no editor and no browser IDE opens usefully: both Edit rows stay greyed with
-     WHY.format. A pdf is exactly the thing worth reading on its GitHub page. */
-  var SKIP = /\.(pdf|pptx|docx|xlsx|zip)$/i;
   /* Only lists of released FILES, and never an item already in a menu - those point at
      the very URL this reads, not at a second file. Deliberately not the Updates box (a
      sentence, not a list) nor the schedule table (a timetable), where a menu per line
@@ -239,31 +236,10 @@ that prints it would break the day that sentence is reworded.
     return lbl;
   }
 
-  /* One menu row, as file_link.html writes them: icon and label, the status on the right. */
-  function menuItem(href, icon, label, status) {
-    var li = document.createElement("li");
-    var a = document.createElement("a");
-    a.setAttribute("href", href);
-    newTab(a, href);
-    a.appendChild(menuLabel(icon, label));
+  /* A row's status on the right - ending in a link to /profile/ when it is a step there. */
+  function statusOf(text, profile) {
     var small = document.createElement("small");
-    small.appendChild(document.createTextNode(status));
-    a.appendChild(small);
-    li.appendChild(a);
-    return li;
-  }
-
-  /* The same row greyed: no href, `aria-disabled`, and the reason as its status - ending in
-     a link to /profile/ when the reason is a step there. */
-  function offItem(icon, label, reason, profile) {
-    var li = document.createElement("li");
-    li.className = "file-menu-off";
-    var lbl = menuLabel(icon, label);
-    lbl.setAttribute("role", "link");
-    lbl.setAttribute("aria-disabled", "true");
-    li.appendChild(lbl);
-    var small = document.createElement("small");
-    small.appendChild(document.createTextNode(reason));
+    small.appendChild(document.createTextNode(text));
     if (profile) {
       var a = document.createElement("a");
       a.setAttribute("href", profile);
@@ -271,7 +247,30 @@ that prints it would break the day that sentence is reworded.
       a.appendChild(document.createTextNode("Profile"));
       small.appendChild(a);
     }
-    li.appendChild(small);
+    return small;
+  }
+
+  /* One menu row, as file_link.html writes them: icon and label, the status on the right. */
+  function menuItem(href, icon, label, status) {
+    var li = document.createElement("li");
+    var a = document.createElement("a");
+    a.setAttribute("href", href);
+    newTab(a, href);
+    a.appendChild(menuLabel(icon, label));
+    a.appendChild(statusOf(status));
+    li.appendChild(a);
+    return li;
+  }
+
+  /* The same row greyed: no href, `aria-disabled`, and the reason as its status. */
+  function offItem(icon, label, reason, profile) {
+    var li = document.createElement("li");
+    li.className = "file-menu-off";
+    var lbl = menuLabel(icon, label);
+    lbl.setAttribute("role", "link");
+    lbl.setAttribute("aria-disabled", "true");
+    li.appendChild(lbl);
+    li.appendChild(statusOf(reason, profile));
     return li;
   }
 
@@ -400,6 +399,14 @@ that prints it would break the day that sentence is reworded.
        reader's for the Edit section to open. */
     var mine = root.getAttribute("data-materials-repo") || "";
     var links = document.querySelectorAll(SCOPE);
+    var profilePage = root.getAttribute("data-profile") || "/profile/";
+    var name = editorName(me.editor);
+    var editor = name ? "Edit in " + name : "Edit locally";
+    /* One Edit row: live at `url`, else greyed with `why`, or with the Profile step it needs. */
+    function row(url, icon, label, status, why) {
+      if (url) { return menuItem(url, icon, label, status); }
+      return why ? offItem(icon, label, why) : offItem(icon, label, WHY.profile, profilePage);
+    }
     for (var i = 0; i < links.length; i++) {
       var a = links[i];
       /* SCOPE says the same; this is for a browser whose `:not()` takes no descendant. */
@@ -419,8 +426,11 @@ that prints it would break the day that sentence is reworded.
       var m = SOURCE.exec(href);
       var ours = !!m && m[1].toLowerCase() === org.toLowerCase() &&
         m[2].toLowerCase() === mine.toLowerCase();
-      /* The format first: a pdf of another repo is still, before anything, a pdf. */
-      var why = SKIP.test(m ? m[5] : href.split(/[?#]/)[0]) ? WHY.format
+      /* The format first: a pdf of another repo is still, before anything, a pdf. Liquid
+         tested it once and wrote the answer on its Edit rows (`_includes/edit_why.html`);
+         a directory, with no menu, has no format. */
+      var edits = menu ? menu.querySelector("li[data-edit]") : null;
+      var why = edits && edits.getAttribute("data-edit-why") === "format" ? WHY.format
         : (ours ? "" : WHY.other);
       var online = !why && me.handle
         ? onlineUrl(me.handle, m[2], "/" + m[3] + "/" + m[4] + "/" + m[5])
@@ -438,17 +448,8 @@ that prints it would break the day that sentence is reworded.
       /* Liquid's two greyed Edit rows, replaced by the reader's own. */
       var old = list.querySelectorAll("li[data-edit]");
       for (var k = 0; k < old.length; k++) { list.removeChild(old[k]); }
-      var profilePage = root.getAttribute("data-profile") || "/profile/";
-      var name = editorName(me.editor);
-      var editor = name ? "Edit in " + name : "Edit locally";
-      var inBrowser = online
-        ? menuItem(online, "pencil", "Edit in browser", "your fork")
-        : (why ? offItem("pencil", "Edit in browser", why)
-          : offItem("pencil", "Edit in browser", WHY.profile, profilePage));
-      var inEditor = local
-        ? menuItem(local, "laptop", editor, "your clone")
-        : (why ? offItem("laptop", editor, why)
-          : offItem("laptop", editor, WHY.profile, profilePage));
+      var inBrowser = row(online, "pencil", "Edit in browser", "your fork", why);
+      var inEditor = row(local, "laptop", editor, "your clone", why);
       inBrowser.setAttribute("data-edit", "online");
       inEditor.setAttribute("data-edit", "local");
       list.appendChild(inBrowser);
