@@ -426,6 +426,21 @@ def test_a_write_that_names_no_org_is_refused_too(monkeypatch, ran):
     assert ran == []
 
 
+def test_a_write_to_the_org_itself_is_read_as_that_org(monkeypatch, ran):
+    # `orgs/<org>` with nothing after it is the org-tightening PATCH in `gh_teams`. Read
+    # without its trailing slash it fell to the `<owner>/<repo>` shape, which named the
+    # owner "orgs" and refused a write to an allowed org mid-migration.
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "hertie-x")
+    assert ghcli._argv_owners(("api", "orgs/hertie-x")) == {"hertie-x"}
+    assert ghcli._argv_owners(("api", "repos/hertie-x/r")) == {"hertie-x"}
+    assert ghcli.gh("api", "--method", "PATCH", "orgs/hertie-x")[0] == 0
+    assert ran, "the allowed PATCH never reached the process boundary"
+
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    with pytest.raises(RuntimeError, match="hertie-x"):
+        ghcli.gh("api", "--method", "PATCH", "orgs/hertie-x")
+
+
 def test_the_destination_of_a_template_generate_is_checked(monkeypatch, ran):
     # The PATH names the template's org; the org the new repo lands in is a `--field`.
     monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-course")
