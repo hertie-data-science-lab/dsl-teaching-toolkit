@@ -763,6 +763,8 @@ table.marks input.fb { min-width: 180px; }
 table.marks input.pn { min-width: 150px; }
 table.marks td.calc { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
 table.marks td.pen { color: var(--amber-ink); font-variant-numeric: tabular-nums; text-align: right; }
+table.marks td.pen .late-apply { display: flex; gap: 6px; justify-content: flex-end; color: var(--ink-2); font-size: 12.5px; white-space: nowrap; }
+table.marks input.ovr { width: 92px; }
 table.marks tr.nosub td { color: var(--muted); }
 table.marks tr.team-row td { background: var(--sunk); font-weight: 600; border-top: 1px solid var(--rule-strong); }
 table.marks tr.member-row td { font-weight: 400; }

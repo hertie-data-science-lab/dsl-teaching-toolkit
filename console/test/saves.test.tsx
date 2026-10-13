@@ -295,6 +295,72 @@ describe('Save on the marks grid', () => {
   });
 });
 
+describe('the late penalty on the marks grid', () => {
+  const LATE = TEAM_SHEET.replace('days_late: 0', 'days_late: 2');
+  const late = () => files({ [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: LATE });
+  const BOX = 'input[aria-label="Late penalty override for team-alpha, as a percentage"]';
+  const tick = () => q<HTMLInputElement>('.late-apply input');
+  const saved = async (gh: FakeGitHub) => {
+    await click(button('Save marks'));
+    await settle(() => puts(gh, 'grading_sheets/assignment-3.yml').length > 0);
+    return parse(body(puts(gh, 'grading_sheets/assignment-3.yml')[0])).teams['team-alpha'];
+  };
+
+  it('offers nothing on a unit that is not late', async () => {
+    const f = files();
+    await mount(envOf(github(), f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    expect(root!.querySelector('.late-apply')).toBeNull();
+    expect(root!.querySelector(BOX)).toBeNull();
+  });
+
+  it('unticking waives it, and the total shows the mark without it', async () => {
+    const gh = github(), f = late();
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    expect(tick().checked).toBe(true);
+    expect(q('.late-apply').textContent).toMatch(/^Apply late penalty \(.*2 days late\)$/);
+    await type('input[aria-label="Q1 (out of 5) for team-alpha"]', '4');
+    await click(tick());
+    expect(tick().checked).toBe(false);
+    expect(q('tr.team-row td.pen').textContent).toContain('waived');
+    expect(q('tr.team-row td.calc').textContent).toBe('4');
+    expect((await saved(gh)).late_penalty).toBe('waive');
+  });
+
+  it('an override is the whole penalty and keeps it applied', async () => {
+    const gh = github(), f = late();
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    await type('input[aria-label="Q1 (out of 5) for team-alpha"]', '4');
+    await type(BOX, '25');
+    expect(tick().checked).toBe(true);
+    expect(q('tr.team-row td.pen').textContent).toContain('−25% (set by hand)');
+    expect(q('tr.team-row td.calc').textContent).toBe('3');
+    expect((await saved(gh)).late_penalty).toBe('25%');
+  });
+
+  it('clearing the override writes apply back, and unticking an override waives it', async () => {
+    const gh = github(), f = late();
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    await type(BOX, '25');
+    await type(BOX, '');
+    expect(tick().checked).toBe(true);
+    expect((await saved(gh)).late_penalty).toBe('apply');
+    const gh2 = github(), f2 = late();
+    render(null, root!);
+    await mount(envOf(gh2, f2), <AssignmentScreen {...props(f2, { entry: 'assignment-3', tab: 'marks' })} />);
+    await type(BOX, '25');
+    await click(tick());
+    expect(q<HTMLInputElement>(BOX).value).toBe('');
+    expect((await saved(gh2)).late_penalty).toBe('waive');
+  });
+
+  it('says so beside a penalty nobody can apply', async () => {
+    const f = files({ [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: LATE.replace('    feedback_group:\n', '    late_penalty: half\n    feedback_group:\n') });
+    await mount(envOf(github(), f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    expect(q<HTMLInputElement>(BOX).value).toBe('half');
+    expect(q('tr.team-row td.pen').textContent).toContain('held until then');
+  });
+});
+
 describe('Save on the Students grid', () => {
   const ROSTER = 'hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,anna-a,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,Ben Baker,enrolled,,,SECRET2,2026-09-02T09:30:00Z\n';
   const roster = () => files({ [`${COHORT_ORG}/semester-config/students.csv`]: ROSTER });

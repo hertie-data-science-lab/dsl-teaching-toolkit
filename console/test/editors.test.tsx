@@ -14,7 +14,7 @@ import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
 import { POLICY, penaltyRate } from '../src/model/policy';
-import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
+import { effectivePenalty, finalGrade, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
 import { assignmentKey, blankDeploy, blankDraft, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
 import { StatusStore, type Loaded } from '../src/model/status';
@@ -311,6 +311,32 @@ describe('marks arithmetic, as grades.py does it', () => {
     expect(finalGrade(null, 0.1, 1, 5)).toBeNull();
   });
 
+  it('takes the late penalty the grader chose, as grades.effective_penalty does', () => {
+    expect(effectivePenalty(0.1, 2)).toBeCloseTo(0.2);
+    expect(effectivePenalty(0.1, 2, 'apply')).toBeCloseTo(0.2);
+    expect(effectivePenalty(0.1, 2, 'waive')).toBe(0);
+    expect(effectivePenalty(0.1, 2, '15%')).toBeCloseTo(0.15);
+    expect(effectivePenalty(0.1, 2, 0.15)).toBeCloseTo(0.15);
+    expect(effectivePenalty(0.1, 0, '15%')).toBe(0);
+    expect(effectivePenalty(0.1, 2, 'half')).toBeNull();
+    expect(effectivePenalty(0.1, 2, '15')).toBeNull();
+    expect(finalGrade(20, 0.1, 2, null, 'waive')).toBe(20);
+    expect(finalGrade(20, 0.1, 2, 1, '5%')).toBe(20);
+    expect(finalGrade(20, 0.1, 2, null, 'half')).toBeCloseTo(16);
+    expect(penaltyText(0.1, 2)).toBe('−20%');
+    expect(penaltyText(0.1, 2, 'waive')).toBe('waived');
+    expect(penaltyText(0.1, 2, '15%')).toBe('−15% (set by hand)');
+    expect(penaltyText(0.1, 0, 'waive')).toBe('');
+    expect(overrideValue('15')).toBe('15%');
+    expect(overrideValue(' 12.5% ')).toBe('12.5%');
+    expect(overrideValue('')).toBe('apply');
+    expect(overrideValue('half')).toBe('half');
+    expect(overrideText('15%')).toBe('15');
+    expect(overrideText(0.15)).toBe('15');
+    expect(overrideText('apply')).toBe('');
+    expect(overrideText('waive')).toBe('');
+  });
+
   it('reads a question given as {points, file} and keeps file: on a save', () => {
     expect(questionPoints({ points: 5, file: 'report.tex' })).toBe(5);
     expect(questionPoints(10)).toBe(10);
@@ -456,6 +482,7 @@ describe('editing screens', () => {
     expect(out).toContain('Total / 40');
     expect(out).toContain('−20%');
     expect(out).toContain('<td class="calc">28.2</td>');
+    expect(out).toContain('Apply late penalty (−20%, 2 days late)');
     expect(out).toContain('Return marks to 0 students');
   });
   it('marks reads a question marked from another file by its points', () => {
