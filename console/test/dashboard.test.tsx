@@ -290,12 +290,15 @@ describe('the Dashboard and the horizon (decision 0034)', () => {
     expect(tabCount(h, 'Coming up')).toBe('1');
     // Only the current tab's body renders: Coming up's once picked.
     expect(h.querySelector('#dash-panel-coming')!.textContent).toBe('');
+    expect(h.querySelector('.ptabs .hint-pop')!.textContent).toBe('What will not happen until you fix it: overdue, and the next 7 days.');
     click(h.querySelector<HTMLButtonElement>('[role="tab"][data-key="coming"]')!);
     const coming = h.querySelector('#dash-panel-coming')!;
     expect(coming.querySelector('.week-h')!.textContent).toBe('Week 5 from 5 Oct · problems from 1 Oct');
     expect(coming.querySelector('li')!.textContent).toContain('Session 5 cites folder lectures/05_trees');
     expect(coming.querySelector('li a')!.getAttribute('href')).toBe('#schedule-s5');
-    expect(coming.textContent).toContain('Each item becomes a problem 7 days before the date it is needed by');
+    // What the tab is for is in the `?` after its label; the body starts with the weeks.
+    expect(h.querySelector('.ptabs .hint-pop')!.textContent).toBe('Needed later, by week. Each item becomes a problem 7 days before the date it is needed by, and is listed here until then.');
+    expect(coming.firstElementChild!.classList.contains('footnote')).toBe(false);
   });
 
   it('lists a template brief a later hand-out cites in Coming up: the engine’s later problem, no to-do of its own', () => {

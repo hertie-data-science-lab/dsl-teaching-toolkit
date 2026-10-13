@@ -400,6 +400,9 @@
                 ],
                 "type": "string"
               },
+              "starter_applies": {
+                "type": "boolean"
+              },
               "state": {
                 "type": "string"
               }

@@ -229,25 +229,26 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .setup .s-fix .btn.small { min-height: 26px; font-size: 12.5px; padding: 0 10px; }
 .sub-h { font-family: var(--font-display); font-weight: 700; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 10px 0 2px; }
 .sub-h:first-child { margin-top: 0; }
-/* The verdict line: red ! (fixing), grey circle (not ready / not set up), green tick (ready / on track). */
+/* The verdict line: red ! (fixing), red ring (not ready / not set up), green tick (ready / on track). */
 .verdict .vtag { font-weight: 400; color: var(--muted); }
 .verdict .vtag::before { content: "·"; margin-right: 8px; }
 .verdict .ex { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 999px; flex: none; font-family: var(--font-display); font-weight: 700; font-size: 12px; }
 .verdict.bad .ex { background: var(--bad); color: #fff; }
-.verdict.open .ex { border: 1.5px solid var(--idle); }
+.verdict.open .ex { border: 1.5px solid var(--bad); }
 /* A dashboard's one tabbed panel (decision 0034): the console's tab look as buttons, a count on each. */
-.ptabs { display: flex; gap: 4px; box-shadow: inset 0 -1px var(--rule-strong); margin: 0 0 14px; overflow-x: auto; scrollbar-width: none; }
-.ptabs button { font: inherit; font-family: var(--font-display); font-weight: 600; font-size: 14.5px; padding: 8px 14px; color: var(--ink-2); background: none; border: 0; border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; }
-.ptabs button:hover { color: var(--ink); }
-.ptabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.ptabs { display: flex; flex-wrap: wrap; gap: 4px; box-shadow: inset 0 -1px var(--rule-strong); margin: 0 0 14px; }
+.ptabs [role="tab"] { font: inherit; font-family: var(--font-display); font-weight: 600; font-size: 14.5px; padding: 8px 14px; color: var(--ink-2); background: none; border: 0; border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; }
+.ptabs [role="tab"]:hover { color: var(--ink); }
+.ptabs [role="tab"][aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
 .ptabs .n { font-family: var(--font-display); font-weight: 700; font-size: 11.5px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--sunk); color: var(--ink-2); display: inline-grid; place-items: center; }
 .ptabs .n.bad { background: var(--bad); color: #fff; }
 .ptabs .n.ok { background: var(--ok-soft); color: var(--ok); }
 .ptabs .n.ok svg { width: 10px; height: 10px; }
 .ptabs .spacer { flex: 1; }
+/* The open tab's `?`: wrapping, not scrolling, so its popover is not clipped. */
+.ptabs > .hint-wrap { align-self: center; margin-left: 0; }
 .ptab[hidden] { display: none; }
 .ptab > .footnote { margin: 0 0 10px; }
-.ptab > .setup + .footnote, .ptab > .no-problems + .footnote { margin: 8px 0 0; }
 .verdict-btn { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .verdict-btn:hover, .verdict-btn:focus-visible { text-decoration: underline; }
 /* Coming up on the semester: what is needed later, by week. */
@@ -257,9 +258,10 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .ptab-coming li b { font-family: var(--font-display); font-weight: 700; color: var(--ink); }
 .ptab-coming li .textlink { min-height: 0; padding: 0; }
 @media (max-width: 760px) { .ptab-coming li { grid-template-columns: 80px minmax(0, 1fr); } .ptab-coming li .textlink { grid-column: 2; } }
-/* Repo chips: not ready is grey; suggestions dotted, never coloured. */
+/* Repo chips: not ready is grey in a row, red on a settings page's head; suggestions dotted, never coloured. */
 .chip.suggest { background: transparent; border: 1.5px dotted var(--idle); color: var(--ink-2); font-weight: 500; }
 .chip.notready { background: var(--sunk); color: var(--ink-2); }
+.page-head .actions > .chip.notready { background: var(--bad-soft); color: var(--bad-ink); }
 .page-note { color: var(--ink-2); font-size: 14px; margin: -6px 0 18px; max-width: 80ch; }
 
 /* ================= lists ================= */
@@ -912,6 +914,8 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .verdict svg { width: 14px; height: 14px; flex: none; }
 .verdict.ok { color: var(--ok); }
 .verdict.bad { color: var(--bad-ink); }
+/* Not ready is red as well; its words ("Not ready", not "Needs fixing") and the empty ring tell it from a problem. */
+.verdict.open { color: var(--bad-ink); }
 
 /* WP-S6 */
 /* The grey note beside a field title: a small gap from the title. */

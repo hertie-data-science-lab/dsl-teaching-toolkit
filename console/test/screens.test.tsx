@@ -15,7 +15,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { CohortScreen } from '../src/screens/Cohort';
-import { CourseHeaderActions, CourseScreen, SETTLING_COLUMNS, TemplateScreen, courseItems, handoutWords, overviewHeights, semesterChip, splitColumns, stepLink } from '../src/screens/Course';
+import { CourseHeaderActions, CourseScreen, SETTLING_COLUMNS, TemplateScreen, courseItems, handoutWords, overviewHeights, semesterChip, splitColumns, stepLink, templateItems } from '../src/screens/Course';
 import { ItemRow, readinessTabs, type SetupItem } from '../src/ui/SetupPanel';
 import { DashboardTabs } from '../src/ui/DashboardTabs';
 import { tier } from '../src/model/readiness';
@@ -472,8 +472,10 @@ describe('S2 course and S17 template', () => {
     expect(sug).toContain('Syllabus<span class="s-need slug">course-materials-f2026</span><span class="s-opt">optional</span>');
     expect(sug).toContain('One file, SYLLABUS.md, two parts');
     expect(sug).toContain('<span class="s-why">The weekly plan (written from the schedule) is not in SYLLABUS.md yet. <a class="textlink" href="#materials-course-materials-f2026" aria-label="Open course-materials-f2026 settings">Open settings</a></span>');
-    expect(sug).toContain('If you would rather skip one, click the circle before it to set it aside.');
-    expect(panel(base, 'setup')).toContain('One-time setup: what the course needs before a semester can start. Done stays done.');
+    // What a tab is for is in the `?` after its label, so the body starts with the rows.
+    expect(sug).toMatch(/aria-label="About Suggestions"[^]*?<span class="hint-pop"[^>]*>Optional: the course works without these\. If you would rather skip one, click the circle before it to set it aside\.<\/span>/);
+    expect(sug).toContain('<div class="ptab ptab-suggestions" role="tabpanel" id="dash-panel-suggestions" aria-labelledby="dash-tab-suggestions"><ul class="setup">');
+    expect(panel(base, 'setup')).toMatch(/aria-label="About Setup"[^]*?<span class="hint-pop"[^>]*>One-time setup: what the course needs before a semester can start\. Done stays done\.<\/span>/);
     // Only the picked tab's body renders.
     expect(sug).not.toContain('One-time setup');
     const tpl: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], course: { ...base, templates: [{ repo: 'a', state: 'todo' }], todo: [{ id: 'template:a:brief', kind: 'template', repo: 'a', text: 'The brief (README.md) is not written yet.', need: 'needed' }] } }, sha: 's', stale: [] };
@@ -701,6 +703,17 @@ describe('S2 course and S17 template', () => {
     expect(out).toContain('value="30"');
     expect(out).toContain('<td>50</td>');
     expect(out).not.toContain('[object Object]');
+  });
+});
+
+describe('a template’s checklist', () => {
+  it('lists the starter only where the engine says one is handed out', () => {
+    const todo = [{ id: 'template:a1:starter', kind: 'template' as const, check: 'starter', repo: 'a1', text: 'Derive has not been run yet.', need: 'needed' as const }];
+    const ids = (tpl: { starter?: 'derived' | 'handwritten'; starter_applies?: boolean }) => templateItems('a1', todo, tpl, [], 0).map((i) => `${i.id}:${i.state}`);
+    expect(ids({ starter: 'derived' })).toEqual(['brief:done', 'starter:open']);
+    expect(ids({ starter: 'derived', starter_applies: true })).toEqual(['brief:done', 'starter:open']);
+    // `formats: [none]` or `submit_via: external`: no starter row at all, not a tick.
+    expect(ids({ starter: 'derived', starter_applies: false })).toEqual(['brief:done']);
   });
 });
 

@@ -186,7 +186,7 @@ open>" or "On track: nothing to fix in the next 7 days", tagged "· n coming up"
 a button to the Problems tab; there is no separate problem badge in the page head.
 
 Under it (on a semester, under the week strip) sits one **tabbed panel** (`ui/DashboardTabs`,
-`id="dash-problems"`; only the current tab's body renders), Problems first and selected: Problems (a red count, or a green tick when
+`id="dash-problems"`; only the current tab's body renders, and what the open tab is for sits in a `?` after its label, so the body starts with the rows), Problems first and selected: Problems (a red count, or a green tick when
 none), on a semester Coming up, then Suggestions, Set aside, and Setup at the right (a green
 tick once every needed step is done, else "n of m"). On the course, Problems lists the course's
 own problems now or soon (a settings file that does not parse, a template's problem); a

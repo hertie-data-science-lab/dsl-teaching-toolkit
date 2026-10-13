@@ -305,6 +305,8 @@ def status_schema(*, closed: bool = True) -> dict:
             "repo": _str(),
             "state": _str(),
             "starter": _enum(STARTER_MODES),
+            # False: no starter is handed out (`format: none` or `submit_via: external`).
+            "starter_applies": {"type": "boolean"},
         },
         ("repo", "state"),
     )
