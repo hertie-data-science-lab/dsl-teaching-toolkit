@@ -248,6 +248,17 @@ describe('S6 schedule and S11 release', () => {
     expect(out).toContain('lectures/05_trees_and_ensembles');
     expect(out).toContain('schedule.yml#L5');
   });
+  it('names both ends of a line From and To, explains what to release, and offers one more line', () => {
+    const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
+    for (const l of ['From: repo', 'From: path', 'To: repo', 'To: path', 'Release at']) expect(out).toContain(`>${l}`);
+    const t = text(<ScheduleScreen {...props({ entry: 's5' })} />);
+    expect(t).toContain('Name the repo and path where the files will be, even if they are not written yet. At release time the engine copies whatever is at that path.');
+    expect(t).toContain('Ships the files at this moment, before or after the session. Leave blank to ship when the session starts.');
+    // One line, its own time blank: the default is the entry's.
+    expect(out.match(/class="deploy"/g)).toHaveLength(1);
+    expect(out).toContain('id="e-d0-at" placeholder="2026-10-08" value/>');
+    expect(out).toContain('>Add another</button>');
+  });
   it('never says a folder is missing when the repo could not be read, or was listed only in part', () => {
     const withTree = (tree: TreeState): Files => Object.assign(Object.create(files), { tree: () => tree });
     const failed = html(<ScheduleScreen {...props({ entry: 's5', files: withTree({ kind: 'error', message: 'HTTP 502' }) })} />);

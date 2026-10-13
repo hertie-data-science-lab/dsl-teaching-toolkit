@@ -9,7 +9,7 @@ import { Field, Invalid } from '../forms/Form';
 import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  assignmentKey, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft,
+  assignmentKey, blankDeploy, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft,
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
@@ -171,16 +171,16 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
       <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', 'Shown to students under the title.')} />
       <Common d={d} set={set} />
       <div class="field">
-        <span class="label">What to release</span>
+        <span class="label">What to release <Hint small label="About what to release">Name the repo and path where the files will be, even if they are not written yet. At release time the engine copies whatever is at that path.</Hint></span>
         {d.deploys.map((dp, i) => {
           const tree = dp.repo ? p.files.tree(p.course.org, dp.repo) : null;
-          const adv = [dp.dest && dp.dest !== DEFAULT_DEST_REPO, !!dp.path, dp.diff].filter(Boolean).length;
+          const adv = [dp.dest && dp.dest !== DEFAULT_DEST_REPO, !!dp.path, !!(dp.atDate || dp.atTime)].filter(Boolean).length;
           return (
             <div class="deploy">
               <div class="deploy-head">Deploy {i + 1}{d.deploys.length > 1 ? <button class="x" type="button" aria-label={`Remove deploy ${i + 1}`} onClick={() => set({ deploys: d.deploys.filter((_, j) => j !== i) })}>&times;</button> : null}</div>
               <div class="row-2">
                 <div class="field">
-                  <label for={`e-d${i}-repo`}>From repo</label>
+                  <label for={`e-d${i}-repo`}>From: repo</label>
                   <select id={`e-d${i}-repo`} onChange={(e) => setDeploy(i, { repo: (e.target as HTMLSelectElement).value })}>
                     <optgroup label="Course materials repos">{from.materials.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup>
                     {from.others.length ? <optgroup label="Other repos">{from.others.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup> : null}
@@ -191,7 +191,7 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
                   {errors[`deploy${i}.repo`] ? <Invalid>{errors[`deploy${i}.repo`]}</Invalid> : null}
                 </div>
                 <div class="field">
-                  <label for={`e-d${i}-folder`}>Folder</label>
+                  <label for={`e-d${i}-folder`}>From: path</label>
                   <input type="text" id={`e-d${i}-folder`} list={`folders-${i}`} value={dp.folder} aria-invalid={errors[`deploy${i}.folder`] ? 'true' : undefined} onInput={(e) => setDeploy(i, { folder: (e.target as HTMLInputElement).value })} />
                   {tree?.kind === 'ready' ? <datalist id={`folders-${i}`}>{tree.paths.filter((x) => x.dir).map((x) => <option value={x.path} />)}</datalist> : null}
                   {errors[`deploy${i}.folder`] ? <Invalid>{errors[`deploy${i}.folder`]}</Invalid> : <FolderCheck p={p} dp={dp} i={i} onSuggest={(v) => setDeploy(i, { folder: v })} />}
@@ -201,24 +201,19 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
                 <summary>Advanced <span class={`cnt${adv ? ' changed' : ''}`}>({adv ? `${adv} changed` : 'none changed'})</span></summary>
                 <div class="fold-body">
                   <div class="row-2">
-                    <div class="field"><label for={`e-d${i}-dest`}>To repo <span class="default">default: {DEFAULT_DEST_REPO}</span></label><input type="text" id={`e-d${i}-dest`} placeholder={DEFAULT_DEST_REPO} value={dp.dest} onInput={(e) => setDeploy(i, { dest: (e.target as HTMLInputElement).value })} /><p class="why">In the semester. Blank means {DEFAULT_DEST_REPO}.</p></div>
-                    <div class="field"><label for={`e-d${i}-path`}>To path <span class="default">default: same as the folder</span></label><input type="text" id={`e-d${i}-path`} placeholder={dp.folder} value={dp.path} onInput={(e) => setDeploy(i, { path: (e.target as HTMLInputElement).value })} /></div>
+                    <div class="field"><label for={`e-d${i}-dest`}>To: repo <span class="default">default: {DEFAULT_DEST_REPO}</span></label><input type="text" id={`e-d${i}-dest`} placeholder={DEFAULT_DEST_REPO} value={dp.dest} onInput={(e) => setDeploy(i, { dest: (e.target as HTMLInputElement).value })} /><p class="why">In the semester. Blank means {DEFAULT_DEST_REPO}.</p></div>
+                    <div class="field"><label for={`e-d${i}-path`}>To: path <span class="default">default: same as From</span></label><input type="text" id={`e-d${i}-path`} placeholder={dp.folder} value={dp.path} onInput={(e) => setDeploy(i, { path: (e.target as HTMLInputElement).value })} /></div>
                   </div>
-                  <label class="check"><input type="checkbox" checked={dp.diff} onChange={(e) => setDeploy(i, { diff: (e.target as HTMLInputElement).checked })} /><span>Release at a different time than the session</span></label>
-                  {dp.diff ? (
-                    <div class="cond">
-                      <div class="row-2">
-                        <div class="field"><label for={`e-d${i}-at`}>Release this deploy at</label><input type="date" id={`e-d${i}-at`} value={dp.atDate || d.date} onInput={(e) => setDeploy(i, { atDate: (e.target as HTMLInputElement).value })} />{errors[`deploy${i}.at`] ? <Invalid>{errors[`deploy${i}.at`]}</Invalid> : null}</div>
-                        <div class="field"><label for={`e-d${i}-att`}>At</label><input type="time" id={`e-d${i}-att`} value={dp.atTime} onInput={(e) => setDeploy(i, { atTime: (e.target as HTMLInputElement).value })} /></div>
-                      </div>
-                    </div>
-                  ) : null}
+                  <div class="row-2">
+                    <div class="field"><label for={`e-d${i}-at`}>Release at <span class="default">default: {d.date ? `${d.date}${d.time ? ` ${d.time}` : ''}` : 'when the session starts'}</span></label> <Hint small label="About the release time">Ships the files at this moment, before or after the session. Leave blank to ship when the session starts.</Hint><input type="date" id={`e-d${i}-at`} placeholder={d.date} value={dp.atDate} onInput={(e) => setDeploy(i, { atDate: (e.target as HTMLInputElement).value })} />{errors[`deploy${i}.at`] ? <Invalid>{errors[`deploy${i}.at`]}</Invalid> : null}</div>
+                    <div class="field"><label for={`e-d${i}-att`}>At</label><input type="time" id={`e-d${i}-att`} placeholder={d.time} value={dp.atTime} onInput={(e) => setDeploy(i, { atTime: (e.target as HTMLInputElement).value })} /></div>
+                  </div>
                 </div>
               </details>
             </div>
           );
         })}
-        <div><button class="btn small quiet" type="button" onClick={() => set({ deploys: [...d.deploys, { repo: repos[0] ?? '', folder: '', dest: '', path: '', diff: false, atDate: '', atTime: '' }] })}>Add another deploy</button></div>
+        <div><button class="btn small quiet" type="button" onClick={() => set({ deploys: [...d.deploys, blankDeploy(repos[0] ?? '')] })}>Add another</button></div>
       </div>
       {d.id ? <a class="textlink" href={`#release-${d.id}`}>Open release details</a> : null}
     </>
