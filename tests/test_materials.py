@@ -91,3 +91,22 @@ def test_supporting_files_folders_are_assets_by_name():
         "literature": "readings",
     }.items():
         assert materials.infer_kind(name) == kind, name
+
+
+def test_a_folder_path_names_its_kind_and_the_repo_declaration_wins():
+    # Paths are keys too, parsed like names: trimmed and lowercased.
+    declared = materials.parse({"kinds": {"/Students/Lectures/": "lecture"}})
+    assert declared.kinds == {"students/lectures": "lecture"}
+    # A built-in name one level down names its kind; two levels down it does not.
+    assert materials.alias_kind("students/Labs") == "lab"
+    assert materials.alias_kind("course/2026/labs") is None
+    # A declared path is honoured at any depth.
+    assert (
+        materials.alias_kind("Course/2026/Labs", {"course/2026/labs": "lab"}) == "lab"
+    )
+    # The repo's own declaration wins over a built-in name, at every depth.
+    assert materials.alias_kind("labs", {"labs": "readings"}) == "readings"
+    assert materials.alias_kind("students/labs", {"students/labs": "readings"}) == (
+        "readings"
+    )
+    assert materials.infer_kind("readings", {"readings": "assets"}) == "assets"
