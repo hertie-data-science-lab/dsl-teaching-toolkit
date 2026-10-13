@@ -7,7 +7,7 @@ import { readTable, writeTable } from '../edit/csv';
 import { useSave } from '../edit/save';
 import { YamlText, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
-import { assignmentTitle, fmtDay, str } from '../model/format';
+import { assignmentTitle, fmtDay, fmtWhen, str } from '../model/format';
 import { NOTES_KEY, cellValue, finalGrade, penaltyText, questionFile, questionPoints, readSheet, round, scoreTotal, type Unit } from '../model/marks';
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
 import { assignmentSettings, sheetName } from './RunSettings';
@@ -24,6 +24,12 @@ import { Check, Lock } from '../ui/icons';
 import type { TabProps } from './Assignments';
 import { cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
 import { CONFIG_REPO } from '../model/names';
+
+/** The late cutoff as the Return marks dialog names it, while it has not passed; null after it. */
+export function lateUntil(a: Assignment, now: number, tz: string, year: number): string | null {
+  const at = a.grading_cutoff_datetime;
+  return at && Date.parse(at) > now ? fmtWhen(at, tz, year) : null;
+}
 
 function asgRef(a: Assignment, group: boolean): AsgRef {
   return { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: 'Marking' };
@@ -45,7 +51,8 @@ function penaltyOf(a: Assignment): number | null {
 }
 
 export function MarksTab(p: TabProps) {
-  const { a } = p;
+  const { a, status, now } = p;
+  const tz = tzOf(status), year = yearOf(now, tz);
   const env = useEnv();
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   // Folds, by unit: `m:<unit>` hides a team's members, `q:<unit>` shows its feedback per question.
@@ -70,7 +77,7 @@ export function MarksTab(p: TabProps) {
   const head = (
     <div class="page-head">
       <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. {group ? 'A team’s marks and feedback reach every member once you return marks.' : 'Nothing reaches a student until you return marks.'}</Hint></h2><p class="lede">{a.marks.filled} of {a.marks.total} marked. {rate !== null ? `Totals and late penalties (${round(rate * 100)}% of the total per late day) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p></div>
-      <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name)} /></div>
+      <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name, lateUntil(a, now, tz, year))} /></div>
     </div>
   );
   const top = <>{head}{p.tabs}</>;
