@@ -423,7 +423,7 @@ def test_the_course_description_contact_and_licence_reach_the_public_site(
         "contact": "dl@example.edu",
         "licence": "CC BY 4.0",
     }
-    monkeypatch.setattr(public_site, "yaml_file", lambda *a: meta)
+    monkeypatch.setattr(public_site, "org_meta", lambda org: meta)
     files = published()
     assert 'course_description: "Nets, end to end."' in files["_config.yml"]
     assert yaml.safe_load(files["_data/course.yml"]) == {
@@ -438,7 +438,7 @@ def test_the_course_description_contact_and_licence_reach_the_public_site(
 def test_unset_keys_fall_back_and_a_blank_description_replaces_the_placeholder(
     published, monkeypatch
 ):
-    monkeypatch.setattr(public_site, "yaml_file", lambda *a: {"contact": ""})
+    monkeypatch.setattr(public_site, "org_meta", lambda org: {"contact": ""})
     files = published()
     assert 'course_description: ""' in files["_config.yml"]
     assert "One paragraph description" not in files["_config.yml"]

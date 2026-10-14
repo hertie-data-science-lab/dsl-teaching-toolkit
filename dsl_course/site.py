@@ -42,8 +42,8 @@ import yaml
 from pathspec import GitIgnoreSpec
 
 from . import policy, run, schedule, status, teams
+from .config import read_semester
 from .course import (
-    CONFIG_REPO,
     CUTOFF_SENTENCE,
     INSTRUCTORS_FILE,
     SELF_SELECT,
@@ -67,6 +67,7 @@ from .discovery import (
     join_issue_url,
     list_org_repos,
     live_semesters,
+    org_meta,
     semester_content_repos,
     semester_is_live,
 )
@@ -142,7 +143,7 @@ def _semester_start(semester_org: str) -> date:
 def _instructors_meta(semester_org: str) -> tuple[dict, str]:
     """A semester's `instructors.yml` and its path. The old `people.yml` is never read
     (decision 0012): a semester that has not migrated gets the instructors-team cards."""
-    return yaml_file(semester_org, CONFIG_REPO, INSTRUCTORS_FILE), INSTRUCTORS_FILE
+    return read_semester(semester_org).instructors.meta(), INSTRUCTORS_FILE
 
 
 def _semester_label(semester_org: str) -> str:
@@ -1540,7 +1541,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
         handed_out = handed_out_assignments(semester_repos)
 
         # Course identity comes from the course org metadata, semester from the semester tag.
-        meta = yaml_file(course_org, ".github", "dsl-course.yml")
+        meta = org_meta(course_org)
         # Schedule is semester-specific (it varies by year), so it comes from the semester's
         # own semester-config/schedule.yml. So do this semester's instructors/TAs - read
         # from its own semester-config/instructors.yml below, NOT the course org (whose

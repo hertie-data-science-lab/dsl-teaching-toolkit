@@ -13,6 +13,7 @@ from dsl_course import faults as faults_mod
 from dsl_course import gh_contents, gh_teams, sync_faculty
 from dsl_course.course import people_by_role
 from dsl_course.schedule import Deploy, Release, Schedule
+from tests.conftest import fake_config
 from tests.plans import citing
 
 
@@ -95,7 +96,7 @@ def test_sync_course_admins_removes_nobody_while_an_entry_cannot_be_placed(
             "course_admins": [{"github_handle": "alice"}, {"github_handle": "@bob"}]
         }
     }
-    monkeypatch.setattr(sync_faculty, "load_yaml_config", lambda *a, **k: meta)
+    fake_config(monkeypatch, lambda *a: meta)
     calls = []
     monkeypatch.setattr(
         sync_faculty,
@@ -613,16 +614,12 @@ def test_a_clean_people_yml_has_no_faults():
 
 
 def test_a_people_yml_that_is_absent_or_unreadable_is_itself_the_fault(monkeypatch):
-    for raise_or_return, expected in (
-        (lambda **_: None, "missing"),
-        (_raiser(yaml.YAMLError("bad")), "not valid YAML"),
-        (_raiser(faults_mod.Unusable("not a mapping")), "not a YAML mapping"),
+    for text, expected in (
+        (None, "missing"),
+        ("instructors: [not closed", "not valid YAML"),
+        ("- a list\n- not a mapping\n", "not a YAML mapping"),
     ):
-        monkeypatch.setattr(
-            sync_faculty,
-            "load_yaml_config",
-            lambda *a, _f=raise_or_return, **k: _f(),
-        )
+        fake_config(monkeypatch, lambda *a, _text=text: _text)
         found = []
         assert sync_faculty.read_semester_people("Semester-f2026", found) is None
         (fault,) = found
@@ -635,11 +632,7 @@ def test_a_read_that_failed_is_not_reported_as_a_broken_people_yml(monkeypatch):
     # `get_file_content`. Recorded as a fault it would rewrite the digest with one entry
     # saying instructors.yml is broken - closing every real fault in it as cleared and mailing
     # the teaching team about a file nobody touched. It has to come back out.
-    monkeypatch.setattr(
-        sync_faculty,
-        "load_yaml_config",
-        lambda *a, **k: _raiser(RuntimeError("HTTP 403 rate limit"))(),
-    )
+    fake_config(monkeypatch, lambda *a: _raiser(RuntimeError("HTTP 403 rate limit"))())
     found = []
     with pytest.raises(RuntimeError):
         sync_faculty.read_semester_people("Semester-f2026", found)
@@ -673,8 +666,8 @@ people:
 
 
 def _course(monkeypatch, text: str | None):
-    # `gh_contents`, not `sync_faculty`: the read goes through `load_yaml_config`, so that
-    # is the module whose imported name has to be stubbed.
+    # `gh_contents`, not `sync_faculty`: the read goes through `config.read`, which reads
+    # through `gh_contents.get_file_content`.
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: text)
     found: list = []
     return sync_faculty.read_course_config("Course-Org", found), found
@@ -898,11 +891,10 @@ def test_an_unknown_role_is_reported_and_holds_every_removal(monkeypatch, capsys
         "  - {github_handle: prof-a, role: instructor, email: a@x.org}\n"
         "  - {github_handle: prof-b, role: lecturer, email: b@x.org}\n"
     )
-    monkeypatch.setattr(
-        sync_faculty,
-        "load_yaml_config",
-        lambda org, repo, path, lines=False: (
-            yaml.safe_load(text) if path == sync_faculty.SEMESTER_PEOPLE_PATH else None
+    fake_config(
+        monkeypatch,
+        lambda org, repo, path: (
+            text if path == sync_faculty.SEMESTER_PEOPLE_PATH else None
         ),
     )
     calls = []

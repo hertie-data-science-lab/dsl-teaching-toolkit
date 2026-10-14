@@ -25,6 +25,7 @@ from dsl_course import (
     welcome,
 )
 from dsl_course.course import CONFIG_REPO, JOIN_REPO, OLD_CONFIG_REPO, OLD_JOIN_REPO
+from tests.conftest import fake_config
 
 ROOT = Path(__file__).resolve().parents[1]
 # The two files allowed to spell a retired name: the declaration and the migration.
@@ -123,7 +124,7 @@ def test_a_semester_is_found_through_the_pointer_in_its_config_repo(monkeypatch)
         reads.append((org, repo, path))
         return {"course": "Course-Org", "org": org}
 
-    monkeypatch.setattr(discovery, "load_yaml_config", load)
+    fake_config(monkeypatch, load)
     assert discovery.course_org_for_semester("Sem-f2026") == "Course-Org"
     assert reads == [("Sem-f2026", CONFIG_REPO, ".system/dsl-course.yml")]
 

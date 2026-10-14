@@ -45,6 +45,7 @@ import yaml
 from . import run, schedule
 from .access import grant_team_repo_access, holds, team_repo_access
 from .central import MissingCentralRef, resolve_central_ref
+from .config import read_course, read_semester
 from .course import (
     CONFIG_REPO,
     COURSE_ADMIN_TEAM,
@@ -64,7 +65,7 @@ from .discovery import (
     live_semesters,
 )
 from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, Unusable, not_migrated_fault
-from .gh_contents import line_of, load_yaml_config, take_lines
+from .gh_contents import line_of, take_lines
 from .gh_teams import (
     CREATED,
     create_team_outcome,
@@ -455,7 +456,7 @@ def load_faculty(
     parses to {} and legitimately empties the team.
 
     `skipped` is `parse_faculty_from_meta`'s: the entries it could not place."""
-    meta = load_yaml_config(course_org, ".github", "dsl-course.yml")
+    meta = read_course(course_org).mapping()
     if meta is None:
         return None
     return parse_faculty_from_meta(meta, skipped=skipped)
@@ -505,15 +506,12 @@ def _load_semester_file(
     absent. A semester that has only the old `people.yml` is refused as NOT_MIGRATED:
     read as absent, it would keep nobody's access and tell nobody why. Raises exactly what
     `load_yaml_config` raises otherwise."""
-    meta = (
-        load_yaml_config(semester_org, CONFIG_REPO, SEMESTER_PEOPLE_PATH, lines=True)
-        if lines
-        else load_yaml_config(semester_org, CONFIG_REPO, SEMESTER_PEOPLE_PATH)
-    )
+    semester = read_semester(semester_org)
+    meta = semester.file(SEMESTER_PEOPLE_PATH).mapping(lines=lines)
     listed = isinstance(meta, dict) and isinstance(meta.get("instructors"), list)
     # The old file beside a new one that lists nobody - absent, or the seeded all-comment
     # skeleton - is a semester that has not migrated, whatever the new file says.
-    if not listed and load_yaml_config(semester_org, CONFIG_REPO, OLD_PEOPLE_FILE):
+    if not listed and semester.file(OLD_PEOPLE_FILE).mapping():
         raise NotMigrated(
             OLD_PEOPLE_FILE, INSTRUCTORS_FILE, f"{semester_org}/{CONFIG_REPO}"
         )
@@ -667,7 +665,7 @@ def read_course_config(
     # FAILED still comes out as a bare RuntimeError, which is the distinction this whole
     # function is about. `read_semester_people` reads its file exactly this way.
     try:
-        meta = load_yaml_config(course_org, ".github", COURSE_CONFIG, lines=True)
+        meta = read_course(course_org).mapping(lines=True)
     except yaml.YAMLError:
         faults.append(
             _course_fault("this file is not valid YAML, so none of it is read")

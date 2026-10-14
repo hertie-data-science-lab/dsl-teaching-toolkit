@@ -57,6 +57,7 @@ import yaml
 from . import cadence, policy, records, schedule, seed, settings, status
 from .bootstrap_course import semester_scaffold
 from .central import CENTRAL
+from .config import read_course, read_semester
 from .course import (
     ASSIGNMENTS_FILE,
     CONFIG_REPO,
@@ -3011,7 +3012,7 @@ class Course:
 
     # dsl-course.yml ---------------------------------------------------------------
     def meta_text(self) -> tuple[str | None, str | None]:
-        text = get_file_content(self.org, ".github", COURSE_CONFIG)
+        text = read_course(self.org).text
         return text, (course_config_keys(text) if text is not None else None)
 
     def lost_values(self) -> list[str]:
@@ -3571,7 +3572,7 @@ class Course:
 def _pointer_course(org: str, listing: dict[str, dict]) -> str:
     """The course org a semester points at, from whichever pointer it has now."""
     if CONFIG_REPO in listing:
-        text = get_file_content(org, CONFIG_REPO, records.path("pointer"))
+        text = read_semester(org).pointer.text
         if text is not None:
             return str(_yaml(text).get("course") or "")
     old = get_file_content(org, OLD_POINTER_REPO, COURSE_CONFIG)

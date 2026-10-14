@@ -23,8 +23,9 @@ from datetime import datetime, timezone
 
 import yaml
 
-from . import records, run
+from . import run
 from .central import resolve_central_ref
+from .config import read_course, read_semester
 from .course import (
     CONFIG_REPO,
     COURSE_CONFIG,
@@ -37,7 +38,7 @@ from .course import (
     session_dirs,
 )
 from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
-from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
+from .gh_contents import get_file_content, put_file, repo_tree
 from .ghcli import ALL, EVERYTHING, FILE, FILES, META, gh, is_missing_resource, on_write
 from .log import log, log_err, log_ok, on_cli_start
 from .materials import is_materials_repo
@@ -474,15 +475,15 @@ def org_meta(org: str) -> dict:
     404 or an empty file; a MALFORMED one still raises, because reading a typo as "this
     org declares nothing" files a semester under the course orgs and rewrites the inventory
     around it. The one caller that must tell ABSENT from EMPTY - sync_faculty, which
-    would otherwise prune every admin - reads load_yaml_config directly."""
-    return load_yaml_config(org, ".github", COURSE_CONFIG) or {}
+    would otherwise prune every admin - reads `config.read_course` directly."""
+    return read_course(org).meta()
 
 
 def semester_pointer(semester_org: str) -> dict:
     """A semester's pointer to its course org (`semester-config/.system/dsl-course.yml`),
     or `{}` when there is none. Moved in from the semester's `.github` (decision 0010):
     its only readers are this repo's dispatchers and the engine, and `.github` is public."""
-    return load_yaml_config(semester_org, CONFIG_REPO, records.path("pointer")) or {}
+    return read_semester(semester_org).pointer.meta()
 
 
 def course_name_for_semester(semester_org: str) -> str:

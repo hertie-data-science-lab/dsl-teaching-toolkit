@@ -1410,22 +1410,34 @@ def load_yaml_config(
     `LineLoader`), for a caller that has to tell somebody WHICH line to go and fix. Off by
     default: the stamp is a reserved key, and a caller that does not consume it would
     render it."""
-    content = get_file_content(org, repo, path)
+    return parse_yaml_config(
+        get_file_content(org, repo, path), f"{org}/{repo}/{path}", lines
+    )
+
+
+def parse_yaml_config(
+    content: str | None, where: str, lines: bool = False, quiet: bool = False
+) -> dict | None:
+    """`load_yaml_config` of text already read (None = absent), `where` naming the file in
+    what it logs. `quiet` raises the same and logs nothing, for a caller that reports the
+    file its own way."""
     if content is None:
         return None
     try:
         data = load_yaml_lines(content) if lines else yaml.safe_load(content)
     except yaml.YAMLError as exc:
-        log_err(f"malformed YAML in {org}/{repo}/{path}: {read_error(exc)}")
+        if not quiet:
+            log_err(f"malformed YAML in {where}: {read_error(exc)}")
         raise
     if data is None:
         return {}
     if not isinstance(data, dict):
         msg = (
-            f"{org}/{repo}/{path} is not a YAML mapping "
+            f"{where} is not a YAML mapping "
             f"(got {type(data).__name__}) - refusing to use it"
         )
-        log_err(msg)
+        if not quiet:
+            log_err(msg)
         # `Unusable`, which IS a RuntimeError - the house style for a bad read/config,
         # which get_file_content and list_org_repos raise too and status.main catches -
         # and which additionally says this is a file faculty must fix rather than a read

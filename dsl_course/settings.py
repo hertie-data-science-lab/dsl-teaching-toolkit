@@ -29,11 +29,11 @@ from dataclasses import dataclass, field
 import yaml
 
 from . import policy, run
+from .config import read_semester
 from .course import ASSIGNMENTS_FILE, CONFIG_REPO, COURSE_CONFIG
 from .discovery import course_org_for_semester, org_meta
 from .faults import ConfigFault, Unusable
 from .gh_contents import (
-    get_file_content,
     line_of,
     load_yaml_lines,
     take_lines,
@@ -283,7 +283,7 @@ def parse_instance(text: str | None) -> Instance:
 def _assignments_text(semester_org: str) -> str | None:
     """`semester-config/assignments.yml`, or None when the semester has none (a 404).
     Any other read failure raises (`get_file_content`)."""
-    return get_file_content(semester_org, CONFIG_REPO, ASSIGNMENTS_FILE)
+    return read_semester(semester_org).assignments.text
 
 
 def instance(semester_org: str) -> Instance:

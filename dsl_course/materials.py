@@ -30,9 +30,9 @@ from dataclasses import dataclass, field
 
 import yaml
 
-from . import policy, run
+from . import config, policy, run
+from .config import ConfigFile
 from .faults import Unusable
-from .gh_contents import load_yaml_config
 from .repos import has_denied_component, has_never_material_component
 from .schema_check import validate
 
@@ -129,9 +129,16 @@ def parse(data: object, where: str = MATERIALS_FILE) -> Declared:
 def read(org: str, repo: str) -> Declared:
     """`repo`'s declaration, read once per run. Absent is the defaults; a file that does
     not parse or does not validate raises `Unusable`."""
-    where = f"{repo}/{MATERIALS_FILE}"
+    return declared(config.read(org, repo, MATERIALS_FILE))
+
+
+def declared(file: ConfigFile, quiet: bool = False) -> Declared:
+    """THE parse of a `materials.yml`, from the API (`read`) or a clone
+    (`public_site`). Absent is the defaults; a file that does not parse or does not
+    validate raises `Unusable`. `quiet` leaves the file's own problem unlogged."""
+    where = f"{file.repo}/{MATERIALS_FILE}"
     try:
-        data = load_yaml_config(org, repo, MATERIALS_FILE)
+        data = file.data() if quiet else file.mapping()
     except yaml.YAMLError as exc:
         raise Unusable(f"{where} is not valid YAML") from exc
     return parse(data, where)

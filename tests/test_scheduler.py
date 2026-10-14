@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
-from conftest import source_fault
+from conftest import fake_config, source_fault
 
 from dsl_course import (
     access,
@@ -5178,10 +5178,7 @@ def test_a_materials_yml_that_does_not_parse_holds_no_inferred_entry(
 ):
     # `week` would be aliased to readings; the file does not parse, so the kind is a
     # guess (lecture) and no number is required on its strength. An explicit kind counts.
-    def broken(org, repo, path):
-        raise yaml.YAMLError("bad")
-
-    monkeypatch.setattr(materials, "load_yaml_config", broken)
+    fake_config(monkeypatch, lambda org, repo, path: "kinds: [not closed")
     materials.read.cache_clear()
     earlier = WHEN - timedelta(hours=1)
     sched = Schedule(

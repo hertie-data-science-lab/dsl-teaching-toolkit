@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-import yaml
 
 from dsl_course import materials, schemas
 from dsl_course.faults import Unusable
 from dsl_course.schema_check import validate
+from tests.conftest import fake_config
 
 
 def test_absent_is_the_defaults():
@@ -53,10 +53,7 @@ def test_the_topic_makes_a_materials_repo_not_the_name():
 
 
 def test_a_file_that_is_not_yaml_is_unusable_not_a_traceback(monkeypatch):
-    def broken(org, repo, path):
-        raise yaml.YAMLError("bad indent")
-
-    monkeypatch.setattr(materials, "load_yaml_config", broken)
+    fake_config(monkeypatch, lambda org, repo, path: "kinds: [not closed")
     materials.read.cache_clear()
     with pytest.raises(Unusable, match="cm/materials.yml is not valid YAML"):
         materials.read("C", "cm")

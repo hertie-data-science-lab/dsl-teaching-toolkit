@@ -19,6 +19,7 @@ import yaml
 from dsl_course import (
     bootstrap_course,
     central,
+    config,
     discovery,
     gh_teams,
     ghcli,
@@ -201,6 +202,21 @@ def clear_process_memos() -> None:
     every read-once memo off. Tests reuse the same org/repo names with different fakes,
     so nothing one test read may answer the next."""
     run.reset()
+
+
+def fake_config(monkeypatch, files) -> None:
+    """Answer `config.read` - the one door to every hand-edited config file - from
+    `files(org, repo, path)`: a mapping (written out as YAML), the file's text, or None
+    for a file that is not there."""
+
+    def read(org: str, repo: str, path: str) -> config.ConfigFile:
+        found = files(org, repo, path)
+        text = (
+            found if found is None or isinstance(found, str) else yaml.safe_dump(found)
+        )
+        return config.ConfigFile(org, repo, path, text)
+
+    monkeypatch.setattr(config, "read", read)
 
 
 def stub_bootstrap(monkeypatch) -> None:
