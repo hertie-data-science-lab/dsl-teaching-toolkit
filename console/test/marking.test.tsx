@@ -2,9 +2,10 @@
 // The marking screen (WP-M1): the engine's hold rules, the Return marks figures and preview
 // emails, the draft kept in the browser, the conflict-safe save, and the grid's toolbar and keys.
 
+import { readFileSync } from 'node:fs';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
@@ -203,6 +204,9 @@ function envOf(gh: FakeGitHub, f: StaticFiles): Env {
 }
 
 let root: HTMLElement | null = null;
+/** The window's width; the grid's tests run in a wide one unless they say otherwise. */
+const windowWidth = (w: number) => Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true });
+beforeEach(() => windowWidth(1440));
 afterEach(() => {
   localStorage.clear();
   if (root) render(null, root);
@@ -551,6 +555,14 @@ describe('teams and people on the grid', () => {
     expect([...members[0].querySelectorAll('td.calc')].pop()!.textContent).toBe('20');
   });
 
+  it('gives a team its own Private notes box on its row, members closed, and each member theirs', async () => {
+    await mountTeams();
+    expect(root!.querySelector('tr.member-row')).toBeNull();
+    expect(root!.querySelector('tr.team-row textarea[aria-label="Team private notes for geneva"]')).not.toBeNull();
+    await click(q('button[aria-label="Show the members of geneva"]'));
+    for (const h of ['ana-l', 'ben-k', 'cy-d']) expect(root!.querySelector(`tr.member-row textarea[aria-label="Private notes for ${h}"]`)).not.toBeNull();
+  });
+
   it('opens a team on load where a member has an adjustment', async () => {
     await mountTeams(teamFiles(TEAMS.replace('      ben-k:\n        adjustment_individual:', '      ben-k:\n        adjustment_individual: -2')));
     expect(root!.querySelectorAll('tr.member-row')).toHaveLength(3);
@@ -566,5 +578,125 @@ describe('teams and people on the grid', () => {
     expect(root!.querySelector('input[aria-label="Adjustment for ben-k"]')).toBeNull();
     await click(q('button.adj-chip'));
     expect(root!.querySelector('input[aria-label="Adjustment for ben-k"]')).not.toBeNull();
+  });
+});
+
+describe('column widths', () => {
+  const widthsKey = `dsl-console-marks-widths:${COHORT_ORG}:grading_sheets/assignment-2.yml`;
+  const colW = () => Object.fromEntries([...root!.querySelectorAll<HTMLElement>('table.marks colgroup col')].map((c) => [c.dataset.colKey, c.style.width]));
+  const grip = (key: string) => q<HTMLElement>(`.col-grip[data-col-key="${key}"]`);
+  const drag = (el: HTMLElement, dx: number) =>
+    act(() => {
+      el.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, pointerId: 1, bubbles: true }));
+      el.dispatchEvent(new PointerEvent('pointermove', { clientX: 100 + dx, pointerId: 1, bubbles: true }));
+      el.dispatchEvent(new PointerEvent('pointerup', { clientX: 100 + dx, pointerId: 1, bubbles: true }));
+    });
+
+  it('sizes each column to its content by default, and leaves Feedback and Private notes to share the rest', async () => {
+    await marks();
+    const w = colW();
+    expect(w).toMatchObject({ submitted: '105px', days: '56px', tests: '56px', 'q:Q1': '64px', 'q:Q2': '64px', score: '56px', penalty: '156px', final: '56px', fb: '', pn: '' });
+    expect(Number.parseInt(w.who!, 10)).toBeLessThanOrEqual(220);
+    expect(q('th.grow').textContent).toContain('Feedback');
+    expect(root!.querySelectorAll('tr.unit-row td.grow')).toHaveLength(6);
+    // The table never squeezes the two text columns under 170px each: exactly the fixed columns plus 2 x 170.
+    const fixed = Object.entries(w).filter(([k]) => k !== 'fb' && k !== 'pn').reduce((n, [, v]) => n + Number.parseInt(String(v), 10), 0);
+    expect(Number.parseInt(q<HTMLElement>('table.marks').style.minWidth, 10)).toBe(fixed + 2 * 170);
+    const css = readFileSync(`${process.cwd()}/src/styles/console.css`, 'utf8');
+    expect(css).toMatch(/table\.marks \{ table-layout: fixed;/);
+    expect(css).toMatch(/table\.marks td\.pen \{[^}]*text-align: left;/);
+  });
+
+  it('drags a column wider, keeps it per sheet, and double-click or Reset widths puts it back', async () => {
+    await marks();
+    expect(button('Reset widths')).toBeUndefined();
+    await drag(grip('penalty'), 40);
+    expect(colW().penalty).toBe('196px');
+    await drag(grip('final'), -100);
+    expect(colW().final).toBe('48px'); // never under the minimum
+    expect(JSON.parse(localStorage.getItem(widthsKey)!)).toEqual({ penalty: 196, final: 48 });
+    await act(() => void grip('penalty').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+    expect(colW().penalty).toBe('156px');
+    await act(() => void grip('days').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+    expect(colW().days).toBe('64px');
+    expect(grip('days').getAttribute('tabindex')).toBe('0');
+    await click(button('Reset widths'));
+    expect(colW()).toMatchObject({ final: '56px', days: '56px' });
+    expect(localStorage.getItem(widthsKey)).toBeNull();
+  });
+
+  it('starts the submission columns folded in a narrow window and open in a wide one or full screen, until the instructor chooses', async () => {
+    const folded = () => q('thead th .th-fold').getAttribute('aria-expanded') === 'false';
+    windowWidth(1280);
+    await marks();
+    expect(folded()).toBe(true);
+    expect(q('thead').textContent).not.toContain('Days late');
+    await click(q('button.full-toggle'));
+    expect(folded()).toBe(false); // full screen counts as wide
+    await click(q('button.full-toggle'));
+    expect(folded()).toBe(true);
+    // The instructor's choice sticks for this sheet, whatever the width, until Reset widths.
+    await click(q('thead th .th-fold'));
+    expect(folded()).toBe(false);
+    expect(JSON.parse(localStorage.getItem(widthsKey)!)).toEqual({ __subFolded: 0 });
+    root!.remove();
+    await marks();
+    expect(folded()).toBe(false);
+    await click(button('Reset widths'));
+    expect(folded()).toBe(true);
+    root!.remove();
+    localStorage.clear();
+    windowWidth(1440);
+    await marks();
+    expect(folded()).toBe(false);
+    windowWidth(1200);
+    await act(() => void window.dispatchEvent(new Event('resize')));
+    expect(folded()).toBe(true);
+  });
+
+  it('opens with the widths kept from an earlier visit', async () => {
+    localStorage.setItem(widthsKey, JSON.stringify({ fb: 300, who: 150 }));
+    await marks();
+    expect(colW()).toMatchObject({ fb: '300px', who: '150px', pn: '' });
+  });
+});
+
+describe('text boxes', () => {
+  it('gives every row shape a Private notes box: a student, a team with its members closed, and each member', async () => {
+    await marks();
+    for (const h of ['ada-l', 'ben-k', 'cy-d']) expect(root!.querySelector(`textarea[aria-label="Private notes for ${h}"]`)).not.toBeNull();
+  });
+
+  it('opens a box in a large editor whose Save is the same cell edit, and whose Cancel or Escape changes nothing', async () => {
+    const k = `dsl-console-marks-draft:${COHORT_ORG}:grading_sheets/assignment-2.yml`;
+    await marks();
+    const open = () => q<HTMLButtonElement>('textarea[aria-label="Feedback for ada-l"] + button.area-open');
+    expect(open().getAttribute('aria-label')).toBe('Open editor');
+    await click(open());
+    expect(q('#modal-title').textContent).toBe('Feedback for ada-l');
+    const big = q<HTMLTextAreaElement>('textarea.big-editor');
+    expect(big.value).toBe('Good.');
+    await act(() => {
+      big.value = 'Good.\nThe plot needs labels.';
+      big.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(button('Save'));
+    expect(root!.querySelector('textarea.big-editor')).toBeNull();
+    expect(q<HTMLTextAreaElement>('textarea[aria-label="Feedback for ada-l"]').value).toBe('Good.\nThe plot needs labels.');
+    expect(root!.textContent).toContain('1 student changed');
+    expect(JSON.parse(localStorage.getItem(k)!).edits['["submissions","ada-l","feedback_individual"]']).toBe('Good.\nThe plot needs labels.');
+    // Cancel, and Escape, leave the cell as it was.
+    await click(q('textarea[aria-label="Private notes for ben-k"] + button.area-open'));
+    await act(() => {
+      const t = q<HTMLTextAreaElement>('textarea.big-editor');
+      t.value = 'scratch';
+      t.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(button('Cancel'));
+    expect(q<HTMLTextAreaElement>('textarea[aria-label="Private notes for ben-k"]').value).toBe('');
+    await click(q('textarea[aria-label="Private notes for ben-k"] + button.area-open'));
+    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(root!.querySelector('textarea.big-editor')).toBeNull();
+    expect(root!.textContent).toContain('1 student changed');
   });
 });

@@ -54,7 +54,7 @@ teams:
 | `score_group` | you | never shown as-is; each member's gradebook shows only the final grade it derives - the score itself too, but only for a team with no repo of its own (`shared_dropbox_repo`, `external`) |
 | `adjustment_individual` | you - the ONLY override of the mark, in both shapes | **no** - only the final grade it produced |
 | `late_penalty` (per student or team, beside `info:`; optional) | you: `apply` (the default), `waive`, or the whole penalty as `15%` / `0.15` | with their marks (Distribute grades), the penalty that applied: `-20%`, `waived` or `-15% (set by hand)`; a submission receipt quotes the late rule's own figure only |
-| `notes_not_shared_with_students` | you | **never** |
+| `notes_not_shared_with_students` (each person's; on a group sheet the team's own too, beside `feedback_group`) | you | **never** |
 | final grade | derived on output, never stored | yes |
 
 The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A late
@@ -82,7 +82,8 @@ marking and saving, and its corner icon opens it full screen (Escape closes). Th
 per student or team. On a team assignment a team's ▸ shows its members, each with their own Adjustment, feedback and private notes; a
 team with any of those set opens by itself. On an individual one the Adjustment column sits
 behind the **Adjustments** chip. Every column header has a `?`; the **From the submission** heading
-folds its columns into one. The filters (All, Unmarked, Late,
+folds its columns into one (folded to begin with in a window narrower than 1400px; your choice is kept). Drag a column's edge to resize it (double-click puts it back; widths are kept
+in this browser), and open any text box's corner ⤢ for a large editor. The filters (All, Unmarked, Late,
 Held) count from the sheet as typed, and a held row says why, by the same rules as Return marks.
 Enter moves down a column of numbers; in a text box Ctrl+Enter (⌘+Enter) does. **Student view**
 shows what one student's marks page will hold. Unsaved marks stay in this browser until saved, and

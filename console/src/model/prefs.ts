@@ -167,3 +167,20 @@ export function saveMarksDraft(org: string, path: string, draft: MarksDraft | nu
   if (draft && Object.keys(draft.edits).length) writeJson(store, draftKey(org, path), draft);
   else remove(store, draftKey(org, path));
 }
+
+// --------------------------------------------------------------------------- Marks column widths (WP-M1d)
+
+const widthsKey = (org: string, path: string) => `dsl-console-marks-widths:${org.toLowerCase()}:${path}`;
+
+/** The column widths the person dragged on one mark sheet's grid (column key -> px), or none. */
+export function marksWidths(org: string, path: string, store: KeyStore | null = localStore()): Record<string, number> {
+  const v = readJson<Record<string, unknown>>(store, widthsKey(org, path));
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+  return Object.fromEntries(Object.entries(v).filter((e): e is [string, number] => typeof e[1] === 'number' && Number.isFinite(e[1])));
+}
+
+/** Keep the dragged widths; none clears them. */
+export function saveMarksWidths(org: string, path: string, widths: Record<string, number>, store: KeyStore | null = localStore()): void {
+  if (Object.keys(widths).length) writeJson(store, widthsKey(org, path), widths);
+  else remove(store, widthsKey(org, path));
+}
