@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from dsl_course import roster, sync_roster
-from tests.conftest import ROSTER_HEADER, repo_row
+from tests.conftest import ROSTER_HEADER, parse_roster, repo_row
 
 HEADER = ROSTER_HEADER
 
@@ -23,7 +23,7 @@ def _no_teams_csv(monkeypatch):
 
 
 def _roster(*rows: str) -> list[roster.Student]:
-    return roster.parse("\n".join((HEADER, *rows)) + "\n")
+    return parse_roster("\n".join((HEADER, *rows)) + "\n")
 
 
 def _handles(wanted: dict) -> dict[str, set[str]]:

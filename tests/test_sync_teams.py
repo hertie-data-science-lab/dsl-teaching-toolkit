@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from dsl_course import gh_teams, roster, sync_teams, teams
-from tests.conftest import ROSTER_HEADER
+from tests.conftest import ROSTER_HEADER, parse_roster
 
 
 def test_team_slug_is_assignment_prefixed_and_lowercased():
@@ -155,7 +155,7 @@ HEADER = ROSTER_HEADER
 
 
 def _students(*rows: str) -> list[roster.Student]:
-    return roster.parse("\n".join((HEADER, *rows)) + "\n")
+    return parse_roster("\n".join((HEADER, *rows)) + "\n")
 
 
 def test_vet_handles_canonicalises_accepts_and_rejects():

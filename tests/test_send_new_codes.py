@@ -10,6 +10,7 @@ import re
 import pytest
 
 from dsl_course import discovery, enrol_codes, gh_contents, mailer, roster
+from tests.conftest import roster_files
 
 HEADER = "hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\n"
 ROSTER = (
@@ -30,19 +31,19 @@ def _drive(monkeypatch, *, dry_run: bool, transport: bool = True, sends=None):
             monkeypatch.delenv(name, raising=False)
     written: list[str] = []
     sent: list = []
+    files = roster_files(ROSTER)
+    monkeypatch.setattr(enrol_codes, "get_file_content", lambda o, r, p: files.get(p))
     monkeypatch.setattr(
-        enrol_codes,
-        "get_file_with_sha",
-        lambda org, repo, path: (written[-1] if written else ROSTER, "sha"),
+        enrol_codes, "get_file_with_sha", lambda org, repo, path: (files[path], "sha")
     )
     monkeypatch.setattr(
-        gh_contents,
-        "get_file_with_sha",
-        lambda org, repo, path: (written[-1] if written else ROSTER, "sha"),
+        gh_contents, "get_file_with_sha", lambda org, repo, path: (files[path], "sha")
     )
 
     def put_file(org, repo, path, content, message, expected_sha=None):
-        written.append(content.decode())
+        assert path == roster.SYSTEM_PATH
+        files[path] = content.decode()
+        written.append(_joined(files))
         return True
 
     monkeypatch.setattr(gh_contents, "put_file", put_file)
@@ -57,6 +58,10 @@ def _drive(monkeypatch, *, dry_run: bool, transport: bool = True, sends=None):
     monkeypatch.setattr(enrol_codes.mailer, "send_bulk", send_bulk)
     outcome, _counts = enrol_codes.resend_unjoined("SEMESTER", dry_run=dry_run)
     return outcome, sent, written
+
+
+def _joined(files: dict) -> list:
+    return roster.parse(files[roster.STUDENTS_PATH], files[roster.SYSTEM_PATH])
 
 
 def _done(out: str) -> dict:
@@ -82,7 +87,7 @@ def test_every_unjoined_row_gets_a_new_code_and_an_email(monkeypatch, capsys):
     outcome, sent, written = _drive(monkeypatch, dry_run=False)
     out = capsys.readouterr()
     assert outcome is enrol_codes.Outcome.SENT
-    final = {s.hertie_email: s for s in roster.parse(written[-1])}
+    final = {s.email: s for s in written[-1]}
     # The old code is gone for Ada, Dee has her first; Bob joined and keeps his; the row
     # with no usable address is left exactly as it was.
     assert final["ada@uni.edu"].enrol_code not in ("", "dsl-aaa111")
@@ -105,7 +110,7 @@ def test_a_mail_that_did_not_go_releases_its_claim(monkeypatch, capsys):
     outcome, _sent, written = _drive(monkeypatch, dry_run=False, sends=1)
     out = capsys.readouterr()
     assert outcome is enrol_codes.Outcome.FAILED
-    stamps = [s.code_sent_at for s in roster.parse(written[-1]) if not s.onboarded]
+    stamps = [s.code_sent_at for s in written[-1] if not s.onboarded]
     # One row carries the new stamp; the unsent one is blank, so the next roster push
     # mails its new code.
     assert "" in stamps
@@ -138,7 +143,12 @@ def test_everyone_joining_mid_run_is_nothing_to_send(monkeypatch, capsys):
     joined = ROSTER.replace(
         "ada@uni.edu,Ada,enrolled,,", "ada@uni.edu,Ada,enrolled,adagh,"
     ).replace("dee@uni.edu,Dee,auditor,,", "dee@uni.edu,Dee,auditor,deegh,")
-    reads = iter([(ROSTER, "sha1"), (joined, "sha2"), (joined, "sha2")])
+    files = roster_files(ROSTER)
+    later = roster_files(joined)[roster.SYSTEM_PATH]
+    monkeypatch.setattr(enrol_codes, "get_file_content", lambda o, r, p: files.get(p))
+    reads = iter(
+        [(files[roster.SYSTEM_PATH], "sha1"), (later, "sha2"), (later, "sha2")]
+    )
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", lambda *a: next(reads))
     monkeypatch.setattr(gh_contents, "get_file_with_sha", lambda *a: next(reads))
     puts: list[str | None] = []

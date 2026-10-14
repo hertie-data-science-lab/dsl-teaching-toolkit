@@ -13,9 +13,8 @@ from dsl_course import (
     gradebook,
     grading_sheet,
     repos,
-    roster,
 )
-from tests.conftest import ROSTER_HEADER
+from tests.conftest import ROSTER_HEADER, parse_roster
 
 # ------------------------------------------------------ provisioning the gradebooks
 
@@ -24,7 +23,7 @@ def test_ensure_gradebooks_skips_auditors(monkeypatch, capsys):
     # Auditors are never assessed, so they get no private gradebook repo. Dry-run keeps
     # this pure - the roster is the only input, and nothing is provisioned.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-student lines are verbose-only
-    students = roster.parse(
+    students = parse_roster(
         ROSTER_HEADER + "\n"
         "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
         "eve@uni.edu,Eve,auditor,eve-e,43,dsl-xyz\n"
@@ -61,7 +60,7 @@ def test_one_run_stops_at_its_deadline_and_says_how_many_are_left(monkeypatch, c
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     rows = "".join(f"\ns{n}@uni.edu,S{n},enrolled,s{n},{n},dsl-{n}" for n in range(5))
     monkeypatch.setattr(
-        gradebook.roster, "load", lambda org: roster.parse(ROSTER_HEADER + rows + "\n")
+        gradebook.roster, "load", lambda org: parse_roster(ROSTER_HEADER + rows + "\n")
     )
     made: list[str] = []
     monkeypatch.setattr(gradebook, "listing_by_name", lambda org: {})
@@ -90,7 +89,7 @@ def test_the_deadline_does_not_stop_a_run_that_is_keeping_up(monkeypatch, capsys
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     rows = "".join(f"\ns{n}@uni.edu,S{n},enrolled,s{n},{n},dsl-{n}" for n in range(200))
     monkeypatch.setattr(
-        gradebook.roster, "load", lambda org: roster.parse(ROSTER_HEADER + rows + "\n")
+        gradebook.roster, "load", lambda org: parse_roster(ROSTER_HEADER + rows + "\n")
     )
     made: list[str] = []
     monkeypatch.setattr(gradebook, "listing_by_name", lambda org: {})
@@ -108,7 +107,7 @@ def test_the_deadline_does_not_stop_a_run_that_is_keeping_up(monkeypatch, capsys
 
 def test_ensure_gradebooks_names_no_student_in_a_public_log(monkeypatch, capsys):
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    students = roster.parse(
+    students = parse_roster(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(gradebook.roster, "load", lambda org: students)
@@ -379,7 +378,7 @@ def _ensure_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
     """`ensure_gradebooks` over `handles`, with `listing` (or None for one that could not
     be read) standing in for the org listing. Returns (the orgs listed, the gradebooks
     created)."""
-    students = roster.parse(
+    students = parse_roster(
         ROSTER_HEADER
         + "\n"
         + "".join(
@@ -436,7 +435,7 @@ def test_a_failed_listing_falls_back_to_probing_each_gradebook(monkeypatch):
 
 def test_a_dry_run_lists_nothing(monkeypatch):
     # Nothing is created, so nothing needs to know what exists.
-    students = roster.parse(
+    students = parse_roster(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(gradebook.roster, "load", lambda org: students)

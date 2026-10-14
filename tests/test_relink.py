@@ -24,7 +24,7 @@ from dsl_course import (
 )
 from dsl_course import run as run_context
 from dsl_course.gh_contents import blob_sha, read_csv
-from tests.conftest import ROSTER_HEADER, new_sheet, repo_row
+from tests.conftest import ROSTER_HEADER, new_sheet, parse_roster, repo_row
 
 ORG = "Semester"
 OLD, NEW = "oldacct", "newacct"
@@ -408,7 +408,7 @@ def test_nothing_that_names_a_student_reaches_the_public_log(world, capsys):
 
 
 def pending(world) -> list[relink.Pending]:
-    return relink.pending(ORG, roster.parse(world.roster))
+    return relink.pending(ORG, parse_roster(world.roster))
 
 
 def test_the_row_is_found_with_both_accounts(world):

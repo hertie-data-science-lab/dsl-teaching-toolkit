@@ -3752,7 +3752,7 @@ def _roster_of(monkeypatch, *rows: str):
     monkeypatch.setattr(
         collect.roster,
         "load",
-        lambda org: collect.roster.parse(
+        lambda org: collect.parse_roster(
             ROSTER_HEADER + "\n" + "".join(r + "\n" for r in rows)
         ),
     )

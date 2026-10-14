@@ -16,6 +16,7 @@ import yaml
 
 from dsl_course import bootstrap_course as bc
 from dsl_course import roster, schedule, site, welcome
+from tests.conftest import parse_roster
 
 
 def test_course_metadata_carries_faculty_block():
@@ -154,7 +155,7 @@ def test_starter_roster_seeds_the_full_column_set():
     # (covered by the seeding tests, which validate every shipped sample).
     starter = welcome.template("semester-config/students.csv")
     assert tuple(starter.splitlines()[0].split(",")) == roster.FIELDS
-    assert roster.parse(starter) == []  # header-only: nobody to enrol by accident
+    assert parse_roster(starter) == []  # header-only: nobody to enrol by accident
 
 
 def test_config_readme_documents_every_roster_column():

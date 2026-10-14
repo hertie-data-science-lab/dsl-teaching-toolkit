@@ -28,17 +28,22 @@ from dsl_course import (
     issues,
     receipts,
     records,
-    roster,
     status_json,
 )
 from dsl_course.schedule import AssignmentEntry, Schedule
-from tests.conftest import ROSTER_HEADER, repo_row, run_settings, split_grading
+from tests.conftest import (
+    ROSTER_HEADER,
+    parse_roster,
+    repo_row,
+    run_settings,
+    split_grading,
+)
 
 
 def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
     # The send count used to be discarded, so a student who never got the "your grades are
     # updated" mail left no trace in the log at all.
-    students = roster.parse(
+    students = parse_roster(
         ROSTER_HEADER + "\n"
         "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
         "bob@uni.edu,Bob,enrolled,bob-b,43,dsl-def\n"
@@ -58,7 +63,7 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
     # A student taking several of these courses cannot tell one "your grades have been
     # updated" from another, so the body names the course - but a course org that carries
     # no name yet must produce the generic sentence, never a blank or a placeholder.
-    students = roster.parse(
+    students = parse_roster(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(distribute.roster, "load", lambda org: students)
@@ -88,7 +93,7 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
 
 
 def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
-    students = roster.parse(
+    students = parse_roster(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(distribute.roster, "load", lambda org: students)
@@ -117,7 +122,7 @@ def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
 
 
 def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
-    students = roster.parse(
+    students = parse_roster(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,Ada-L,42,dsl-abc\n"
     )
     monkeypatch.setattr(distribute.roster, "load", lambda org: students)
@@ -385,7 +390,7 @@ def _distribute(
 
     monkeypatch.setattr(distribute, "put_files", fake_put_files)
     students = (
-        None if roster_rows is None else roster.parse(ROSTER_HEADER + roster_rows)
+        None if roster_rows is None else parse_roster(ROSTER_HEADER + roster_rows)
     )
     monkeypatch.setattr(distribute.roster, "load", lambda org: students)
     monkeypatch.setattr(discovery, "course_name_for_semester", course_name)

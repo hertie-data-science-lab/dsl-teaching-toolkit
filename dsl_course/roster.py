@@ -31,6 +31,7 @@ import csv
 import io
 from collections import Counter
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from . import legacy, records, run
 from .course import CONFIG_REPO
@@ -307,16 +308,15 @@ def load(
     return parse(content, _system_text(semester_org), faults)
 
 
-def load_path(path: str, system_path: str | None = None) -> list[Student]:
-    """Parse a local students.csv (and `.system/roster.csv`), for running outside
-    Actions."""
-    with open(path, encoding="utf-8") as fh:
-        text = fh.read()
-    system = None
-    if system_path:
-        with open(system_path, encoding="utf-8") as fh:
-            system = fh.read()
-    return parse(text, system)
+def load_path(path: str) -> list[Student]:
+    """Parse a local students.csv, joined with the `.system/roster.csv` beside it in the
+    same checkout when there is one (for running outside Actions)."""
+    students = Path(path)
+    system = students.parent / SYSTEM_PATH
+    return parse(
+        students.read_text(encoding="utf-8"),
+        system.read_text(encoding="utf-8") if system.is_file() else None,
+    )
 
 
 # ------------------------------------------------------------- writing roster.csv
