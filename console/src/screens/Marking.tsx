@@ -16,7 +16,7 @@ import {
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
 import { assignmentSettings, sheetName } from './RunSettings';
 import { penaltyRate } from '../model/policy';
-import { marksDraft, marksWidths, saveMarksDraft, saveMarksWidths, type MarksDraft } from '../model/prefs';
+import { marksDraft, marksSubFolded, marksWidths, saveMarksDraft, saveMarksSubFolded, saveMarksWidths, type MarksDraft } from '../model/prefs';
 import { parseRoster, sameHandle } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef, type LateReturn } from '../ops/defs';
@@ -54,6 +54,8 @@ function asgRef(a: Assignment, group: boolean): AsgRef {
 // --------------------------------------------------------------------------- marks
 
 const key = (path: Path) => JSON.stringify(path);
+/** A handle as `sameHandle` compares it. */
+const fold = (h: string) => h.trim().toLowerCase();
 /** How many units (rows) a set of cell edits touches: a cell's path is `[container, unit, ...]`. */
 const rowsIn = (edits: Record<string, unknown>) => new Set(Object.keys(edits).map((k) => String((JSON.parse(k) as Path)[1]))).size;
 
@@ -82,13 +84,37 @@ function OpenOnArrival({ def, start }: { def: OpDef; start: 'preview' | 'run' })
 }
 
 /** Whether the browser grows a textarea with its text by itself (CSS `field-sizing`, Chromium only). */
-const sizesItself = () => typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('field-sizing', 'content');
-/** Grow a textarea to its text where the browser does not (Firefox, Safari); its CSS min-height still holds. */
-function grow(el: HTMLTextAreaElement): void {
-  if (sizesItself()) return;
-  el.style.height = 'auto';
-  el.style.height = `${el.scrollHeight + 2}px`;
+const SIZES_ITSELF = typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('field-sizing', 'content');
+/** Each box's text as last grown, and each grid's column layout as last swept. */
+const grownText = new WeakMap<HTMLTextAreaElement, string>();
+const sweptLayout = new WeakMap<HTMLElement, string>();
+/**
+ * Grow textareas to their text where the browser does not (Firefox, Safari); their CSS min-height
+ * still holds. Only a box whose text changed is measured, or every box when the columns changed
+ * (`layout`); all heights are reset before any is read, so the page lays out once.
+ */
+function grow(els: HTMLTextAreaElement[], all = false): void {
+  if (SIZES_ITSELF) return;
+  const todo = all ? els : els.filter((el) => grownText.get(el) !== el.value);
+  for (const el of todo) el.style.height = 'auto';
+  const heights = todo.map((el) => el.scrollHeight);
+  todo.forEach((el, i) => {
+    el.style.height = `${heights[i] + 2}px`;
+    grownText.set(el, el.value);
+  });
 }
+function sweep(table: HTMLElement, layout: string): void {
+  const all = sweptLayout.get(table) !== layout;
+  sweptLayout.set(table, layout);
+  grow([...table.querySelectorAll('textarea')], all);
+}
+
+/** Who a unit's held chip names: the first of its people the hold rules hold, and why. */
+const heldIn = (held: Record<string, HoldReason>) => (u: Unit): HoldReason | null => u.people.map((pr) => held[pr.handle]).find(Boolean) ?? null;
+/** The submission columns, folded or not. */
+const SUB_KEYS = new Set(['sub', 'submitted', 'days', 'tests', 'completion']);
+/** How long typing pauses before the unsaved marks are kept in the browser. */
+const DRAFT_MS = 500;
 
 const on = (v: unknown) => v === true || v === 'true';
 const off = (v: unknown) => v === false || v === 'false';
@@ -113,8 +139,6 @@ interface MarksCol {
 }
 /** Below this window width the submission columns start folded. */
 const WIDE = 1400;
-/** Where the instructor's fold choice is kept, beside the column widths. */
-const FOLD_KEY = '__subFolded';
 /** No column is dragged narrower than this. */
 const MIN_COL = 48;
 /** Feedback and Private notes never get less than this each (the console beside its side nav at 1280px). */
@@ -204,10 +228,10 @@ export function MarksTab(p: TabProps) {
   // The late-penalty override box as typed, by unit: the sheet gets `15%`, the box keeps `15.`.
   const [typed, setTyped] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<Filter>('all');
-  // The window's width, for the submission columns' default fold.
-  const [winW, setWinW] = useState(() => (typeof window === 'undefined' ? WIDE : window.innerWidth));
+  // A narrow window, for the submission columns' default fold.
+  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < WIDE);
   useEffect(() => {
-    const on = () => setWinW(window.innerWidth);
+    const on = () => setNarrow(window.innerWidth < WIDE);
     window.addEventListener('resize', on);
     return () => window.removeEventListener('resize', on);
   }, []);
@@ -223,31 +247,53 @@ export function MarksTab(p: TabProps) {
   const [widths, setWidths] = useState<Record<string, number>>(() => marksWidths(org, path));
   useEffect(() => saveMarksWidths(org, path, widths), [widths, org, path]);
   // "From the submission" folds to one chip in a narrow window (full screen counts as wide), until the
-  // instructor chooses; that choice is kept per sheet with the widths, and Reset widths forgets it.
-  const subFolded = widths[FOLD_KEY] !== undefined ? widths[FOLD_KEY] === 1 : !full && winW < WIDE;
-  const setSubFolded = (fold: boolean) => setWidths((cur) => ({ ...cur, [FOLD_KEY]: fold ? 1 : 0 }));
+  // instructor chooses; that choice is kept per sheet, and Reset widths forgets it with the widths.
+  const [foldChoice, setFoldChoice] = useState<boolean | null>(() => marksSubFolded(org, path));
+  useEffect(() => saveMarksSubFolded(org, path, foldChoice), [foldChoice, org, path]);
+  const subFolded = foldChoice ?? (!full && narrow);
   const fullBtn = useRef<HTMLButtonElement>(null);
-  const wasFull = useRef(false);
-  // Textareas grow with their text where the browser cannot do it in CSS.
+  // Textareas grow with their text where the browser cannot do it in CSS: typing grows its own box,
+  // and this sweep catches the rest (rows shown, a text set by the large editor, columns moved).
   useEffect(() => {
-    table.current?.querySelectorAll('textarea').forEach(grow);
+    if (table.current) sweep(table.current, JSON.stringify([widths, subFolded, adjChoice, folds, full]));
   });
   const [save, , setSave] = useSave(env);
   const file = p.files.file(org, CONFIG_REPO, path);
   const sha = file.kind === 'ready' ? file.sha : null;
-  // Unsaved marks survive a reload: kept in this browser per sheet, with the sha they were made on, until saved.
+  // Unsaved marks survive a reload: kept in this browser per sheet, with the sha they were made on,
+  // until saved. Written once typing pauses, and at once when a box loses focus, the page is hidden
+  // or the tab closes; cleared at once.
+  const draft = useRef<{ org: string; path: string; draft: MarksDraft | null } | null>(null);
+  const keepDraft = () => {
+    const d = draft.current;
+    draft.current = null;
+    if (d) saveMarksDraft(d.org, d.path, d.draft);
+  };
   useEffect(() => {
-    if (!pending) saveMarksDraft(org, path, Object.keys(edits).length ? { sha, at: Date.now(), edits } : null);
+    if (pending) return;
+    draft.current = { org, path, draft: Object.keys(edits).length ? { sha, at: Date.now(), edits } : null };
+    if (!draft.current.draft) return keepDraft();
+    const t = setTimeout(keepDraft, DRAFT_MS);
+    return () => clearTimeout(t);
   }, [edits, pending, org, path]);
-  // Full screen is an overlay over the page: Escape or the icon closes it, and focus goes back to the icon.
   useEffect(() => {
-    if (!full) {
-      if (wasFull.current) fullBtn.current?.focus();
-      wasFull.current = false;
-      return;
-    }
-    wasFull.current = true;
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setFull(false);
+    const hidden = () => document.visibilityState === 'hidden' && keepDraft();
+    document.addEventListener('visibilitychange', hidden);
+    window.addEventListener('pagehide', keepDraft);
+    return () => {
+      document.removeEventListener('visibilitychange', hidden);
+      window.removeEventListener('pagehide', keepDraft);
+      keepDraft();
+    };
+  }, []);
+  // Full screen is an overlay over the page: Escape or the icon closes it, and focus goes back to the icon.
+  const exitFull = () => {
+    setFull(false);
+    fullBtn.current?.focus();
+  };
+  useEffect(() => {
+    if (!full) return;
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && exitFull();
     document.addEventListener('keydown', esc);
     return () => document.removeEventListener('keydown', esc);
   }, [full]);
@@ -260,12 +306,49 @@ export function MarksTab(p: TabProps) {
   const roster = p.files.file(org, CONFIG_REPO, 'students.csv');
   const rosterText = roster.kind === 'ready' ? roster.text : null;
   const students = useMemo(() => (rosterText === null ? [] : parseRoster(rosterText).rows), [rosterText]);
+  // Real names by handle (folded as `sameHandle` folds it), the first row's where two share one.
+  const names = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of students) if (!m.has(fold(s.handle))) m.set(fold(s.handle), s.name);
+    return m;
+  }, [students]);
   /** A person's real name from students.csv, or '' when it has none. */
-  const realName = (h: string) => students.find((s) => sameHandle(s.handle, h))?.name ?? '';
+  const realName = (h: string) => names.get(fold(h)) ?? '';
+  /** A person as the grid names them: the real name, else the handle. */
+  const shownName = (h: string) => realName(h) || h;
   const cfg = useGradingConfig(p, a.template);
-  const questions = cfg.questions && typeof cfg.questions === 'object' ? (cfg.questions as Record<string, unknown>) : null;
+  const questions = useMemo(() => (cfg.questions && typeof cfg.questions === 'object' ? (cfg.questions as Record<string, unknown>) : null), [cfg]);
   const qs = questions ? Object.entries(questions) : [];
   const rate = penaltyOf(a);
+  const sheetRead = parsed?.sheet ?? null;
+  // The name column fits its longest line (a name, a handle, or a team's members line), up to 220px; longer wraps.
+  const whoWidth = useMemo(() => {
+    if (!sheetRead) return 96;
+    const longest = Math.max(
+      8,
+      ...sheetRead.units.flatMap((u) => [
+        u.key.length + 4,
+        ...(sheetRead.group ? [`${u.people.map((pr) => shownName(pr.handle)).join(', ')} · ${u.people.length}`.length] : []),
+        ...u.people.map((pr) => shownName(pr.handle).length),
+        qs.length ? 'Feedback per question (9)'.length : 0,
+      ]),
+    );
+    return Math.min(220, Math.max(96, Math.round(longest * 6.4 + 28)));
+  }, [sheetRead, names, qs.length]);
+  // Return marks reads the sheet as saved: who gets marks, who is skipped or held, and the final
+  // grades. Only a saved sheet moves them, so they are not worked out again per keystroke.
+  const saved = useMemo(() => {
+    if (!sheetRead) return null;
+    const held = holdReasons(sheetRead.units.map((u) => holdUnit(u, u.score, u.latePenalty, (pr) => pr.adjustment)), questions, rate);
+    const isHeld = heldIn(held);
+    const heldUnits = sheetRead.units.filter((u) => isHeld(u)).length;
+    const skipped = sheetRead.units.filter((u) => !isHeld(u) && noMark(u.score)).length;
+    const finals = sheetRead.units.flatMap((u) => {
+      const pen = effectivePenalty(rate, u.info?.days_late, u.latePenalty);
+      return u.people.filter((pr) => !held[pr.handle]).map((pr) => finalGrade(scoreTotal(u.score, questions), pen, pr.adjustment)).filter((f): f is number => f !== null);
+    });
+    return { heldUnits, skipped, sending: sheetRead.units.length - heldUnits - skipped, finals, held: Object.keys(held).length };
+  }, [sheetRead, questions, rate]);
   const rule = lateRuleOf(a);
   const max = qs.reduce((n, [, m]) => n + (Number(questionPoints(m)) || 0), 0);
   const group = a.teams !== null && a.teams !== undefined;
@@ -307,8 +390,6 @@ export function MarksTab(p: TabProps) {
     }
     return v(u.scorePath, u.score && typeof u.score === 'object' ? null : u.score);
   };
-  // The whole score map as the engine reads it: questions the sheet has but `questions` lacks included.
-  const fullScore = (u: Unit) => (qs.length && isObj(u.score) ? { ...u.score, ...(scoreOf(u) as Record<string, unknown>) } : scoreOf(u));
   const adjOf = (pr: Person) => v([...pr.base, 'adjustment_individual'], pr.adjustment);
   const fbOf = (pr: Person) => v([...pr.base, 'feedback_individual'], pr.feedback);
   // A late unit's penalty (`late_penalty`): switched on writes `apply`, off `waive`; an override
@@ -323,39 +404,64 @@ export function MarksTab(p: TabProps) {
   };
   // What the unit loses for lateness, worked out once for its late cell and its final grades.
   const lateFor = (u: Unit) => effectivePenalty(rate, u.info?.days_late, lateOf(u));
+  // Each unit's figures from the marks on screen, worked out once per render for its rows, the counts and the filters.
+  const scored = sheet.units.map((u) => {
+    const score = scoreOf(u);
+    // The whole score map as the engine reads it: questions the sheet has but `questions` lacks included.
+    const full = qs.length && isObj(u.score) ? { ...u.score, ...(score as Record<string, unknown>) } : score;
+    return { u, score, full };
+  });
   // The engine's hold rules over the marks on screen: each held handle and why.
-  const heldNow = holdReasons(sheet.units.map((u) => holdUnit(u, fullScore(u), lateOf(u), adjOf)), questions, rate);
-  const heldOf = (u: Unit): HoldReason | null => u.people.map((pr) => heldNow[pr.handle]).find(Boolean) ?? null;
-  const unmarked = (u: Unit) => noMark(scoreOf(u));
+  const heldOf = heldIn(holdReasons(scored.map((x) => holdUnit(x.u, x.full, lateOf(x.u), adjOf)), questions, rate));
+  const figs = new Map(scored.map(({ u, score, full }) => [u, { score, full, total: scoreTotal(score, questions), pen: lateFor(u), unmarked: noMark(score), held: heldOf(u) }]));
+  const fig = (u: Unit) => figs.get(u)!;
   const isLate = (u: Unit) => (num(u.info?.days_late) ?? 0) > 0;
   const counts: Record<Filter, number> = {
     all: sheet.units.length,
-    unmarked: sheet.units.filter(unmarked).length,
+    unmarked: sheet.units.filter((u) => fig(u).unmarked).length,
     late: sheet.units.filter(isLate).length,
-    held: sheet.units.filter((u) => heldOf(u) !== null).length,
+    held: sheet.units.filter((u) => fig(u).held !== null).length,
   };
-  const shown = sheet.units.filter((u) => filter === 'all' || (filter === 'unmarked' ? unmarked(u) : filter === 'late' ? isLate(u) : heldOf(u) !== null));
+  const shown = sheet.units.filter((u) => filter === 'all' || (filter === 'unmarked' ? fig(u).unmarked : filter === 'late' ? isLate(u) : fig(u).held !== null));
   // Handed in outside GitHub: no `info:` anywhere, so nothing to show from the submission.
   const external = sheet.units.length > 0 && sheet.units.every((u) => u.info === null);
   // Tests and Completion: a column only when some unit's submission has the fact (the template runs tests / the completion check).
   const hasInfo = (k: string) => sheet.units.some((u) => u.info !== null && k in u.info);
   const showTests = hasInfo('autograde'), showCompletion = hasInfo('completion');
-  const subCols = external ? 0 : subFolded ? 1 : 2 + (showTests ? 1 : 0) + (showCompletion ? 1 : 0);
   // A team's member rows: its ▸/▾ (or Open/Close all teams) decides; until then open where a member carries an adjustment or their own feedback.
   const membersOpen = (u: Unit) => folds[`m:${u.key}`] ?? u.people.some((pr) => !blank(pr.adjustment) || !blank(pr.feedback));
   // The Adjustment column: while any team is open; on an individual sheet behind the Adjustments chip, open where any is saved.
   const adjOpen = sheet.group ? sheet.units.some(membersOpen) : (adjChoice ?? sheet.units.some((u) => !blank(u.people[0]?.adjustment)));
+  // The grid's columns in order, each content-wide by default; Feedback and Private notes share the rest.
+  const cols: MarksCol[] = [
+    { key: 'who', def: whoWidth, label: sheet.group ? 'Team' : 'Student' },
+    ...(external ? [] : subFolded ? [{ key: 'sub', def: 170, label: 'From the submission' }] : [
+      { key: 'submitted', def: 105, label: 'Submitted' },
+      { key: 'days', def: 56, label: 'Days late' },
+      ...(showTests ? [{ key: 'tests', def: 56, label: 'Tests' }] : []),
+      ...(showCompletion ? [{ key: 'completion', def: 90, label: 'Completion' }] : []),
+    ]),
+    ...qs.map(([q]) => ({ key: `q:${q}`, def: 64, label: q })),
+    { key: 'score', def: 56, label: 'Score' },
+    { key: 'penalty', def: rate !== null ? 156 : 64, label: 'Penalty' },
+    ...(adjOpen ? [{ key: 'adj', def: 86, label: 'Adjustment' }] : []),
+    { key: 'final', def: 56, label: 'Final' },
+    { key: 'fb', def: null, label: 'Feedback' },
+    { key: 'pn', def: null, label: 'Private notes' },
+  ];
+  // The submission columns (one when folded), and those from Penalty on (Penalty, [Adjustment,] Final, Feedback, Private notes).
+  const subCols = cols.filter((c) => SUB_KEYS.has(c.key)).length;
+  const after = cols.length - cols.findIndex((c) => c.key === 'penalty');
   /** A person's cell: real name, handle under it (the handle alone when the roster has no name). */
   const who = (h: string, strong: boolean) => {
-    const n = realName(h);
-    const top = n || h;
-    return <>{strong ? <b>{top}</b> : <span>{top}</span>}{n ? <><br /><span class="slug footnote">{h}</span></> : null}</>;
+    const top = shownName(h);
+    return <>{strong ? <b>{top}</b> : <span>{top}</span>}{realName(h) ? <><br /><span class="slug footnote">{h}</span></> : null}</>;
   };
   // A text box carries a corner icon that opens it in a large editor; Save there is the same cell edit.
   const input = (pth: Path, orig: unknown, cls: string, label: string, col: string, typed = true, area = false) =>
     area ? (
       <span class="area-wrap">
-        <textarea class={cls} rows={1} aria-label={label} data-col={col} onInput={(e) => { grow(e.target as HTMLTextAreaElement); set(pth, (e.target as HTMLTextAreaElement).value, false); }}>{str(v(pth, orig))}</textarea>
+        <textarea class={cls} rows={1} aria-label={label} data-col={col} onInput={(e) => { grow([e.target as HTMLTextAreaElement]); set(pth, (e.target as HTMLTextAreaElement).value, false); }}>{str(v(pth, orig))}</textarea>
         <button class="area-open" type="button" aria-label="Open editor" title={`Open editor: ${label}`} onClick={() => setEditor({ path: pth, title: label, text: str(v(pth, orig)) })}>⤢</button>
       </span>
     ) : (
@@ -407,13 +513,21 @@ export function MarksTab(p: TabProps) {
   const qfbCount = (u: Unit) => qs.filter(([q]) => !blank(v([...u.questionFeedbackPath, q], u.questionFeedback[q] ?? null))).length;
   const qOpen = (u: Unit) => folds[`q:${u.key}`] ?? false;
   const heldChip = (u: Unit) => {
-    const why = heldOf(u);
+    const why = fig(u).held;
     return why ? <><br /><span class="chip bad held-chip">held</span> <span class="held-why">{HOLD_WORDS[why]}</span></> : null;
   };
   // The unit's own row: its score per question, and (on a group sheet) the team's feedback.
+  // A person's own cells: their adjustment (where the column shows), final grade, feedback and private notes.
+  const personCells = (pr: Person, total: number | null, pen: Penalty, showAdj: boolean) => (
+    <>
+      {showAdj ? <td class="adjcol">{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${pr.handle}`, 'adj')}</td> : null}
+      <td class="calc">{round(finalGrade(total, pen, adjOf(pr)))}</td>
+      <td class="grow">{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${pr.handle}`, 'fb', false, true)}</td>
+      <td class="grow">{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${pr.handle}`, 'pn', false, true)}</td>
+    </>
+  );
   const unitRow = (u: Unit) => {
-    const total = scoreTotal(scoreOf(u), questions);
-    const pen = lateFor(u);
+    const { total, pen } = fig(u);
     const nosub = u.info !== null && !u.info?.submitted;
     const scoreCells = qs.length
       ? [...qs.map(([q, m]) => <td>{input([...u.scorePath, q], (u.score as Record<string, unknown> | null)?.[q] ?? null, 'q', `${q}${outOf(m)} for ${u.key}`, `q:${q}`)}</td>), <td class="calc">{round(total)}</td>]
@@ -422,22 +536,19 @@ export function MarksTab(p: TabProps) {
     const qChip = qs.length ? (
       <><br /><button class="chip qfb-chip" type="button" aria-expanded={qOpen(u)} aria-label={`${qOpen(u) ? 'Hide' : 'Show'} feedback per question for ${u.key}`} onClick={() => setFolds({ ...folds, [`q:${u.key}`]: !qOpen(u) })}>✎ Feedback per question{n ? ` (${n})` : ''}</button></>
     ) : null;
-    const mark = unmarked(u) ? { 'data-unmarked': '' } : {};
+    const mark = fig(u).unmarked ? { 'data-unmarked': '' } : {};
     if (!sheet.group) {
       const pr = u.people[0];
       return (
         <tr class={`unit-row${nosub ? ' nosub' : ''}`} {...mark}>
           <td>{who(u.key, true)}{heldChip(u)}{qChip}</td>{info(u)}{scoreCells}
           {lateCell(u, pen)}
-          {adjOpen ? <td class="adjcol">{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${u.key}`, 'adj')}</td> : null}
-          <td class="calc">{round(finalGrade(total, pen, adjOf(pr)))}</td>
-          <td class="grow">{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${u.key}`, 'fb', false, true)}</td>
-          <td class="grow">{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${u.key}`, 'pn', false, true)}</td>
+          {personCells(pr, total, pen, adjOpen)}
         </tr>
       );
     }
     const open = membersOpen(u);
-    const names = u.people.map((pr) => realName(pr.handle) || pr.handle);
+    const names = u.people.map((pr) => shownName(pr.handle));
     return (
       <tr class={`team-row${nosub ? ' nosub' : ''}`} {...mark}>
         <td>
@@ -450,7 +561,6 @@ export function MarksTab(p: TabProps) {
       </tr>
     );
   };
-  const after = 4 + (adjOpen ? 1 : 0); // Penalty, [Adjustment,] Final, Feedback, Private notes
   // Feedback per question: one row under the unit, a box under each question (the team's on a group sheet).
   const questionRow = (u: Unit) => (
     <tr class="qfb-row">
@@ -462,18 +572,14 @@ export function MarksTab(p: TabProps) {
   );
   // A member's row: the team's score, the member's own adjustment, final, feedback and private notes.
   const memberRows = (u: Unit) => {
-    const total = scoreTotal(scoreOf(u), questions);
-    const pen = lateFor(u);
+    const { total, pen, score } = fig(u);
     return u.people.map((pr) => (
       <tr class="member-row">
         <td style="padding-left:22px">{who(pr.handle, false)}</td>
         {subCols ? <td class="sys" colSpan={subCols} /> : null}{qs.length ? <td colSpan={qs.length} /> : null}
-        <td class="calc team-score">{qs.length ? round(total) : str(scoreOf(u))}</td>
+        <td class="calc team-score">{qs.length ? round(total) : str(score)}</td>
         <td class="pen" />
-        <td class="adjcol">{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${pr.handle}`, 'adj')}</td>
-        <td class="calc">{round(finalGrade(total, pen, adjOf(pr)))}</td>
-        <td class="grow">{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${pr.handle}`, 'fb', false, true)}</td>
-        <td class="grow">{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${pr.handle}`, 'pn', false, true)}</td>
+        {personCells(pr, total, pen, true)}
       </tr>
     ));
   };
@@ -525,19 +631,11 @@ export function MarksTab(p: TabProps) {
     next.focus();
     next.select?.();
   };
-  // Return marks reads the sheet as saved: who gets marks, who is skipped or held, and the final grades.
-  const savedHeld = holdReasons(sheet.units.map((u) => holdUnit(u, u.score, u.latePenalty, (pr) => pr.adjustment)), questions, rate);
-  const heldUnits = sheet.units.filter((u) => u.people.some((pr) => savedHeld[pr.handle])).length;
-  const skipped = sheet.units.filter((u) => !u.people.some((pr) => savedHeld[pr.handle]) && noMark(u.score)).length;
-  const sending = sheet.units.length - heldUnits - skipped;
-  const finals = sheet.units.flatMap((u) => {
-    const pen = effectivePenalty(rate, u.info?.days_late, u.latePenalty);
-    return u.people.filter((pr) => !savedHeld[pr.handle]).map((pr) => finalGrade(scoreTotal(u.score, questions), pen, pr.adjustment)).filter((f): f is number => f !== null);
-  });
+  const { sending, skipped, heldUnits, finals, held } = saved!;
   const facts = [
     ...(changed ? [`${plural(changed, 'unsaved row')} ${changed === 1 ? 'is' : 'are'} not counted until you save`] : []),
     `${plural(sending, noun)} ${sending === 1 ? 'gets' : 'get'} marks · ${skipped} not marked yet (skipped) · ${heldUnits} held (fix first)`,
-    spread(finals, Object.keys(savedHeld).length),
+    spread(finals, held),
   ];
   const people = sheet.units.flatMap((u) => u.people.map((pr) => ({ u, pr })));
   const view = viewing === null ? null : (people.find((x) => x.pr.handle === viewing) ?? people[0] ?? null);
@@ -560,8 +658,8 @@ export function MarksTab(p: TabProps) {
         <span class="footnote">Show:</span>
         {(['all', 'unmarked', 'late', 'held'] as const).map((f) => <button class={`chip filter${filter === f ? ' on' : ''}`} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}>{FILTER_WORD[f]} {counts[f]}</button>)}
         {sheet.group ? null : <button class="chip adj-chip" type="button" aria-expanded={adjOpen} onClick={() => setAdjChoice(!adjOpen)}>Adjustments {adjOpen ? '▾' : '▸'}</button>}
-        {Object.keys(widths).length ? <button class="btn small quiet reset-widths" type="button" onClick={() => setWidths({})}>Reset widths</button> : null}
-        <button class="icon-btn full-toggle" type="button" ref={fullBtn} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} onClick={() => setFull(!full)}>{full ? '⤡' : '⤢'}</button>
+        {Object.keys(widths).length ? <button class="btn small quiet reset-widths" type="button" onClick={() => { setWidths({}); setFoldChoice(null); }}>Reset widths</button> : null}
+        <button class="icon-btn full-toggle" type="button" ref={fullBtn} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} onClick={() => (full ? exitFull() : setFull(true))}>{full ? '⤡' : '⤢'}</button>
       </div>
       <div class="marks-tools">
         <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!changed} small file={{ org, repo: CONFIG_REPO, path }} note={changed ? `${plural(changed, noun)} changed` : 'No unsaved changes'} />
@@ -569,40 +667,14 @@ export function MarksTab(p: TabProps) {
     </div>
   );
   const subHint = <ColHint col="From the submission">Filled in by the toolkit from the submission; you never type these. Click the heading to fold these columns into one.</ColHint>;
-  const subFold = <button class="th-fold" type="button" aria-expanded={!subFolded} onClick={() => setSubFolded(!subFolded)}>From the submission {subFolded ? '▸' : '▾'}</button>;
-  // The name column fits its longest line (a name, a handle, or a team's members line), up to 220px; longer wraps.
-  const longest = Math.max(
-    8,
-    ...sheet.units.flatMap((u) => [
-      u.key.length + 4,
-      ...(sheet.group ? [`${u.people.map((pr) => realName(pr.handle) || pr.handle).join(', ')} · ${u.people.length}`.length] : []),
-      ...u.people.map((pr) => (realName(pr.handle) || pr.handle).length),
-      qs.length ? 'Feedback per question (9)'.length : 0,
-    ]),
-  );
-  const whoWidth = Math.min(220, Math.max(96, Math.round(longest * 6.4 + 28)));
-  // The grid's columns in order, each content-wide by default; Feedback and Private notes share the rest.
-  const cols: MarksCol[] = [
-    { key: 'who', def: whoWidth, label: sheet.group ? 'Team' : 'Student' },
-    ...(external ? [] : subFolded ? [{ key: 'sub', def: 170, label: 'From the submission' }] : [
-      { key: 'submitted', def: 105, label: 'Submitted' },
-      { key: 'days', def: 56, label: 'Days late' },
-      ...(showTests ? [{ key: 'tests', def: 56, label: 'Tests' }] : []),
-      ...(showCompletion ? [{ key: 'completion', def: 90, label: 'Completion' }] : []),
-    ]),
-    ...qs.map(([q]) => ({ key: `q:${q}`, def: 64, label: q })),
-    { key: 'score', def: 56, label: 'Score' },
-    { key: 'penalty', def: rate !== null ? 156 : 64, label: 'Penalty' },
-    ...(adjOpen ? [{ key: 'adj', def: 86, label: 'Adjustment' }] : []),
-    { key: 'final', def: 56, label: 'Final' },
-    { key: 'fb', def: null, label: 'Feedback' },
-    { key: 'pn', def: null, label: 'Private notes' },
-  ];
+  const subFold = <button class="th-fold" type="button" aria-expanded={!subFolded} onClick={() => setFoldChoice(!subFolded)}>From the submission {subFolded ? '▸' : '▾'}</button>;
   const widthOf = (c: MarksCol) => widths[c.key] ?? c.def;
-  const setWidth = (k: string, w: number) => setWidths((cur) => ({ ...cur, [k]: Math.max(MIN_COL, Math.round(w)) }));
+  const clampW = (w: number) => Math.max(MIN_COL, Math.round(w));
+  const setWidth = (k: string, w: number) => setWidths((cur) => ({ ...cur, [k]: clampW(w) }));
   const resetWidth = (k: string) => setWidths((cur) => Object.fromEntries(Object.entries(cur).filter(([x]) => x !== k)));
   // The table is never narrower than its fixed columns plus the two text columns' minimum.
-  const minTable = cols.reduce((n, c) => n + (c.key === 'fb' || c.key === 'pn' ? Math.max(widths[c.key] ?? 0, MIN_TEXT_COL) : (widthOf(c) ?? 0)), 0);
+  const colMin = (c: MarksCol, w = widths[c.key]) => (c.key === 'fb' || c.key === 'pn' ? Math.max(w ?? 0, MIN_TEXT_COL) : (w ?? c.def ?? 0));
+  const minTable = cols.reduce((n, c) => n + colMin(c), 0);
   /** The handle on a column's right edge: drag (mouse, pen or touch), arrows by 8px, double-click for the default. */
   const grip = (key: string) => {
     const c = cols.find((x) => x.key === key);
@@ -613,11 +685,20 @@ export function MarksTab(p: TabProps) {
       const x0 = e.clientX;
       e.preventDefault();
       el.setPointerCapture?.(e.pointerId);
-      const move = (m: PointerEvent) => setWidth(key, w0 + m.clientX - x0);
+      // While dragging, only the column and the table's minimum move, on the page itself; the width is kept once, on release.
+      const tbl = table.current;
+      const col = [...(tbl?.querySelectorAll<HTMLElement>('col') ?? [])].find((x) => x.dataset.colKey === key);
+      let w: number | null = null;
+      const move = (m: PointerEvent) => {
+        w = clampW(w0 + m.clientX - x0);
+        if (col) col.style.width = `${w}px`;
+        if (tbl) tbl.style.minWidth = `${minTable - colMin(c) + colMin(c, w)}px`;
+      };
       const end = () => {
         el.removeEventListener('pointermove', move);
         el.removeEventListener('pointerup', end);
         el.removeEventListener('pointercancel', end);
+        if (w !== null) setWidth(key, w);
       };
       el.addEventListener('pointermove', move);
       el.addEventListener('pointerup', end);
@@ -679,7 +760,7 @@ export function MarksTab(p: TabProps) {
         {tools}
         {external ? <p class="footnote">Submitted outside GitHub: no dates, no late penalty.</p> : null}
         <div class="table-wrap marks-wrap">
-          <table class="grid marks" ref={table} onKeyDown={onKey} style={{ minWidth: `${minTable}px` }}>
+          <table class="grid marks" ref={table} onKeyDown={onKey} onFocusOut={keepDraft} style={{ minWidth: `${minTable}px` }}>
             {colgroup}
             {head}
             <tbody>{rows}</tbody>
@@ -704,7 +785,7 @@ export function MarksTab(p: TabProps) {
             </select>
           </div>
           {view ? <StudentView handle={view.pr.handle} title={assignmentTitle(a)} submitted={view.u.info?.submitted} m={studentMarks({
-            group: sheet.group, team: view.u.key, score: fullScore(view.u), questions, max: max || null, rate, daysLate: view.u.info?.days_late, latePenalty: lateOf(view.u),
+            group: sheet.group, team: view.u.key, score: fig(view.u).full, questions, max: max || null, rate, daysLate: view.u.info?.days_late, latePenalty: lateOf(view.u),
             adjustment: adjOf(view.pr), feedback: fbOf(view.pr),
             teamFeedback: view.u.feedbackPath ? v(view.u.feedbackPath, view.u.feedback) : null,
             questionFeedback: { ...view.u.questionFeedback, ...Object.fromEntries(qs.map(([q]) => [q, v([...view.u.questionFeedbackPath, q], view.u.questionFeedback[q] ?? null)])) },

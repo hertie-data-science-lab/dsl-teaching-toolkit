@@ -453,9 +453,15 @@ describe('the Submitted column', () => {
 
 describe('growing text boxes', () => {
   it('grows a textarea with its text where the browser has no field-sizing', async () => {
-    // As Firefox and Safari answer: no field-sizing.
+    // As Firefox and Safari answer: no field-sizing (asked once, when the screen's module loads).
     vi.stubGlobal('CSS', { supports: () => false, escape: (s: string) => s });
-    await marks();
+    vi.resetModules();
+    const fresh = await import('../src/screens/Assignments');
+    const { EnvCtx: FreshCtx } = await import('../src/env');
+    const f = files();
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    await act(() => render(<FreshCtx.Provider value={envOf(github(), f)}><fresh.AssignmentScreen {...props(f)} /></FreshCtx.Provider>, root!));
     const fb = q<HTMLTextAreaElement>('textarea[aria-label="Feedback for ada-l"]');
     Object.defineProperty(fb, 'scrollHeight', { configurable: true, get: () => 90 });
     await act(() => {
@@ -492,6 +498,8 @@ describe('unsaved marks', () => {
     const gh = github();
     await marks(files(), gh);
     await type('input[aria-label="Q1 (out of 10) for cy-d"]', '6');
+    expect(localStorage.getItem(k)).toBeNull(); // kept once typing pauses, or the box loses focus
+    await act(() => void q('input[aria-label="Q1 (out of 10) for cy-d"]').dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
     expect(JSON.parse(localStorage.getItem(k)!)).toMatchObject({ sha: 'static', edits: { '["submissions","cy-d","score_individual","Q1"]': 6 } });
     await click(button('Save marks'));
     await settle(() => puts(gh).length > 0 && localStorage.getItem(k) === null);
@@ -647,15 +655,19 @@ describe('column widths', () => {
     expect(folded()).toBe(false); // full screen counts as wide
     await click(q('button.full-toggle'));
     expect(folded()).toBe(true);
-    // The instructor's choice sticks for this sheet, whatever the width, until Reset widths.
+    // The instructor's choice sticks for this sheet, whatever the width, until Reset widths; it is no width, so it alone offers no Reset widths.
     await click(q('thead th .th-fold'));
     expect(folded()).toBe(false);
-    expect(JSON.parse(localStorage.getItem(widthsKey)!)).toEqual({ __subFolded: 0 });
+    expect(localStorage.getItem(`dsl-console-marks-fold:${COHORT_ORG}:grading_sheets/assignment-2.yml`)).toBe('0');
+    expect(localStorage.getItem(widthsKey)).toBeNull();
+    expect(button('Reset widths')).toBeUndefined();
     root!.remove();
     await marks();
     expect(folded()).toBe(false);
+    await act(() => void grip('days').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
     await click(button('Reset widths'));
     expect(folded()).toBe(true);
+    expect(localStorage.getItem(`dsl-console-marks-fold:${COHORT_ORG}:grading_sheets/assignment-2.yml`)).toBeNull();
     root!.remove();
     localStorage.clear();
     windowWidth(1440);
@@ -696,6 +708,7 @@ describe('text boxes', () => {
     expect(root!.querySelector('textarea.big-editor')).toBeNull();
     expect(q<HTMLTextAreaElement>('textarea[aria-label="Feedback for ada-l"]').value).toBe('Good.\nThe plot needs labels.');
     expect(root!.textContent).toContain('1 student changed');
+    await act(() => void window.dispatchEvent(new Event('pagehide'))); // kept at once when the page goes
     expect(JSON.parse(localStorage.getItem(k)!).edits['["submissions","ada-l","feedback_individual"]']).toBe('Good.\nThe plot needs labels.');
     // Cancel, and Escape, leave the cell as it was.
     await click(q('textarea[aria-label="Private notes for ben-k"] + button.area-open'));
