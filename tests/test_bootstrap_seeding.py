@@ -50,7 +50,6 @@ from dsl_course import (
     settings,
     site_repo,
     sync_faculty,
-    teams,
     welcome,
     workflows_place,
 )
@@ -60,7 +59,7 @@ from dsl_course.course import SEMESTER_TOPIC
 from dsl_course.faults import NOT_MIGRATED
 from dsl_course.repos import Converged
 from dsl_course.team_formation import LockWrite
-from tests.conftest import parse_roster, repo_row, stub_bootstrap
+from tests.conftest import repo_row, stub_bootstrap
 
 EXAMPLE_SEMESTER = (
     Path(__file__).resolve().parents[1] / "example-course" / "semester-org"
@@ -389,18 +388,17 @@ def test_semester_tag_derivation():
 def test_every_shipped_sample_parses_with_the_real_parser():
     # A sample IS the schema documentation faculty copy from, so it is validated by the
     # very code that will read their copy - never by a second, driftable checker.
-    students = parse_roster(example_semester_file("students.csv"))
+    students = roster.parse(example_semester_file("students.csv"))
     assert len(students) >= 3
     assert any(s.is_auditor for s in students), (
         "the roster sample must exercise `role: auditor`"
     )
-
-    per_assignment = teams.parse(example_semester_file("teams.csv"))
-    assert sorted(per_assignment["assignment-4-project"]) == [
+    # assignment-4-project is assignment 4: its teams are the `team:4` column.
+    assert {s.teams.get("4") for s in students} - {None} == {
         "team-alpha",
         "team-beta",
         "team-gamma",
-    ]
+    }
 
     sched, error = schedule.load_file(str(EXAMPLE_SEMESTER / "schedule.yml"))
     assert error is None, error
@@ -486,15 +484,10 @@ def test_scaffold_and_sample_carry_the_engines_current_column_sets():
     def header(text: str) -> tuple[str, ...]:
         return tuple(text.splitlines()[0].split(","))
 
-    for name, fields in (
-        ("students.csv", roster.FIELDS),
-        ("teams.csv", teams.FIELDS),
-    ):
-        assert header(welcome.template(f"semester-config/{name}")) == fields
-        assert header(example_semester_file(name)) == fields
-    # header-only scaffolds: nobody to enrol, and no team to provision, by accident
-    assert parse_roster(welcome.template("semester-config/students.csv")) == []
-    assert teams.parse(welcome.template("semester-config/teams.csv")) == {}
+    assert header(welcome.template("semester-config/students.csv")) == roster.FIELDS
+    assert header(example_semester_file("students.csv"))[:3] == roster.FIELDS
+    # the header-only scaffold: nobody to enrol by accident
+    assert roster.parse(welcome.template("semester-config/students.csv")) == []
 
 
 def test_samples_carry_nothing_that_only_makes_sense_inside_this_repo():

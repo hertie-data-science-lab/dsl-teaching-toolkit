@@ -164,6 +164,7 @@ def test_config_readme_documents_every_roster_column():
     readme = welcome.template("semester-config/README.md")
     documented = set(re.findall(r"^\| `?(\w+)`? \|", readme, re.MULTILINE))
     assert set(roster.FIELDS) <= documented
+    assert set(roster.SYSTEM_FIELDS) <= documented
 
 
 def test_every_seeded_template_path_resolves():

@@ -82,9 +82,11 @@ Things whose *literal spelling* is depended on from outside Python:
   parser rather than a subcommand, for the same reason: `--patch-path` switches it from
   handing an assignment out to patching one that is already out, and every org's Release
   assignment workflow spells the bare form.
-- **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
-  shipped JavaScript (`templates/join/onboard.yml`, `team-formation.yml`), which cites them by
-  name. Change a column and change both sides.
+- **`roster.FIELDS` / `roster.SYSTEM_FIELDS` / `roster.TEAM_PREFIX` / `roster.normalise_role`**
+  are re-implemented in the shipped JavaScript (`templates/join/onboard.yml`,
+  `team-formation.yml`), which cites them by name. Change a column and change both sides.
+  `students.csv` is faculty's; `.system/roster.csv` (handle, id, code, `code_sent_at`) is the
+  engine's, joined on `email` by `roster.parse`, the one reader of both.
 - **`team_formation.team_lock_text`'s LAYOUT.** `semester-config/.system/assignments.lock.yml` is parsed by
   line scanners - one in `templates/join/team-formation.yml` (github-script has no YAML
   library), one in `team_formation.parse_team_lock` - which match a two-space assignment key
@@ -196,10 +198,10 @@ Things whose *literal spelling* is depended on from outside Python:
 
 ## A student who switched GitHub account
 
-Faculty edit the row's `github_handle` and nothing else (the console's Students grid
-lets them on a joined row, after checking the account exists); `relink.sync`, first in each
+Faculty edit the student's `github_handle` in `.system/roster.csv` and nothing else (the one
+hand edit that engine file takes); `relink.sync`, first in each
 semester's Sync membership pass, moves every handle-keyed thing - repos, grants,
-`teams.csv`, sheet keys, `distributed.csv` email rows, `.system/autograde/` files, the
+sheet keys (team cells are keyed by email and need no move), `distributed.csv` email rows, `.system/autograde/` files, the
 `join` throttle issues -
 and writes `github_id` LAST: it is the pending marker, so a run that stops anywhere is
 finished by the next. Nothing is deleted: an untouched new-name repo is renamed
@@ -368,7 +370,7 @@ Seeded files carry their owner on the first line, and the write site enforces it
   every real Derive (JSON, so it carries no stamp; it reaches students with the rest of
   `main`, and says only which blobs Derive wrote).
 - **INSTRUCTOR-OWNED** - `gh_contents.seed_if_absent` only. Rewriting one destroys live state (roster
-  rows, enrol codes, the semester's schedule). The code comments call this "USER-owned"; the shipped
+  rows, the semester's schedule). The code comments call this "USER-owned"; the shipped
   stamp says INSTRUCTOR-OWNED. Same thing.
 - **`dsl-stub:`** is the third state: an instructor-owned file we seeded and they have not yet
   written. `gh_contents.STUB_MARKS` recognises it, and `gh_contents.is_withheld_stub` reads that to
@@ -720,7 +722,7 @@ under an older one is still found, updated and closed.
 | `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` and `assignments.yml` | semester `semester-config` |
 | `instructors.yml has entries the sync cannot use` (was `people.yml ...`) | `instructors.yml` | semester `semester-config` |
 | `students.csv has rows the toolkit cannot use` | `students.csv` | semester `semester-config` |
-| `teams.csv has rows the toolkit cannot use` | `teams.csv` | semester `semester-config` |
+| `teams.csv has rows the toolkit cannot use` (retired 0.11.0: team cells are students.csv's) | - | - |
 | `grading sheets have entries the grader cannot read` | `grading_sheets/` | semester `semester-config` |
 | `assignment grading_config.yml has values that will not grade as written` | template `solution` branch | semester `semester-config` |
 | `assignments.yml has values that will not run as written` | `assignments.yml` (what is checked against the handed-out repos) | semester `semester-config` |
@@ -759,7 +761,7 @@ handle - in the mail, the issue and the log alike.
 content fault is delivered by its digest issue and the mail beside it, never by an exit
 code: Sync membership skips the semester it cannot read (`sync_membership._CONTENT_FAULT` -
 `faults.Unusable` plus a YAML error), skips a semester with no `instructors.yml` and no
-`students.csv`, and does not count a `teams.csv` handle that is not on the roster; a course
+`students.csv`; a course
 file it cannot read reconciles nothing at all and still exits 0; a `schedule.yml` that does
 not parse is one fault on the file, not a red scheduler tick; Send enrolment codes is green
 for a roster nobody can parse and for one with nothing in it yet (`enrol_codes._GREEN`). A
@@ -812,7 +814,7 @@ systemd timer on the lab server ds01 - `dsl-scheduled-release.timer` running
 `scripts/maintenance/dsl-scheduled-release.sh`, both in `hertie-data-science-lab/ds01-infra` - which
 POSTs `repository_dispatch: scheduled-release` to the `.github` repo of every `dsl-course-hub`
 org at :00/:15/:30/:45. A push to a semester's `schedule.yml`, `instructors.yml`, `students.csv` or
-`teams.csv` dispatches the same event with `driver: semester-config`, and that run releases
+`.system/roster.csv` dispatches the same event with `driver: semester-config`, and that run releases
 into **that semester only** (checked against the registry) and asks Sync site for any render
 instead of pushing the site itself. Each driver guards the other; the cron and ds01 runs
 always walk every semester. All of them share the one `scheduled-release` group, which holds a

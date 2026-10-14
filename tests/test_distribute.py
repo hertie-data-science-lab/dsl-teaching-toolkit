@@ -1898,19 +1898,6 @@ def test_a_mark_no_roster_row_claims_is_counted_not_fatal(
     assert "ada-l" not in printed.out + printed.err
 
 
-def test_a_roster_row_with_no_email_is_counted_not_fatal(tmp_path, monkeypatch, capsys):
-    # On the roster, so the grade is distributed - but there is no address to tell them at,
-    # which is an ordinary state (a withdrawn student) and must not red every run from here
-    # on.
-    monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    out = _distribute(
-        monkeypatch, tmp_path, roster_rows="\n,Ada,enrolled,ada-l,42,dsl-abc\n"
-    )
-    assert out["rc"] == 0
-    err = capsys.readouterr().err
-    assert "no roster row with an email" in err and "ada-l" not in err
-
-
 def test_a_dry_run_reds_when_the_roster_cannot_be_read(tmp_path, monkeypatch):
     # `ensure_gradebooks` skips an unreadable roster (the nightly sync runs it too), so
     # distribute says so itself - on the dry run as well as on the real one.
@@ -2121,18 +2108,6 @@ def test_a_scoped_return_that_died_after_the_first_record_is_not_wedged(
     assert again["rc"] == 0
     ((_cfg, cfg_files, _d),) = again["config"]
     assert distribute.marks_return_record("assignment-1") in cfg_files
-
-
-def test_a_student_with_no_roster_email_is_not_recorded_before_the_mail(
-    tmp_path, monkeypatch
-):
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        roster_rows="\n,Ada,enrolled,ada-l,42,dsl-abc\n",
-    )
-    assert out["gradebooks"]  # marked and written ...
-    assert out["intent"] == [] and out["outbox"] == []  # ... and nobody to tell
 
 
 # ------------------------------------------------------------- per-question feedback
