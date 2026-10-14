@@ -19,6 +19,7 @@ from dsl_course import (
     discovery,
     distribute,
     gh_commits,
+    ghcli,
     grading_sheet,
     grading_spec,
     policy,
@@ -689,6 +690,34 @@ def test_gather_raises_no_problem_for_an_archived_template_without_the_topic(
     )
     facts = status_json.gather_course(COURSE)
     assert not [t for t in facts.templates if not t.topic]
+
+
+def test_the_course_is_gathered_once_per_run_until_this_run_writes_to_it(monkeypatch):
+    # Every semester's status.json renders the course's facts; a run that writes several
+    # (the scheduler's refresh, an operation's semester-then-course rewrite) reads the
+    # course org once, and a write of its own there is seen.
+    listed = []
+    monkeypatch.setattr(
+        status_json,
+        "list_org_repos",
+        lambda org: listed.append(org) or [repo_row(".github")],
+    )
+    monkeypatch.setattr(status_json, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(status_json, "repo_path_shas", lambda *a, **k: {})
+    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(status_json, "org_meta", lambda org: {})
+    monkeypatch.setattr(status_json, "read_semester_registry", lambda org, f: [])
+    monkeypatch.setattr(status_json, "load_opencourse", lambda org: None)
+    monkeypatch.setattr(
+        status_json.sync_faculty, "read_course_config", lambda org, faults: None
+    )
+    first = status_json.gather_course(COURSE)
+    first.templates.append("changed by its caller")
+    assert status_json.gather_course(COURSE).templates == []
+    assert listed == [COURSE]
+    ghcli._wrote(ghcli.FILE, frozenset({f"{COURSE.casefold()}/.github/x.json"}))
+    status_json.gather_course(COURSE)
+    assert listed == [COURSE, COURSE]
 
 
 def test_a_release_carries_the_number_the_site_gives_it():
