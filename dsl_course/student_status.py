@@ -398,9 +398,9 @@ def _row(
 
 
 def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
-    """A row per entry the site shows (`schedule_plan.site_rows`, the `events:` sessions
-    among them), numbered as the site numbers it, with the files it has landed and the
-    readings attached to it. A row that ships nothing is `no_materials`, as on the site."""
+    """A row per slot of each entry the site shows (`schedule_plan.site_rows`; a second
+    slot's id is `<key>-2`, as the site names its file), numbered as the site numbers
+    it, with the files it has landed and the readings attached to it. A row that ships nothing is `no_materials`, as on the site."""
     out = []
     for sr in site_rows(planned_rows(facts.sched)):
         r = sr.row
@@ -418,7 +418,7 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
         nothing = not (landed or readings or pending or r.deploys)
         out.append(
             _row(
-                r.key,
+                r.key if r.slot == 0 else f"{r.key}-{r.slot + 1}",
                 r.kind,
                 r.when,
                 title,

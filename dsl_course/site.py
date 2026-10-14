@@ -772,6 +772,8 @@ class _Row:
     reading_list: str = ""
     # Its unit has readings: the row carries the readings chip (decision 0038 rule 5).
     chip: bool = False
+    # An entry's second (third, ...) slot: the same files, so never news again.
+    repeat: bool = False
 
     @property
     def tabs(self) -> list[str]:
@@ -799,8 +801,9 @@ def _row_entry(
     Nothing landed (its own copies or its readings) is the not-yet-released row:
     `unreleased: true` and a line naming where the copies will land. `readings_pending`:
     readings attached to it that have not landed yet. `readings_chip`: its unit has
-    readings. `off_schedule`: a `show_on_site: false` row, left off the schedule and the
-    Updates box. `dateless`: a `tbc` row - on the schedule and its tab, with no `date:`
+    readings. `repeat`: an entry's later slot, never in the Updates box (its files
+    shipped once). `off_schedule`: a `show_on_site: false` row, left off the schedule
+    and the Updates box. `dateless`: a `tbc` row - on the schedule and its tab, with no `date:`
     ("TBC" is printed instead), and never in the Updates box. `no_materials`: a row that
     ships nothing (`_Row.no_materials`) - never "not yet released", never in the Updates
     box. `hide_time`: a whole-day row (its date has no time), so the site prints no
@@ -840,6 +843,8 @@ def _row_entry(
         flags += "readings_pending: true\n"
     if row.chip:
         flags += "readings_chip: true\n"
+    if row.repeat:
+        flags += "repeat: true\n"
     # A whole-day row (a bare date) has no clock: `iso_when` fills in 09:00 and the theme
     # would print it as an appointment.
     if isinstance(row.when, date) and not isinstance(row.when, datetime):
@@ -925,6 +930,7 @@ def _site_rows(
             location=r.location,
             reading_list=_reading_list([*own, *sr.readings]),
             chip=sr.chip,
+            repeat=r.slot > 0,
         )
         built.append((r.key, r.slot, row))
     out: dict[str, str] = {}

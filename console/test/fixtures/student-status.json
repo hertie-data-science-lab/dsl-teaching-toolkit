@@ -86,7 +86,7 @@
     },
     "other": {
       "label": "Event",
-      "plural": "other",
+      "plural": "events",
       "colour": "#7d6230",
       "background": "#fbf2d5",
       "tab": true
@@ -167,7 +167,7 @@
       "no_materials": false
     },
     {
-      "id": "lecture-1-online",
+      "id": "lecture_01-2",
       "kind": "lecture",
       "when": "2026-09-09T18:00:00+02:00",
       "sort_at": "2026-09-09T18:00:00+02:00",
@@ -180,14 +180,27 @@
       "tbc": false,
       "dateless": false,
       "off_schedule": false,
-      "links": [],
+      "links": [
+        {
+          "name": "slides.pdf",
+          "repo": "materials",
+          "path": "lectures/01_intro/slides.pdf",
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/main/lectures/01_intro/slides.pdf"
+        },
+        {
+          "name": "code/ (2 files)",
+          "repo": "materials",
+          "path": "lectures/01_intro/code",
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/tree/main/lectures/01_intro/code"
+        }
+      ],
       "readings": [],
       "reading_list": "",
       "readings_pending": false,
       "tabs": [
         "lecture"
       ],
-      "no_materials": true
+      "no_materials": false
     },
     {
       "id": "assignment-1:handout",
