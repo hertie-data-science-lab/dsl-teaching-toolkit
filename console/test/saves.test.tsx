@@ -246,6 +246,48 @@ describe('Save on the schedule’s new release, its kind inferred from the folde
   });
 });
 
+describe('A release line’s own time, prefilled with the default', () => {
+  const sched = 'timezone: Europe/Berlin\nreleases:\n  lab-2:\n    event_datetime: 2026-09-15T10:00\n    kind: lab\n    deploy:\n      - course_source_repo: course-materials-f2026\n        course_source_path: labs/02_x\n';
+  const at = () => [q<HTMLInputElement>('#e-d0-at').value, q<HTMLInputElement>('#e-d0-att').value];
+  async function open(gh: FakeGitHub) {
+    const f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'lab-2' })} />);
+  }
+  async function save(gh: FakeGitHub) {
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    return parse(body(puts(gh, 'schedule.yml')[0])).releases['lab-2'].deploy[0];
+  }
+
+  it('shows an hour before the session, and follows the session while it is the default', async () => {
+    const gh = github();
+    await open(gh);
+    expect(at()).toEqual(['2026-09-15', '09:00']);
+    expect(root!.textContent).not.toContain('default: 2026');
+    await type('#e-time', '00:30');
+    expect(at()).toEqual(['2026-09-14', '23:30']);
+  });
+
+  it('writes no deploy_datetime when set back to the default, or the date is cleared', async () => {
+    const gh = github();
+    await open(gh);
+    await type('#e-d0-att', '08:00');
+    await type('#e-d0-att', '09:00');
+    await type('#e-d0-at', '2026-09-14');
+    await type('#e-d0-at', '');
+    expect(at()).toEqual(['2026-09-15', '09:00']);
+    await type('#e-title', 'Intro');
+    expect(await save(gh)).toEqual({ course_source_repo: 'course-materials-f2026', course_source_path: 'labs/02_x' });
+  });
+
+  it('writes a changed time', async () => {
+    const gh = github();
+    await open(gh);
+    await type('#e-d0-att', '08:00');
+    expect((await save(gh)).deploy_datetime).toBe('2026-09-15T08:00');
+  });
+});
+
 describe('Save on the schedule’s new assignment entry', () => {
   async function addEntry(gh: FakeGitHub, f: StaticFiles) {
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026' })} />);

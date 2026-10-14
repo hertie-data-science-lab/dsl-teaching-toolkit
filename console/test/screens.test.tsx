@@ -315,11 +315,15 @@ describe('S6 schedule and S11 release', () => {
     for (const l of ['From: repo', 'From: path', 'To: repo', 'To: path', 'Release at']) expect(out).toContain(`>${l}`);
     const t = text(<ScheduleScreen {...props({ entry: 's5' })} />);
     expect(t).toContain('Name the repo and path where the files will be, even if they are not written yet. At release time the engine copies whatever is at that path.');
-    expect(t).toContain('Ships the files at this moment, before or after the session. Leave blank to ship when the session starts.');
-    // One line, its own time blank: the default is the entry's.
+    expect(t).toContain('Ships the files at this moment, before or after the session. Filled in with the default, an hour before the session; clear the date to go back to it.');
+    // One line, its own time unset: the boxes hold the default, an hour before the 10:00 session.
     expect(out.match(/class="deploy"/g)).toHaveLength(1);
-    expect(out).toContain('id="e-d0-at" placeholder="2026-10-08" value/>');
-    expect(out).toContain('>Add another</button>');
+    expect(out).toContain('id="e-d0-at" value="2026-10-08"/>');
+    expect(out).toContain('id="e-d0-att" value="09:00"/>');
+    expect(t).not.toContain('default: 2026');
+    expect(out).toContain('>Add another release item(s)</button>');
+    // Kind and Title infer silently; the dialog does not describe the site row.
+    for (const gone of ['inferred from where it lands', 'from the folder name', 'On the student site this row shows', 'without the colon']) expect(t).not.toContain(gone);
   });
   it('never says a folder is missing when the repo could not be read, or was listed only in part', () => {
     const withTree = (tree: TreeState): Files => Object.assign(Object.create(files), { tree: () => tree });

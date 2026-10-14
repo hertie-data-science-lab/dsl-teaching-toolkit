@@ -15,7 +15,7 @@ import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
 import { POLICY, penaltyRate } from '../src/model/policy';
 import { effectivePenalty, finalGrade, lateChoice, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { assignmentKey, blankDeploy, blankDraft, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { assignmentKey, blankDeploy, blankDraft, defaultDeployAt, deployAt, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
 import { validSchedule } from '../src/model/cascade';
 import { StatusStore, type Loaded } from '../src/model/status';
@@ -231,15 +231,29 @@ describe('the schedule entry sheet model', () => {
   });
 
   it('keeps an exam or a special event on its own sheet, and an unknown kind is a special event', () => {
-    const doc = { events: { mid: { kind: 'exam', event_datetime: '2026-11-03' }, clinic: { event_datetime: '2026-11-04' }, odd: { kind: 'assets', event_datetime: '2026-11-05' }, lab: { kind: 'lab', event_datetime: '2026-11-06' } } };
+    const doc = { events: { mid: { kind: 'exam', event_datetime: '2026-11-03' }, clinic: { event_datetime: '2026-11-04' }, odd: { kind: 'assets', event_datetime: '2026-11-05' }, lab: { kind: 'lab', event_datetime: '2026-11-06' }, talk: { kind: 'lecture', event_datetime: '2026-11-07T10:00' } } };
     expect(readDraft(doc, 'mid')?.kind).toBe('events');
-    // A session kind is a session's sheet, whichever block holds it.
+    // A session kind is a session's sheet, whichever block holds it: a lab, a lecture.
     expect(readDraft(doc, 'lab')?.kind).toBe('session');
+    expect(readDraft(doc, 'talk')).toMatchObject({ kind: 'session', type: 'lecture', deploys: [] });
     expect(readDraft(doc, 'clinic')).toMatchObject({ kind: 'events', type: 'special_event' });
     expect(readDraft(doc, 'odd')?.kind).toBe('events');
   });
 
-  it('writes a line’s own release time only when given; blank ships at the entry’s time', () => {
+  it('defaults a line’s release time to an hour before a timed session, the day’s start for a whole-day one', () => {
+    expect(defaultDeployAt('2026-10-08', '10:00')).toEqual(['2026-10-08', '09:00']);
+    expect(defaultDeployAt('2026-10-08', '00:30')).toEqual(['2026-10-07', '23:30']);
+    expect(defaultDeployAt('2026-10-08', '')).toEqual(['2026-10-08', '']);
+    expect(defaultDeployAt('', '10:00')).toEqual(['', '']);
+    const session = { date: '2026-10-08', time: '10:00' };
+    // Back at the default, or the date emptied: blank, so nothing is written.
+    expect(deployAt(session, '2026-10-08', '09:00')).toEqual({ atDate: '', atTime: '' });
+    expect(deployAt(session, '', '09:00')).toEqual({ atDate: '', atTime: '' });
+    expect(deployAt(session, '2026-10-08', '08:00')).toEqual({ atDate: '2026-10-08', atTime: '08:00' });
+    expect(deployAt(session, '2026-10-08', '')).toEqual({ atDate: '2026-10-08', atTime: '' });
+  });
+
+  it('writes a line’s own release time only when given; blank ships at the default', () => {
     const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n        deploy_datetime: 2026-10-07T09:00\n';
     const y = new YamlText(src);
     const doc = y.toJS() as Record<string, unknown>;

@@ -9,7 +9,7 @@ import { Field, Invalid } from '../forms/Form';
 import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  assignmentKey, blankDeploy, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft,
+  assignmentKey, blankDeploy, blankDraft, blockOf, defaultDeployAt, deployAt, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft,
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
@@ -172,12 +172,12 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
   return (
     <>
       <div class="row-2">
-        <F id="e-type" k="type" d={d} set={set} t={{ tier: 'default', label: 'Kind', widget: 'select', defaultLabel: 'default: inferred from where it lands', reason: 'Sets the row’s tab, colour and name.', options: [{ value: '', label: `${KIND_LABEL[inferred] ?? inferred} (inferred)` }, ...kinds.map((k) => ({ value: k, label: KIND_LABEL[k] ?? k }))] }} />
-        <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'from the folder name', reason: 'The name, shown after the identifier. Plain text.' }} />
+        <F id="e-type" k="type" d={d} set={set} t={{ tier: 'default', label: 'Kind', widget: 'select', reason: 'Sets the row’s tab, colour and name.', options: [{ value: '', label: `${KIND_LABEL[inferred] ?? inferred} (inferred)` }, ...kinds.map((k) => ({ value: k, label: KIND_LABEL[k] ?? k }))] }} />
+        <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', reason: 'The name, shown after the identifier. Plain text.' }} />
       </div>
       <NumberField d={d} set={set as Setter<ReleaseDraft | AssignmentDraft>} errors={errors} kind={d.type || inferred} />
       <div class="row-2">
-        <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: d.deploys.length ? `Automation releases at this time, ${tz}.` : 'Leave the date empty and the student site shows TBC.' }} />
+        <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: d.deploys.length ? `In ${tz}. Automation releases the files an hour before, unless a line sets its own time (Advanced).` : 'Leave the date empty and the student site shows TBC.' }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time' }} />
       </div>
       <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', 'Shown to students under the title.')} />
@@ -187,6 +187,8 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
         {d.deploys.map((dp, i) => {
           const tree = dp.repo ? p.files.tree(p.course.org, dp.repo) : null;
           const adv = [dp.dest && dp.dest !== DEFAULT_DEST_REPO, !!dp.path, !!(dp.atDate || dp.atTime)].filter(Boolean).length;
+          // The release time's boxes show the default until a time of its own is set.
+          const [atDate, atTime] = dp.atDate || dp.atTime ? [dp.atDate, dp.atTime] : defaultDeployAt(d.date, d.time);
           return (
             <div class="deploy">
               <div class="deploy-head">Deploy {i + 1}<button class="x" type="button" aria-label={`Remove deploy ${i + 1}`} onClick={() => set({ deploys: d.deploys.filter((_, j) => j !== i) })}>&times;</button></div>
@@ -217,8 +219,8 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
                     <div class="field"><label for={`e-d${i}-path`}>To: path <span class="default">default: same as From</span></label><input type="text" id={`e-d${i}-path`} placeholder={dp.folder} value={dp.path} onInput={(e) => setDeploy(i, { path: (e.target as HTMLInputElement).value })} /></div>
                   </div>
                   <div class="row-2">
-                    <div class="field"><label for={`e-d${i}-at`}>Release at <span class="default">default: {d.date ? `${d.date}${d.time ? ` ${d.time}` : ''}` : 'when the session starts'}</span></label> <Hint small label="About the release time">Ships the files at this moment, before or after the session. Leave blank to ship when the session starts.</Hint><input type="date" id={`e-d${i}-at`} placeholder={d.date} value={dp.atDate} onInput={(e) => setDeploy(i, { atDate: (e.target as HTMLInputElement).value })} />{errors[`deploy${i}.at`] ? <Invalid>{errors[`deploy${i}.at`]}</Invalid> : null}</div>
-                    <div class="field"><label for={`e-d${i}-att`}>At</label><input type="time" id={`e-d${i}-att`} placeholder={d.time} value={dp.atTime} onInput={(e) => setDeploy(i, { atTime: (e.target as HTMLInputElement).value })} /></div>
+                    <div class="field"><label for={`e-d${i}-at`}>Release at <Hint small label="About the release time">Ships the files at this moment, before or after the session. Filled in with the default, an hour before the session; clear the date to go back to it.</Hint></label><input type="date" id={`e-d${i}-at`} value={atDate} onInput={(e) => setDeploy(i, deployAt(d, (e.target as HTMLInputElement).value, atTime))} />{errors[`deploy${i}.at`] ? <Invalid>{errors[`deploy${i}.at`]}</Invalid> : null}</div>
+                    <div class="field"><label for={`e-d${i}-att`}>At</label><input type="time" id={`e-d${i}-att`} value={atTime} onInput={(e) => setDeploy(i, deployAt(d, atDate, (e.target as HTMLInputElement).value))} /></div>
                   </div>
                 </div>
               </details>
@@ -226,7 +228,7 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
           );
         })}
         {d.deploys.length ? null : <p class="why">Nothing to release: a session of its own (a second lab group, say), saved under events. Its row still shows on the student site, without files.</p>}
-        <div><button class="btn small quiet" type="button" onClick={() => set({ deploys: [...d.deploys, blankDeploy(repos[0] ?? '')] })}>{d.deploys.length ? 'Add another' : 'Add what to release'}</button></div>
+        <div><button class="btn small quiet" type="button" onClick={() => set({ deploys: [...d.deploys, blankDeploy(repos[0] ?? '')] })}>{d.deploys.length ? 'Add another release item(s)' : 'Add what to release'}</button></div>
       </div>
       {d.id ? <a class="textlink" href={`#release-${d.id}`}>Open release details</a> : null}
     </>
@@ -630,8 +632,6 @@ function View(p: ReadyProps) {
       const title = d.kind === 'semester' ? <>Semester dates</> : d.kind === 'archive' ? <><b>Archive</b>: {d.title || 'Semester archived'} <ArchiveHelp org={p.cohort.org} /></> : <><b>{ident}</b>: {d.title || (current?.name ?? 'Untitled')}</>;
       const eyebrow = d.kind === 'semester' ? 'Semester' : d.kind === 'archive' ? 'Archive' : d.kind === 'assignments' ? 'Assignment entry' : `${TYPE_LABEL[d.kind === 'session' ? d.type || 'lecture' : d.type] ?? ''}${d.date ? `, ${fmtDay(d.date, tz, year)}${d.time ? ` ${d.time}` : ''}` : ''}`;
       const probs = (status.problems ?? []).filter((x) => x.fix?.entry === key && x.fix.path === 'schedule.yml');
-      const two = d.kind === 'session' || d.kind === 'assignments';
-      const siteTitle = d.kind === 'semester' ? '' : d.title || current?.name || '';
       sheet = (
         <div class="entry" role="dialog" aria-labelledby="entry-title">
           <div class="entry-head">
@@ -643,11 +643,6 @@ function View(p: ReadyProps) {
             {close}
           </div>
           <div class="entry-body">
-            {d.kind !== 'semester' ? (
-              <div class="site-note">
-                On the student site this row shows {two ? <><b>{ident}</b> on one line and “{siteTitle}” below it, without the colon.</> : <>only the bold title, <b>{siteTitle || (d.kind === 'archive' ? 'Semester archived' : '')}</b>.</>}
-              </div>
-            ) : null}
             {/* A release that will be skipped says so once: the chip above, and the folder check (or, for a missing number, the line below). */}
             {probs.length && rel?.state !== 'will_be_skipped' ? <ProblemCards list={probs} /> : null}
             <div class="form">

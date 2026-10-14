@@ -17,7 +17,7 @@ export interface DeployDraft {
   folder: string;
   dest: string;
   path: string;
-  /** Its own release time (`deploy_datetime`); blank ships it at the entry's time. */
+  /** Its own release time (`deploy_datetime`); blank ships it at the default (`defaultDeployAt`). */
   atDate: string;
   atTime: string;
   /** Its index in the file's `deploy:` list; none for a line added here. */
@@ -396,7 +396,29 @@ export function withNumber<T extends Draft>(d: T, doc: Raw, kindOf: KindOf = spe
   return n === null ? d : { ...d, number: n };
 }
 
-/** A new line of what to release: from `repo`, at the entry's time. */
+/**
+ * When a copy that names no release time ships, as the two boxes show it: an hour before a
+ * timed session (the engine's `_default_ship_times`, on the wall clock), the day's start for a
+ * whole-day one (no time), nothing for an undated one.
+ */
+export function defaultDeployAt(date: string, time: string): [string, string] {
+  if (!date || !time) return [date, ''];
+  const [y, mo, d] = date.split('-').map(Number);
+  const [h, mi] = time.split(':').map(Number);
+  const at = new Date(Date.UTC(y, mo - 1, d, h, mi) - 3_600_000).toISOString();
+  return [at.slice(0, 10), at.slice(11, 16)];
+}
+
+/**
+ * A copy's release time as typed into its boxes (prefilled with the default): emptied, or back
+ * at the default, it is blank again, so no `deploy_datetime` is written and the file stays minimal.
+ */
+export function deployAt(session: { date: string; time: string }, date: string, time: string): Pick<DeployDraft, 'atDate' | 'atTime'> {
+  const [dd, dt] = defaultDeployAt(session.date, session.time);
+  return !date || (date === dd && time === dt) ? { atDate: '', atTime: '' } : { atDate: date, atTime: time };
+}
+
+/** A new line of what to release: from `repo`, at the default time. */
 export const blankDeploy = (repo: string): DeployDraft => ({ repo, folder: '', dest: '', path: '', atDate: '', atTime: '' });
 
 export function blankDraft(type: string, defaults: { repo: string }): ReleaseDraft | AssignmentDraft | EventDraft {
