@@ -17,7 +17,6 @@ export function Hint({ children, doc, label = 'About this page', small = false }
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
   const [place, setPlace] = useState<{ up: boolean; top: number; left: number } | null>(null);
-  const [moved, setMoved] = useState(0);
   const open = hover || focus;
   const id = useId();
   const wrap = useRef<HTMLSpanElement>(null);
@@ -51,11 +50,13 @@ export function Hint({ children, doc, label = 'About this page', small = false }
       render(null, box);
       box.remove();
       setHost(null);
+      setPlace(null);
     };
   }, [open]);
 
   // Below the ?, right-aligned to it; above when it does not fit below but fits above; then
-  // clamped so it never passes either edge of the viewport. Measured once the box holds it.
+  // clamped so it never passes either edge of the viewport. Measured once the box holds it, and
+  // again on scroll or resize; an unchanged place renders nothing.
   const measure = () => {
     if (!pop.current || !wrap.current) return;
     const r = pop.current.getBoundingClientRect();
@@ -63,19 +64,17 @@ export function Hint({ children, doc, label = 'About this page', small = false }
     const up = b.bottom + GAP + r.height > window.innerHeight && b.top - GAP >= r.height;
     const left = Math.max(GAP, Math.min(b.right - r.width, window.innerWidth - GAP - r.width));
     const next = { up, top: up ? b.top - GAP - r.height : b.bottom + GAP, left };
-    if (!place || place.up !== next.up || place.top !== next.top || place.left !== next.left) setPlace(next);
+    setPlace((prev) => (prev && prev.up === next.up && prev.top === next.top && prev.left === next.left ? prev : next));
   };
-  const measured = useRef(-1);
 
   // The popover follows its ? when anything scrolls or the window resizes.
   useEffect(() => {
     if (!open) return;
-    const follow = () => setMoved((n) => n + 1);
-    window.addEventListener('scroll', follow, true);
-    window.addEventListener('resize', follow);
+    window.addEventListener('scroll', measure, true);
+    window.addEventListener('resize', measure);
     return () => {
-      window.removeEventListener('scroll', follow, true);
-      window.removeEventListener('resize', follow);
+      window.removeEventListener('scroll', measure, true);
+      window.removeEventListener('resize', measure);
     };
   }, [open]);
 
@@ -98,11 +97,11 @@ export function Hint({ children, doc, label = 'About this page', small = false }
   };
   const body = (
     <span
-      class={`hint-pop${open ? ' fixed' : ''}${place?.up ? ' flip-y' : ''}`}
+      class={`hint-pop${place?.up ? ' flip-y' : ''}`}
       id={id}
       ref={pop}
       hidden={!open}
-      style={open ? { position: 'fixed', top: `${place?.top ?? 0}px`, left: `${place?.left ?? 0}px`, right: 'auto', bottom: 'auto', visibility: place ? undefined : 'hidden' } : undefined}
+      style={open ? { position: 'fixed', top: `${place?.top ?? 0}px`, left: `${place?.left ?? 0}px`, visibility: place ? undefined : 'hidden' } : undefined}
       onMouseEnter={enter}
       onMouseLeave={leave}
       onFocusIn={() => setFocus(true)}
@@ -113,18 +112,12 @@ export function Hint({ children, doc, label = 'About this page', small = false }
     </span>
   );
   useLayoutEffect(() => {
-    if (!host) {
-      if (place) setPlace(null);
-      measured.current = -1;
-      return;
-    }
-    render(body, host);
-    // Once on opening, and again whenever something scrolled or resized.
-    if (measured.current !== moved) {
-      measured.current = moved;
-      measure();
-    }
+    if (host) render(body, host);
   });
+  // Once on opening, after the box holds it (the effect above runs first).
+  useLayoutEffect(() => {
+    if (host) measure();
+  }, [host]);
   return (
     <span class={small ? 'hint-wrap small' : 'hint-wrap'} ref={wrap} onMouseEnter={enter} onMouseLeave={leave} onFocusIn={() => setFocus(true)} onFocusOut={blur}>
       <button class="hint-btn" type="button" aria-label={label} aria-describedby={id}>?</button>

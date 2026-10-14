@@ -92,7 +92,6 @@ describe('Hint', () => {
       const { btn } = await inDialog();
       await act(() => btn.focus());
       expect(pop().hidden).toBe(false);
-      expect(pop().classList.contains('fixed')).toBe(true);
       expect(pop().style.position).toBe('fixed');
       expect(pop().style.top).toMatch(/px$/);
       expect(pop().style.left).toMatch(/px$/);
@@ -117,7 +116,6 @@ describe('Hint', () => {
     it('is fixed at the end of the page outside a dialog too, above everything, and comes back in place closed', async () => {
       const { btn } = await mount();
       await act(() => btn.focus());
-      expect(pop().classList.contains('fixed')).toBe(true);
       expect(pop().style.position).toBe('fixed');
       expect(root!.contains(pop())).toBe(false);
       expect(btn.getAttribute('aria-describedby')).toBe(pop().id);
@@ -139,7 +137,7 @@ describe('Hint', () => {
     it('sits above the modal scrim and the panel, and no dialog box makes itself a fixed box’s containing block', () => {
       const css = readFileSync(`${process.cwd()}/src/styles/console.css`, 'utf8');
       const z = (sel: string) => Number(new RegExp(`(?:^|\\n)${sel.replace(/[.]/g, '\\.')} \\{[^}]*z-index: (\\d+)`).exec(css)?.[1]);
-      expect(z('.hint-pop.fixed')).toBeGreaterThan(Math.max(z('.modal-scrim'), z('.drawer')));
+      expect(z('.hint-pop')).toBeGreaterThan(Math.max(z('.modal-scrim'), z('.drawer')));
       for (const sel of ['.entry', '.entry-body', '.modal', '.drawer-body']) {
         const rules = [...css.matchAll(new RegExp(`(?:^|\\n)\\s*${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`, 'g'))].map((m) => m[1]);
         expect(rules.length).toBeGreaterThan(0);
