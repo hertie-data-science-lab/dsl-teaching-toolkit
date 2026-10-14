@@ -4,8 +4,8 @@ The course org's `<course-org>.github.io` is PUBLIC and opt-in. The `course-mate
 repos it publishes are private, so linking into them would 404 for the public; instead
 this HOSTS the chosen repo's files in the site repo (Jekyll serves any path not starting
 with `_`) and links to site-relative URLs. Session materials only - no assignments, no
-events, no semester repos. What it publishes is the course's `opencourse.yml`
-(`opencourse`): the Publish website operation and the daily update both read it,
+events, no semester repos. What it publishes is the course's `course.yml`
+`open_course_site:` (`opencourse`): the Publish website operation and the daily update both read it,
 and `enabled: false` stops both.
 
 Driven through `python3 -m dsl_course.site public-sync`, which delegates here.
@@ -25,6 +25,8 @@ import yaml
 from . import policy
 from .config import read_local
 from .course import (
+    OPEN_SITE_BLOCK,
+    course_block,
     discover_local_sessions,
     discover_sections,
     find_session_dir,
@@ -68,7 +70,7 @@ from .site_repo import (
 PUBLIC_MATERIALS_DIR = "public-materials"
 
 # The open site is still built from one repo's folders (its own design, `openware`, is
-# not written yet): `readings` is the section `opencourse.yml`'s `readings_mode` governs,
+# not written yet): `readings` is the section `open_course_site.readings_mode` governs,
 # and a lab-kind section makes a lab row (`row_kind`). The semester site reads kinds from
 # the schedule.
 READINGS_SECTION = "readings"
@@ -77,12 +79,19 @@ READINGS_SECTION = "readings"
 def course_facts(meta: dict) -> str:
     """`_data/course.yml`: the contact and the licence the home page shows (decision 0019).
 
-    The course's own `contact` / `licence` from dsl-course.yml, else the institution's
-    `policy.contact` and first licence. A licence `policy.licences` names carries its URL;
-    one it does not (or `All rights reserved`, which has none) is shown as plain text."""
+    The course's own `open_course_site.contact` / `course.licence` from course.yml, else
+    the institution's first contact and first licence. A licence the institution names
+    carries its URL; one it does not (or `All rights reserved`, which has none) is shown
+    as plain text."""
     pol = policy.load()
-    contact = str(meta.get("contact") or "").strip() or pol["contact"]
-    name = str(meta.get("licence") or "").strip() or pol["licences"][0]["name"]
+    site = (
+        meta.get(OPEN_SITE_BLOCK) if isinstance(meta.get(OPEN_SITE_BLOCK), dict) else {}
+    )
+    contact = str(site.get("contact") or "").strip() or policy.contact()
+    name = (
+        str(course_block(meta).get("licence") or "").strip()
+        or pol["licences"][0]["name"]
+    )
     url = next((lc["url"] for lc in pol["licences"] if lc["name"] == name), "")
     facts = {"contact": contact, "licence": {"name": name, "url": url}}
     return yaml.safe_dump(facts, sort_keys=False, allow_unicode=True)
@@ -136,7 +145,7 @@ def _withheld_from_site(root: Path, path: Path, withhold: tuple[str, ...] = ()) 
     it never calls `copy_tree` and the `ignore` hook never runs: it publishes filenames,
     and inlines the overlay's prose verbatim. Without this, a withheld reading was named on
     the open web and a withheld OVERLAY had its full text published there. `withhold` is
-    `opencourse.yml`'s list, judged from the clone's root."""
+    `open_course_site:`'s list, judged from the clone's root."""
     rel = path.relative_to(root).as_posix()
     return (
         has_denied_component(rel)
@@ -240,7 +249,7 @@ def _public_lecture_entry(
 
 def sync_public_site(course_org: str, oc: OpenCourse) -> int:
     """Build/refresh the PUBLIC course site `<course-org>.github.io` (open courseware)
-    from `oc`, the course's `opencourse.yml`.
+    from `oc`, the course's `open_course_site:`.
 
     The first run scaffolds the site (Pages), later runs re-sync it. Hosts the declared
     `source_repo`'s files - every section it
@@ -277,7 +286,7 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                 return None
             # Three filters unioned, not one list: the denylist is what this toolkit
             # refuses to publish, `.releaseignore` is faculty's own for every copy, and
-            # `opencourse.yml`'s `withhold` theirs for this site alone. Anchored at the
+            # `open_course_site:`'s `withhold` theirs for this site alone. Anchored at the
             # CLONE root even though what gets copied is a session folder deep inside it.
             withhold = union_deny(
                 _publication_ignore, deny_for(src), deny_lines(src, oc.withhold)
@@ -368,13 +377,14 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                     )
 
         config = {}
-        if meta.get("course_name"):
-            config["course_name"] = str(meta["course_name"])
-        if meta.get("course_code"):
-            config["course_code"] = str(meta["course_code"])
+        identity = course_block(meta)
+        if identity.get("name"):
+            config["course_name"] = str(identity["name"])
+        if identity.get("code"):
+            config["course_code"] = str(identity["code"])
         # Always written, blank included: the seed's placeholder paragraph must never
         # reach the open web (the home page drops the section when it is blank).
-        config["course_description"] = str(meta.get("course_description") or "").strip()
+        config["course_description"] = str(identity.get("description") or "").strip()
         config["course_semester"] = "Open Courseware"  # neutral: the site is multi-year
         # The public open-courseware site belongs to the COURSE org (multi-year), so its
         # footer links there - unlike a semester site, which links its semester org.
@@ -392,12 +402,12 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             files={
                 # People from the course org's declared `people:` block (else the GitHub
                 # teams). Instructors only - the open-courseware site is multi-year, and
-                # TAs are declared per semester (in each semester's instructors.yml), never
+                # TAs are declared per semester (in each semester's semester.yml), never
                 # course-level.
                 "_data/people.yml": people_yaml(
                     course_org,
                     meta,
-                    edit_at=f"the `people:` block of {course_org}/.github/dsl-course.yml",
+                    edit_at=f"the `people:` block of {course_org}/.github/course.yml",
                     include_tas=False,
                 ),
                 "_data/course.yml": course_facts(meta),
@@ -422,9 +432,9 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
 
 
 def publish(course_org: str, *, daily: bool = False) -> int:
-    """Publish the public website as the course's `opencourse.yml` declares it.
+    """Publish the public website as the course's `open_course_site:` declares it.
 
-    `daily` is the cron's catch-up: a course with no `opencourse.yml`, or one that says
+    `daily` is the cron's catch-up: a course with no `open_course_site:`, or one that says
     `enabled: false`, is a one-line no-op there, since the cron ships in every course org
     and most never publish. Asked for by a person, the same answer is a refusal with the
     sentence that says what to change."""

@@ -1,6 +1,10 @@
 {
   "assignments_file": "assignments.yml",
   "config_repo": "semester-config",
+  "course_file": "course.yml",
+  "default_formats": [
+    "ipynb"
+  ],
   "instructors_file": "instructors.yml",
   "join_markers": {
     "join_course": "<!-- dsl:join-course -->",
@@ -243,6 +247,198 @@
     {
       "cost": "",
       "fault_code": null,
+      "new": "course.yml",
+      "old": "dsl-course.yml",
+      "since": "0.11.0",
+      "where": "course .github"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "course.yml open_course_site",
+      "old": "opencourse.yml",
+      "since": "0.11.0",
+      "where": "course .github"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "semester.yml people",
+      "old": "instructors.yml",
+      "since": "0.11.0",
+      "where": "semester-config"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "semester.yml defaults",
+      "old": "assignments.yml",
+      "since": "0.11.0",
+      "where": "semester-config"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": ".system/course.yml",
+      "old": ".system/dsl-course.yml",
+      "since": "0.11.0",
+      "where": "semester-config"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "institution.yml",
+      "old": "policy.yml",
+      "since": "0.11.0",
+      "where": "toolkit root"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "course.name",
+      "old": "course_name",
+      "since": "0.11.0",
+      "where": "dsl-course.yml -> course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "course.code",
+      "old": "course_code",
+      "since": "0.11.0",
+      "where": "dsl-course.yml -> course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "course.description",
+      "old": "course_description",
+      "since": "0.11.0",
+      "where": "dsl-course.yml -> course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "course.toolkit_version_ref",
+      "old": "central_ref",
+      "since": "0.11.0",
+      "where": "dsl-course.yml -> course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "course.licence",
+      "old": "licence",
+      "since": "0.11.0",
+      "where": "dsl-course.yml -> course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "course.student_console",
+      "old": "student_console",
+      "since": "0.11.0",
+      "where": "dsl-course.yml -> course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "open_course_site.contact",
+      "old": "contact",
+      "since": "0.11.0",
+      "where": "dsl-course.yml -> course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "defaults",
+      "old": "assignment_defaults",
+      "since": "0.11.0",
+      "where": "dsl-course.yml -> course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "people",
+      "old": "people",
+      "since": "0.11.0",
+      "where": "dsl-course.yml -> course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "",
+      "old": "site_link_extensions",
+      "since": "0.11.0",
+      "where": "dsl-course.yml -> course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "assignment_repo_visibility",
+      "old": "visibility",
+      "since": "0.11.0",
+      "where": "a defaults: block"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "",
+      "old": "formats",
+      "since": "0.11.0",
+      "where": "a defaults: block"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "email",
+      "old": "hertie_email",
+      "since": "0.11.0",
+      "where": "semester-config students.csv / teams.csv"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": ".system/roster.csv",
+      "old": "github_handle",
+      "since": "0.11.0",
+      "where": "semester-config students.csv / teams.csv"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": ".system/roster.csv",
+      "old": "github_id",
+      "since": "0.11.0",
+      "where": "semester-config students.csv / teams.csv"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": ".system/roster.csv",
+      "old": "enrol_code",
+      "since": "0.11.0",
+      "where": "semester-config students.csv / teams.csv"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": ".system/roster.csv",
+      "old": "code_sent_at",
+      "since": "0.11.0",
+      "where": "semester-config students.csv / teams.csv"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "students.csv `team:<number>` columns",
+      "old": "teams.csv",
+      "since": "0.11.0",
+      "where": "semester-config students.csv / teams.csv"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
       "new": "none: folders carry no kind (the schedule block decides it)",
       "old": "kind_folder",
       "since": "0.11.0",
@@ -264,8 +460,9 @@
     "migration_run_keys": ".system/migration-run-keys.json",
     "missing_semesters": ".system/missing-semesters",
     "outcomes": ".system/outcomes",
-    "pointer": ".system/dsl-course.yml",
+    "pointer": ".system/course.yml",
     "proposed_releases": ".system/proposed-releases.yml",
+    "roster": ".system/roster.csv",
     "semester_gradebook": ".system/semester-grades.csv",
     "snapshots": ".system/snapshots",
     "solution_preview": ".system/solution-preview.json",
@@ -277,6 +474,7 @@
     "team_formation": ".system/team-formation"
   },
   "registry_file": "semesters.yml",
+  "semester_file": "semester.yml",
   "semester_topic": "dsl-semester",
   "site_config": {
     "institution": [

@@ -1,11 +1,11 @@
 // Course details (`.github/dsl-course.yml`): design/inputs.md "Set up a course". The admins
 // list is edited as rows beside this form. "Defaults for this course's assignments" is the
-// course layer of the cascade (decision 0009 rule 5): each field shows the institution's
+// course layer of the cascade (decision 0039 rule 2): each field shows the institution's
 // value in grey, the one that applies when it is left empty.
 
-import { COURSE_RUN_KEYS, institutionLayer, resolve, SOURCES, type Layers } from '../model/cascade';
+import { effectiveOf, institutionDefaults, type RunKey } from '../model/settings';
 import { labelOf } from '../model/labels';
-import { DEFAULT_FORMATS, DEFAULT_TIMEZONE, POLICY, SUBMIT_VIA_DEFAULT } from '../model/policy';
+import { CONTACT, DEFAULT_FORMATS, DEFAULT_TIMEZONE, POLICY, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import { FORMATS, SUBMIT, formatWord } from './grading';
 import { runTiers } from './runSettings';
 import { defaultFirst, type Tiers, type Values } from './types';
@@ -26,7 +26,7 @@ const LICENCE = POLICY.licences[0].name;
 /** Course facts the public website shows (decision 0019); each falls back to the institution's, shown grey. */
 export const COURSE_FACTS: Tiers = {
   contact: {
-    tier: 'default', label: 'Contact email', widget: 'email', placeholder: POLICY.contact, defaultLabel: `institution default: ${POLICY.contact}`,
+    tier: 'default', label: 'Contact email', widget: 'email', placeholder: CONTACT, defaultLabel: `institution default: ${CONTACT}`,
     check: (v) => (v && !/^[^@\s]+@[^@\s]+$/.test(String(v)) ? 'Write an email address.' : null),
   },
   licence: {
@@ -36,7 +36,8 @@ export const COURSE_FACTS: Tiers = {
 };
 
 
-const onlyInstitution = (): Layers => Object.fromEntries(SOURCES.map((s) => [s, s === 'institution' ? institutionLayer() : {}])) as Layers;
+/** The run keys a course may state (`settings.DEFAULT_KEYS`): no submit link, a per-semester fact. */
+export const COURSE_RUN_KEYS: RunKey[] = ['max_team_size', 'late_window_days', 'late_penalty_per_day', 'team_formation', 'visibility', 'marks_per_question'];
 
 /**
  * Defaults for this course's assignments: the run keys over the institution's values, then the
@@ -44,9 +45,9 @@ const onlyInstitution = (): Layers => Object.fromEntries(SOURCES.map((s) => [s, 
  * pinned equal to the institution's shows as "set here".
  */
 export function courseDefaultTiers(saved: Values = {}): Tiers {
-  const inst = onlyInstitution();
+  const inst = institutionDefaults();
   return {
-    ...runTiers((k) => resolve(k, inst), COURSE_RUN_KEYS, saved),
+    ...runTiers((k) => effectiveOf(inst, k), COURSE_RUN_KEYS, saved),
     formats: {
       tier: 'default', label: 'Format a new assignment starts with', widget: 'select', defaultLabel: `institution default: ${formatWord(DEFAULT_FORMATS[0])}`,
       options: defaultFirst(DEFAULT_FORMATS[0], formatWord(DEFAULT_FORMATS[0]), FORMATS.map(([v, l]) => opt(v, l)), saved.formats),

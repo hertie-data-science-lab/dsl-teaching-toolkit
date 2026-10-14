@@ -44,9 +44,10 @@ from . import policy, run, schedule, status, teams
 from .config import read_semester
 from .course import (
     CUTOFF_SENTENCE,
-    INSTRUCTORS_FILE,
     SELF_SELECT,
+    SEMESTER_FILE,
     advertises_console,
+    course_block,
     identifier,
     late_rule,
     pages_repo,
@@ -108,7 +109,6 @@ from .site_repo import (
     iso_when,
     kinds_yaml,
     landed_links,
-    link_extensions,
     links_block,
     liquid_raw,
     nav_yaml,
@@ -136,9 +136,9 @@ def _semester_start(semester_org: str) -> date:
 
 
 def _instructors_meta(semester_org: str) -> tuple[dict, str]:
-    """A semester's `instructors.yml` and its path. The old `people.yml` is never read
-    (decision 0012): a semester that has not migrated gets the instructors-team cards."""
-    return read_semester(semester_org).instructors.meta(), INSTRUCTORS_FILE
+    """A semester's `semester.yml` (its `people:` are the cards) and its path. A semester
+    that has not migrated gets the instructors-team cards."""
+    return read_semester(semester_org).semester.meta(), SEMESTER_FILE
 
 
 def _semester_label(semester_org: str) -> str:
@@ -1011,20 +1011,22 @@ def member_digest(semester_org: str, handle: str) -> str:
 FormedTeams = Callable[[str], list[tuple[str, list[str]]]]
 
 
-def _formed_teams(semester_org: str) -> FormedTeams:
+def _formed_teams(
+    semester_org: str, sched: schedule.Schedule | None = None
+) -> FormedTeams:
     """A reader of `(team, member handles)` for every team formed for an assignment key
     so far, by name - the same reader (`teams.teams_for`) the student console's team list
-    uses. teams.csv is loaded once, on the first ask, however many assignments list
+    uses. the roster is loaded once, on the first ask, however many assignments list
     teams, and never when none does.
 
-    Never fatal: teams.csv is student-written, and a row somebody broke must not take down
+    Never fatal: a team cell is student-written, and a row somebody broke must not take down
     the render of a semester's whole website. The callout still goes out; only the table
     is missing."""
 
     @cache
     def loaded() -> dict[str, dict[str, list[str]]] | None:
         try:
-            return teams.load(semester_org)
+            return teams.load(semester_org, sched=sched)
         except RuntimeError as exc:
             log_err(f"could not read {semester_org}'s teams: {exc}")
             return None
@@ -1085,7 +1087,7 @@ def _assignment_entry(
     carries `team_salt` and `teams:` once any has formed: each team's name, headcount
     (and, while the window is open, its cap), its members as salted digests
     (`member_digest`, never a handle) and its repo's URL. `formed_teams` is the sync's one
-    reader of teams.csv (`_formed_teams`), shared by every page."""
+    reader of the team cells (`_formed_teams`), shared by every page."""
     slug = schedule.semester_name(*found) if found else repo
     undated = when is None
     if undated:
@@ -1190,7 +1192,9 @@ def _assignment_entry(
 
         listed = "".join(
             team_entry(name, handles)
-            for name, handles in (formed_teams or _formed_teams(semester_org))(found[0])
+            for name, handles in (formed_teams or _formed_teams(semester_org, sched))(
+                found[0]
+            )
         )
         if forming:
             closes = spoken_day(schedule.in_semester_zone(sched, shuts))
@@ -1489,8 +1493,8 @@ def sync_site(course_org: str, semester_org: str) -> int:
         meta = org_meta(course_org)
         # Schedule is semester-specific (it varies by year), so it comes from the semester's
         # own semester-config/schedule.yml. So do this semester's instructors/TAs - read
-        # from its own semester-config/instructors.yml below, NOT the course org (whose
-        # dsl-course.yml carries only the multi-year instructor cards).
+        # from its own semester-config/semester.yml below, NOT the course org (whose
+        # course.yml carries only the multi-year instructor cards).
         sched = schedule.load(semester_org)
         # Every datetime on `sched` is already the semester's wall clock (the parser converts
         # a written offset into the semester timezone), so the renderers below just print it.
@@ -1513,9 +1517,9 @@ def sync_site(course_org: str, semester_org: str) -> int:
             nowhere to say otherwise, so it shows."""
             return hit is None or hit[1].show_on_site
 
-        # What a row LINKS, out of everything it released - the default
-        # folder-shaped listing unless this course declared an extension allowlist.
-        allow = link_extensions(meta)
+        # What a row LINKS, out of everything it released: the folder-shaped listing
+        # (decision 0039 dropped the course's `site_link_extensions` allowlist).
+        allow: frozenset[str] = frozenset()
         # The repos this semester actually releases into - the only ones the index and
         # the syllabus lookup may read (see `_indexable_repos`).
         indexable = sorted(set(content_repos) & _indexable_repos(sched))
@@ -1556,8 +1560,8 @@ def sync_site(course_org: str, semester_org: str) -> int:
         else:
             hosted = _mirror_public(site_wd, semester_org, policies)
         rows, present = _site_rows(semester_org, planned, allow, live, hosted)
-        # ONE read of teams.csv for every self-select group assignment (`_formed_teams`).
-        formed_teams = _formed_teams(semester_org)
+        # ONE read of the team cells for every self-select group assignment (`_formed_teams`).
+        formed_teams = _formed_teams(semester_org, sched)
         log_step(
             f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} row(s) "
             f"({sum('unreleased: true' in text for text in rows.values())} not released "
@@ -1565,17 +1569,18 @@ def sync_site(course_org: str, semester_org: str) -> int:
         )
 
         config = {}
-        if meta.get("course_name"):
-            config["course_name"] = str(meta["course_name"])
+        identity = course_block(meta)
+        if identity.get("name"):
+            config["course_name"] = str(identity["name"])
         if _semester_label(semester_org):
             config["course_semester"] = _semester_label(semester_org)
-        if meta.get("course_code"):
-            config["course_code"] = str(meta["course_code"])
-        # The site's blurb. Declared once in the course org's dsl-course.yml and pushed to
+        if identity.get("code"):
+            config["course_code"] = str(identity["code"])
+        # The site's blurb. Declared once in the course org's course.yml and pushed to
         # every semester site; left as the site repo has it when the course doesn't declare
         # one. Written as a single line whatever the source shape (see q).
-        if meta.get("course_description"):
-            config["course_description"] = str(meta["course_description"])
+        if identity.get("description"):
+            config["course_description"] = str(identity["description"])
         # The footer's GitHub link (the site's only click-back). This is the SEMESTER site,
         # so it links the semester org - where this year's materials and the students' own
         # repos live - never the course org (faculty-side) or the template's default.
@@ -1632,9 +1637,9 @@ def sync_site(course_org: str, semester_org: str) -> int:
         instructors_meta, instructors_path = _instructors_meta(semester_org)
         return SitePlan(
             config=config,
-            # People: this semester's own semester-config/instructors.yml (instructors AND TAs -
+            # People: this semester's own semester-config/semester.yml (instructors AND TAs -
             # the per-semester teaching team; schema in
-            # templates/semester-config/instructors.yml), else its instructors team.
+            # templates/semester-config/semester.yml), else its instructors team.
             files={
                 "README.md": site_readme(semester_org, semester=True),
                 "_data/people.yml": people_yaml(
@@ -1720,7 +1725,7 @@ def main() -> int:
     ps.add_argument(
         "--all-semesters",
         action="store_true",
-        help="Sync every registered semester (a course-level change, e.g. dsl-course.yml)",
+        help="Sync every registered semester (a course-level change, e.g. course.yml)",
     )
     pp = sub.add_parser("public-sync")
     pp.add_argument("--course-org", required=True)
@@ -1735,7 +1740,7 @@ def main() -> int:
         log_err("pass --semester-org or --all-semesters.")
         return 1
     # A read helper that couldn't reach the API raises RuntimeError; a config file with
-    # one bad indent raises yaml.YAMLError out of load_yaml_config (instructors.yml is
+    # one bad indent raises yaml.YAMLError out of load_yaml_config (semester.yml is
     # web-editable, so faculty author that fault directly). In an Actions log a one-line
     # error beats a traceback either way, and the run still goes red.
     try:
@@ -1744,7 +1749,7 @@ def main() -> int:
         if args.all_semesters:
             rc = 0
             for semester in live_semesters(args.course_org):
-                # One semester's raised failure (an unreachable API, a instructors.yml that
+                # One semester's raised failure (an unreachable API, a semester.yml that
                 # doesn't parse) must not skip every LATER semester's site on the 06:00
                 # cron - log it, mark the batch failed, and carry on. The same per-semester
                 # isolation PR #151/#146 applied to the nightly refresh and the scheduler.

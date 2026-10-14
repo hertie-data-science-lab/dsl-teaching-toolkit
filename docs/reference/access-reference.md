@@ -21,10 +21,10 @@ release anything there. Being a course admin, conversely, grants nothing central
 
 | Right | Declared in | Level | Reaches |
 |---|---|---|---|
-| **Admin**, course-wide | course org `.github/dsl-course.yml` → `people:` `course_admins` (or the `admin` input at bootstrap) | **course** - once, for all years | `course-admin` team on the course org **and mirrored into every semester org** |
-| **Push**, one year's content | that semester's `semester-config/instructors.yml` → `instructors:` (each with a `role:`) | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>` team |
+| **Admin**, course-wide | course org `.github/course.yml` → `people:` `course_admins` (or the `admin` input at bootstrap) | **course** - once, for all years | `course-admin` team on the course org **and mirrored into every semester org** |
+| **Push**, one year's content | that semester's `semester-config/semester.yml` → `people:` (each with a `role:`) | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>` team |
 | **Read** on released materials | `semester-config/students.csv` | semester | `students` or `auditors` team (`role` column) |
-| **Write** on a shared project repo | `semester-config/teams.csv` | semester | `<assignment>-<team>` team (secret; the assignment's page is the list) |
+| **Write** on a shared project repo | the assignment's `team:<number>` column in `semester-config/students.csv` | semester | `<assignment>-<team>` team (secret; the assignment's page is the list) |
 
 `course_admins` is deliberately **course-level**: a course director should not be re-declared each
 year, and their admin rights need to span every semester. Instructors and TAs are deliberately
@@ -36,13 +36,13 @@ Both files' person entries accept optional `start` / `end` ISO dates - see
 
 ```mermaid
 flowchart LR
-  dcy["`COURSE org · .github/dsl-course.yml
+  dcy["`COURSE org · .github/course.yml
 people: course_admins`"] -->|Sync membership| ca["`course-admin team (course org)
 admin on .github → every workflow, all semesters`"]
   ca -->|mirrored down| cca["`course-admin team
 (every semester org)`"]
-  py["`SEMESTER org · semester-config/instructors.yml
-instructors`"] -->|Sync membership| ci["`instructors team (semester org)
+  py["`SEMESTER org · semester-config/semester.yml
+people`"] -->|Sync membership| ci["`instructors team (semester org)
 semester-config + join`"]
   py -->|synced upward| itag["`instructors-<semester> team (course org)
 push on that semester's repos + .github → the workflows`"]
@@ -147,8 +147,8 @@ a *population* (who teaches at DSL); the other three name a *role in one course*
 | Team | Lives in | Declared by | Grants |
 | --- | --- | --- | --- |
 | `instructors` | **`hertie-data-science-lab`** | nothing - manual | write on the toolkit → run **Bootstrap Course Org**. No access inside any course. |
-| `instructors` | a **semester** org | that semester's `semester-config/instructors.yml` | semester-org membership for that year's instructors/TAs; reconciled |
-| `instructors-<semester>` | the **course** org | the same `instructors.yml` (semester = e.g. `f2026`) | push on `.github` + that semester's content repos, i.e. the workflows for that semester; reconciled |
+| `instructors` | a **semester** org | that semester's `semester-config/semester.yml` `people:` | semester-org membership for that year's instructors/TAs; reconciled |
+| `instructors-<semester>` | the **course** org | the same `semester.yml` (semester = e.g. `f2026`) | push on `.github` + that semester's content repos, i.e. the workflows for that semester; reconciled |
 | `instructors` | the **course** org (generic) | nothing - manual | a rare, permanent escape hatch |
 
 The central one is the odd kind out: it is the only one that grants **provisioning** and the only
@@ -157,7 +157,7 @@ one that reaches nothing inside a course. See
 
 The generic course-org `instructors` team is the other exception: a manual add sticks until manually
 removed, but it is **invisible to every config file and to the Console's Check**. Use it sparingly and
-record who's on it elsewhere. Route FA (faculty assistant) and TA access through `instructors.yml`.
+record who's on it elsewhere. Route FA (faculty assistant) and TA access through `semester.yml`.
 
 ## Rules that catch people out
 
@@ -177,7 +177,7 @@ record who's on it elsewhere. Route FA (faculty assistant) and TA access through
 - **Nobody ever holds the bot token.** Every workflow runs server-side under `DSL_BOT_TOKEN`; the
   actor's own permissions are only ever used as the gate.
 - **This is rotation, not a security boundary.** `instructors-<semester>` has push on `.github`, and no
-  branch protection is configured, so a member could edit `dsl-course.yml` to add themselves to
+  branch protection is configured, so a member could edit `course.yml` to add themselves to
   `course_admins`, or extend their own `end` date in `semester-config`. Fine for trusted
   instructors; if you need a hard boundary, protect `main` on `.github` and `semester-config`.
 
@@ -191,8 +191,8 @@ made.
 ## Related
 
 - [05 Manage the instructors](../05-manage-teaching-team.md) - the runbook for changing any of this.
-- [`DEPLOYMENT-CHECKLIST.md`](../DEPLOYMENT-CHECKLIST.md) - field-by-field schemas for `dsl-course.yml`
-  and `instructors.yml`.
+- [`DEPLOYMENT-CHECKLIST.md`](../DEPLOYMENT-CHECKLIST.md) - field-by-field schemas for `course.yml`
+  and `semester.yml`.
 - [`../../docs-admin-arch/central-admin.md`](../../docs-admin-arch/central-admin.md) - central DSL-org
   authority: who can create orgs, the bot and its rotation, the org inventory.
 - [`../../docs-admin-arch/admin-setup.md`](../../docs-admin-arch/admin-setup.md) - the bot account, its

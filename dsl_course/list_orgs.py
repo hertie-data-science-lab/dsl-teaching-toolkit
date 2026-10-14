@@ -1,7 +1,7 @@
 """list-orgs -- the DSL course and semester orgs, as an inventory.
 
 COURSE orgs are the ones the toolkit's `orgs.yml` names (`org_registry`), each read off its
-`.github/dsl-course.yml`: the tier fan-out reads this list, and a topic is anyone's to set.
+`.github/course.yml`: the tier fan-out reads this list, and a topic is anyone's to set.
 SEMESTER orgs are still found by their `dsl-semester` topic, best effort, for the report
 only. The output is a JSON / Markdown / YAML inventory of the two tiers separately.
 
@@ -28,6 +28,8 @@ from .course import (
     COURSE_CONFIG,
     COURSE_HUB_TOPIC,
     SEMESTER_TOPIC,
+    TOOLKIT_REF_KEY,
+    course_block,
 )
 from .discovery import discover_semesters, org_meta, semester_pointer
 from .faults import Unusable
@@ -80,7 +82,8 @@ def _tier_or_none(org: str, declared: dict) -> str | None:
     """The tier `org` declares, or None when it declares something that is not one."""
     try:
         return resolve_central_ref(
-            declared.get("central_ref"), source=f"{org}/.github/{COURSE_CONFIG}"
+            course_block(declared).get(TOOLKIT_REF_KEY),
+            source=f"{org}/.github/{COURSE_CONFIG}",
         )
     except MissingCentralRef as exc:
         log_err(str(exc))
@@ -88,7 +91,7 @@ def _tier_or_none(org: str, declared: dict) -> str | None:
 
 
 def discover_course_orgs() -> list[dict]:
-    """Every course org `orgs.yml` names, with its `.github/dsl-course.yml` metadata.
+    """Every course org `orgs.yml` names, with its `.github/course.yml` metadata.
 
     Returns a list of dicts with keys: org, readable, course_name, course_code,
     central_ref, url. Sorted by org name.
@@ -103,19 +106,20 @@ def discover_course_orgs() -> list[dict]:
     # this feeds writes the bot token into every org it refreshes.
     for owner in org_registry.names():
         meta = _metadata_or_none(owner)
-        if meta and meta.get("course"):
-            # A semester org's dsl-course.yml is a pointer back to its course org
-            # (`course:`/`org:` keys only). Semesters bootstrapped before the topic split
-            # still carry dsl-course-hub on their .github, so filter them here too -
-            # this inventory enumerates COURSE orgs, never their per-year semesters.
+        if meta and isinstance(meta.get("course"), str):
+            # A semester's pointer back to its course org names it as a string
+            # (`course: <org>`); a course's `course:` is a block. Semesters bootstrapped
+            # before the topic split still carry dsl-course-hub on their .github, so
+            # filter them here too - this inventory enumerates COURSE orgs, never their
+            # per-year semesters.
             continue
         declared = meta or {}
         orgs.append(
             {
                 "org": owner,
                 "readable": meta is not None,
-                "course_name": declared.get("course_name", ""),
-                "course_code": declared.get("course_code", ""),
+                "course_name": course_block(declared).get("name", ""),
+                "course_code": course_block(declared).get("code", ""),
                 # The deployment tier this course (and every semester under it) runs. Read
                 # off the metadata already fetched, so the page costs no extra call to say
                 # which orgs a promotion would move. A tier that does not resolve is null,
@@ -157,7 +161,7 @@ def discover_semester_orgs() -> list[dict]:
 
 
 def _metadata_or_none(org: str) -> dict | None:
-    """`org`'s `.github/dsl-course.yml`, or None when it could not be READ.
+    """`org`'s `.github/course.yml`, or None when it could not be READ.
 
     `discovery.org_meta` gives `{}` only for an org that genuinely carries none (a 404 or
     an empty file) and RAISES on anything else, which matters here more than anywhere: the

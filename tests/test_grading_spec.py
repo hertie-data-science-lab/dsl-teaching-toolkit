@@ -143,7 +143,7 @@ def test_an_explicit_zero_penalty_is_never_the_institution_default(
     # 10% a day for 10 days was deducted from every late mark and emailed.
     spec = _semester_spec(monkeypatch, config)
     assert (spec.late_window_days, spec.late_penalty_per_day) == (window, penalty)
-    assert dict(spec.sources)["late_penalty_per_day"] == "assignment"
+    assert dict(spec.sources)["late_penalty_per_day"] == "entry"
     assert grading_sheet.penalty_rate(spec.late_penalty_per_day) == 0
 
 

@@ -403,11 +403,11 @@ def test_choice_falls_back_when_empty():
 
 def test_sync_site_auto_resyncs_on_sourced_changes():
     # Sync site must auto-fire (no manual click) on the things the site reads: a push to
-    # the course dsl-course.yml, a repository_dispatch from a semester's schedule.yml, and a
+    # the course course.yml, a repository_dispatch from a semester's schedule.yml, and a
     # daily cron catch-all. The auto path is ungated (no check-team); manual stays gated.
     doc = yaml.safe_load(workflows_render.render_sync_site())
     trigger = doc.get("on", doc.get(True))
-    assert "dsl-course.yml" in trigger["push"]["paths"]
+    assert "course.yml" in trigger["push"]["paths"]
     assert trigger["repository_dispatch"]["types"] == ["sync-site"]
     assert trigger["schedule"][0]["cron"] == "41 6 * * *"
     assert "workflow_dispatch" in trigger
@@ -426,19 +426,17 @@ def test_sync_site_auto_resyncs_on_sourced_changes():
 DISPATCH_MAP = {
     "scheduled-release": {
         "schedule.yml",
-        "assignments.yml",
-        "instructors.yml",
+        "semester.yml",
         "students.csv",
-        "teams.csv",
+        ".system/roster.csv",
     },
     "sync-membership": {
         "students.csv",
-        "teams.csv",
-        "instructors.yml",
+        ".system/roster.csv",
+        "semester.yml",
         "schedule.yml",
-        "assignments.yml",
     },
-    "sync-site": {"schedule.yml", "assignments.yml", "instructors.yml", "teams.csv"},
+    "sync-site": {"schedule.yml", "semester.yml", "students.csv"},
     "send-codes": {"students.csv"},
 }
 
@@ -475,7 +473,7 @@ def _fire(tmp_path, changed: str, before: str = "abc") -> list[str]:
     script.write_text(
         doc["jobs"]["dispatch"]["steps"][0]["run"]
         .replace("__CONFIG_REPO__", "semester-config")
-        .replace("__POINTER__", ".system/dsl-course.yml")
+        .replace("__POINTER__", ".system/course.yml")
     )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -590,7 +588,7 @@ def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
     trigger = doc.get("on", doc.get(True))
 
     # fires where the file is edited, and on demand
-    assert trigger["push"]["paths"] == ["schedule.yml", "assignments.yml"]
+    assert trigger["push"]["paths"] == ["schedule.yml", "semester.yml"]
     assert trigger["push"]["branches"] == ["main"]
     assert "workflow_dispatch" in trigger
 
@@ -611,7 +609,7 @@ def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
 
 
 # -------------------------------------- update_profile_readme guards its config load
-# A malformed dsl-course.yml used to raise a bare yaml traceback from mid-refresh (after
+# A malformed course.yml used to raise a bare yaml traceback from mid-refresh (after
 # workflows were pushed, before the welcome/sample refresh), half-converging the nightly
 # run. It now loads through gh_contents.load_yaml_config: absent -> fall back to the org name;
 # malformed/non-mapping -> raise with a clear, logged message.
@@ -801,7 +799,7 @@ def test_a_written_readme_reports_no_failures(monkeypatch):
 def test_semester_page_title_follows_the_course_pointer(monkeypatch):
     from dsl_course import profile_readme as P
 
-    # A semester has no dsl-course.yml of its own, only its pointer, so this used to title
+    # A semester has no course.yml of its own, only its pointer, so this used to title
     # the students' landing page with the org slug.
     monkeypatch.setattr(P, "org_meta", lambda org: {})
     monkeypatch.setattr(
@@ -2065,7 +2063,7 @@ def test_the_release_pass_itself_carries_the_transport():
     assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
 
 
-# The two steps that check dsl-course.yml and the semester registry mail a fault in them to
+# The two steps that check course.yml and the semester registry mail a fault in them to
 # the course admins, so they carry the transport.
 @pytest.mark.parametrize(
     ("name", "command"),
@@ -2088,7 +2086,7 @@ def test_a_push_to_either_course_config_file_checks_it_within_the_minute():
     rendered = ALL_RENDERED["sync_membership"]
     doc = yaml.safe_load(rendered)
     paths = doc.get("on", doc.get(True))["push"]["paths"]
-    assert paths == ["dsl-course.yml", "semesters.yml"]
+    assert paths == ["course.yml", "semesters.yml"]
     auto = workflow_jobs(rendered)["sync-auto"]["steps"]
     step = next(
         s for s in auto if "dsl_course.sync_membership" in str(s.get("run", ""))

@@ -29,7 +29,9 @@ from .course import (
     GRADEBOOK_PREFIX,
     JOIN_REPO,
     SEMESTER_TOPIC,
+    TOOLKIT_REF_KEY,
     advertises_console,
+    course_block,
 )
 from .faults import ConfigFault, Unusable
 from .gh_contents import get_file_content, put_file
@@ -415,7 +417,7 @@ def read_semester_registry(course_org: str, faults: list[ConfigFault]) -> list[s
 
 
 def org_meta(org: str) -> dict:
-    """An org's `.github/dsl-course.yml`, or `{}` when it declares none.
+    """An org's `.github/course.yml`, or `{}` when it declares none.
 
     THE read for an org's declared identity - the course name, the faculty SSOT, a
     semester's `course:` pointer, the `central_ref:` its workflows run. `{}` for a genuine
@@ -427,7 +429,7 @@ def org_meta(org: str) -> dict:
 
 
 def semester_pointer(semester_org: str) -> dict:
-    """A semester's pointer to its course org (`semester-config/.system/dsl-course.yml`),
+    """A semester's pointer to its course org (`semester-config/.system/course.yml`),
     or `{}` when there is none. Moved in from the semester's `.github` (decision 0010):
     its only readers are this repo's dispatchers and the engine, and `.github` is public."""
     return read_semester(semester_org).pointer.meta()
@@ -453,7 +455,7 @@ def course_name_or(
     """The course's name for an email - `course_name_of(course_org)`, or
     `course_name_for_semester(semester_org)` - else `fallback`. Never raises.
 
-    Both readers raise on a dsl-course.yml that is malformed or that the API would not
+    Both readers raise on a course.yml that is malformed or that the API would not
     hand over (`load_yaml_config`), and a name is never worth losing the email over: a
     grade notice, a code or the one fault mail about that very file. A course carrying no
     name keeps the generic wording rather than mailing a blank."""
@@ -486,12 +488,11 @@ def course_name_of(course_org: str) -> str:
     course org needs no guard of its own."""
     if not course_org:
         return ""
-    meta = org_meta(course_org)
-    return str(meta.get("course_name") or "")
+    return str(course_block(org_meta(course_org)).get("name") or "")
 
 
 def student_console_for(course_org: str) -> bool:
-    """`course.advertises_console` off a COURSE org's own `dsl-course.yml`. Never raises: a
+    """`course.advertises_console` off a COURSE org's own `course.yml`. Never raises: a
     file that cannot be read answers False, which links the semester site - a page that
     always exists - so a mail or a lock is never lost over which page it links."""
     try:
@@ -506,9 +507,9 @@ def student_console_for(course_org: str) -> bool:
 def central_ref_for(org: str) -> str:
     """Which ref of the central toolkit this org's seeded workflows run the engine from.
 
-    Declared as `central_ref:` in the COURSE org's `.github/dsl-course.yml`, so one edit
+    Declared as `central_ref:` in the COURSE org's `.github/course.yml`, so one edit
     moves a course and every semester under it between tiers together. A semester org has
-    no `dsl-course.yml` of its own, only the pointer (`semester_pointer`), so this follows
+    no `course.yml` of its own, only the pointer (`semester_pointer`), so this follows
     it - a semester running a different engine from the course org that releases into it
     is not a state anyone wants to debug.
 
@@ -519,7 +520,7 @@ def central_ref_for(org: str) -> str:
     if course:
         org, meta = course, org_meta(course)
     return resolve_central_ref(
-        meta.get("central_ref"), source=f"{org}/.github/{COURSE_CONFIG}"
+        course_block(meta).get(TOOLKIT_REF_KEY), source=f"{org}/.github/{COURSE_CONFIG}"
     )
 
 

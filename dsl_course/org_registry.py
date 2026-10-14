@@ -6,7 +6,7 @@ invitation only from an org named here (`invitations`), and the tier fan-out ref
 so hands the bot token to, only the orgs named here (`list_orgs`). Semester orgs are not
 listed: each is registered by its course's `semesters.yml`, as before.
 
-Maintainer-edited, like `policy.yml`, and read the same way: from the checkout of the ref
+Maintainer-edited, like `institution.yml`, and read the same way: from the checkout of the ref
 the run is on. A registry that is missing or does not parse RAISES: an empty answer would
 read as "no courses", and a fan-out that refreshes nothing must not look like one that
 refreshed everything.

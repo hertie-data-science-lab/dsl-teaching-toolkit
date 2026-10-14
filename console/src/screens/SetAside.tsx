@@ -1,6 +1,6 @@
 // Setting suggestions aside (decisions 0032 and 0034). Only a suggested item may be set aside
 // (`need`, as the engine writes it);
-// the course's dsl-course.yml lists the ids set aside (`set_aside:`), shared by everyone on the
+// the course's course.yml lists the ids set aside (`set_aside:`), shared by everyone on the
 // course. The console reads that list as it last read or wrote the file, so an item moves the
 // moment the save lands, before the status is rewritten; until the file is read it takes the
 // engine's `stage_set_aside` / `set_aside`.
@@ -10,16 +10,16 @@ import { useEnv } from '../env';
 import { invalidText, saveText } from '../edit/save';
 import { YamlText } from '../edit/yamlText';
 import type { FileState, Files } from '../model/files';
-import { COURSE_REPO } from '../model/names';
-import { validCourse } from '../model/cascade';
+import { COURSE_FILE, COURSE_REPO } from '../model/names';
+import { validCourseFile } from '../model/settings';
 import { isIntentionalGap } from '../model/format';
 import { CheckLine } from '../ui/bits';
 import { MODAL_TEXT_ID, Modal } from '../ui/Modal';
 
 export const SET_ASIDE_KEY = 'set_aside';
-export const COURSE_FILE = 'dsl-course.yml';
+export { COURSE_FILE };
 
-/** The ids dsl-course.yml sets aside: none when there is no file; null while it is not read (or does not parse). */
+/** The ids course.yml sets aside: none when there is no file; null while it is not read (or does not parse). */
 export function asideList(file: FileState): string[] | null {
   if (file.kind === 'absent') return [];
   if (file.kind !== 'ready') return null;
@@ -29,14 +29,14 @@ export function asideList(file: FileState): string[] | null {
   return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string').map((x) => x.trim()) : [];
 }
 
-/** dsl-course.yml with `id` added to (or removed from) `set_aside:`, the rest untouched; or why it would not be valid. */
+/** course.yml with `id` added to (or removed from) `set_aside:`, the rest untouched; or why it would not be valid. */
 export function setAsideText(text: string, id: string, on: boolean): { text: string } | { error: string } {
   const y = new YamlText(text);
   const raw = y.get([SET_ASIDE_KEY]);
   const rest = (Array.isArray(raw) ? raw : []).filter((x): x is string => typeof x === 'string' && x.trim() !== id);
   const next = on ? [...rest, id] : rest;
   y.assign([SET_ASIDE_KEY], next.length ? next : undefined);
-  return validCourse(y.toJS()) ? { text: y.text } : { error: invalidText('dsl-course.yml', validCourse) };
+  return validCourseFile(y.toJS()) ? { text: y.text } : { error: invalidText(COURSE_FILE, validCourseFile) };
 }
 
 /** The suggestion the circle asks about. */

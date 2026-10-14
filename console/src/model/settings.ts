@@ -1,41 +1,44 @@
-// The run settings of an assignment and where each effective value comes from: the
-// cascade of decisions 0009 (rule 5) and 0010 (rule 5), as the engine's `settings.resolve`
-// reads it. Four layers, nearest first:
-//
-//   assignment   semester-config/assignments.yml  assignments.<key>.<setting>
-//   semester     semester-config/assignments.yml  defaults.<setting>
-//   course       .github/dsl-course.yml            assignment_defaults.<setting>
-//   institution  policy.yml                        defaults.<setting>  (console/schemas/policy.json)
-//
-// A value a layer states but the engine refuses (a typo, a negative team size) states
-// nothing, and the next layer answers. The late pair is one rule: a layer stating either
-// half states both, the other half absent meaning none.
+// The run settings as the console reads, says and writes them. The cascade itself is the
+// engine's (decision 0039 rule 2): status.json carries every effective value and the layer
+// that gave it (`settings.effective_defaults`, `status_json.run_settings`), and the console
+// reads it there; `over` lays a form's unsaved values over that answer for a live preview.
+// A value the engine refuses (a typo, a negative team size) states nothing, and the next
+// layer answers. The late pair is one rule: a layer stating either half states both.
 
 import { YamlText, deepEqual, isObj, obj, type Path } from '../edit/yamlText';
 import type { FileState, Files } from './files';
-import { ASSIGNMENTS_FILE, CONFIG_REPO, COURSE_REPO } from './names';
+import { ASSIGNMENTS_FILE, CONFIG_REPO } from './names';
 import assignmentsSchema from '../../schemas/assignments.schema.json';
 import courseSchema from '../../schemas/dsl_course.schema.json';
+import courseFileSchema from '../../schemas/course.schema.json';
 import gradingSchema from '../../schemas/grading_config.schema.json';
+// WP-C removes: the 0.10 assignments.yml / dsl-course.yml schemas the settings screens
+// still validate against, frozen.
 import scheduleSchema from '../../schemas/schedule.schema.json';
 import { labelMap, labelOf } from './labels';
 import { DEFAULTS, penaltyRate } from './policy';
+import type { Status } from './types';
 import { validator } from './validate';
 
 export const RUN_KEYS = ['team_formation', 'max_team_size', 'late_window_days', 'late_penalty_per_day', 'visibility', 'submit_url', 'marks_per_question'] as const;
 export type RunKey = (typeof RUN_KEYS)[number];
 export const LATE_PAIR: RunKey[] = ['late_window_days', 'late_penalty_per_day'];
 
-export type Source = 'assignment' | 'semester' | 'course' | 'institution';
-export const SOURCES: Source[] = ['assignment', 'semester', 'course', 'institution'];
+/** Where an effective value comes from (`settings.SOURCES`). */
+export type Source = 'entry' | 'semester' | 'course' | 'institution';
 
 export type Block = Record<string, unknown>;
-export type Layers = Record<Source, Block>;
 
 export interface Effective {
   value: unknown;
   source: Source;
 }
+
+/** Every effective value at one level, keyed as the files spell it (`assignment_repo_visibility`). */
+export type Effectives = Partial<Record<string, Effective>>;
+
+/** A run key as the files and status.json spell it. */
+export const fileKey = (key: string): string => (key === 'visibility' ? 'assignment_repo_visibility' : key);
 
 
 const ENUMS = (assignmentsSchema.properties.defaults.properties as unknown as Record<string, { enum?: string[] }>);
@@ -119,9 +122,6 @@ export function usableBlock(raw: unknown, keys: readonly string[] = RUN_KEYS): B
   return out;
 }
 
-/** The run keys the course layer may state (`settings.COURSE_DEFAULT_KEYS`): no submit link, a per-semester fact. */
-export const COURSE_RUN_KEYS: RunKey[] = ['max_team_size', 'late_window_days', 'late_penalty_per_day', 'team_formation', 'visibility', 'marks_per_question'];
-
 /** The name the semester's artefacts use for an assignment (`schedule.semester_name`): its
  *  `semester_dest_repo` in assignments.yml when that is a repo name, else its schedule key. */
 export function semesterName(assignmentsDoc: Block, key: string): string {
@@ -132,35 +132,35 @@ export function semesterName(assignmentsDoc: Block, key: string): string {
 /** A repo name as `settings._REPO_NAME` accepts one. */
 export const REPO_NAME_RE = /^[A-Za-z0-9._-]+$/;
 
-/** The institution's layer: policy.json's defaults for the run keys. */
-export function institutionLayer(): Block {
-  const d = DEFAULTS as unknown as Block;
-  return Object.fromEntries(RUN_KEYS.filter((k) => d[k] !== undefined).map((k) => [k, d[k]]));
+/** The institution's answer for every key it states (`policy.json`), the floor every level falls back to. */
+export function institutionDefaults(): Effectives {
+  return Object.fromEntries(Object.entries(DEFAULTS as unknown as Block).map(([k, v]) => [k, { value: v, source: 'institution' as const }]));
 }
 
-function states(block: Block, key: RunKey): boolean {
-  if (LATE_PAIR.includes(key)) return LATE_PAIR.some((k) => k in block);
-  return block[key] !== undefined && block[key] !== null && block[key] !== '';
+/** `key`'s effective value at a level (`status.json`), else the institution's, else none. */
+export function effectiveOf(at: Effectives | undefined, key: string): Effective {
+  return at?.[fileKey(key)] ?? institutionDefaults()[fileKey(key)] ?? { value: null, source: 'institution' };
 }
 
-/** The effective value of `key` and the layer it comes from, looking only at `from` and the layers after it. */
-export function resolve(key: RunKey, layers: Layers, from: Source = 'assignment'): Effective {
-  for (const source of SOURCES.slice(SOURCES.indexOf(from))) {
-    const b = layers[source];
-    if (states(b, key)) return { value: b[key] ?? null, source };
-  }
-  return { value: null, source: 'institution' };
-}
+/** A semester's effective defaults: what an assignment's own settings fall back to. */
+export const semesterDefaults = (s: Status): Effectives => s.semester?.defaults ?? {};
+/** A course's effective defaults: what a semester's own fall back to. */
+export const courseDefaults = (s: Status | null | undefined): Effectives => s?.course?.defaults ?? {};
 
-/** The layer after `s`, the one a cleared value falls back to. */
-export function below(s: Source): Source {
-  return SOURCES[Math.min(SOURCES.indexOf(s) + 1, SOURCES.length - 1)];
+/**
+ * `key` for a level being edited: `own` (its unsaved values, as `usableBlock` reads them) when
+ * it states the key - a layer naming either half of the late pair states both - else what
+ * `below` says. A live preview only: the saved answer is status.json's.
+ */
+export function over(key: RunKey, own: Block, source: Source, below: Effectives | undefined): Effective {
+  if (LATE_PAIR.includes(key) ? LATE_PAIR.some((k) => k in own) : own[key] !== undefined && own[key] !== null && own[key] !== '') return { value: own[key] ?? null, source };
+  return effectiveOf(below, key);
 }
 
 // ------------------------------------------------------------------ words
 
 export const SOURCE_WORD: Record<Source, string> = {
-  assignment: 'set for this assignment',
+  entry: 'set for this assignment',
   semester: 'this semester’s default',
   course: 'this course’s default',
   institution: 'institution default',
@@ -231,27 +231,9 @@ export function scheduleFile(files: Files, semesterOrg: string): YamlFile | 'loa
 export const validAssignments = validator(assignmentsSchema);
 export const validSchedule = validator(scheduleSchema);
 export const validCourse = validator(courseSchema);
+/** `.github/course.yml` (decision 0039). */
+export const validCourseFile = validator(courseFileSchema);
 export const validGrading = validator(gradingSchema);
-
-/** The course's `assignment_defaults`: from dsl-course.yml as last read or written, else as discovered. */
-export function courseBlock(files: Files, courseOrg: string, meta: Record<string, unknown> | null): Block {
-  const f = files.file(courseOrg, COURSE_REPO, 'dsl-course.yml');
-  if (f.kind === 'ready') {
-    const y = new YamlText(f.text);
-    if (!y.errors.length) return obj(obj(y.toJS()).assignment_defaults);
-  }
-  return obj(meta?.assignment_defaults);
-}
-
-/** The four layers for one assignment (`key`: its schedule key), or for the semester's defaults when `key` is empty. */
-export function layersOf(course: Block, assignmentsDoc: Block, key = ''): Layers {
-  return {
-    assignment: key ? usableBlock(obj(obj(assignmentsDoc.assignments)[key])) : {},
-    semester: usableBlock(assignmentsDoc.defaults),
-    course: usableBlock(course, COURSE_RUN_KEYS),
-    institution: institutionLayer(),
-  };
-}
 
 /**
  * Write `after` into the block at `path`, key by key, touching only what changed; a

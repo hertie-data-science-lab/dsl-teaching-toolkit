@@ -147,24 +147,22 @@ Push to `main`.
 """
 
 PEOPLE = {
-    "people": {
-        "instructors": [
-            {
-                "github_handle": "prof-a",
-                "name": "Alex Instructor",
-                "photo": "/_images/pp/placeholder.jpg",
-                "url": "https://example.invalid/alex",
-                "title": "Professor of Data Science",
-            }
-        ],
-        "teaching_assistants": [
-            {
-                "github_handle": "ta-b",
-                "name": "Blair Assistant",
-                "photo": "/_images/pp/placeholder.jpg",
-            }
-        ],
-    }
+    "people": [
+        {
+            "github_handle": "prof-a",
+            "role": "instructor",
+            "name": "Alex Instructor",
+            "photo": "/_images/pp/placeholder.jpg",
+            "url": "https://example.invalid/alex",
+            "title": "Professor of Data Science",
+        },
+        {
+            "github_handle": "ta-b",
+            "role": "teaching_assistant",
+            "name": "Blair Assistant",
+            "photo": "/_images/pp/placeholder.jpg",
+        },
+    ]
 }
 
 
@@ -172,7 +170,7 @@ def _repo_tree(_org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     return "main", TREE if repo == MATERIALS else ()
 
 
-def _formed_teams(_org: str):
+def _formed_teams(_org: str, _sched=None):
     """Two teams for the assignment inside its team-formation window - one with room and
     one full, so the built page carries both halves of the Places-left column."""
     return lambda _key: [
@@ -551,7 +549,8 @@ def data_files(hosted: site_repo.Hosted) -> dict[str, str]:
         "_data/people.yml": site_repo.people_yaml(
             SEMESTER_ORG,
             PEOPLE,
-            edit_at=f"{SEMESTER_ORG}/semester-config/instructors.yml",
+            edit_at=f"{SEMESTER_ORG}/semester-config/semester.yml",
+            semester=True,
         ),
         "_data/nav.yml": site_repo.nav_yaml(semester=True, kinds=kinds),
         "_data/materials.yml": site._materials_index(

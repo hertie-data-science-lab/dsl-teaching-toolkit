@@ -118,29 +118,33 @@ class FakeGitHub:
         # `pushed`: students who pushed since the sheets last looked. `gone`: handles off
         # the roster whose submission repos are still in the org.
         self.students, self.pushed = students, pushed
-        roster = "hertie_email,name,role,github_handle"
+        roster = "email,name,role"
+        system = "email,github_handle"
         self.files: dict[tuple[str, str, str], str] = {
             (
                 COURSE,
                 ".github",
-                "dsl-course.yml",
-            ): "course_name: Deep Learning\ncourse_code: E1234\n",
+                "course.yml",
+            ): "course:\n  name: Deep Learning\n  code: E1234\n",
             (COURSE, ".github", "semesters.yml"): f"semesters:\n- {SEMESTER}\n",
             (
                 SEMESTER,
                 "semester-config",
-                ".system/dsl-course.yml",
+                ".system/course.yml",
             ): f"course: {COURSE}\n",
             (SEMESTER, "semester-config", "schedule.yml"): _schedule(),
             (SEMESTER, "semester-config", "students.csv"): roster
             + "\n"
-            + "".join(f"{h}@example.org,{h},enrolled,{h}\n" for h in students),
+            + "".join(f"{h}@example.org,{h},enrolled\n" for h in students),
+            (SEMESTER, "semester-config", ".system/roster.csv"): system
+            + "\n"
+            + "".join(f"{h}@example.org,{h}\n" for h in students),
             (
                 SEMESTER,
                 "semester-config",
                 "teams.csv",
             ): "assignment,team,github_handle\n",
-            (SEMESTER, "semester-config", "instructors.yml"): "instructors: []\n",
+            (SEMESTER, "semester-config", "semester.yml"): "people: []\n",
         }
         materials = (FIXTURES / "demo-course-tree.txt").read_text().splitlines()
         self.trees: dict[tuple[str, str], list[str]] = {
@@ -471,7 +475,7 @@ _REAL = [
     (discovery, "repo_is_archived", discovery.repo_is_archived),
     (discovery, "repo_missing", discovery.repo_missing),
     (settings, "org_meta", settings.org_meta),
-    (settings, "_assignments_text", settings._assignments_text),
+    (settings, "_semester_text", settings._semester_text),
     (settings, "course_org_for_semester", settings.course_org_for_semester),
 ]
 
@@ -661,10 +665,12 @@ OPERATIONS = {
         13,
         0,
     ),
-    "propagate (preview)": (("propagate", *_C, *_S, "--preview"), 3, 0),
+    # A schedule read also reads the course's pointer and course.yml: the plan is read in
+    # the zone, archive grace and default repo the cascade gives (decision 0039).
+    "propagate (preview)": (("propagate", *_C, *_S, "--preview"), 5, 0),
     "team formation (preview)": (
         ("team_formation", *_C, *_S, "--assignment", "assignment-1", "--preview"),
-        6,
+        8,
         0,
     ),
     "enrol codes: resend (preview)": (
@@ -688,7 +694,7 @@ OPERATIONS = {
         8,
         0,
     ),
-    "archive (preview)": (("archive", *_C, *_S, "--preview"), 5, 0),
+    "archive (preview)": (("archive", *_C, *_S, "--preview"), 7, 0),
 }
 # Not covered: the real runs of a hand-out, a release now and an archive, and New
 # assignment / New materials (`scaffold`). Each is a button pressed once per assignment,
@@ -720,7 +726,10 @@ def test_every_operation_stays_under_its_ceiling(
     fake.calls.clear()
     _drive(monkeypatch, argv)
     capsys.readouterr()
-    assert len(fake.calls) <= 1.25 * (base + per_student * students), fake.calls
+    assert len(fake.calls) <= 1.25 * (base + per_student * students), (
+        len(fake.calls),
+        [c[:3] for c in fake.calls],
+    )
     if "--preview" in argv:
         assert _reads_twice(fake.calls) == []
 

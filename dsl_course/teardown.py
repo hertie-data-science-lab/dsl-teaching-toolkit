@@ -97,8 +97,8 @@ _RECORD_BANNER = (
 # toolkit; this list is the only place that says, in one breath, that together they ARE the
 # semester's record of assessment.
 _RETENTION_NOTE = f"""This repository is the semester's private record and is now read-only.
-It holds the roster (`students.csv`), the project teams (`teams.csv`), the instructors
-(`instructors.yml`), the semester plan (`schedule.yml`), every grading sheet (`grading_sheets/`),
+It holds the roster (`students.csv`, with the project teams), the instructors
+(`semester.yml`), the semester plan (`schedule.yml`), every grading sheet (`grading_sheets/`),
 the autograde detail (`.system/autograde/`), what was sent to whom (`.system/gradebook/distributed.csv`),
 the enrolment refusals and account relinks (`.system/enrolment/`) and the semester grades file
 (`{SEMESTER_CSV_NAME}`). Together those are this semester's record of

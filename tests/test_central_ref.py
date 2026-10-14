@@ -2,7 +2,7 @@
 
 Every workflow in every bootstrapped org checks this repo out at run time, so the ref in
 its checkout step IS the deployment tier that org is on. These tests hold the two halves
-together: what `central_ref:` in a course org's dsl-course.yml resolves to, and that the
+together: what `central_ref:` in a course org's course.yml resolves to, and that the
 resolved value reaches every file the toolkit writes into an org.
 """
 
@@ -26,12 +26,12 @@ SHA = "0" * 40
 
 
 def _configs(monkeypatch, files: dict[str, dict]) -> None:
-    """Stand in for every org's `dsl-course.yml`, keyed by org: a course org's in its
+    """Stand in for every org's `course.yml`, keyed by org: a course org's in its
     `.github`, a semester's pointer (a mapping with `course:`) in its config repo."""
 
     def load(org, repo, path):
         found = files.get(org)
-        is_pointer = bool(found and "course" in found)
+        is_pointer = bool(found and isinstance(found.get("course"), str))
         return found if is_pointer == (repo == discovery.CONFIG_REPO) else None
 
     fake_config(monkeypatch, load)
@@ -51,12 +51,12 @@ def test_the_demo_course_can_pin_a_pr_tip_before_it_merges(monkeypatch):
     # The whole point of the tier: an unmerged branch cannot be pinned as a SHA (a pinned
     # SHA has to be on main's history), so inspecting a feature in a real org before the
     # merge needs a ref of its own.
-    _configs(monkeypatch, {"Course": {"central_ref": "preview"}})
+    _configs(monkeypatch, {"Course": {"course": {"toolkit_version_ref": "preview"}}})
     assert discovery.central_ref_for("Course") == "preview"
 
 
 def test_a_course_org_runs_the_tier_it_declares(monkeypatch):
-    _configs(monkeypatch, {"Course": {"central_ref": "main"}})
+    _configs(monkeypatch, {"Course": {"course": {"toolkit_version_ref": "main"}}})
     assert discovery.central_ref_for("Course") == "main"
 
 
@@ -68,14 +68,14 @@ def test_a_semester_inherits_the_tier_of_the_course_org_it_points_at(monkeypatch
         monkeypatch,
         {
             "Semester-f2026": {"course": "Course", "central_ref": "release"},
-            "Course": {"central_ref": "main"},
+            "Course": {"course": {"toolkit_version_ref": "main"}},
         },
     )
     assert discovery.central_ref_for("Semester-f2026") == "main"
 
 
 def test_an_org_that_declares_nothing_runs_the_default(monkeypatch):
-    _configs(monkeypatch, {"Course": {"course_name": "Deep Learning"}})
+    _configs(monkeypatch, {"Course": {"course": {"name": "Deep Learning"}}})
     assert discovery.central_ref_for("Course") == CENTRAL_REF == "release"
 
 
@@ -85,7 +85,7 @@ def test_an_org_with_no_config_at_all_runs_the_default(monkeypatch):
 
 
 def test_a_full_sha_pins_an_org_to_one_build(monkeypatch):
-    _configs(monkeypatch, {"Course": {"central_ref": SHA}})
+    _configs(monkeypatch, {"Course": {"course": {"toolkit_version_ref": SHA}}})
     assert discovery.central_ref_for("Course") == SHA
 
 
@@ -93,17 +93,17 @@ def test_junk_is_refused_and_names_the_file(monkeypatch):
     # It used to fall back to `release` with an [err] line, which is silent where it
     # counts: the fallback rendered a full set of working workflows and the refresh
     # reported success, so `stagign` ran `release` for as long as nobody read the log.
-    _configs(monkeypatch, {"Course": {"central_ref": "stagign"}})
+    _configs(monkeypatch, {"Course": {"course": {"toolkit_version_ref": "stagign"}}})
     with pytest.raises(central.MissingCentralRef) as exc:
         discovery.central_ref_for("Course")
     assert "stagign" in str(exc.value)
-    assert "Course/.github/dsl-course.yml" in str(exc.value)
+    assert "Course/.github/course.yml" in str(exc.value)
 
 
 def test_the_retired_staging_tier_is_junk_like_any_other(monkeypatch):
     # There is no compatibility shim for it: an org whose file still says `staging` goes
     # red and gets fixed, rather than quietly running a tier that no longer exists.
-    _configs(monkeypatch, {"Course": {"central_ref": "staging"}})
+    _configs(monkeypatch, {"Course": {"course": {"toolkit_version_ref": "staging"}}})
     with pytest.raises(
         central.MissingCentralRef, match="not one of main, release, preview"
     ):
@@ -113,7 +113,7 @@ def test_the_retired_staging_tier_is_junk_like_any_other(monkeypatch):
 def test_an_abbreviated_sha_is_junk(monkeypatch):
     # A short SHA resolves inconsistently where the workflows use it, so only the full
     # 40 count.
-    _configs(monkeypatch, {"Course": {"central_ref": "0" * 7}})
+    _configs(monkeypatch, {"Course": {"course": {"toolkit_version_ref": "0" * 7}}})
     with pytest.raises(central.MissingCentralRef, match="not one of"):
         discovery.central_ref_for("Course")
 
@@ -316,7 +316,10 @@ def test_a_mistyped_central_ref_reds_the_refresh_instead_of_running_release(
     # seed.refresh reads the tier before it renders anything, so a refusal there
     # re-renders nothing and leaves last night's workflows exactly where they are - and
     # the CLI turns the cron red rather than converging the org onto a tier nobody chose.
-    fake_config(monkeypatch, lambda org, repo, path: {"central_ref": "stagign"})
+    fake_config(
+        monkeypatch,
+        lambda org, repo, path: {"course": {"toolkit_version_ref": "stagign"}},
+    )
     monkeypatch.setattr("sys.argv", ["seed", "refresh", "--course-org", "Course-Org"])
 
     assert seed.main() == 1

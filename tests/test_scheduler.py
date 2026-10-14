@@ -3243,7 +3243,7 @@ ARCHIVES = date(2027, 2, 16)
 def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None, extra=()):
     """Drive _preflight_sources with a fixed fault list, capturing every call it makes.
 
-    Routing is stubbed too: it reads blame and instructors.yml over the API, and what these
+    Routing is stubbed too: it reads blame and semester.yml over the API, and what these
     tests are about is the exit code and what the phases are handed."""
     seen: dict = {}
     monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: faults)
@@ -3814,9 +3814,8 @@ def _config_preflight(
     """Drive `_preflight_configs` with every reader stubbed, capturing what each digest
     was handed.
 
-    `vetted_against` is an out-parameter: a one-item list that ends up holding the
-    allowlist teams.csv was vetted against, which is how the roster's own state reaches
-    the teams check."""
+    `vetted_against` is an out-parameter: the roster each team-column check was handed
+    (none when the roster was absent)."""
     synced: dict = {}
     mailed: list = []
 
@@ -3835,16 +3834,17 @@ def _config_preflight(
             raise roster_raises
         return None if roster_absent else []
 
-    def _teams(semester, found=None, known=None):
+    def _teams(students, keys, found=None):
         if vetted_against is not None:
-            vetted_against.append(known)
+            vetted_against.append(students)
+        found.append(ConfigFault("team:9", "a team fault", file="students.csv"))
         return {}
 
     monkeypatch.setattr(scheduler.roster, "load", _roster)
     monkeypatch.setattr(
         scheduler.sync_faculty, "read_semester_people", lambda semester, found: {}
     )
-    monkeypatch.setattr(scheduler.teams, "load", _teams)
+    monkeypatch.setattr(scheduler.teams, "parse", _teams)
     monkeypatch.setattr(
         scheduler,
         "semester_sheet_faults",
@@ -3885,36 +3885,36 @@ def test_the_config_preflight_checks_every_hand_edited_file(monkeypatch):
     rc, synced, mailed = _config_preflight(monkeypatch)
     assert rc == 0
     everything = {
-        "instructors.yml",
+        "semester.yml",
         "students.csv",
-        "teams.csv",
         "grading_sheets/",
         "grading_config.yml",
-        "assignments.yml",
     }
+    # semester.yml is two digests: its `people:` and its `defaults:`.
     assert set(synced) == everything
-    assert sorted(mailed) == sorted(everything)
+    assert sorted(mailed) == sorted([*everything, "semester.yml"])
 
 
 def test_an_assignments_yml_fault_from_the_definition_pass_goes_in_its_own_issue(
     monkeypatch, capsys
 ):
     template = ConfigFault("assignments.a1", "bad", file="grading_config.yml")
-    run = ConfigFault("assignments.a1", "drift", file="assignments.yml")
+    run = ConfigFault("assignments.a1", "drift", file="semester.yml")
     _rc, synced, _mailed = _config_preflight(monkeypatch, spec_faults=[template, run])
     assert synced["grading_config.yml"] == [template]
-    assert synced["assignments.yml"] == [run]
+    # The defaults digest syncs after the people digest, on the same file.
+    assert synced["semester.yml"] == [run]
     out = capsys.readouterr().out
     # Where each file is: the template's is in the course org, not the semester's.
     assert "in Semester-Org's `<assignment template>/grading_config.yml`" in out
-    assert "in Semester-Org's `semester-config/assignments.yml`" in out
+    assert "in Semester-Org's `semester-config/semester.yml`" in out
 
 
 def test_a_content_fault_reaches_that_files_digest_and_nobody_elses(monkeypatch):
     fault = _csv_fault()
     _rc, synced, _mailed = _config_preflight(monkeypatch, roster_faults=[fault])
-    assert synced["students.csv"] == [fault]
-    assert synced["teams.csv"] == []
+    assert synced["students.csv"][0] == fault
+    assert synced["semester.yml"] == []
 
 
 @pytest.mark.parametrize(
@@ -3950,7 +3950,7 @@ def test_a_file_that_could_not_be_read_is_left_exactly_as_it_was(monkeypatch):
         monkeypatch, roster_raises=RuntimeError("rate limited")
     )
     assert "students.csv" not in synced and "students.csv" not in mailed
-    assert "instructors.yml" in synced  # the others are still checked
+    assert "semester.yml" in synced  # the others are still checked
 
 
 def test_an_unreadable_header_is_a_content_fault_not_a_read_failure(monkeypatch):
@@ -3974,19 +3974,17 @@ def test_an_absent_roster_is_a_fault_of_its_own_not_a_healthy_empty_one(monkeypa
     assert fault.file == "students.csv" and "missing" in fault.what
 
 
-def test_an_absent_roster_does_not_report_every_teams_row_as_a_stranger(monkeypatch):
-    # The roster is the allowlist teams.csv is vetted against. Absent, it implies the
-    # EMPTY allowlist - and vetting against that files one "not an onboarded handle"
-    # fault per row, on top of the one fault that is actually true.
+def test_an_absent_roster_checks_no_team_column(monkeypatch):
     seen: list = []
     _config_preflight(monkeypatch, roster_absent=True, vetted_against=seen)
-    assert seen == [None]
+    assert seen == []
 
 
-def test_a_roster_that_was_read_still_vets_teams_against_it(monkeypatch):
+def test_the_team_columns_faults_go_on_the_students_csv_digest(monkeypatch):
     seen: list = []
-    _config_preflight(monkeypatch, vetted_against=seen)
-    assert seen == [set()]
+    _rc, synced, _mailed = _config_preflight(monkeypatch, vetted_against=seen)
+    assert seen == [[]]
+    assert [f.where for f in synced["students.csv"]] == ["team:9"]
 
 
 def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch):
@@ -4007,7 +4005,7 @@ def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch
 
 # ---------------------------------------------- the COURSE org's own config (unattended)
 #
-# dsl-course.yml and the semester registry belong to the course, not to a semester: one issue
+# course.yml and the semester registry belong to the course, not to a semester: one issue
 # for the whole course, once per tick, addressed to the admins rather than to a teaching
 # team. What matters is that it never reds the tick, that it is reported BEFORE the semester
 # listing a malformed registry makes raise, and that "we could not look" leaves the issue
@@ -4053,7 +4051,7 @@ def _course_preflight(
     return rc, seen
 
 
-def _course_fault(file: str = "dsl-course.yml"):
+def _course_fault(file: str = "course.yml"):
     return ConfigFault(
         file, "this file is not valid YAML", file=file, field="", in_repo=".github"
     )
@@ -4154,7 +4152,7 @@ def test_the_grading_matrix_leg_is_not_the_courses_own_tick(monkeypatch):
 
 
 def test_the_sync_membership_fast_path_checks_and_exits_green(monkeypatch):
-    # What a push to dsl-course.yml or the registry runs. Never red: a config faculty have
+    # What a push to course.yml or the registry runs. Never red: a config faculty have
     # to fix is a content fault, and Sync membership must not go red for one.
     called: list = []
     monkeypatch.setattr(
@@ -4433,7 +4431,7 @@ def test_the_mail_goes_once_however_many_ticks_the_fortnight_has(monkeypatch):
 
 
 def test_a_notice_whose_mail_never_went_offers_it_again(monkeypatch):
-    # An org with no address in instructors.yml, or with no mail transport wired up, gets a
+    # An org with no address in semester.yml, or with no mail transport wired up, gets a
     # `False` - and that must NOT be recorded as "mailed", or the tick after somebody
     # fixes the transport would read the mark and stay quiet for the rest of the
     # fortnight. The issue is filed either way; only the mark waits for a real send.
@@ -4527,11 +4525,11 @@ def test_the_notice_says_what_the_freeze_does_and_links_the_runbook(monkeypatch)
 
 
 def test_an_unreadable_central_ref_still_files_the_notice(monkeypatch):
-    # The ref is read from the course org's own `dsl-course.yml`. A semester must still be
+    # The ref is read from the course org's own `course.yml`. A semester must still be
     # warned that it freezes in a fortnight when that file cannot be read, so the link
     # falls back to the default tier rather than the notice failing.
     def boom(org):
-        raise RuntimeError("no dsl-course.yml")
+        raise RuntimeError("no course.yml")
 
     when = date(2027, 2, 16)
     rc, seen = _archive(
@@ -5031,7 +5029,7 @@ def test_an_assignments_yml_that_is_not_yaml_holds_the_tick_green(monkeypatch):
     # Every run setting is unknown: nothing acts, the tick stays green, and the fault goes
     # out on the schedule.yml digest.
     monkeypatch.setattr(
-        scheduler.schedule.settings, "_assignments_text", lambda org: "a: [\n"
+        scheduler.schedule.settings, "_semester_text", lambda org: "a: [\n"
     )
     monkeypatch.setattr(
         scheduler.schedule,
@@ -5053,7 +5051,7 @@ def test_an_assignments_yml_that_is_not_yaml_holds_the_tick_green(monkeypatch):
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
     assert scheduler.run("Course", "Semester-f2026", now) == 0
     ((fault,),) = synced
-    assert fault.file == "assignments.yml"
+    assert fault.file == "semester.yml"
 
 
 # ------------------------------------------------------ the bot's pending invitations
@@ -5235,7 +5233,7 @@ def test_an_unparseable_assignments_yml_holds_the_schedule_digest(monkeypatch):
     # It synced the schedule.yml digest with no window, number, marks-return or
     # held-solution faults: Cleared for each, with a mail, then New again once fixed.
     broken = ConfigFault(
-        "", "this file is not valid YAML", file=schedule_mod.ASSIGNMENTS_FILE
+        "", "this file is not valid YAML", file=schedule_mod.SEMESTER_FILE
     )
     standing = ConfigFault("releases.wk1", "no number", file=schedule_mod.SCHEDULE_PATH)
     sched = Schedule(faults=[broken, standing])

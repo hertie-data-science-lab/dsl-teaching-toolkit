@@ -8,7 +8,7 @@
 // and each card on the Assignments tab renders the same body.
 
 import { useState } from 'preact/hooks';
-import { hostOf } from '../model/cascade';
+import { hostOf } from '../model/settings';
 import { fmtDay, fmtWhen } from '../model/format';
 import { isMarked, patchNotes, repoUrl, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
 import { DEFAULT_TIMEZONE } from '../model/policy';

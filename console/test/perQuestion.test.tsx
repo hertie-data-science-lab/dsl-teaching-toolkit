@@ -5,7 +5,7 @@
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import { SchemaForm, fieldErrors } from '../src/forms/Form';
-import { RUN_KEYS, fileValue, readSetting, valueWord, withRunSetting, writeBlock } from '../src/model/cascade';
+import { RUN_KEYS, fileValue, readSetting, valueWord, withRunSetting, writeBlock } from '../src/model/settings';
 import { YamlText } from '../src/edit/yamlText';
 import { RUN_LABEL, runTier } from '../src/tiers/runSettings';
 import type { Adapter, Handle, Progress, Result } from '../src/ops/adapter';

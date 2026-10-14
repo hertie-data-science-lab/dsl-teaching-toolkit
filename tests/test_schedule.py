@@ -695,7 +695,7 @@ def test_a_run_keeps_an_early_solution_and_holds_it_until_the_cutoff(monkeypatch
     monkeypatch.setattr(
         settings,
         "org_meta",
-        lambda org: {"assignment_defaults": {"late_window_days": 5}},
+        lambda org: {"defaults": {"late_window_days": 5}},
     )
     sched = schedule.load("Sem-f2026")
     assert sched.assignments["assignment-1"].solution_datetime == datetime(
@@ -709,7 +709,7 @@ def test_a_run_keeps_an_early_solution_and_holds_it_until_the_cutoff(monkeypatch
     monkeypatch.setattr(
         settings,
         "org_meta",
-        lambda org: {"assignment_defaults": {"late_window_days": 2}},
+        lambda org: {"defaults": {"late_window_days": 2}},
     )
     assert schedule.solution_held_until(sched, "assignment-1") is None
 

@@ -20,8 +20,8 @@ Never edit the GitHub teams directly; the file is the auditable record.
 
 | Role | You want them to… | Declare them in | Level | They get |
 |--- |---|---|---|---|
-| Faculty, FAs | Administer the **whole course**, every semester, indefinitely | course org `.github/dsl-course.yml` → `people:` `course_admins` | **course** - once, for all years | `course-admin` (admin) on the course org **and** every semester org |
-| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that semester's `semester-config/instructors.yml` → `instructors:` (`role: instructor` or `teaching_assistant`) | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>`: push on `.github` and on every course-org repo the semester's `schedule.yml` names |
+| Faculty, FAs | Administer the **whole course**, every semester, indefinitely | course org `.github/course.yml` → `people:` `course_admins` | **course** - once, for all years | `course-admin` (admin) on the course org **and** every semester org |
+| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that semester's `semester-config/semester.yml` → `people:` (`role: instructor` or `teaching_assistant`) | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>`: push on `.github` and on every course-org repo the semester's `schedule.yml` names |
 
 **Prefer the semester file** for anyone who isn't running the course across multiple years. It is per-year, self-retiring, and supplies the deployed site's instructor cards.
 
@@ -31,10 +31,10 @@ Never edit the GitHub teams directly; the file is the auditable record.
 
 1. **Edit the file.**
 
-   **Semester org**: → `semester-config` → `instructors.yml` (this year's instructors):
+   **Semester org**: → `semester-config` → `semester.yml` → `people:` (this year's instructors):
 
    ```yaml
-   instructors:
+   people:
      - github_handle: "janedoe"        # required
        role: instructor                # required: instructor | teaching_assistant
        email: "jane@example.org"       # required
@@ -48,11 +48,11 @@ Never edit the GitHub teams directly; the file is the auditable record.
    ```
 
    `role:` ignores case. An entry with no valid `role:` or `github_handle:` is reported on the
-   `instructors.yml` issue, and nobody is removed from the teaching teams until it is fixed.
+   *semester.yml people* issue, and nobody is removed from the teaching teams until it is fixed.
 
-   `email` is required and private: it is where this semester's notifications go (a schedule fault, a source that has not been staged), and nothing publishes it. Add `show_email: true` to an entry to show that address on the semester site's instructor card. A `course_admins` entry's `email` is optional, and public, since `dsl-course.yml` is. Leave every entry without one and the semester's notifications go to the course admins instead, and to the toolkit maintainer if the course names none.
+   `email` is required and private: it is where this semester's notifications go (a schedule fault, a source that has not been staged), and nothing publishes it. Add `show_email: true` to an entry to show that address on the semester site's instructor card. A `course_admins` entry's `email` is optional, and public, since `course.yml` is. Leave every entry without one and the semester's notifications go to the course admins instead, and to the toolkit maintainer if the course names none.
 
-   Or **course org** → `.github` → `dsl-course.yml` (course-wide admin):
+   Or **course org** → `.github` → `course.yml` (course-wide admin):
 
    ```yaml
    people:
@@ -86,7 +86,7 @@ Never edit the GitHub teams directly; the file is the auditable record.
 Every person entry, in **either** file, takes two optional ISO dates. This is how you give a guest lecturer, a visiting faculty member or a TA access
 
 ```yaml
-instructors:
+people:
   - github_handle: "anOther"
     role: teaching_assistant
     email: "another@example.org"
@@ -96,13 +96,13 @@ instructors:
 
 >Because every sync is a full reconcile, a lapsed `end` prunes them exactly as a deleted entry would - no manual removal step needed. Leave the entry in the file afterwards: it doubles as the record of who taught what, and re-granting next year is a date edit.
 
-Worked example: [`example-course/semester-org/instructors.yml`](../example-course/semester-org/instructors.yml).
+Worked example: [`example-course/semester-org/semester.yml`](../example-course/semester-org/semester.yml).
 
 ## Remove someone / end access early
 
 - **Time-boxed:** do nothing, or bring the `end` date forward.
 - **Immediately:** delete their entry (or set `end` to yesterday) and push. The dispatch on that push revokes within a minute or two.
-- **Do not use the GitHub Teams UI.** A hand-add to `course-admin`, `instructors` or `instructors-<semester>` is reverted by the next sync, and a hand-*removal* of someone still named in the config is re-added. The file is the truth. Assignment teams are secret, so only org owners see them there; each assignment's page lists them (on the semester site, or in the student console for a course with `student_console: true`).
+- **Do not use the GitHub Teams UI.** A hand-add to `course-admin`, `instructors` or `instructors-<semester>` is reverted by the next sync, and a hand-*removal* of someone still named in the config is re-added. The file is the truth. Assignment teams are secret, so only org owners see them there; each assignment's page on the semester site lists them.
 
 ## What the access actually reaches
 
@@ -133,8 +133,8 @@ not a security boundary.
 
 - [Enrol students](06-enrol-students-to-cohort.md) - the other half of populating a semester.
 - [Add materials to the course](02-add-materials-to-course.md) - what a new TA usually does first.
-- Field-by-field schemas: [DEPLOYMENT-CHECKLIST](DEPLOYMENT-CHECKLIST.md#instructorsyml).
+- Field-by-field schemas: [DEPLOYMENT-CHECKLIST](DEPLOYMENT-CHECKLIST.md#semesteryml).
 
 ---
-**Demo:** [`hertie-dsl-demo-f2026/semester-config/instructors.yml`](https://github.com/hertie-dsl-demo-f2026/semester-config/blob/main/instructors.yml)
+**Demo:** [`hertie-dsl-demo-f2026/semester-config/semester.yml`](https://github.com/hertie-dsl-demo-f2026/semester-config/blob/main/semester.yml)
 → [`hertie-dsl-demo-course-e1234` teams](https://github.com/orgs/hertie-dsl-demo-course-e1234/teams).

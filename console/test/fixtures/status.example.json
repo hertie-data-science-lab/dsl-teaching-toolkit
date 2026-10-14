@@ -4,7 +4,7 @@
     "schedule.yml": "sha-0",
     "instructors.yml": "sha-1",
     "students.csv": "sha-2",
-    "teams.csv": null,
+    ".system/roster.csv": null,
     "grading_sheets": "sha-4",
     "course/dsl-course.yml": "sha-5",
     ".system/assignments.lock.yml": "sha-6"
@@ -123,7 +123,45 @@
         "need": "suggested",
         "set_aside": false
       }
-    ]
+    ],
+    "defaults": {
+      "timezone": {
+        "value": "Europe/Berlin",
+        "source": "institution"
+      },
+      "late_window_days": {
+        "value": 10,
+        "source": "course"
+      },
+      "late_penalty_per_day": {
+        "value": "10%",
+        "source": "course"
+      },
+      "max_team_size": {
+        "value": 5,
+        "source": "institution"
+      },
+      "assignment_repo_visibility": {
+        "value": "private",
+        "source": "institution"
+      },
+      "archive_grace_days": {
+        "value": 60,
+        "source": "institution"
+      },
+      "materials_repo": {
+        "value": "materials",
+        "source": "institution"
+      },
+      "marks_per_question": {
+        "value": true,
+        "source": "institution"
+      },
+      "team_formation": {
+        "value": "self_select",
+        "source": "institution"
+      }
+    }
   },
   "semester": {
     "org": "hertie-dsl-demo-f2026",
@@ -159,7 +197,45 @@
       "coming_up": 1
     },
     "todo": [],
-    "archive_date": "2027-01-31"
+    "archive_date": "2027-01-31",
+    "defaults": {
+      "timezone": {
+        "value": "Europe/Berlin",
+        "source": "institution"
+      },
+      "late_window_days": {
+        "value": 10,
+        "source": "course"
+      },
+      "late_penalty_per_day": {
+        "value": "10%",
+        "source": "course"
+      },
+      "max_team_size": {
+        "value": 5,
+        "source": "institution"
+      },
+      "assignment_repo_visibility": {
+        "value": "private",
+        "source": "institution"
+      },
+      "archive_grace_days": {
+        "value": 60,
+        "source": "institution"
+      },
+      "materials_repo": {
+        "value": "materials",
+        "source": "institution"
+      },
+      "marks_per_question": {
+        "value": true,
+        "source": "institution"
+      },
+      "team_formation": {
+        "value": "self_select",
+        "source": "institution"
+      }
+    }
   },
   "problems": [
     {

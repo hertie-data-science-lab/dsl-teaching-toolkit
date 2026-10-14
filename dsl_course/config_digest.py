@@ -58,7 +58,7 @@ from datetime import datetime, timedelta
 from typing import NamedTuple
 
 from .central import CENTRAL, CENTRAL_REF
-from .course import ASSIGNMENTS_FILE, COURSE_ADMIN_TEAM, COURSE_CONFIG
+from .course import COURSE_ADMIN_TEAM, COURSE_CONFIG, SEMESTER_FILE
 from .discovery import central_ref_for
 from .faults import (
     NOTIFY_FROM,
@@ -82,10 +82,9 @@ from .issues import (
     upsert_issue,
 )
 from .log import log_err, log_ok, log_step
-from .roster import ROSTER_PATH
+from .roster import STUDENTS_PATH
 from .schedule import CONFIG_REPO, SourceFault, worst_severity
 from .sync_faculty import SEMESTER_PEOPLE_PATH
-from .teams import TEAMS_PATH
 
 
 @dataclass(frozen=True)
@@ -137,20 +136,18 @@ class Digest:
 # in one file would only earn its own issue if it kept different time, as schedule.yml's
 # two do.
 PEOPLE = Digest(
-    title="instructors.yml has entries the sync cannot use",
-    older_titles=("people.yml has entries the sync cannot use",),
+    title="semester.yml people has entries the sync cannot use",
+    older_titles=(
+        "instructors.yml has entries the sync cannot use",
+        "people.yml has entries the sync cannot use",
+    ),
     file=SEMESTER_PEOPLE_PATH,
     doc="docs/05-manage-teaching-team.md",
 )
 ROSTER = Digest(
     title="students.csv has rows the toolkit cannot use",
-    file=ROSTER_PATH,
+    file=STUDENTS_PATH,
     doc="docs/06-enrol-students-to-cohort.md",
-)
-TEAMS = Digest(
-    title="teams.csv has rows the toolkit cannot use",
-    file=TEAMS_PATH,
-    doc="docs/09-release-assignment-to-cohort.md",
 )
 # The FOLDER, not one sheet: a semester marks half a dozen assignments at once and an issue
 # per sheet would be six threads about one grader's afternoon. Each fault still carries
@@ -162,7 +159,7 @@ GRADING_SHEETS = Digest(
 )
 # The SEMESTER's issue about a file in the COURSE org: the assignment is defined once and
 # graded per semester, and the people who can act on it are the ones in this semester's
-# instructors.yml. Every fault in it carries its own template's address, so the line links the
+# semester.yml. Every fault in it carries its own template's address, so the line links the
 # template it is in - see `ConfigFault.in_org`.
 GRADING_CONFIG = Digest(
     title="assignment grading_config.yml has values that will not grade as written",
@@ -170,24 +167,30 @@ GRADING_CONFIG = Digest(
     doc="docs/03-add-assignment-to-course.md",
     cite=f"<assignment template>/{GRADING_FILE}",
 )
-# The semester's own run settings for its assignments. Its faults come from the same pass
-# as GRADING_CONFIG's (the resolved spec is what they are checked against), and are the
-# ones whose `file` is this one (`split_assignments`).
+# The semester's own run settings for its assignments (`semester.yml` `defaults:`, and a
+# setting that no longer describes what was handed out). Its faults come from the same
+# pass as GRADING_CONFIG's (the resolved spec is what they are checked against), and are
+# the ones whose `file` is this one (`split_assignments`): `people:` faults never reach
+# that pass, so one file is two digests without ambiguity.
 ASSIGNMENTS = Digest(
-    title="assignments.yml has values that will not run as written",
-    file=ASSIGNMENTS_FILE,
+    title="semester.yml defaults have values that will not run as written",
+    older_titles=("assignments.yml has values that will not run as written",),
+    file=SEMESTER_FILE,
     doc="docs/09-release-assignment-to-cohort.md",
 )
 # The one digest that is not a semester's. It lives in the COURSE org's own public
 # `.github`, beside the two files it is about, and it is the exception to "one issue per
-# FILE": `dsl-course.yml` and the semester registry are one issue because they are one
+# FILE": `course.yml` and the semester registry are one issue because they are one
 # failure - either of them unreadable and the sync walks past the whole course, admins
 # and semesters alike, so the consequence sentence and the audience are identical. `file`
-# names dsl-course.yml because that is what the subject line has to say; each fault still
+# names course.yml because that is what the subject line has to say; each fault still
 # cites the file it is actually in.
 COURSE = Digest(
-    title="dsl-course.yml / semester registry has entries the sync cannot use",
-    older_titles=("dsl-course.yml / cohort registry has entries the sync cannot use",),
+    title="course.yml / semester registry has entries the sync cannot use",
+    older_titles=(
+        "dsl-course.yml / semester registry has entries the sync cannot use",
+        "dsl-course.yml / cohort registry has entries the sync cannot use",
+    ),
     file=COURSE_CONFIG,
     doc="docs/01-new-course-org.md",
     repo=".github",
@@ -202,7 +205,6 @@ COURSE = Digest(
 SEMESTER_DIGESTS: tuple[Digest, ...] = (
     PEOPLE,
     ROSTER,
-    TEAMS,
     GRADING_SHEETS,
     GRADING_CONFIG,
     ASSIGNMENTS,
@@ -211,7 +213,7 @@ SEMESTER_DIGESTS: tuple[Digest, ...] = (
 
 def split_assignments(faults: list) -> tuple[list, list]:
     """`(GRADING_CONFIG's faults, ASSIGNMENTS')` out of one assignment-definition pass."""
-    ours = [f for f in faults if f.file == ASSIGNMENTS_FILE]
+    ours = [f for f in faults if f.file == SEMESTER_FILE]
     return [f for f in faults if f not in ours], ours
 
 
@@ -340,7 +342,7 @@ def _mention(digest: Digest, ctx: Context) -> str:
     """`cc @who`, falling back to the semester's instructors team.
 
     A team mention reaches everybody and is therefore what nobody reads; the fallback is
-    for a line git could not attribute to anyone in instructors.yml."""
+    for a line git could not attribute to anyone in semester.yml."""
     if ctx.mention:
         return "cc " + " ".join(f"@{login}" for login in ctx.mention)
     return f"cc @{ctx.semester_org}/{digest.cc_team}"
@@ -921,7 +923,7 @@ def sync(
     called ONLY on a tick that has something to say: a comment to post, an issue to open,
     or a mail owed. An hourly tick with a standing fault has none of those, so it reuses
     the logins the last body recorded and spends no API call at all - which matters,
-    because the answer costs a blame query, a instructors.yml read and a commit lookup per
+    because the answer costs a blame query, a semester.yml read and a commit lookup per
     repo, every fifteen minutes for as long as the fault stands.
 
     `absorb` is the title of an issue this one has TAKEN OVER: its recorded state is read
@@ -1026,7 +1028,7 @@ def sync(
         ref = central_ref_for(course_org)
     except Exception:
         # Every exception, not just the RuntimeError a bad ref raises: this reads the
-        # course org's `dsl-course.yml`, which is one of the files the COURSE digest is
+        # course org's `course.yml`, which is one of the files the COURSE digest is
         # written ABOUT. A malformed one raises `yaml.YAMLError` from the loader, and
         # letting that out of here would silence the digest reporting exactly that.
         ref = CENTRAL_REF

@@ -294,7 +294,7 @@ def yaml_problem(exc: yaml.YAMLError) -> str:
     """The parser's own complaint about a file that does not parse, and nothing else.
 
     Not `str(exc)`, which is what these messages used to be: PyYAML renders the offending
-    source LINE into it, and the line that broke a instructors.yml is the one carrying somebody's
+    source LINE into it, and the line that broke a semester.yml is the one carrying somebody's
     email address. Every message here travels to a public run log, a public issue and an
     email."""
     return " ".join(str(getattr(exc, "problem", "") or "").split())
@@ -341,7 +341,7 @@ def read_csv(
 ) -> csv.DictReader:
     """A DictReader over `text`, BOM stripped and the header checked for `required`.
 
-    The single door every HAND-EDITED CSV comes through - the roster, teams.csv, a grades
+    The single door every HAND-EDITED CSV comes through - the roster, a grades
     CSV, the enrol-code writers. Excel's two ways of handing back an unreadable file (a
     leading BOM, a `;`-delimited export) each look like ordinary empty data to DictReader,
     so neither is optional and neither is left to a caller to remember. `what` names the
@@ -924,7 +924,7 @@ def _commit_tree(
         #
         # This is not hypothetical tidying: batching the semester-config scaffolds into one
         # commit moved them off Contents, and the first semester org bootstrapped afterwards
-        # could not seed that repo at all - the roster, schedule and instructors.yml never
+        # could not seed that repo at all - the roster, schedule and semester.yml never
         # landed, and every later step that reads them failed in turn.
         return _seed_first_commit(org, repo, tree, message, person)
     payload: dict[str, Any] = {"tree": tree, "base_tree": parent[1]}

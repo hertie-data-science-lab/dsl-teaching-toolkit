@@ -10,6 +10,12 @@ export interface Names {
   join_repo: string;
   /** Where the engine writes, in every repo it writes to. */
   system_dir: string;
+  /** The course org's one hand-edited file and the semester's (decision 0039). */
+  course_file: string;
+  semester_file: string;
+  /** The starters New assignment offers when nobody chose (`course.DEFAULT_FORMATS`). */
+  default_formats: string[];
+  /** WP-C removes: the 0.10 files the settings screens still edit. */
   instructors_file: string;
   assignments_file: string;
   /** The topic on a semester org's `.github` that marks it as one. */
@@ -38,6 +44,10 @@ export const INSTRUCTORS_FILE = NAMES.instructors_file;
 export const ASSIGNMENTS_FILE = NAMES.assignments_file;
 export const REGISTRY_FILE = NAMES.registry_file;
 export const OPENCOURSE_FILE = NAMES.opencourse_file;
+/** The course org's one hand-edited file (decision 0039), `.github/course.yml`. */
+export const COURSE_FILE = NAMES.course_file;
+/** The semester's one hand-edited settings file, `semester-config/semester.yml`. */
+export const SEMESTER_FILE = NAMES.semester_file;
 export const STATUS_PATH = NAMES.records.status;
 /** A semester's public facts for its students, in the semester org's `.github`. */
 export const STUDENT_STATUS_PATH = NAMES.records.student_status;

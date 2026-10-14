@@ -33,11 +33,31 @@ from dsl_course import (
     settings,
 )
 
-# students.csv's header row, DERIVED from the columns the engine declares rather than
-# re-typed. `roster.FIELDS` is a frozen public contract (the shipped JavaScript spells the
-# same columns out by hand), and five test files each carried their own copy of it - so a
-# column added to FIELDS left five fixtures describing a roster that no longer exists.
-ROSTER_HEADER = ",".join(roster.FIELDS)
+# A test writes each student as ONE row in the pre-0.11.0 combined shape (students.csv
+# with the engine's columns on it), DERIVED from the columns the engine declares rather
+# than re-typed. `parse_roster` / `roster_files` split it exactly as the migration does
+# (`roster.split_legacy`), so a fixture stays one line per student and the parse under
+# test is the real one over the real two files.
+ROSTER_HEADER = ",".join(
+    (roster.LEGACY_EMAIL, *roster.FIELDS[1:], *roster.LEGACY_SYSTEM_COLUMNS)
+)
+
+
+def roster_files(
+    text: str, teams: str | None = None, numbers: dict | None = None
+) -> dict[str, str]:
+    """`{students.csv: text, .system/roster.csv: text}` from one combined fixture (and an
+    old-shape teams.csv, `numbers` = schedule key -> assignment number)."""
+    students, system = roster.split_legacy(text, teams, numbers or {})
+    return {roster.STUDENTS_PATH: students, roster.SYSTEM_PATH: system}
+
+
+def parse_roster(
+    text: str, teams: str | None = None, numbers: dict | None = None
+) -> list[roster.Student]:
+    """`roster.parse` over `roster_files(text)`."""
+    files = roster_files(text, teams, numbers)
+    return roster.parse(files[roster.STUDENTS_PATH], files[roster.SYSTEM_PATH])
 
 
 def new_sheet(
@@ -168,13 +188,13 @@ def _no_semester_is_closed_out(monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_course_or_semester_defaults(monkeypatch):
     """Answer the cascade's live reads (`settings`) with "nothing declared" by default:
-    the course's `dsl-course.yml`, the semester's `assignments.yml`, the run settings
+    the course's `course.yml`, the semester's `semester.yml`, the run settings
     the settings written on a schedule.yml entry (`schedule.run_settings_of`, which reads
     the parsed plan) and the semester's pointer to its course. Every spec read and every late cutoff resolves through them,
-    and the institution's policy is the uninteresting answer for every test but the ones
+    and the institution's defaults are the uninteresting answer for every test but the ones
     about a layer, which set their own after this fixture and win."""
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    monkeypatch.setattr(settings, "_semester_text", lambda org: None)
     monkeypatch.setattr(schedule, "run_settings_of", lambda org, slug: {})
     monkeypatch.setattr(schedule, "shape_of", lambda org, slug: {})
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
@@ -246,7 +266,7 @@ def stub_bootstrap(monkeypatch) -> None:
     monkeypatch.setattr(bc, "register_semester", lambda course, semester: True)
     monkeypatch.setattr(bc, "update_profile_readme", lambda *a, **k: 0)
     monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, semesters=None: 0)
-    # The org's tier is read off its (not yet written) dsl-course.yml; a bootstrap test is
+    # The org's tier is read off its (not yet written) course.yml; a bootstrap test is
     # about what the run does, not which ref it seeds at.
     monkeypatch.setattr(bc, "central_ref_for", lambda org: "release")
 
@@ -541,11 +561,11 @@ def entry_links(rendered: str) -> list[tuple[str, str]]:
 
 def run_settings(monkeypatch, read) -> None:
     """Stub a semester's run settings from `read(org)`, the text of an `assignments.yml`
-    as it was written before decision 0038: its `defaults:` stay in `assignments.yml`,
+    as it was written before decisions 0038/0039: its `defaults:` become `semester.yml`'s,
     and each `assignments.<key>` block becomes the settings written on that key's
-    schedule.yml entry (`settings.inline_settings`; `visibility` spelt
-    `assignment_repo_visibility` there). Text that is not YAML is the `assignments.yml`
-    as it stands."""
+    schedule.yml entry (`settings.inline_settings`). `visibility` is spelt
+    `assignment_repo_visibility` in both. Text that is not YAML is `semester.yml` as it
+    stands."""
 
     def split(org):
         text = read(org)
@@ -556,6 +576,10 @@ def run_settings(monkeypatch, read) -> None:
         if not isinstance(data, dict):
             return text, None
         blocks = data.pop("assignments", None)
+        if isinstance(data.get("defaults"), dict):
+            data["defaults"] = {
+                settings.INLINE_NAMES.get(k, k): v for k, v in data["defaults"].items()
+            }
         defaults = yaml.safe_dump(data, sort_keys=False) if data else None
         if not isinstance(blocks, dict):
             return defaults, None
@@ -570,6 +594,6 @@ def run_settings(monkeypatch, read) -> None:
         blocks = (yaml.safe_load(text) or {}).get("assignments") if text else None
         return settings.inline_blocks(blocks).get(slug, {})
 
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: split(org)[0])
+    monkeypatch.setattr(settings, "_semester_text", lambda org: split(org)[0])
     # The entry's own settings, as the parsed plan carries them (`AssignmentEntry.settings`).
     monkeypatch.setattr(schedule, "run_settings_of", inline)

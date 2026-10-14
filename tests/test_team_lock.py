@@ -102,6 +102,8 @@ def test_the_lock_file_carries_a_scalar_block_per_schedule_assignment(monkeypatc
                 # No window, so no day for a refusal about one to name.
                 "team_formation_closes": None,
                 "team_formation_page": None,
+                # The students.csv column the form writes: no number, so the key.
+                "team_column": "team:a1",
             },
             "project": {
                 "team_formation": "self_select",
@@ -111,6 +113,7 @@ def test_the_lock_file_carries_a_scalar_block_per_schedule_assignment(monkeypatc
                 "team_formation_closes": _CUTOFF.date(),
                 # No `pages` handed in, so none to link - the key is still written.
                 "team_formation_page": None,
+                "team_column": "team:project",
             },
         }
     }
@@ -146,7 +149,7 @@ def test_the_course_default_cap_fills_in_for_an_assignment_that_names_none(monke
         monkeypatch,
         _sched(project="assignment-4-project-f2026"),
         {"assignment-4-project-f2026": "type: group\n"},
-        defaults="assignment_defaults:\n  max_team_size: 4\n",
+        defaults="defaults:\n  max_team_size: 4\n",
     )
     assert yaml.safe_load(text)["assignments"]["project"]["max_team_size"] == 4
 
@@ -293,7 +296,9 @@ def _writes(
         grading_spec, "_grading_text", lambda org, t, **_: "type: group\n"
     )
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
-    monkeypatch.setattr(discovery, "org_meta", lambda org: {"student_console": console})
+    monkeypatch.setattr(
+        discovery, "org_meta", lambda org: {"course": {"student_console": console}}
+    )
     monkeypatch.setattr(
         team_formation, "repo_is_archived", lambda org, repo, **_: False
     )
@@ -330,6 +335,7 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
         "team_formation_closes": _CUTOFF.date(),
         # Where the teams are listed: the assignment's page on the semester site.
         "team_formation_page": "https://semester.github.io/assignments/project.html",
+        "team_column": "team:project",
     }
 
 

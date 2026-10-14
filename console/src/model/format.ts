@@ -1,7 +1,7 @@
 // Words and dates, in the vocabulary of design/vocabulary.md. Engine identifiers (K4,
 // will_be_skipped, release.entry) never reach the screen except through these maps.
 
-import { hostOf } from './cascade';
+import { hostOf } from './settings';
 import { DEFAULT_TIMEZONE, EVENT_KIND, KINDS } from './policy';
 import type { Assignment, AssignmentState, Bites, Need, Release, ReleaseState } from './types';
 import type { ItemState, ReleaseMark, RepoReadiness, Verdict } from './readiness';

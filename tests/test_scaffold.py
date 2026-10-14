@@ -509,7 +509,7 @@ def test_an_external_brief_carries_no_repo_shaped_furniture(fake, monkeypatch):
     assert "Commit the notebook" not in brief
     assert "`submit_url:`" in brief  # and it says where the address goes instead
     # A run setting: written in grading_config.yml it would make the template NOT_MIGRATED.
-    assert "`assignments.yml`" in brief and "grading_config.yml" not in brief
+    assert "`schedule.yml`" in brief and "grading_config.yml" not in brief
 
 
 def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
@@ -644,14 +644,14 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     assert spec.type == "group"
     assert (spec.submit_via, spec.format, spec.autograde) == ("external", "ipynb", True)
     # No run setting is written at all, live or commented: they are each semester's
-    # assignments.yml, and the cascade answers them at read time.
+    # schedule.yml entry, and the cascade answers them at read time.
     text = written["grading_config.yml"]
     assert not any(
         line.lstrip("# ").startswith(f"{key}:")
         for line in text.splitlines()
         for key in settings.RUN_KEYS
     )
-    assert "semester-config/assignments.yml" in text
+    assert "semester-config/schedule.yml entry" in text
     resolved = grading_spec.with_run_settings(spec, "Org")
     assert (resolved.max_team_size, resolved.late_window_days) == (3, 7)
     assert dict(resolved.sources)["late_window_days"] == "course"
@@ -659,7 +659,7 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
 
 
 def test_an_unasked_run_setting_leaves_the_semester_layer_to_answer(fake, monkeypatch):
-    # No box answered: nothing the scaffold writes may hide `assignments.yml`.
+    # No box answered: nothing the scaffold writes may hide the semester layers.
     written = _solution_files(monkeypatch)
     assert scaffold.scaffold_assignment("Org", "Assignment 1", ["ipynb"], "group") == 0
     text = written["grading_config.yml"]

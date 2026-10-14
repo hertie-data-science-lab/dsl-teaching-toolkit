@@ -160,7 +160,7 @@ def revoke_offboarded_access(
     repo's suffix is a team name, faculty and the bot hold their access through teams, and
     a repo name is not a reason to take anyone's access away. `on_roster` is casefolded, because GitHub logins
     are case-insensitive and a case-only difference is the same account."""
-    # teams.csv already says which repos are the GROUP ones, so asking GitHub whether a
+    # The team cells already say which repos are the GROUP ones, so asking GitHub whether a
     # team is a collaborator on its own repo is a paginated read per team repo per night,
     # for an answer that is always "no". Matched on the whole repo NAME rather than the
     # bare suffix: a team name and a student's handle live in the same namespace, and only

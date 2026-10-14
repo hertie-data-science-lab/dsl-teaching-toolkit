@@ -27,7 +27,7 @@ name: Validate schedule
 # the scheduler will silently drop entries from.
 #
 # A THIRD verdict arrives here and has no channel of its own: an empty course org means
-# the toolkit could not read this semester's own dsl-course.yml, which is nothing faculty can
+# the toolkit could not read this semester's own course.yml pointer, which is nothing faculty can
 # fix. It reds the run and says so in the annotation, and the annotation asks for the
 # maintainer by name - it cannot email them. A semester org carries DSL_BOT_TOKEN and nothing
 # else: the GRAPH_* transport and DSL_MAINTAINER_EMAIL are set on COURSE orgs, nothing
@@ -55,11 +55,11 @@ on:
     branches: [main]
     paths:
       - schedule.yml
-      - assignments.yml
+      - semester.yml
   pull_request:
     paths:
       - schedule.yml
-      - assignments.yml
+      - semester.yml
   workflow_dispatch:
 
 # contents: write covers both things this job does to the repo it runs in: checking it
@@ -91,9 +91,9 @@ jobs:
           python-version: "3.12"
       - run: pip install -r central/requirements.txt
 
-      # The course org this semester belongs to, read from its own dsl-course.yml (the same
+      # The course org this semester belongs to, read from its own course.yml pointer (the same
       # single source of truth dispatch.yml reads - no org name baked in at bootstrap
-      # time). A semester's dsl-course.yml is SYSTEM-OWNED and always names `course:`, so an
+      # time). A semester's course.yml pointer is SYSTEM-OWNED and always names `course:`, so an
       # empty answer here is an API error or a token that lost its scope - infrastructure,
       # not anything in the file that was just pushed. It used to be swallowed, which meant
       # the source check silently stopped running and every push looked clean.
@@ -210,7 +210,7 @@ jobs:
           echo "::error file=schedule.yml::schedule.yml has entries the scheduler cannot read - see the run summary"
           exit 1
 
-      # LAST, so the dropped-entry channel above has already run. A semester's dsl-course.yml
+      # LAST, so the dropped-entry channel above has already run. A semester's course.yml pointer
       # is SYSTEM-OWNED and always names `course:`, so an empty answer is an API error or a
       # token that lost its scope - infrastructure, and nothing in the file just pushed. It
       # used to be swallowed, which meant the source check silently stopped running and
@@ -220,5 +220,5 @@ jobs:
       - name: Fail the run because the course org could not be read
         if: steps.course.outputs.org == ''
         run: |
-          echo "::error::could not read this semester's dsl-course.yml - the source check could not run. This is not a fault in your file - the toolkit could not reach the course org. Tell the maintainer."
+          echo "::error::could not read this semester's course.yml pointer - the source check could not run. This is not a fault in your file - the toolkit could not reach the course org. Tell the maintainer."
           exit 1

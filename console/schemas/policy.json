@@ -1,24 +1,20 @@
 {
-  "contact": "datasciencelab@hertie-school.org",
   "defaults": {
-    "archive": {
-      "grace_days": 60
-    },
-    "formats": [
-      "ipynb"
-    ],
+    "archive_grace_days": 60,
+    "assignment_repo_visibility": "private",
     "late_penalty_per_day": "10%",
     "late_window_days": 10,
     "marks_per_question": true,
+    "materials_repo": "materials",
     "max_team_size": 5,
-    "semester_dest_repo": "materials",
-    "team_formation": "self_select",
-    "timezone": "Europe/Berlin",
-    "visibility": "private"
+    "timezone": "Europe/Berlin"
   },
   "institution": {
     "address": "Data Science Lab\nHertie School\nFriedrichstra\u00dfe 180\n10117 Berlin, Germany\n",
     "console_url": "https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/",
+    "contacts": [
+      "h.baker@hertie-school.org"
+    ],
     "dsl_org_url": "https://github.com/hertie-data-science-lab",
     "name": "Hertie School",
     "url": "https://hertie-school.org/en/datasciencelab"
@@ -142,5 +138,6 @@
       "name": "All rights reserved",
       "url": ""
     }
-  ]
+  ],
+  "selection_floor": {}
 }

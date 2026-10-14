@@ -1,20 +1,3 @@
-# ---------------------------------------------------------------------------
-# People. Two DIFFERENT things live under the `people:` key below - don't
-# confuse them:
-#
-#   course_admins        GRANTS ACCESS. Course admins keep every button for this
-#                        course across years; a term's instructors are set per
-#                        semester in instructors.yml. The single source of truth for course-wide
-#                        admin rights - the `course-admin` team here, mirrored into
-#                        every semester org. A handle added any other way is reverted
-#                        on the next sync unless it's declared here; removing a
-#                        handle here revokes their access.
-#
-#   instructors          DISPLAY ONLY - website cards (name/photo/title/link) for
-#                        the OPTIONAL public open-courseware course website (the
-#                        "Publish course website" action). They grant NO GitHub
-#                        access. TAs are NOT declared here - they change every
-#                        semester, so a semester's whole teaching team (instructors &
-#                        TAs, their GitHub access AND their semester-site cards) is
-#                        declared PER SEMESTER in that semester's semester-config/instructors.yml.
-# ---------------------------------------------------------------------------
+# The course's owners: org admins on this course and every semester under it, mailed about
+# a fault in this file, and shown as the course leads on the open course site. A semester's
+# instructors and TAs are declared in that semester's semester-config/semester.yml.

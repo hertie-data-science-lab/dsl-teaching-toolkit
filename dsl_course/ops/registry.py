@@ -221,7 +221,7 @@ def _deploy(request: Request) -> list[str]:
         "--course-source-path",
         _a(request, "course_source_path"),
         "--semester-dest-repo",
-        _a(request, "semester_dest_repo", policy.defaults()["semester_dest_repo"]),
+        _a(request, "semester_dest_repo", policy.defaults()["materials_repo"]),
         "--semester-dest-path",
         _a(request, "semester_dest_path", ""),
     ]
@@ -609,7 +609,7 @@ _OPS = (
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
-        help="Check instructor and student access against instructors.yml, the roster and teams.",
+        help="Check instructor and student access against semester.yml, the roster and teams.",
         done_text="Access checked.",
         doc="docs/05-manage-teaching-team.md",
         module="sync_membership",

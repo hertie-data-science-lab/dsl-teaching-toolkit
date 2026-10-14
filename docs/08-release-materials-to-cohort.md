@@ -114,7 +114,7 @@ re-include, `/` to anchor or to mean a directory, `#` comments.
 
 It applies to every copy out of the repo it sits in: the semester release, the public
 website and the assignment handout. The public website can withhold more on top, in the
-course's `.github/opencourse.yml` (`withhold:`, the same syntax). A course whose website is
+course's `.github/course.yml` (`open_course_site.withhold:`, the same syntax). A course whose website is
 off starts with the system folder kept off, and anything whose name has the word solution,
 exam, grade, marks or private in it.
 
@@ -159,7 +159,7 @@ writing about that session and always ships.
 
 Released materials appear on the site automatically, on the row of the schedule entry that
 names them (a path no entry names is in the semester site's All Materials only): a release triggers **Sync site**, as
-does a push to `semester-config/schedule.yml` or `instructors.yml`, and there is a daily sync
+does a push to `semester-config/schedule.yml` or `semester.yml`, and there is a daily sync
 besides. Run [Sync site](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/sync-site.yml)
 by hand only when you don't want to wait - e.g. after editing a file inside an already-released repo.
 

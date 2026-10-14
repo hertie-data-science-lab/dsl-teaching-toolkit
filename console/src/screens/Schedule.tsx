@@ -27,8 +27,8 @@ import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortScope, gradingConfig, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
-import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, assignmentsFile, resolve, validAssignments, validSchedule } from '../model/cascade';
-import { SolutionNote, assignmentsAfterSchedule, cutoffOf, forcedVisibility, semesterLayers } from './RunSettings';
+import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, assignmentsFile, effectiveOf, validAssignments, validSchedule } from '../model/settings';
+import { SolutionNote, assignmentsAfterSchedule, cutoffOf, entryBelow, forcedVisibility } from './RunSettings';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, KINDS, SUBMIT_VIA_DEFAULT, penaltyError, pluralOf } from '../model/policy';
 import { otherRepos } from './CourseIndex';
 
@@ -470,9 +470,9 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
   const group = (d.group || tplGroup) === 'group';
   const route = d.submitVia || tplRoute;
   const auto = cfg.autograde === true || String(cfg.autograde ?? '').toLowerCase() === 'yes';
-  const af = assignmentsFile(p.files, p.cohort.org);
-  const layers = semesterLayers(p, af && af !== 'loading' ? af.doc : {}, d.id);
-  const inherited: Record<string, unknown> = Object.fromEntries(RUN_KEYS.map((k) => [k, resolve(k, layers).value]));
+  // What the entry falls back to: the semester's effective defaults, as the engine resolved them (status.json).
+  const below = entryBelow(p);
+  const inherited: Record<string, unknown> = Object.fromEntries(RUN_KEYS.map((k) => [k, effectiveOf(below, k).value]));
   const setRun = (k: string, v: unknown) => {
     const run = { ...(d.run ?? {}) };
     if (v === inherited[k] || v === '') delete run[k];
@@ -689,9 +689,7 @@ function View(p: ReadyProps) {
   // An assignment draft's late cutoff, off the cascade with its own run settings first. No stated window is none: the due date.
   const cutoffFor = (d: Draft): string | null => {
     if (d.kind !== 'assignments') return null;
-    const af = assignmentsFile(p.files, p.cohort.org);
-    const layers = semesterLayers(p, af && af !== 'loading' ? af.doc : {}, d.id);
-    const own = d.run && 'late_window_days' in d.run ? d.run.late_window_days : resolve('late_window_days', layers).value;
+    const own = d.run && 'late_window_days' in d.run ? d.run.late_window_days : effectiveOf(entryBelow(p), 'late_window_days').value;
     return cutoffOf(d.dueDate, d.dueTime, typeof own === 'number' ? own : 0);
   };
   const runErrorsOf = (d: Draft): Record<string, string> => {
@@ -702,7 +700,7 @@ function View(p: ReadyProps) {
     const lw = d.run.late_window_days;
     if (lw !== undefined && lw !== '' && !(Number.isInteger(lw) && (lw as number) >= 0)) e.late_window_days = 'A whole number of days, 0 or more.';
     const route = d.submitVia || String(gradingConfig(p, d.template).submit_via ?? SUBMIT_VIA_DEFAULT);
-    if (route === 'external' && !String(d.run.submit_url ?? resolve('submit_url', semesterLayers(p, {}, '')).value ?? '').trim()) e.submit_url = 'Give the address students submit to.';
+    if (route === 'external' && !String(d.run.submit_url ?? effectiveOf(entryBelow(p), 'submit_url').value ?? '').trim()) e.submit_url = 'Give the address students submit to.';
     return e;
   };
   const errorsOf = (d: Draft) => ({ ...draftErrors(d, { doc, removed }, cutoffFor(d)), ...runErrorsOf(d) });

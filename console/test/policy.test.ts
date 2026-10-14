@@ -4,10 +4,9 @@
 
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
-import SKELETON from '../../templates/semester-config/assignments.yml?raw';
 import policy from '../schemas/policy.json';
 import { YamlText } from '../src/edit/yamlText';
-import { effectiveWord, institutionLayer, lateWord, layersOf, readSetting, resolve, semesterName, usableBlock, writeBlock, type Layers } from '../src/model/cascade';
+import { effectiveOf, effectiveWord, institutionDefaults, lateWord, over, readSetting, semesterName, usableBlock, writeBlock, type Effectives } from '../src/model/settings';
 import { questionFileError, questionsValue } from '../src/tiers/grading';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, HANDLE_RE, ORG_NAME_RE, penaltyRate } from '../src/model/policy';
 import { assignmentsAfterSchedule } from '../src/screens/RunSettings';
@@ -55,8 +54,8 @@ describe('no default literal in the console', () => {
 
   it('takes the values and the name rules from the engine’s export', () => {
     expect(DEFAULT_TIMEZONE).toBe(policy.defaults.timezone);
-    expect(ARCHIVE_GRACE_DAYS).toBe(policy.defaults.archive.grace_days);
-    expect(DEFAULT_DEST_REPO).toBe(policy.defaults.semester_dest_repo);
+    expect(ARCHIVE_GRACE_DAYS).toBe(policy.defaults.archive_grace_days);
+    expect(DEFAULT_DEST_REPO).toBe(policy.defaults.materials_repo);
     expect(HANDLE_RE.test('anna-adams')).toBe(true);
     expect(HANDLE_RE.test('-anna')).toBe(false);
     expect(ORG_NAME_RE.test('hertie-dsl-demo-f2026')).toBe(true);
@@ -72,43 +71,37 @@ describe('no default literal in the console', () => {
   });
 });
 
-// ------------------------------------------------------------------ the cascade
+// ------------------------------------------------------------------ effective values
 
-const inst = institutionLayer();
-const stack = (over: Partial<Layers>): Layers => ({ assignment: {}, semester: {}, course: {}, institution: inst, ...over });
+// The engine resolves the cascade and status.json carries each answer (decision 0039); the
+// console reads it, and lays a form's unsaved values over it for a live preview (`over`).
+const semester: Effectives = {
+  late_window_days: { value: 5, source: 'semester' },
+  late_penalty_per_day: { value: '5%', source: 'semester' },
+  max_team_size: { value: 4, source: 'course' },
+};
 
-describe('the cascade', () => {
-  it('answers from the nearest layer that states a value, and says which', () => {
-    expect(resolve('max_team_size', stack({}))).toEqual({ value: policy.defaults.max_team_size, source: 'institution' });
-    expect(resolve('max_team_size', stack({ course: { max_team_size: 4 } }))).toEqual({ value: 4, source: 'course' });
-    expect(resolve('max_team_size', stack({ course: { max_team_size: 4 }, semester: { max_team_size: 3 } }))).toEqual({ value: 3, source: 'semester' });
-    expect(resolve('max_team_size', stack({ semester: { max_team_size: 3 }, assignment: { max_team_size: 2 } }))).toEqual({ value: 2, source: 'assignment' });
-    expect(resolve('max_team_size', stack({ assignment: { max_team_size: 2 } }), 'semester').source).toBe('institution');
+describe('effective values', () => {
+  it('reads a level’s answer, else the institution’s', () => {
+    expect(effectiveOf(semester, 'max_team_size')).toEqual({ value: 4, source: 'course' });
+    expect(effectiveOf({}, 'max_team_size')).toEqual({ value: policy.defaults.max_team_size, source: 'institution' });
+    expect(effectiveOf(undefined, 'visibility')).toEqual({ value: policy.defaults.assignment_repo_visibility, source: 'institution' });
+    expect(institutionDefaults().archive_grace_days).toEqual({ value: policy.defaults.archive_grace_days, source: 'institution' });
   });
 
-  it('keeps the late pair one rule: a layer naming one half sets the other to none', () => {
-    const l = stack({ course: { late_window_days: 7, late_penalty_per_day: '5%' }, semester: { late_window_days: 3 } });
-    expect(resolve('late_window_days', l)).toEqual({ value: 3, source: 'semester' });
-    expect(resolve('late_penalty_per_day', l)).toEqual({ value: null, source: 'semester' });
+  it('lays a form’s values over the answer below, the late pair as one rule', () => {
+    expect(over('max_team_size', { max_team_size: 2 }, 'entry', semester)).toEqual({ value: 2, source: 'entry' });
+    expect(over('max_team_size', {}, 'entry', semester)).toEqual({ value: 4, source: 'course' });
+    expect(over('late_penalty_per_day', { late_window_days: 3 }, 'entry', semester)).toEqual({ value: null, source: 'entry' });
+    expect(over('max_team_size', usableBlock({ max_team_size: -3 }), 'entry', semester).source).toBe('course');
     expect(lateWord(3, null)).toBe('3 days, no penalty');
     expect(lateWord(0, '5%')).toBe('no late work');
   });
 
-  it('lets a value the engine refuses fall through to the next layer', () => {
-    const doc = { defaults: { max_team_size: -3, visibility: 'secret', team_formation: 'assigned' } };
-    const l = layersOf({}, doc);
-    expect(usableBlock(doc.defaults)).toEqual({ team_formation: 'assigned' });
-    expect(resolve('max_team_size', l).source).toBe('institution');
-    expect(resolve('visibility', l).source).toBe('institution');
-    expect(resolve('team_formation', l)).toEqual({ value: 'assigned', source: 'semester' });
-  });
-
-  it('reads an assignment’s block by its schedule key, and says the value in words', () => {
-    const doc = { defaults: { late_window_days: 5, late_penalty_per_day: '5%' }, assignments: { a2: { max_team_size: 2 } } };
-    const l = layersOf({ max_team_size: 4 }, doc, 'a2');
-    expect(effectiveWord('max_team_size', resolve('max_team_size', l))).toBe('up to 2, set for this assignment');
-    expect(effectiveWord('late_window_days', resolve('late_window_days', l))).toBe('5 days, this semester’s default');
-    expect(effectiveWord('visibility', resolve('visibility', l))).toBe('Private, institution default');
+  it('says a value and its source in words', () => {
+    expect(effectiveWord('max_team_size', over('max_team_size', { max_team_size: 2 }, 'entry', semester))).toBe('up to 2, set for this assignment');
+    expect(effectiveWord('late_window_days', effectiveOf(semester, 'late_window_days'))).toBe('5 days, this semester’s default');
+    expect(effectiveWord('visibility', effectiveOf({}, 'visibility'))).toBe('Private, institution default');
   });
 });
 
@@ -118,7 +111,6 @@ describe('the readers, as setting_readers reads each value', () => {
     expect(readSetting('late_window_days', '4')).toBe(4);
     expect(readSetting('late_window_days', 2.5)).toBeUndefined();
     expect(readSetting('late_window_days', 'ten')).toBeUndefined();
-    expect(resolve('late_window_days', layersOf({}, { defaults: { late_window_days: -3, late_penalty_per_day: '5%' } }))).toEqual({ value: 0, source: 'semester' });
   });
 
   it('refuses a submit link that is not a filled-in https:// address', () => {
@@ -127,11 +119,6 @@ describe('the readers, as setting_readers reads each value', () => {
     expect(readSetting('submit_url', 'https://moodle.example.org/CHANGE-ME')).toBeUndefined();
     expect(readSetting('submit_url', 'https://')).toBeUndefined();
     expect(readSetting('submit_url', 'http://moodle.example.org/')).toBeUndefined();
-  });
-
-  it('gives the course layer no submit link', () => {
-    const l = layersOf({ submit_url: 'https://moodle.example.org/', max_team_size: 4 }, {});
-    expect(l.course).toEqual({ max_team_size: 4 });
   });
 
   it('lower-cases the enums and checks them against the schema’s lists, not a label map', () => {
@@ -168,6 +155,9 @@ describe('questions', () => {
     for (const bad of ['../secret.tex', '/etc/passwd', 'a\\b.tex', 'a/../b.tex']) expect(questionFileError(bad)).toContain('is not a file inside the submission');
   });
 });
+
+// The 0.10 assignments.yml skeleton the run-settings forms still write into until WP-C.
+const SKELETON = '# INSTRUCTOR-OWNED - yours to edit freely.\n#\n# How THIS semester runs each assignment.\n\n# defaults:\n#   late_window_days: 10\n';
 
 describe('writing a layer', () => {
   it('writes only the keys set, into the seeded skeleton, keeping its comments', () => {

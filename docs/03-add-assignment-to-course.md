@@ -41,9 +41,9 @@ Live example: [`example-course/course-org/assignment-linear-regression/`](../exa
      penalty, who may read the repos, an external submit link - is not asked here and
      never written into `grading_config.yml` (a run setting there refuses the whole file as
      `RUN_SETTING_IN_TEMPLATE`). It
-     is the assignment's entry in that semester's `schedule.yml` (else its `assignments.yml`
+     is the assignment's entry in that semester's `schedule.yml` (else its `semester.yml`
      `defaults:`), else the course's
-     `assignment_defaults:` in `.github/dsl-course.yml`, else the institution's (Hertie:
+     `defaults:` in `.github/course.yml`, else the institution's (Hertie:
      teams of 5, `late_penalty_per_day: 10%` per day started, `late_window_days: 10`).
      See [07](07-schedule-releases.md#assignments).
    - this creates **`assignment-neural-networks-from-scratch`**, marked with the
@@ -191,7 +191,7 @@ and gives every onboarded student (or every team) `push` on it. Each unit works 
 point - peer-visible presentations, referee reports, a gallery of submissions.
 
 The folder name is the student's GitHub handle (or the team name) spelt **exactly** as
-*students.csv* or *teams.csv* has it, including its capitals: GitHub matches a path
+*.system/roster.csv* or the *students.csv* team cell has it, including its capitals: GitHub matches a path
 case-sensitively, so work pushed to `Anna-Adams/` is not in `anna-adams/` and is not found.
 Say so in the brief, and check the spelling of a handle whose folder the sheet says is empty.
 
@@ -241,7 +241,7 @@ feedback go to the private `grades-<handle>` gradebook for every shape alike, wh
 >    number: 4
 >    template: assignment-project
 >    due_datetime: 2026-11-27
->    team_formation: self_select   # or `assigned`, and you write teams.csv
+>    team_formation: self_select   # or `assigned`, and you type the teams into students.csv
 >    max_team_size: 4
 >```
 >

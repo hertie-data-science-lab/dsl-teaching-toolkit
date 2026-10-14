@@ -9,13 +9,13 @@ Accompanies the e2e [worked example](../example-course/).
 | | Step | Org Level | Where | Input | Output |
 |---|------|-------|-------|-------|--------|
 | `[required]` | 1. Create the course org | course | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-<CODE>` (no year); invite **`hertie-dsl-bot`** as **Owner** (it joins by itself once the DSL team registers the course) | an empty org the bot can bootstrap |
-| `[required]` | 2. Bootstrap | course | [central repo → Actions → **Bootstrap Course Org**](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/bootstrap-org.yml) | `org`, `course_name`, `course_code`; optional `admin` (your handle); `central_ref` defaults to `release` | the `.github` control panel with every workflow, the `course-admin` team, [`dsl-course.yml`](#dsl-courseyml), `DSL_BOT_TOKEN` set for you |
+| `[required]` | 2. Bootstrap | course | [central repo → Actions → **Bootstrap Course Org**](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/bootstrap-org.yml) | `org`, `course_name`, `course_code`; optional `admin` (your handle); `central_ref` defaults to `release` | the `.github` control panel with every workflow, the `course-admin` team, [`course.yml`](#courseyml), `DSL_BOT_TOKEN` set for you |
 | `[required]` | 3. Materials | course | Console **New course materials** (`python -m dsl_course materials.create`), then `git push` | `semester` (e.g. `f2026`); then your content ([layout](#materials-repo)) | `course-materials-<semester>` |
 | `[required]` | 4. Assignment(s) | course | Console **New assignment** (`python -m dsl_course assignment.create`), then `git push` | `name` + `formats` (one or more starters, the first runnable) + `type` (individual/group); brief + starter on `main`, optional autograding on `solution` ([layout](#assignment-template)) | one `assignment-<name>` template each |
-| *(optional)* | 5. Course admins | course | edit [`dsl-course.yml`](#dsl-courseyml), commit to `main` ([05](05-manage-teaching-team.md)) | GitHub handles, optional `start`/`end` | admin on the course org + every semester, reconciled |
+| *(optional)* | 5. Course admins | course | edit [`course.yml`](#courseyml), commit to `main` ([05](05-manage-teaching-team.md)) | GitHub handles, optional `start`/`end` | admin on the course org + every semester, reconciled |
 | `[required]` | 6. Refresh | course | course `.github` → **Refresh actions** | none | dropdowns populated, secrets on content repos and assignment templates |
 
-> Enrolment-code + grade emails send as `datasciencelab@hertie-school.org` via a central Entra app, authenticated by certificate ([details](../docs-admin-arch/central-admin.md#email)). Live on every course org. Where it is not, enrolment codes still land in `students.csv` (to be emailed by hand) and grades still reach each student's repo; only the notification is skipped.
+> Enrolment-code + grade emails send as `datasciencelab@hertie-school.org` via a central Entra app, authenticated by certificate ([details](../docs-admin-arch/central-admin.md#email)). Live on every course org. Where it is not, enrolment codes still land in `.system/roster.csv` (to be emailed by hand) and grades still reach each student's repo; only the notification is skipped.
 
 <a id="cohort-setup-per-year"></a>
 
@@ -27,13 +27,13 @@ Accompanies the e2e [worked example](../example-course/).
 | `[required]` | 2. Bootstrap | course → semester | Console **Set up** on the new semester (`python -m dsl_course semester.bootstrap`) | `semester_org` | `join` (Join course / Join team issues) + `semester-config` (all the files below), `students`/`auditors` teams, the semester site, semester registered with the scheduler |
 | `[do this first]` | 3. The semester plan | semester | edit [`semester-config/schedule.yml`](#scheduleyml) | sessions, releases, due dates, exams | the scheduler runs the whole semester; site dates; grading deadlines |
 | `[required]` | 4. Roster | semester | edit [`semester-config/students.csv`](#studentscsv) | registrar rows | the enrolment + provisioning source of truth |
-| *(optional)* | 5. Instructors | semester | edit [`semester-config/instructors.yml`](#instructorsyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this semester's instructors/TAs + site cards; time-boxed if dated |
+| *(optional)* | 5. Instructors | semester | edit [`semester-config/semester.yml`](#semesteryml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this semester's instructors/TAs + site cards; time-boxed if dated |
 | `[required]` | 6. Enrol | *nothing to run* - the roster push does it | - | - | codes written to the roster + emailed within a minute; students join via the `join` **Join course** issue |
 | *(optional)* | 7. Ad-hoc release | Console, per semester | **Release** / **Hand out** (`release.adhoc`, `release.entry`, `assignment.handout_now`) | see [08](08-release-materials-to-cohort.md)/[09](09-release-assignment-to-cohort.md) | anything out earlier/differently than the schedule says |
 | *(optional)* | 8. Return marks | course workflows + [`grading_sheets/<slug>.yml`](#grading_sheetsslugyml) | the [grading runbook](10-grade-and-return-assignments.md) | your marks | private per-student gradebooks |
 | *(optional)* | 9. Check the semester | Console, per semester | the semester's **Refresh**, or `python -m dsl_course semester.check` | `semester_org` | what's configured, what's missing, an edit link per gap |
 
-> **Member privileges (once, and only if any assignment uses `visibility: student_choice`).**
+> **Member privileges (once, and only if any assignment uses `assignment_repo_visibility: student_choice`).**
 > Semester org → Settings → Member privileges: **Allow members to change repository
 > visibilities** ON, **Allow members to delete or transfer repositories** OFF. Both are
 > web-only - no API call sets them - so the toolkit reads them and the semester's
@@ -43,51 +43,61 @@ Accompanies the e2e [worked example](../example-course/).
 
 > NB: all these `semester-config/` files are kept in a private repo (PII stays there; not leaked publicly).
 
-### `dsl-course.yml`
+<a id="dsl-courseyml"></a>
 
-Live example: [`example-course/course-org/dsl-course.yml`](../example-course/course-org/dsl-course.yml).
+### `course.yml`
 
-- Course org's `.github` repo - the course's identity card. 
+Live example: [`example-course/course-org/course.yml`](../example-course/course-org/course.yml).
+
+- Course org's `.github` repo - the course's one settings file.
 - Bootstrap writes it; edit it as needed.
 
 ```yaml
-course_name: Deep Learning       # the course's name: every site's title
-course_code: E1234               # shown beside it
-course_description: One or two sentences, on one line - the sites' blurb
-site_link_extensions: [pdf, html]  # optional - semester sites only; see below
-contact: course@example.org     # optional - the public website's contact; unset = the lab's
-licence: CC BY 4.0              # optional - one of policy.yml's licences; unset = its first
-set_aside: [C6]                 # optional - optional setup steps / to-dos set aside; see below
-student_console: true           # optional - send students to the student console; see below
+course:
+  name: Deep Learning             # every site's title
+  code: E1234                     # shown beside it
+  description: One paragraph - the sites' blurb
+  # toolkit_version_ref: release  # absent = release
+  # licence: CC BY 4.0            # one of the institution's licences; absent = its first
 people:
   course_admins:
-    - github_handle: "janedoe"   # admin on the course org + every semester
-      email: "jane@example.org"  # optional, PUBLIC - where a fault in this file is mailed
+    - github_handle: "janedoe"    # admin on the course org + every semester
+      email: "jane@example.org"   # optional, PUBLIC - where a fault in this file is mailed
     - github_handle: "visiting"
-      start: "2026-09-01"        # optional - access auto-starts/lapses on these dates
+      start: "2026-09-01"         # optional - access auto-starts/lapses on these dates
       end: "2027-06-30"
+defaults:                         # every key seeded; the comment shows the inherited value and its source
+  # late_window_days: 10          (institution)
+  max_team_size: 4                # overrides the institution's
+open_course_site:                 # the public website
+  enabled: false
+  source_repo: course-materials-f2026
+  readings_mode: reading-list     # reading-list | actual-readings | none
+  include_lectures: true
+  withhold: [.system/]            # .releaseignore syntax
+  # contact: course@example.org   # unset = the institution's
+set_aside: [C6]                   # optional - suggestions set aside; see below
 ```
 
 `course_admins` is the **course-level** grant - declared once here, mirrored into every semester's
-own `course-admin` team, and never re-declared per year. Deleting an entry, or an `end` date
-passing, revokes on the next sync. This org's `instructors`/`teaching_assistants` keys are
-display-only cards; TAs are declared per semester in [`instructors.yml`](#instructorsyml).
-Runbook: [05](05-manage-teaching-team.md).
+own `course-admin` team, and never re-declared per year. They are also the course leads on the
+open course site. Deleting an entry, or an `end` date passing, revokes on the next sync. A
+semester's instructors and TAs are declared in its own [`semester.yml`](#semesteryml). Runbook:
+[05](05-manage-teaching-team.md).
 
 An admin's `email` is optional: a fault in this file is mailed to it. This file is public,
 so an address written here is public too; without one, the digest issue's @mention is the
 only channel.
 
-`assignment_defaults:` (optional) is this course's defaults for its assignments:
-`max_team_size`, `late_window_days`, `late_penalty_per_day`, `team_formation`,
-`visibility` apply to every assignment that does not set its own; unset, the institution's
-apply. `formats` and `submit_via` answer New assignment's boxes left at
-`(course default)`. A semester's timezone and archive grace are
-set in its own `schedule.yml` (default: the institution's, Europe/Berlin and 60 days).
+`defaults:` is the course layer of the cascade: `timezone`, `late_window_days`,
+`late_penalty_per_day`, `max_team_size`, `assignment_repo_visibility`, `archive_grace_days`,
+`materials_repo`, `marks_per_question` and `team_formation`. Each key resolves nearest first:
+the assignment's `schedule.yml` entry, the semester's `semester.yml`, this block, then the
+institution's `institution.yml`. A late line alone is a whole rule: the other half is then none.
 
-`course_name` / `course_code` / `course_description` are the fields that reach every
-semester website - a push here re-syncs them all: [11](11-configure-cohort-site.md).
-The public website shows those three plus `contact` and `licence`, from its next publish.
+`course.name` / `course.code` / `course.description` reach every semester website - a push
+here re-syncs them all: [11](11-configure-cohort-site.md). The public website shows those
+three plus `open_course_site.contact` and `course.licence`, from its next publish.
 
 `set_aside` lists the suggestions nobody needs, on the course's and every semester's
 Dashboard (the console writes it from the circle before each Suggestions line; Bring back
@@ -96,59 +106,51 @@ withheld patterns reviewed, course description) and the semesters' suggested to-
 page, archive date, instructor emails). A needed item, an unknown id, or an item done anyway is
 ignored. Unset, nothing is set aside.
 
-`student_console: true` points this course's students at the student console: the semester
-sites' banner, and team-formation links (mail, Join-team form, its comments) to each
-assignment's console page. Unset (the default), students see only the semester sites, and
-those links go to the site's own assignment pages; a student who signs in to the console is
-sent to the site. A push re-syncs the sites; the lock and
-the form follow on the next tick.
-
-`site_link_extensions` narrows what each row **links** on the **semester** sites,
-never what it ships. Unset (the default), a row lists the files at the root of each folder it
-released plus one link per subfolder, so a rendered Quarto/Rmd deck links the deck rather than its
-hundreds of assets; set, only these file types are listed, plus a link to the folder itself.
-
-It does **not** apply to the public open-courseware site, which serves its files itself and
-has no directory listing to fall back on - a file excluded there would be published and
-linked from nowhere. That site always lists each session folder's root files.
+<a id="teamscsv"></a>
 
 ### `students.csv`
 
 Live example: [`example-course/semester-org/students.csv`](../example-course/semester-org/students.csv).
 
 `semester-config/students.csv` - one row per student, straight from the registrar (seeded
-header-only; a filled one is in the [worked example](../example-course/semester-org/students.csv)). Leave the onboarding-owned
-columns blank (`github_handle`, `github_id`, `enrol_code`). Deleting a row off-boards that student on the next push.
+header-only). Deleting a row off-boards that student on the next push.
 
 ```csv
-hertie_email,name,role,github_handle,github_id,enrol_code
-j.doe@students.hertie-school.org,Jane Doe,,,,
-e.evans@students.hertie-school.org,Eve Evans,auditor,,,
+email,name,role,team:4
+j.doe@students.hertie-school.org,Jane Doe,,team-x
+e.evans@students.hertie-school.org,Eve Evans,auditor,
 ```
 
-| Column | Filled by | Notes |
-|--------|-----------|-------|
-| `hertie_email`, `name` | you | `hertie_email` is the match key, and receives the enrolment code + grade notices |
-| `github_handle`, `github_id` | **onboarding** | blank until the student joins; the immutable `github_id` survives handle renames |
-| `enrol_code` | **Send enrolment codes** | the token the student pastes into the Join course issue |
-| `role` | you | blank/`enrolled` = full participant; `auditor` = reads released materials, gets no assignments/grades, refused from teams |
+| Column | Notes |
+|--------|-------|
+| `email`, `name` | `email` is the match key, and receives the enrolment code + grade notices |
+| `role` | blank/`enrolled` = full participant; `auditor` = reads released materials, gets no assignments/grades, refused from teams |
+| `team:<number>` | one per team assignment (its schedule `number`); a team = the rows sharing a value, blank = no team. The **Join team** form writes the cell; for `team_formation: assigned` you type it |
 
 Add any other column you want (a registrar id, a lecture section, notes) - the engine ignores it and preserves it.
 
+The engine's own columns live beside it in `semester-config/.system/roster.csv` (`email`,
+`github_handle`, `github_id`, `enrol_code`, `code_sent_at`): written by **Send enrolment
+codes** and onboarding, never by you, except a switched account's new `github_handle`
+([06](06-enrol-students-to-cohort.md)).
+
 <a id="peopleyml"></a>
+<a id="instructorsyml"></a>
 
-### `instructors.yml`
+### `semester.yml`
 
-Live example: [`example-course/semester-org/instructors.yml`](../example-course/semester-org/instructors.yml).
+Live example: [`example-course/semester-org/semester.yml`](../example-course/semester-org/semester.yml).
 
-`semester-config/instructors.yml` - this semester's instructors, one list. Grants the semester's `instructors`
+`semester-config/semester.yml` - this semester's people and defaults.
+
+`people:` - this semester's instructors, one list. Grants the semester's `instructors`
 team necessary access permissions at both the course- and semester-org levels, including push
 from the course org into that year's content repos (`instructors-<semester>`), and supplies the
 semester site's cards. `github_handle`, `role` (`instructor` or `teaching_assistant`) and
 `email` are required on every entry; the rest are optional.
 
 ```yaml
-instructors:
+people:
   - github_handle: "janedoe"     # required, with `role` and `email` - the rest is optional
     role: instructor             # instructor | teaching_assistant
     email: "jane@example.org"    # required, and private
@@ -161,11 +163,10 @@ instructors:
   - github_handle: "anOther"
     role: teaching_assistant
     email: "another@example.org"
+defaults:                        # as course.yml's, one layer nearer; every key seeded commented
+  # max_team_size: 4             (course)
+  late_window_days: 5            # overrides the course and the institution
 ```
-
-The **course** org's `dsl-course.yml` `people:` block takes `instructors`/`teaching_assistants`
-lists, but there it is **display-only** (public-site cards, no access) - course-wide admin is
-[`course_admins`](#dsl-courseyml).
 
 **Instructor photos.** `photo` accepts either form:
 
@@ -185,21 +186,6 @@ so a lapsed date prunes the member exactly as deleting the entry would. **An edi
 Sync membership on the push (immediate); a date rolling over with no edit waits for the daily
 cron (~24h)** - run **Sync membership** by hand if you need it sooner. Runbook:
 [05](05-manage-teaching-team.md).
-
-### `teams.csv`
-
-Live example: [`example-course/semester-org/teams.csv`](../example-course/semester-org/teams.csv).
-
-`semester-config/teams.csv` - group membership, per assignment. It is populated in 2 ways:
-1. Students self-select via the `join` **Join team** issue - only where the assignment's `team_formation` is `self_select` (the default; `assigned` only where declared), only up to its `max_team_size` (default 5), and only between its `handout_datetime` and its grading pin; all three are read from the generated `semester-config/.system/assignments.lock.yml`,
-2. you edit it directly;
-either way a push materialises a GitHub team per group, and releasing a group assignment grants each team one shared repo.
-
-```csv
-assignment,team,github_handle
-assignment-4-project,team-x,anna-adams
-assignment-4-project,team-x,ben-baker
-```
 
 ### `grading_sheets/<slug>.yml`
 
@@ -259,9 +245,9 @@ solution branch  solution/ + grading_config.yml + tests/       -> faculty-only; 
 `grading_config.yml`, on the `solution` branch, is what the assignment is:
 `title`, `type`, `submit_via`, `formats` (a list; the first is the runnable one), `questions`,
 `autograde`, `completion_check`, `grader_pdf`, `tests`, `starter`. How a semester runs it -
-team formation, team size, the late rule, `visibility`, `submit_url` - is that semester's
+team formation, team size, the late rule, `assignment_repo_visibility`, `submit_url` - is that semester's
 [`schedule.yml`](07-schedule-releases.md#assignments); one of those keys written here refuses the whole template
-(`RUN_SETTING_IN_TEMPLATE`). The button writes it from its five inputs plus the course's `assignment_defaults:`; every key
+(`RUN_SETTING_IN_TEMPLATE`). The button writes it from its five inputs; every key
 is documented inline in the generated file and in
 [Add an assignment](03-add-assignment-to-course.md). Two of them drive the cutoff:
 `autograde: true` runs `tests/` (or `tests/run.sh`, in any language), and `completion_check`
@@ -306,7 +292,7 @@ by its kind, which is the block it is written in:
 | semester | the `semester:` block's start and end; a break is a grey band |
 
 `assets:` entries ship files and are never a row. Labels, colours and tabs come from the
-institution policy's `kinds:`.
+institution's `institution.yml` `kinds:`.
 
 **A malformed entry is dropped - and every drop is reported** in the run log, by the
 Console's Check (`semester.check`), and by `--validate` exiting non-zero. A push to `schedule.yml` runs

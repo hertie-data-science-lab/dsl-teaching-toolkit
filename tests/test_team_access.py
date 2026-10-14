@@ -106,7 +106,7 @@ def test_faculty_and_semester_team_sets_are_disjoint():
 
 def test_semester_infra_repos_get_the_faculty_grant():
     # A semester org is default_repository_permission=none, so a non-owner instructor could
-    # not open semester-config (schedule.yml/students.csv/teams.csv/instructors.yml, and the
+    # not open semester-config (schedule.yml/students.csv/teams.csv/semester.yml, and the
     # grading sheets)
     # or triage welcome's needs-review onboarding issues without these.
     assert set(bootstrap_course.SEMESTER_FACULTY_REPOS) == {

@@ -2,7 +2,7 @@
 // the runnable one (listed first: autograde and the completion check read it; decision 0009
 // rule 10). Used by New assignment and the template's Settings form.
 
-import { SOURCE_WORD } from '../model/cascade';
+import { SOURCE_WORD } from '../model/settings';
 import { DEFAULT_FORMATS } from '../model/policy';
 import { Hint } from '../ui/Hint';
 import { Invalid } from './Form';

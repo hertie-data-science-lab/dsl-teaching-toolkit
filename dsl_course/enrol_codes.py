@@ -4,10 +4,13 @@ Students enrol by pasting a random, **non-PII** code (not their email) into the 
 Join issue, so no personal data ever touches the public repo - and because the code is
 unguessable, a classmate can't bind your roster row to their account. This one action:
 
-    1. fills blank `enrol_code` cells in semester-config/students.csv (idempotent), then
+    1. gives every students.csv row without one an `enrol_code` in the SYSTEM-OWNED
+       semester-config/.system/roster.csv (idempotent), then
     2. emails each not-yet-onboarded student their code.
 
-Email reaches the student's UNIVERSITY inbox (the roster `hertie_email`), replacing the
+It writes only `.system/roster.csv`, never the students.csv faculty edit, so a roster push
+never races it. Email reaches the student's university inbox (students.csv `email`),
+replacing the
 Excel -> Power Automate -> Outlook mail-merge. Reuses dsl_course.mailer.
 
 Every roster row gets a code, auditors included - the code is how anyone onboards at all;
@@ -34,9 +37,7 @@ Bare, every one of these previews and sends nothing: acting takes `--no-preview`
 
 from __future__ import annotations
 
-import csv
 import enum
-import io
 import json
 import re
 import secrets
@@ -44,7 +45,7 @@ import sys
 from datetime import UTC, datetime
 
 from . import mailer, roster, status
-from .course import course_phrase
+from .course import CONFIG_REPO, course_phrase
 from .discovery import (
     SEMESTERS_PATH,
     course_name_or,
@@ -53,7 +54,7 @@ from .discovery import (
     semester_is_live,
 )
 from .faults import Unusable
-from .gh_contents import get_file_with_sha, put_file_as_read, read_csv
+from .gh_contents import get_file_content, get_file_with_sha, put_file_as_read
 from .log import (
     CLIParser,
     Summary,
@@ -74,106 +75,53 @@ def make_code() -> str:
     return "dsl-" + "".join(secrets.choice(_ALPHABET) for _ in range(6))
 
 
-def fill_column_in_csv(
-    text: str, column: str, values_by_row: dict[int, str], replacing: str | None = ""
-) -> str:
-    """Surgically write one column into the RAW students.csv, preserving everything else.
-
-    `values_by_row` maps a 0-based DATA-row index (matching `roster.parse` order) to the
-    value to drop into that row's blank `column` cell. Only that one column is touched: every
-    other column - including ones `roster.FIELDS` doesn't know about, e.g. a faculty-added
-    `notes`/`moodle_id` - is carried through untouched, and no cell's raw text is normalised
-    (so a `role` of `audit`/`Auditor` is left exactly as written). This replaces the old
-    round-trip through a whole-file re-serialisation, which wrote only `roster.FIELDS` and
-    rewrote
-    `role`, silently dropping unknown columns and mangling role text on every code write.
-
-    Only cells whose current text is `replacing` are written, which is what makes every
-    caller idempotent: the default (blank) means a code already issued is never rotated and
-    a row already marked as emailed is never re-stamped. The one caller that passes
-    anything else is the release of a claim that could not be spent (`_release_unsent`),
-    which blanks the cells still holding ITS OWN stamp and nobody else's. `None` writes
-    whatever the cell holds - `resend_unjoined`, which replaces codes on purpose. The column
-    is appended if the roster predates it, so a deployed semester needs no migration."""
-    # read_csv, not a bare DictReader: this path bypasses `roster.parse`, and a
-    # `;`-delimited Excel export was written straight back with a code column bolted on -
-    # exit 0, roster destroyed.
-    reader = read_csv(text, roster.REQUIRED_FIELDS, roster.ROSTER_PATH)
-    fieldnames = list(reader.fieldnames or [])
-    if column not in fieldnames:
-        fieldnames.append(column)
-    rows = list(reader)
-    for i, row in enumerate(rows):
-        if i in values_by_row and (
-            replacing is None or (row.get(column) or "").strip() == replacing
-        ):
-            row[column] = values_by_row[i]
-    out = io.StringIO()
-    writer = csv.DictWriter(out, fieldnames=fieldnames)
-    writer.writeheader()
-    for row in rows:
-        writer.writerow({k: row.get(k, "") for k in fieldnames})
-    return out.getvalue()
-
-
-def rows_for_values(text: str, items: list[tuple[int, str, str]]) -> dict[int, str]:
-    """Where each value belongs in `text`, as `{row index: value}`.
-
-    `items` is `(row index at read time, hertie_email, value)`. A row is re-located by
-    EMAIL, because a row index taken from an earlier read is not stable across an edit that
-    landed in between - a Join issue filling in a handle, a faculty member inserting a row.
-    A row carrying no email at all cannot be re-located and keeps its original index; that
-    is the one row for which a concurrent edit can still land the value on the wrong line,
-    and it is also a row nobody can be emailed at.
-
-    An email that is NOT unique cannot re-locate anything either - a registrar export with
-    the same address on two rows (a duplicate enrolment, a shared departmental inbox) sent
-    both codes to the FIRST of them, so the two collapsed onto one key and one of the rows
-    was left with no code at all, silently. Those rows keep their original index too."""
-    seen: dict[str, int] = {}
-    for i, row in enumerate(read_csv(text, roster.REQUIRED_FIELDS, roster.ROSTER_PATH)):
-        email = (row.get("hertie_email") or "").strip()
-        if email:
-            # -1 marks "more than one row carries this" - not usable as a destination.
-            seen[email] = i if email not in seen else -1
-    placed: dict[int, str] = {}
-    for index, email, value in items:
-        at = seen.get(email, -1)
-        placed[at if at >= 0 else index] = value
-    return placed
-
-
 def write_column(
     semester_org: str,
-    raw: str,
+    raw: str | None,
     sha: str,
     column: str,
-    items: list[tuple[int, str, str]],
+    values: dict[str, str],
     message: str,
     replacing: str | None = "",
 ) -> str | None:
-    """Commit one column into students.csv without clobbering a concurrent edit
-    (`put_file_as_read`). Returns the roster text AS COMMITTED, or None if no attempt was
-    accepted.
+    """Commit one column of `.system/roster.csv` (`{email: value}`, `roster.fill_system`)
+    without clobbering a concurrent edit - a Join issue binding a handle while this run is
+    sending (`put_file_as_read`). `raw`/`sha` are the file as read (None/"" = absent).
+    Returns the text AS COMMITTED, or None if no attempt was accepted.
 
-    A refused write re-applies only the values THIS run produced onto the fresh text -
-    `fill_column_in_csv` fills blank cells only, so a value that arrived in between is
-    left exactly as it is. Which is exactly why the committed TEXT is returned rather than
-    a bare success: after a retry the roster can hold a different code from the one this
-    run generated, and the caller must email what the roster holds."""
+    A refused write re-applies only the values THIS run produced onto the fresh text, and
+    only into cells still holding `replacing`, so a value that arrived in between is left
+    as it is. Which is why the committed TEXT is returned rather than a bare success:
+    after a retry the roster can hold a different code from the one this run generated,
+    and the caller must email what the roster holds."""
 
-    def fill(text: str) -> str:
-        return fill_column_in_csv(text, column, rows_for_values(text, items), replacing)
+    def fill(text: str | None) -> str:
+        return roster.fill_system(text, column, values, replacing)
 
     return put_file_as_read(
         semester_org,
-        roster.CONFIG_REPO,
-        roster.ROSTER_PATH,
+        CONFIG_REPO,
+        roster.SYSTEM_PATH,
         fill(raw),
         sha,
-        lambda fresh: None if fresh is None else fill(fresh),
+        fill,
         message,
     )
+
+
+def _read(semester_org: str) -> tuple[str, str | None, str] | None:
+    """`(students.csv, .system/roster.csv or None, its sha or "")`, or None when
+    students.csv is absent (logged)."""
+    students = get_file_content(semester_org, CONFIG_REPO, roster.STUDENTS_PATH)
+    if students is None:
+        log_err(
+            f"Could not find {roster.STUDENTS_PATH} in {semester_org}/{CONFIG_REPO} - "
+            f"bootstrap the semester first (bootstrap_course --semester)."
+        )
+        return None
+    read = get_file_with_sha(semester_org, CONFIG_REPO, roster.SYSTEM_PATH)
+    raw, sha = read if read is not None else (None, "")
+    return students, raw, sha
 
 
 def assign_codes(students: list[roster.Student], gen=make_code) -> int:
@@ -203,7 +151,7 @@ def code_message(
     `course_name` names the course in the subject and the opening line - a student
     reading several of these in one week needs to know which one this is, and the inbox
     list is where they tell them apart. It is optional because the name is
-    read live from the course org's dsl-course.yml, which a half-configured course may
+    read live from the course org's course.yml, which a half-configured course may
     not carry yet; the wording then falls back to "the course" rather than emailing a
     blank."""
     course = course_phrase(course_name)
@@ -223,7 +171,7 @@ def code_message(
     )
     if replaces:
         body += "\nThis code replaces any code you were sent before, which no longer works.\n"
-    return (student.hertie_email, subject, body)
+    return (student.email, subject, body)
 
 
 class Outcome(enum.Enum):
@@ -246,20 +194,14 @@ class Outcome(enum.Enum):
 
 
 def run(semester_org: str) -> Outcome:
-    # Fetch the RAW roster text once: we parse it for the students, and (below) edit the same
-    # text in place so writing codes back never disturbs columns roster doesn't model.
-    read = get_file_with_sha(semester_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
-    if read is None:  # genuinely absent - mirror roster.load's message
-        log_err(
-            f"Could not find {roster.ROSTER_PATH} in {semester_org}/{roster.CONFIG_REPO} - "
-            f"bootstrap the semester first (bootstrap_course --semester)."
-        )
+    read = _read(semester_org)
+    if read is None:
         return Outcome.NO_ROSTER
-    # The sha is kept so the write below can be refused if anything else commits to the
-    # roster while this run is generating and mailing codes (see write_codes).
-    raw, raw_sha = read
+    # The roster file's sha is kept so the write below is refused if a Join issue commits
+    # to it while this run is generating and mailing codes (see write_column).
+    text, raw, raw_sha = read
     try:
-        students = roster.parse(raw)
+        students = roster.parse(text, raw)
     except Unusable as exc:
         # A `;`-delimited Excel export, or a header row somebody deleted. Nothing here can
         # act on it - and nothing here should red for it either: the roster is faculty's
@@ -271,22 +213,21 @@ def run(semester_org: str) -> Outcome:
         log_err(f"roster in {semester_org} has no rows yet - no codes to generate.")
         return Outcome.EMPTY_ROSTER
 
-    before = [s.enrol_code for s in students]
-    added = assign_codes(students)  # in memory; persisted below
+    # One code per address: two rows of one email are one student (the duplicate is on
+    # the students.csv digest issue), and a row with no address cannot be mailed.
+    unique = list(roster.by_email(students).values())
+    before = [s.enrol_code for s in unique]
+    added = assign_codes(unique)  # in memory; persisted below
     log_step(
         f"Enrolment codes for {semester_org}: {added} new code(s), "
         f"emailing not-yet-onboarded students"
     )
     if added:
-        # Write ONLY the newly filled enrol_code cells back into the raw CSV, preserving
-        # every other column and each cell's raw text (see fill_enrol_codes_in_csv). Row
-        # order matches roster.parse, so index i lines up with students[i] - and
-        # write_codes re-locates each row by email if it has to re-read.
-        new_codes = [
-            (i, s.hertie_email.strip(), s.enrol_code)
-            for i, s in enumerate(students)
+        new_codes = {
+            s.email.strip(): s.enrol_code
+            for i, s in enumerate(unique)
             if not before[i] and s.enrol_code
-        ]
+        }
         written = write_column(
             semester_org,
             raw,
@@ -297,40 +238,35 @@ def run(semester_org: str) -> Outcome:
         )
         if written is None:
             log_err(
-                f"could not write the enrolment codes to {roster.ROSTER_PATH} in "
+                f"could not write the enrolment codes to {roster.SYSTEM_PATH} in "
                 f"{semester_org} - nothing emailed, so re-running is safe."
             )
             return Outcome.FAILED
-        log_ok(f"wrote {added} code(s) to {roster.ROSTER_PATH}")
+        log_ok(f"wrote {added} code(s) to {roster.SYSTEM_PATH}")
         # Email what the ROSTER holds, never the codes generated in memory: a refused write
         # is re-applied onto a fresh read, and a code that landed in between is left as it
         # is - so the in-memory code for that student is one nobody can enrol with.
-        students = roster.parse(written)
+        unique = list(roster.by_email(roster.parse(text, written)).values())
 
     join_url = join_issue_url(semester_org)
-    # One set, two jobs: `code_sent_at` keeps a re-run from re-mailing students who already
-    # have their code, and adding each address as we go collapses a duplicated roster row,
-    # which would otherwise get two emails carrying two different codes.
-    already = {
-        s.hertie_email.strip().casefold() for s in students if s.code_sent_at.strip()
-    }
-    # A code on two rows binds whoever joins first to the first row: mail neither until
-    # faculty blank one (`roster.parse` puts the rows on the students.csv digest issue).
-    shared = roster.shared_codes(students)
+    # `code_sent_at` keeps a re-run from re-mailing students who already have their code.
+    already = {s.email.strip().casefold() for s in unique if s.code_sent_at.strip()}
+    # A code on two rows binds whoever joins first to the first row: mail neither (the
+    # roster file is the engine's own, so this is a fault to report, never faculty's).
+    shared = roster.shared_codes(unique)
     targets = []
     held = 0
-    for s in students:
-        email = s.hertie_email.strip().casefold()
+    for s in unique:
+        email = s.email.strip().casefold()
         if s.enrol_code and email and not s.onboarded and email not in already:
             if s.enrol_code.casefold() in shared:
                 held += 1
                 continue
-            already.add(email)
             targets.append(s)
     if held:
         log_err(
-            f"{held} row(s) share an enrol_code with another row in "
-            f"{roster.ROSTER_PATH} - not emailed until each has its own (blank the copy)"
+            f"{held} student(s) share an enrol_code with another in "
+            f"{roster.SYSTEM_PATH} - not emailed until each has its own"
         )
     if not targets:
         log_ok("no not-yet-onboarded students still to be sent a code.")
@@ -344,13 +280,13 @@ def run(semester_org: str) -> Outcome:
             f"no mail transport for {semester_org} - nothing claimed, nothing sent."
         )
         return Outcome.NO_TRANSPORT
-    # The codes are already committed to students.csv by this point: a course file that
-    # cannot be read costs the name, never the email.
+    # The codes are already committed by this point: a course file that cannot be read
+    # costs the name, never the email.
     course_name = course_name_or(semester_org=semester_org)
     out = _claimed_send(
         semester_org,
         [code_message(s, join_url, course_name) for s in targets],
-        [s.hertie_email for s in targets],
+        [s.email for s in targets],
         "",
         "nothing emailed, so re-running is safe. Fix the roster write.",
     )
@@ -380,30 +316,27 @@ def resend_unjoined(
 
     Returns the outcome and its counts: `students` (who would get or got a new code),
     `skipped` (rows whose address is unusable) and `sent`."""
-    read = get_file_with_sha(semester_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
+    read = _read(semester_org)
     if read is None:
-        log_err(
-            f"Could not find {roster.ROSTER_PATH} in {semester_org}/{roster.CONFIG_REPO}."
-        )
         return Outcome.NO_ROSTER, {}
-    raw, raw_sha = read
+    text, raw, raw_sha = read
     try:
-        students = roster.parse(raw)
+        students = roster.parse(text, raw)
     except Unusable as exc:
         log_err(f"{exc} No codes generated or sent.")
         return Outcome.UNUSABLE_ROSTER, {}
     seen: set[str] = set()
-    targets: list[tuple[int, roster.Student]] = []
+    targets: list[roster.Student] = []
     skipped = 0
-    for i, s in enumerate(students):
+    for s in students:
         if s.onboarded:
             continue
-        email = s.hertie_email.strip()
+        email = s.email.strip()
         if not _ADDRESS.fullmatch(email) or email.casefold() in seen:
             skipped += 1
             continue
         seen.add(email.casefold())
-        targets.append((i, s))
+        targets.append(s)
     counts = {"students": len(targets), "skipped": skipped, "sent": 0}
     if dry_run or not targets:
         log_ok(
@@ -417,13 +350,13 @@ def resend_unjoined(
         )
         return Outcome.NO_TRANSPORT, counts
     taken = {s.enrol_code for s in students if s.enrol_code}
-    fresh: list[tuple[int, str, str]] = []
-    for i, s in targets:
+    fresh: dict[str, str] = {}
+    for s in targets:
         code = make_code()
         while code in taken:
             code = make_code()
         taken.add(code)
-        fresh.append((i, s.hertie_email.strip(), code))
+        fresh[s.email.strip()] = code
     written = write_column(
         semester_org,
         raw,
@@ -435,17 +368,16 @@ def resend_unjoined(
     )
     if written is None:
         log_err(
-            f"could not write the new codes to {roster.ROSTER_PATH} in {semester_org} - "
+            f"could not write the new codes to {roster.SYSTEM_PATH} in {semester_org} - "
             f"the old codes still work and nothing was emailed."
         )
         return Outcome.FAILED, counts
-    minted = {email: code for _i, email, code in fresh}
     # Email what the ROSTER holds, and only rows still unjoined that carry this run's code:
     # a Join that landed in between is somebody who needs no new code.
     to_mail = [
         s
-        for s in roster.parse(written)
-        if not s.onboarded and minted.get(s.hertie_email.strip()) == s.enrol_code
+        for s in roster.by_email(roster.parse(text, written)).values()
+        if not s.onboarded and fresh.get(s.email.strip()) == s.enrol_code
     ]
     if not to_mail:
         # Every one of them joined while the codes were being written: nobody to mail.
@@ -457,7 +389,7 @@ def resend_unjoined(
     out = _claimed_send(
         semester_org,
         [code_message(s, join_url, course_name, replaces=True) for s in to_mail],
-        [s.hertie_email for s in to_mail],
+        [s.email for s in to_mail],
         None,
         "the new codes are in the roster and nothing was emailed; the next roster "
         "push will not send them either, so run this again.",
@@ -497,7 +429,7 @@ def _claimed_send(
     stamp = datetime.now(UTC).isoformat(timespec="seconds")
     if not _claim_sent(semester_org, recipients, stamp, replacing=replacing):
         log_err(
-            f"could not stamp code_sent_at in {roster.ROSTER_PATH} for {semester_org} - "
+            f"could not stamp code_sent_at in {roster.SYSTEM_PATH} for {semester_org} - "
             f"{unclaimed}"
         )
         return None
@@ -523,24 +455,20 @@ def _claim_sent(
     A claim, not a record - it is written BEFORE the send (see `run`), so what it really
     asserts is "nobody else will mail these rows". `_release_unsent` gives back whatever
     the send then failed to spend."""
-    read = get_file_with_sha(semester_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
+    if not recipients:
+        return False
+    read = get_file_with_sha(semester_org, CONFIG_REPO, roster.SYSTEM_PATH)
     if read is None:
         return False
     raw, sha = read
-    want = set(recipients)
-    marks = [
-        (i, s.hertie_email.strip(), stamp)
-        for i, s in enumerate(roster.parse(raw))
-        if s.hertie_email in want
-    ]
-    return bool(marks) and bool(
+    return bool(
         write_column(
             semester_org,
             raw,
             sha,
             "code_sent_at",
-            marks,
-            f"roster: claim {len(marks)} enrolment code email(s)",
+            {to: stamp for to in recipients},
+            f"roster: claim {len(recipients)} enrolment code email(s)",
             replacing=replacing,
         )
     )
@@ -555,16 +483,16 @@ def _release_unsent(semester_org: str, unsent: list[str], stamp: str) -> None:
     Never raises: it runs on the failure path, including from an `except` block where a
     raise of its own would replace the exception the caller has to see."""
     try:
-        read = get_file_with_sha(semester_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
+        read = get_file_with_sha(semester_org, CONFIG_REPO, roster.SYSTEM_PATH)
         released: str | None = None
         if read is not None:
             raw, sha = read
-            want = set(unsent)
-            marks = [
-                (i, s.hertie_email.strip(), "")
-                for i, s in enumerate(roster.parse(raw))
-                if s.hertie_email in want and s.code_sent_at.strip() == stamp
-            ]
+            held = roster.parse_system(raw)
+            marks = {
+                to: ""
+                for to in unsent
+                if held.get(to.strip().casefold(), {}).get("code_sent_at") == stamp
+            }
             released = (
                 write_column(
                     semester_org,
@@ -594,7 +522,7 @@ def _release_unsent(semester_org: str, unsent: list[str], stamp: str) -> None:
     # line lands in a world-readable Actions log - but the stamp is exact, and every row
     # carrying it is a row to clear.
     log_err(
-        f"{len(unsent)} student(s) in {roster.ROSTER_PATH} in {semester_org} are stamped "
+        f"{len(unsent)} student(s) in {roster.SYSTEM_PATH} in {semester_org} are stamped "
         f"code_sent_at={stamp} but were never emailed, and the stamp could not be "
         f"cleared - delete that exact timestamp from those rows by hand, or they never "
         f"receive a code."

@@ -6,7 +6,7 @@ bootstrap_course imports seed, so seed cannot import bootstrap_course back - thi
 is what both sides may import.
 
 Everything this module writes is SYSTEM-owned, and that is the whole rule for what may
-live here: a semester's own config (students.csv, teams.csv, schedule.yml, instructors.yml) is
+live here: a semester's own config (students.csv, schedule.yml, semester.yml) is
 seeded create-if-missing by bootstrap_course and must never be refreshed from a template,
 or a nightly run would clobber a live roster.
 """
@@ -23,7 +23,7 @@ from .course import JOIN_REPO
 from .gh_contents import get_file_content, put_file, put_files
 from .log import log_err, log_ok
 from .repos import ensure_label
-from .roster import CONFIG_REPO
+from .roster import CONFIG_REPO, STUDENTS_PATH, SYSTEM_PATH
 from .team_formation import TEAM_LOCK_PATH, parse_team_lock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,10 +36,8 @@ EXAMPLE_COURSE = ROOT / "example-course" / "course-org"
 # rendered for this semester, so every example in a scaffold is copy-paste-correct.
 CONFIG_SCAFFOLDS = {
     "students.csv": "semester-config/students.csv",
-    "teams.csv": "semester-config/teams.csv",
     "schedule.yml": "semester-config/schedule.yml",
-    "instructors.yml": "semester-config/instructors.yml",
-    "assignments.yml": "semester-config/assignments.yml",
+    "semester.yml": "semester-config/semester.yml",
 }
 
 
@@ -50,7 +48,7 @@ def template(rel: str) -> str:
     Everything under templates/ is content pushed into a course/semester repo, kept in real
     files rather than Python literals so faculty & instructors can read (and PR) the thing
     they'll actually receive. Most are seeded verbatim; the few that carry `{placeholders}`
-    are rendered with str.format (see bootstrap_course._course_metadata)."""
+    are rendered with str.format (see bootstrap_course.course_seed)."""
     return (TEMPLATES / rel).read_text(encoding="utf-8")
 
 
@@ -86,6 +84,8 @@ def join_workflow(rel: str) -> str:
         "".join(out)
         .replace("__CONFIG_REPO__", CONFIG_REPO)
         .replace("__LOCK__", TEAM_LOCK_PATH)
+        .replace("__STUDENTS__", STUDENTS_PATH)
+        .replace("__ROSTER__", SYSTEM_PATH)
     )
 
 
@@ -394,8 +394,8 @@ def refresh_join_workflows(org: str) -> int:
 # and the workflows that make the repo act on what they put in it, as
 # `(path in the repo, template file)`.
 #
-# HARD INVARIANT: nothing the semester edits may join this table. students.csv, teams.csv,
-# schedule.yml and instructors.yml hold the semester's LIVE state (enrol codes, onboarded
+# HARD INVARIANT: nothing the semester edits may join this table. students.csv,
+# schedule.yml and semester.yml hold the semester's LIVE state (enrol codes, onboarded
 # handles); they are seeded create-if-missing by bootstrap_course and stay that way.
 # Adding one here would have the nightly refresh overwrite it every night.
 # tests/test_bootstrap_seeding.py pins this set exactly, so an addition fails loud.
@@ -439,7 +439,7 @@ def config_system_files(central_ref: str) -> dict[str, bytes]:
 
 
 def refresh_semester_pointer(org: str, course_org: str) -> int:
-    """Re-push a semester's `semester-config/.system/dsl-course.yml` - the pointer its
+    """Re-push a semester's `semester-config/.system/course.yml` - the pointer its
     dispatchers read to find which course org to fire Sync membership / Sync site at.
 
     SYSTEM-owned, but it used to be written ONLY by Bootstrap semester's own wiring, so it
@@ -454,7 +454,7 @@ def refresh_semester_pointer(org: str, course_org: str) -> int:
         org,
         CONFIG_REPO,
         {
-            records.path("pointer"): template("semester/dsl-course.yml")
+            records.path("pointer"): template("semester/course.yml")
             .format(course=course_org)
             .encode()
         },

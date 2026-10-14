@@ -21,6 +21,7 @@ from dsl_course import (
     ghcli,
     grading_spec,
     materials,
+    roster,
     settings,
     site,
     site_repo,
@@ -40,9 +41,47 @@ from dsl_course.schedule import (
 )
 from dsl_course.setting_readers import read_settings
 from dsl_course.site_repo import Link
-from tests.conftest import BareOrigins, fake_config, run_settings
+from tests.conftest import (
+    ROSTER_HEADER,
+    BareOrigins,
+    fake_config,
+    roster_files,
+    run_settings,
+)
 
 UTC = ZoneInfo("UTC")
+
+
+def _teams_reader(monkeypatch, read) -> None:
+    """Serve the roster whose team cells the old-shape teams.csv `read(org)` returns (None
+    = no roster), one onboarded student per handle it names, through the real parsers."""
+    held: dict = {}
+
+    def files(org: str) -> dict:
+        if org not in held:
+            text = read(org)
+            rows = [line.split(",") for line in (text or "").splitlines()[1:] if line]
+            handles = sorted({r[2] for r in rows})
+            combined = (
+                ROSTER_HEADER
+                + "\n"
+                + "".join(f"{h}@x.org,{h},,{h},1,,\n" for h in handles)
+            )
+            keys = {r[0] for r in rows}
+            numbers = {
+                k: int(k.rsplit("-", 1)[1])
+                for k in keys
+                if k.rsplit("-", 1)[-1].isdigit()
+            }
+            held[org] = {} if text is None else roster_files(combined, text, numbers)
+        return held[org]
+
+    monkeypatch.setattr(
+        roster, "_students_text", lambda org: files(org).get(roster.STUDENTS_PATH)
+    )
+    monkeypatch.setattr(
+        roster, "_system_text", lambda org: files(org).get(roster.SYSTEM_PATH)
+    )
 
 
 def _spec(config: str) -> grading_spec.GradingSpec:
@@ -569,7 +608,7 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
         lambda *a, **k: _spec("type: group\n"),
     )
     # Out, so the page would list any team formed; this semester has none.
-    monkeypatch.setattr(site.teams, "_teams_text", lambda org: None)
+    _teams_reader(monkeypatch, lambda org: None)
     sched = Schedule(
         assignments={
             "assignment-3": AssignmentEntry(
@@ -610,10 +649,8 @@ def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) 
         site, "get_file_content", lambda *a, **k: "# Group project\nThe brief."
     )
     monkeypatch.setattr(site, "load_grading_spec", lambda *a, **k: _spec(config))
-    monkeypatch.setattr(
-        site.teams,
-        "_teams_text",
-        teams_csv if callable(teams_csv) else lambda org: teams_csv or None,
+    _teams_reader(
+        monkeypatch, teams_csv if callable(teams_csv) else lambda org: teams_csv or None
     )
     sched = Schedule(
         assignments={
@@ -735,9 +772,8 @@ def test_a_sync_reads_teams_csv_once_for_every_forming_assignment(
     )
     run_settings(monkeypatch, lambda org: None)
     reads = []
-    monkeypatch.setattr(
-        site.teams,
-        "_teams_text",
+    _teams_reader(
+        monkeypatch,
         lambda org: (
             reads.append(org)
             or "assignment,team,github_handle\nassignment-1,alpha,ada-l\n"
@@ -1383,7 +1419,7 @@ def test_the_banner_shows_only_for_a_course_that_opts_into_the_console(
         tmp_path,
         Schedule(),
         yaml_file=lambda *a: (
-            {"student_console": True} if a[-1] == "dsl-course.yml" else {}
+            {"course": {"student_console": True}} if a[-1] == "course.yml" else {}
         ),
     )
     url = yaml.safe_load(on.files["_data/console.yml"])["url"]
@@ -1393,7 +1429,7 @@ def test_the_banner_shows_only_for_a_course_that_opts_into_the_console(
 def test_course_description_flows_from_course_metadata_into_config(
     monkeypatch, tmp_path
 ):
-    # course_description is declared once in the course org's dsl-course.yml and pushed to
+    # course_description is declared once in the course org's course.yml and pushed to
     # every semester site. Undeclared, it must not be written at all - the site repo keeps
     # whatever blurb it has.
     captured = {}
@@ -1412,7 +1448,7 @@ def test_course_description_flows_from_course_metadata_into_config(
     assert "course_description" not in captured["plan"].config
 
     monkeypatch.setattr(
-        site, "yaml_file", lambda *a: {"course_description": "Nets, from 0."}
+        site, "yaml_file", lambda *a: {"course": {"description": "Nets, from 0."}}
     )
     fake_config(monkeypatch, site.yaml_file)
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
@@ -1440,7 +1476,7 @@ def test_the_exported_config_keys_are_the_ones_the_sync_writes_and_the_seed_keep
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
-    meta = {"course_name": "Nets", "course_code": "E1", "course_description": "D."}
+    meta = {"course": {"name": "Nets", "code": "E1", "description": "D."}}
     monkeypatch.setattr(site, "yaml_file", lambda *a: meta)
     fake_config(monkeypatch, site.yaml_file)
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
@@ -1454,7 +1490,7 @@ def test_the_exported_config_keys_are_the_ones_the_sync_writes_and_the_seed_keep
 
 
 def test_replacing_a_config_scalar_writes_one_line_over_a_block_scalar():
-    # A faculty `>` block in dsl-course.yml, and/or one already in _config.yml: either way
+    # A faculty `>` block in course.yml, and/or one already in _config.yml: either way
     # the result must stay valid YAML on one line, its body not stranded as loose text.
     cfg = site_repo._replace_config_scalar(
         "course_description: >\n  an old\n  folded blurb\ncourse_code: 'y'\n",
@@ -1483,7 +1519,9 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(site, "yaml_file", lambda *a: {"course_name": "Deep Learning"})
+    monkeypatch.setattr(
+        site, "yaml_file", lambda *a: {"course": {"name": "Deep Learning"}}
+    )
     fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     # the REAL schedule.load, fed the malformed file
@@ -1865,7 +1903,7 @@ def test_team_people_never_renders_the_syncs_own_bot_account(monkeypatch, capsys
 
 
 def _bad_indent_error() -> yaml.YAMLError:
-    """The REAL exception a bad indent in instructors.yml produces. load_yaml_config re-raises
+    """The REAL exception a bad indent in semester.yml produces. load_yaml_config re-raises
     it untouched, and yaml.YAMLError is NOT a RuntimeError - a stub that raised
     RuntimeError instead is exactly why the boundaries below went uncaught."""
     try:
@@ -1878,28 +1916,27 @@ def _bad_indent_error() -> yaml.YAMLError:
 def test_yaml_file_raises_on_a_malformed_file_rather_than_wiping_what_it_feeds(
     monkeypatch,
 ):
-    # A semester's instructors.yml with one bad indent used to parse to `{}` - "nothing declared" -
+    # A semester's semester.yml with one bad indent used to parse to `{}` - "nothing declared" -
     # and republish the site with every teaching-team card gone, green.
     err = _bad_indent_error()
     monkeypatch.setattr(
         site_repo, "load_yaml_config", lambda *a: (_ for _ in ()).throw(err)
     )
     with pytest.raises(yaml.YAMLError):
-        site_repo.yaml_file("Semester-f2026", "semester-config", "instructors.yml")
+        site_repo.yaml_file("Semester-f2026", "semester-config", "semester.yml")
 
 
 def test_yaml_file_reads_an_absent_file_as_nothing_declared(monkeypatch):
     monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a: None)
     assert (
-        site_repo.yaml_file("Semester-f2026", "semester-config", "instructors.yml")
-        == {}
+        site_repo.yaml_file("Semester-f2026", "semester-config", "semester.yml") == {}
     )
 
 
 def test_main_reports_a_malformed_config_as_one_line_not_a_traceback(
     monkeypatch, capsys
 ):
-    # instructors.yml is web-editable, so faculty author bad indents directly. yaml.YAMLError
+    # semester.yml is web-editable, so faculty author bad indents directly. yaml.YAMLError
     # is not a RuntimeError, so it used to walk straight through main()'s guard and out as
     # a traceback in the Actions log.
     err = _bad_indent_error()
@@ -2128,7 +2165,7 @@ def test_the_config_header_names_the_identity_keys_the_sync_overwrites():
         ["course_code", "course_name"],
     )
     assert "`course_code`, `course_name`" in cfg
-    assert "dsl-course.yml" in cfg
+    assert "course.yml" in cfg
     assert "course_name: x" in cfg
 
 

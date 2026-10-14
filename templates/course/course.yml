@@ -1,0 +1,10 @@
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+# This course across every semester: who it is, who owns it, the defaults its semesters
+# inherit, and its open course site. Reference: docs/01-new-course-org.md
+course:
+  name: {course_name}
+  code: {course_code}
+  # description: One paragraph students see on every semester site and the open course site.
+  # toolkit_version_ref: release   # absent = release. Pins this course and its semesters to one ref of the toolkit (`main` is the demo course's; a 40-character SHA holds a course still).
+  # licence: CC BY-NC-SA 4.0       # one of the institution's licences; absent = the first

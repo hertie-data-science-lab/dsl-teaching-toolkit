@@ -226,7 +226,7 @@ def test_with_no_address_set_the_institution_contact_is_the_maintainer(monkeypat
     # Never "" or None: a fault always has somewhere to go - the policy's contact.
     for key in (*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV):
         monkeypatch.delenv(key, raising=False)
-    assert mailer.maintainer_address() == policy.load()["contact"]
+    assert mailer.maintainer_address() == policy.contact()
 
 
 # ------------------------------------------------------------------- pacing and the budget
@@ -387,7 +387,7 @@ def test_a_plain_three_tuple_is_still_a_message(monkeypatch):
 
 def test_a_group_is_counted_not_named_in_the_run_log(monkeypatch, capsys):
     # Every workflow runs in a PUBLIC repo, so its log is world-readable - and a mask is
-    # not anonymity: `a***@x.edu` beside a semester's instructors.yml is a name.
+    # not anonymity: `a***@x.edu` beside a semester's semester.yml is a name.
     _payloads(monkeypatch)
     mailer.send_bulk([mailer.Message(("ada@x.edu", "bo@x.edu"), "Subj", "Body")])
     out = capsys.readouterr().out

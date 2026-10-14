@@ -22,7 +22,7 @@ from cryptography.x509.oid import NameOID
 
 from dsl_course import discovery, enrol_codes, gh_contents, mailer, roster
 from dsl_course.gh_contents import read_csv
-from tests.conftest import ROSTER_HEADER
+from tests.conftest import ROSTER_HEADER, roster_files
 
 
 def _student(email="a@x.edu", name="Ada", code="", handle=""):
@@ -231,125 +231,92 @@ def test_a_failed_graph_token_is_not_reported_as_nothing_to_send(monkeypatch):
         mailer._send_via_graph(cfg, [("a@x.edu", "Subj", "Body")])
 
 
-# --------------------------------- writing codes must not rewrite the roster (fix 17)
-
-
-def test_fill_enrol_codes_preserves_unknown_columns_and_raw_role():
-    # The old whole-file round-trip re-serialised only roster.FIELDS, dropping
-    # every column the engine does not read - a faculty-added `notes`, and the retired
-    # `student_id`/`section` a deployed semester's roster still carries - and normalising
-    # `role`. A surgical cell edit must leave every other column and each cell's raw text
-    # exactly as written.
-    import csv
-    import io
-
-    text = (
-        "student_id,hertie_email,name,github_handle,github_id,section,enrol_code,role,notes\n"
-        "1,ada@uni.edu,Ada,ada-l,42,A,,audit,keen\n"
-        "2,bob@uni.edu,Bob,bob-b,43,B,dsl-keep,enrolled,\n"
-    )
-    out = enrol_codes.fill_column_in_csv(text, "enrol_code", {0: "dsl-new"})
-    rows = list(csv.DictReader(io.StringIO(out)))
-    assert rows[0]["enrol_code"] == "dsl-new"  # the blank cell is filled
-    assert rows[0]["role"] == "audit"  # raw text, NOT normalised to enrolled/auditor
-    assert rows[0]["notes"] == "keen"  # the unknown column survives
-    assert rows[0]["student_id"] == "1"  # so do the columns the engine no longer reads
-    assert rows[0]["section"] == "A"
-    assert rows[1]["enrol_code"] == "dsl-keep"  # an existing code is never overwritten
-    assert "notes" in out.splitlines()[0]  # header keeps the extra column
-
-
-def test_fill_column_appends_the_column_when_the_roster_predates_it():
-    import csv
-    import io
-
-    # A roster predating the column, but still a roster: the required columns are what
-    # `roster.parse` requires, and only `enrol_code` is optional here.
-    text = "hertie_email,name,github_handle\nada@uni.edu,Ada,ada-l\n"
-    out = enrol_codes.fill_column_in_csv(text, "enrol_code", {0: "dsl-new"})
-    rows = list(csv.DictReader(io.StringIO(out)))
-    assert rows[0]["enrol_code"] == "dsl-new"
-    assert out.splitlines()[0].endswith("enrol_code")  # added at the end
-
-
-def test_a_semicolon_export_is_refused_rather_than_written_back_mangled():
-    # A German-locale Excel saves `;`-delimited CSV. DictReader sees ONE header column and
-    # every field reads "", so this path used to bolt an `enrol_code` column onto the
-    # single mangled column and commit that over the roster - exit 0, nobody told. These
-    # two readers bypassed `roster.parse`, which has refused it all along.
-    text = "hertie_email;name;github_handle\nada@uni.edu;Ada;ada-l\n"
-    for call in (
-        lambda: enrol_codes.fill_column_in_csv(text, "enrol_code", {0: "dsl-new"}),
-        lambda: enrol_codes.rows_for_values(text, [(0, "ada@uni.edu", "dsl-new")]),
-    ):
-        with pytest.raises(RuntimeError, match="comma-separated"):
-            call()
-
-
-# ------------------- a code write must not revert a Join binding that landed meanwhile
+# --------------------------- codes are written to .system/roster.csv, never students.csv
 
 
 HEADER = ROSTER_HEADER + "\n"
+SYS = roster.SYSTEM_PATH
+STUDENTS = roster.STUDENTS_PATH
 STALE = HEADER + "ada@uni.edu,Ada,enrolled,,,\nbob@uni.edu,Bob,enrolled,,,\n"
-# What the roster looks like after a Join issue bound Ada's handle mid-run.
-FRESH = HEADER + "ada@uni.edu,Ada,enrolled,ada-l,42,\nbob@uni.edu,Bob,enrolled,,,\n"
+# What the roster file looks like after a Join issue bound Ada's handle mid-run.
+FRESH = roster_files(HEADER + "ada@uni.edu,Ada,enrolled,ada-l,42,\n")[SYS]
 
 
 def _codes():
-    return [(0, "ada@uni.edu", "dsl-aaa111"), (1, "bob@uni.edu", "dsl-bbb222")]
+    return {"ada@uni.edu": "dsl-aaa111", "bob@uni.edu": "dsl-bbb222"}
+
+
+def _system(text: str) -> dict[str, dict]:
+    return {r["email"]: r for r in read_csv(text, ("email",), SYS)}
+
+
+def _files(monkeypatch, files: dict[str, str], *, writes_ok=True) -> list[str]:
+    """Serve `files` (path -> text) as semester-config, writes landing back in it. Returns
+    the texts written, in order."""
+    written: list[str] = []
+
+    def with_sha(org, repo, path):
+        return (files[path], f"sha-{len(written)}") if path in files else None
+
+    monkeypatch.setattr(enrol_codes, "get_file_content", lambda o, r, p: files.get(p))
+    monkeypatch.setattr(enrol_codes, "get_file_with_sha", with_sha)
+    monkeypatch.setattr(gh_contents, "get_file_with_sha", with_sha)
+
+    def fake_put_file(org, repo, path, content, message, expected_sha=None):
+        if not writes_ok:
+            return False
+        assert path == SYS, "the send writes only the engine's roster file"
+        files[path] = content.decode()
+        written.append(files[path])
+        return True
+
+    monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
+    return written
 
 
 def test_a_refused_write_is_retried_against_the_fresh_roster(monkeypatch):
-    # The failure: put_file re-read the sha at write time, so this run's stale copy - with
-    # no handle for Ada - overwrote the Join binding, and Ada could not be provisioned.
+    # A Join issue bound Ada's handle while this run was minting codes: the retry is
+    # re-applied onto the fresh file, so the binding survives.
     written: list[str] = []
     attempts = {"n": 0}
 
     def fake_put_file(org, repo, path, content, message, expected_sha=None):
         attempts["n"] += 1
         written.append(content.decode())
-        return expected_sha == "fresh"  # only the up-to-date sha is accepted
+        return expected_sha == "fresh"
 
     monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
-    monkeypatch.setattr(
-        enrol_codes, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
-    )
     monkeypatch.setattr(
         gh_contents, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
     )
     assert (
         enrol_codes.write_column(
-            "SEMESTER", STALE, "stale", "enrol_code", _codes(), "roster: assign"
+            "SEMESTER", None, "", "enrol_code", _codes(), "roster: assign"
         )
         == written[-1]
     )
     assert attempts["n"] == 2
-    # The retry carries Ada's handle - it was never this run's to remove - and both codes.
-    assert "ada-l" in written[-1]
-    assert "dsl-aaa111" in written[-1] and "dsl-bbb222" in written[-1]
+    rows = _system(written[-1])
+    assert rows["ada@uni.edu"]["github_handle"] == "ada-l"
+    assert rows["ada@uni.edu"]["enrol_code"] == "dsl-aaa111"
+    assert rows["bob@uni.edu"]["enrol_code"] == "dsl-bbb222"
 
 
 def test_the_retry_gives_up_after_a_bounded_number_of_attempts(monkeypatch):
     monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: False)
     monkeypatch.setattr(
-        enrol_codes, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
-    )
-    monkeypatch.setattr(
         gh_contents, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
     )
     assert (
         enrol_codes.write_column(
-            "SEMESTER", STALE, "stale", "enrol_code", _codes(), "roster: assign"
+            "SEMESTER", None, "", "enrol_code", _codes(), "roster: assign"
         )
         is None
     )
 
 
 def test_a_code_that_arrived_in_between_is_left_alone(monkeypatch):
-    # Another run (or a faculty edit) already filled Ada's cell. Ours must not replace it.
-    theirs = (
-        HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-theirs\nbob@uni.edu,Bob,enrolled,,,\n"
-    )
+    theirs = roster_files(HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-theirs\n")[SYS]
     written: list[str] = []
 
     def fake_put_file(org, repo, path, content, message, expected_sha=None):
@@ -358,44 +325,37 @@ def test_a_code_that_arrived_in_between_is_left_alone(monkeypatch):
 
     monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
     monkeypatch.setattr(
-        enrol_codes, "get_file_with_sha", lambda org, repo, path: (theirs, "fresh")
-    )
-    monkeypatch.setattr(
         gh_contents, "get_file_with_sha", lambda org, repo, path: (theirs, "fresh")
     )
     assert enrol_codes.write_column(
-        "SEMESTER", STALE, "stale", "enrol_code", _codes(), "roster: assign"
+        "SEMESTER", None, "", "enrol_code", _codes(), "roster: assign"
     )
     assert "dsl-theirs" in written[-1] and "dsl-aaa111" not in written[-1]
 
 
 def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
-    # Another run filled Ada's cell first, so our write was refused and the retry left
+    # Another run filled Ada's code first, so our write was refused and the retry left
     # `dsl-theirs` in place. Emailing the code THIS run generated in memory gave Ada one
-    # that enrols nobody: the Join issue rejected her, with no sign anything went wrong.
-    theirs = (
-        HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-theirs\nbob@uni.edu,Bob,enrolled,,,\n"
-    )
-    # First read is the stale roster; every read after it sees theirs - the retry's
-    # re-read, and then the sent-marker's.
-    reads = [(STALE, "stale"), (theirs, "fresh")]
-    monkeypatch.setattr(
-        enrol_codes,
-        "get_file_with_sha",
-        lambda org, repo, path: reads.pop(0) if len(reads) > 1 else reads[0],
-    )
-    monkeypatch.setattr(
-        gh_contents,
-        "get_file_with_sha",
-        lambda org, repo, path: reads.pop(0) if len(reads) > 1 else reads[0],
-    )
-    monkeypatch.setattr(
-        gh_contents,
-        "put_file",
-        lambda org, repo, path, content, msg, expected_sha=None: (
-            expected_sha == "fresh"
-        ),
-    )
+    # that enrols nobody.
+    files = roster_files(STALE)
+    del files[SYS]
+    theirs = roster_files(HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-theirs\n")[SYS]
+    monkeypatch.setattr(enrol_codes, "get_file_content", lambda o, r, p: files.get(p))
+    reads = [None, (theirs, "fresh")]
+
+    def with_sha(org, repo, path):
+        return reads.pop(0) if len(reads) > 1 else reads[0]
+
+    monkeypatch.setattr(enrol_codes, "get_file_with_sha", with_sha)
+    monkeypatch.setattr(gh_contents, "get_file_with_sha", with_sha)
+
+    def fake_put_file(org, repo, path, content, msg, expected_sha=None):
+        if expected_sha != "fresh":
+            return False
+        reads[0] = (content.decode(), "fresh")
+        return True
+
+    monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
     monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
     _transport(monkeypatch, True)
     sent: list[tuple[str, str, str]] = []
@@ -408,45 +368,23 @@ def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
     )
     assert enrol_codes.run("SEMESTER") is enrol_codes.Outcome.SENT
     ada = next(body for to, _subject, body in sent if to == "ada@uni.edu")
-    assert "dsl-theirs" in ada  # not the code this run generated for her in memory
+    assert "dsl-theirs" in ada
 
 
-def test_rows_are_relocated_by_email_not_by_their_original_index():
-    # A row inserted above shifts every index below it; the email is what identifies the
-    # student the code was generated for.
-    shifted = HEADER + "zoe@uni.edu,Zoe,enrolled,,,\n" + STALE[len(HEADER) :]
-    assert enrol_codes.rows_for_values(shifted, _codes()) == {
-        1: "dsl-aaa111",
-        2: "dsl-bbb222",
+def test_students_csv_is_never_written_and_its_extra_columns_never_read(monkeypatch):
+    files = {
+        STUDENTS: "student_id,email,name,role,notes\n1,ada@uni.edu,Ada,audit,keen\n",
     }
-
-
-def test_two_rows_sharing_an_email_each_keep_their_own_code():
-    # A registrar export with the same address twice (a duplicate enrolment, a shared
-    # departmental inbox) mapped BOTH codes onto the first of the two rows, so the pair
-    # collapsed to one dict key and the second row was left with no code at all - silently,
-    # on a green run. A non-unique email re-locates nothing; those rows keep their index.
-    text = (
-        HEADER
-        + "ada@uni.edu,Ada,enrolled,,,\n"
-        + "dept@uni.edu,First,enrolled,,,\n"
-        + "dept@uni.edu,Second,enrolled,,,\n"
+    before = files[STUDENTS]
+    written = _files(monkeypatch, files)
+    _transport(monkeypatch, True)
+    monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
+    monkeypatch.setattr(
+        enrol_codes.mailer, "send_bulk", lambda m, **k: [x[0] for x in m]
     )
-    codes = [
-        (0, "ada@uni.edu", "dsl-aaa111"),
-        (1, "dept@uni.edu", "dsl-bbb222"),
-        (2, "dept@uni.edu", "dsl-ccc333"),
-    ]
-    assert enrol_codes.rows_for_values(text, codes) == {
-        0: "dsl-aaa111",
-        1: "dsl-bbb222",
-        2: "dsl-ccc333",
-    }
-
-
-def test_a_row_with_no_email_keeps_its_original_index():
-    text = HEADER + ",Anonymous,enrolled,,,\n"
-    assert enrol_codes.rows_for_values(text, [(0, "", "dsl-zzz")]) == {0: "dsl-zzz"}
+    assert enrol_codes.run("SEMESTER") is enrol_codes.Outcome.SENT
+    assert files[STUDENTS] == before
+    assert list(_system(written[-1])) == ["ada@uni.edu"]
 
 
 # ------------------------------------------------ run(): who gets mailed, and who does not
@@ -463,28 +401,14 @@ def _transport(monkeypatch, configured: bool) -> None:
 
 
 def _run_with(monkeypatch, roster_text, *, sends=None, writes_ok=True, transport=True):
-    """Drive `run` against one roster. Returns (outcome, messages sent, texts written)."""
+    """Drive `run` against one combined fixture (`roster_files`). Returns (outcome,
+    messages sent, roster-file texts written)."""
     _transport(monkeypatch, transport)
-    written: list[str] = []
+    # A combined fixture is split; anything else (a header nothing can read) as it is.
+    combined = roster_text.startswith(ROSTER_HEADER)
+    files = roster_files(roster_text) if combined else {STUDENTS: roster_text}
     sent: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(
-        enrol_codes,
-        "get_file_with_sha",
-        lambda org, repo, path: (written[-1] if written else roster_text, "sha"),
-    )
-    monkeypatch.setattr(
-        gh_contents,
-        "get_file_with_sha",
-        lambda org, repo, path: (written[-1] if written else roster_text, "sha"),
-    )
-
-    def fake_put_file(org, repo, path, content, message, expected_sha=None):
-        if not writes_ok:
-            return False
-        written.append(content.decode())
-        return True
-
-    monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
+    written = _files(monkeypatch, files, writes_ok=writes_ok)
     monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
     monkeypatch.setattr(
         enrol_codes.mailer,
@@ -499,9 +423,6 @@ def _run_with(monkeypatch, roster_text, *, sends=None, writes_ok=True, transport
 
 
 def test_a_student_already_marked_sent_is_not_emailed_again(monkeypatch):
-    # The predicate used to be the state of the ROSTER, not the state of the SEND: a
-    # student who had their code but had not yet opened a Join issue was re-mailed on
-    # every run, including runs that assigned no new codes at all.
     text = (
         HEADER
         + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,2026-08-31T09:00:00+00:00\n"
@@ -513,93 +434,52 @@ def test_a_student_already_marked_sent_is_not_emailed_again(monkeypatch):
 
 
 def test_the_sent_marker_is_written_only_for_recipients_that_went_out(monkeypatch):
-    # A marker written off a COUNT would stamp the wrong rows and the students whose mail
-    # failed would never be retried. Since the stamp is CLAIMED before the send, the same
-    # end state now depends on the claims a partial batch did not spend being released -
-    # `send_bulk` stops at its own time budget and says "re-run to continue", and without
-    # the release the tail of every throttled batch would be stamped and never mailed.
     text = (
         HEADER
         + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
         + "bob@uni.edu,Bob,enrolled,,,dsl-bbb222,\n"
     )
     outcome, _sent, written = _run_with(monkeypatch, text, sends=1)
-    # one of two did not go out - a rejected message, not a missing transport
     assert outcome is enrol_codes.Outcome.FAILED
-    rows = list(read_csv(written[-1], roster.REQUIRED_FIELDS, roster.ROSTER_PATH))
-    stamped = {r["hertie_email"]: bool(r["code_sent_at"].strip()) for r in rows}
+    stamped = {
+        e: bool(r["code_sent_at"].strip()) for e, r in _system(written[-1]).items()
+    }
     assert stamped == {"ada@uni.edu": True, "bob@uni.edu": False}
 
 
 def test_a_batch_that_went_nowhere_for_want_of_secrets_reads_as_a_missing_transport(
     monkeypatch,
 ):
-    # `send_bulk` answers an unconfigured transport and a wholly rejected batch with the
-    # same empty list, and the two are not the same fix: nothing a re-push of the roster
-    # does can conjure a GRAPH_* secret.
-    for name in mailer.GRAPH_ENV:
-        monkeypatch.delenv(name, raising=False)
     text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
     outcome, sent, written = _run_with(monkeypatch, text, sends=0, transport=False)
     assert outcome is enrol_codes.Outcome.NO_TRANSPORT
-    # And nothing was CLAIMED: the roster of an org whose secrets were never set would
-    # otherwise be marked as emailed in full by a run that could never email anybody.
     assert sent == [] and written == []
 
 
 def test_a_wholly_rejected_batch_on_a_live_transport_is_still_a_failure(monkeypatch):
-    # The other half of the same question: the secrets ARE set, so nothing went out
-    # because Graph refused it. That is a real failure and must red.
     text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
     outcome, _sent, written = _run_with(monkeypatch, text, sends=0)
     assert outcome is enrol_codes.Outcome.FAILED
-    # The claim it never spent is given back, so the next run tries Ada again.
-    rows = list(read_csv(written[-1], roster.REQUIRED_FIELDS, roster.ROSTER_PATH))
-    assert rows[0]["code_sent_at"].strip() == ""
+    assert _system(written[-1])["ada@uni.edu"]["code_sent_at"].strip() == ""
 
 
 def test_a_roster_that_cannot_be_stamped_mails_nobody_however_often_it_is_run(
     monkeypatch, capsys
 ):
-    # THE invariant, and the bug that motivated it. `write_column` reports a refused write
-    # by RETURNING - it never raises - so under send-then-stamp a roster that could not be
-    # written (an archived semester-config, a new branch ruleset, a token that lost write
-    # scope) meant the batch went out with `code_sent_at` still blank - and the next push
-    # to the roster, which the send's own write-back provokes, mailed them all again.
     text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
-    for tick in range(3):  # nobody reads the log, and the roster keeps being pushed
+    for tick in range(3):
         outcome, sent, written = _run_with(monkeypatch, text, writes_ok=False)
         assert outcome is enrol_codes.Outcome.FAILED, tick
         assert sent == [] and written == [], tick
     err = capsys.readouterr().err
     assert "nothing emailed, so re-running is safe" in err
-    assert "ada@uni.edu" not in err  # the log is public
+    assert "ada@uni.edu" not in err
 
 
 def test_a_transport_that_raises_gives_the_claim_back_before_it_propagates(monkeypatch):
-    # A credential Graph refuses raises out of `send_bulk`. Unreleased, the claim would
-    # leave a whole semester marked as emailed by a run that sent nothing, with no later
-    # push to the roster ever retrying them.
     text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
     _transport(monkeypatch, True)
-    written: list[str] = []
-    monkeypatch.setattr(
-        enrol_codes,
-        "get_file_with_sha",
-        lambda org, repo, path: (written[-1] if written else text, "sha"),
-    )
-    monkeypatch.setattr(
-        gh_contents,
-        "get_file_with_sha",
-        lambda org, repo, path: (written[-1] if written else text, "sha"),
-    )
-    monkeypatch.setattr(
-        gh_contents,
-        "put_file",
-        lambda org, repo, path, content, message, expected_sha=None: (
-            written.append(content.decode()) or True
-        ),
-    )
+    written = _files(monkeypatch, roster_files(text))
     monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
     monkeypatch.setattr(
         enrol_codes.mailer,
@@ -608,65 +488,42 @@ def test_a_transport_that_raises_gives_the_claim_back_before_it_propagates(monke
     )
     with pytest.raises(RuntimeError):
         enrol_codes.run("SEMESTER")
-    rows = list(read_csv(written[-1], roster.REQUIRED_FIELDS, roster.ROSTER_PATH))
-    assert rows[0]["code_sent_at"].strip() == ""
+    assert _system(written[-1])["ada@uni.edu"]["code_sent_at"].strip() == ""
 
 
 def test_a_claim_that_cannot_be_released_names_the_exact_stamp_to_clear(
     monkeypatch, capsys
 ):
-    # The price of claiming first is a bounded UNDER-send: these students are stamped and
-    # were never mailed, so nothing retries them. It has to be loud, and it has to be
-    # actionable without naming anyone - the stamp is shared by the whole batch, so
-    # "clear this timestamp" identifies every row to fix.
     text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
     _transport(monkeypatch, True)
-    written: list[str] = []
+    files = roster_files(text)
+    written = _files(monkeypatch, files)
+    real_put = gh_contents.put_file
 
     def fake_put_file(org, repo, path, content, message, expected_sha=None):
-        if "release" in message:  # the claim commits; giving it back does not
+        if "release" in message:
             return False
-        written.append(content.decode())
-        return True
+        return real_put(org, repo, path, content, message, expected_sha)
 
-    monkeypatch.setattr(
-        enrol_codes,
-        "get_file_with_sha",
-        lambda org, repo, path: (written[-1] if written else text, "sha"),
-    )
-    monkeypatch.setattr(
-        gh_contents,
-        "get_file_with_sha",
-        lambda org, repo, path: (written[-1] if written else text, "sha"),
-    )
     monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
     monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "Test")
     monkeypatch.setattr(enrol_codes.mailer, "send_bulk", lambda *a, **k: [])
     assert enrol_codes.run("SEMESTER") is enrol_codes.Outcome.FAILED
     err = capsys.readouterr().err
-    stamped = next(read_csv(written[-1], roster.REQUIRED_FIELDS, roster.ROSTER_PATH))
-    assert f"code_sent_at={stamped['code_sent_at']}" in err
+    stamp = _system(written[-1])["ada@uni.edu"]["code_sent_at"]
+    assert f"code_sent_at={stamp}" in err
     assert "by hand" in err
-    assert "ada@uni.edu" not in err  # the log is public
+    assert "ada@uni.edu" not in err
 
 
 def test_two_roster_rows_sharing_an_email_get_one_code_email(monkeypatch):
-    # A registrar re-enrolment or a shared inbox. Each row keeps its OWN code, but the
-    # person behind the address received two emails carrying two different codes, only
-    # one of which binds - with nothing to say which.
-    text = (
-        HEADER
-        + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
-        + "ada@uni.edu,Ada,enrolled,,,dsl-bbb222,\n"
-    )
-    _rc, sent, _written = _run_with(monkeypatch, text)
+    text = HEADER + "ada@uni.edu,Ada,enrolled,,,\nada@uni.edu,Ada,enrolled,,,\n"
+    _rc, sent, written = _run_with(monkeypatch, text)
     assert [to for to, _s, _b in sent] == ["ada@uni.edu"]
+    assert list(_system(written[-1])) == ["ada@uni.edu"]
 
 
 def test_rows_sharing_a_code_are_not_mailed_it(monkeypatch, capsys):
-    # Mailed to both, the code binds whoever joins first to the first row - the second
-    # student can take the first's seat. Hold both until faculty blank the copy; the
-    # count is public, the addresses are not.
     text = (
         HEADER
         + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
@@ -677,48 +534,35 @@ def test_rows_sharing_a_code_are_not_mailed_it(monkeypatch, capsys):
     assert outcome is enrol_codes.Outcome.SENT
     assert [to for to, _s, _b in sent] == ["bob@uni.edu"]
     err = capsys.readouterr().err
-    assert "2 row(s) share an enrol_code" in err
+    assert "2 student(s) share an enrol_code" in err
     assert "ada@uni.edu" not in err and "eve@uni.edu" not in err
 
 
 def test_a_semicolon_roster_sends_nothing_and_leaves_the_run_green(monkeypatch, capsys):
-    # A German-locale Excel export. Every cell reads blank through DictReader, so the send
-    # used to write a mangled roster back and exit 0 - then the header check made it a red
-    # X instead, which files `Send enrolment codes is failing` in the course org and mails
-    # the maintainer about a CSV in a semester org. It is faculty's file: nothing is written,
-    # nothing is sent, the run is green, and the same push opens the students.csv digest.
-    semicolons = ROSTER_HEADER.replace(",", ";") + "\nada@uni.edu;Ada;enrolled;;;;\n"
+    semicolons = "email;name;role\nada@uni.edu;Ada;enrolled\n"
     outcome, sent, written = _run_with(monkeypatch, semicolons)
     assert outcome is enrol_codes.Outcome.UNUSABLE_ROSTER
     assert not enrol_codes.reds_the_run(outcome)
-    assert sent == [] and written == []  # nothing mailed, and the file left as it is
+    assert sent == [] and written == []
     err = capsys.readouterr().err
-    assert "header lacks hertie_email, github_handle" in err
-    assert "ada@uni.edu" not in err  # the log is public
+    assert "header lacks email" in err
+    assert "ada@uni.edu" not in err
 
 
 def test_a_roster_with_no_header_row_names_no_cell_in_the_public_log(
     monkeypatch, capsys
 ):
-    # The other way a header goes missing: somebody deletes the row. DictReader then reads
-    # the FIRST STUDENT as the header, so the columns it "found" are a name, an address
-    # and a handle - and this message is logged verbatim by a workflow running in a public
-    # repo. It says which columns are MISSING (the toolkit's own vocabulary) and never
-    # which it found.
-    headerless = "ada@uni.edu,Ada,enrolled,ada-l,42,\nbob@uni.edu,Bob,enrolled,,,\n"
+    headerless = "ada@uni.edu,Ada,enrolled\nbob@uni.edu,Bob,enrolled\n"
     outcome, sent, written = _run_with(monkeypatch, headerless)
     assert outcome is enrol_codes.Outcome.UNUSABLE_ROSTER
     assert sent == [] and written == []
     err = capsys.readouterr().err
     assert "header lacks" in err
-    for cell in ("ada@uni.edu", "Ada", "ada-l"):
+    for cell in ("ada@uni.edu", "Ada"):
         assert cell not in err
 
 
 def test_an_absent_roster_and_a_missing_transport_still_red(monkeypatch):
-    # The line the green outcome must not cross. A roster that is not there and a mail
-    # transport that is not configured are the toolkit's own problem, not a file somebody
-    # can go and correct, and the push that fired this run is owed the red X.
     reds = set(enrol_codes.Outcome) - set(enrol_codes._GREEN)
     assert reds == {
         enrol_codes.Outcome.NO_ROSTER,
@@ -729,10 +573,6 @@ def test_an_absent_roster_and_a_missing_transport_still_red(monkeypatch):
 
 
 def test_a_roster_with_only_a_header_is_green(monkeypatch, capsys):
-    # A semester is bootstrapped with the roster template and enrolled days later, and every
-    # push to the file fires this send. Nothing is outstanding, so there is nothing to be
-    # red about - it used to file `Send enrolment codes is failing` and mail the maintainer
-    # about a brand-new semester.
     outcome, sent, written = _run_with(monkeypatch, HEADER)
     assert outcome is enrol_codes.Outcome.EMPTY_ROSTER
     assert not enrol_codes.reds_the_run(outcome)
@@ -741,11 +581,10 @@ def test_a_roster_with_only_a_header_is_green(monkeypatch, capsys):
 
 
 def test_run_reds_when_the_roster_is_missing(monkeypatch, capsys):
-    monkeypatch.setattr(enrol_codes, "get_file_with_sha", lambda org, repo, path: None)
-    monkeypatch.setattr(gh_contents, "get_file_with_sha", lambda org, repo, path: None)
+    _files(monkeypatch, {})
     outcome = enrol_codes.run("SEMESTER")
     assert outcome is enrol_codes.Outcome.NO_ROSTER
-    assert enrol_codes.reds_the_run(outcome)  # nothing is outstanding only if it sent
+    assert enrol_codes.reds_the_run(outcome)
     assert "Could not find students.csv" in capsys.readouterr().err
 
 

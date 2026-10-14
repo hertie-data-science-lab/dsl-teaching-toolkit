@@ -16,33 +16,31 @@ Live example roster: [`example-course/semester-org/students.csv`](../example-cou
    - Edit `semester-config/students.csv` in the **semester** org
    - Editing directly via the web UI is fine, or edit the repo locally, commit & push
    - Or use the console's **Students** tab: **Edit roster** (the pencil on the table's corner), then **Add a student** or a row's remove control (struck through, with Undo, until you save); **Save** writes one commit
-   - One row per student: fill the first three columns - `hertie_email`, `name`, and optionally `role` (blank means enrolled; `auditor` gets the materials but no assignments or grades)
-   - Leave the rest (`github_handle`, `github_id`, `enrol_code`) blank - onboarding and step 2 fill them in for you
+   - One row per student: `email`, `name`, and optionally `role` (blank means enrolled; `auditor` gets the materials but no assignments or grades)
+   - Each student's code, GitHub handle and id are the toolkit's, in `semester-config/.system/roster.csv` (one row per email) - never in your file
 
 
    >Someone joins late? Add their row, commit & push - the push sends them their code.
    >Someone drops? Delete their row - the commit & push off-boards them.
 
 2. **Codes are emailed automatically.**
-   - Nothing to press: step 1's commit & push is the whole of it. The push fires the course org's **Send enrolment codes**, which writes an `enrol_code` onto every roster row that lacks one and emails each not-yet-onboarded student at their `hertie_email`, within a minute or so. Watch it in the **course** org → `.github` → **Actions**.
-   - **Re-pushing is safe.** Each row records `code_sent_at` just before its code goes out, and only rows without it are emailed - so a later push chases the students who still need a code and leaves the rest alone. To deliberately re-send, clear that row's `code_sent_at` and push. To give everyone who has a code but has not joined a fresh one (their old codes stop working), press **Send codes** on the console's **Students** tab; its panel previews first. **Sync now** under it opens **Sync membership** on GitHub, for a run by hand.
-     > On a semester whose codes went out before `code_sent_at` existed, the first run mails every not-yet-onboarded student their existing code again; fill `code_sent_at` on the rows already mailed to skip it.
-
+   - Nothing to press: step 1's commit & push is the whole of it. The push fires the course org's **Send enrolment codes**, which gives every student without one an `enrol_code` in `.system/roster.csv` and emails each not-yet-onboarded student at their `email`, within a minute or so. It never writes `students.csv`. Watch it in the **course** org → `.github` → **Actions**.
+   - **Re-pushing is safe.** `.system/roster.csv` records `code_sent_at` just before a code goes out, and only students without it are emailed - so a later push chases the students who still need a code and leaves the rest alone. To deliberately re-send, clear that student's `code_sent_at` in `.system/roster.csv`. To give everyone who has a code but has not joined a fresh one (their old codes stop working), press **Send codes** on the console's **Students** tab; its panel previews first. **Sync now** under it opens **Sync membership** on GitHub, for a run by hand.
    - **A roster the toolkit cannot read stops the send, not the run.** Excel in a German locale saves a `;`-delimited CSV, and a deleted header row reads the same way: nothing is written, nothing is sent, and the run stays **green**. The same push opens *"students.csv has rows the toolkit cannot use"* in the semester's `semester-config` and emails whoever pushed it, naming the row and the column (never a cell). Save the file as comma-separated UTF-8 and push again. Every file you edit is checked this way - [Why did I get this email?](reference/actions-reference.md#why-did-i-get-this-email).
    - **A roster with nothing but its header is green too** - nothing outstanding, nothing to report.
    - **A run that genuinely breaks says so.** Everything else - no roster at all, no mail transport, a write GitHub refused - goes red, opens *"Send enrolment codes is failing"* in the course org's `.github` (cc `course-admin`) and emails the toolkit maintainer the failed step's log. It closes itself on the next successful send.
 
-   > **If the emailing integration isn't live** the run still writes every code into `students.csv` and then goes red for want of a transport → copy each student's code out of the roster into an email of your own and send it by hand. Emailing is live once the course org has the `GRAPH_*` secrets, set centrally by the DSL team; **Send enrolment codes** and **Distribute grades** are what use them.
+   > **If the emailing integration isn't live** the run still writes every code into `.system/roster.csv` and then goes red for want of a transport → copy each student's code out of the roster into an email of your own and send it by hand. Emailing is live once the course org has the `GRAPH_*` secrets, set centrally by the DSL team; **Send enrolment codes** and **Distribute grades** are what use them.
 
 3. **Students self-onboard.**
    - Each student opens a **Join course** issue in the semester's `join` repo and pastes their code.
-   - The match is on the **`enrol_code`**; the issue author is the authenticated GitHub handle, so the code binds that handle (and its GitHub id) to the roster row. Single-use once bound.
+   - The match is on the **`enrol_code`**; the issue author is the authenticated GitHub handle, so the code binds that handle (and its GitHub id) to the student in `.system/roster.csv`. Single-use once bound.
    - Success: label `onboarded`, issue closed, student added to the org and to `students` | `auditors`. They must accept the org invite before they see anything.
-   - Failure: one neutral "could not be matched" message, whether the code is unknown or already claimed. **Triage `needs-review` issues, then delete them** - the code stays readable in the body's edit history until the issue is deleted (or rotate the code: blank the row's `enrol_code` and its `code_sent_at`, then push).
+   - Failure: one neutral "could not be matched" message, whether the code is unknown or already claimed. **Triage `needs-review` issues, then delete them** - the code stays readable in the body's edit history until the issue is deleted (or rotate the code: press **Send codes** on the console's **Students** tab).
    - Students must never paste a code in a **comment** (public, never redacted). Blank issues are disabled in `join`.
-   - **A student who switched GitHub account** is refused (their code is bound to the old one); the reason is recorded privately in `semester-config/.system/enrolment/refusals/<issue>.json`. Put their new login in the row's `github_handle` (in the console's **Students** grid after **Edit roster**, or the file itself) and push: the next **Sync membership** moves their repos, gradebook, grading-sheet and team rows to it and closes their stuck Join issues. Leave `github_id` as it is - the sync rewrites it last.
+   - **A student who switched GitHub account** is refused (their code is bound to the old one); the reason is recorded privately in `semester-config/.system/enrolment/refusals/<issue>.json`. Put their new login in their `github_handle` in `.system/roster.csv` (the one edit that file takes) and push: the next **Sync membership** moves their repos, gradebook and grading-sheet rows to it (their team cells follow their email) and closes their stuck Join issues. Leave `github_id` as it is - the sync rewrites it last.
    - **A student who renamed their GitHub account** needs nothing from you: the next **Sync membership** moves everything to the new name. A Join issue they open meanwhile is answered "already enrolled" and changes nothing.
-   - **One `enrol_code` on two rows** (a row copied to add a student) is reported on the roster's digest issue, and neither row is emailed until you blank the copy's code; a new one is minted on the next push.
+   - **One email on two rows** is one student: reported on the roster's digest issue, and mailed one code.
 
    > The semester org's `join` repo is automatically seeded when the semester org is [bootstrapped by the course org](04-new-cohort-org.md#steps).
 
@@ -61,14 +59,14 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
 
 - There are 2 methods to form groups:
    1. Students open a **Join team** issue in `join`, 
-   2. instructors edit `semester-config/teams.csv`(`assignment, team, github_handle`)
+   2. instructors type team names into the assignment's `team:<number>` column of `semester-config/students.csv` (a team = the rows sharing a value; blank = no team)
 - The issue flow only accepts an assignment **declared under `assignments:` in
   `semester-config/schedule.yml`**, **whose `team_formation` is `self_select`** (its `schedule.yml` entry),
   and **whose team-formation window is open**. It enforces that assignment's
-  `max_team_size` (its `schedule.yml` entry, else the semester's `assignments.yml` `defaults:`, else the course's `assignment_defaults`, else 5). Every answer
+  `max_team_size` (its `schedule.yml` entry, else the semester's `semester.yml` `defaults:`, else the course's `course.yml` `defaults:`, else the institution's). Every answer
   reaches the form through the generated mirror `semester-config/.system/assignments.lock.yml`.
   Three outcomes, by label:
-  - `team-recorded` (closed): the row is in `teams.csv`. The comment points to step 2 on
+  - `team-recorded` (closed): the student's cell in `students.csv` is set. The comment points to step 2 on
     the assignment page, where the team's repo appears within minutes.
   - `team-refused` (closed as not planned): the **student** can fix it, and the comment
     says how, with a link to a new Join team issue with the Team box filled in. Covers:
@@ -78,15 +76,16 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
     Join or Create of the team they're already in; an unreadable form, an unknown Action,
     or a name that isn't letters, digits and dashes.
   - `needs-review` (open): **you** must act - not on the roster or not onboarded, an
-    auditor, a missing lock or team cap, a teams.csv header problem, or a write that failed.
+    auditor, a missing lock or team cap, or a write that failed.
 - A student already in a team who **joins** or **creates** another is moved while the
-  window is open, in one write to `teams.csv`. Sync membership then takes them out of the
+  window is open, by rewriting their one cell. Sync membership then takes them out of the
   old GitHub team, including a team they leave empty. The old team's repo is kept, with
   what they pushed.
-- A student on two teams' rows for one assignment is in the FIRST row's team only; the later
-  row is ignored and reported on the teams.csv digest issue.
-- A deleted or renamed `teams.csv` empties nobody: Sync membership holds every project team
-  as it is until the file is back. To empty them all, keep the file with just its header.
+- A `team:` column that names no assignment's number, or a cell naming a faculty team, is
+  reported on the students.csv digest issue and ignored.
+- A deleted or renamed `students.csv` empties nobody: Sync membership holds every project team
+  as it is until the file is back. To empty a team, blank its cells.
+- A cell typed for a student who has not joined yet takes effect when they join.
 - An assignment whose course template does not exist yet refuses every request until the
   template is created.
 - Team names are lower-cased; a GitHub handle or a faculty team name (`course-admin`) is refused.

@@ -28,17 +28,22 @@ from dsl_course import (
     issues,
     receipts,
     records,
-    roster,
     status_json,
 )
 from dsl_course.schedule import AssignmentEntry, Schedule
-from tests.conftest import ROSTER_HEADER, repo_row, run_settings, split_grading
+from tests.conftest import (
+    ROSTER_HEADER,
+    parse_roster,
+    repo_row,
+    run_settings,
+    split_grading,
+)
 
 
 def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
     # The send count used to be discarded, so a student who never got the "your grades are
     # updated" mail left no trace in the log at all.
-    students = roster.parse(
+    students = parse_roster(
         ROSTER_HEADER + "\n"
         "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
         "bob@uni.edu,Bob,enrolled,bob-b,43,dsl-def\n"
@@ -58,7 +63,7 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
     # A student taking several of these courses cannot tell one "your grades have been
     # updated" from another, so the body names the course - but a course org that carries
     # no name yet must produce the generic sentence, never a blank or a placeholder.
-    students = roster.parse(
+    students = parse_roster(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(distribute.roster, "load", lambda org: students)
@@ -88,7 +93,7 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
 
 
 def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
-    students = roster.parse(
+    students = parse_roster(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(distribute.roster, "load", lambda org: students)
@@ -117,7 +122,7 @@ def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
 
 
 def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
-    students = roster.parse(
+    students = parse_roster(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,Ada-L,42,dsl-abc\n"
     )
     monkeypatch.setattr(distribute.roster, "load", lambda org: students)
@@ -385,7 +390,7 @@ def _distribute(
 
     monkeypatch.setattr(distribute, "put_files", fake_put_files)
     students = (
-        None if roster_rows is None else roster.parse(ROSTER_HEADER + roster_rows)
+        None if roster_rows is None else parse_roster(ROSTER_HEADER + roster_rows)
     )
     monkeypatch.setattr(distribute.roster, "load", lambda org: students)
     monkeypatch.setattr(discovery, "course_name_for_semester", course_name)
@@ -960,7 +965,7 @@ def test_the_dry_run_sample_email_is_the_one_that_would_be_sent(tmp_path, monkey
 def test_an_unreadable_course_name_still_previews_the_email(tmp_path, monkeypatch):
     # Same fallback the send has: the name is a nicety, the notification is not.
     def boom(org):
-        raise RuntimeError("no dsl-course.yml")
+        raise RuntimeError("no course.yml")
 
     out = _distribute(monkeypatch, tmp_path, dry_run=True, course_name=boom)
     assert out["rc"] == 0
@@ -1893,19 +1898,6 @@ def test_a_mark_no_roster_row_claims_is_counted_not_fatal(
     assert "ada-l" not in printed.out + printed.err
 
 
-def test_a_roster_row_with_no_email_is_counted_not_fatal(tmp_path, monkeypatch, capsys):
-    # On the roster, so the grade is distributed - but there is no address to tell them at,
-    # which is an ordinary state (a withdrawn student) and must not red every run from here
-    # on.
-    monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    out = _distribute(
-        monkeypatch, tmp_path, roster_rows="\n,Ada,enrolled,ada-l,42,dsl-abc\n"
-    )
-    assert out["rc"] == 0
-    err = capsys.readouterr().err
-    assert "no roster row with an email" in err and "ada-l" not in err
-
-
 def test_a_dry_run_reds_when_the_roster_cannot_be_read(tmp_path, monkeypatch):
     # `ensure_gradebooks` skips an unreadable roster (the nightly sync runs it too), so
     # distribute says so itself - on the dry run as well as on the real one.
@@ -2116,18 +2108,6 @@ def test_a_scoped_return_that_died_after_the_first_record_is_not_wedged(
     assert again["rc"] == 0
     ((_cfg, cfg_files, _d),) = again["config"]
     assert distribute.marks_return_record("assignment-1") in cfg_files
-
-
-def test_a_student_with_no_roster_email_is_not_recorded_before_the_mail(
-    tmp_path, monkeypatch
-):
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        roster_rows="\n,Ada,enrolled,ada-l,42,dsl-abc\n",
-    )
-    assert out["gradebooks"]  # marked and written ...
-    assert out["intent"] == [] and out["outbox"] == []  # ... and nobody to tell
 
 
 # ------------------------------------------------------------- per-question feedback

@@ -11,9 +11,9 @@ import { YamlText, compact, deepEqual, obj, type Path } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { Modal } from '../ui/Modal';
 import {
-  LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
-  validAssignments, validSchedule, valueWord, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
-} from '../model/cascade';
+  LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, courseDefaults, effectiveOf, effectiveWord, lateWord, over, rawBlock, scheduleFile, semesterDefaults, usableBlock,
+  validAssignments, validSchedule, valueWord, writeBlock, type Block, type Effectives, type RunKey, type YamlFile,
+} from '../model/settings';
 import { addDays, fmtWhen } from '../model/format';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { draftErrors, readDraft, writeDraft, type AssignmentDraft } from '../model/scheduleEdit';
@@ -32,16 +32,12 @@ import type { ReadyProps } from './types';
 
 
 
-/** The semester's layers for `key` (empty for its defaults), read from the files as they are now. */
-export function semesterLayers(p: Pick<ReadyProps, 'files' | 'course' | 'cohort'>, doc: Block, key = ''): Layers {
-  return layersOf(courseBlock(p.files, p.course.org, p.course.meta), doc, key);
-}
+/** What an assignment's own settings fall back to: the semester's effective defaults (status.json). */
+export const entryBelow = (p: Pick<ReadyProps, 'status'>): Effectives => semesterDefaults(p.status);
 
-/** The effective value of every run key for an assignment, with its source, from the files. */
-export function assignmentSettings(p: Pick<ReadyProps, 'files' | 'course' | 'cohort'>, key: string): Layers | null {
-  const f = assignmentsFile(p.files, p.cohort.org);
-  if (f === 'loading' || f === null) return f === null ? semesterLayers(p, {}, key) : null;
-  return semesterLayers(p, f.doc, key);
+/** An assignment's effective run settings, each with its source, as the engine resolved them (status.json). */
+export function assignmentSettings(p: Pick<ReadyProps, 'status'>, key: string): Effectives | null {
+  return p.status.assignments?.find((a) => a.slug === key)?.settings ?? null;
 }
 
 /** The semester-side name of the assignment with schedule key `key` (`schedule.semester_name`): what its mark
@@ -55,11 +51,11 @@ const toValues = (b: Block): Values => Object.fromEntries(Object.entries(b).map(
 
 // ------------------------------------------------------------------ the semester's defaults
 
-/** "Defaults: 5 days, 5%, teams of 4." from the effective semester defaults. */
-export function defaultsLine(layers: Layers): string {
-  const days = resolve('late_window_days', layers, 'semester').value;
-  const pen = resolve('late_penalty_per_day', layers, 'semester').value;
-  const size = resolve('max_team_size', layers, 'semester').value;
+/** "Defaults: 5 days, 5%, teams of 4." from the semester's effective defaults (status.json). */
+export function defaultsLine(defaults: Effectives): string {
+  const days = effectiveOf(defaults, 'late_window_days').value;
+  const pen = effectiveOf(defaults, 'late_penalty_per_day').value;
+  const size = effectiveOf(defaults, 'max_team_size').value;
   const rate = penaltyRate(pen);
   const late = typeof days === 'number' && days >= 1 ? [valueWord('late_window_days', days), rate ? `${round(rate * 100)}%` : 'no penalty'] : ['no late work'];
   return `Defaults: ${[...late, ...(size ? [`teams of ${String(size)}`] : [])].join(', ')}.`;
@@ -80,7 +76,7 @@ export function SemesterDefaults({ p }: { p: ReadyProps }) {
   return (
     <>
       <p class="defaults-line" id="semester-defaults">
-        {defaultsLine(semesterLayers(p, f.doc))}{' '}
+        {defaultsLine(entryBelow(p))}{' '}
         <button class="textlink" type="button" ref={opener} aria-haspopup="dialog" onClick={() => setOpen(true)}>Change</button>
       </p>
       {open ? <Modal title="Defaults for this semester’s assignments" onClose={close}><DefaultsForm p={p} f={f} draft={draft} setDraft={setDraft} /></Modal> : null}
@@ -93,9 +89,8 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
   const exists = p.files.file(p.cohort.org, CONFIG_REPO, ASSIGNMENTS_FILE).kind !== 'absent';
   const env = useEnv();
   const [save, runSave, setSave] = useSave(env);
-  const layers = semesterLayers(p, f.doc);
   const before = toValues(rawBlock(f.doc, ['defaults']));
-  const tiers = runTiers((k) => resolve(k, layers, 'course'), RUN_KEYS, before);
+  const tiers = runTiers((k) => effectiveOf(courseDefaults(p.status), k), RUN_KEYS, before);
   const cur = draft ?? before;
   const errors = fieldErrors(null, tiers, cur);
   const dirty = draft !== null && !deepEqual(compact(draft), compact(before));
@@ -138,8 +133,10 @@ export function forcedVisibility(cfg: Record<string, unknown>): string | null {
 export interface RunRowsProps {
   id: string;
   keys: RunKey[];
-  /** The layers under this assignment's block (semester, course, institution). */
-  layers: Layers;
+  /** What this assignment's own settings fall back to: the semester's effective defaults. */
+  below: Effectives;
+  /** The assignment's effective settings as the engine resolved them (status.json), shown while the form states nothing; none for a new entry. */
+  current?: Effectives | null;
   draft: Values;
   setDraft: (v: Values) => void;
   errors: Record<string, string>;
@@ -149,9 +146,10 @@ export interface RunRowsProps {
 }
 
 /** Each run setting as its effective value and source, with "Change for this assignment" opening the field. */
-export function RunRows({ id, keys, layers, draft, setDraft, errors, defaultsHref, teamsHref, forced }: RunRowsProps) {
+export function RunRows({ id, keys, below, current, draft, setDraft, errors, defaultsHref, teamsHref, forced }: RunRowsProps) {
   const [opened, setOpened] = useState<string[]>([]);
-  const mine: Layers = { ...layers, assignment: usableBlock(draft) };
+  const own = usableBlock(draft);
+  const mine = (k: RunKey) => over(k, own, 'entry', current ?? below);
   const has = (k: string) => draft[k] !== undefined && draft[k] !== '' && draft[k] !== null;
   const rows: { name: string; keys: RunKey[] }[] = [];
   for (const k of keys) {
@@ -163,8 +161,8 @@ export function RunRows({ id, keys, layers, draft, setDraft, errors, defaultsHre
       {rows.map((r) => {
         const open = opened.includes(r.name) || r.keys.some(has);
         const late = r.name === 'late';
-        const eff = resolve(r.keys[0], mine);
-        const effText = late ? `${lateWord(eff.value, resolve('late_penalty_per_day', mine).value)}, ${SOURCE_WORD[eff.source]}` : effectiveWord(r.keys[0], eff);
+        const eff = mine(r.keys[0]);
+        const effText = late ? `${lateWord(eff.value, mine('late_penalty_per_day').value)}, ${SOURCE_WORD[eff.source]}` : effectiveWord(r.keys[0], eff);
         const label = late ? 'Late work' : RUN_LABEL[r.keys[0]];
         if (r.name === 'visibility' && forced)
           return <div class="field"><span class="label">{label}</span><div class="readonly">{forced}</div></div>;
@@ -175,7 +173,7 @@ export function RunRows({ id, keys, layers, draft, setDraft, errors, defaultsHre
             {open ? (
               <div class="cond">
                 {r.keys.map((k) => (
-                  <Field id={`${id}-${k}`} k={k} t={runTier(k, resolve(k, layers, below('assignment')), { override: true }) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
+                  <Field id={`${id}-${k}`} k={k} t={runTier(k, effectiveOf(below, k), { override: true }) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
                     set={(key, v) => setDraft({ ...draft, [key]: v })} />
                 ))}
                 <button class="textlink" type="button" onClick={() => { setOpened(opened.filter((x) => x !== r.name)); setDraft(Object.fromEntries(Object.entries(draft).filter(([k]) => !r.keys.includes(k as RunKey)))); }}>Use the default</button>
@@ -195,10 +193,10 @@ export function RunRows({ id, keys, layers, draft, setDraft, errors, defaultsHre
 }
 
 /** The run settings' errors as typed at the assignment layer. */
-export function runErrors(keys: RunKey[], layers: Layers, draft: Values): Record<string, string> {
+export function runErrors(keys: RunKey[], below: Effectives, draft: Values): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of keys) {
-    const t = runTier(k, resolve(k, layers, 'semester'));
+    const t = runTier(k, effectiveOf(below, k));
     const msg = t.check?.(draft[k], draft);
     if (msg && (draft[k] !== undefined || (k === 'late_window_days' && lateError(draft)))) out[k] = msg;
   }
@@ -310,13 +308,14 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   const beforeRun = toValues(rawBlock(doc, path));
   const d = timing ?? baseT;
   const r = run ?? beforeRun;
-  const layers = semesterLayers(p, doc, a.slug);
-  const mine: Layers = { ...layers, assignment: usableBlock(r) };
-  const days = resolve('late_window_days', mine).value;
-  const vis = forcedVisibility(cfg) ? 'private' : resolve('visibility', mine).value;
+  const below = entryBelow(p);
+  const current = run === null ? a.settings : null;
+  const own = usableBlock(r);
+  const days = over('late_window_days', own, 'entry', current ?? below).value;
+  const vis = forcedVisibility(cfg) ? 'private' : over('visibility', own, 'entry', current ?? below).value;
   const solutionOff = vis !== 'private' ? 'Not available: student repos are not private, so the solution cannot be pushed automatically.' : d.manual ? 'Needs a hand out time; the solution must follow it.' : null;
   const tErr = draftErrors(d, undefined, cutoffOf(d.dueDate, d.dueTime, typeof days === 'number' ? days : 0));
-  const rErr = { ...runErrors(keys, layers, r), ...repoNameError(r.semester_dest_repo) };
+  const rErr = { ...runErrors(keys, below, r), ...repoNameError(r.semester_dest_repo) };
   const dirtyT = timing !== null && !deepEqual(timing, baseT);
   const dirtyR = run !== null && !deepEqual(compact(run), compact(beforeRun));
   // Past the due date the engine recomputes the cutoff and every late deduction off a changed late rule.
@@ -354,7 +353,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
         <div class="form-section">
           <h3>Run settings</h3>
           {af === null ? <CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}; the defaults below may not be this semester’s.</CheckLine> : af.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({af.error}); fix it with Edit the file directly.</CheckLine> : null}
-          <RunRows id="ov" keys={keys} layers={layers} draft={r} setDraft={(v) => { setRun(v); setSave({ kind: 'idle' }); }} errors={rErr}
+          <RunRows id="ov" keys={keys} below={below} current={current} draft={r} setDraft={(v) => { setRun(v); setSave({ kind: 'idle' }); }} errors={rErr}
             defaultsHref="#assignments" teamsHref={group ? `#assignment-${a.slug}/teams` : undefined} forced={forcedVisibility(cfg)} />
           <details class="fold" open={!!repoName}>
             <summary>Advanced <span class={`cnt${repoName ? ' changed' : ''}`}>({repoName ? '1 changed' : 'none changed'})</span></summary>

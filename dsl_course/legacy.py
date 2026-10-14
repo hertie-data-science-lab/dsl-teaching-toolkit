@@ -16,7 +16,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from .course import CONFIG_REPO, INSTRUCTORS_FILE, JOIN_REPO
+from . import records
+from .course import CONFIG_REPO, JOIN_REPO, SEMESTER_FILE
+from .course import COURSE_CONFIG as COURSE_FILE
 from .faults import NOT_MIGRATED
 
 
@@ -33,6 +35,14 @@ class Old:
     cost: str = ""
 
 
+# The hand-edited files decision 0039 folded into one per level, by their old names: read
+# by `migrate` (and a 0.10 `assignments.yml` by `settings.parse_legacy_assignments`).
+OLD_COURSE_FILE = "dsl-course.yml"
+OLD_OPENCOURSE_FILE = "opencourse.yml"
+OLD_INSTRUCTORS_FILE = "instructors.yml"
+OLD_ASSIGNMENTS_FILE = "assignments.yml"
+OLD_POLICY_FILE = "policy.yml"
+
 # The surfaces old names were spelt in.
 SCHEDULE_TOP = "schedule.yml top level"
 SCHEDULE_ENTRY = "schedule.yml <block>.<key>"
@@ -42,12 +52,18 @@ ASSIGNMENTS_YML = "assignments.yml top level"
 GRADING_CONFIG = "grading_config.yml"
 SETTINGS = "assignment settings"
 COURSE_CONFIG = "dsl-course.yml"
+# Keys of a 0.10 `dsl-course.yml` that moved into a block of `course.yml`.
+COURSE_FILE_KEYS = "dsl-course.yml -> course.yml"
+DEFAULTS_KEYS = "a defaults: block"
 COURSE_GITHUB = "course .github"
+SEMESTER_CONFIG = "semester-config"
+TOOLKIT_ROOT = "toolkit root"
 SEMESTER_ORG = "semester org"
 SEMESTER_TOPICS = "semester .github topics"
 COURSE_REPOS = "course org repos"
 MEMBERSHIP_DISPATCH = "sync-membership dispatch payload"
 STATUS_TODO_CHECK = "status.json to-do check"
+ROSTER_FILES = "semester-config students.csv / teams.csv"
 
 _BLOCKS = "a block per kind (`lectures:`, `labs:`, `readings:`, `exams:`, `events:`, `assets:`)"
 _MIGRATE = "run the 0.11.0 migration (`python3 -m dsl_course.migrate`)"
@@ -196,7 +212,7 @@ ROWS: tuple[Old, ...] = (
     Old("github", "assignment_repo", GRADING_CONFIG, "0.9.0"),
     Old("classroom-config", CONFIG_REPO, SEMESTER_ORG, "0.10.0"),
     Old("welcome", JOIN_REPO, SEMESTER_ORG, "0.10.0"),
-    Old("people.yml", INSTRUCTORS_FILE, SEMESTER_ORG, "0.10.0"),
+    Old("people.yml", OLD_INSTRUCTORS_FILE, SEMESTER_ORG, "0.10.0"),
     Old("dsl-cohort", "dsl-semester", SEMESTER_TOPICS, "0.10.0"),
     Old("cohort-courses-pages.yml", "semesters.yml", COURSE_GITHUB, "0.10.0"),
     Old("org", "", COURSE_CONFIG, "0.10.0"),
@@ -205,6 +221,45 @@ ROWS: tuple[Old, ...] = (
     Old("semester_defaults", "", COURSE_CONFIG, "0.10.0"),
     # An assignment template told by its name before the `dsl-assignment` topic (0014).
     Old("assignment-", "dsl-assignment", COURSE_REPOS, "0.10.0"),
+    # Decision 0039: one hand-edited file per level. Read by `migrate.config_layers`,
+    # which folds each old file into its new home and deletes it; `policy.read` refuses a
+    # toolkit checkout that still carries the old institution file.
+    Old(OLD_COURSE_FILE, COURSE_FILE, COURSE_GITHUB, "0.11.0"),
+    Old(
+        OLD_OPENCOURSE_FILE, f"{COURSE_FILE} open_course_site", COURSE_GITHUB, "0.11.0"
+    ),
+    Old(OLD_INSTRUCTORS_FILE, f"{SEMESTER_FILE} people", SEMESTER_CONFIG, "0.11.0"),
+    Old(OLD_ASSIGNMENTS_FILE, f"{SEMESTER_FILE} defaults", SEMESTER_CONFIG, "0.11.0"),
+    Old(
+        f"{records.SYSTEM_DIR}/{OLD_COURSE_FILE}",
+        records.path("pointer"),
+        SEMESTER_CONFIG,
+        "0.11.0",
+    ),
+    Old(OLD_POLICY_FILE, "institution.yml", TOOLKIT_ROOT, "0.11.0"),
+    # A 0.10 `dsl-course.yml`'s top-level keys -> their `course.yml` place ("" = dropped).
+    Old("course_name", "course.name", COURSE_FILE_KEYS, "0.11.0"),
+    Old("course_code", "course.code", COURSE_FILE_KEYS, "0.11.0"),
+    Old("course_description", "course.description", COURSE_FILE_KEYS, "0.11.0"),
+    Old("central_ref", "course.toolkit_version_ref", COURSE_FILE_KEYS, "0.11.0"),
+    Old("licence", "course.licence", COURSE_FILE_KEYS, "0.11.0"),
+    Old("student_console", "course.student_console", COURSE_FILE_KEYS, "0.11.0"),
+    Old("contact", "open_course_site.contact", COURSE_FILE_KEYS, "0.11.0"),
+    Old("assignment_defaults", "defaults", COURSE_FILE_KEYS, "0.11.0"),
+    Old("people", "people", COURSE_FILE_KEYS, "0.11.0"),
+    Old("site_link_extensions", "", COURSE_FILE_KEYS, "0.11.0"),
+    # A 0.10 defaults block's keys (`assignment_defaults:`, `assignments.yml defaults:`).
+    Old("visibility", "assignment_repo_visibility", DEFAULTS_KEYS, "0.11.0"),
+    Old("formats", "", DEFAULTS_KEYS, "0.11.0"),
+    # The roster before decision 0039 rule 4: one students.csv carrying the engine's
+    # columns too, and teams.csv beside it. Read by `roster.split_legacy`, which the 0.11.0
+    # migration folds them with.
+    Old("hertie_email", "email", ROSTER_FILES, "0.11.0"),
+    Old("github_handle", ".system/roster.csv", ROSTER_FILES, "0.11.0"),
+    Old("github_id", ".system/roster.csv", ROSTER_FILES, "0.11.0"),
+    Old("enrol_code", ".system/roster.csv", ROSTER_FILES, "0.11.0"),
+    Old("code_sent_at", ".system/roster.csv", ROSTER_FILES, "0.11.0"),
+    Old("teams.csv", "students.csv `team:<number>` columns", ROSTER_FILES, "0.11.0"),
     # A status.json an engine before 0.11.0 wrote still carries it until the semester's next
     # status refresh rewrites the file; the final sweep drops the row once every live org
     # has migrated and refreshed (decision 0038 retired the check).

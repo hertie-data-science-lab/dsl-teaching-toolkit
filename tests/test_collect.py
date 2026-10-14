@@ -40,7 +40,7 @@ from dsl_course.collect import Target
 from dsl_course.faults import RunSettingInTemplate, Severity
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
-from tests.conftest import ROSTER_HEADER, run_settings
+from tests.conftest import ROSTER_HEADER, parse_roster, run_settings
 from tests.plans import citing
 
 # Every template these tests hand out, collect or patch: the plan cites each.
@@ -405,15 +405,15 @@ def test_parse_grading_spec_drops_a_malformed_value_and_keeps_the_rest(capsys):
 def test_the_course_defaults_block_is_validated_like_the_file_it_is_stamped_into(
     capsys,
 ):
-    # `assignment_defaults:` in dsl-course.yml is what `New assignment` stamps into the
+    # `defaults:` in course.yml is what `New assignment` stamps into the
     # file it generates - at WRITE time, so a reader never merges it - and it goes through
     # the same readers, so a value the writer would emit cannot be one the reader refuses.
-    assert settings.parse_assignment_defaults(
+    assert settings.parse_course_defaults(
         {"max_team_size": 5, "late_window_days": 7, "late_penalty_per_day": "10%"}
     ) == {"max_team_size": 5, "late_window_days": 7, "late_penalty_per_day": "10%"}
     # A per-assignment key is not a course-wide one: nothing about ONE assignment belongs
     # in a block that stands behind all of them.
-    assert settings.parse_assignment_defaults({"title": "no"}) == {}
+    assert settings.parse_course_defaults({"title": "no"}) == {}
     assert "title" in capsys.readouterr().err
 
 
@@ -3752,7 +3752,7 @@ def _roster_of(monkeypatch, *rows: str):
     monkeypatch.setattr(
         collect.roster,
         "load",
-        lambda org: collect.roster.parse(
+        lambda org: parse_roster(
             ROSTER_HEADER + "\n" + "".join(r + "\n" for r in rows)
         ),
     )
@@ -3779,7 +3779,7 @@ def test_submission_targets_vets_teams_csv_against_the_roster(monkeypatch, capsy
     # the roster's casing wins; everyone else is dropped
     assert targets == [Target("assignment-4-team-1", "team-1", ["ada-l"])]
     err = capsys.readouterr().err
-    assert "3 handle(s) in teams.csv" in err
+    assert "3 team member(s) for" in err
     assert "stranger-x" not in err, "a student's typing must not reach a public log"
 
 
@@ -6335,7 +6335,7 @@ def test_a_public_assignment_whose_repos_are_private_is_a_fault(monkeypatch):
         _semester_rows(("a3-ada", "private"), ("a3-ben", "public")),
     )
     (fault,) = found
-    assert fault.field == "visibility"
+    assert fault.field == "assignment_repo_visibility"
     assert "1 of 2 are not public" in fault.what
     assert "read when each repo is CREATED" in fault.what
     # A COUNT and never a name: this sentence reaches a public run log, a digest issue and
@@ -6343,8 +6343,8 @@ def test_a_public_assignment_whose_repos_are_private_is_a_fault(monkeypatch):
     assert "ada" not in fault.what + fault.fix()
     # It bites when the assignment is graded (the late cutoff), like every other value.
     assert fault.fires == DUE_AT + timedelta(days=10)
-    # ...and names the file the setting lives in now.
-    assert fault.file == "assignments.yml"
+    # ...and is filed with the semester's own settings (decision 0039).
+    assert fault.file == "semester.yml"
 
 
 def test_a_private_assignment_whose_repos_are_public_is_the_same_fault(monkeypatch):

@@ -1,4 +1,4 @@
-"""relink: a student re-pointed at a new GitHub account in students.csv - or whose account
+"""relink: a student re-pointed at a new GitHub account in .system/roster.csv - or whose account
 was renamed - is moved there by the next membership sync: repos, grants, config rows,
 throttle issues, with the row's pending marker (the stored `github_id`, or the handle cell
 for a rename) written last, so a run that stops anywhere is finished by the next.
@@ -23,8 +23,14 @@ from dsl_course import (
     teams,
 )
 from dsl_course import run as run_context
-from dsl_course.gh_contents import blob_sha, read_csv
-from tests.conftest import ROSTER_HEADER, new_sheet, repo_row
+from dsl_course.gh_contents import blob_sha, dump_csv, read_csv
+from tests.conftest import (
+    ROSTER_HEADER,
+    new_sheet,
+    parse_roster,
+    repo_row,
+    roster_files,
+)
 
 ORG = "Semester"
 OLD, NEW = "oldacct", "newacct"
@@ -35,6 +41,11 @@ SPEC = grading_sheet.SheetSpec(
     slug="assignment-1", title="A1", is_group=False, questions={"q1": "5"}
 )
 GROUP = grading_sheet.SheetSpec(slug="assignment-2", title="A2", is_group=True)
+
+
+# Ada and Bob share team-x for assignment 2 (its `team:2` column).
+TEAMS = "assignment,team,github_handle\nassignment-2,team-x,oldacct\nassignment-2,team-x,bob\n"
+NUMBERS = {"assignment-2": 2}
 
 
 def roster_text(handle=NEW, stored=OLD_ID, extra=()) -> str:
@@ -74,12 +85,11 @@ class World:
     """One semester as `relink` sees it: its roster, semester-config, repos and people."""
 
     def __init__(self):
-        self.roster = roster_text()
+        self.files = roster_files(roster_text(handle=OLD), TEAMS, NUMBERS)
+        self.files[roster.SYSTEM_PATH] = self.files[roster.SYSTEM_PATH].replace(
+            f",{OLD},", f",{NEW},"
+        )
         self.config: dict[str, bytes] = {
-            teams.TEAMS_PATH: (
-                ",".join(teams.FIELDS) + "\nassignment-2,team-x,oldacct\n"
-                "assignment-2,team-x,bob\n"
-            ).encode(),
             SHEET: sheet_text().encode(),
             GROUP_SHEET: group_sheet_text().encode(),
             gradebook.DISTRIBUTED_PATH: distributed_text().encode(),
@@ -131,12 +141,58 @@ class World:
             self.fail = None
         return True
 
+    @property
+    def roster(self) -> str:
+        """students.csv and .system/roster.csv, joined back into one combined text."""
+        system = {
+            r["email"]: r
+            for r in read_csv(self.files[roster.SYSTEM_PATH], ("email",), "roster")
+        }
+        rows = [ROSTER_HEADER]
+        for r in read_csv(self.files[roster.STUDENTS_PATH], ("email",), "students"):
+            mine = system.get(r["email"], {})
+            rows.append(
+                ",".join(
+                    [r["email"], r["name"], r["role"]]
+                    + [mine.get(c) or "" for c in roster.LEGACY_SYSTEM_COLUMNS]
+                )
+            )
+        return "\n".join(rows) + "\n"
+
+    @roster.setter
+    def roster(self, text: str) -> None:
+        """A combined text in; each student keeps the team cell they had, by email."""
+        cells = {
+            r["email"]: r.get("team:2") or ""
+            for r in read_csv(self.files[roster.STUDENTS_PATH], ("email",), "students")
+        }
+        files = roster_files(text)
+        rows = list(read_csv(files[roster.STUDENTS_PATH], ("email",), "students"))
+        files[roster.STUDENTS_PATH] = dump_csv(
+            ["email", "name", "role", "team:2"],
+            (
+                [r["email"], r["name"], r["role"], cells.get(r["email"], "")]
+                for r in rows
+            ),
+        )
+        self.files = files
+
+    def team_of(self, handle: str) -> str | None:
+        per = teams.parse(
+            roster.parse(
+                self.files[roster.STUDENTS_PATH], self.files[roster.SYSTEM_PATH]
+            ),
+            {"assignment-2": "2"},
+        )
+        groups = per.get("assignment-2", {})
+        return next((t for t, members in groups.items() if handle in members), None)
+
     def stored_id(self) -> str:
         return self.cell("github_id")
 
     def cell(self, column: str) -> str:
-        rows = list(read_csv(self.roster, roster.REQUIRED_FIELDS, "students.csv"))
-        return rows[0][column]
+        rows = list(read_csv(self.files[roster.SYSTEM_PATH], ("email",), "roster"))
+        return next(r for r in rows if r["email"] == "a@x.edu")[column]
 
     def rename(self) -> None:
         """Ada renames OLD -> NEW: same id, the old login 404s, and everything GitHub
@@ -173,16 +229,19 @@ def world(monkeypatch) -> World:
     monkeypatch.setattr(relink, "path_commit_subjects", subjects)
 
     def roster_read(org, repo, path, ref=""):
-        return (w.roster, blob_sha(w.roster.encode()))
+        text = w.files[path]
+        return (text, blob_sha(text.encode()))
 
     monkeypatch.setattr(relink, "get_file_with_sha", roster_read)
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", roster_read)
     monkeypatch.setattr(gh_contents, "get_file_with_sha", roster_read)
+    monkeypatch.setattr(relink, "get_file_content", lambda o, r, p: w.files.get(p))
 
     def roster_write(org, repo, path, content, message, expected_sha=None, **k):
-        if w.failing("id") or expected_sha != blob_sha(w.roster.encode()):
+        assert path == roster.SYSTEM_PATH, "the relink writes only the engine's file"
+        if w.failing("id") or expected_sha != blob_sha(w.files[path].encode()):
             return False
-        w.roster = content.decode()
+        w.files[path] = content.decode()
         return True
 
     monkeypatch.setattr(gh_contents, "put_file", roster_write)
@@ -234,7 +293,10 @@ def world(monkeypatch) -> World:
     monkeypatch.setattr(
         relink.teams,
         "load",
-        lambda org: teams.parse(w.config[teams.TEAMS_PATH].decode()),
+        lambda org: teams.parse(
+            roster.parse(w.files[roster.STUDENTS_PATH], w.files[roster.SYSTEM_PATH]),
+            {"assignment-2": "2"},
+        ),
     )
 
     def rename(org, name, new_name, *, description=None, person=False):
@@ -317,9 +379,8 @@ def test_a_switched_account_is_moved_completely(world):
     assert world.repos[f"assignment-1-{NEW}"]["collab"] == {NEW: "maintain"}
     assert world.repos[f"grades-{NEW}"]["collab"] == {NEW: "pull"}
     assert world.repos["assignment-1-bob"]["collab"] == {"bob": "maintain"}
-    # semester-config
-    assert "assignment-2,team-x,newacct" in world.config[teams.TEAMS_PATH].decode()
-    assert OLD not in world.config[teams.TEAMS_PATH].decode()
+    # semester-config: the team cell is keyed by email, so it moved with her.
+    assert world.team_of(NEW) == "team-x" and world.team_of(OLD) is None
     marks = sheet_of(world)["submissions"]
     assert OLD not in marks and marks[NEW]["score_individual"] == {"q1": "4"}
     assert list(marks) == [NEW, "bob"]
@@ -365,11 +426,11 @@ def test_a_second_run_does_nothing(world):
 
 
 def test_the_roster_memo_is_cleared_once_the_id_moves(world, monkeypatch):
-    monkeypatch.setattr(roster, "get_file_content", lambda *a, **k: world.roster)
+    monkeypatch.setattr(roster, "get_file_content", lambda o, r, p: world.files.get(p))
     roster.load(ORG)
-    assert run_context.current().holds(roster._roster_text) == 1
+    assert run_context.current().holds(roster._system_text) == 1
     run(world)
-    assert run_context.current().holds(roster._roster_text) == 0
+    assert run_context.current().holds(roster._system_text) == 0
     assert roster.load(ORG)[0].github_id == NEW_ID
 
 
@@ -408,7 +469,7 @@ def test_nothing_that_names_a_student_reaches_the_public_log(world, capsys):
 
 
 def pending(world) -> list[relink.Pending]:
-    return relink.pending(ORG, roster.parse(world.roster))
+    return relink.pending(ORG, parse_roster(world.roster))
 
 
 def test_the_row_is_found_with_both_accounts(world):
@@ -500,19 +561,6 @@ def test_a_new_name_repo_with_work_in_it_refuses_and_moves_nothing(world, capsys
     assert f"relink of @{NEW}" in err and OLD not in err
 
 
-def test_an_identical_team_row_is_dropped(world):
-    world.config[teams.TEAMS_PATH] += b"assignment-2,team-x,newacct\n"
-    run(world)
-    text = world.config[teams.TEAMS_PATH].decode()
-    assert text.count("newacct") == 1 and OLD not in text
-
-
-def test_a_different_team_for_one_assignment_refuses(world):
-    world.config[teams.TEAMS_PATH] += b"assignment-2,team-y,newacct\n"
-    run(world)
-    assert world.stored_id() == OLD_ID and f"assignment-1-{OLD}" in world.repos
-
-
 def test_a_blank_new_sheet_entry_is_dropped_and_the_old_one_re_keyed(world):
     world.config[SHEET] = sheet_text(new_entry="").encode()
     run(world)
@@ -556,17 +604,17 @@ def test_a_config_edit_that_lands_mid_relink_is_never_overwritten(world, capsys)
     # The semester-config commit is built on the commit its files were READ at, so a
     # write that landed in between makes it fail rather than be silently reverted.
     def faculty_edit():
-        world.config[teams.TEAMS_PATH] += b"assignment-2,team-x,cy\n"
+        world.config["notes.md"] = b"a faculty edit\n"
         world.head += 1
 
     world.race = faculty_edit
     assert run(world)[0] == 0, "a lost race is transient, not a red run"
     assert world.stored_id() == OLD_ID
-    assert OLD in world.config[teams.TEAMS_PATH].decode()
+    assert OLD in sheet_of(world)["submissions"]
     assert "met a concurrent semester-config edit" in capsys.readouterr().out
     assert run(world)[0] == 0
-    text = world.config[teams.TEAMS_PATH].decode()
-    assert "cy" in text and "newacct" in text and OLD not in text
+    assert world.config["notes.md"] == b"a faculty edit\n"
+    assert NEW in sheet_of(world)["submissions"]
     assert world.stored_id() == NEW_ID
 
 
@@ -696,7 +744,7 @@ def test_a_renamed_account_is_moved_and_its_handle_cell_written_last(world):
     assert f"assignment-1-{NEW}" in world.repos and f"grades-{NEW}" in world.repos
     assert f"assignment-1-{OLD}" not in world.repos
     assert world.repos[f"assignment-1-{NEW}"]["collab"] == {NEW: "maintain"}
-    assert "assignment-2,team-x,newacct" in world.config[teams.TEAMS_PATH].decode()
+    assert world.team_of(NEW) == "team-x"
     assert NEW in sheet_of(world)["submissions"]
     assert f".system/autograde/assignment-1/{NEW}.json" in world.config
     record = json.loads(world.config[f".system/enrolment/relinks/{OLD_ID}.json"])

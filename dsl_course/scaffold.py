@@ -34,6 +34,7 @@ from .central import CENTRAL
 from .course import (
     ASSIGNMENT_TYPES,
     COURSE_DEFAULT_CHOICE,
+    DEFAULT_FORMATS,
     FACULTY_ONLY_HEADING,
     FORMATS,
     MAINTAINING_FILE,
@@ -172,16 +173,17 @@ def _syllabus_sample() -> str:
 # The assignment's own definition, written from what New assignment was asked for.
 # INSTRUCTOR-OWNED from the moment it lands: nothing ever rewrites it, and every setting in
 # it is meant to be edited here afterwards. What the assignment IS, and nothing about how
-# one semester runs it: the run settings (`settings.RUN_KEYS`) live in each semester's
-# `assignments.yml`, and one written here is RUN_SETTING_IN_TEMPLATE.
+# one semester runs it: the run settings (`settings.RUN_KEYS`) live on each semester's
+# schedule.yml entry (else its semester.yml `defaults:`), and one written here is
+# RUN_SETTING_IN_TEMPLATE.
 _GRADING_STAMP = (
     "# INSTRUCTOR-OWNED - defines the assignment. "
     "Dates live in the semester's schedule.yml."
 )
 _RUN_SETTINGS_NOTE = (
     "# How each semester runs it - how teams form, the max team size, the late rule, who "
-    "can\n# read the repos, an external submit link - is set per semester in "
-    "semester-config/assignments.yml."
+    "can\n# read the repos, an external submit link - is set per semester on its "
+    "semester-config/schedule.yml entry."
 )
 _QUESTIONS_STUB = """\
 # questions:                  # OPTIONAL - the score skeleton, and the maximum shown beside
@@ -588,8 +590,8 @@ def _brief_stub(
         + "".join(f"{sentence}\n\n" for sentence in artefacts)
         + (
             "_Say where and how students hand in - nothing is collected from this repo. "
-            "`submit_url:` in the semester's `assignments.yml` puts that address on the "
-            "semester site as a button._\n"
+            "`submit_url:` on the assignment's entry in the semester's `schedule.yml` puts "
+            "that address on the semester site as a button._\n"
             if external
             else "_Say which files you expect back, and in what shape._\n"
         )
@@ -1114,19 +1116,21 @@ def _collision(named: list[str], autograde: bool) -> str:
     return ""
 
 
-# `submit_via` is the template's shape, not a policy default: the box left at
-# `COURSE_DEFAULT_CHOICE` with no course answer gets the ordinary repo per unit.
-_SHAPE_ANSWERS = {"submit_via": "assignment_repo"}
+# What a box left at `COURSE_DEFAULT_CHOICE` gets when the course does not answer it:
+# `submit_via` is the template's shape (the ordinary repo per unit), `formats` the
+# wizard's own default - neither is an institution default (decision 0039 rule 2).
+_SHAPE_ANSWERS = {"submit_via": "assignment_repo", "formats": DEFAULT_FORMATS}
 
 
 def resolve_answers(answers: dict[str, str], defaults: dict) -> dict[str, str]:
     """The New assignment answers with every box left at `COURSE_DEFAULT_CHOICE` replaced
-    through the cascade's course and institution layers (`settings.resolve`): the course's
-    `assignment_defaults:` value when it declares one, else the policy's. An answer
+    through the course's `defaults:` (`formats` excepted: the wizard asks, decision 0039)
+    else the toolkit's (`_SHAPE_ANSWERS`, the institution's defaults). An answer
     somebody chose is kept as given."""
+    course = {k: v for k, v in defaults.items() if k != "formats"}
     stack = [
-        ("course", defaults),
-        ("institution", {**_SHAPE_ANSWERS, **settings.institution_defaults()}),
+        ("course", course),
+        ("institution", {**settings.institution_defaults(), **_SHAPE_ANSWERS}),
     ]
     out = {}
     for key, value in answers.items():
@@ -1182,7 +1186,7 @@ def scaffold_assignment(
     `grading_config.yml`, which is what the handout, the grading sheet and the Join-team
     form all read - so the answers given on the button are the ones the rest of the term
     obeys, and nothing has to be hand-edited in afterwards. How a semester runs it (the
-    run settings) is that semester's `assignments.yml`, never this file.
+    run settings) is that semester's schedule.yml entry, never this file.
 
     `formats` is the exception: it picks which starter stubs are seeded on `main`, one
     each with its model answer on `solution`, and nothing else. The grader reads whatever
@@ -1564,8 +1568,8 @@ def main() -> int:
         help="The assignment's name, e.g. 'Neural networks from scratch': the repo is "
         "assignment-<name>, and the name is its `title:` in grading_config.yml.",
     )
-    # Two boxes default to COURSE_DEFAULT_CHOICE: the course's `assignment_defaults:`
-    # answers them, else the toolkit does (`resolve_answers`).
+    # Two boxes default to COURSE_DEFAULT_CHOICE: the course's `defaults:` answers
+    # `submit_via`, else the toolkit does (`resolve_answers`).
     pa.add_argument(
         "--formats",
         dest="formats",
@@ -1573,15 +1577,14 @@ def main() -> int:
         help="Which starter stubs to seed on main, and nothing else: a comma-separated "
         f"list of {', '.join(FORMATS)}, with `none` on its own for no starter at all; "
         "the first is the runnable one (the completion check and the autograder run "
-        "it). Default: the course's `assignment_defaults: formats`, else the "
-        "institution's (policy.yml)",
+        "it). Default: ipynb",
     )
     pa.add_argument(
         "--type",
         dest="kind",
         choices=list(ASSIGNMENT_TYPES),
         default="individual",
-        help="individual = one repo per student; group = one repo per team (teams.csv)",
+        help="individual = one repo per student; group = one repo per team (students.csv)",
     )
     pa.add_argument(
         "--submit-via",

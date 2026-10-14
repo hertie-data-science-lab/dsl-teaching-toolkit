@@ -42,18 +42,24 @@ _REAL_SEND_BULK = mailer.send_bulk
 # entry are two faults, so the path is part of it.
 _KEY = "releases.lecture_02[students/lectures/02_lecture].course_source_path"
 
-# One instructor, one TA, one entry with no address at all - the three cases instructors.yml
+# One instructor, one TA, one entry with no address at all - the three cases semester.yml
 # really contains.
 PEOPLE = {
-    "people": {
-        "instructors": [
-            {"github_handle": "JanG", "name": "Jan", "email": "jan@x.edu"},
-            {"github_handle": "Nobody", "name": "No Address"},
-        ],
-        "teaching_assistants": [
-            {"github_handle": "cpj97", "name": "Camilo", "email": "cam@x.edu"},
-        ],
-    }
+    "people": [
+        {
+            "github_handle": "JanG",
+            "role": "instructor",
+            "name": "Jan",
+            "email": "jan@x.edu",
+        },
+        {"github_handle": "Nobody", "role": "instructor", "name": "No Address"},
+        {
+            "github_handle": "cpj97",
+            "role": "teaching_assistant",
+            "name": "Camilo",
+            "email": "cam@x.edu",
+        },
+    ]
 }
 
 
@@ -276,7 +282,7 @@ def test_an_addressee_with_no_email_is_counted_not_named(wired, capsys):
 def test_a_semester_no_address_can_be_found_for_falls_to_the_course_admins(
     wired, admins, capsys
 ):
-    # A instructors.yml with no `email:` anywhere used to leave the digest's @mention as the
+    # A semester.yml with no `email:` anywhere used to leave the digest's @mention as the
     # only channel until the 48h rung copied the maintainer. The course this semester
     # belongs to has admins, and a semester that will ship nothing is theirs to chase.
     admins(", ".join(ADMINS))
@@ -625,18 +631,18 @@ def test_a_people_yml_that_will_not_parse_never_prints_the_line_it_broke_on(
     wired, monkeypatch, capsys
 ):
     # PyYAML renders the offending SOURCE LINE into `str(exc)`, and the line that breaks a
-    # instructors.yml is as often as not the one carrying somebody's address. The parser's own
+    # semester.yml is as often as not the one carrying somebody's address. The parser's own
     # complaint and the line NUMBER say everything a reader needs (`read_error`).
     wired(blame={131: "cpj97"}, committer=None)
 
     def boom(*a, **k):
-        yaml.safe_load("people:\n  instructors:\n  - email: jan@x.edu: typo\n")
+        yaml.safe_load("people:\n  -\n  - email: jan@x.edu: typo\n")
 
     monkeypatch.setattr(notify.sync_faculty, "load_semester_faculty", boom)
     notify.route(SEMESTER, COURSE, [_fault()], NOW)
     err = capsys.readouterr().err
     assert "jan@x.edu" not in err
-    assert f"could not read {SEMESTER}'s instructors.yml" in err
+    assert f"could not read {SEMESTER}'s semester.yml" in err
     assert "ScannerError: mapping values are not allowed here (line 3)" in err
 
 
@@ -715,10 +721,10 @@ def _row_fault(lineno: int = 4, field: str = "role") -> notify.ConfigFault:
 
 def _people_fault() -> notify.ConfigFault:
     return notify.ConfigFault(
-        "people.instructors[1]",
+        "people[1]",
         "no usable `email:` - access is still granted, but no notification reaches "
         "this person",
-        file="instructors.yml",
+        file="semester.yml",
         field="email",
         lineno=6,
     )
@@ -977,9 +983,9 @@ def test_a_people_fault_names_its_own_file(wired):
     sent = wired(blame={6: "JanG"})
     routing = notify.route(SEMESTER, COURSE, [_people_fault()], NOW)
     _mail_config([_people_fault()], routing, spec=config_digest.PEOPLE)
-    assert "instructors.yml has 1 entry the toolkit cannot use" in sent.one["subject"]
+    assert "semester.yml has 1 entry the toolkit cannot use" in sent.one["subject"]
     assert "this person has no access and is not notified" in sent.one["body"]
-    assert "instructors.yml#L6" in sent.one["body"]
+    assert "semester.yml#L6" in sent.one["body"]
 
 
 def _sheet_fault() -> notify.ConfigFault:
@@ -1079,19 +1085,20 @@ def test_no_mail_transport_says_so_once_and_never_raises(wired, capsys):
 
 # --------------------------------------------- a fault in the COURSE org's own config
 #
-# The course org's dsl-course.yml and semester registry decide whether the course is synced
+# The course org's course.yml and semester registry decide whether the course is synced
 # at all. Their addressees are the course ADMINS, by the `email:` each declares in
-# dsl-course.yml, and git's answer goes to the digest's @mention instead of to the To line.
+# course.yml, and git's answer goes to the digest's @mention instead of to the To line.
 
 COURSE_ISSUE = "https://github.com/Course-Org/.github/issues/3"
 ADMINS = ("lonny@x.edu", "luis@x.edu")
 
 
-def _course_fault(field: str = "central_ref", lineno: int | None = 8):
+def _course_fault(field: str = "toolkit_version_ref", lineno: int | None = 8):
     return notify.ConfigFault(
-        "dsl-course.yml",
-        "`central_ref:` is not `main`, `release` or a full 40-character commit SHA",
-        file="dsl-course.yml",
+        "course.yml",
+        "`course.toolkit_version_ref:` is not `main`, `release` or a full 40-character "
+        "commit SHA",
+        file="course.yml",
         field=field,
         in_repo=".github",
         lineno=lineno,
@@ -1123,7 +1130,7 @@ def _mail_course(faults, routing, reminder=None):
 @pytest.fixture
 def admins(monkeypatch):
     """The course admins' declared `email:`s, comma-separated (None: nobody declares one),
-    as `notify` reads them out of the course's dsl-course.yml."""
+    as `notify` reads them out of the course's course.yml."""
 
     def _set(value: str | None) -> None:
         emails = [a.strip() for a in (value or "").split(",") if a.strip()]
@@ -1157,7 +1164,7 @@ def test_a_fault_about_the_whole_file_falls_back_to_whoever_pushed_it(wired, adm
 
 
 def test_a_line_the_bot_wrote_falls_through_to_whoever_pushed_it(wired, admins):
-    # The bot writes `central_ref:` into every dsl-course.yml, so blame is its login for
+    # The bot writes `central_ref:` into every course.yml, so blame is its login for
     # lines nobody at the school has ever typed. @mentioning it on the issue reaches
     # nobody and hides the person who actually pushed the file.
     admins(ADMINS[0])
@@ -1184,10 +1191,10 @@ def test_the_course_subject_names_the_course_and_no_semester(wired, admins):
     _mail_course([_course_fault()], routing)
     # No term tag: this is the course org's own file, not a semester's.
     assert sent.one["subject"] == (
-        "[Course Name] dsl-course.yml has 1 entry the toolkit cannot use"
+        "[Course Name] course.yml has 1 entry the toolkit cannot use"
     )
     assert "the sync skips this course" in sent.one["body"]
-    assert "dsl-course.yml#L8" in sent.one["body"]
+    assert "course.yml#L8" in sent.one["body"]
 
 
 def test_a_course_org_with_no_admin_address_says_so_without_naming_anyone(
@@ -1229,7 +1236,7 @@ def test_a_dsl_course_yml_nobody_can_parse_still_sends_its_mail(
     monkeypatch.setattr(discovery, "course_name_of", unparseable)
     routing = notify.route_course(COURSE, [_course_fault()], NOW)
     assert _mail_course([_course_fault()], routing).addressees == 0
-    assert sent.one["subject"].startswith(f"[{COURSE}] dsl-course.yml has 1 entry")
+    assert sent.one["subject"].startswith(f"[{COURSE}] course.yml has 1 entry")
 
 
 # ------------------------------------------- an edit the site sync rebuilt over
@@ -1314,7 +1321,7 @@ def test_two_people_who_lost_edits_get_a_letter_each(wired):
 
 
 def test_a_site_org_with_nobody_to_address_sends_nothing(wired, capsys):
-    # The public COURSE site: the org declares no instructors.yml at all, so the issue's cc is
+    # The public COURSE site: the org declares no semester.yml at all, so the issue's cc is
     # the only channel there is. Not an error, and not a raise inside a site sync.
     sent = wired(people=None)
     assert _overwritten({"JanG": [("_data/people.yml", SHA)]}) == notify.Unsent()

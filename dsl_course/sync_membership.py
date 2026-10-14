@@ -6,8 +6,8 @@ One entrypoint replacing three separate workflows' worth of orchestration:
   everywhere - the course org itself + every semester registered under it
   (sync_faculty.sync_course_admins) - regardless of which semester (if any) triggered
   this sync, since admin access is course-wide by design.
-- Roster (students.csv), project teams (teams.csv), and each semester's own
-  instructors/TAs (semester-config/instructors.yml, via
+- Roster (students.csv, with the project teams), and each semester's own
+  instructors/TAs (semester-config/semester.yml, via
   sync_faculty.sync_semester_instructors) additionally reconcile for whichever
   semester(s) are in scope: one named semester (--semester-org, e.g. a push to that
   semester's semester-config), or every registered semester (--all-semesters, e.g. the
@@ -18,10 +18,10 @@ config is the live truth, so a deleted roster row or a lapsed faculty `end` date
 revokes access on the very next sync.
 
 A CONTENT fault never reds this run. A students.csv saved as a `;`-delimited export, a
-teams.csv with no header, a instructors.yml that is not YAML: each skips its semester and is
+students.csv with no header, a semester.yml that is not YAML: each skips its semester and is
 reported where the person who left it there will see it - the per-file digest issue in
 that semester's semester-config, and the mail beside it. The COURSE org's own two files
-(`dsl-course.yml`, the semester registry) are the same rule at a wider blast radius: nothing
+(`course.yml`, the semester registry) are the same rule at a wider blast radius: nothing
 is reconciled under the course at all, and the course digest issue and the admin mail are
 what say so. The exit code is kept for the run's own failures (a `gh` write that was
 refused, a token that lost its scope), because this cron's red X opens `Sync membership is
@@ -60,7 +60,7 @@ from .welcome import refresh_join_team_form
 
 # What a semester's hand-edited config can be wrong in a way this sync cannot act on: a CSV
 # whose header nobody can read (`faults.Unusable`, raised by `gh_contents.read_csv`) and a
-# instructors.yml that is not YAML at all. Both mean the same thing here - the file says
+# semester.yml that is not YAML at all. Both mean the same thing here - the file says
 # nothing this run may reconcile from, and reconciling from what it does say would prune
 # a semester's teams down to whatever survived the parse.
 _CONTENT_FAULT = (Unusable, yaml.YAMLError)
@@ -79,7 +79,7 @@ GRADEBOOK_BUDGET_MINUTES = 10
 def _unreadable_course_config(course_org: str, exc: Exception) -> int:
     """The COURSE org's own config cannot be read - the exit code for that, which is 0.
 
-    `dsl-course.yml` and the semester registry are hand-edited like every other file here,
+    `course.yml` and the semester registry are hand-edited like every other file here,
     and a course admin is the only person who can fix either. Nothing is reconciled or
     pruned while one of them stands broken, and that is reported where they are looking:
     the course org's digest issue and the mail beside it
@@ -275,7 +275,7 @@ def main() -> int:
         all_semesters=args.all_semesters,
         dry_run=args.preview,
     )
-    # A push to one semester's roster, teams or instructors.yml dispatches exactly this: the
+    # A push to one semester's roster, teams or semester.yml dispatches exactly this: the
     # semester's status.json follows the membership it just reconciled. Not counted - the
     # sync's exit code is the sync's - and `status.write` refuses a semester the course's
     # registry does not list, whatever the payload named.

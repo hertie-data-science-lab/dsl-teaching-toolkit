@@ -1,25 +1,29 @@
-"""settings - every assignment setting: how its value is read, and where its effective
-value comes from.
+"""settings - every assignment and semester default: how its value is read, and where
+its effective value comes from.
 
-Every value is read by its key's reader (`setting_readers`).
+Every value is read by its key's reader (`setting_readers`, and `_SEMESTER_READERS` for
+the three semester-wide keys).
 
-The cascade: a RUN setting (`RUN_KEYS`: how teams form, the team cap, the late pair, the
-repo visibility, the external submit link, whether returned marks show each question)
-resolves nearest-first through four layers -
+The cascade (decision 0039): a key of the fixed `defaults:` set resolves nearest-first,
+per key never per block, through four layers -
 
-    assignment   semester-config/schedule.yml     assignments.<key>.<key> (inline, 0038)
-    semester     semester-config/assignments.yml  defaults.<key>
-    course       .github/dsl-course.yml            assignment_defaults.<key>
-    institution  policy.yml                        defaults.<key>
+    entry        semester-config/schedule.yml   assignments.<key>.<key> (inline, 0038)
+    semester     semester-config/semester.yml   defaults.<key>
+    course       .github/course.yml             defaults.<key>
+    institution  institution.yml                defaults.<key>
 
-and `effective` says which layer answered. The late pair is ONE rule: whichever layer
-states either half states both, the other half absent meaning none (`_late_pair`).
-`assignments.yml` is optional: absent, both of its layers are empty. A template's
-`grading_config.yml` states no run setting (a run key there is RUN_SETTING_IN_TEMPLATE). This is the
-ONE module that reads `assignment_defaults`, the one parser of `assignments.yml`
-(`parse_instance`; its per-assignment `assignments:` blocks are legacy, read only for the
-0.11.0 migration) and of the settings written inline on a schedule entry
-(`inline_settings`; `assignment_repo_visibility` there is the `visibility` setting).
+and `effective` says which layer answered. A RUN setting (`RUN_KEYS`: how teams form, the
+team cap, the late pair, the repo visibility, the external submit link, whether returned
+marks show each question) has all four; a SEMESTER-WIDE one (`SEMESTER_KEYS`: timezone,
+archive grace, the default materials repo) has no entry layer. `team_formation` has no
+institution layer (decision 0039 rule 2). The late pair is ONE rule: whichever layer
+states either half states both, the other half absent meaning none (`_late_pair`). The
+files spell `visibility` as `assignment_repo_visibility` (`FILE_NAMES`). A template's
+`grading_config.yml` states no run setting (a run key there is RUN_SETTING_IN_TEMPLATE).
+
+This is the ONE module that reads a `defaults:` block, the one parser of the settings
+written inline on a schedule entry (`inline_settings`), and of a 0.10 `assignments.yml`
+(`parse_legacy_assignments`, for the 0.11.0 migration only).
 """
 
 from __future__ import annotations
@@ -27,12 +31,22 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
 from . import legacy, policy, run
 from .config import read_semester
-from .course import ASSIGNMENTS_FILE, CONFIG_REPO, COURSE_CONFIG, SCHEDULE_FILE
+from .course import (
+    CONFIG_REPO,
+    COURSE_CONFIG,
+    DEFAULTS_BLOCK,
+    PEOPLE_BLOCK,
+    SCHEDULE_FILE,
+    SELF_SELECT,
+    SEMESTER_FILE,
+    STUDENT_SITE_BLOCK,
+)
 from .discovery import course_org_for_semester, org_meta
 from .faults import ConfigFault, Unusable
 from .gh_contents import (
@@ -41,49 +55,9 @@ from .gh_contents import (
     take_lines,
     yaml_mark_line,
 )
+from .legacy import OLD_ASSIGNMENTS_FILE
 from .log import log_err
-from .setting_readers import read_settings
-
-# What a COURSE may set once for every assignment under it, in `dsl-course.yml`
-# `assignment_defaults:` - the course layer of the cascade below. The run settings among
-# them resolve at READ time; `formats` and `submit_via` answer New assignment's boxes left
-# at `course.COURSE_DEFAULT_CHOICE`
-# (`scaffold.resolve_answers`). The per-assignment keys - the title, the type, the question
-# maxima - are deliberately not among them: they are what makes one assignment different
-# from the next.
-COURSE_DEFAULT_KEYS = (
-    "max_team_size",
-    "late_window_days",
-    "late_penalty_per_day",
-    "marks_per_question",
-    "formats",
-    "submit_via",
-    "team_formation",
-    "visibility",
-)
-# Where the course-wide block lives, for the warnings it produces.
-ASSIGNMENT_DEFAULTS_KEY = "assignment_defaults"
-_DEFAULTS_WHERE = f"{COURSE_CONFIG} {ASSIGNMENT_DEFAULTS_KEY}"
-
-
-def parse_assignment_defaults(raw: object) -> dict:
-    """The course-wide `assignment_defaults:` block, validated exactly as an assignment's
-    own file is. Returns the settings it declares; anything else it says is warned about
-    and dropped, and a value its reader refuses states nothing (the institution's
-    answers). A course that declares none gets `{}`."""
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict):
-        log_err(f"  ! {_DEFAULTS_WHERE}: must be a block of settings - ignored")
-        return {}
-    dropped: list[str] = []
-    values = read_settings(raw, COURSE_DEFAULT_KEYS, _DEFAULTS_WHERE, dropped)
-    for line in dropped:
-        log_err(line)
-    return {key: value for key, value in values.items() if value is not None}
-
-
-# ------------------------------------------------------------------ the cascade
+from .setting_readers import Dropped, read_settings, whole_days
 
 # The settings that say how ONE semester runs an assignment, as opposed to what the
 # assignment is (the template's). Each resolves through the four layers.
@@ -98,10 +72,115 @@ RUN_KEYS = (
     "marks_per_question",
 )
 LATE_PAIR = ("late_window_days", "late_penalty_per_day")
-# The run settings as a schedule.yml assignment entry spells them (decision 0038 rule 9):
-# `visibility` says whose the repos are, so on the entry it is `assignment_repo_visibility`.
-INLINE_NAMES = {"visibility": "assignment_repo_visibility"}
+# The defaults that hold for a whole semester: no entry states them.
+SEMESTER_KEYS = ("timezone", "archive_grace_days", "materials_repo")
+# A setting as the files spell it: `visibility` says whose the repos are, so a file writes
+# `assignment_repo_visibility` (decision 0038 rule 9, 0039 rule 2).
+FILE_NAMES = {"visibility": "assignment_repo_visibility"}
+INLINE_NAMES = FILE_NAMES
 INLINE_KEYS = tuple(INLINE_NAMES.get(key, key) for key in RUN_KEYS)
+# What a course's or a semester's `defaults:` block may state, by setting: the fixed key
+# set (`policy.DEFAULT_KEYS`) and `team_formation`. The submit link is one assignment's.
+DEFAULT_KEYS = (
+    "timezone",
+    "late_window_days",
+    "late_penalty_per_day",
+    "max_team_size",
+    "visibility",
+    "archive_grace_days",
+    "materials_repo",
+    "marks_per_question",
+    "team_formation",
+)
+# The same, as the files spell them, in the order the seeded skeletons write them.
+DEFAULT_FILE_KEYS = tuple(FILE_NAMES.get(key, key) for key in DEFAULT_KEYS)
+# `submit_via` answers New assignment's box of that name when it is left at
+# `course.COURSE_DEFAULT_CHOICE` (`scaffold.resolve_answers`); a course may still write it
+# in `defaults:` (not in the fixed set: kept pending the maintainer's ruling).
+COURSE_ASKED_KEYS = ("submit_via",)
+# `team_formation` when no layer states it. Decision 0039 takes it out of the institution
+# file; until the maintainer rules on what "absent everywhere" means for a group template,
+# the engine keeps the value it has always fallen back to.
+TEAM_FORMATION_FALLBACK = SELF_SELECT
+
+_REPO_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+# `semester.yml`'s blocks (decision 0039).
+SEMESTER_BLOCKS = (PEOPLE_BLOCK, DEFAULTS_BLOCK, STUDENT_SITE_BLOCK)
+
+
+def _timezone(value: object, where: str, dropped: list[str]) -> str | None:
+    name = str(value or "").strip()
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        dropped.append(
+            Dropped(
+                where, "timezone", f"`timezone: {value}` is not a known zone - ignored"
+            )
+        )
+        return None
+    return name
+
+
+def _grace_days(value: object, where: str, dropped: list[str]) -> int | None:
+    if (days := whole_days(value)) is None:
+        dropped.append(
+            Dropped(
+                where,
+                "archive_grace_days",
+                f"`archive_grace_days: {value}` is not a whole number of days - ignored",
+            )
+        )
+    return days
+
+
+def _materials_repo(value: object, where: str, dropped: list[str]) -> str | None:
+    name = str(value or "").strip()
+    if _REPO_NAME.match(name):
+        return name
+    dropped.append(
+        Dropped(
+            where,
+            "materials_repo",
+            f"`materials_repo: {value}` is not a repo name (letters, digits, `.`, `_`, "
+            f"`-`) - ignored",
+        )
+    )
+    return None
+
+
+_SEMESTER_READERS = {
+    "timezone": _timezone,
+    "archive_grace_days": _grace_days,
+    "materials_repo": _materials_repo,
+}
+
+
+def read_defaults(
+    raw: Mapping, where: str, dropped: list, allowed: tuple[str, ...] = DEFAULT_KEYS
+) -> dict:
+    """A `defaults:` block, keyed by setting (`visibility`, not its file spelling), each
+    value through its reader; a value its reader refuses is None (the next layer answers)
+    and an unknown key is ignored, each recorded in `dropped`."""
+    spelt = {name: key for key, name in FILE_NAMES.items()}
+    out: dict = {}
+    for name, value in raw.items():
+        key = spelt.get(str(name), str(name))
+        if str(name) in FILE_NAMES or key not in allowed:
+            dropped.append(
+                Dropped(
+                    where,
+                    str(name),
+                    f"`{name}:` is not a setting the toolkit reads - ignored",
+                )
+            )
+            continue
+        reader = _SEMESTER_READERS.get(key)
+        if reader is None:
+            out.update(read_settings({key: value}, (key,), where, dropped))
+        else:
+            out[key] = reader(value, where, dropped)
+    return out
 
 
 def inline_settings(entry: Mapping, where: str, dropped: list) -> dict:
@@ -128,39 +207,51 @@ def inline_blocks(assignments: object) -> dict[str, dict]:
     }
 
 
-SOURCES = ("assignment", "semester", "course", "institution")
-ASSIGNMENTS_DEFAULTS = "defaults"
-ASSIGNMENTS_BLOCKS = "assignments"
+SOURCES = ("entry", "semester", "course", "institution")
 
 Layer = tuple[str, Mapping]
+
+_COURSE_WHERE = f"{COURSE_CONFIG} {DEFAULTS_BLOCK}"
+
+
+def parse_course_defaults(raw: object) -> dict:
+    """A course's `defaults:` block. Returns the settings it declares; anything else it
+    says is warned about and dropped, and a value its reader refuses states nothing (the
+    institution's answers). A course that declares none gets `{}`."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        log_err(f"  ! {_COURSE_WHERE}: must be a block of settings - ignored")
+        return {}
+    dropped: list[str] = []
+    values = read_defaults(
+        raw, _COURSE_WHERE, dropped, (*DEFAULT_KEYS, *COURSE_ASKED_KEYS)
+    )
+    for line in dropped:
+        log_err(line)
+    return {key: value for key, value in values.items() if value is not None}
 
 
 @run.per_run(lambda course_org: run.scope(course_org, ".github", COURSE_CONFIG))
 def course_defaults(course_org: str) -> dict:
-    """A course's `assignment_defaults:` block, validated, read ONCE per course per process.
+    """A course's `defaults:` block, validated, read ONCE per course per process.
 
-    An absent `dsl-course.yml` (a 404) declares nothing. Any OTHER failure to read it - no
+    An absent `course.yml` (a 404) declares nothing. Any OTHER failure to read it - no
     permission, rate limit, malformed YAML - RAISES and is not cached: a run that cannot
     see the course's defaults must stop rather than hand out and grade on the
     institution's. Held by the run (`run.per_run`)."""
     if not course_org:
         return {}
-    return parse_assignment_defaults(org_meta(course_org).get(ASSIGNMENT_DEFAULTS_KEY))
-
-
-# Keys an `assignments.yml` block may state that are not cascaded run settings: the
-# semester-side repo name belongs to one assignment only (two sharing it would share every
-# repo, snapshot and sheet), so it is refused under `defaults:`.
-ASSIGNMENT_ONLY_KEYS = ("semester_dest_repo",)
-INSTANCE_KEYS = RUN_KEYS + ASSIGNMENT_ONLY_KEYS
-_REPO_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+    return parse_course_defaults(org_meta(course_org).get(DEFAULTS_BLOCK))
 
 
 @dataclass(frozen=True)
 class Instance:
-    """One semester's `assignments.yml`, read: its `defaults:` block and each
-    `assignments.<slug>` block (run settings through their readers), each assignment's
-    `semester_dest_repo`, and every line the parse refused as a `ConfigFault`.
+    """One semester's `defaults:` as read (from `semester.yml`, or a 0.10
+    `assignments.yml` by `parse_legacy_assignments`), every line the parse refused as a
+    `ConfigFault`, and the semester-wide values the semester's plan is read with
+    (`SEMESTER_KEYS`, effective: semester > course > institution). `blocks` / `dests` /
+    `lines` are a 0.10 `assignments.yml`'s per-key blocks, for the migration only.
     `unparseable` = the file is not YAML, or not a mapping: nothing in it is read."""
 
     defaults: dict = field(default_factory=dict)
@@ -170,18 +261,127 @@ class Instance:
     # `{slug: line of its block}`, for a fault about the block as a whole.
     lines: dict[str, int] = field(default_factory=dict)
     unparseable: bool = False
-
-
-def _fault(where: str, what: str, lineno: int | None, field_name: str = "", **kw):
-    return ConfigFault(
-        where, what, file=ASSIGNMENTS_FILE, field=field_name, lineno=lineno, **kw
+    timezone: str = field(default_factory=lambda: policy.defaults()["timezone"])
+    archive_grace_days: int = field(
+        default_factory=lambda: policy.defaults()["archive_grace_days"]
+    )
+    materials_repo: str = field(
+        default_factory=lambda: policy.defaults()["materials_repo"]
     )
 
 
-def parse_instance(text: str | None) -> Instance:
-    """`assignments.yml` as an `Instance`. Pure: text in, the read file out. A value its
-    reader refuses states nothing (the next layer answers) and is a fault; so is an unknown
-    key, a `semester_dest_repo` under `defaults:` and a block that is not a mapping."""
+# What a refused `defaults:` value costs: `semester.yml`'s own sentence in
+# `faults.CONSEQUENCE` is about its `people:`.
+_DEFAULTS_COST = (
+    "that value is not read: the course's or the institution's default applies"
+)
+
+
+def _fault(where: str, what: str, lineno: int | None, field_name: str = "", **kw):
+    kw.setdefault("consequence", _DEFAULTS_COST)
+    return ConfigFault(
+        where, what, file=SEMESTER_FILE, field=field_name, lineno=lineno, **kw
+    )
+
+
+# A 0.10 `assignments.yml`'s two blocks; a per-key block could name its repos.
+ASSIGNMENTS_DEFAULTS = "defaults"
+ASSIGNMENTS_BLOCKS = "assignments"
+ASSIGNMENT_ONLY_KEYS = ("semester_dest_repo",)
+
+
+def _old_fault(where: str, what: str, lineno: int | None, field_name: str = "", **kw):
+    return ConfigFault(
+        where, what, file=OLD_ASSIGNMENTS_FILE, field=field_name, lineno=lineno, **kw
+    )
+
+
+def parse_instance(text: str | None, course: Mapping | None = None) -> Instance:
+    """`semester.yml`'s `defaults:` as an `Instance`. Pure: text in, the read block out;
+    `course` is the course's defaults when the caller holds them (the semester-wide values
+    then cascade through it). A value its reader refuses states nothing (the next layer
+    answers) and is a fault; so is an unknown key and a block that is not a mapping. The
+    file's other blocks are read by their own readers."""
+    try:
+        data = load_yaml_lines(text) if text and text.strip() else None
+    except yaml.YAMLError as exc:
+        return Instance(
+            faults=(
+                _fault(
+                    "",
+                    "this file is not valid YAML, so none of it is read and nothing is "
+                    "handed out or marked on its defaults until it parses",
+                    yaml_mark_line(exc),
+                    SEMESTER_FILE,
+                    fix_text="fix the YAML on the line above",
+                ),
+            ),
+            unparseable=True,
+        )
+    if data is not None and not isinstance(data, dict):
+        return Instance(
+            faults=(
+                _fault(
+                    "",
+                    f"this file parses as {type(data).__name__}, not a mapping of "
+                    f"`people:` / `{DEFAULTS_BLOCK}:` / `student_site:`, so none of it "
+                    f"is read",
+                    None,
+                    SEMESTER_FILE,
+                ),
+            ),
+            unparseable=True,
+        )
+    data = data or {}
+    top = take_lines(data)
+    faults: list[ConfigFault] = [
+        _fault(
+            str(key),
+            f"`{key}:` is not a block the toolkit reads (only "
+            f"{', '.join(f'`{b}:`' for b in SEMESTER_BLOCKS)}) - ignored",
+            top.get(str(key)),
+            str(key),
+        )
+        for key in data
+        if key not in SEMESTER_BLOCKS
+    ]
+    raw = data.get(DEFAULTS_BLOCK)
+    values: dict = {}
+    if raw is not None and not isinstance(raw, dict):
+        faults.append(
+            _fault(
+                DEFAULTS_BLOCK,
+                "must be a block of settings - ignored",
+                top.get(DEFAULTS_BLOCK),
+            )
+        )
+    elif raw:
+        lines = take_lines(raw)
+        dropped: list = []
+        values = read_defaults(raw, f"{SEMESTER_FILE} {DEFAULTS_BLOCK}", dropped)
+        for line in dropped:
+            name = getattr(line, "field", "")
+            faults.append(
+                _fault(
+                    DEFAULTS_BLOCK,
+                    getattr(line, "what", str(line)),
+                    line_of(lines, name),
+                    name,
+                )
+            )
+    stack = [("semester", _usable(values)), ("course", _usable(course or {}))]
+    stack.append(("institution", institution_defaults()))
+    wide = {key: resolve(key, stack)[0] for key in SEMESTER_KEYS}
+    return Instance(defaults=values, faults=tuple(faults), **wide)
+
+
+def parse_legacy_assignments(text: str | None) -> Instance:
+    """A 0.10 `assignments.yml` as an `Instance`, for the 0.11.0 migration only (its
+    `defaults:` fold into semester.yml, its per-key blocks onto the schedule entries). Pure:
+    text in, the read file out. A value its reader refuses states nothing and is a fault;
+    so is an unknown key, a `semester_dest_repo` under `defaults:` and a block that is not
+    a mapping. Its `defaults:` are read by the 0.10 key set (`visibility`, no
+    semester-wide keys)."""
     if not text or not text.strip():
         return Instance()
     try:
@@ -189,12 +389,12 @@ def parse_instance(text: str | None) -> Instance:
     except yaml.YAMLError as exc:
         return Instance(
             faults=(
-                _fault(
+                _old_fault(
                     "",
                     "this file is not valid YAML, so none of it is read and nothing is "
                     "handed out or marked from it until it parses",
                     yaml_mark_line(exc),
-                    ASSIGNMENTS_FILE,
+                    OLD_ASSIGNMENTS_FILE,
                     fix_text="fix the YAML on the line above",
                 ),
             ),
@@ -205,13 +405,13 @@ def parse_instance(text: str | None) -> Instance:
     if not isinstance(data, dict):
         return Instance(
             faults=(
-                _fault(
+                _old_fault(
                     "",
                     f"this file parses as {type(data).__name__}, not a mapping of "
                     f"`{ASSIGNMENTS_DEFAULTS}:` / `{ASSIGNMENTS_BLOCKS}:`, so none of it "
                     f"is read",
                     None,
-                    ASSIGNMENTS_FILE,
+                    OLD_ASSIGNMENTS_FILE,
                 ),
             ),
             unparseable=True,
@@ -223,20 +423,22 @@ def parse_instance(text: str | None) -> Instance:
         if raw is None:
             return {}, {}
         if not isinstance(raw, dict):
-            faults.append(_fault(where, "must be a block of settings - ignored", at))
+            faults.append(
+                _old_fault(where, "must be a block of settings - ignored", at)
+            )
             return {}, {}
         lines = take_lines(raw)
         dropped: list[str] = []
         values = read_settings(
             {k: v for k, v in raw.items() if k not in ASSIGNMENT_ONLY_KEYS},
             allowed,
-            f"{ASSIGNMENTS_FILE} {where}",
+            f"{OLD_ASSIGNMENTS_FILE} {where}",
             dropped,
         )
         for line in dropped:
             name = getattr(line, "field", "")
             faults.append(
-                _fault(
+                _old_fault(
                     where, getattr(line, "what", str(line)), line_of(lines, name), name
                 )
             )
@@ -252,7 +454,7 @@ def parse_instance(text: str | None) -> Instance:
     for key in ASSIGNMENT_ONLY_KEYS:
         if key in extra:
             faults.append(
-                _fault(
+                _old_fault(
                     ASSIGNMENTS_DEFAULTS,
                     f"`{key}:` names one assignment's repos, so it is only read under "
                     f"`{ASSIGNMENTS_BLOCKS}.<key>` - ignored",
@@ -263,7 +465,7 @@ def parse_instance(text: str | None) -> Instance:
     raw_blocks = data.get(ASSIGNMENTS_BLOCKS)
     if raw_blocks is not None and not isinstance(raw_blocks, dict):
         faults.append(
-            _fault(
+            _old_fault(
                 ASSIGNMENTS_BLOCKS,
                 "must be a mapping of schedule key -> settings - ignored",
                 top.get(ASSIGNMENTS_BLOCKS),
@@ -274,7 +476,7 @@ def parse_instance(text: str | None) -> Instance:
     for key in data:
         if key not in (ASSIGNMENTS_DEFAULTS, ASSIGNMENTS_BLOCKS):
             faults.append(
-                _fault(
+                _old_fault(
                     str(key),
                     f"`{key}:` is not a block the toolkit reads (only "
                     f"`{ASSIGNMENTS_DEFAULTS}:` and `{ASSIGNMENTS_BLOCKS}:`) - ignored",
@@ -285,7 +487,7 @@ def parse_instance(text: str | None) -> Instance:
     if raw_blocks:
         row = legacy.flag(ASSIGNMENTS_BLOCKS, legacy.ASSIGNMENTS_YML)
         faults.append(
-            _fault(
+            _old_fault(
                 ASSIGNMENTS_BLOCKS,
                 f"moved: each assignment's settings are written on its entry in "
                 f"{SCHEDULE_FILE} (`{row.new}`) - ignored here, so {row.cost}",
@@ -307,7 +509,7 @@ def parse_instance(text: str | None) -> Instance:
             dests[str(slug)] = dest
         elif "semester_dest_repo" in extra and extra["semester_dest_repo"] is not None:
             faults.append(
-                _fault(
+                _old_fault(
                     where,
                     f"`semester_dest_repo: {extra['semester_dest_repo']}` is not a repo "
                     f"name (letters, digits, `.`, `_`, `-`) - the schedule key names "
@@ -325,48 +527,51 @@ def parse_instance(text: str | None) -> Instance:
     )
 
 
-@run.per_run(
-    lambda semester_org: run.scope(semester_org, CONFIG_REPO, ASSIGNMENTS_FILE)
-)
-def _assignments_text(semester_org: str) -> str | None:
-    """`semester-config/assignments.yml`, or None when the semester has none (a 404).
-    Any other read failure raises (`get_file_content`)."""
-    return read_semester(semester_org).assignments.text
+@run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO, SEMESTER_FILE))
+def _semester_text(semester_org: str) -> str | None:
+    """`semester-config/semester.yml`, or None when the semester has none (a 404). Any
+    other read failure raises (`get_file_content`)."""
+    return read_semester(semester_org).semester.text
 
 
 def instance(semester_org: str) -> Instance:
-    """The semester's `assignments.yml`, read and parsed; empty for no semester or no
-    file. A read that fails other than with a 404 raises."""
-    return (
-        parse_instance(_assignments_text(semester_org)) if semester_org else Instance()
-    )
+    """The semester's `semester.yml` defaults, read and parsed, its semester-wide values
+    cascaded through its course's; empty for no semester or no file. A read that fails
+    other than with a 404 raises."""
+    if not semester_org:
+        return Instance()
+    course = course_defaults(course_org_for_semester(semester_org))
+    return parse_instance(_semester_text(semester_org), course)
 
 
 @run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO))
 def semester_defaults(semester_org: str) -> dict:
-    """The semester's `assignments.yml` `defaults:`, each value through its reader; `{}`
-    when the file is not there (a 404). The assignment layer - the settings written on
-    each schedule.yml entry - is never read here: the caller hands it over from the
-    parsed `Schedule` (`AssignmentEntry.settings`), so schedule.yml is read once. A read
-    that fails for any other reason RAISES and is not cached, and an `assignments.yml`
-    that is not YAML raises `Unusable` - the same fail-closed rule as `course_defaults`:
-    nothing hands out or grades on defaults the semester did not choose. `schedule.load`
-    carries the fault. Held by the run (`run.per_run`)."""
-    read = instance(semester_org)
+    """The semester's `semester.yml` `defaults:`, each value through its reader; `{}`
+    when the file is not there (a 404). The entry layer - the settings written on each
+    schedule.yml entry - is never read here: the caller hands it over from the parsed
+    `Schedule` (`AssignmentEntry.settings`), so schedule.yml is read once. A read that
+    fails for any other reason RAISES and is not cached, and a `semester.yml` that is not
+    YAML raises `Unusable` - the same fail-closed rule as `course_defaults`: nothing hands
+    out or grades on defaults the semester did not choose. `schedule.load` carries the
+    fault. Held by the run (`run.per_run`)."""
+    if not semester_org:
+        return {}
+    read = parse_instance(_semester_text(semester_org))
     if read.unparseable:
         raise Unusable(
-            f"{semester_org}/{CONFIG_REPO}/{ASSIGNMENTS_FILE}: {read.faults[0].what}"
+            f"{semester_org}/{CONFIG_REPO}/{SEMESTER_FILE}: {read.faults[0].what}"
         )
     for fault in read.faults:
-        log_err(f"  ! {ASSIGNMENTS_FILE} {fault.where}: {fault.what}")
+        log_err(f"  ! {SEMESTER_FILE} {fault.where}: {fault.what}")
     return read.defaults
 
 
 def institution_defaults() -> dict:
-    """The policy's defaults for the run keys (and the starter formats)."""
-    ours = policy.defaults()
-    out = {key: ours[key] for key in RUN_KEYS if key in ours}
-    out["formats"] = tuple(ours["formats"])
+    """The institution's defaults, keyed by setting, with `team_formation`'s fallback
+    (`TEAM_FORMATION_FALLBACK`): the bottom layer of every stack."""
+    spelt = {name: key for key, name in FILE_NAMES.items()}
+    out = {spelt.get(k, k): v for k, v in policy.defaults().items()}
+    out["team_formation"] = TEAM_FORMATION_FALLBACK
     return out
 
 
@@ -376,7 +581,7 @@ def layers(
     """The layers for one assignment, nearest first. `inline` is its schedule.yml entry's
     own run settings (`AssignmentEntry.settings`), from the parsed plan."""
     return [
-        ("assignment", _usable(inline or {})),
+        ("entry", _usable(inline or {})),
         ("semester", _usable(semester_defaults(semester_org))),
         ("course", _usable(course_defaults(course_org))),
         ("institution", institution_defaults()),
@@ -385,16 +590,16 @@ def layers(
 
 def instance_layers(read: Instance, inline: Mapping) -> list[Layer]:
     """The two layers a semester states for one assignment, off files already read: its
-    entry's inline settings and `assignments.yml` `defaults:` - what a parse can resolve
-    with no course and no policy in hand."""
+    entry's inline settings and `semester.yml` `defaults:` - what a parse can resolve
+    with no course and no institution in hand."""
     return [
-        ("assignment", _usable(inline)),
+        ("entry", _usable(inline)),
         ("semester", _usable(read.defaults)),
     ]
 
 
 def _usable(block: Mapping) -> dict:
-    """A block without the values its readers refused (None, for every run key): a value
+    """A block without the values its readers refused (None, for every key): a value
     nobody can use states nothing, and the next layer answers."""
     return {key: value for key, value in block.items() if value is not None}
 
@@ -430,9 +635,9 @@ def effective(
     inline: Mapping | None = None,
     course_org: str = "",
 ) -> tuple[object, str]:
-    """The effective value of run setting `key` for an assignment of `semester_org`
-    whose schedule.yml entry states `inline`, and the layer it came from: `assignment`,
-    `semester`, `course` or `institution`."""
+    """The effective value of setting `key` for an assignment of `semester_org` whose
+    schedule.yml entry states `inline`, and the layer it came from: `entry`, `semester`,
+    `course` or `institution`."""
     course_org = _course_of(semester_org, course_org)
     return resolve(key, layers(course_org, semester_org, inline))
 
@@ -444,3 +649,62 @@ def effective_all(
     course_org = _course_of(semester_org, course_org)
     stack = layers(course_org, semester_org, inline)
     return {key: resolve(key, stack) for key in RUN_KEYS}
+
+
+def effective_defaults(
+    course_org: str, semester_org: str = ""
+) -> dict[str, dict[str, object]]:
+    """Every `defaults:` key's effective value at the semester level (or the course level,
+    with no semester), as the files spell the keys: `{key: {"value", "source"}}` - what
+    status.json carries and the console shows as each input's placeholder."""
+    stack = layers(course_org, semester_org)[1:]
+    out = {}
+    for key in DEFAULT_KEYS:
+        value, source = resolve(key, stack)
+        out[FILE_NAMES.get(key, key)] = {"value": value, "source": source}
+    return out
+
+
+# What each key's comment says in a seeded skeleton when no layer above states it.
+_SKELETON_HINTS = {"team_formation": "self_select | assigned"}
+
+
+def defaults_skeleton(inherited: Sequence[Layer], stated: Mapping | None = None) -> str:
+    """A `defaults:` block with every key present (decision 0039 rule 2): the keys
+    `stated` (this level's own values, keyed by setting) live, every other key commented
+    with the value it inherits from `inherited` (the layers below, nearest first) and that
+    layer's name. `team_formation` with no layer stating it names its choices instead."""
+    stated = stated or {}
+    lines = [
+        (
+            "defaults:   # every key present; uncomment to override. The comment shows "
+            "the inherited value and its source."
+        )
+    ]
+    for key in DEFAULT_KEYS:
+        name = FILE_NAMES.get(key, key)
+        if key in stated and stated[key] is not None:
+            lines.append(f"  {name}: {_yaml_scalar(stated[key])}")
+            continue
+        if key in LATE_PAIR and any(stated.get(k) is not None for k in LATE_PAIR):
+            lines.append(
+                f"  # {name}:".ljust(44) + "(none: the late pair is set above)"
+            )
+            continue
+        value, source = resolve(key, inherited)
+        if key == "team_formation" and source == "institution":
+            hint = _SKELETON_HINTS[key]
+            lines.append(f"  # {name}:".ljust(44) + f"({hint}; not set above)")
+            continue
+        lines.append(f"  # {name}: {_yaml_scalar(value)}".ljust(44) + f"({source})")
+    return "\n".join(lines) + "\n"
+
+
+def _yaml_scalar(value: object) -> str:
+    """One value as a YAML flow scalar on one line."""
+    return (
+        yaml.safe_dump(value, default_flow_style=True)
+        .strip()
+        .removesuffix("...")
+        .strip()
+    )

@@ -9,7 +9,7 @@ import POLICY from '../schemas/policy.json';
 // semester fills them (policy.yml).
 const SEEDED = TEMPLATE.replaceAll('{timezone}', POLICY.defaults.timezone).replaceAll(
   '{grace_days}',
-  String(POLICY.defaults.archive.grace_days),
+  String(POLICY.defaults.archive_grace_days),
 );
 import SHEET from '../../example-course/semester-org/grading_sheets/assignment-4-project.yml?raw';
 
