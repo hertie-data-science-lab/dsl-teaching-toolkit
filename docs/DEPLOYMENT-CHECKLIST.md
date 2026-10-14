@@ -275,8 +275,8 @@ Every field: [Schedule releases](07-schedule-releases.md).
 
 `semester-config/schedule.yml` - the semester plan the scheduler runs and the dates that
 drive the website and grading: one block per kind (`lectures:`, `labs:`, `readings:`,
-`exams:`, `drop-ins:`, `events:`, `assets:`), `assignments:`, `semester_start:`,
-`semester_end:` and `archive:`. Each block is a map keyed by an id you choose, never shown.
+`exams:`, `drop-ins:`, `events:`, `assets:`), `assignments:`, and the `semester:` block
+(start, end, breaks, archive). Each block is a map keyed by an id you choose, never shown.
 
 ```yaml
 lectures:
@@ -303,7 +303,7 @@ by its kind, which is the block it is written in:
 | lecture, lab, readings, drop-in, exam | an entry of that block; each slot of an entry is a row |
 | assignment | an `assignments:` entry - shown on **both** its handout date and its due date |
 | other | an `events:` entry (clinic, guest lecture), and the `archive` block's date |
-| semester | the `semester_start` / `semester_end` scalars |
+| semester | the `semester:` block's start and end; a break is a grey band |
 
 `assets:` entries ship files and are never a row. Labels, colours and tabs come from the
 institution policy's `kinds:`.

@@ -33,8 +33,6 @@
 # see the worked example above.
 
 # timezone: {timezone}           # OPTIONAL - default: {timezone}
-# semester_start:                   # OPTIONAL - the site's "Semester starts" row
-# semester_end:                     # OPTIONAL - the default archive date counts from it
 
 # lectures:
 #   lecture-1:
@@ -68,7 +66,7 @@
 #     session: 1                    # OPTIONAL - shown on unit 1's first row and under it on the Readings tab; absent = a row of its own
 #     event_datetime:               # REQUIRED - when it appears; its files ship then unless a file says otherwise
 #     files: [{{from_course_repo: , from_path: readings/01}}]
-#     reading_list: |               # OPTIONAL - markdown, shown on the site (and the only readings content the open site shows)
+#     reading_guide: |              # OPTIONAL - markdown: what to read, chapters, links, pointers; every student sees it, and it is the only readings content the open site shows
 #       - Author, Title, ch. 1.
 
 # exams:
@@ -82,7 +80,7 @@
 #     title: Clinic drop-in
 #     event_datetime:
 
-# assets:                           # supporting files: released on their date, never a row or a tab
+# assets:                           # supporting files: released on their date, never a row or a tab (show_on_site defaults to false)
 #   assets-data:
 #     event_datetime:
 #     files: [{{from_course_repo: , from_path: data}}]
@@ -96,15 +94,30 @@
 #     solution_datetime:            # OPTIONAL - NO default: absent = the solution only goes out by hand. Not before the late cutoff
 #     marks_return_datetime:        # OPTIONAL - absent = marks returned by hand
 #     details:                      # OPTIONAL - on both its schedule rows
+#     type:                         # OPTIONAL - individual | group; absent = the template's
+#     submit_via:                   # OPTIONAL - assignment_repo | shared_dropbox_repo | external; absent = the template's
 #     # run settings, each OPTIONAL, each overriding assignments.yml `defaults:`, the course and the institution:
 #     # late_window_days, late_penalty_per_day, max_team_size, team_formation,
 #     # assignment_repo_visibility, marks_per_question, submit_url, repo_name, show_on_site, tbc
 
-# archive the org (every repo read-only): removes all write permissions, retains all read permissions
-archive:
-  event_datetime:             # optional (default: semester_end + {grace_days} days)
-  title: Semester archived      # optional - the row's Title column
-  show_on_site: true          # a "Semester archived" row on the site's Schedule tab. The notice email 14 days out goes either way
-  tbc: false                  # optional - true marks the date "(TBC)". Display only: the freeze still happens on the date above
-  details: >-                 # optional, `{{date}}` is filled in automatically
-    This semester is archived on {{date}}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.
+# The term's own dates: one `semester:` block, each entry with a `type`.
+semester:
+  # start:                          # the site's "Semester starts" row; week 1 begins here
+  #   type: start
+  #   event_datetime:
+  # end:                            # the default archive date counts from it
+  #   type: end
+  #   event_datetime:
+  # reading-week:                   # a grey band on the schedule; its weeks are never "empty"
+  #   type: break
+  #   title: Reading week
+  #   from:
+  #   to:
+  archive:                          # archive the org (every repo read-only): removes all write permissions, retains all read permissions
+    type: archive
+    event_datetime:                 # optional (default: the end + {grace_days} days)
+    title: Semester archived        # optional - the row's Title column
+    show_on_site: true              # a "Semester archived" row on the site's Schedule tab. The notice email 14 days out goes either way
+    tbc: false                      # optional - true marks the date "(TBC)". Display only: the freeze still happens on the date above
+    details: >-                     # optional, `{{date}}` is filled in automatically
+      This semester is archived on {{date}}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.

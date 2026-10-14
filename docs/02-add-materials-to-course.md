@@ -40,7 +40,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
    ```
    lectures/01_intro/   any files - slides, demo code, notebooks …
    readings/01_intro/   the readings; the reading list itself is the schedule entry's
-                        `reading_list:` (07), shown on the site
+                        `reading_guide:` (07), shown on the site
    labs/01_intro/       any files
    SYLLABUS.md          optional - or any name you like (SYLLABUS.pdf, ...)
    ```

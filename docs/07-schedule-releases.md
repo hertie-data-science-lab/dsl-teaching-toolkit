@@ -16,7 +16,7 @@ The schedule file can be updated throughout the semester.
 
 > A fully worked `schedule.yml` (a whole semester): [example-course/semester-org/schedule.yml](../example-course/semester-org/schedule.yml). The schedule it renders, live: [here](https://hertie-dsl-demo-f2026.github.io/schedule/).
 
-`schedule.yml` holds **one block per kind** - `lectures:`, `labs:`, `readings:`, `exams:`, `drop-ins:`, `events:`, `assets:` (the institution's kinds, from `policy.yml`) - and `assignments:`. Two scalars bookend the semester, `semester_start:` and `semester_end:`, and an optional `archive:` block freezes it read-only.
+`schedule.yml` holds **one block per kind** - `lectures:`, `labs:`, `readings:`, `exams:`, `drop-ins:`, `events:`, `assets:` (the institution's kinds, from `policy.yml`) - and `assignments:`. The term's own dates are one [`semester:`](#semester) block.
 
 Each block is a map. The **key** of an entry (`lecture-3`, `lab-2b`) is its id: it names the entry's site row and, for an assignment, its mark sheet. It is never shown to students and never read for a number - so call it anything, and renaming it is the only thing that changes it.
 
@@ -33,7 +33,7 @@ Each block is a map. The **key** of an entry (`lecture-3`, `lab-2b`) is its id: 
 | `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)**; it still fires |
 | `show_on_site` | no | `true` | `false`: no row on the site; its files still ship (readings: see below) |
 | `files` | no | - | what ships (below) |
-| `reading_list` | no | - | `readings:` only: markdown, shown with the readings on the site |
+| `reading_guide` | no | - | `readings:` only: markdown - what to read, chapters, links, pointers. Every student sees it, and it is the only readings content the open site shows |
 
 Each kind gets its own tab on the site, and its rows are named by the kind and the number (`Lecture 3`). Two shown entries of one kind with the same number are a problem. A lecture or lab without `session:` is a problem too (*Give lecture-3 a session*), and its files wait until it has one.
 
@@ -108,13 +108,13 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/04_week-4
-    reading_list: |
+    reading_guide: |
       - Goodfellow et al., *Deep Learning*, ch. 6.
 ```
 
 ### Exams, drop-ins, events, assets
 
-`exams:` and `events:` entries are calendar rows - a midterm, a clinic, a guest lecture. A bare date is a whole day. `assets:` entries ship supporting files (data, setup) on their date and are never a row.
+`exams:` and `events:` entries are calendar rows - a midterm, a clinic, a guest lecture. A bare date is a whole day. `assets:` entries ship supporting files (data, setup) on their date and are never a row; `show_on_site` defaults to `false` for them.
 
 ```yaml
 exams:
@@ -142,6 +142,8 @@ Each assignment's dates and run settings.
 | `solution_datetime` | no | - | when the template's `solution/` is pushed into every repo. **No default**; must be after `handout_datetime` (and needs it) and no earlier than the late cutoff. It cannot be undone |
 | `marks_return_datetime` | no | - | when marks go back automatically, once every unit is marked. `{event_datetime: ..., show_on_site: true}` also shows a "Marks expected" row |
 | `details`, `show_on_site`, `tbc` | no | - | as for any entry; on both its rows (out and due) |
+| `type` | no | the template's | `individual` or `group`: this semester's override of the template's `grading_config.yml` |
+| `submit_via` | no | the template's | `assignment_repo`, `shared_dropbox_repo` or `external`: this semester's override |
 
 Run settings, each optional, written on the entry: `late_window_days`, `late_penalty_per_day`, `team_formation` (`self_select` or `assigned`), `max_team_size`, `assignment_repo_visibility` (`private`, `public`, `student_choice`; read when each repo is created), `marks_per_question`, `submit_url` (`submit_via: external` only). Nearest wins: the entry, then `semester-config/assignments.yml` `defaults:`, then the course's `assignment_defaults:` (`.github/dsl-course.yml`), then `policy.yml`. The late window and penalty go together: an entry naming one sets the other to none.
 
@@ -163,22 +165,49 @@ A `template:` that does not exist is reported and the assignment skipped; an ent
 
 Adding or renaming an assignment wakes **Sync membership**, which rewrites `semester-config/.system/assignments.lock.yml` for the **Join team** form. The team-formation window runs from `handout_datetime` to the late cutoff ([09](09-release-assignment-to-cohort.md#group-assignments-creating-the-teams)).
 
-## `archive:`
+<a id="archive"></a>
+
+## `semester:`
+
+The term's own dates, one entry each, every entry naming its `type`:
+
+```yaml
+semester:
+  start:
+    type: start
+    event_datetime: 2026-09-07
+  end:
+    type: end
+    event_datetime: 2026-12-18
+  reading-week:
+    type: break
+    title: Reading week
+    from: 2026-10-26
+    to: 2026-10-30
+  archive:
+    type: archive
+```
+
+- **`start`, `end`**: the "Semester starts" / "Semester ends" rows; week 1 begins on the start, and the default archive date counts from the end. One of each.
+- **`break`**: `from` and `to` (both days included), optional `title`, `details`, `show_on_site`. A grey band on the schedule, and its weeks are never an *Empty week*. Any number.
+- **`archive`**: at most one - see below.
+
+### Archiving
 
 When this semester is archived: every repository in the org archived, nothing deleted, nobody removed. See [Archiving the semester](10-grade-and-return-assignments.md#archiving-the-semester).
 
-**The block is the switch.** Write it and the semester is archived automatically; leave it out and nothing ever is. A new semester's seeded `schedule.yml` carries the block, so filling in `semester_end` arms a freeze sixty days later; delete the block to opt out.
+**The `type: archive` entry is the switch.** Write it and the semester is archived automatically; leave it out and nothing ever is. A new semester's seeded `schedule.yml` carries it, so filling in the end date arms a freeze sixty days later; delete the entry to opt out.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `event_datetime` | no | `semester_end` + `grace_days` | the day the whole semester org is archived |
-| `grace_days` | no | `60` | days after `semester_end` the default date falls |
+| `event_datetime` | no | the end + `grace_days` | the day the whole semester org is archived |
+| `grace_days` | no | `60` | days after the end the default date falls |
 | `title` | no | `Semester archived` | the row's Title column |
 | `show_on_site` | no | `true` | a row on the Schedule, and a notice in the Updates box for the fortnight before |
 | `details` | no | *none* | the sentence that row and notice say; `{date}` is filled in |
 | `tbc` | no | `false` | marks the date **(TBC)**. Display only |
 
-`archive:` on its own means "yes, on the default date". With no block, or no date to count from, nothing is archived automatically and the digest issue says so; archive such a semester with the `semester.archive` op and `force` (console, or `python -m dsl_course semester.archive`).
+With no archive entry, or no date to count from, nothing is archived automatically and the digest issue says so; archive such a semester with the `semester.archive` op and `force` (console, or `python -m dsl_course semester.archive`).
 
 ---
 
@@ -223,7 +252,7 @@ Parsed schedule.yml
   16 entries, 20 file(s) | 3 assignment(s) | 4 event(s)
 ```
 
-**Empty weeks.** Each week of the term still to come (counted from `semester_start`, as the Dashboard's week strip numbers them) with nothing dated in it (no release, hand-out, due date, late cutoff, exam, event or archive) is an *Empty week* problem on the console's Dashboard. A week with something dated but no lecture, lab or readings release or session - for each of those kinds the semester runs weekly, that is, with a dated release in at least half (rounded up) of the weeks that have anything dated - is a *Missing lab* (etc.) problem instead; a hand-out or exam does not count, and one further-readings entry does not make readings weekly. An intentional gap (a reading or exam week) is dismissed with **Set aside**, which adds `empty_week:<monday>` (or `empty_week:<monday>:<kind>`, the Monday of the week's first day) to the course's `set_aside:` list.
+**Empty weeks.** Each week of the term still to come (counted from the `semester:` start, as the Dashboard's week strip numbers them), outside a `type: break` entry, with nothing dated in it (no release, hand-out, due date, late cutoff, exam, event or archive) is an *Empty week* problem on the console's Dashboard. A week with something dated but no lecture, lab or readings release or session - for each of those kinds the semester runs weekly, that is, with a dated release in at least half (rounded up) of the weeks that have anything dated - is a *Missing lab* (etc.) problem instead; a hand-out or exam does not count, and one further-readings entry does not make readings weekly. Write a reading week as a [break](#semester); any other intentional gap is dismissed with **Set aside**, which adds `empty_week:<monday>` (or `empty_week:<monday>:<kind>`, the Monday of the week's first day) to the course's `set_aside:` list.
 
 **No files yet.** An entry written with `files: []` (or `files:` and nothing under it) is a to-do on the Dashboard, dated by the entry: write its files, or delete the key if the session ships nothing.
 
