@@ -270,8 +270,11 @@ export function MarksTab(p: TabProps) {
     if (d) saveMarksDraft(d.org, d.path, d.draft);
   };
   useEffect(() => {
-    if (pending) return;
-    draft.current = { org, path, draft: Object.keys(edits).length ? { sha, at: Date.now(), edits } : null };
+    // While a kept draft is offered, marks typed before Restore or Discard are kept too: the
+    // offer with them over it (what Restore gives), on the offer's sha.
+    if (pending && !Object.keys(edits).length) return;
+    const all = pending ? { ...pending.edits, ...edits } : edits;
+    draft.current = { org, path, draft: Object.keys(all).length ? { sha: pending ? pending.sha : sha, at: Date.now(), edits: all } : null };
     if (!draft.current.draft) return keepDraft();
     const t = setTimeout(keepDraft, DRAFT_MS);
     return () => clearTimeout(t);

@@ -485,6 +485,18 @@ describe('unsaved marks', () => {
     expect(root!.textContent).toContain('1 student changed');
   });
 
+  it('keeps marks typed while a draft is still offered, and the offer with them', async () => {
+    const k = `dsl-console-marks-draft:${COHORT_ORG}:grading_sheets/assignment-2.yml`;
+    localStorage.setItem(k, JSON.stringify({ sha: 'static', at: 0, edits: { '["submissions","cy-d","score_individual","Q1"]': 6 } }));
+    await marks();
+    await type('input[aria-label="Q2 (out of 10) for cy-d"]', '7');
+    await act(() => void window.dispatchEvent(new Event('pagehide')));
+    expect(JSON.parse(localStorage.getItem(k)!).edits).toEqual({ '["submissions","cy-d","score_individual","Q1"]': 6, '["submissions","cy-d","score_individual","Q2"]': 7 });
+    await click(button('Restore'));
+    expect(q<HTMLInputElement>('input[aria-label="Q1 (out of 10) for cy-d"]').value).toBe('6');
+    expect(q<HTMLInputElement>('input[aria-label="Q2 (out of 10) for cy-d"]').value).toBe('7');
+  });
+
   it('Discard drops the draft', async () => {
     const k = `dsl-console-marks-draft:${COHORT_ORG}:grading_sheets/assignment-2.yml`;
     localStorage.setItem(k, JSON.stringify({ sha: 'static', at: 0, edits: { '["submissions","cy-d","score_individual","Q1"]': 6 } }));
