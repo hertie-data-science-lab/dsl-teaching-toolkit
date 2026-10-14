@@ -1,0 +1,1226 @@
+{
+  "institution": {
+    "archive_grace_days": 60,
+    "late_penalty_per_day": "10%",
+    "late_window_days": 10,
+    "marks_per_question": true,
+    "materials_repo": "materials",
+    "max_team_size": 5,
+    "team_formation": "self_select",
+    "timezone": "Europe/Berlin",
+    "visibility": "private"
+  },
+  "vectors": [
+    {
+      "key": "team_formation",
+      "layers": {},
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {},
+      "source": "institution",
+      "value": 5
+    },
+    {
+      "key": "late_window_days",
+      "layers": {},
+      "source": "institution",
+      "value": 10
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {},
+      "source": "institution",
+      "value": "10%"
+    },
+    {
+      "key": "visibility",
+      "layers": {},
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {},
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {},
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        }
+      },
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        }
+      },
+      "source": "course",
+      "value": 4
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        }
+      },
+      "source": "institution",
+      "value": 10
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        }
+      },
+      "source": "institution",
+      "value": "10%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        }
+      },
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "semester",
+      "value": 3
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "institution",
+      "value": 10
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "institution",
+      "value": "10%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "course": {
+          "max_team_size": 4
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "entry": {
+          "max_team_size": 2
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "entry": {
+          "max_team_size": 2
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "entry",
+      "value": 2
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "entry": {
+          "max_team_size": 2
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "institution",
+      "value": 10
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "entry": {
+          "max_team_size": 2
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "institution",
+      "value": "10%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "entry": {
+          "max_team_size": 2
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "entry": {
+          "max_team_size": 2
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "entry": {
+          "max_team_size": 2
+        },
+        "semester": {
+          "max_team_size": 3
+        }
+      },
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "course": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": 7
+        },
+        "semester": {
+          "late_window_days": 3
+        }
+      },
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "course": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": 7
+        },
+        "semester": {
+          "late_window_days": 3
+        }
+      },
+      "source": "institution",
+      "value": 5
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "course": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": 7
+        },
+        "semester": {
+          "late_window_days": 3
+        }
+      },
+      "source": "semester",
+      "value": 3
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "course": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": 7
+        },
+        "semester": {
+          "late_window_days": 3
+        }
+      },
+      "source": "semester",
+      "value": null
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "course": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": 7
+        },
+        "semester": {
+          "late_window_days": 3
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "course": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": 7
+        },
+        "semester": {
+          "late_window_days": 3
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "course": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": 7
+        },
+        "semester": {
+          "late_window_days": 3
+        }
+      },
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "entry": {
+          "late_penalty_per_day": "2%"
+        },
+        "semester": {
+          "late_window_days": 4
+        }
+      },
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "entry": {
+          "late_penalty_per_day": "2%"
+        },
+        "semester": {
+          "late_window_days": 4
+        }
+      },
+      "source": "institution",
+      "value": 5
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "entry": {
+          "late_penalty_per_day": "2%"
+        },
+        "semester": {
+          "late_window_days": 4
+        }
+      },
+      "source": "entry",
+      "value": null
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "entry": {
+          "late_penalty_per_day": "2%"
+        },
+        "semester": {
+          "late_window_days": 4
+        }
+      },
+      "source": "entry",
+      "value": "2%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "entry": {
+          "late_penalty_per_day": "2%"
+        },
+        "semester": {
+          "late_window_days": 4
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "entry": {
+          "late_penalty_per_day": "2%"
+        },
+        "semester": {
+          "late_window_days": 4
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "entry": {
+          "late_penalty_per_day": "2%"
+        },
+        "semester": {
+          "late_window_days": 4
+        }
+      },
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "semester": {
+          "max_team_size": -3,
+          "team_formation": "assigned",
+          "visibility": "secret"
+        }
+      },
+      "source": "semester",
+      "value": "assigned"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "semester": {
+          "max_team_size": -3,
+          "team_formation": "assigned",
+          "visibility": "secret"
+        }
+      },
+      "source": "institution",
+      "value": 5
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "semester": {
+          "max_team_size": -3,
+          "team_formation": "assigned",
+          "visibility": "secret"
+        }
+      },
+      "source": "institution",
+      "value": 10
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "semester": {
+          "max_team_size": -3,
+          "team_formation": "assigned",
+          "visibility": "secret"
+        }
+      },
+      "source": "institution",
+      "value": "10%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "semester": {
+          "max_team_size": -3,
+          "team_formation": "assigned",
+          "visibility": "secret"
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "semester": {
+          "max_team_size": -3,
+          "team_formation": "assigned",
+          "visibility": "secret"
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "semester": {
+          "max_team_size": -3,
+          "team_formation": "assigned",
+          "visibility": "secret"
+        }
+      },
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "semester": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": -3
+        }
+      },
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "semester": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": -3
+        }
+      },
+      "source": "institution",
+      "value": 5
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "semester": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": -3
+        }
+      },
+      "source": "semester",
+      "value": null
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "semester": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": -3
+        }
+      },
+      "source": "semester",
+      "value": "5%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "semester": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": -3
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "semester": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": -3
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "semester": {
+          "late_penalty_per_day": "5%",
+          "late_window_days": -3
+        }
+      },
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "course": {
+          "max_team_size": "4",
+          "visibility": "Private"
+        }
+      },
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "course": {
+          "max_team_size": "4",
+          "visibility": "Private"
+        }
+      },
+      "source": "course",
+      "value": 4
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "course": {
+          "max_team_size": "4",
+          "visibility": "Private"
+        }
+      },
+      "source": "institution",
+      "value": 10
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "course": {
+          "max_team_size": "4",
+          "visibility": "Private"
+        }
+      },
+      "source": "institution",
+      "value": "10%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "course": {
+          "max_team_size": "4",
+          "visibility": "Private"
+        }
+      },
+      "source": "course",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "course": {
+          "max_team_size": "4",
+          "visibility": "Private"
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "course": {
+          "max_team_size": "4",
+          "visibility": "Private"
+        }
+      },
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "course": {
+          "team_formation": "self_select"
+        },
+        "entry": {
+          "team_formation": " Assigned "
+        }
+      },
+      "source": "entry",
+      "value": "assigned"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "course": {
+          "team_formation": "self_select"
+        },
+        "entry": {
+          "team_formation": " Assigned "
+        }
+      },
+      "source": "institution",
+      "value": 5
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "course": {
+          "team_formation": "self_select"
+        },
+        "entry": {
+          "team_formation": " Assigned "
+        }
+      },
+      "source": "institution",
+      "value": 10
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "course": {
+          "team_formation": "self_select"
+        },
+        "entry": {
+          "team_formation": " Assigned "
+        }
+      },
+      "source": "institution",
+      "value": "10%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "course": {
+          "team_formation": "self_select"
+        },
+        "entry": {
+          "team_formation": " Assigned "
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "course": {
+          "team_formation": "self_select"
+        },
+        "entry": {
+          "team_formation": " Assigned "
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "course": {
+          "team_formation": "self_select"
+        },
+        "entry": {
+          "team_formation": " Assigned "
+        }
+      },
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "course": {
+          "max_team_size": 6
+        },
+        "entry": {
+          "max_team_size": "",
+          "visibility": null
+        }
+      },
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "course": {
+          "max_team_size": 6
+        },
+        "entry": {
+          "max_team_size": "",
+          "visibility": null
+        }
+      },
+      "source": "course",
+      "value": 6
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "course": {
+          "max_team_size": 6
+        },
+        "entry": {
+          "max_team_size": "",
+          "visibility": null
+        }
+      },
+      "source": "institution",
+      "value": 10
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "course": {
+          "max_team_size": 6
+        },
+        "entry": {
+          "max_team_size": "",
+          "visibility": null
+        }
+      },
+      "source": "institution",
+      "value": "10%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "course": {
+          "max_team_size": 6
+        },
+        "entry": {
+          "max_team_size": "",
+          "visibility": null
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "course": {
+          "max_team_size": 6
+        },
+        "entry": {
+          "max_team_size": "",
+          "visibility": null
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "course": {
+          "max_team_size": 6
+        },
+        "entry": {
+          "max_team_size": "",
+          "visibility": null
+        }
+      },
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/CHANGE-ME"
+        }
+      },
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/CHANGE-ME"
+        }
+      },
+      "source": "institution",
+      "value": 5
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/CHANGE-ME"
+        }
+      },
+      "source": "institution",
+      "value": 10
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/CHANGE-ME"
+        }
+      },
+      "source": "institution",
+      "value": "10%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/CHANGE-ME"
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/CHANGE-ME"
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/CHANGE-ME"
+        }
+      },
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/a/1"
+        }
+      },
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/a/1"
+        }
+      },
+      "source": "institution",
+      "value": 5
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/a/1"
+        }
+      },
+      "source": "institution",
+      "value": 10
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/a/1"
+        }
+      },
+      "source": "institution",
+      "value": "10%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/a/1"
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/a/1"
+        }
+      },
+      "source": "entry",
+      "value": "https://moodle.example.org/a/1"
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "entry": {
+          "submit_url": "https://moodle.example.org/a/1"
+        }
+      },
+      "source": "institution",
+      "value": true
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "course": {
+          "marks_per_question": true
+        },
+        "semester": {
+          "marks_per_question": "no"
+        }
+      },
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "course": {
+          "marks_per_question": true
+        },
+        "semester": {
+          "marks_per_question": "no"
+        }
+      },
+      "source": "institution",
+      "value": 5
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "course": {
+          "marks_per_question": true
+        },
+        "semester": {
+          "marks_per_question": "no"
+        }
+      },
+      "source": "institution",
+      "value": 10
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "course": {
+          "marks_per_question": true
+        },
+        "semester": {
+          "marks_per_question": "no"
+        }
+      },
+      "source": "institution",
+      "value": "10%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "course": {
+          "marks_per_question": true
+        },
+        "semester": {
+          "marks_per_question": "no"
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "course": {
+          "marks_per_question": true
+        },
+        "semester": {
+          "marks_per_question": "no"
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "course": {
+          "marks_per_question": true
+        },
+        "semester": {
+          "marks_per_question": "no"
+        }
+      },
+      "source": "semester",
+      "value": false
+    },
+    {
+      "key": "team_formation",
+      "layers": {
+        "course": {
+          "max_team_size": 2
+        }
+      },
+      "source": "institution",
+      "value": "self_select"
+    },
+    {
+      "key": "max_team_size",
+      "layers": {
+        "course": {
+          "max_team_size": 2
+        }
+      },
+      "source": "course",
+      "value": 2
+    },
+    {
+      "key": "late_window_days",
+      "layers": {
+        "course": {
+          "max_team_size": 2
+        }
+      },
+      "source": "institution",
+      "value": 10
+    },
+    {
+      "key": "late_penalty_per_day",
+      "layers": {
+        "course": {
+          "max_team_size": 2
+        }
+      },
+      "source": "institution",
+      "value": "10%"
+    },
+    {
+      "key": "visibility",
+      "layers": {
+        "course": {
+          "max_team_size": 2
+        }
+      },
+      "source": "institution",
+      "value": "private"
+    },
+    {
+      "key": "submit_url",
+      "layers": {
+        "course": {
+          "max_team_size": 2
+        }
+      },
+      "source": "institution",
+      "value": null
+    },
+    {
+      "key": "marks_per_question",
+      "layers": {
+        "course": {
+          "max_team_size": 2
+        }
+      },
+      "source": "institution",
+      "value": true
+    }
+  ]
+}
