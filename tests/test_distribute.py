@@ -264,7 +264,6 @@ def _distribute(
     sheets: dict[str, str] | None = None,
     grading: str = _GRADING_YML,
     distributed: str | None = None,
-    notified: str | None = None,
     stale_gradebooks: tuple[str, ...] = (),
     sent: int = 1,
     notify: bool = True,
@@ -305,9 +304,6 @@ def _distribute(
     if distributed is not None:
         (cfg / gradebook.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
         (cfg / gradebook.DISTRIBUTED_PATH).write_text(distributed)
-    if notified is not None:
-        (cfg / gradebook.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
-        (cfg / gradebook.NOTIFIED_PATH).write_text(notified)
     for name in stale_gradebooks:
         (cfg / gradebook.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
         (cfg / gradebook.GRADEBOOK_DIR / name).write_text("student: someone\n")
@@ -548,11 +544,6 @@ def test_the_marks_per_question_run_setting_decides_what_a_return_shows(
     ((_repo, files, _d),) = out["gradebooks"]
     assert ("Q1" in files["grades.yml"]) is shown
     assert "**Final grade:** 23 / 25" in files["README.md"]
-
-
-_UNMARKED = _SHEET.replace("score_individual: 43", "score_individual:").replace(
-    "feedback_individual: |\n      Clean derivation.\n", "feedback_individual:\n"
-)
 
 
 @pytest.mark.parametrize(
@@ -1579,36 +1570,8 @@ def test_the_registrar_export_is_written_only_on_a_real_run(tmp_path, monkeypatc
     assert csv_text.splitlines()[0] == "hertie_email,name,github_handle,assignment-1"
 
 
-def test_the_migration_off_notified_csv_happens_in_one_commit(tmp_path, monkeypatch):
-    # The old marker and the dead per-student YAML go in the SAME commit that writes the
-    # new record, so no reader ever sees both and has to choose.
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        notified=(
-            "github_handle,grades_sha,notified_at\n"
-            "ada-l,anoldsha,2026-08-31T09:00:00+00:00\n"
-        ),
-        stale_gradebooks=("ada-l.yml",),
-        notify=False,  # so the carried-over row is visible, not overwritten
-    )
-    ((_cfg, files, delete),) = out["config"]
-    assert gradebook.DISTRIBUTED_PATH in files
-    assert set(delete) == {
-        gradebook.NOTIFIED_PATH,
-        f"{gradebook.GRADEBOOK_DIR}/ada-l.yml",
-    }
-    # The email rows carried over, so nobody is re-told about a book they already know
-    # about beyond the one re-hash this migration costs.
-    assert "ada-l,,email,anoldsha," in files[gradebook.DISTRIBUTED_PATH]
-
-
-def test_the_dead_per_student_yaml_goes_whether_or_not_this_is_the_migration(
-    tmp_path, monkeypatch
-):
-    # A semester that reached `distributed.csv` without ever having had a `notified.csv` was
-    # never on the migration path, so its `.system/gradebook/*.yml` was left in place for the rest
-    # of the term - a stale copy of a grade beside the repo that holds the real one.
+def test_the_dead_per_student_yaml_goes_on_every_run(tmp_path, monkeypatch):
+    # A stale copy of a grade beside the repo that holds the real one.
     out = _distribute(
         monkeypatch,
         tmp_path,

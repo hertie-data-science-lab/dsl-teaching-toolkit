@@ -71,10 +71,6 @@ from .setting_readers import (
 GRADEBOOK_DIR = records.path(
     "gradebook"
 )  # what has been sent, beside the retired files
-# RETIRED. The old per-student notification marker, named here for one reason only: the
-# migration in `_read_distributed` reads it once and deletes it in the same commit that
-# writes `distributed.csv`, which records every channel rather than just the email.
-NOTIFIED_PATH = f"{GRADEBOOK_DIR}/notified.csv"
 GRADEBOOK_PERMISSION = (
     "pull"  # a student READS their gradebook; the sheet is the source
 )
@@ -887,9 +883,7 @@ def ensure_gradebooks(
 # ---------------------------------------------------------------- what was distributed
 
 # One row per thing SAID, so a re-run says nothing twice and a failure is retried exactly
-# once. It replaces `gradebook/notified.csv`, which recorded only the email and only per
-# student - so a corrected grade re-emailed the whole semester, and a write that failed was
-# never retried because nothing recorded that it had not.
+# once.
 DISTRIBUTED_PATH = records.path("distributed")
 DISTRIBUTED_HEADER = (
     "target",  # a handle; a TEAM name on the rows the retired issue channel left behind
@@ -946,41 +940,19 @@ def dump_distributed(records: Distributed) -> str:
     )
 
 
-def _read_distributed(wd: Path) -> tuple[Distributed, bool]:
-    """`(what has been distributed, whether this run is the migration)`.
-
-    A semester part-way through the term has `notified.csv` and no `distributed.csv`. Its
-    rows become EMAIL rows here, so nobody is emailed again for a book they already know
-    about - the hash is over different bytes now, so the first run after the migration
-    does re-tell everyone once; that is what `--no-notify` is for."""
+def _read_distributed(wd: Path) -> Distributed:
+    """What has been distributed: `distributed.csv` in a semester-config checkout, or
+    nothing when it is not there yet."""
     live = wd / DISTRIBUTED_PATH
-    if live.is_file():
-        return parse_distributed(live.read_text()), False
-    old = wd / NOTIFIED_PATH
-    if not old.is_file():
-        return {}, False
-    # read_csv, not a bare DictReader: the file is machine-written, but it sits in a repo
-    # faculty can edit, so it goes through the same BOM/delimiter guard as the roster.
-    return {
-        ((row.get("github_handle") or "").strip(), "", CHANNEL_EMAIL): (
-            (row.get("grades_sha") or "").strip(),
-            (row.get("notified_at") or "").strip(),
-            "",
-        )
-        for row in read_csv(old.read_text(), ("github_handle",), NOTIFIED_PATH)
-        if (row.get("github_handle") or "").strip()
-    }, True
+    return parse_distributed(live.read_text()) if live.is_file() else {}
 
 
 def _retired_gradebook_files(wd: Path) -> list[str]:
     """The per-student YAML the retired `render` staged for its preview PR. The gradebook
     repos hold the real thing now, and a stale copy of a grade is worse than none.
 
-    Asked on EVERY run, not only on the `notified.csv` migration: a semester that reached
-    `distributed.csv` without ever having had a notified.csv - which is every semester
-    bootstrapped since - was never on the migration path, so its `gradebook/*.yml` sat
-    there for the rest of the term. They are dead either way, and the only file in that
-    folder anything still reads is `distributed.csv`, which is not a `.yml`."""
+    Asked on every run. The only file in that folder anything still reads is
+    `distributed.csv`, which is not a `.yml`."""
     folder = wd / GRADEBOOK_DIR
     if not folder.is_dir():
         return []
@@ -1025,7 +997,7 @@ def _already_returned(wd: Path) -> set[str] | None:
     gradebooks have already been written (`distributed.csv` has rows)."""
     path = semester_grades_file(wd)
     if not path.is_file():
-        distributed, _ = _read_distributed(wd)
+        distributed = _read_distributed(wd)
         return None if distributed else set()
     try:
         rows = list(read_csv(path.read_text(), ("github_handle",), SEMESTER_CSV_NAME))

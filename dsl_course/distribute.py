@@ -39,7 +39,6 @@ from .gradebook import (
     CHANNEL_EMAIL,
     CHANNEL_GRADEBOOK,
     DISTRIBUTED_PATH,
-    NOTIFIED_PATH,
     SEMESTER_CSV_NAME,
     Distributed,
     _already_returned,
@@ -810,7 +809,7 @@ def distribute(
         if not per_question:
             withheld |= {assignment} if assignment else set(sources)
         books, unknown = _on_the_roster(build_gradebooks(sources, withheld), students)
-        distributed, migrating = _read_distributed(wd)
+        distributed = _read_distributed(wd)
         retired = _retired_gradebook_files(wd)
         old_grades = records.RETIRED_SEMESTER_GRADES
         retired_grades = [old_grades] if (wd / old_grades).is_file() else []
@@ -1014,7 +1013,7 @@ def distribute(
             ),
             now=now,
             counts=counts,
-            delete=[*([NOTIFIED_PATH] if migrating else []), *retired],
+            delete=retired,
             retired=retired_grades,
         )
 
