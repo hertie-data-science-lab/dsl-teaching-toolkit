@@ -48,8 +48,9 @@ NOW = datetime(2026, 9, 23, 9, 0, tzinfo=UTC)
 
 SCHEDULE = """\
 timezone: Europe/Berlin
-semester_start: 2026-09-07
-semester_end: 2026-12-18
+semester:
+  start: {type: start, event_datetime: 2026-09-07}
+  end: {type: end, event_datetime: 2026-12-18}
 lectures:
   s3:
     session: 3
@@ -536,7 +537,9 @@ def test_a_semester_past_its_end_and_not_archived_has_ended(now, archived, ended
 
 
 def test_a_semester_with_no_end_date_has_not_ended():
-    sched = _sched(SCHEDULE.replace("semester_end: 2026-12-18\n", ""))
+    sched = _sched(
+        SCHEDULE.replace("  end: {type: end, event_datetime: 2026-12-18}\n", "")
+    )
     doc = _render(semester=_semester(sched=sched))
     assert doc["semester"]["ended"] is False
 
@@ -2312,7 +2315,10 @@ def test_the_horizon_ignores_the_semester_dates():
 
 
 def test_the_three_semester_verdicts():
-    archive = SCHEDULE + "archive:\n  event_datetime: 2027-01-31T00:00\n"
+    archive = SCHEDULE.replace(
+        "semester:\n",
+        "semester:\n  archive: {type: archive, event_datetime: 2027-01-31}\n",
+    )
     healthy = {"sched": _sched(archive), "students": [_student("ada"), _student("bob")]}
     doc = _render(semester=_semester(**healthy))
     assert doc["semester"]["verdict"] == {
@@ -2371,7 +2377,10 @@ def test_the_three_course_verdicts():
 
 def test_k5_and_k6_are_done_once_their_needed_part_is():
     # Codes not sent are the Students panel's meter, not a setup sentence.
-    archive = SCHEDULE + "archive:\n  event_datetime: 2027-01-31T00:00\n"
+    archive = SCHEDULE.replace(
+        "semester:\n",
+        "semester:\n  archive: {type: archive, event_datetime: 2027-01-31}\n",
+    )
     doc = _render(
         semester=_semester(
             students=[_student("ada", sent=""), _student("bob", sent="")],
@@ -2851,8 +2860,9 @@ if __name__ == "__main__":
 
 THREE_WEEKS = """\
 timezone: Europe/Berlin
-semester_start: 2026-10-05
-semester_end: 2026-10-23
+semester:
+  start: {type: start, event_datetime: 2026-10-05}
+  end: {type: end, event_datetime: 2026-10-23}
 lectures:
   s1:
     session: 1
@@ -2896,8 +2906,9 @@ def test_the_weeks_are_the_semesters_own_counted_from_its_first_day():
     # week 2, Wed 14 to Tue 20, has nothing. The id names that week's Monday.
     text = """\
 timezone: Europe/Berlin
-semester_start: 2026-10-07
-semester_end: 2026-10-20
+semester:
+  start: {type: start, event_datetime: 2026-10-07}
+  end: {type: end, event_datetime: 2026-10-20}
 lectures:
   lecture_1:
     session: 1
@@ -2918,8 +2929,9 @@ def test_a_week_already_begun_is_not_raised():
 
 WEEKLY = """\
 timezone: Europe/Berlin
-semester_start: 2026-10-05
-semester_end: 2026-10-16
+semester:
+  start: {type: start, event_datetime: 2026-10-05}
+  end: {type: end, event_datetime: 2026-10-16}
 lectures:
   lecture_1:
     session: 1
@@ -2971,8 +2983,9 @@ def _twelve_weeks(readings_weeks: int) -> list[str]:
         for n in range(1, readings_weeks + 1)
     )
     text = (
-        "timezone: Europe/Berlin\nsemester_start: 2026-10-05\n"
-        f"semester_end: 2026-12-25\nlectures:\n{lectures}"
+        "timezone: Europe/Berlin\nsemester:\n"
+        "  start: {type: start, event_datetime: 2026-10-05}\n"
+        f"  end: {{type: end, event_datetime: 2026-12-25}}\nlectures:\n{lectures}"
         + (f"readings:\n{readings}" if readings else "")
         + "labs:\n  lab_1:\n    session: 1\n    event_datetime: tbc\n"
     )
@@ -2996,6 +3009,20 @@ def test_a_kind_is_expected_weekly_only_when_dated_in_half_the_planned_weeks():
     assert _twelve_weeks(5) == []
 
 
+def test_a_week_a_break_touches_is_never_an_empty_week():
+    # Decision 0038 amendment 2: a reading week is written as a break, not set aside.
+    text = THREE_WEEKS.replace(
+        "  end: {type: end, event_datetime: 2026-10-23}\n",
+        "  end: {type: end, event_datetime: 2026-10-23}\n"
+        "  reading-week: {type: break, from: 2026-10-12, to: 2026-10-16}\n",
+    )
+    facts = _semester(sched=_sched(text))
+    before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    ids = [p["id"] for p in status_json.empty_week_problems(facts, before, frozenset())]
+    assert "empty_week:2026-10-12" not in ids
+    assert ids == ["empty_week:2026-10-19:lecture"]
+
+
 def test_a_set_aside_empty_week_is_not_raised():
     before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
     aside = ("empty_week:2026-10-12", "empty_week:2026-10-19:lecture")
@@ -3015,8 +3042,9 @@ def test_a_set_aside_empty_week_is_not_raised():
 
 NO_FILES = """\
 timezone: Europe/Berlin
-semester_start: 2026-10-05
-semester_end: 2026-12-18
+semester:
+  start: {type: start, event_datetime: 2026-10-05}
+  end: {type: end, event_datetime: 2026-12-18}
 lectures:
   lecture_9:
     session: 9
@@ -3150,8 +3178,9 @@ def test_an_assignment_carries_its_semester_side_name():
 
 SLOTS = """\
 timezone: Europe/Berlin
-semester_start: 2026-10-05
-semester_end: 2026-10-16
+semester:
+  start: {type: start, event_datetime: 2026-10-05}
+  end: {type: end, event_datetime: 2026-10-16}
 lectures:
   lecture_1:
     session: 1

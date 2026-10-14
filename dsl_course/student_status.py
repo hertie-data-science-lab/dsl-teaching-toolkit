@@ -524,12 +524,24 @@ def event_rows(facts: SemesterFacts) -> list[dict]:
                 dateless=ev.when is None,
             )
         )
-    for id_, title, when in (
-        ("term-start", "Semester starts", sched.semester_start),
-        ("term-end", "Semester ends", sched.semester_end),
+    for id_, title, details, when in (
+        (
+            "term-start",
+            sched.semester_start_title,
+            sched.semester_start_details,
+            sched.semester_start,
+        ),
+        (
+            "term-end",
+            sched.semester_end_title,
+            sched.semester_end_details,
+            sched.semester_end,
+        ),
     ):
         if when is not None:
-            out.append(_row(id_, "semester", when, title, all_day=True))
+            out.append(
+                _row(id_, "semester", when, title, all_day=True, details=details)
+            )
     archive = sched.archive
     if archive and archive.when and archive.show_on_site:
         details = (archive.details or "").replace("{date}", archive.when.isoformat())

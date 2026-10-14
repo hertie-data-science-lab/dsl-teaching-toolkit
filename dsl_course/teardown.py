@@ -2,9 +2,9 @@
 module keeps the frozen name `teardown`, which every org's Archive semester workflow ran).
 
 Runs on the semester's own archive date, fired by the scheduler - and only for a semester
-whose `schedule.yml` writes an `archive:` block (its `event_datetime:` defaults to `semester_end` +
-60 days). Archiving is opt-in, so the Archive semester button is for closing one out early,
-and the only way to close out a semester that wrote no block. Six steps, in this order, and
+whose `schedule.yml` `semester:` block has a `type: archive` entry (its `event_datetime:`
+defaults to the semester's end + 60 days). Archiving is opt-in, so the `semester.archive`
+op is for closing one out early, and the only way to close out a semester without one. Six steps, in this order, and
 the order is the whole design:
 
 0. PROPAGATE: offer the semester's edits to its released material back to the course org as
@@ -178,9 +178,9 @@ class Closed(NamedTuple):
 def archive_due(sched: schedule.Schedule, today: date) -> bool:
     """Whether this semester's archive date has arrived.
 
-    A semester that writes no `archive:` block has no such date and is never due: archiving
+    A semester with no `type: archive` entry has no such date and is never due: archiving
     is opt-in, so closing it out is `--force`, which is a person taking the decision
-    instead. Where the block is written, the sixty-day grace after `semester_end` is the
+    instead. Where the entry is written, the sixty-day grace after the end is the
     whole point (`schedule.ARCHIVE_GRACE`), because a term goes on being pushed to for
     weeks after its last class."""
     when = sched.archive.when if sched.archive else None
@@ -474,8 +474,8 @@ def close_out(
         declared = (
             f"archives on {archives}"
             if archives
-            else "names no archive date - it has no `archive:` block, or none with a "
-            "date anything can be derived from"
+            else "names no archive date - it has no `type: archive` entry, or none with "
+            "a date anything can be derived from"
         )
         not_due = (
             f"{semester_org} is not due to be archived: {CONFIG_REPO}/"

@@ -12,16 +12,28 @@
 #   event_datetime  a datetime, `tbc`, or a list of slots {at, location, details}
 #   files           from_course_repo, from_path, to_semester_repo, to_path, release_datetime
 #                   (default: an hour before the first slot)
-# Assignments carry their run settings inline (late_window_days, ..., repo_name).
+# The term's own dates are the `semester:` block. Assignments carry their run settings
+# inline (late_window_days, ..., repo_name).
 
 timezone: Europe/Berlin
-semester_start: 2026-09-07
-semester_end: 2026-12-18
-archive:
-  event_datetime: 2027-02-16
-  title: Semester archived
-  show_on_site: true
-  details: 'This semester is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.'
+semester:                         # the term's own dates, each entry with a `type`
+  start:
+    type: start
+    event_datetime: 2026-09-07
+  end:
+    type: end
+    event_datetime: 2026-12-18
+  reading-week:                   # a grey band on the schedule; never an "empty week"
+    type: break
+    title: Reading week
+    from: 2026-10-26
+    to: 2026-10-30
+  archive:
+    type: archive
+    event_datetime: 2027-02-16
+    title: Semester archived
+    show_on_site: true
+    details: 'This semester is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.'
 lectures:
   lecture-1:
     session: 1
@@ -118,7 +130,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/01_week-1
-    reading_list: |
+    reading_guide: |
       # Week 1 readings - 
 
       - Goodfellow et al., *Deep Learning*, ch. 1 (citation only).
@@ -130,7 +142,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/02_week-2
-    reading_list: |
+    reading_guide: |
       # Week 2 readings - Intro to deep learning
 
       - Goodfellow et al., *Deep Learning*, ch. 2 (citation only).
@@ -142,7 +154,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/03_week-3
-    reading_list: |
+    reading_guide: |
       # Week 3 readings - Linear models & gradient descent
 
       - Goodfellow et al., *Deep Learning*, ch. 3 (citation only).
@@ -154,7 +166,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/04_week-4
-    reading_list: |
+    reading_guide: |
       # Week 4 readings - Neural networks & backprop
 
       - Goodfellow et al., *Deep Learning*, ch. 4 (citation only).
@@ -166,7 +178,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/05_week-5
-    reading_list: |
+    reading_guide: |
       # Week 5 readings - Convolutional networks
 
       - Goodfellow et al., *Deep Learning*, ch. 5 (citation only).

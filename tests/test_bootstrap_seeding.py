@@ -694,15 +694,15 @@ def test_every_example_assignment_has_the_layout_the_engine_pushes():
         assert any((a / "main").iterdir()), f"{a.name}: main/ is empty"
 
 
-def test_the_example_semester_writes_its_reading_lists_in_the_schedule():
-    # Decision 0038 rule 5: a reading list is the entry's `reading_list:`, not a
+def test_the_example_semester_writes_its_reading_guides_in_the_schedule():
+    # Decision 0038 rule 5: a reading list is the entry's `reading_guide:`, not a
     # READINGS.md in the folder - the example shows the one way.
     materials = welcome.EXAMPLE_COURSE / "course-materials-f2026"
     assert not sorted(materials.glob(f"readings/*/{readings.READING_OVERLAY_FILE}"))
     plan = yaml.safe_load(
         (welcome.EXAMPLE_COURSE.parent / "semester-org" / "schedule.yml").read_text()
     )
-    assert all(entry.get("reading_list") for entry in plan["readings"].values())
+    assert all(entry.get("reading_guide") for entry in plan["readings"].values())
 
 
 def test_the_example_course_names_nobody_real():

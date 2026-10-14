@@ -33,6 +33,38 @@
       "where": "schedule.yml <block>.<key>"
     },
     {
+      "cost": "the semester has no start date",
+      "fault_code": "NOT_MIGRATED",
+      "new": "a `semester:` entry of `type: start`",
+      "old": "semester_start",
+      "since": "0.11.0",
+      "where": "schedule.yml top level"
+    },
+    {
+      "cost": "the semester has no end date",
+      "fault_code": "NOT_MIGRATED",
+      "new": "a `semester:` entry of `type: end`",
+      "old": "semester_end",
+      "since": "0.11.0",
+      "where": "schedule.yml top level"
+    },
+    {
+      "cost": "nothing archives this semester",
+      "fault_code": "NOT_MIGRATED",
+      "new": "a `semester:` entry of `type: archive`",
+      "old": "archive",
+      "since": "0.11.0",
+      "where": "schedule.yml top level"
+    },
+    {
+      "cost": "the row shows no reading guide",
+      "fault_code": "NOT_MIGRATED",
+      "new": "reading_guide",
+      "old": "reading_list",
+      "since": "0.11.0",
+      "where": "schedule.yml <block>.<key>"
+    },
+    {
       "cost": "none of its copies ships - run the 0.11.0 migration (`python3 -m dsl_course.migrate`)",
       "fault_code": "NOT_MIGRATED",
       "new": "files",
@@ -103,14 +135,6 @@
       "old": "assignments",
       "since": "0.11.0",
       "where": "assignments.yml top level"
-    },
-    {
-      "cost": "the assignment is handed out and graded in whatever shape grading_config.yml declares - individual when it declares none",
-      "fault_code": null,
-      "new": "in the assignment's own grading_config.yml, on the course template's `solution` branch",
-      "old": "type",
-      "since": "0.9.0",
-      "where": "schedule.yml assignments.<key>"
     },
     {
       "cost": "",

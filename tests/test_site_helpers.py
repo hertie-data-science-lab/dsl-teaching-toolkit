@@ -408,7 +408,7 @@ _READINGS_TREE = (
 
 
 def test_a_readings_folder_lists_every_file_it_holds(monkeypatch):
-    # Decision 0038 rule 5: the reading list is the schedule's `reading_list:`, so a
+    # Decision 0038 rule 5: the reading list is the schedule's `reading_guide:`, so a
     # READINGS.md in the folder is a file like any other.
     monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", _READINGS_TREE))
     landed = site._landed("C", _deploy("readings/01_week-1"), frozenset(), {})

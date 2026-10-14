@@ -380,7 +380,7 @@ def test_every_row_kind_the_sync_emits_is_labelled_from_the_policy(
     emitted = {doc["kind"] for doc in documents if doc.get("kind")}
     emitted |= {doc["due_event"]["kind"] for doc in documents if doc.get("due_event")}
     keys = {k["key"] for k in site_data["kinds"]}
-    mapped = {"due": "assignment", "special_event": "other"}
+    mapped = {"due": "assignment", "special_event": "other", "break": "semester"}
     for kind in sorted(emitted):
         assert mapped.get(kind, kind) in keys, kind
     schedule = _strip_comments(_templates()["_layouts/schedule.html"])
@@ -448,6 +448,7 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "tbc",
         "dateless",
         "hide_time",
+        "until",
         "announce",
         "repo_url",
         "repo_name",

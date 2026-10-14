@@ -73,6 +73,37 @@ def _instance(text: str) -> settings.Instance:
     return settings.parse_instance(text)
 
 
+# The term's own dates moved into one `semester:` block (decision 0038 amendment 2). These
+# tests are about what each date MEANS, so they write the keys they always did and this
+# places them where the block now holds them: `semester_start` / `semester_end` become
+# the `start` / `end` entries, `archive:` the `archive` entry (a bare one, `type` alone).
+_TERM = {"semester_start": "start", "semester_end": "end", "archive": "archive"}
+
+
+def _term(meta: dict) -> dict:
+    meta = dict(meta)
+    block = {}
+    for old, key in _TERM.items():
+        if old not in meta:
+            continue
+        value = meta.pop(old)
+        if key == "archive":
+            block[key] = (
+                {"type": key, **value}
+                if isinstance(value, dict)
+                else {"type": key}
+                if value is None
+                else value
+            )
+        else:
+            block[key] = {"type": key, "event_datetime": value}
+    return {"semester": block, **meta} if block else meta
+
+
+def _parse(meta: dict, *args) -> schedule.Schedule:
+    return parse(_term(meta), *args)
+
+
 def test_parse_full_schedule():
     meta = {
         "timezone": "Europe/Berlin",
@@ -108,7 +139,7 @@ def test_parse_full_schedule():
             },
         },
     }
-    sched = parse(meta)
+    sched = _parse(meta)
     assert sched.semester_start == date(2026, 9, 7)
     assert [r.label for r in sched.releases] == [
         "session_2",
@@ -429,33 +460,34 @@ def test_malformed_deploy_datetime_falls_back_to_the_default():
     assert r.deploy[0].deploy_datetime.isoformat().startswith("2026-09-15T09:00")
 
 
-def test_the_settings_that_moved_out_of_schedule_are_flagged_by_name():
-    # The clean break. A semester still carrying `type: group` is not making a typo, it is
-    # declaring the shape in a file that no longer reads it - so the entry is KEPT (its
-    # dates are still good) and the message says which file the declaration moved to.
-    # The team cap is a run setting written on the entry now (decision 0038 rule 9).
+def test_an_assignment_entry_may_override_its_template_s_shape():
+    # Decision 0038 amendment 2: `type` and `submit_via` are this semester's override of
+    # the template's; the team cap is a run setting written on the entry (rule 9).
     meta = {
         "assignments": {
             "assignment-4-project": {
                 "template": "a-f2026-1",
                 "due_datetime": "2026-11-15",
                 "type": "group",
+                "submit_via": "external",
                 "max_team_size": 3,
+            },
+            "a2": {
+                "template": "a-f2026-2",
+                "due_datetime": "2026-11-15",
+                "type": "pairs",
             },
         }
     }
     sched = parse(meta)
     entry = sched.assignments["assignment-4-project"]
-    assert not hasattr(entry, "type")
+    assert (entry.type, entry.submit_via) == ("group", "external")
     assert entry.settings["max_team_size"] == 3
-    assert entry.due_datetime is not None  # the timing it DID declare still stands
-    kinds = {line.split(":")[0] for line in sched.dropped}
-    assert kinds == {"assignments.assignment-4-project.type"}
+    # A word that is not one is flagged, and the template decides.
+    assert sched.assignments["a2"].type is None
     (said,) = sched.dropped
-    assert "grading_config.yml" in said and "solution" in said
-    for line in sched.dropped:
-        # named as MOVED, not as the generic typo they are not
-        assert "unrecognised key" not in line
+    assert said.startswith("assignments.a2.type: unusable value")
+    assert "template's grading_config.yml decides" in said
 
 
 def test_assignment_handout_parses():
@@ -929,7 +961,8 @@ def test_a_wellformed_schedule_is_untouched_by_the_yaml_guard(monkeypatch, capsy
 
     good = (
         "timezone: Europe/Berlin\n"
-        "semester_start: 2026-09-07\n"
+        "semester:\n"
+        "  start: {type: start, event_datetime: 2026-09-07}\n"
         "labs:\n"
         "  lab-1:\n"
         "    session: 1\n"
@@ -1134,11 +1167,13 @@ def test_a_fallen_back_timezone_is_the_zone_the_plan_keeps(written):
 def test_an_unparseable_term_date_is_reported_not_silently_synthesised(key):
     # `01/09/2026` coerces to None exactly like an absent key, and the site then
     # synthesises term dates - shifting every weekly session row, green.
-    sched = parse({key: "01/09/2026"})
+    sched = _parse({key: "01/09/2026"})
     assert getattr(sched, key) is None
     assert len(sched.dropped) == 1
     # top-level: the location renders bare, not as a stray-dotted `.semester_start`
-    assert sched.dropped[0].startswith(f"{key}: unusable value")
+    assert sched.dropped[0].startswith(
+        f"semester.{_TERM[key]}.event_datetime: unusable value"
+    )
     assert "shifting every session row" in sched.dropped[0]
 
 
@@ -1146,8 +1181,8 @@ def test_an_unparseable_term_date_is_reported_not_silently_synthesised(key):
 def test_an_absent_term_date_is_not_flagged(key):
     # Absent is a legitimate "not declared" - only a value faculty wrote and we cannot
     # read is a fault.
-    assert parse({}).dropped == []
-    assert parse({key: date(2026, 9, 1)}).dropped == []
+    assert _parse({}).dropped == []
+    assert _parse({key: date(2026, 9, 1)}).dropped == []
 
 
 def test_a_files_key_written_with_nothing_in_it_is_a_to_do_not_a_fault():
@@ -2727,7 +2762,7 @@ def test_a_semester_that_writes_no_block_is_never_archived():
     # Archiving is opt-in: a whole org going read-only, and a site row announcing it, may
     # not happen off a date nobody typed - not even a term end.
     for meta in ({}, {"semester_end": "2026-12-18"}):
-        sched = parse(meta)
+        sched = _parse(meta)
         assert sched.archive is None
         assert sched.dropped == []
 
@@ -2737,7 +2772,7 @@ def test_writing_the_block_at_all_turns_archiving_on():
     # The grace is the point: the real courses this was measured against went on being
     # pushed to for about three weeks past their last class.
     for block in (None, {}, {"show_on_site": True}):
-        sched = parse({"semester_end": "2026-12-18", "archive": block})
+        sched = _parse({"semester_end": "2026-12-18", "archive": block})
         assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
         assert sched.archive.show_on_site is True
         assert sched.dropped == []
@@ -2747,7 +2782,7 @@ def test_the_block_can_say_what_the_site_says():
     # The row and the Updates box are the two places students read about the freeze, and
     # a semester that wants to say it in its own words says it once, here.
     said = "Everything here goes read-only on the 16th. Grab what you want first."
-    sched = parse({"archive": {"event_datetime": "2027-02-16", "details": said}})
+    sched = _parse({"archive": {"event_datetime": "2027-02-16", "details": said}})
     assert sched.archive.details == said
     assert sched.dropped == []
 
@@ -2757,11 +2792,11 @@ def test_an_unusable_details_value_is_dropped_rather_than_printed():
     # flagged, never raised, and never printed. The row then reads as it does for a
     # semester that wrote no details at all.
     for said in (["a", "b"], {"text": "x"}, 7):
-        sched = parse({"semester_end": "2026-12-18", "archive": {"details": said}})
+        sched = _parse({"semester_end": "2026-12-18", "archive": {"details": said}})
         assert sched.archive.details is None
         assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
         (drop,) = sched.dropped
-        assert drop.startswith("archive.details: unusable value")
+        assert drop.startswith("semester.archive.details: unusable value")
         assert "no sentence at all" in drop
 
 
@@ -2780,17 +2815,17 @@ def test_a_blank_details_is_an_empty_slot_rather_than_a_mistake():
             ),
             ("exams", {"exam": {"event_datetime": "2026-11-03", "details": said}}),
         ):
-            sched = parse({block: entry})
+            sched = _parse({block: entry})
             assert sched.dropped == [], (block, said)
             assert sched.faults == [], (block, said)
 
 
 def test_a_block_with_no_details_says_nothing_about_one():
-    assert parse({"archive": {"event_datetime": "2027-02-16"}}).archive.details is None
+    assert _parse({"archive": {"event_datetime": "2027-02-16"}}).archive.details is None
 
 
 def test_a_declared_archive_date_wins_over_the_default():
-    sched = parse(
+    sched = _parse(
         {"semester_end": "2026-12-18", "archive": {"event_datetime": "2027-01-15"}}
     )
     assert sched.archive.when == date(2027, 1, 15)
@@ -2799,21 +2834,21 @@ def test_a_declared_archive_date_wins_over_the_default():
 def test_a_block_with_no_term_end_and_no_date_has_no_archive_date():
     # It asked to be archived, but there is no clock to archive it against. Neither a
     # crash nor a freeze - `scheduler._no_archive_date` says so in the digest instead.
-    sched = parse({"archive": {"show_on_site": False}})
+    sched = _parse({"archive": {"show_on_site": False}})
     # Declared - the block is there - but with nothing to date it from.
     assert sched.archive is not None
     assert sched.archive.when is None
 
 
 def test_a_semester_with_no_term_end_can_still_name_its_own_archive_date():
-    assert parse({"archive": {"event_datetime": "2027-01-15"}}).archive.when == date(
+    assert _parse({"archive": {"event_datetime": "2027-01-15"}}).archive.when == date(
         2027, 1, 15
     )
 
 
 def test_show_on_site_is_only_switched_off_by_a_real_false():
-    assert parse({"archive": {"show_on_site": False}}).archive.show_on_site is False
-    assert parse({"archive": {}}).archive.show_on_site is True
+    assert _parse({"archive": {"show_on_site": False}}).archive.show_on_site is False
+    assert _parse({"archive": {}}).archive.show_on_site is True
 
 
 def test_an_unreadable_show_on_site_is_flagged_and_the_row_still_shows():
@@ -2821,12 +2856,12 @@ def test_an_unreadable_show_on_site_is_flagged_and_the_row_still_shows():
     # to take the row off the site did nothing and said nothing. Flagged like the two
     # keys beside it; the row still shows, which is the default.
     for shown in ("nope", 0, [], {"when": True}):
-        sched = parse(
+        sched = _parse(
             {"archive": {"event_datetime": "2027-02-16", "show_on_site": shown}}
         )
         assert sched.archive.show_on_site is True
         (drop,) = sched.dropped
-        assert drop.startswith("archive.show_on_site: unusable value")
+        assert drop.startswith("semester.archive.show_on_site: unusable value")
 
 
 def test_an_unreadable_flag_is_flagged_on_every_block_that_takes_one():
@@ -2866,7 +2901,7 @@ def test_an_unusable_details_is_flagged_on_every_block_that_takes_one():
     # guarded this and the other three read `str(entry.get("details") or "")`, so
     # `details: ["a", "b"]` parsed clean and reached the deployed site as the literal
     # `['a', 'b']`. One key, one meaning, one guard.
-    sched = parse(
+    sched = _parse(
         {
             "lectures": {
                 "lecture-1": {"event_datetime": "2026-09-01", "details": ["a", "b"]}
@@ -2891,7 +2926,7 @@ def test_an_unusable_details_is_flagged_on_every_block_that_takes_one():
         "lectures.lecture-1.details",
         "assignments.a1.details",
         "events.clinic.details",
-        "archive.details",
+        "semester.archive.details",
     }
     assert all("unusable value" in drop for drop in sched.dropped)
     assert all("no sentence at all" in drop for drop in sched.dropped)
@@ -2901,37 +2936,39 @@ def test_an_unreadable_archive_date_falls_back_and_is_flagged():
     # A date nobody can read must not freeze the semester on a day they did not choose, and
     # must not crash the tick that reads the file either: it falls back to the default and
     # is reported through the digest issue like any other unusable value.
-    sched = parse(
+    sched = _parse(
         {"semester_end": "2026-12-18", "archive": {"event_datetime": "16/02/2027"}}
     )
     assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
     assert len(sched.dropped) == 1
-    assert sched.dropped[0].startswith("archive.event_datetime: unusable value")
+    assert sched.dropped[0].startswith(
+        "semester.archive.event_datetime: unusable value"
+    )
     assert "freezes at its default date" in sched.dropped[0]
 
 
-def test_an_archive_block_that_is_not_a_mapping_is_dropped_not_raised():
-    sched = parse({"semester_end": "2026-12-18", "archive": "2027-02-16"})
-    assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
-    assert len(sched.dropped) == 1
-    assert "not a mapping" in sched.dropped[0]
-    # And it names every key that goes under it: the message is the only place a faculty
-    # member reading the digest learns what the block accepts.
-    for key in ("`event_datetime:`", "`title:`", "`details:`", "`show_on_site:`"):
-        assert key in sched.dropped[0]
+def test_a_semester_entry_that_is_not_a_mapping_is_dropped_not_raised():
+    # A bare value has no `type`: dropped, naming the types an entry may have, so nothing
+    # is archived off it (the entry is the switch).
+    sched = parse({"semester": {"archive": "2027-02-16"}})
+    assert sched.archive is None
+    (said,) = sched.dropped
+    assert said.startswith("semester.archive: no `type:`")
+    for word in ("start", "end", "break", "archive"):
+        assert word in said
 
 
 def test_a_stray_key_under_archive_is_flagged_and_ignored():
-    sched = parse({"semester_end": "2026-12-18", "archive": {"when": "2027-02-16"}})
+    sched = _parse({"semester_end": "2026-12-18", "archive": {"when": "2027-02-16"}})
     assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
     assert len(sched.dropped) == 1
-    assert "archive.when" in sched.dropped[0]
+    assert "semester.archive.when" in sched.dropped[0]
 
 
 def test_archive_is_a_known_top_level_key():
     # Not in KNOWN_TOP_LEVEL, the whole block reads as a typo and every semester that writes
     # one gets a red `Validate schedule` run for a key the parser now understands.
-    assert parse({"archive": {"event_datetime": "2027-02-16"}}).dropped == []
+    assert _parse({"archive": {"event_datetime": "2027-02-16"}}).dropped == []
 
 
 # ---------------------------------------- one word per column (title / details / type)
@@ -2945,7 +2982,7 @@ def test_the_old_spelling_is_now_an_unknown_key_like_any_other_typo():
     # No special casing and no bespoke message: `description:` and `archive.date:` reach
     # `_flag_unknown_keys` exactly as `grading_dateime:` would, and the row falls back to
     # what a semester that wrote no sentence at all gets.
-    sched = parse(
+    sched = _parse(
         {
             "semester_end": "2026-12-18",
             "lectures": {
@@ -2966,8 +3003,8 @@ def test_the_old_spelling_is_now_an_unknown_key_like_any_other_typo():
     assert all("unrecognised key" in line for line in sched.dropped)
     for loc in (
         "lectures.lecture-1.description",
-        "archive.date",
-        "archive.description",
+        "semester.archive.date",
+        "semester.archive.description",
     ):
         assert any(line.startswith(f"{loc}: ") for line in sched.dropped), loc
 
@@ -2976,7 +3013,7 @@ def test_only_the_new_spelling_is_read_where_a_file_carries_both():
     # The other direction of the same fact, so the file's meaning is pinned both ways: a
     # half-swept file reads its new keys and the line somebody forgot to delete is flagged
     # rather than quietly preferred.
-    sched = parse(
+    sched = _parse(
         {
             "lectures": {
                 "lecture-1": {
@@ -3134,7 +3171,7 @@ def test_the_retired_spelling_on_a_readings_entry_is_reported_once_not_twice():
 
 
 def test_the_archive_row_can_be_named_and_marked_provisional():
-    sched = parse(
+    sched = _parse(
         {
             "archive": {
                 "event_datetime": "2027-02-16",
@@ -3151,9 +3188,9 @@ def test_the_archive_row_can_be_named_and_marked_provisional():
 
 
 def test_an_archive_block_with_no_title_carries_the_default_one():
-    assert parse({"archive": {}}).archive.title == schedule.ARCHIVE_TITLE
+    assert _parse({"archive": {}}).archive.title == schedule.ARCHIVE_TITLE
     # And a semester that wrote no block at all has no row to name.
-    assert parse({}).archive is None
+    assert _parse({}).archive is None
 
 
 def _entry(repo: str, day: int, **kw) -> schedule.AssignmentEntry:
@@ -3294,3 +3331,146 @@ def test_no_previous_file_or_an_unreadable_one_gives_no_notice(
     monkeypatch, tmp_path, capsys, previous
 ):
     assert "::notice" not in _validate(monkeypatch, tmp_path, capsys, previous)
+
+
+# ------------------------------------------- the semester: block (0038 amendment 2)
+
+
+def test_the_semester_block_holds_the_term_s_dates_by_type():
+    sched = parse(
+        {
+            "semester": {
+                "start": {"type": "start", "event_datetime": "2026-09-07"},
+                "end": {"type": "end", "event_datetime": "2026-12-18"},
+                "reading-week": {
+                    "type": "break",
+                    "title": "Reading week",
+                    "from": "2026-10-19",
+                    "to": "2026-10-23",
+                },
+                "archive": {"type": "archive"},
+            }
+        }
+    )
+    assert (sched.semester_start, sched.semester_end) == (
+        date(2026, 9, 7),
+        date(2026, 12, 18),
+    )
+    (brk,) = sched.breaks
+    assert (brk.key, brk.title, brk.start, brk.end) == (
+        "reading-week",
+        "Reading week",
+        date(2026, 10, 19),
+        date(2026, 10, 23),
+    )
+    assert brk.covers(date(2026, 10, 23)) and not brk.covers(date(2026, 10, 24))
+    assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+    assert sched.dropped == []
+
+
+def test_start_and_end_take_a_title_and_details_else_the_default_rows():
+    plain = parse(
+        {
+            "semester": {
+                "start": {"type": "start", "event_datetime": "2026-09-07"},
+                "end": {"type": "end", "event_datetime": "2026-12-18"},
+            }
+        }
+    )
+    assert (plain.semester_start_title, plain.semester_start_details) == (
+        "Semester starts",
+        "",
+    )
+    assert (plain.semester_end_title, plain.semester_end_details) == (
+        "Semester ends",
+        "",
+    )
+    named = parse(
+        {
+            "semester": {
+                "start": {
+                    "type": "start",
+                    "event_datetime": "2026-09-07",
+                    "title": "Welcome week",
+                    "details": "Orientation in the atrium.",
+                },
+                "end": {
+                    "type": "end",
+                    "event_datetime": "2026-12-18",
+                    "title": "Last day of teaching",
+                },
+            }
+        }
+    )
+    assert (named.semester_start_title, named.semester_start_details) == (
+        "Welcome week",
+        "Orientation in the atrium.",
+    )
+    assert (named.semester_end_title, named.semester_end_details) == (
+        "Last day of teaching",
+        "",
+    )
+    assert named.semester_start == date(2026, 9, 7) and named.dropped == []
+
+
+def test_a_second_start_and_an_unusable_break_are_dropped():
+    sched = parse(
+        {
+            "semester": {
+                "start": {"type": "start", "event_datetime": "2026-09-07"},
+                "again": {"type": "start", "event_datetime": "2026-09-14"},
+                "gap": {"type": "break", "from": "2026-10-23", "to": "2026-10-19"},
+                "odd": {"type": "holiday"},
+            }
+        }
+    )
+    assert sched.semester_start == date(2026, 9, 7) and sched.breaks == []
+    said = {line.split(":")[0] for line in sched.dropped}
+    assert said == {"semester.again", "semester.gap", "semester.odd"}
+
+
+def test_the_term_s_old_top_level_keys_are_not_migrated():
+    sched = parse(
+        {
+            "semester_start": "2026-09-07",
+            "semester_end": "2026-12-18",
+            "archive": {"event_datetime": "2027-02-16"},
+        }
+    )
+    assert sched.semester_start is None and sched.archive is None
+    assert {f.field for f in sched.faults} == {
+        "semester_start",
+        "semester_end",
+        "archive",
+    }
+    assert all(f.code == "NOT_MIGRATED" for f in sched.faults)
+
+
+def test_a_reading_guide_is_read_and_the_old_reading_list_is_not_migrated():
+    sched = parse(
+        {
+            "readings": {
+                "r1": {"event_datetime": "2026-09-01", "reading_guide": "- A."},
+                "r2": {"event_datetime": "2026-09-08", "reading_list": "- B."},
+            }
+        }
+    )
+    guides = {r.label: r.reading_list for r in sched.releases}
+    assert guides == {"r1": "- A.", "r2": ""}
+    (fault,) = sched.faults
+    assert (fault.where, fault.field, fault.code) == (
+        "readings.r2",
+        "reading_list",
+        "NOT_MIGRATED",
+    )
+
+
+def test_supporting_files_default_off_the_site():
+    sched = parse(
+        {
+            "assets": {"data": {"event_datetime": "2026-09-01"}},
+            "lectures": {"l1": {"session": 1, "event_datetime": "2026-09-01"}},
+        }
+    )
+    shown = {r.label: r.show_on_site for r in sched.releases}
+    assert shown == {"data": False, "l1": True}

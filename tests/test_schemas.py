@@ -80,7 +80,12 @@ def test_file_schema_enums_are_the_engine_constants():
     assert set(top["assignments"]["additionalProperties"]["properties"]) == set(
         schedule.KNOWN_ASSIGNMENT
     )
-    assert set(top["archive"]["properties"]) == set(schedule.KNOWN_ARCHIVE)
+    # Decision 0038 amendment 2: the term's dates, one `semester:` block of typed entries.
+    semester = top[schedule.SEMESTER_BLOCK]["additionalProperties"]
+    assert set(semester["properties"]) == set(
+        schedule.KNOWN_ARCHIVE | schedule.KNOWN_BREAK | schedule.KNOWN_SEMESTER_DATE
+    )
+    assert semester["properties"]["type"]["enum"] == list(schedule.SEMESTER_TYPES)
 
     assert schemas.students_schema()["columns"] == list(roster.FIELDS)
     assert schemas.teams_schema()["columns"] == list(teams.FIELDS)
@@ -373,14 +378,14 @@ def test_labels_json_names_every_engine_value_once():
 
 def test_the_seeded_files_validate():
     # What Bootstrap seeds, unedited, must save through the console, which validates the
-    # whole file before every write: the schedule's bare `archive.event_datetime:` and the
+    # whole file before every write: the schedule's bare archive `event_datetime:` and the
     # course file's comment-only `assignment_defaults:` both read as YAML null.
     from dsl_course import bootstrap_course
 
     sched = yaml.safe_load(
         bootstrap_course.semester_scaffold("x-f2026", "schedule.yml", "release")
     )
-    assert sched["archive"]["event_datetime"] is None
+    assert sched["semester"]["archive"]["event_datetime"] is None
     assert validate(sched, schemas.schedule_schema()) == []
     for code, admins in (("E1", None), ("", ["ann"])):
         meta = yaml.safe_load(bootstrap_course._course_metadata("ML", code, admins))
@@ -398,13 +403,21 @@ def test_blank_schedule_keys_validate():
         }
         for i in range(1, 24)
     }
+
+    def term(archive: dict) -> dict:
+        return {
+            "start": {"type": "start", "event_datetime": "2026-09-01"},
+            "archive": {"type": "archive", **archive},
+        }
+
     doc = {
-        "semester_start": "2026-09-01",
+        "semester": term({"event_datetime": None, "show_on_site": True}),
         "lectures": rows,
         "exams": {"midterm": {"details": None, "tbc": None}},
-        "archive": {"event_datetime": None, "show_on_site": True},
     }
     assert validate(doc, schemas.schedule_schema()) == []
-    assert validate({**doc, "archive": None}, schemas.schedule_schema()) == []
+    assert validate({**doc, "semester": term({})}, schemas.schedule_schema()) == []
     # Still a type check: a list where text belongs is refused.
-    assert validate({**doc, "archive": {"details": ["a"]}}, schemas.schedule_schema())
+    assert validate(
+        {**doc, "semester": term({"details": ["a"]})}, schemas.schedule_schema()
+    )
