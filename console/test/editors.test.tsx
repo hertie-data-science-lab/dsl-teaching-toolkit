@@ -14,8 +14,9 @@ import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
 import { POLICY, penaltyRate } from '../src/model/policy';
+import { labelNumber, sessionNumber } from '../src/model/format';
 import { effectivePenalty, finalGrade, lateChoice, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { assignmentKey, blankDeploy, blankDraft, defaultDeployAt, deployAt, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { assignmentKey, blankDeploy, blankDraft, defaultDeployAt, deployAt, draftErrors, entryKey, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
 import { validSchedule } from '../src/model/cascade';
 import { StatusStore, type Loaded } from '../src/model/status';
@@ -203,11 +204,42 @@ describe('the schedule entry sheet model', () => {
     // Read back it is the same sheet, with nothing to release; a line moves it back.
     const doc2 = y.toJS() as Record<string, unknown>;
     const back = readDraft(doc2, 's5') as ReleaseDraft;
-    expect(back).toEqual(d);
+    expect(back).toEqual({ ...d, block: 'events' });
     writeDraft(y, { ...back, deploys: [{ ...blankDeploy('m'), folder: 'l' }] }, doc2);
     const again = parse(y.text);
     expect(again.events).toEqual({});
     expect(again.releases.s5).toEqual({ event_datetime: '2026-10-08T10:00', kind: 'lecture', title: 'Trees', deploy: [{ course_source_repo: 'm', course_source_path: 'l' }] });
+  });
+
+  it('numbers a session by the first number in its label, as the engine does', () => {
+    expect(sessionNumber('lab-01-group-2')).toBe(1);
+    expect(labelNumber('lab-01-group-2')).toBe(2);
+    const y = new YamlText('events:\n  lab-01-group-2:\n    event_datetime: 2026-09-17T18:00\n    kind: lab\n');
+    const doc = y.toJS() as Record<string, unknown>;
+    const d = readDraft(doc, 'lab-01-group-2') as ReleaseDraft;
+    expect(d.number).toBe(1);
+    // Its own number is the label's: nothing is written for it.
+    writeDraft(y, { ...d, details: 'Group 2' }, doc);
+    expect(parse(y.text).events['lab-01-group-2']).toEqual({ event_datetime: '2026-09-17T18:00', kind: 'lab', details: 'Group 2' });
+  });
+
+  it('edits the events: session when a release shares its label, and never deletes the release', () => {
+    const src = 'releases:\n  lab-01:\n    event_datetime: 2026-09-16T08:00\n    kind: lab\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/01\nevents:\n  lab-01:\n    event_datetime: 2026-09-17T18:00\n    kind: lab\n    details: Group 2\n';
+    const y = new YamlText(src);
+    const doc = y.toJS() as Record<string, unknown>;
+    // The events row opens under its own key, and reads the session, not the release.
+    expect(entryKey(doc, 'events', 'lab-01')).toBe('events:lab-01');
+    expect(entryKey(doc, 'releases', 'lab-01')).toBe('lab-01');
+    const d = readDraft(doc, entryKey(doc, 'events', 'lab-01')) as ReleaseDraft;
+    expect([d.id, d.block, d.details, d.deploys]).toEqual(['lab-01', 'events', 'Group 2', []]);
+    // The label under both blocks is refused, either way round.
+    expect(draftErrors(d, { doc, kind: 'lab' }).block).toBe('lab-01 is already a release in schedule.yml. Rename one of them there.');
+    expect(draftErrors(readDraft(doc, 'lab-01') as ReleaseDraft, { doc, kind: 'lab' }).block).toBe('lab-01 is already a session in schedule.yml. Rename one of them there.');
+    // Even written, the session's edit stays under events: and the release is untouched.
+    writeDraft(y, { ...d, details: 'Group 2, room B' }, doc);
+    const out = parse(y.text);
+    expect(out.events['lab-01'].details).toBe('Group 2, room B');
+    expect(out.releases['lab-01'].deploy).toHaveLength(1);
   });
 
   it('writes a new session with nothing to release under events: its kind, its number, TBC without a date', () => {

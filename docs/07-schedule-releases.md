@@ -92,6 +92,8 @@ Nested under `deploy:` we have the following:
 | `semester_dest_path` | no | mirrors `course_source_path` | where it lands, relative to `semester_dest_repo` |
 | `deploy_datetime` | no | an hour before the entry's `event_datetime` (a whole-day `event_datetime`: the day's start) | ship this one copy at another time, earlier or later than the class it belongs to |
 
+NB: the hour-before default is for these materials copies only - an assignment's hand-out and solution ship at their own `handout_datetime` / `solution_datetime`. It also applies to a file written before it existed: a copy with no `deploy_datetime` there now ships an hour before its session.
+
 NB: `semester_dest_repo` is yours to choose - one shared `materials` repo, or one repo for lectures, another for labs etc; any non-existent repo and/or directory structure specified between `semester_dest_repo` and `semester_dest_path` is created on release if non-exist.
 
 NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release workflows) and `.system/` (the toolkit's files: your operating notes `MAINTAINING.md` and the syllabus example). Nested copies - a `labs/.github/` of your own - travel normally.
@@ -234,7 +236,7 @@ Could be an exam, a drop-in clinic, a guest lecture, a revision session, a secon
 |---|---|---|---|
 | `event_datetime` | **yes** | - | when it happens; as displayed on the deployed site schedule |
 | `kind` | no | `special_event` | `special_event`, `exam`, or any other row kind of `releases:` (`lecture`, `lab`, ...) - see below. An unknown value is flagged and shown as `special_event` |
-| `number` | no | the label's number | a session's number (`Lab 1`), as on a release |
+| `number` | no | the FIRST number in the label (`lab-01-group-2` is Lab 1) | a session's number (`Lab 1`); a label with two numbers and no `number:` is flagged by **Validate schedule** |
 | `title` | no | prettified label | the row label on the site; a session's defaults to the title of the shown release of the same kind and number |
 | `details` | no | - | what the row's Details column says: the room, the format, what to bring. There is no default - an exam with no `details:` says nothing, rather than the "Details to be confirmed." the toolkit used to write into every one |
 | `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)** |
@@ -275,7 +277,7 @@ releases:
 events:
   lab-01-group-2:                       # group 2: "Lab 1 - Introduction", no files
     kind: lab
-    number: 1                           # the label alone would say 2
+    number: 1                           # the label alone says 1 too; numbered, it is never flagged
     details: Group 2, room 2.32
     event_datetime: 2026-09-17T18:00
 ```

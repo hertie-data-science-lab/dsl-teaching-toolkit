@@ -28,7 +28,7 @@ from .materials import (
     infer_kind,
     publishable,
 )
-from .schedule import own_number
+from .schedule import own_number, session_number
 
 # A source repo -> its `materials.yml` folder aliases (None: the file does not parse).
 # The caller reads them; the plan stays pure.
@@ -143,12 +143,12 @@ class PlannedRow:
 def planned_rows(
     sched: schedule.Schedule, aliases: Aliases = _no_aliases
 ) -> list[PlannedRow]:
-    """One row per `releases:` entry: the dated ones in date order (ties in plan order),
-    then the undated (`event_datetime: tbc`) ones in plan order, flagged `undated`. Then
-    one row per `events:` session (`Schedule.sessions`), in plan order, with no copies:
-    numbered as a release (`own_number`), titled with its own `title:`, else that of the
-    shown release of the same kind and number. Releases come first, so a session never
-    takes the row file of the release it shares a number with.
+    """One row per `releases:` entry and per `events:` session (`Schedule.sessions`), in
+    date order: sorted on `sort_at`, stably, so ties keep plan order with the releases
+    first. An undated (`event_datetime: tbc`) row is flagged `undated`. A session has no copies:
+    numbered by `session_number` (the label's FIRST number, `lab-01-group-2` -> 1), titled with its own `title:`, else that of the
+    shown release of the same kind and number. A session never takes the row file of the
+    release it shares a number with: the site names release rows first (`site._site_rows`).
 
     An undated row's `when` is None, and it sorts (`sort_at`) at the end of its kind
     (`_undated_placer`)."""
@@ -169,7 +169,7 @@ def planned_rows(
         )
 
     def session(event: schedule.Event, sort_at: date | datetime) -> PlannedRow:
-        n = own_number(event.number, event.label)
+        n = session_number(event.number, event.label)
         return PlannedRow(
             key=event.label,
             kind=event.kind,
@@ -197,7 +197,9 @@ def planned_rows(
     for r in rows:
         if r.shown and r.subtitle and (n := own_number(r.number, r.key)):
             titles.setdefault((r.kind, n), r.subtitle)
-    return rows + [session(e, e.when or place(e.kind)) for e in sched.sessions]
+    rows += [session(e, e.when or place(e.kind)) for e in sched.sessions]
+    tz = ZoneInfo(sched.timezone)
+    return sorted(rows, key=lambda r: schedule._instant(r.sort_at, tz))
 
 
 def _undated_placer(

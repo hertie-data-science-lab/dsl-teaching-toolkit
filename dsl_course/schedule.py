@@ -275,11 +275,14 @@ class Deploy:
     """One source->dest copy: a path in a COURSE-org source repo copied into a SEMESTER-org
     dest repo. `semester_dest_path` defaults to `course_source_path` (mirror).
 
-    `deploy_datetime` optionally overrides the copy's own ship time; unset, it ships an
-    hour before the parent entry's `event_datetime` (`_default_ship_times` fills it in at
-    parse time, so every reader sees the moment the copy actually ships). A whole-day
-    event has no clock time, so its copies ship at the day's start; a `tbc` entry's have
-    no time at all. This is what disaggregates the class from its materials: the entry's
+    `deploy_datetime` optionally overrides the copy's own ship time; unset on a materials
+    copy (a `releases:` entry's `deploy:`), it ships an hour before the parent entry's
+    `event_datetime` (`_default_ship_times` fills it in at parse time, so every reader
+    sees the moment the copy actually ships). A whole-day event has no clock time, so its
+    copies ship at the day's start; a `tbc` entry's have no time at all. The hour-before
+    default is for materials only: a release the scheduler synthesises for an
+    assignment's hand-out (and the solution riding on it) ships at its own hand-out or
+    solution time, unchanged. This is what disaggregates the class from its materials: the entry's
     `event_datetime` is the session the site announces, a deploy's `deploy_datetime`
     ships the files an hour (or a week) before or after it."""
 
@@ -358,8 +361,12 @@ class Release:
         return not self.deploy and not self.assignment
 
     def due_deploys(self, now: datetime) -> list[Deploy]:
-        """The deploys whose own ship time (`deploy_datetime`, else this entry's
-        `event_datetime`) has arrived. An undated (TBC) entry's deploys can never be due -
+        """The deploys whose own ship time has arrived: `deploy_datetime`, else this
+        entry's `event_datetime`. A materials copy from `releases:` already carries its
+        hour-before default in `deploy_datetime` (`_default_ship_times`, at parse), so the
+        `event_datetime` fallback is left to a whole-day entry's copies (the day's start).
+        A synthesised hand-out or solution release ships at its own hand-out/solution
+        time, never an hour early. An undated (TBC) entry's deploys can never be due -
         except one carrying its own explicit `deploy_datetime`."""
         return [
             d
@@ -1060,7 +1067,11 @@ def _default_ship_times(deploys: list[Deploy], raw_when: object, tz: ZoneInfo) -
     entry's timed `event_datetime`. A whole-day event has no clock time to count back
     from, so its copies keep shipping at the day's start (the entry's `when`, 00:00); a
     `tbc` entry has no time, so nothing is filled and nothing fires. An explicit
-    `deploy_datetime` is never touched."""
+    `deploy_datetime` is never touched.
+
+    Materials only (`_parse_releases`): a synthesised hand-out or solution release ships
+    at its own time. Applied on every parse, so an existing file's copies that never named
+    a time moved to an hour before their session when this default shipped."""
     when = _coerce_date_or_datetime(raw_when, tz)
     if not isinstance(when, datetime):
         return
@@ -1529,6 +1540,22 @@ def _parse_events(
         number = _parse_number(
             entry, where, drops, lines, "the row is numbered from its label instead"
         )
+        if (
+            number is None
+            and kind in EVENT_KINDS
+            and kind != "exam"
+            and len(_DIGITS.findall(str(label))) > 1
+        ):
+            # `lab-01-group-2` is read as Lab 1 (`session_number`): say so, so a label
+            # meant as Lab 2 is numbered rather than quietly shown as the first.
+            first = session_number(None, str(label))
+            drops.note(
+                where,
+                "number",
+                f"the label carries more than one number and no `number:` - number it "
+                f"or it reads as {policy.numbered_title(kind, first)}",
+                lines,
+            )
         out.append(
             Event(
                 label=str(label),
@@ -1905,6 +1932,18 @@ def own_number(number: int | None, key: str) -> int | None:
     """An entry's number (decision 0020): its `number:`, else the number its label or key
     carries (`lecture_03`, `assignment-3`: the instructor typed it). Never a position."""
     return number or label_number(key)
+
+
+_DIGITS = re.compile(r"\d+")
+
+
+def session_number(number: int | None, label: str) -> int | None:
+    """An `events:` session's number: its `number:`, else the FIRST number in its label -
+    `lab-01-group-2` is a group of Lab 1, not Lab 2. A release keeps `own_number`."""
+    if number:
+        return number
+    m = _DIGITS.search(label)
+    return int(m.group()) if m else None
 
 
 def assignment_pages(sched: Schedule) -> list[AssignmentPage]:

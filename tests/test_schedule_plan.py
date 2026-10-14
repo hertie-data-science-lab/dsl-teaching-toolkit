@@ -63,10 +63,10 @@ def test_an_undated_entry_sorts_after_the_last_dated_row_of_its_kind():
     assert [(r.key, r.when, r.sort_at, r.undated) for r in rows] == [
         ("lab-1", _at(8), _at(8), False),
         ("lab-2", _at(9), _at(9), False),
-        ("lecture-1", _at(10), _at(10), False),
-        # No date of its own: `when` is None, and `sort_at` only places it.
+        # No date of its own: `when` is None, and `sort_at` places it - in date order.
         ("lab-3", None, _at(9) + minute, True),
         ("lab-4", None, _at(9) + 2 * minute, True),
+        ("lecture-1", _at(10), _at(10), False),
     ]
 
 
@@ -269,6 +269,40 @@ def test_a_label_carries_its_number_at_either_end():
         "week3": 3,
     }.items():
         assert schedule.label_number(label) == n, label
+
+
+def test_rows_come_in_date_order_sessions_among_releases():
+    # A week-2 session sorts before a TBC lab; whatever the order, ties keep plan order.
+    sched = Schedule(
+        releases=[
+            Release("lab-1", _at(1), [Deploy("cm", "labs/01_a")]),
+            Release("lab-2", None, [Deploy("cm", "labs/02_a")]),
+        ],
+        sessions=[schedule.Event("lab-1-group-2", "", _at(8), "lab")],
+        semester_end=date(2026, 12, 18),
+    )
+    rows = schedule_plan.planned_rows(sched)
+    assert [r.key for r in rows] == ["lab-1", "lab-1-group-2", "lab-2"]
+
+
+def test_a_session_takes_the_first_number_of_its_label():
+    # `lab-01-group-2` is a group of Lab 1; a release keeps its trailing number.
+    sched = Schedule(
+        releases=[
+            Release("lab-01", _at(1), [Deploy("cm", "labs/01_a")], title="Intro")
+        ],
+        sessions=[
+            schedule.Event("lab-01-group-2", "", _at(2), "lab"),
+            schedule.Event("lab-01-group-3", "", _at(3), "lab", number=3),
+        ],
+    )
+    rows = {r.key: r for r in schedule_plan.planned_rows(sched)}
+    assert (rows["lab-01-group-2"].number, rows["lab-01-group-2"].subtitle) == (
+        1,
+        "Intro",
+    )
+    assert rows["lab-01-group-3"].number == 3
+    assert schedule.label_number("lab-01-group-2") == 2
 
 
 def _shown(rows):

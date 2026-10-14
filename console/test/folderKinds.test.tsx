@@ -57,6 +57,17 @@ describe('the Folder kinds tree', () => {
     expect(kindFolderPaths([...DIRS, 'readings/labs'], {})).not.toContain('readings/labs');
   });
 
+  it('never looks inside a top folder the .releaseignore withholds, as the engine does not', () => {
+    // `kind_folders` descends only RELEASED top folders, so a withheld folder's child gets no chip.
+    const out = kindFolderPaths(DIRS, { 'course/2026/labs': 'lab' }, ['# withheld', 'students/', 'course']);
+    expect(out).not.toContain('students/labs');
+    expect(out).not.toContain('students/lectures');
+    expect(out).not.toContain('course/2026/labs');
+    // The top folder itself is still listed (the engine's `folders` keeps it); a released one is looked inside.
+    expect(out).toContain('students');
+    expect(kindFolderPaths(DIRS, {}, ['readings/'])).toContain('students/labs');
+  });
+
   it('renders nested folders through the withheld tree’s component, each with a picker, detected ones pre-selected', () => {
     const out = html(screen(files()));
     // Both settings are the one file-tree component.

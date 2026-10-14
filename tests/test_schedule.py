@@ -3337,3 +3337,26 @@ def test_no_previous_file_or_an_unreadable_one_gives_no_notice(
     monkeypatch, tmp_path, capsys, previous
 ):
     assert "::notice" not in _validate(monkeypatch, tmp_path, capsys, previous)
+
+
+def test_validate_flags_a_session_label_with_two_numbers_and_no_number():
+    meta = {
+        "events": {
+            "lab-01-group-2": {"event_datetime": "2026-09-17T18:00", "kind": "lab"},
+            "lab-01-group-3": {
+                "event_datetime": "2026-09-18T18:00",
+                "kind": "lab",
+                "number": 1,
+            },
+            "exam-2026-1": {"event_datetime": "2026-11-03", "kind": "exam"},
+        }
+    }
+    sched = parse(meta)
+    flagged = [d for d in sched.dropped if "more than one number" in d]
+    assert flagged == [
+        (
+            "events.lab-01-group-2.number: the label carries more than one number "
+            "and no `number:` - number it or it reads as Lab 1"
+        )
+    ]
+    assert [e.label for e in sched.sessions] == ["lab-01-group-2", "lab-01-group-3"]

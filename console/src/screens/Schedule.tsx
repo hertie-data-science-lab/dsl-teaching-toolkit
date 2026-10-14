@@ -9,7 +9,7 @@ import { Field, Invalid } from '../forms/Form';
 import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, kindIdent, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  assignmentKey, blankDeploy, blankDraft, blockOf, defaultDeployAt, deployAt, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft,
+  assignmentKey, blankDeploy, blankDraft, defaultDeployAt, entryKey, keyEntry, deployAt, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft,
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
@@ -90,7 +90,7 @@ export function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
 export function scheduleAfter(sf: SchedFile, drafts: Draft[], removed: Record<string, Block> = {}): { text: string } | { error: string } {
   const y = new YamlText(sf.text);
   for (const d of drafts) writeDraft(y, d, sf.doc);
-  for (const [id, b] of Object.entries(removed)) y.delete([b, id]);
+  for (const [k, b] of Object.entries(removed)) y.delete([b, keyEntry(sf.doc, k)[1]]);
   return validSchedule(y.toJS()) ? { text: y.text } : { error: invalidText('the schedule', validSchedule) };
 }
 
@@ -228,6 +228,7 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
           );
         })}
         {d.deploys.length ? null : <p class="why">Nothing to release: a session of its own (a second lab group, say), saved under events. Its row still shows on the student site, without files.</p>}
+        {errors.block ? <Invalid>{errors.block}</Invalid> : null}
         <div><button class="btn small quiet" type="button" onClick={() => set({ deploys: [...d.deploys, blankDeploy(repos[0] ?? '')] })}>{d.deploys.length ? 'Add another release item(s)' : 'Add what to release'}</button></div>
       </div>
       {d.id ? <a class="textlink" href={`#release-${d.id}`}>Open release details</a> : null}
@@ -463,7 +464,9 @@ function View(p: ReadyProps) {
   const rows = scheduleRows(status, sched, now, tz);
   const assignmentOf = new Map((status.assignments ?? []).map((a) => [a.slug, a]));
   const key = p.entry;
-  const current = key && key !== 'new' && key !== 'semester' && key !== 'archive' ? rows.find((r) => r.entry === key) : undefined;
+  // A row's sheet key: its id, qualified for an `events:` entry whose id a release also has.
+  const rowKey = (r: { block: Block; entry: string }) => (r.entry === 'semester' || r.entry === 'archive' ? r.entry : entryKey(doc, r.block, r.entry));
+  const current = key && key !== 'new' && key !== 'semester' && key !== 'archive' ? rows.find((r) => rowKey(r) === key) : undefined;
   const repos = (status.course?.materials ?? []).map((m) => m.repo);
   const templates = status.course?.templates ?? [];
   const [newRun, setNewRun] = useState<Values>({});
@@ -578,20 +581,21 @@ function View(p: ReadyProps) {
     }
     if (!filters[r.block]) continue;
     const rel = r.block === 'releases' ? (status.releases ?? []).find((x) => x.id === r.entry) : undefined;
-    const gone = !!removed[r.entry];
+    const rk = rowKey(r);
+    const gone = !!removed[rk];
     const ref = rel ? releaseRef(rel, tz, year) : null;
     const m = rowMark(marks, r);
     const st = gone ? (
-      <><span>Removed.</span><button class="textlink" type="button" style="min-height:0;padding:0" onClick={() => { const n = { ...removed }; delete n[r.entry]; setRemoved(n); }}>Undo</button></>
+      <><span>Removed.</span><button class="textlink" type="button" style="min-height:0;padding:0" onClick={() => { const n = { ...removed }; delete n[rk]; setRemoved(n); }}>Undo</button></>
     ) : m ? <><ReleaseMarks m={m} entry={r.entry} />{m.late ? <a class="textlink" href={`#release-${r.entry}`}>Details</a> : null}</>
-      : rel && !ref ? <><span class="st-note">{NOTHING_TO_RELEASE}</span><a class="textlink" href={`#schedule-${r.entry}`}>Edit</a></>
+      : rel && !ref ? <><span class="st-note">{NOTHING_TO_RELEASE}</span><a class="textlink" href={`#schedule-${rk}`}>Edit</a></>
       : ref && rel?.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small" label="Release early" /></>
       : <span class="st-chip">{r.state}</span>;
     items.push(
-      <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === r.entry ? ' current' : ''}${gone ? ' removed' : ''}${r.show ? '' : ' off-site'}`} data-entry={r.entry}>
+      <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === rk ? ' current' : ''}${gone ? ' removed' : ''}${r.show ? '' : ' off-site'}`} data-entry={r.entry}>
         <span class="k">{siteRowWord(r.type)}</span>
         <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'No date yet'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}{r.tbc ? ' (TBC)' : ''}</span> : r.tbc && r.when ? <span>(TBC)</span> : null}</span>
-        <span class="ttl"><a href={`#schedule-${r.entry}`}><b>{r.ident}</b>: {r.name}</a></span>
+        <span class="ttl"><a href={`#schedule-${rk}`}><b>{r.ident}</b>: {r.name}</a></span>
         <Details r={r} a={r.block === 'assignments' ? assignmentOf.get(r.entry) : undefined} now={now} />
         <span class="st">{st}</span>
       </li>,
@@ -663,9 +667,9 @@ function View(p: ReadyProps) {
             <SaveLine state={save} />
             <div class="savebar">
               <button class="btn" type="button" disabled={save.kind === 'busy' || !dirty} onClick={() => void doSave()}>Save</button>
-              <EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} line={key !== 'new' && key !== 'semester' ? lineOf(sf.text, key, key === 'archive' ? 0 : 2) : undefined} />
-              {key !== 'new' && key !== 'semester' && key !== 'archive' && blockOf(doc, key) && !removed[key] ? (
-                <button class="btn small quiet" type="button" style="margin-left:auto" onClick={() => { setRemoved({ ...removed, [key]: blockOf(doc, key)! }); if (typeof location !== 'undefined') location.hash = '#schedule'; }}>Remove</button>
+              <EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} line={key !== 'new' && key !== 'semester' ? lineOf(sf.text, keyEntry(doc, key)[1], key === 'archive' ? 0 : 2) : undefined} />
+              {key !== 'new' && key !== 'semester' && key !== 'archive' && keyEntry(doc, key)[0] && !removed[key] ? (
+                <button class="btn small quiet" type="button" style="margin-left:auto" onClick={() => { setRemoved({ ...removed, [key]: keyEntry(doc, key)[0]! }); if (typeof location !== 'undefined') location.hash = '#schedule'; }}>Remove</button>
               ) : null}
             </div>
           </div>

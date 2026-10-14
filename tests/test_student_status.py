@@ -705,6 +705,17 @@ def test_a_session_event_is_a_row_of_its_kind_with_nothing_to_ship():
     }
 
 
+def test_a_whole_day_session_is_all_day_for_the_student_console():
+    # A session dated with no time: the console prints the day and no 09:00.
+    facts = _facts()
+    facts.sched.sessions.append(
+        schedule.Event("field-trip", "Field trip", NOW.date(), "lab", number=7)
+    )
+    rows = {r["id"]: r for r in student_status.release_rows(facts, _extra(facts))}
+    assert rows["field-trip"]["all_day"] is True
+    assert rows["lecture-1-online"]["all_day"] is False
+
+
 def test_a_release_with_an_empty_deploy_ships_nothing_like_a_session():
     # The site's `no_materials` test: no copies, no readings - never "not released yet".
     facts = _facts()

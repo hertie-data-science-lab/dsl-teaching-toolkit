@@ -6,6 +6,7 @@ import materialsSchema from '../../schemas/materials.schema.json';
 import opencourseSchema from '../../schemas/opencourse.schema.json';
 import { useEnv, type Env } from '../env';
 import { badgeFiles, denylisted, neverMaterial } from '../edit/badges';
+import { compileAll, withheldBy } from '../edit/glob';
 import { invalidText, useSave, type SaveState } from '../edit/save';
 import { YamlText, compact, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
@@ -536,13 +537,16 @@ const FROM_WORD = { declared: 'set here', name: 'from its name', default: 'by de
  * The folders that carry a kind (`status_json.kind_folders`), out of a repo's folder paths: every
  * released top folder, a folder one level down in a top folder no kind names when its own name
  * names one, and a folder `materials.yml` declares at any depth. Any other folder is part of the
- * folder above it.
+ * folder above it. Like the engine, only a RELEASED top folder is looked inside: a child of one the
+ * `.releaseignore` (`withheld`, its lines) withholds is never a kind folder.
  */
-export function kindFolderPaths(dirs: string[], kinds: Record<string, string>): string[] {
+export function kindFolderPaths(dirs: string[], kinds: Record<string, string>, withheld: string[] = []): string[] {
+  const rules = compileAll(withheld);
   return dirs.filter((d) => {
     const parts = d.split('/');
     return !parts.some((x) => x.startsWith('.')) && !neverMaterial(d) && !denylisted(d)
-      && (parts.length === 1 || !!kinds[d.toLowerCase()] || (parts.length === ALIAS_DEPTH && !aliasKind(parts[0], kinds) && !!aliasKind(d)));
+      && (parts.length === 1 || (!withheldBy(rules, parts[0], true)
+        && (!!kinds[d.toLowerCase()] || (parts.length === ALIAS_DEPTH && !aliasKind(parts[0], kinds) && !!aliasKind(d)))));
   });
 }
 
@@ -625,6 +629,8 @@ export function MaterialsScreen(p: CourseProps) {
   const declared = matFile.kind === 'loading' ? NOTHING_DECLARED : readDeclared(matFile.kind === 'ready' ? matFile.text : null);
   const baseSyl = declared?.declared ? declared.syllabus : '';
   const baseKinds = declared?.kinds ?? {};
+  const ignText = ignFile.kind === 'ready' ? ignFile.text : '';
+  const [ign, setIgn] = useState<string | null>(null);
   const [syl, setSyl] = useState<string | null>(null);
   const [kindsDraft, setKindsDraft] = useState<Record<string, string> | null>(null);
   const [sylSave, runSyl, setSylSave] = useSave(env);
@@ -632,11 +638,12 @@ export function MaterialsScreen(p: CourseProps) {
   const curKinds = kindsDraft ?? baseKinds;
   const dirs = tree.kind === 'ready' ? tree.paths.filter((x) => x.dir).map((x) => x.path) : [];
   // Folders a kind is read for without a declaration: the tree's other folders are part of the one above.
-  const kindSet = new Set(kindFolderPaths(dirs, {}));
+  const withheld = linesOf(ign ?? ignText);
+  const kindSet = new Set(kindFolderPaths(dirs, {}, withheld));
   // The folders that carry a kind (`status_json.kind_folders`, `kindFolderPaths` with the draft's
   // kinds): a top folder declared a kind holds none of the detected ones, a declared path is one at any depth.
   const folders = new Set([...kindSet].filter((d) => !d.includes('/') || !aliasKind(d.split('/')[0], curKinds)));
-  for (const d of kindFolderPaths(dirs.filter((x) => x.includes('/') && curKinds[x.toLowerCase()]), curKinds)) folders.add(d);
+  for (const d of kindFolderPaths(dirs.filter((x) => x.includes('/') && curKinds[x.toLowerCase()]), curKinds, withheld)) folders.add(d);
   const kinds = folderKinds(folders, curKinds);
   // A content kind with no folder (the engine's suggested `kind_folder:<kind>`): a notice, never an error.
   const missingKinds = (m?.checks ?? []).filter((c) => c.id.startsWith('kind_folder:') && !c.done);
@@ -650,8 +657,6 @@ export function MaterialsScreen(p: CourseProps) {
     : sylFile.kind === 'absent' && !files.includes(syllabus)
       ? `There is no ${syllabus} yet: write the syllabus first, or copy the plan.`
       : null;
-  const ignText = ignFile.kind === 'ready' ? ignFile.text : '';
-  const [ign, setIgn] = useState<string | null>(null);
   const [ignSave, runIgn] = useSave(env);
   const scope = newestScope(p);
   // The syllabus line of the checklist; a status without one reads it off `ready`.

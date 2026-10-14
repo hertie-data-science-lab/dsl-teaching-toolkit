@@ -2389,6 +2389,10 @@ def test_handout_releases_synthesised_from_the_assignments_block(monkeypatch):
     assert r.when == datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN)
     # and it is due like any release once its datetime passes - not a minute before
     assert scheduler.due_releases([r], datetime(2026, 9, 22, 8, 0, tzinfo=BERLIN)) == []
+    # The materials copies' hour-before default is not a hand-out's: it ships at its own time.
+    assert (
+        scheduler.due_releases([r], datetime(2026, 9, 22, 8, 59, tzinfo=BERLIN)) == []
+    )
     assert scheduler.due_releases([r], datetime(2026, 9, 22, 10, 0, tzinfo=BERLIN)) == [
         r
     ]

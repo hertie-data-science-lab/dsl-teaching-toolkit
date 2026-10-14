@@ -300,6 +300,12 @@ export function labelNumber(key: string): number | null {
   return m ? Number(m[1] ?? m[2]) : null;
 }
 
+/** An `events:` session's number from its label (schedule.session_number): the FIRST number in it, so `lab-01-group-2` is a group of Lab 1. A release keeps `labelNumber`. */
+export function sessionNumber(key: string): number | null {
+  const m = /\d+/.exec(key);
+  return m ? Number(m[0]) : null;
+}
+
 /**
  * The name the site gives a release's row: the kind's label and its number ("Lecture 3",
  * "Lab 9"). The number is the engine's (`status.json` `releases[].number`, decisions 0013 and

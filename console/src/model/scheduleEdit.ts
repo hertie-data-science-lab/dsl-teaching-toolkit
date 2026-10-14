@@ -4,7 +4,7 @@
 // file already spelt it.
 
 import { obj, type YamlText } from '../edit/yamlText';
-import { kebab, labelNumber } from './format';
+import { kebab, labelNumber, sessionNumber } from './format';
 import { solutionBeforeCutoff } from './labels';
 import { EMPTY_ENTRY_KIND } from './materialsRules';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO } from './policy';
@@ -32,6 +32,8 @@ export interface DeployDraft {
 export interface ReleaseDraft {
   kind: 'session';
   id: string;
+  /** The block the entry was read from; undefined for a new one. A save moves it from here, never from the first block its id is in. */
+  block?: 'releases' | 'events';
   type: string;
   /** The row's number (decision 0020). Undefined until proposed; '' while the box is empty. */
   number?: number | '';
@@ -132,10 +134,24 @@ export function whenOf(raw: unknown, date: string, time: string): unknown {
   return joinWhen(date, time);
 }
 
-/** Which block an entry id is in. */
+/** Which block an entry id is in: the first that has it. */
 export function blockOf(doc: Raw, id: string): Block | null {
   for (const b of ['releases', 'assignments', 'events'] as Block[]) if (id in obj(doc[b])) return b;
   return null;
+}
+
+const EVENTS_KEY = 'events:';
+
+/** The sheet's key for a row: its id, or `events:<id>` for an `events:` entry whose id an earlier block also has. */
+export function entryKey(doc: Raw, block: Block, id: string): string {
+  return block === 'events' && blockOf(doc, id) !== 'events' ? `${EVENTS_KEY}${id}` : id;
+}
+
+/** A sheet key's block and id (`entryKey` reversed): the block is null when the file has no such entry. */
+export function keyEntry(doc: Raw, key: string): [Block | null, string] {
+  if (!key.startsWith(EVENTS_KEY)) return [blockOf(doc, key), key];
+  const id = key.slice(EVENTS_KEY.length);
+  return [id in obj(doc.events) ? 'events' : null, id];
 }
 
 /** The sheet's key for an entry: "semester", "archive", or the id (ids are unique across blocks in practice). */
@@ -146,11 +162,11 @@ export function readDraft(doc: Raw, key: string): Draft | null {
     const date = splitWhen(a?.event_datetime)[0];
     return { kind: 'archive', on: a !== null, when: date ? 'date' : 'days', date, title: s(a?.title), details: s(a?.details), show: a?.show_on_site !== false, tbc: a?.tbc === true, graceDays: typeof a?.grace_days === 'number' ? a.grace_days : ARCHIVE_GRACE_DAYS };
   }
-  const b = blockOf(doc, key);
+  const [b, id] = keyEntry(doc, key);
   if (!b) return null;
-  const e = obj(obj(doc[b])[key]);
-  const common = { id: key, title: s(e.title), details: s(e.details), show: e.show_on_site !== false, tbc: e.tbc === true };
-  const number = entryNumber(key, e) ?? '';
+  const e = obj(obj(doc[b])[id]);
+  const common = { id, title: s(e.title), details: s(e.details), show: e.show_on_site !== false, tbc: e.tbc === true };
+  const number = entryNumber(id, e) ?? '';
   if (b === 'releases') {
     const [date, time] = splitWhen(e.event_datetime);
     const deploys = (Array.isArray(e.deploy) ? e.deploy : []).map((d: unknown, src: number) => {
@@ -158,7 +174,7 @@ export function readDraft(doc: Raw, key: string): Draft | null {
       const [atDate, atTime] = splitWhen(x.deploy_datetime);
       return { repo: s(x.course_source_repo), folder: s(x.course_source_path), dest: s(x.semester_dest_repo), path: s(x.semester_dest_path), atDate, atTime, src };
     });
-    return { kind: 'session', ...common, type: s(e.kind), number, date, time, deploys };
+    return { kind: 'session', ...common, block: 'releases', type: s(e.kind), number, date, time, deploys };
   }
   if (b === 'assignments') {
     const [handoutDate, handoutTime] = splitWhen(e.handout_datetime);
@@ -173,7 +189,9 @@ export function readDraft(doc: Raw, key: string): Draft | null {
   const tbc = common.tbc || s(e.event_datetime).toLowerCase() === 'tbc';
   const type = s(e.kind).trim().toLowerCase();
   // A session with nothing to ship is a session's draft with no deploys (`sessionBlock`).
-  if (isSession(type)) return { kind: 'session', ...common, tbc, type, number, date, time, deploys: [] };
+  // A session's own number is the FIRST in its label (`lab-01-group-2` is Lab 1), as the engine reads it.
+  const sessionNo = Number.isInteger(e.number) && (e.number as number) > 0 ? (e.number as number) : sessionNumber(id) ?? '';
+  if (isSession(type)) return { kind: 'session', ...common, block: 'events', tbc, type, number: sessionNo, date, time, deploys: [] };
   return { kind: 'events', ...common, type: type || 'special_event', date, time, tbc };
 }
 
@@ -200,7 +218,8 @@ function display(raw: Raw, d: { title: string; details: string; show: boolean; t
  */
 function numberValue(d: ReleaseDraft | AssignmentDraft, raw: Raw, fresh: boolean): number | undefined {
   if (d.number === undefined || d.number === '') return undefined;
-  return fresh || 'number' in raw || d.number !== labelNumber(d.id) ? d.number : undefined;
+  const own = d.kind === 'session' && sessionBlock(d) === 'events' ? sessionNumber(d.id) : labelNumber(d.id);
+  return fresh || 'number' in raw || d.number !== own ? d.number : undefined;
 }
 
 /** The entry as it goes into the file, merged over what the file has (none: a new entry). */
@@ -279,13 +298,15 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
     return;
   }
   // A session moves between `releases:` and `events:` as it gains or loses what it releases.
+  // It leaves the block it was READ from: an id another block also has is never taken for it
+  // (`draftErrors` refuses the clash). A draft built by hand with no `block` is looked up.
   const block = d.kind === 'session' ? sessionBlock(d) : d.kind;
-  const from = blockOf(doc, d.id);
+  const from = d.kind === 'session' ? (d.block ?? (d.id ? blockOf(doc, d.id) : null)) : d.id in obj(doc[d.kind]) ? d.kind : null;
   if (from && from !== block) {
     // The block it leaves stays a mapping (`releases: {}`), as the schema wants, when it was its last entry.
     if (Object.keys(obj(doc[from])).length === 1) y.set([from], {});
     else y.delete([from, d.id]);
-  } else if (d.kind === 'session') dropRemovedDeploys(y, d, obj(doc.releases)[d.id]);
+  } else if (d.kind === 'session' && block === 'releases') dropRemovedDeploys(y, d, obj(doc.releases)[d.id]);
   y.assign([block, d.id], entryValue(d, obj(doc[from ?? block])[d.id]));
 }
 
@@ -455,6 +476,10 @@ export function draftErrors(d: Draft, others?: { templateUsers?: (template: stri
   }
   if (d.kind === 'session') {
     if (!d.date && sessionBlock(d) === 'releases') e.date = 'When is needed.';
+    // One label, one block: the same key under both `releases:` and `events:` is two rows nobody can tell apart.
+    const home = d.block ?? sessionBlock(d);
+    const other = home === 'releases' ? 'events' : 'releases';
+    if (d.id && others?.doc && d.id in obj(others.doc[other])) e.block = `${d.id} is already ${other === 'releases' ? 'a release' : 'a session'} in schedule.yml. Rename one of them there.`;
     d.deploys.forEach((dp, i) => {
       if (!dp.repo) e[`deploy${i}.repo`] = 'Choose the repo.';
       if (!dp.folder) e[`deploy${i}.folder`] = 'Name the folder or file.';

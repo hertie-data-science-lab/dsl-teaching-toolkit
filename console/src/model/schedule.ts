@@ -3,7 +3,7 @@
 
 import { parse } from 'yaml';
 import { obj } from '../edit/yamlText';
-import { ASSIGNMENT_WORD, RELEASE_WORD, addDays, assignmentIdent, dayKey, daysBetween, kindIdent, labelNumber, releaseIdent, sortKey, zoned } from './format';
+import { ASSIGNMENT_WORD, RELEASE_WORD, addDays, assignmentIdent, dayKey, daysBetween, kindIdent, labelNumber, releaseIdent, sessionNumber, sortKey, zoned } from './format';
 import { ASSETS_KIND, CONTENT_KINDS } from './materialsRules';
 import type { Release, Status } from './types';
 
@@ -140,7 +140,7 @@ export function scheduleRows(status: Status, sched: Schedule | null, now: number
     }
     for (const ev of sched.events) {
       const session = isSession(ev.kind);
-      const n = session ? ev.number ?? labelNumber(ev.id) : null;
+      const n = session ? ev.number ?? sessionNumber(ev.id) : null;
       rows.push({
         entry: ev.id, block: 'events', type: ev.kind, when: ev.when,
         ident: session ? kindIdent(ev.kind, n) : ev.kind === 'exam' ? 'Exam' : 'Event',

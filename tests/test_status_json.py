@@ -2162,6 +2162,16 @@ def test_a_whole_folder_copy_is_read_as_that_folder():
     assert status_json.kindless_entry_problems(facts) == []
 
 
+def test_released_folders_are_derived_from_the_folders_and_the_releaseignore():
+    # One source of truth: a changed `.releaseignore` changes what is released.
+    m = status_json.MaterialsFacts(
+        "course-materials", folders=("labs", "drafts", "solutions")
+    )
+    assert m.released == ("labs", "drafts")
+    m.releaseignore = "drafts/\n"
+    assert m.released == ("labs",)
+
+
 def test_the_kind_folder_why_and_never_released_folders_skipped():
     # Only never-released folders: as good as none.
     only = _materials("m", folders=("solution",))

@@ -239,14 +239,12 @@ class MaterialsFacts:
     # numbered subfolders: each got rows under the old `lecture` default and is now
     # supporting files (`kindless_problems`).
     numbered: tuple[str, ...] = ()
-    # The folders a release can copy (`_released`); read off `folders` and
-    # `releaseignore` when not given.
-    released: tuple[str, ...] | None = None
 
-    def __post_init__(self):
-        if self.released is None:
-            withheld = listed((self.releaseignore or "").splitlines())
-            self.released = _released(self.folders, withheld)
+    @property
+    def released(self) -> tuple[str, ...]:
+        """The folders a release can copy (`_released`): `folders` less what the
+        `.releaseignore` withholds - derived, so the two can never disagree."""
+        return _released(self.folders, listed((self.releaseignore or "").splitlines()))
 
 
 @dataclass
@@ -892,11 +890,6 @@ def _released(folders: Iterable[str], withheld: Ignore) -> tuple[str, ...]:
     )
 
 
-def _released_folders(m: MaterialsFacts) -> tuple[str, ...]:
-    """`MaterialsFacts.released`."""
-    return m.released or ()
-
-
 def _reviewed(text: str | None) -> bool:
     """A `.releaseignore` somebody has been through: one pattern (a line that is not blank
     or a comment), or the mark the console writes when nothing is withheld. The seeded one
@@ -931,7 +924,7 @@ def _syllabus_why(m: MaterialsFacts) -> str:
 def _named(m: MaterialsFacts) -> dict[str, str | None]:
     """Each released folder's named kind (`alias_kind`), or None: the one alias sweep
     `materials_checks` reads its kind rows from."""
-    return {f: alias_kind(f, m.kinds) for f in _released_folders(m)}
+    return {f: alias_kind(f, m.kinds) for f in m.released}
 
 
 def _kinds_found(named: Mapping[str, str | None]) -> list[dict]:
@@ -1010,7 +1003,7 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
             "At least one folder of a content kind",
             NEEDED,
             bool(shown),
-            _kind_folder_why(_released_folders(m)),
+            _kind_folder_why(m.released),
         ),
         (
             "syllabus",
@@ -1067,7 +1060,7 @@ def _nearest_materials_why(
     first = unmet[repo][0]["id"] if unmet[repo] else None
     if first == "kind_folder":
         m = next(m for m in materials if m.repo == repo)
-        if not _released_folders(m):
+        if not m.released:
             return f"{repo} has no lectures/, labs/ or readings/ folder yet."
         return f"{repo} has only supporting files so far."
     return f"{repo} is not ready yet."
@@ -2745,7 +2738,6 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
         kinds=declared.kinds,
         releaseignore=releaseignore,
         numbered=numbered,
-        released=_released(every, withheld),
     )
 
 

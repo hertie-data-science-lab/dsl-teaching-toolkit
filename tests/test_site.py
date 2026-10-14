@@ -3254,6 +3254,34 @@ def test_a_repo_no_longer_released_into_loses_its_copies(
 # ---------------------------------------------------- sessions with nothing to ship
 
 
+def test_a_whole_day_session_hides_its_time(monkeypatch, tmp_path):
+    # A session dated with no time is a whole day: no fabricated 09:00 on the site.
+    sched = Schedule(
+        releases=[],
+        sessions=[
+            Event("field-trip", "Field trip", date(2026, 9, 7), "lab", number=1),
+            Event("lab-2", "Timed", _at(9, 8), "lab", number=2),
+        ],
+        events=[],
+    )
+    rows = _rows(_plan(monkeypatch, tmp_path, sched))
+    assert rows["lab-01.md"]["hide_time"] is True
+    assert "hide_time" not in rows["lab-02.md"]
+
+
+def test_an_earlier_session_never_takes_its_releases_row_file(monkeypatch, tmp_path):
+    # Rows are in date order, sessions among releases; the file names are not: the
+    # release keeps lab-01.md even when its second group meets first.
+    sched = Schedule(
+        releases=[Release("lab-1", _at(9, 5), [_copy("labs/01_intro")])],
+        sessions=[Event("lab-1-group-2", "", _at(9, 3), "lab", number=1)],
+        events=[],
+    )
+    rows = _rows(_plan(monkeypatch, tmp_path, sched))
+    assert "unreleased" in rows["lab-01.md"]
+    assert rows["lab-01-lab-1-group-2.md"]["no_materials"] is True
+
+
 def test_a_session_event_is_a_row_of_its_kind_with_no_files(monkeypatch, tmp_path):
     # Two lab groups, one handout: the release is group 1, an `events:` lab is group 2.
     # It is "Lab 1" with the release's title, on the Labs tab, never "not yet released"
