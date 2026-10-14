@@ -48,7 +48,6 @@ from .course import (
     SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
     UPSTREAM_BRANCH,
-    canonical_submit_via,
     pages_repo,
 )
 from .derive import (
@@ -1614,10 +1613,7 @@ def main() -> int:
     pa.add_argument(
         "--submit-via",
         dest="submit_via",
-        # `github` stays an accepted choice - not a documented one - for an org whose
-        # rendered New assignment workflow has not refreshed yet and so still sends the
-        # legacy word; `canonical_submit_via` below normalises it before use.
-        choices=[*SUBMIT_VIA, "github", COURSE_DEFAULT_CHOICE],
+        choices=[*SUBMIT_VIA, COURSE_DEFAULT_CHOICE],
         default=COURSE_DEFAULT_CHOICE,
         help="external = handed in off GitHub (Moodle, Kaggle, in class): no repo is "
         "created, and nothing is ever collected",
@@ -1646,11 +1642,6 @@ def main() -> int:
         )
         args.formats = answers["formats"]
         args.submit_via = answers["submit_via"]
-    if args.cmd == "assignment":
-        # Normalised once, here, so an un-refreshed org's workflow sending the legacy
-        # `github` still scaffolds an `assignment_repo` shape and never re-writes the old
-        # word into the file.
-        args.submit_via = canonical_submit_via(args.submit_via)
     # The `--format` box, refused here - before the repo exists, so a mistyped answer
     # costs a re-run and nothing else. Caught on its OWN, the way `deploy.main` catches
     # `parse_path_pairs`: a ValueError from anywhere deeper is a bug and still earns its

@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 from . import (
+    legacy,
     materials,
     opencourse,
     policy,
@@ -760,7 +761,8 @@ def names_json() -> dict:
     """The repo names and paths the console must spell exactly as the engine does, so it
     holds no literal of its own: the config and join repos, the `.system/` folder and every
     record in it (`records.path`), the instructor files, the semester topic, and a
-    semester site's `_config.yml` keys."""
+    semester site's `_config.yml` keys; and the old names the engine still recognises
+    (`legacy.ROWS`)."""
     return {
         "config_repo": CONFIG_REPO,
         "join_repo": JOIN_REPO,
@@ -782,6 +784,7 @@ def names_json() -> dict:
             "synced": list(site_repo.SYNCED_CONFIG_KEYS),
             "institution": list(site_repo.INSTITUTION_CONFIG_KEYS),
         },
+        "legacy": legacy.as_json(),
     }
 
 

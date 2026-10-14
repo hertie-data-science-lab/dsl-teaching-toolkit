@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 import yaml
 
-from . import run
+from . import legacy, run
 from .central import resolve_central_ref
 from .config import read_course, read_semester
 from .course import (
@@ -32,7 +32,6 @@ from .course import (
     COURSE_HUB_TOPIC,
     GRADEBOOK_PREFIX,
     JOIN_REPO,
-    OLD_SEMESTER_TOPIC,
     SEMESTER_TOPIC,
     advertises_console,
     session_dirs,
@@ -46,9 +45,6 @@ from .repos import default_branch, repo_exists, repo_is_archived, repo_missing
 
 # The standalone semester registry in the course org's .github repo.
 SEMESTERS_PATH = "semesters.yml"
-# Its old name and key (decision 0012). Never read: a course that still has the old file
-# and not the new one, or the old `cohorts:` key, is refused as NOT_MIGRATED.
-OLD_SEMESTERS_PATH = "cohort-courses-pages.yml"
 
 INFRA_REPOS = {JOIN_REPO, CONFIG_REPO, ".github"}
 # The topic assign.py stamps on the frozen semester-side template it creates before
@@ -61,25 +57,13 @@ ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
 # The topic that makes a COURSE-org repo an assignment template (decision 0014), as
 # `dsl-materials` makes a materials repo. The `assignment-` name is only the scaffold's
-# default; `scaffold` stamps the topic and the migration stamps it on older templates.
+# default; `scaffold` stamps the topic.
 TEMPLATE_TOPIC = "dsl-assignment"
-# What an assignment template was told by before the topic: the name, on a GitHub template.
-OLD_TEMPLATE_PREFIX = "assignment-"
 
 
 def is_assignment_template(row: dict) -> bool:
     """Whether a course-org listing row is an assignment template: it carries the topic."""
     return TEMPLATE_TOPIC in (row.get("topics") or [])
-
-
-def is_untopicked_template(row: dict) -> bool:
-    """An assignment template by its old mark only - an `assignment-*` GitHub template
-    without the topic: NOT_MIGRATED until the migration's topic step stamps it."""
-    return (
-        row["name"].startswith(OLD_TEMPLATE_PREFIX)
-        and bool(row.get("isTemplate"))
-        and not is_assignment_template(row)
-    )
 
 
 # The repos only a semester org has - the fallback tier signal for an org bootstrapped
@@ -97,14 +81,6 @@ def join_issue_url(semester_org: str) -> str:
     return f"https://github.com/{semester_org}/{JOIN_REPO}/issues/new/choose"
 
 
-def carries_old_semester_topic(repos: list[dict]) -> bool:
-    """Whether the org's `.github` still carries the OLD semester topic and not the new
-    one (decision 0012): a semester that has not been migrated."""
-    dotgithub = next((r for r in repos if r["name"] == ".github"), None)
-    topics = set((dotgithub or {}).get("topics") or [])
-    return OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics
-
-
 def org_tier(repos: list[dict]) -> str | None:
     """`"semester"`, `"course"`, or None when the listing cannot say.
 
@@ -114,11 +90,6 @@ def org_tier(repos: list[dict]) -> str | None:
     elimination, and the faculty-access sweep treats "course" as "push everywhere"."""
     dotgithub = next((r for r in repos if r["name"] == ".github"), None)
     topics = set((dotgithub or {}).get("topics") or [])
-    # The old topic alone is NOT a tier (never read as one): the org's tier cannot be told,
-    # so the faculty-access sweep gives it the read floor. Its caller reports the org as
-    # NOT_MIGRATED (`carries_old_semester_topic`) and carries on with the rest.
-    if carries_old_semester_topic(repos):
-        return None
     if SEMESTER_TOPIC in topics:
         return "semester"
     if COURSE_HUB_TOPIC in topics:
@@ -397,8 +368,6 @@ def _read_semesters(
     `faults.Unusable`, which says this is a file faculty must fix rather than a read that
     failed, so an unattended run can skip it and stay green."""
     content = get_file_content(course_org, ".github", SEMESTERS_PATH)
-    if content is None and get_file_content(course_org, ".github", OLD_SEMESTERS_PATH):
-        return _not_migrated(course_org, OLD_SEMESTERS_PATH, SEMESTERS_PATH, faults)
     if not content:
         return []
     try:
@@ -417,8 +386,9 @@ def _read_semesters(
             )
         )
         return []
-    if isinstance(data, dict) and "cohorts" in data and "semesters" not in data:
-        return _not_migrated(course_org, "cohorts", "semesters", faults)
+    for row in legacy.rows(legacy.SEMESTER_REGISTRY) if isinstance(data, dict) else ():
+        if row.old in data and row.new not in data:
+            return _not_migrated(course_org, row.old, row.new, faults)
     semesters = data.get("semesters", []) if isinstance(data, dict) else data
     if not isinstance(semesters, list) or not all(
         isinstance(c, str) for c in semesters
@@ -598,17 +568,10 @@ def semester_is_live(semester_org: str) -> bool:
     if repo_is_archived(semester_org, CONFIG_REPO):
         log(f"  [skip] {semester_org} (archived semester - left frozen)")
         return False
-    # No config repo under its name at all: either the old topic - a semester archived
-    # before decision 0010 (never migrated, never touched) or one the migration has not
-    # reached - or no semester topic at all, a semester the New semester wizard has
-    # registered before Bootstrap semester has run. Nothing may be written into either.
+    # No config repo under its name and no semester topic: a semester the New semester
+    # wizard has registered before Bootstrap semester has run. Nothing may be written into it.
     if repo_missing(semester_org, CONFIG_REPO):
         topics = _github_topics(semester_org)
-        if topics is not None and _old_topic_only(topics):
-            log(
-                f"  [skip] {semester_org} (not migrated - archived, or run the migration)"
-            )
-            return False
         if topics is not None and SEMESTER_TOPIC not in topics:
             log(
                 f"  [skip] {semester_org} (being set up - Bootstrap semester has not run)"
@@ -625,11 +588,7 @@ def being_set_up(semester_org: str) -> bool:
     if not repo_missing(semester_org, CONFIG_REPO):
         return False
     topics = _github_topics(semester_org)
-    return (
-        topics is not None
-        and SEMESTER_TOPIC not in topics
-        and not _old_topic_only(topics)
-    )
+    return topics is not None and SEMESTER_TOPIC not in topics
 
 
 def _github_topics(org: str) -> set[str] | None:
@@ -639,17 +598,6 @@ def _github_topics(org: str) -> set[str] | None:
     if code == 0:
         return set(out.split())
     return set() if is_missing_resource(out) else None
-
-
-def _old_topic_only(topics: set[str]) -> bool:
-    return OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics
-
-
-def not_migrated_org(org: str) -> bool:
-    """Whether `org`'s `.github` carries the OLD semester topic and not the new one, read
-    from its topics. The listing form, for a caller that already holds one, is
-    `carries_old_semester_topic`."""
-    return _old_topic_only(_github_topics(org) or set())
 
 
 def live_semesters(course_org: str) -> list[str]:
@@ -838,7 +786,5 @@ def discover_content_repos(course_org: str) -> list[str]:
     return sorted(
         r["name"]
         for r in list_org_repos(course_org)
-        if not _is_infra_repo(r)
-        and not is_assignment_template(r)
-        and not is_untopicked_template(r)
+        if not _is_infra_repo(r) and not is_assignment_template(r)
     )

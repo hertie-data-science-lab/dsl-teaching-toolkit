@@ -92,13 +92,6 @@ def test_the_body_carries_the_rung_and_the_moment_it_was_first_seen():
     assert cd._rungs(_state(body)) == {fault.key: "warning"}
 
 
-def test_a_marker_written_before_the_moment_was_recorded_still_reads():
-    # Every digest issue open when this shipped carries `{key: "warning"}`. Read as junk,
-    # each of its faults would appear afresh - a comment and a mail about nothing.
-    assert cd._rungs({"a.f": "urgent"}) == {"a.f": "urgent"}
-    assert cd._first_seen({"a.f": "urgent"}) == {}
-
-
 def test_a_since_stamp_nobody_can_read_is_ignored_not_compared(monkeypatch):
     # A marker somebody edited by hand: one stamp reads, the other does not. The
     # unreadable one used to be sorted last as a NAIVE `datetime.max`, and comparing that

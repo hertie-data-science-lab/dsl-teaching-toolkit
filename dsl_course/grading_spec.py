@@ -63,10 +63,6 @@ from .setting_readers import (
 # everything else in it exists to shape the grading sheet - which is this module's. The
 # names `collect` still spells are re-exported there, so no caller had to move.
 GRADING_FILE = "grading_config.yml"  # on the template's solution branch
-# The name it had before the rename. The engine stopped reading that one, so a template
-# still carrying it declares NOTHING - which looks exactly like an assignment nobody has
-# configured, and grades like one.
-LEGACY_GRADING_FILE = "grading.yml"
 
 
 # The institution's defaults, read once: the run settings of a spec nobody has resolved yet.
@@ -562,8 +558,7 @@ def grading_config_faults(
         fires = schedule.grading_cutoff_datetime(sched, slug)
         text = _grading_text(course_org, template)
         if text is None:
-            faults += _undeclared_faults(slug, template, course_org, fires)
-            continue
+            continue  # declares nothing: graded as an individual, hand-marked one
         # Nothing to compare a file against until the assignment has gone out. Archived
         # repos are left out: one is read-only and a finished semester is meant to stay
         # frozen, so nothing it says can be anybody's fault.
@@ -714,41 +709,6 @@ def _org_settings_faults(semester_org: str) -> list[ConfigFault]:
                 f"them and cannot set them - and they are the one-time semester-org step "
                 f"in docs/DEPLOYMENT-CHECKLIST.md"
             ),
-        )
-    ]
-
-
-def _undeclared_faults(
-    slug: str, template: str, course_org: str, fires: datetime | None
-) -> list[ConfigFault]:
-    """The one fault a template with NO `grading_config.yml` can still have: it is
-    carrying the file under the name the engine stopped reading.
-
-    An assignment that declares nothing is not a fault - it grades as an individual
-    hand-marked one, which is a real choice - so this asks the question only when there is
-    a file to find, and pays one API read for it only on a template that has no definition
-    at all."""
-    try:
-        legacy = get_file_content(
-            course_org, template, LEGACY_GRADING_FILE, ref=SOLUTION_BRANCH
-        )
-    except RuntimeError:
-        return []  # cannot say; `get_file_content` has already said why
-    if legacy is None:
-        return []
-    return [
-        _spec_fault(
-            slug,
-            template,
-            course_org,
-            fires,
-            f"this assignment is defined in `{LEGACY_GRADING_FILE}`, which nothing "
-            f"reads any more - it grades on the toolkit's defaults",
-            file=LEGACY_GRADING_FILE,
-            fix=f"rename `{LEGACY_GRADING_FILE}` to `{GRADING_FILE}` on the template's "
-            f"`{SOLUTION_BRANCH}` branch",
-            plain=f"{slug} keeps its settings in {LEGACY_GRADING_FILE}, which is no "
-            f"longer read, so it is marked on the toolkit's defaults.",
         )
     ]
 

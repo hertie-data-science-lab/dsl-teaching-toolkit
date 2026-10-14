@@ -320,12 +320,9 @@ def refresh_join_team_form(org: str) -> int:
     return 1
 
 
-# The forms were renamed to control the issue-chooser ordering (01-/02- prefix); the old
-# filenames are deleted on live semesters or the chooser shows both generations.
-RETIRED_JOIN_FORMS = (
-    ".github/ISSUE_TEMPLATE/join.yml",
-    ".github/ISSUE_TEMPLATE/join-team.yml",
-)
+# Retired join-repo files, deleted on live semesters or the issue chooser shows both
+# generations. Emptied once every live semester had refreshed (14 Oct 2026).
+RETIRED_JOIN_FORMS: tuple[str, ...] = ()
 
 
 def join_files(org: str) -> dict[str, bytes]:

@@ -56,7 +56,7 @@ from dsl_course import (
 )
 from dsl_course import bootstrap_course as bc
 from dsl_course.central import CENTRAL
-from dsl_course.course import OLD_SEMESTER_TOPIC
+from dsl_course.course import SEMESTER_TOPIC
 from dsl_course.faults import NOT_MIGRATED
 from dsl_course.repos import Converged
 from dsl_course.team_formation import LockWrite
@@ -753,9 +753,12 @@ def test_a_new_course_gets_its_public_website_settings_seeded_off(fake, monkeypa
     )
 
 
-def test_rerun_retires_the_pre_rename_issue_forms(fake):
-    # The forms moved to 01-/02- prefixed names (chooser ordering); a live semester still
-    # carrying the old files would show both generations in the issue chooser.
+def test_rerun_retires_a_retired_issue_form(fake, monkeypatch):
+    # A live semester still carrying a retired form would show both generations in the
+    # issue chooser.
+    monkeypatch.setattr(
+        welcome, "RETIRED_JOIN_FORMS", (".github/ISSUE_TEMPLATE/join.yml",)
+    )
     fake.files[("join", ".github/ISSUE_TEMPLATE/join.yml")] = "name: old\n"
     bc.setup_semester_extras("Semester-f2026", "release")
     assert ("join", ".github/ISSUE_TEMPLATE/join.yml") in fake.deletes
@@ -1167,7 +1170,7 @@ def test_the_course_migrations_refresh_leaves_every_semester_alone(monkeypatch, 
         "list_org_repos",
         lambda org: (
             listed.append(org)
-            or [{"name": ".github", "topics": [OLD_SEMESTER_TOPIC], "archived": False}]
+            or [{"name": ".github", "topics": [SEMESTER_TOPIC], "archived": False}]
         ),
     )
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["cm-f2026"])

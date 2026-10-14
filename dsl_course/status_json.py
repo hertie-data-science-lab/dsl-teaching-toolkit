@@ -89,11 +89,9 @@ from .derive import (
 )
 from .discovery import (
     SEMESTERS_PATH,
-    TEMPLATE_TOPIC,
     assignment_rows,
     handed_out_assignments,
     is_assignment_template,
-    is_untopicked_template,
     list_org_repos,
     org_meta,
     read_semester_registry,
@@ -210,8 +208,6 @@ class TemplateFacts:
     repo: str
     readme: str | None = None
     faults: list[ConfigFault] = field(default_factory=list)
-    # False for an `assignment-*` GitHub template without the `dsl-assignment` topic yet.
-    topic: bool = True
     # Decision 0028: how `main` is written (the key, else read off the solution tree), or
     # `none` when no starter is handed out at all (`hands_out_starter`); then it is not
     # checked.
@@ -415,17 +411,12 @@ _FILES = {
     ASSIGNMENTS_FILE: _Where(
         "assignments", "semester", "K4", "assignment", "ASSIGNMENTS"
     ),
-    # The old file's name too, so a NOT_MIGRATED fault about it files under K3.
-    **dict.fromkeys(
-        (sync_faculty.SEMESTER_PEOPLE_PATH, sync_faculty.OLD_PEOPLE_FILE),
-        _Where("people", "semester", "K3", "instructors", "PEOPLE"),
+    sync_faculty.SEMESTER_PEOPLE_PATH: _Where(
+        "people", "semester", "K3", "instructors", "PEOPLE"
     ),
     roster.ROSTER_PATH: _Where("roster", "semester", "K5", "roster", "ROSTER"),
     teams.TEAMS_PATH: _Where("teams", "semester", "K5", "teams", "TEAMS"),
     grading_spec.GRADING_FILE: _Where(
-        "template", "course", "C5", "template", "GRADING_CONFIG"
-    ),
-    grading_spec.LEGACY_GRADING_FILE: _Where(
         "template", "course", "C5", "template", "GRADING_CONFIG"
     ),
     COURSE_CONFIG: _Where("course", "course", "C3", "course", "COURSE"),
@@ -562,10 +553,7 @@ def _where_filed(fault: ConfigFault) -> _Where:
         return _MARKS_DUE
     if fault.per_semester and fault.file == ASSIGNMENTS_FILE:
         return _HANDED_OUT_SETTING
-    if fault.per_semester and fault.file in (
-        grading_spec.GRADING_FILE,
-        grading_spec.LEGACY_GRADING_FILE,
-    ):
+    if fault.per_semester and fault.file == grading_spec.GRADING_FILE:
         return _SEMESTER_TEMPLATE
     if fault.file.startswith(f"{grading_sheet.SHEETS_DIR}/"):
         return _SHEET
@@ -1165,29 +1153,6 @@ def kindless_entry_problems(facts: SemesterFacts) -> list[dict]:
     return out
 
 
-def template_problem(t: TemplateFacts, org: str) -> dict:
-    """The NOT_MIGRATED problem of an assignment template that has no topic yet."""
-    return {
-        "id": f"template:{_slugify(t.repo)}:{NOT_MIGRATED}",
-        "scope": "course",
-        "stage": "C5",
-        "kind": NOT_MIGRATED,
-        "text": (
-            f"{t.repo} is an assignment template by its old name only: it has no "
-            f"{TEMPLATE_TOPIC} topic yet."
-        ),
-        "stops": "Run the migration, which adds the topic.",
-        "fix": {
-            "repo": f"{org}/{t.repo}",
-            "path": "",
-            "line": None,
-            "screen": None,
-            "entry": t.repo,
-            "url": f"https://github.com/{org}/{t.repo}",
-        },
-    }
-
-
 NOT_NUMBERED, DUPLICATE_NUMBER = "NOT_NUMBERED", "DUPLICATE_NUMBER"
 
 
@@ -1490,13 +1455,10 @@ def main_edited_problem(t: TemplateFacts, org: str) -> dict:
 def template_problems(
     t: TemplateFacts, org: str, moments: Mapping[str, Moment] | None
 ) -> list[dict]:
-    """A template's own problems beside its grading_config.yml faults: NOT_MIGRATED
-    without the topic, MAIN_EDITED on a derived one. Each bites at the template's first
-    dated citing hand-out (`moments`); one no dated hand-out cites is `later`."""
-    if not t.topic:
-        out = [template_problem(t, org)]
-    else:
-        out = [main_edited_problem(t, org)] if t.main_edited else []
+    """A template's own problems beside its grading_config.yml faults: MAIN_EDITED on a
+    derived one. Each bites at the template's first dated citing hand-out (`moments`);
+    one no dated hand-out cites is `later`."""
+    out = [main_edited_problem(t, org)] if t.main_edited else []
     m = (moments or {}).get(t.repo)
     for p in out:
         if m is not None and m.when is not None:
@@ -1518,7 +1480,7 @@ def template_todo_problems(
     yet. A hand-out that has happened never dates one (`_handouts`): with none to come,
     the to-do is only a to-do. It stays in `course.todo[]` either way."""
     m = (moments or {}).get(t.repo)
-    if not t.topic or m is None or m.when is None:
+    if m is None or m.when is None:
         return []
     day = f"The hand-out on {_day(m.when)} would give students"
     parts = []
@@ -1593,8 +1555,7 @@ def starter_check(
 
 
 def template_state(t: TemplateFacts) -> str:
-    """C5, per template: `problem` until the migration gives it the topic, while its
-    grading_config.yml will not grade as written, or while a derived `main` carries a
+    """C5, per template: `problem` while its grading_config.yml will not grade as written, or while a derived `main` carries a
     hand edit; `ready` once its README is written and its starter is in place (derived:
     `starter_check` finds nothing to do), `todo` before."""
     if t.faults or template_problems(t, "", None):
@@ -1830,7 +1791,7 @@ def course_todo(
             entry=t.repo,
         )
         for t in facts.templates
-        if t.topic and not _written(t.readme)
+        if not _written(t.readme)
     ]
     out += [
         _todo(
@@ -1845,7 +1806,7 @@ def course_todo(
             entry=t.repo,
         )
         for t in facts.templates
-        if t.topic and (text := t.starter_todo)
+        if (text := t.starter_todo)
     ]
     order = {"course": 0, "materials": 1, "template": 2}
     return sorted(out, key=lambda e: (order[e["kind"]], e["repo"]))
@@ -2781,14 +2742,8 @@ def _course_facts(course_org: str) -> CourseFacts:
             m = _materials_facts(course_org, name)
             m.topic = False
             facts.materials.append(m)
-        elif is_assignment_template(row) or is_untopicked_template(row):
-            # One without the topic is listed, and NOT_MIGRATED until the migration's
-            # topic step gives it the topic (decision 0014).
-            t = TemplateFacts(
-                name,
-                get_file_content(course_org, name, README_FILE),
-                topic=is_assignment_template(row),
-            )
+        elif is_assignment_template(row):
+            t = TemplateFacts(name, get_file_content(course_org, name, README_FILE))
             text = get_file_content(
                 course_org, name, grading_spec.GRADING_FILE, ref=SOLUTION_BRANCH
             )
@@ -2799,7 +2754,7 @@ def _course_facts(course_org: str) -> CourseFacts:
                 )
             if not hands_out_starter(spec):
                 t.starter = STARTER_NONE
-            elif t.topic:
+            else:
                 _starter_facts(course_org, t, text)
             facts.templates.append(t)
     facts.public_site = pages_repo(course_org) in listing

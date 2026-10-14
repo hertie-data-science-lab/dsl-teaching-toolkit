@@ -7,6 +7,144 @@
     "join_team": "<!-- dsl:join-team -->"
   },
   "join_repo": "join",
+  "legacy": [
+    {
+      "cost": "the assignment is handed out and graded in whatever shape grading_config.yml declares - individual when it declares none",
+      "fault_code": null,
+      "new": "in the assignment's own grading_config.yml, on the course template's `solution` branch",
+      "old": "type",
+      "since": "0.9.0",
+      "where": "schedule.yml assignments.<key>"
+    },
+    {
+      "cost": "the 'Join team' flow uses the cap declared there, or the course default",
+      "fault_code": null,
+      "new": "in semester-config/assignments.yml (`assignments.<key>`)",
+      "old": "max_team_size",
+      "since": "0.9.0",
+      "where": "schedule.yml assignments.<key>"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "all_semesters",
+      "old": "all_cohorts",
+      "since": "0.10.0",
+      "where": "sync-membership dispatch payload"
+    },
+    {
+      "cost": "",
+      "fault_code": "NOT_MIGRATED",
+      "new": "formats",
+      "old": "format",
+      "since": "0.10.0",
+      "where": "assignment settings"
+    },
+    {
+      "cost": "",
+      "fault_code": "NOT_MIGRATED",
+      "new": "semesters",
+      "old": "cohorts",
+      "since": "0.10.0",
+      "where": "semesters.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "opencourse.yml",
+      "old": "_publish-config.yml",
+      "since": "0.9.0",
+      "where": "public site repo"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "assignment_repo",
+      "old": "github",
+      "since": "0.9.0",
+      "where": "grading_config.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "semester-config",
+      "old": "classroom-config",
+      "since": "0.10.0",
+      "where": "semester org"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "join",
+      "old": "welcome",
+      "since": "0.10.0",
+      "where": "semester org"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "instructors.yml",
+      "old": "people.yml",
+      "since": "0.10.0",
+      "where": "semester org"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "dsl-semester",
+      "old": "dsl-cohort",
+      "since": "0.10.0",
+      "where": "semester .github topics"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "semesters.yml",
+      "old": "cohort-courses-pages.yml",
+      "since": "0.10.0",
+      "where": "course .github"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "",
+      "old": "org",
+      "since": "0.10.0",
+      "where": "dsl-course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "",
+      "old": "org_name",
+      "since": "0.10.0",
+      "where": "dsl-course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "",
+      "old": "cohort_defaults",
+      "since": "0.10.0",
+      "where": "dsl-course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "",
+      "old": "semester_defaults",
+      "since": "0.10.0",
+      "where": "dsl-course.yml"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "dsl-assignment",
+      "old": "assignment-",
+      "since": "0.10.0",
+      "where": "course org repos"
+    }
+  ],
   "opencourse_file": "opencourse.yml",
   "records": {
     "archive": ".system/archive.md",

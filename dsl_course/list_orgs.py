@@ -27,11 +27,10 @@ from .central import CENTRAL, MissingCentralRef, resolve_central_ref
 from .course import (
     COURSE_CONFIG,
     COURSE_HUB_TOPIC,
-    OLD_SEMESTER_TOPIC,
     SEMESTER_TOPIC,
 )
 from .discovery import discover_semesters, org_meta, semester_pointer
-from .faults import Unusable, not_migrated_text
+from .faults import Unusable
 from .ghcli import gh_json
 from .log import CLIParser, log_err
 from .repos import org_exists
@@ -143,18 +142,6 @@ def discover_semester_orgs() -> list[dict]:
     """
     semesters = []
     tagged = _tagged_orgs(SEMESTER_TOPIC)
-    # An org still carrying the OLD topic (decision 0012) is listed as unreadable - so the
-    # run's exit code says the picture is partial - and named as NOT_MIGRATED.
-    for owner in sorted(set(_tagged_orgs(OLD_SEMESTER_TOPIC)) - set(tagged)):
-        log_err(f"{owner}: {not_migrated_text(OLD_SEMESTER_TOPIC, SEMESTER_TOPIC)}")
-        semesters.append(
-            {
-                "org": owner,
-                "readable": False,
-                "course": "",
-                "url": f"https://github.com/{owner}",
-            }
-        )
     for owner in tagged:
         meta = _pointer_or_none(owner)
         semesters.append(

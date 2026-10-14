@@ -36,10 +36,6 @@ from .log import Summary, log, log_err, log_ok, log_step, plural
 from .readings import is_reading_overlay
 from .repos import has_never_material_component, repo_exists, repo_is_archived
 
-# RETIRED (decision 0016): the settings an older publish committed into the site repo.
-# `opencourse.yml` holds them now; every publish deletes this, the migration reads it.
-PUBLISH_CONFIG = "_publish-config.yml"
-
 # The shared Jekyll theme, and the ref every generated site pins it at.
 #
 # Pinned, because sites used to track its `main`: a theme PR reached all six live sites

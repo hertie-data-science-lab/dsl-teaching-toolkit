@@ -24,6 +24,8 @@ export interface Names {
   join_markers: { join_course: string; join_team: string };
   /** A semester site's `_config.yml`: the keys every sync rewrites, and the institution keys it leaves to the site (`site_repo` in the engine). */
   site_config: { synced: string[]; institution: string[] };
+  /** The old names the engine still recognises (`legacy.py`): the console spells none of them. */
+  legacy: { old: string; new: string; where: string; since: string; fault_code: string | null; cost: string }[];
 }
 
 export const NAMES: Names = names;

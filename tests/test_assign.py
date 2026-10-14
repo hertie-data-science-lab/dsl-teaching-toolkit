@@ -641,7 +641,15 @@ def test_a_retired_button_left_on_a_template_is_withheld_too(monkeypatch):
     # whose nightly refresh has not run yet still carries the file - and the semester copy
     # frozen from it is what students generate off. So the strip reads what may never be
     # in a student repo, which keeps the retired paths in it.
-    retired = workflows_place.RETIRED_WORKFLOWS[0]
+    assert set(workflows_place.RETIRED_WORKFLOWS) <= set(
+        workflows_place.NEVER_IN_STUDENT_REPOS
+    )
+    retired = ".github/workflows/release-code.yml"
+    monkeypatch.setattr(
+        assign,
+        "NEVER_IN_STUDENT_REPOS",
+        (*workflows_place.NEVER_IN_STUDENT_REPOS, retired),
+    )
     deleted = _template_tree(
         monkeypatch, {retired: "name: Release code", "starter.py": ""}
     )

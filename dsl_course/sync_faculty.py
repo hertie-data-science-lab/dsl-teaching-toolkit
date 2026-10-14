@@ -53,8 +53,6 @@ from .course import (
     INSTRUCTOR_ROLES,
     INSTRUCTORS_FILE,
     INSTRUCTORS_TEAM,
-    OLD_PEOPLE_FILE,
-    RETIRED_COURSE_KEYS,
     active_today,
     instructor_role,
     semester_of,
@@ -64,7 +62,7 @@ from .discovery import (
     discover_content_repos,
     live_semesters,
 )
-from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, Unusable, not_migrated_fault
+from .faults import ConfigFault, Unusable
 from .gh_contents import line_of, take_lines
 from .gh_teams import (
     CREATED,
@@ -503,21 +501,10 @@ def _load_semester_file(
     semester_org: str, *, lines: bool = False
 ) -> tuple[dict | None, str]:
     """`(meta, path)` for this semester's `instructors.yml`; `(None, path)` when it is
-    absent. A semester that has only the old `people.yml` is refused as NOT_MIGRATED:
-    read as absent, it would keep nobody's access and tell nobody why. Raises exactly what
-    `load_yaml_config` raises otherwise."""
-    semester = read_semester(semester_org)
-    meta = semester.file(SEMESTER_PEOPLE_PATH).mapping(lines=lines)
+    absent. Raises exactly what `load_yaml_config` raises otherwise, and
+    `NoInstructorsList` for a present file that lists nobody."""
+    meta = read_semester(semester_org).file(SEMESTER_PEOPLE_PATH).mapping(lines=lines)
     listed = isinstance(meta, dict) and isinstance(meta.get("instructors"), list)
-    # The old file beside a new one that lists nobody - absent, or the seeded all-comment
-    # skeleton - is a semester that has not migrated, whatever the new file says.
-    if not listed and semester.file(OLD_PEOPLE_FILE).mapping():
-        raise NotMigrated(
-            OLD_PEOPLE_FILE, INSTRUCTORS_FILE, f"{semester_org}/{CONFIG_REPO}"
-        )
-    # The old file's shape under the new name: refused too, never read as "nobody".
-    if isinstance(meta, dict) and "people" in meta and not listed:
-        raise NotMigrated("people:", "instructors:", SEMESTER_PEOPLE_PATH)
     if meta is not None and not listed:
         raise NoInstructorsList(
             f"{semester_org}/{CONFIG_REPO}/{SEMESTER_PEOPLE_PATH} declares no "
@@ -542,11 +529,6 @@ def read_semester_people(
     look" must never be reported to faculty as "your file is broken"."""
     try:
         meta, path = _load_semester_file(semester_org, lines=True)
-    except NotMigrated as exc:
-        # The old file, or its old shape in the new one: filed against whichever holds it.
-        file = OLD_PEOPLE_FILE if exc.old == OLD_PEOPLE_FILE else SEMESTER_PEOPLE_PATH
-        faults.append(not_migrated_fault(exc.old, exc.new, where=file, file=file))
-        return None
     except NoInstructorsList:
         faults.append(
             _file_fault(
@@ -622,28 +604,6 @@ def _course_fault(what: str, field: str = "", lineno: int | None = None) -> Conf
     )
 
 
-def retired_course_faults(
-    meta: dict, lines: dict[str, int] | None = None
-) -> list[ConfigFault]:
-    """A NOT_MIGRATED fault for each key `dsl-course.yml` no longer has (decision 0009):
-    `course.RETIRED_COURSE_KEYS`. Pure, so the migration verifies with the same rule."""
-    return [
-        ConfigFault(
-            COURSE_CONFIG,
-            f"`{key}:` is no longer read - remove it",
-            field=key,
-            file=COURSE_CONFIG,
-            in_repo=".github",
-            lineno=line_of(lines or {}, key),
-            fix_text=f"delete the `{key}:` line, or run the migration "
-            "(`python -m dsl_course.migrate`), which strips it",
-            code=NOT_MIGRATED,
-        )
-        for key in RETIRED_COURSE_KEYS
-        if key in meta
-    ]
-
-
 def read_course_config(
     course_org: str, faults: list[ConfigFault]
 ) -> dict[str, list[dict]] | None:
@@ -687,7 +647,6 @@ def read_course_config(
     # for `central_ref:` - and so the loader's reserved key cannot survive into anything
     # that renders this mapping.
     lines = take_lines(meta)
-    faults += retired_course_faults(meta, lines)
     faculty = parse_faculty_from_meta(meta, faults, file=COURSE_CONFIG, repo=".github")
     try:
         resolve_central_ref(
@@ -759,8 +718,8 @@ def sync_semester_instructors(
     not once per semester."""
     try:
         faculty, skipped = _semester_faculty(semester_org)
-    except (NotMigrated, NoInstructorsList) as exc:
-        # Fail CLOSED: an old or empty file is no desired set to prune to. Skip this
+    except NoInstructorsList as exc:
+        # Fail CLOSED: an empty file is no desired set to prune to. Skip this
         # semester's instructors sweep - the digest issue carries the fault - and stay green.
         log_err(f"  ! {exc} - instructors not reconciled for {semester_org}; skipping")
         return 0

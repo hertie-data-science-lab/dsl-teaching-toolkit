@@ -1,7 +1,7 @@
 """Decision 0010: the semester's repos and files have ONE spelling each, declared once.
 
-The engine knows only the new names (no dual reading); the old ones live in `course.py`
-(the retired list) and `migrate.py` (the tool that renames a live org) and nowhere else.
+The engine knows only the new names (no dual reading); the old ones live in `legacy.py`
+and `migrate.py` (the tool that renames a live org) reads them from there.
 """
 
 from __future__ import annotations
@@ -13,23 +13,22 @@ import pytest
 
 from dsl_course import (
     access,
-    bootstrap_course,
     course,
     discovery,
     gradebook,
     profile_readme,
     records,
-    repos,
     team_formation,
     teardown,
     welcome,
 )
-from dsl_course.course import CONFIG_REPO, JOIN_REPO, OLD_CONFIG_REPO, OLD_JOIN_REPO
+from dsl_course.course import CONFIG_REPO, JOIN_REPO
+from dsl_course.migrate import OLD_CONFIG_REPO, OLD_JOIN_REPO
 from tests.conftest import fake_config
 
 ROOT = Path(__file__).resolve().parents[1]
-# The two files allowed to spell a retired name: the declaration and the migration.
-SPELLS_OLD_NAMES = {"dsl_course/course.py", "dsl_course/migrate.py"}
+# The two files allowed to spell a retired name: the registry and the migration.
+SPELLS_OLD_NAMES = {"dsl_course/legacy.py", "dsl_course/migrate.py"}
 
 
 def _shipped_files():
@@ -86,25 +85,6 @@ def test_the_shipped_scripts_carry_the_config_repo_substituted():
     assert not any(b"__CONFIG_REPO__" in body for body in files.values())
 
 
-@pytest.mark.parametrize("name", sorted(course.RETIRED_REPO_NAMES))
-def test_a_retired_name_is_never_created(name, monkeypatch):
-    calls = []
-    monkeypatch.setattr(repos, "gh", lambda *a, **k: calls.append(a) or (0, ""))
-    assert repos.create_repo("org", name) is False
-    assert calls == []
-
-
-def test_bootstrap_refuses_a_semester_the_migration_has_not_reached(monkeypatch):
-    monkeypatch.setattr(
-        discovery, "gh", lambda *a, **k: (0, f"{course.OLD_SEMESTER_TOPIC}\n")
-    )
-    assert bootstrap_course.refuses_unmigrated("sem-f2026") is True
-    monkeypatch.setattr(
-        discovery, "gh", lambda *a, **k: (0, f"{course.SEMESTER_TOPIC}\n")
-    )
-    assert bootstrap_course.refuses_unmigrated("sem-f2026") is False
-
-
 # ------------------------------------------------------------------ .system/ (item 3)
 
 
@@ -129,38 +109,15 @@ def test_a_semester_is_found_through_the_pointer_in_its_config_repo(monkeypatch)
     assert reads == [("Sem-f2026", CONFIG_REPO, ".system/dsl-course.yml")]
 
 
-def test_a_semester_archived_before_the_rename_is_never_written_into(monkeypatch):
-    # No semester-config under its new name, and the old topic: frozen or unmigrated.
+def test_a_semester_without_its_config_repo_or_topic_is_never_written_into(monkeypatch):
+    # No semester-config under its name, and no semester topic: not set up (or never renamed).
     monkeypatch.setattr(discovery, "repo_missing", lambda org, name: True)
-    monkeypatch.setattr(
-        discovery, "gh", lambda *a, **k: (0, f"{course.OLD_SEMESTER_TOPIC}\n")
-    )
+    monkeypatch.setattr(discovery, "gh", lambda *a, **k: (0, "dsl-cohort\n"))
     assert discovery.semester_is_live("Old-f2025") is False
     monkeypatch.setattr(
         discovery, "gh", lambda *a, **k: (0, f"{course.SEMESTER_TOPIC}\n")
     )
     assert discovery.semester_is_live("New-f2026") is True
-
-
-def test_the_refresh_skips_a_frozen_pre_rename_semester_without_a_fault(
-    monkeypatch, capsys
-):
-    from test_bootstrap_seeding import _stub_refresh
-
-    from dsl_course import seed
-
-    _stub_refresh(monkeypatch)
-    frozen = [
-        {"name": ".github", "topics": [course.OLD_SEMESTER_TOPIC], "archived": True},
-        {"name": OLD_CONFIG_REPO, "topics": [], "archived": True},
-    ]
-    monkeypatch.setattr(
-        seed, "list_org_repos", lambda org: frozen if org == "Semester-f2026" else []
-    )
-    assert seed.refresh("Course-Org") == 0
-    out = capsys.readouterr()
-    assert "Semester-f2026 (archived semester - left frozen)" in out.out
-    assert "NOT_MIGRATED" not in out.out + out.err
 
 
 def test_the_record_paths_all_sit_under_one_folder():

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 
-from . import mailer, policy
+from . import legacy, mailer, policy
 from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
 from .course import (
     ASSIGNMENT_TYPES,
@@ -125,33 +125,24 @@ _AUTOGRADE_CONCURRENCY = """    concurrency:
 """
 
 
-# Which semester a repository_dispatch names, and whether it asks for all of them. The old
-# `cohort_org` (decision 0012) is never read: a dispatch that still sends it fails its step
-# as NOT_MIGRATED, from the check below.
+# Which semester a repository_dispatch names, and whether it asks for all of them.
 #
-# ONE narrow exception: `all_cohorts`, which the ds01 membership timer - an EXTERNAL system,
-# changed in lockstep at Promote - still sends. Read as a deprecated alias of
-# `all_semesters`, with a line in the log and no fault, so the hourly sync does not go red
-# in the gap. It goes once ds01-infra sends `all_semesters` (maintainers.md, Migration).
+# The ds01 membership timer - an EXTERNAL system - still sends the old spelling of
+# `all_semesters` (`legacy.MEMBERSHIP_DISPATCH`): read as an alias, with a line in the log
+# and no fault, so the hourly sync does not go red. It goes once ds01-infra sends
+# `all_semesters`.
 _PAYLOAD_SEMESTER = "github.event.client_payload.semester_org"
+(_ALL_ALIAS,) = (row.old for row in legacy.rows(legacy.MEMBERSHIP_DISPATCH))
 _PAYLOAD_ALL_SEMESTERS = (
     "(toJSON(github.event.client_payload.all_semesters) == 'true' "
-    "|| toJSON(github.event.client_payload.all_cohorts) == 'true')"
+    f"|| toJSON(github.event.client_payload.{_ALL_ALIAS}) == 'true')"
 )
-_OLD_PAYLOAD_ENV = (
-    "          OLD_PAYLOAD: ${{ github.event.client_payload.cohort_org }}\n"
-)
-_OLD_PAYLOAD_CHECK = """          if [ -n "$OLD_PAYLOAD" ]; then
-            echo "::error::NOT_MIGRATED: this dispatch sends cohort_org, the old name of semester_org - run the migration"
-            exit 1
-          fi
-"""
 _DEPRECATED_ALL_ENV = (
     "          DEPRECATED_ALL: "
-    "${{ toJSON(github.event.client_payload.all_cohorts) == 'true' }}\n"
+    f"${{{{ toJSON(github.event.client_payload.{_ALL_ALIAS}) == 'true' }}}}\n"
 )
-_DEPRECATED_ALL_NOTE = """          if [ "$DEPRECATED_ALL" = "true" ]; then
-            echo "deprecated: this dispatch sends all_cohorts - read as all_semesters; switch the sender to all_semesters"
+_DEPRECATED_ALL_NOTE = f"""          if [ "$DEPRECATED_ALL" = "true" ]; then
+            echo "deprecated: this dispatch sends {_ALL_ALIAS} - read as all_semesters; switch the sender to all_semesters"
           fi
 """
 
@@ -1142,12 +1133,12 @@ def render_sync_membership(semester_orgs: list[str]) -> str:
         "Sync membership",
         f"""          # The JSON boolean `true` and nothing else - a string "true" or a 1 is absent.
           DISPATCH_ALL: ${{{{ {_PAYLOAD_ALL_SEMESTERS} }}}}
-{_OLD_PAYLOAD_ENV}{_DEPRECATED_ALL_ENV}# A fault in the course org's own config is emailed to its admins from this step (see
+{_DEPRECATED_ALL_ENV}# A fault in the course org's own config is emailed to its admins from this step (see
 # dsl_course.notify.route_course), so the automatic job carries the transport alongside
 # the token. The manual button does not: somebody is standing at that run and reads its log.
 {_MAIL_ENV}
 """,
-        f"""{_OLD_PAYLOAD_CHECK}{_DEPRECATED_ALL_NOTE}          # First, and never fatal: a push to either of the course's own config files is
+        f"""{_DEPRECATED_ALL_NOTE}          # First, and never fatal: a push to either of the course's own config files is
           # what this job is here for, and the reconcile below is what SKIPS the course
           # when one of them cannot be read. Its own digest issue and mail are the report.
           python3 -m dsl_course.scheduler --course-org "$COURSE" --check-course-config --no-preview
@@ -1567,9 +1558,9 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           DISPATCH_SEMESTER: ${{{{ {_PAYLOAD_SEMESTER} }}}}
-{_OLD_PAYLOAD_ENV}{_MAIL_ENV}
+{_MAIL_ENV}
         run: |
-{_OLD_PAYLOAD_CHECK}          # A payload with no semester names nothing to send for. Fail loudly rather than
+          # A payload with no semester names nothing to send for. Fail loudly rather than
           # let an empty --semester-org reach the CLI and be refused for the wrong reason.
           if [ -z "$DISPATCH_SEMESTER" ]; then
             echo "::error::the send-codes dispatch carried no client_payload.semester_org - nothing to send."
@@ -1716,7 +1707,7 @@ on:
           PREVIEW: ${{{{ inputs.preview }}}}
           EVENT: ${{{{ github.event_name }}}}
           DRIVER: ${{{{ github.event.client_payload.driver }}}}
-{_OLD_PAYLOAD_ENV}# A source the plan cites and the org has not got is emailed to the people git names for
+# A source the plan cites and the org has not got is emailed to the people git names for
 # it, from this step (see dsl_course.notify) - so the release pass carries the transport
 # alongside the token. Without it the digest issue's @mention is the only channel, which
 # reaches whoever happens to read GitHub notifications that week. This pass also pre-flights
@@ -1724,7 +1715,7 @@ on:
 # admins' `email:` there instead.
 {_MAIL_ENV}
         run: |
-{_OLD_PAYLOAD_CHECK}          gh auth setup-git
+          gh auth setup-git
           # Which driver delivered this tick. The run history is the only record of that,
           # and it is what says whether both drivers are alive (a dispatch names its
           # sender in client_payload.driver; the cron has nobody to name).
@@ -2190,8 +2181,8 @@ def render_sync_site(semester_orgs: list[str]) -> str:
     skip the check-team gate (no actor), same as Sync membership and the scheduler."""
     auto = _sync_auto_job(
         "Sync site",
-        _OLD_PAYLOAD_ENV,
-        f"""{_OLD_PAYLOAD_CHECK}          gh auth setup-git
+        "",
+        """          gh auth setup-git
           args=(--course-org "$COURSE")
 """,
         'python3 -m dsl_course.site sync "${args[@]}"',

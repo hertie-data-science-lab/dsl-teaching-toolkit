@@ -327,21 +327,6 @@ def test_shared_renamed_before_it_shipped_has_no_alias_and_is_dropped(capsys):
     )
 
 
-def test_the_legacy_github_spelling_reads_as_assignment_repo_with_no_warning(capsys):
-    # Live INSTRUCTOR-OWNED `grading_config.yml` files in real course orgs carry
-    # `submit_via: github` for ever, so the alias must read clean - no Dropped line - and
-    # drive exactly the shape a fresh `assignment_repo` config would.
-    spec = collect.parse_grading_spec("submit_via: github\n")
-    assert spec.submit_via == "assignment_repo"
-    assert spec.dropped == ()
-    assert capsys.readouterr().err == ""
-    canonical = collect.parse_grading_spec("submit_via: assignment_repo\n")
-    assert spec.has_receipts_issue is canonical.has_receipts_issue is True
-    assert spec.collects_commits is canonical.collects_commits is True
-    assert spec.creates_unit_repos is canonical.creates_unit_repos is True
-    assert spec.submit_shape == canonical.submit_shape == "assignment-repo-private"
-
-
 def test_visibility_says_nothing_about_an_assignment_that_creates_no_repo(monkeypatch):
     # Nothing is created for an external assignment, so there is nothing for a visibility
     # to describe - and leaving `public` standing there would read as a promise.
@@ -6268,15 +6253,6 @@ def test_the_grading_moment_is_the_late_cutoff(monkeypatch):
     )
     settings.semester_blocks.cache_clear()
     assert _collect_configs(monkeypatch)[0].fires == DUE_AT
-
-
-def test_a_template_still_using_the_pre_rename_filename_says_so(monkeypatch):
-    # `grading.yml` is read by nothing, so the assignment grades on the defaults while the
-    # file that was meant to define it sits right there.
-    (fault,) = _collect_configs(monkeypatch, text=None, legacy="type: group\n")
-    assert fault.file == "grading.yml"
-    assert "nothing reads any more" in fault.what
-    assert fault.fix().startswith("rename `grading.yml` to `grading_config.yml`")
 
 
 def test_an_assignment_that_declares_nothing_at_all_is_not_a_fault(monkeypatch):

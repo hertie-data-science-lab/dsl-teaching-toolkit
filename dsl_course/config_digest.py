@@ -419,26 +419,17 @@ def _write_marker(name: str, value) -> str:
 
 
 def _rungs(state: dict) -> dict[str, str]:
-    """The rung each key was last reported at, out of a state marker in EITHER shape.
-
-    Part I stored the rung alone (`{key: "warning"}`); it now travels with the moment the
-    fault was first seen, which is what an immediate fault's reminders count from. Every
-    digest issue open at the moment this ships carries the old shape, and read as junk
-    each of its faults would appear afresh - a comment and a mail apiece, about nothing
-    that changed."""
-    out = {}
-    for key, value in (state or {}).items():
-        if isinstance(value, str):
-            out[key] = value
-        elif isinstance(value, dict) and isinstance(value.get("rung"), str):
-            out[key] = value["rung"]
-    return out
+    """The rung each key was last reported at, out of a state marker."""
+    return {
+        key: value["rung"]
+        for key, value in (state or {}).items()
+        if isinstance(value, dict) and isinstance(value.get("rung"), str)
+    }
 
 
 def _first_seen(state: dict) -> dict[str, str]:
-    """When each recorded key was first seen, for the shape that carries it. A key from
-    the old shape has no answer, and is taken to have been seen now (see `sync`) - which
-    delays its first reminder by at most one deploy."""
+    """When each recorded key was first seen. A key with none recorded is taken to have
+    been seen now (see `sync`)."""
     return {
         key: value["since"]
         for key, value in (state or {}).items()
@@ -920,7 +911,6 @@ def sync(
     now,
     dry_run: bool = False,
     resolve_mention: Callable[[], list[str]] | None = None,
-    migrate: Callable[[dict, list], dict] | None = None,
     absorb: str | None = None,
 ) -> DigestResult:
     """Bring this semester's digest issue for one FILE in line with `faults`. Reports what
@@ -933,9 +923,6 @@ def sync(
     the logins the last body recorded and spends no API call at all - which matters,
     because the answer costs a blame query, a instructors.yml read and a commit lookup per
     repo, every fifteen minutes for as long as the fault stands.
-
-    `migrate` renames keys recorded under an older scheme (see `source_digest.migrated`).
-    A digest whose keys have never changed shape passes nothing.
 
     `absorb` is the title of an issue this one has TAKEN OVER: its recorded state is read
     into this tick's (this issue's own wins) and it is closed once, on the first tick that
@@ -1002,8 +989,6 @@ def sync(
             **recorded,
         }
     previous = _rungs(recorded)
-    if migrate:
-        previous = migrate(previous, faults)
     # When each standing fault was first seen. A key with nothing recorded is seen NOW -
     # which is right for one that has just appeared, and one deploy's delay for one whose
     # issue predates this marker.

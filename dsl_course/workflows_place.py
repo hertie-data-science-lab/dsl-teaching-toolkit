@@ -23,10 +23,9 @@ RELEASE_WORKFLOWS = (RELEASE_MATERIALS, RELEASE_ASSIGNMENT)
 # release copies, so the button would only ever name a source with nothing to release.
 TEMPLATE_WORKFLOWS = (RELEASE_ASSIGNMENT,)
 
-# Retired in favour of the consolidated Release materials workflow (whose course_source_path
-# takes any folder or file, which is all Release code ever did) - removed from content repos
-# seeded before that change, so no repo keeps a workflow whose CLI no longer exists.
-RETIRED_WORKFLOWS = (".github/workflows/release-code.yml",)
+# Retired content-repo and template workflows, removed from repos seeded before the change.
+# Emptied once every live org had refreshed (14 Oct 2026).
+RETIRED_WORKFLOWS: tuple[str, ...] = ()
 
 # What no student repo may carry: every faculty release button, whether a repo hosts it
 # today or was seeded before it was retired. `assign.withhold_from_template` strips these

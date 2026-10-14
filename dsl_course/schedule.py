@@ -102,7 +102,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from . import policy, run, settings
+from . import legacy, policy, run, settings
 from .course import (
     ASSIGNMENTS_FILE,
     CONFIG_REPO,
@@ -122,11 +122,8 @@ from .faults import (
     FaultKind,
     Severity,
     hours,
-    moved_text,
-    not_migrated_text,
 )
 from .gh_contents import (
-    LINES,
     get_file_content,
     get_file_with_sha,
     line_of,
@@ -698,11 +695,6 @@ KNOWN_TOP_LEVEL = frozenset(
         "archive",
     }
 )
-# Keys that went (decision 0009): never read, each a NOT_MIGRATED fault saying where the
-# fact lives now. The migration deletes them.
-RETIRED_TOP_KEYS = {
-    "enrolment": "enrolment codes are mailed on a push to students.csv",
-}
 KNOWN_RELEASE = frozenset(
     {
         "event_datetime",
@@ -715,14 +707,6 @@ KNOWN_RELEASE = frozenset(
         "show_on_site",
     }
 )
-# The row kind's old key (decision 0012), on a release or an event: never read, noted as
-# NOT_MIGRATED - the row is placed as if it declared no kind.
-RENAMED_ROW_KEYS = {"type": "kind"}
-# A release that handed out an assignment: an undocumented second route to what
-# `assignments.<key>.handout_datetime` does. Noted and ignored; the entry still deploys.
-RETIRED_RELEASE_KEYS = {
-    "assignment": "an assignment hands out at its `assignments.<key>.handout_datetime`",
-}
 # What `releases.<label>.kind` may say: the policy's content kinds (`policy.yml` `kinds:`,
 # every kind the engine does not create rows for itself). Anything else lands on `other`.
 KNOWN_ROW_KINDS = frozenset(policy.content_kinds())
@@ -748,87 +732,6 @@ KNOWN_ASSIGNMENT = frozenset(
         "show_on_site",
     }
 )
-# Keys an assignment entry no longer takes (decision 0009: schedule.yml is timings only).
-# The ENTRY is dropped, as for a renamed key: read without them it would grade to another
-# cutoff or hand out into repos of another name, and say nothing.
-RETIRED_ASSIGNMENT_KEYS = {
-    "grading_datetime": (
-        f"the late cutoff is the due date plus `late_window_days` ({ASSIGNMENTS_FILE})"
-    ),
-    "semester_dest_repo": (
-        f"it is `assignments.<key>.semester_dest_repo` in {ASSIGNMENTS_FILE}"
-    ),
-    "cohort_dest_repo": (
-        f"it is `assignments.<key>.semester_dest_repo` in {ASSIGNMENTS_FILE}"
-    ),
-}
-RETIRED_COST = "entry dropped: no hand out, freeze or grading until fixed"
-# Display-only, so the entry is KEPT and the key faulted: nothing it runs depends on it.
-RETIRED_DISPLAY_KEYS = {
-    "title": "the assignment's name is `title:` in its template's grading_config.yml",
-}
-
-
-def _retired(old: str, home: str) -> str:
-    return f"{moved_text(old, home)} - {RETIRED_COST}"
-
-
-# Settings that USED to live in an `assignments:` entry and now live elsewhere: the shape
-# (`type`) in the assignment's own `grading_config.yml`, on the course template's solution
-# branch; a run setting (`settings.RUN_KEYS`, decision 0009) in the semester's
-# `assignments.yml` - a template's grading_config.yml refuses one. Flagged BY NAME
-# rather than as generic unknown keys: a semester still carrying `type: group` is not making
-# a typo, it is declaring something in a file that no longer reads it, and the message has
-# to say where the declaration went.
-_GRADING_CONFIG_HOME = "in the assignment's own grading_config.yml, on the course template's `solution` branch"
-_RUN_KEYS_HOME = f"in {CONFIG_REPO}/{ASSIGNMENTS_FILE} (`assignments.<key>`)"
-# key -> what ignoring it here costs. Where it MOVED TO is `_moved_home(key)`, built from
-# the key at the flag site, so a third retired key cannot be filed under a home that
-# names a different setting.
-MOVED_ASSIGNMENT_KEYS = {
-    "type": (
-        "the assignment is handed out and graded in whatever shape grading_config.yml "
-        "declares - individual when it declares none"
-    ),
-    "max_team_size": (
-        "the 'Join team' flow uses the cap declared there, or the course default"
-    ),
-}
-
-
-def _moved_home(key: str) -> str:
-    """Where a `MOVED_ASSIGNMENT_KEYS` setting is declared now."""
-    return _RUN_KEYS_HOME if key in settings.RUN_KEYS else _GRADING_CONFIG_HOME
-
-
-# Keys RENAMED (decision 0012), old -> new. Never read: an entry that still spells one is
-# DROPPED as NOT_MIGRATED rather than half-read - a destination silently defaulted to the
-# slug would hand out into a repo nobody named.
-RENAMED_DEST_KEYS = {
-    "cohort_dest_repo": "semester_dest_repo",
-    "cohort_dest_path": "semester_dest_path",
-}
-
-
-def not_migrated_keys(
-    drops: Drops,
-    entry: dict,
-    where: str,
-    renames: dict[str, str],
-    lines: dict[str, int] | None = None,
-    say=not_migrated_text,
-) -> bool:
-    """Whether `entry` spells any old key, each noted as NOT_MIGRATED (`say(old, value)`
-    words it: a rename by default, `moved_text` for a key that went). Called before
-    `take_lines` (or handed its `lines`), so the note can cite the old key's line."""
-    if lines is None:
-        lines = entry.get(LINES) if isinstance(entry.get(LINES), dict) else {}
-    found = [old for old in renames if old in entry]
-    for old in found:
-        drops.note(where, old, say(old, renames[old]), lines, NOT_MIGRATED)
-    return bool(found)
-
-
 KNOWN_EVENT = frozenset(
     {"kind", "number", "title", "details", "event_datetime", "tbc", "show_on_site"}
 )
@@ -1010,8 +913,6 @@ def _parse_deploy(raw: object, tz: ZoneInfo, drops: Drops, label: str) -> list[D
         if not isinstance(d, dict):
             _drop(drops, where, "not a mapping", "this copy never ships")
             continue
-        if not_migrated_keys(drops, d, where, RENAMED_DEST_KEYS):
-            continue
         lines = take_lines(d)
         src_repo, src_path = d.get("course_source_repo"), d.get("course_source_path")
         if not src_repo or not src_path:
@@ -1123,16 +1024,10 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
                 "event_datetime",
             )
             continue
-        not_migrated_keys(drops, entry, where, RENAMED_ROW_KEYS, lines)
-        not_migrated_keys(
-            drops, entry, where, RETIRED_RELEASE_KEYS, lines, say=moved_text
-        )
         _flag_unknown_keys(
             drops,
             entry,
-            KNOWN_RELEASE
-            | frozenset(RENAMED_ROW_KEYS)
-            | frozenset(RETIRED_RELEASE_KEYS),
+            KNOWN_RELEASE,
             where,
             "that setting is ignored",
             lines,
@@ -1244,20 +1139,6 @@ def _parse_assignments(
         return out
     sources: dict[str, str] = {}  # course_source_repo -> the slug that claimed it
     names: dict[str, str] = {}  # semester-side name -> the slug that claimed it
-    mapping = {
-        slug: entry
-        for slug, entry in mapping.items()
-        if not (
-            isinstance(entry, dict)
-            and not_migrated_keys(
-                drops,
-                entry,
-                f"assignments.{slug}",
-                RETIRED_ASSIGNMENT_KEYS,
-                say=_retired,
-            )
-        )
-    }
     shared = _shared_sources(
         mapping, dests
     )  # sources every citing entry names a dest for
@@ -1325,24 +1206,19 @@ def _parse_assignments(
             continue
         sources[source_repo] = str(slug)
         names[name] = str(slug)
-        for moved, moved_cost in MOVED_ASSIGNMENT_KEYS.items():
-            if moved in entry:
+        moved = legacy.rows(legacy.SCHEDULE_ASSIGNMENT)
+        for row in moved:
+            if row.old in entry:
                 drops.note(
                     where,
-                    moved,
-                    f"moved to `{moved}:` {_moved_home(moved)} - ignored here, so "
-                    f"{moved_cost}",
+                    row.old,
+                    f"moved to `{row.old}:` {row.new} - ignored here, so {row.cost}",
                     lines,
                 )
-        not_migrated_keys(
-            drops, entry, where, RETIRED_DISPLAY_KEYS, lines, say=moved_text
-        )
         _flag_unknown_keys(
             drops,
             entry,
-            KNOWN_ASSIGNMENT
-            | frozenset(MOVED_ASSIGNMENT_KEYS)
-            | frozenset(RETIRED_DISPLAY_KEYS),
+            KNOWN_ASSIGNMENT | {row.old for row in moved},
             where,
             "that setting is ignored",
             lines,
@@ -1512,11 +1388,10 @@ def _parse_events(
                 "event_datetime",
             )
             continue
-        not_migrated_keys(drops, entry, where, RENAMED_ROW_KEYS, lines)
         _flag_unknown_keys(
             drops,
             entry,
-            KNOWN_EVENT | frozenset(RENAMED_ROW_KEYS),
+            KNOWN_EVENT,
             where,
             "that setting is ignored",
             lines,
@@ -1717,11 +1592,10 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
     # A whole plan under an unknown top-level key (`materials_releases:` instead of
     # `releases:`) otherwise validates as "OK: nothing dropped" with zero releases - the
     # worst kind of silent failure, since the file looks full. Flag it here.
-    not_migrated_keys(drops, meta, "", RETIRED_TOP_KEYS, drops.top, say=moved_text)
     _flag_unknown_keys(
         drops,
         meta,
-        KNOWN_TOP_LEVEL | frozenset(RETIRED_TOP_KEYS),
+        KNOWN_TOP_LEVEL,
         "",
         "nothing it contains is scheduled or shown",
     )

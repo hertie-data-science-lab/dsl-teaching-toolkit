@@ -628,47 +628,6 @@ def test_a_materials_repo_by_its_old_name_only_is_not_migrated():
     assert validate(doc, schemas.status_schema()) == []
 
 
-def test_an_assignment_template_by_its_old_name_only_is_not_migrated():
-    old = status_json.TemplateFacts("assignment-1-f2025", "# Trees", topic=False)
-    doc = _render(_course(templates=[old]))
-    assert doc["course"]["templates"] == [
-        {
-            "repo": "assignment-1-f2025",
-            "state": "problem",
-            "starter": "derived",
-        }
-    ]
-    (problem,) = [p for p in doc["problems"] if p["id"].startswith("template:")]
-    assert problem["id"] == "template:assignment-1-f2025:NOT_MIGRATED"
-    assert "dsl-assignment" in problem["text"] and problem["stage"] == "C5"
-    assert validate(doc, schemas.status_schema()) == []
-
-
-def test_gather_lists_a_template_without_the_topic_as_not_migrated(monkeypatch):
-    listing = [
-        repo_row(".github"),
-        repo_row("trees", isTemplate=True, topics=["dsl-assignment"]),
-        repo_row("assignment-1-f2025", isTemplate=True),
-        # Shares the prefix, is no GitHub template: not an assignment template at all.
-        repo_row("assignment-notes"),
-    ]
-    monkeypatch.setattr(status_json, "list_org_repos", lambda org: listing)
-    monkeypatch.setattr(status_json, "get_file_content", lambda *a, **k: None)
-    monkeypatch.setattr(status_json, "repo_path_shas", lambda *a, **k: {})
-    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
-    monkeypatch.setattr(status_json, "org_meta", lambda org: {})
-    monkeypatch.setattr(status_json, "read_semester_registry", lambda org, f: [])
-    monkeypatch.setattr(status_json, "load_opencourse", lambda org: None)
-    monkeypatch.setattr(
-        status_json.sync_faculty, "read_course_config", lambda org, faults: None
-    )
-    facts = status_json.gather_course(COURSE)
-    assert [(t.repo, t.topic) for t in facts.templates] == [
-        ("assignment-1-f2025", False),
-        ("trees", True),
-    ]
-
-
 def test_gather_raises_no_problem_for_an_archived_template_without_the_topic(
     monkeypatch,
 ):

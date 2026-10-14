@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 import yaml
 
-from . import policy
+from . import legacy, policy
 from .config import read_local
 from .course import (
     discover_local_sessions,
@@ -48,7 +48,6 @@ from .repos import (
     is_never_material,
 )
 from .site_repo import (
-    PUBLISH_CONFIG,
     ROW_NOUN,
     Link,
     SitePlan,
@@ -245,7 +244,7 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
     from `oc`, the course's `opencourse.yml`.
 
     The first run scaffolds the site (Pages), later runs re-sync it; each deletes a
-    `PUBLISH_CONFIG` an older publish left in the site repo. Hosts the declared
+    retired file an older publish left in the site repo (`legacy.PUBLIC_SITE`). Hosts the declared
     `source_repo`'s files - every section it
     actually has (see course.discover_sections), plus, in `actual-readings` mode, `readings`
     - in the public site repo and links to them with site-relative URLs. `reading-list` mode
@@ -419,7 +418,7 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             # older publish kept here: `opencourse.yml` holds them now.
             retire=(
                 *retired_pages(site_wd, ("assignments.md",)),
-                PUBLISH_CONFIG,
+                *(row.old for row in legacy.rows(legacy.PUBLIC_SITE)),
             ),
             commit=f"site: publish public course site from {source_repo}",
             label="public site",

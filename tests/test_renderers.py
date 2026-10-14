@@ -629,10 +629,11 @@ def test_undated_dropdown_options_leave_the_default_to_github():
 
 def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
     # Refresh actions re-renders every run-from-repo workflow (so a fix reaches live
-    # courses) - and removes release-code.yml, whose CLI no longer exists now that
-    # Release materials takes any path. All of it in ONE commit: the buttons always change
-    # together, and a burst of near-identical commits is noise in a repo faculty read.
+    # courses) - and removes a retired one. All of it in ONE commit: the buttons always
+    # change together, and a burst of near-identical commits is noise in a repo faculty read.
     commits = []
+    retired = (".github/workflows/release-code.yml",)
+    monkeypatch.setattr(workflows_place, "RETIRED_WORKFLOWS", retired)
 
     def fake_put_files(org, repo, files, message, *, delete=()):
         commits.append((files, list(delete), message))
@@ -661,7 +662,7 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
             ".github/workflows/release-assignment.yml",
         }
     )
-    assert deleted == [".github/workflows/release-code.yml"]
+    assert deleted == list(retired)
     # The materials button seeded into a content repo is that repo's own variant.
     materials = yaml.safe_load(pushed[".github/workflows/release-materials.yml"])
     trigger = materials.get("on", materials.get(True))
@@ -713,6 +714,8 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     # writes turned each such edit into a wall of near-identical commits in the repo whose
     # history faculty actually browse. The retired buttons ride along in the same commit
     # rather than earning three more.
+    retired = (".github/workflows/propagate-cohort.yml",)
+    monkeypatch.setattr(seed, "RETIRED_GITHUB_WORKFLOWS", retired)
     monkeypatch.setattr(seed, "discover_semesters", lambda org: ["Semester-f2026"])
     monkeypatch.setattr(
         seed, "discover_content_repos", lambda org: ["course-materials"]
@@ -739,16 +742,8 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     )  # three grading buttons became two, the two end-of-term ones, the team nudge, Console
     assert ".github/workflows/console.yml" in files
     assert all(path.startswith(".github/workflows/") for path in files)
-    assert deleted == list(seed.RETIRED_GITHUB_WORKFLOWS)
-    # A renamed button is deleted under its old name and written under the new one.
-    for old in (
-        "propagate-cohort.yml",
-        "archive-cohort.yml",
-        "bootstrap-cohort.yml",
-        "check-cohort-setup.yml",
-    ):
-        assert f".github/workflows/{old}" in deleted
-        assert f".github/workflows/{old}" not in files
+    assert deleted == list(retired)
+    assert retired[0] not in files
     assert ".github/workflows/check-semester-setup.yml" in files
     assert ".github/workflows/archive-semester.yml" in files
 

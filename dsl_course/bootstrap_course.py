@@ -33,7 +33,6 @@ from .course import (
     COURSE_HUB_TOPIC,
     FACULTY_TEAMS,
     JOIN_REPO,
-    OLD_SEMESTER_TOPIC,
     SEMESTER_TEAMS,
     SEMESTER_TOPIC,
     semester_of,
@@ -41,10 +40,8 @@ from .course import (
 from .discovery import (
     SEMESTERS_PATH,
     central_ref_for,
-    not_migrated_org,
     register_semester,
 )
-from .faults import not_migrated_text
 from .gh_contents import put_file, put_files, seed_if_absent
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
@@ -700,21 +697,8 @@ def preflight(org: str, semester: bool = False) -> bool:
             f"  - 'active/member'  -> promote @{bot} to Owner in the org's People page\n"
         )
         return False
-    if refuses_unmigrated(org):
-        return False
     log_ok(f"org {org} accessible; @{bot} is an active owner")
     return True
-
-
-def refuses_unmigrated(org: str) -> bool:
-    """Whether `org` is a semester the migration has not reached (its `.github` still
-    carries the old topic). Bootstrap must not touch one: it would stamp the new topic
-    over the old and create the renamed repos beside the ones the migration renames,
-    ending the redirects every sent link relies on."""
-    if not_migrated_org(org):
-        log_err(f"{org}: {not_migrated_text(OLD_SEMESTER_TOPIC, SEMESTER_TOPIC)}")
-        return True
-    return False
 
 
 def main() -> int:

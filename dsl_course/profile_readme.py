@@ -31,7 +31,6 @@ from .central import CENTRAL
 from .course import CONFIG_REPO, COURSE_CONFIG, JOIN_REPO
 from .discovery import (
     being_set_up,
-    carries_old_semester_topic,
     course_name_for_semester,
     discover_semesters,
     join_issue_url,
@@ -511,7 +510,7 @@ def profile_files(
         repos = list_org_repos(org)
     # `tier` is None for an org the listing cannot place (a legacy semester with no topics
     # and no `join`); the page renders it as a course org, as before.
-    is_semester = org_tier(repos) == "semester" or carries_old_semester_topic(repos)
+    is_semester = org_tier(repos) == "semester"
     semesters = None if is_semester else discover_semesters(org)
     body = render_profile_readme(
         org,

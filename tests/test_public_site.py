@@ -17,9 +17,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import gh_contents, ghcli, policy, public_site, site, site_repo
+from dsl_course import gh_contents, ghcli, legacy, policy, public_site, site, site_repo
 from dsl_course.faults import Unusable
 from dsl_course.opencourse import OpenCourse
+
+(PUBLISH_CONFIG,) = (row.old for row in legacy.rows(legacy.PUBLIC_SITE))
 from tests.conftest import entry_links
 
 COURSE = "Course-Org"
@@ -94,7 +96,7 @@ def _install_fakes(monkeypatch) -> dict[str, str]:
                     'course_name: "x"\ncourse_code: "y"\ncourse_semester: "z"\n'
                     'course_description: "One paragraph description of the course."\n'
                 )
-                (dest / site_repo.PUBLISH_CONFIG).write_text(f"source_repo: {SOURCE}\n")
+                (dest / PUBLISH_CONFIG).write_text(f"source_repo: {SOURCE}\n")
             return (0, "")
         return (0, "")
 
@@ -232,7 +234,7 @@ def test_nothing_to_publish_at_all_is_an_error():
 def test_a_publish_deletes_the_settings_file_an_older_publish_left(published):
     # opencourse.yml holds the settings now (decision 0016); the old file goes.
     files = published(readings_mode="actual-readings")
-    assert site_repo.PUBLISH_CONFIG not in files
+    assert PUBLISH_CONFIG not in files
     assert "_config.yml" in files
 
 

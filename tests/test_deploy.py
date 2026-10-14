@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from dsl_course import access, course, deploy, ghcli, records, repos
+from dsl_course import repos as repo_mod
 from dsl_course.schedule import Deploy, Release, Schedule
 
 
@@ -376,6 +377,7 @@ def _converge(monkeypatch, listing):
 def test_a_superseded_description_is_updated_and_others_are_left_alone(monkeypatch):
     # Only a wording WE have since replaced may be overwritten. Faculty's own text, and a
     # repo already carrying the current wording, must produce no request at all.
+    monkeypatch.setattr(repo_mod, "SUPERSEDED_DESCRIPTIONS", {SUPERSEDED: CURRENT})
     repos = [
         {"name": "materials", "description": SUPERSEDED},
         {"name": "labs", "description": CURRENT},
@@ -423,10 +425,21 @@ def test_every_superseded_description_names_a_replacement_we_still_write(monkeyp
             )
 
 
-def test_the_dotgithub_description_says_the_opposite_thing_per_tier():
+def test_the_dotgithub_description_says_the_opposite_thing_per_tier(monkeypatch):
     # A semester org's .github is scaffolding nobody should open; a course org's is where
     # faculty work. Converging both onto one wording would tell half of them the wrong
     # thing, which is why the tier picks the table.
+    old = "Org profile and configuration"
+    monkeypatch.setattr(
+        repos,
+        "SUPERSEDED_SEMESTER_DESCRIPTIONS",
+        {old: "[do not touch]: Org profile and configuration"},
+    )
+    monkeypatch.setattr(
+        repos,
+        "SUPERSEDED_COURSE_DESCRIPTIONS",
+        {old: "[control panel]: Org profile & configuration"},
+    )
     listing = [{"name": ".github", "description": "Org profile and configuration"}]
     calls = []
     original = repos.gh

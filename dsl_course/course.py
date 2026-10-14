@@ -18,11 +18,6 @@ from . import records
 # The per-org identity/config file, at the root of every org's `.github` repo: a course
 # org's declares its name and its faculty SSOT, a semester org's is a pointer back to it.
 COURSE_CONFIG = "dsl-course.yml"
-# Its keys that went (decision 0009): the org is the repo owner, the name is `course_name`,
-# and a semester's timezone and archive grace are the semester's own facts with the
-# institution's defaults. Never read: a file still carrying one is NOT_MIGRATED, and
-# `migrate` strips them.
-RETIRED_COURSE_KEYS = ("org", "org_name", "cohort_defaults", "semester_defaults")
 
 
 def advertises_console(meta: dict) -> bool:
@@ -38,23 +33,15 @@ def advertises_console(meta: dict) -> bool:
 # The private per-semester config repo: roster, teams, schedule, grades, autograde records.
 # Every semester org has exactly one, under exactly this name.
 CONFIG_REPO = "semester-config"
-# Its name before decision 0010. Spelt here and in `migrate` only: the engine never reads a
-# repo under it, and `repos.create_repo` refuses to create one - a migrated semester's old
-# name is a live redirect (every clone, API read and sent link resolves through it) for as
-# long as nothing else takes the name.
-OLD_CONFIG_REPO = "classroom-config"
 # The semester's public front door: the Join course and Join team issue forms and the two
 # workflows that act on them. Its URL is in every enrolment mail (`discovery.join_issue_url`
-# builds it); the ones sent before decision 0010 name `welcome`, which GitHub redirects here
-# for as long as no repo takes that name again.
+# builds it).
 JOIN_REPO = "join"
 # The hidden first line of a Join issue the student console opens through the API. GitHub
 # drops a form's routing label on an issue created that way by an account without push, so
 # each join workflow runs on its marker as well as on the label the web form still applies.
 JOIN_COURSE_MARKER = "<!-- dsl:join-course -->"
 JOIN_TEAM_MARKER = "<!-- dsl:join-team -->"
-OLD_JOIN_REPO = "welcome"
-RETIRED_REPO_NAMES = frozenset({OLD_CONFIG_REPO, OLD_JOIN_REPO})
 # The per-student gradebook repo: grades-<handle> (gradebook.py creates them, discovery reads
 # them back). Named here so the reader and the writer cannot drift.
 GRADEBOOK_PREFIX = "grades-"
@@ -63,9 +50,6 @@ GRADEBOOK_PREFIX = "grades-"
 # tell a course org from a semester without another read.
 COURSE_HUB_TOPIC = "dsl-course-hub"
 SEMESTER_TOPIC = "dsl-semester"
-# The semester topic's old spelling (decision 0012). Never read as a tier: an org still
-# carrying it is refused as NOT_MIGRATED, so the migration is what moves it.
-OLD_SEMESTER_TOPIC = "dsl-cohort"
 # How `scaffold_materials` names every materials repo (`course-materials-<tag>`) - the New
 # materials repo workflow takes only the tag, so this prefix is guaranteed by the toolkit
 # rather than a convention faculty could deviate from. Named here because `seed.refresh`
@@ -132,24 +116,6 @@ SANDBOX_USER = "dsl-sandbox"
 # here when the engine can ACT on it, because this same tuple is what the New assignment
 # dropdown offers, and a form offering a word the reader would refuse is a form that lies.
 SUBMIT_VIA = ("assignment_repo", "shared_dropbox_repo", "external")
-# `github` is the LEGACY spelling of `assignment_repo`: live INSTRUCTOR-OWNED
-# `grading_config.yml` files in real course orgs carry it, so it is accepted at every
-# read boundary (`canonical_submit_via` below) and never written again by any generator.
-# The migration rewrites it (`migrate.submit_via_line`); the alias goes once every org
-# has migrated. `shared` was renamed to `shared_dropbox_repo` before it ever shipped to a
-# real org, so it gets no alias - an unrecognised `shared` is simply Dropped.
-LEGACY_SUBMIT_VIA = {"github": "assignment_repo"}
-
-
-def canonical_submit_via(value: object) -> str:
-    """A raw `submit_via` read off the outside world, normalised to its canonical spelling.
-
-    The ONE place every read boundary calls before trusting the value - the
-    `grading_config.yml` reader, the New assignment workflow's argv/env, the e2e harness -
-    so `github` reads as `assignment_repo` everywhere internal code compares against it,
-    and no second copy of the alias can drift from this one."""
-    text = str(value or "").strip().lower()
-    return LEGACY_SUBMIT_VIA.get(text, text)
 
 
 # THE `shared_dropbox_repo` rationale, written down once so the five places that act on it
@@ -715,14 +681,12 @@ def coerce_date(value: object) -> date | None:
 
 
 # A semester's instructors file (decision 0012): ONE `instructors:` list, each entry with
-# a required `role:`. `OLD_PEOPLE_FILE` - a `people:` mapping of role -> list - is never
-# read: a semester that still has it is refused as NOT_MIGRATED (`sync_faculty`).
+# a required `role:`.
 INSTRUCTORS_FILE = "instructors.yml"
 # The semester layer of the assignment settings (decision 0010: a `defaults:` block and an
 # `assignments:` map of per-slug deviations), at the root of semester-config beside the
 # schedule. Named now so the console has no literal; the engine reads it from B2.
 ASSIGNMENTS_FILE = "assignments.yml"
-OLD_PEOPLE_FILE = "people.yml"
 # `role:` value -> the role key every consumer groups by (the old file's own keys).
 INSTRUCTOR_ROLES = {
     "instructor": "instructors",
