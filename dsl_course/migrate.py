@@ -1203,14 +1203,19 @@ def _old_kind(entry: dict, aliases: Aliases) -> str:
     deploys = [d for d in deploys if isinstance(d, dict)]
     if not deploys:
         return EMPTY_ENTRY_KIND
-    first = deploys[0]
-    kinds = aliases(str(first.get("course_source_repo") or ""))
-    dest = str(first.get("semester_dest_path") or first.get("course_source_path") or "")
+    return _copy_kind(deploys[0], aliases)
+
+
+def _copy_kind(copy: dict, aliases: Aliases) -> str:
+    """The kind 0.10 read off where one `deploy:` copy lands: the section its destination
+    names (the source repo's `materials.yml` aliases, else the built-in ones)."""
+    kinds = aliases(str(copy.get("course_source_repo") or ""))
+    dest = str(copy.get("semester_dest_path") or copy.get("course_source_path") or "")
     head, sep, _ = dest.strip("/").partition("/")
     section = (
         head
         if sep or (head and alias_kind(head, kinds))
-        else str(first.get("semester_dest_repo") or schedule.DEFAULT_DEST_REPO)
+        else str(copy.get("semester_dest_repo") or schedule.DEFAULT_DEST_REPO)
     )
     return infer_kind(section, kinds)
 
@@ -1224,6 +1229,45 @@ def _copies(entry: dict) -> list[dict]:
         for d in deploys
         if isinstance(d, dict)
     ]
+
+
+def _readings_twin(
+    key: str,
+    kind: str,
+    entry: dict,
+    new: dict,
+    aliases: Aliases,
+    reading_list: ReadingList,
+) -> tuple[str, dict] | None:
+    """A lecture's or lab's copies that land in a readings section, moved off `new` into a
+    readings entry of the same session (`<key>-readings`): under 0.11 the block says what
+    a file is, so a session's own row lists only its own files and its readings attach to
+    the unit as any readings entry does. Same date, so the copies ship when they did. None
+    when it copied no readings."""
+    if kind not in schedule.SESSION_KINDS or not new.get("session"):
+        return None
+    deploys = entry.get("deploy")
+    deploys = [deploys] if isinstance(deploys, dict) else deploys or []
+    deploys = [d for d in deploys if isinstance(d, dict)]
+    split = [i for i, d in enumerate(deploys) if _copy_kind(d, aliases) == "readings"]
+    if not split:
+        return None
+    files = new["files"]
+    moved = [files[i] for i in split]
+    new["files"] = [f for i, f in enumerate(files) if i not in split]
+    twin = {"session": new["session"], "event_datetime": new.get("event_datetime")}
+    if "tbc" in new:
+        twin["tbc"] = new["tbc"]
+    twin["files"] = moved
+    texts = [
+        t.strip()
+        for f in moved
+        if (t := reading_list(str(f.get("from_course_repo")), str(f.get("from_path"))))
+        and t.strip()
+    ]
+    if texts:
+        twin["reading_list"] = "\n\n".join(texts) + "\n"
+    return f"{key}-readings", {k: v for k, v in twin.items() if v not in (None, "")}
 
 
 def _first_time(value: object) -> str | None:
@@ -1286,6 +1330,8 @@ def schedule_shape(
     hosts: dict[
         tuple[str, int], str
     ] = {}  # (kind, n) -> the shown key a session repeats
+    # (key, entry) of each readings entry split off a lecture's or lab's copies.
+    twins: list[tuple[str, dict]] = []
     for key, kind in kinds.items():
         entry, n = releases[key], numbers[key]
         new: dict = {}
@@ -1315,6 +1361,9 @@ def schedule_shape(
         }
         if "deploy" in entry or kind in schedule.DISPLAY_KINDS:
             new["files"] = _copies(entry)
+        twin = _readings_twin(key, kind, entry, new, aliases, reading_list)
+        if twin:
+            twins.append(twin)
         if kind == "readings":
             texts = [
                 t.strip()
@@ -1331,6 +1380,17 @@ def schedule_shape(
         blocks[policy.plural_of(kind)][key] = new
         if n and entry.get("show_on_site") is not False:
             hosts.setdefault((kind, n), key)
+
+    for key, twin in twins:
+        if key in kinds or key in blocks["readings"]:
+            stops.append(
+                f"{key}: the readings split off its session need this key - free it"
+            )
+            continue
+        blocks["readings"][key] = twin
+        notes.append(
+            f"{key}: the readings its session copied, now a readings entry of that session"
+        )
 
     # 2. Events: exams and special events are display rows; a session of a content kind
     # repeats a release - a slot of it where it says nothing of its own but its date,

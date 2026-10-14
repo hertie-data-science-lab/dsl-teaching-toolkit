@@ -4,7 +4,8 @@ removed), migrated by `migrate.schedule_shape` and rendered by the site sync, gi
 the 0.10 engine rendered (frozen in `<name>-rows-0.10.json`) - but for what 0038 and its
 rulings change: no stub exams, the readings chip, a READINGS.md listed as a file (its
 text is the entry's `reading_list:` now), a lab's second group a slot of its lab (with
-its files), and every row file named by its key."""
+its files), every row file named by its key, and a row's own files filed by its kind
+rather than by the folder they land in."""
 
 from __future__ import annotations
 
@@ -87,6 +88,20 @@ def _decided(text: str) -> str:
     return text.replace("links:\n---", "links: []\n---")
 
 
+_KIND = re.compile(r"^kind: ([a-z-]+)$", re.MULTILINE)
+_SECTION = re.compile(r'      section: "(?!reading")[a-z-]+"')
+
+
+def _by_kind(text: str) -> str:
+    """A 0.10 row with its own files filed by its kind, as 0.11 files them (decision 0038:
+    the block says what a file is; 0.10 used the folder it landed in). Attached readings
+    stay `reading`."""
+    kind = _KIND.search(text)
+    if not kind:
+        return text
+    return _SECTION.sub(f'      section: "{kind.group(1)}"', text)
+
+
 def _no_files(text: str) -> str:
     """A row less what says whether its files are out: how a 0.10 second lab group (a
     session with nothing to ship) and its 0.11 slot (the lab's own files) are compared."""
@@ -128,7 +143,9 @@ def test_a_live_semester_migrates_and_renders_the_rows_it_did(
     assert sorted(_no_files(t) for t in groups.values()) == sorted(
         _no_files(_decided(t)) for t in slots.values()
     )
-    rest_old = sorted(t for f, t in old["lectures"].items() if f not in groups)
+    rest_old = sorted(
+        _by_kind(t) for f, t in old["lectures"].items() if f not in groups
+    )
     rest_new = sorted(_decided(t) for f, t in new["lectures"].items() if f not in slots)
     assert rest_new == rest_old
 
@@ -200,3 +217,37 @@ def test_the_assignments_yml_blocks_move_onto_their_entries():
     assert after == "defaults:\n  visibility: private\n"
     sched = schedule.parse(load_yaml_lines(text))
     assert sched.assignments["assignment-4"].settings["visibility"] == "public"
+
+
+def test_a_session_s_copy_into_a_readings_folder_becomes_its_readings_entry():
+    # 0.10 filed a lecture's copy by the folder it landed in; 0.11 by the block. A
+    # lecture copying a readings folder keeps its own files, and the readings move to a
+    # readings entry of its session, shipping when they did.
+    old = (
+        "releases:\n"
+        "  lecture-1:\n"
+        "    kind: lecture\n"
+        "    event_datetime: 2026-09-07T10:00\n"
+        "    deploy:\n"
+        "      - course_source_repo: cm\n"
+        "        course_source_path: lectures/01\n"
+        "      - course_source_repo: cm\n"
+        "        course_source_path: readings/01\n"
+    )
+    text, _after, notes, stops = migrate.schedule_shape(
+        old, reading_list=lambda repo, path: "- A paper.\n"
+    )
+    assert stops == []
+    data = yaml.safe_load(text)
+    assert data["lectures"]["lecture-1"]["files"] == [
+        {"from_course_repo": "cm", "from_path": "lectures/01"}
+    ]
+    assert data["readings"]["lecture-1-readings"] == {
+        "session": 1,
+        "event_datetime": "2026-09-07T10:00",
+        "files": [{"from_course_repo": "cm", "from_path": "readings/01"}],
+        "reading_list": "- A paper.",
+    }
+    assert any("lecture-1-readings" in n for n in notes)
+    sched = schedule.parse(load_yaml_lines(text))
+    assert sched.dropped == [] and sched.faults == []

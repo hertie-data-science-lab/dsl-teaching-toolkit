@@ -98,7 +98,7 @@ NB: `from_path: /` releases the whole repo, less `.github` and `.system/`. A roo
 
 ### Readings
 
-A readings entry with a `session:` belongs to that unit: the unit's first row carries a **Readings** chip, and the Readings tab lists it under the lecture's name. One without is a row of its own. `show_on_site: false` keeps a session's readings off the Schedule; they stay on the Readings tab.
+A readings entry with a `session:` belongs to that unit: the unit's first row carries a **Readings** chip, and the Readings tab lists it under the lecture's name. The lecture's own tab lists only the lecture's files. Copy readings in a `readings:` entry, not in the lecture's `files:` - a file is what its block says, whatever folder it lands in. One without is a row of its own. `show_on_site: false` keeps a session's readings off the Schedule; they stay on the Readings tab.
 
 ```yaml
 readings:

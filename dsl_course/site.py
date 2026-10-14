@@ -814,8 +814,11 @@ def _row_entry(
     # `row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
     # "Lab 1 / Lab 1" - faculty repeat the identifier as readily in the plan as in a README.
     subtitle, details = row_name(row.subtitle, title), row.details
+    # Filed by what they are, never by the folder they land in (decision 0038: the block
+    # says what an entry is): the row's own files under its kind, the readings attached
+    # to its unit under readings - so a kind tab lists the row's own files only.
     links = links_block(
-        [(item.section, item.links) for item in row.landed]
+        [(policy.plural_of(row.kind), item.links) for item in row.landed]
         + [(READINGS_LINKS, item.links) for item in row.readings]
     )
     flags, body = "", ""

@@ -115,7 +115,8 @@ TREE = (
     "readings/extra/attention.pdf",
     "clinic/notes.pdf",
     "exams/mock.pdf",
-    # Released outside the plan (no entry copies it): an undated row on the Labs tab.
+    # Released outside the plan (no entry copies it): All Materials only, no row
+    # (decision 0038).
     "labs/02_week-2/Lab_Session_2.ipynb",
 )
 

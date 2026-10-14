@@ -2529,9 +2529,10 @@ def test_several_copies_are_one_row_linking_everything_that_landed(
     )
     trees = {"materials": ("lectures/03/a.pdf", "datasets/week3.csv")}
     (row,) = _rows(_plan(monkeypatch, tmp_path, sched, trees=trees)).values()
+    # Filed by the entry's kind, never by the folder a copy lands in (decision 0038).
     assert [(x["section"], x["name"]) for x in row["links"]] == [
         ("lecture", "a.pdf"),
-        ("dataset", "week3.csv"),
+        ("lecture", "week3.csv"),
     ]
     assert "unreleased" not in row
 
