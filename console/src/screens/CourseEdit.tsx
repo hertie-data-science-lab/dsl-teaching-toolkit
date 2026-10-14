@@ -14,7 +14,7 @@ import { termRank } from '../model/catalogue';
 import { KIND_LABEL } from '../model/format';
 import { sameHandle } from '../model/people';
 import { ALIAS_DEPTH, DEFAULT_SYLLABUS, FOLDER_KINDS, MATERIALS_FILE, NOTHING_DECLARED, aliasKind, inferKind, readDeclared, withMark } from '../model/materialsRules';
-import { validCourse } from '../model/cascade';
+import { fileValue, validCourse } from '../model/cascade';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
@@ -80,8 +80,10 @@ export function formatsAfter(meta: Record<string, unknown>, first: unknown): str
 /** Write only what changed, key by key, into dsl-course.yml. */
 export function writeDetails(y: YamlText, before: Details, after: Details, meta: Record<string, unknown>): void {
   for (const k of Object.keys({ ...before.about, ...after.about })) if (!deepEqual(before.about[k], after.about[k])) y.assign([k], after.about[k]);
-  for (const k of Object.keys({ ...before.defaults, ...after.defaults }))
-    if (!deepEqual(before.defaults[k], after.defaults[k])) y.assign(['assignment_defaults', k], k === 'formats' ? formatsAfter(meta, after.defaults[k]) : after.defaults[k]);
+  for (const k of Object.keys({ ...before.defaults, ...after.defaults })) {
+    const v = fileValue(k, after.defaults[k]);
+    if (!deepEqual(before.defaults[k], v)) y.assign(['assignment_defaults', k], k === 'formats' ? formatsAfter(meta, v) : v);
+  }
   if (!deepEqual(before.admins, after.admins)) {
     const raws = (Array.isArray(obj(meta.people).course_admins) ? (obj(meta.people).course_admins as unknown[]) : []).map(obj);
     const rawBy = (h: string) => raws.find((r) => sameHandle(String(r.github_handle ?? ''), h)) ?? {};

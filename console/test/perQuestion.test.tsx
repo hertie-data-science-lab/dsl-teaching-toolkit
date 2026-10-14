@@ -5,7 +5,9 @@
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import { SchemaForm, fieldErrors } from '../src/forms/Form';
-import { withRunSetting } from '../src/model/cascade';
+import { RUN_KEYS, fileValue, readSetting, valueWord, withRunSetting, writeBlock } from '../src/model/cascade';
+import { YamlText } from '../src/edit/yamlText';
+import { RUN_LABEL, runTier } from '../src/tiers/runSettings';
 import type { Adapter, Handle, Progress, Result } from '../src/ops/adapter';
 import * as defs from '../src/ops/defs';
 import { opSpec } from '../src/ops/registry';
@@ -66,6 +68,13 @@ describe('Include marks per question', () => {
     expect(log).toEqual(['preview per_question=false', 'save false', 'run per_question=false']);
   });
 
+  it('a preview carries the box as it stands, and saves nothing', async () => {
+    const { s, log } = setup(false, async () => {});
+    s.setValues({ ...s.current.value!.values, per_question: true });
+    await s.start('preview');
+    expect(log).toEqual(['preview per_question=true']);
+  });
+
   it('an unchanged box saves nothing', async () => {
     const { s, log } = setup(true, async () => {});
     await s.start('run');
@@ -110,5 +119,23 @@ describe('the run setting it saves', () => {
     expect(perQuestionOf(p, a, null)).toMatchObject({ value: true, source: 'institution' });
     const set = { ...a, settings: { marks_per_question: { value: false, source: 'course' as const } } };
     expect(perQuestionOf(p, set, null)).toMatchObject({ value: false, source: 'course' });
+  });
+});
+
+describe('marks per question in How this semester runs it', () => {
+  it('is a run setting like the others: effective value, source, a select that writes a boolean', () => {
+    expect(RUN_KEYS).toContain('marks_per_question');
+    expect(RUN_LABEL.marks_per_question).toBe('Marks per question on the student’s page');
+    const t = runTier('marks_per_question', { value: true, source: 'institution' }, { override: true });
+    expect(t.widget).toBe('select');
+    expect(t.defaultLabel).toBe('institution default: on');
+    expect(t.options!.map((o) => o.value)).toEqual(['', 'true', 'false']);
+    expect([readSetting('marks_per_question', 'false'), readSetting('marks_per_question', true), valueWord('marks_per_question', false)]).toEqual([false, true, 'off']);
+    expect(fileValue('marks_per_question', 'false')).toBe(false);
+    const y = new YamlText('assignments:\n  a1:\n    late_window_days: 2\n');
+    expect(writeBlock(y, ['assignments', 'a1'], { late_window_days: 2 }, { late_window_days: 2, marks_per_question: 'false' }, RUN_KEYS)).toBe(true);
+    expect(y.text).toContain('marks_per_question: false');
+    // Choosing what the file already holds writes nothing.
+    expect(writeBlock(y, ['assignments', 'a1'], { marks_per_question: false }, { marks_per_question: 'false' }, RUN_KEYS)).toBe(false);
   });
 });
