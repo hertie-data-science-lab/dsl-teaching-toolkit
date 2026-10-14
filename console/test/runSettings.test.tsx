@@ -246,7 +246,7 @@ describe('the marks grid: teams > students > questions', () => {
     expect(out).toContain('aria-label="Hide the members of team-alpha"');
     // A member carries an adjustment, so the team opens on load, with the amber Adjustment column.
     expect(out).toContain('<th rowspan="2" class="adjcol">Adjustment');
-    expect(out).toContain('Students see it as its own line on their marks page.');
+    expect(out).toContain('Added to this person’s final grade (plus or minus points).</span>');
     expect(out).not.toContain('class="grp">students see');
   });
 

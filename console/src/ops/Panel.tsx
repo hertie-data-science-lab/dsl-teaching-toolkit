@@ -199,7 +199,7 @@ export function targetOf(def: OpDef, values: Record<string, unknown>): string | 
 }
 
 /** The `?` an operation carries beside its verb, one paragraph per line of its text. */
-function VerbHint({ def }: { def: OpDef }) {
+export function VerbHint({ def }: { def: OpDef }) {
   const h = def.verbHint;
   if (!h) return null;
   return <Hint label={h.label}><b class="para">{h.label}</b>{h.text.map((x) => <span class="para">{x}</span>)}</Hint>;

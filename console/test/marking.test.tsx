@@ -18,7 +18,7 @@ import { DispatchAdapter } from '../src/ops/adapter';
 import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
 import { AssignmentScreen } from '../src/screens/Assignments';
-import { previewEmails } from '../src/screens/Marking';
+import { previewEmails, templateChecks } from '../src/screens/Marking';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, fileBody, json, type Seen } from './fake';
@@ -174,10 +174,11 @@ const SHEET = [
   '',
 ].join('\n');
 
-function files(sheet = SHEET) {
+const CONFIG = 'type: individual\nautograde: true\nformats: [py]\nquestions:\n  Q1: 10\n  Q2: 10\n';
+function files(sheet = SHEET, config = CONFIG) {
   return new StaticFiles({
     [`${COHORT_ORG}/semester-config/schedule.yml`]: 'timezone: Europe/Berlin\nassignments:\n  assignment-2:\n    course_source_repo: assignment-2-f2026\n',
-    [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: individual\nquestions:\n  Q1: 10\n  Q2: 10\n',
+    [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: config,
     [SHEET_PATH]: sheet,
   });
 }
@@ -233,6 +234,30 @@ const props = (f: StaticFiles, over: Partial<CohortProps> = {}): CohortProps => 
 const marks = (f = files(), gh = github()) => mount(envOf(gh, f), <AssignmentScreen {...props(f)} />);
 const filter = (word: string) => [...root!.querySelectorAll<HTMLButtonElement>('.chip.filter')].find((b) => b.textContent?.startsWith(word))!;
 
+describe('what a template runs at the cutoff (grades.GradingSpec)', () => {
+  it('runs the tests only with autograde on, and the completion check as declared, else for a notebook', () => {
+    expect(templateChecks({})).toEqual({ tests: false, completion: false });
+    expect(templateChecks({ autograde: true, formats: ['py'] })).toEqual({ tests: true, completion: false });
+    expect(templateChecks({ formats: ['ipynb', 'pdf'] })).toEqual({ tests: false, completion: true });
+    expect(templateChecks({ formats: 'pdf, ipynb' })).toEqual({ tests: false, completion: false });
+    expect(templateChecks({ formats: ['ipynb'], completion_check: false })).toEqual({ tests: false, completion: false });
+    expect(templateChecks({ formats: ['py'], completion_check: true })).toEqual({ tests: false, completion: true });
+    expect(templateChecks({ submit_via: 'shared_dropbox_repo', autograde: true, formats: ['ipynb'] })).toEqual({ tests: false, completion: false });
+  });
+});
+
+describe('the column help', () => {
+  it('words Penalty, Adjustment, Feedback and Completion as approved', async () => {
+    await marks(files(SHEET.replace('      autograde: 8/10\n', '      autograde: 8/10\n      completion: Completed\n'), CONFIG.replace('formats: [py]', 'formats: [ipynb]')));
+    const pop = (col: string) => q(`button[aria-label="About ${col}"]`).nextElementSibling!.textContent;
+    expect(pop('Penalty')).toBe('10% of the total per day started, up to 10 days. Switch it off to waive it, or type your preferred penalty as a percentage to override it.');
+    expect(pop('Feedback')).toBe('Students see this with their marks.');
+    expect(pop('Completion')).toBe('At the late cutoff the toolkit runs the submitted notebook top to bottom in a clean sandbox and records whether it reached the end. “Completed” means every cell ran without an error; otherwise the first error is named. Information for you, never a mark: a notebook can run through and still be wrong, or stop on a missing package and still be right. “—” where the template has no check.');
+    await click(q('button.adj-chip'));
+    expect(pop('Adjustment')).toBe('Added to this person’s final grade (plus or minus points).');
+  });
+});
+
 describe('the marking screen', () => {
   it('counts All, Unmarked, Late and Held, and marks a held row with its reason', async () => {
     await marks();
@@ -246,6 +271,25 @@ describe('the marking screen', () => {
     await click(filter('All'));
     await type('input[aria-label="Q1 (out of 10) for ben-k"]', '7');
     expect(filter('Held').textContent).toBe('Held 0');
+  });
+
+  it('prints “—” for a check the template does not run, even where the sheet still carries its key', async () => {
+    // Every unit has `completion:`, but the template is not a notebook and does not declare the check.
+    const withKey = SHEET.replace(/( {6}autograde:.*\n)/g, '$1      completion:\n');
+    await marks(files(withKey));
+    const col = [...q('thead').querySelectorAll('th')].map((h) => h.firstChild?.textContent?.trim());
+    expect(col).toContain('Completion');
+    const cells = [...root!.querySelectorAll('tr.unit-row')].map((r) => r.querySelectorAll('td.sys')[3].textContent);
+    expect(cells).toEqual(['—', '—', '—']);
+    root!.remove();
+    // Tests the template no longer runs: a dash too, and no tint.
+    await marks(files(SHEET, CONFIG.replace('autograde: true', 'autograde: false')));
+    expect([...root!.querySelectorAll('tr.unit-row')].map((r) => r.querySelectorAll('td.sys')[2].textContent)).toEqual(['—', '—', '—']);
+    expect(root!.querySelector('td.sys.auto')).toBeNull();
+    root!.remove();
+    // A notebook template runs the check: blank until the cutoff fills it.
+    await marks(files(withKey, CONFIG.replace('formats: [py]', 'formats: [ipynb]')));
+    expect([...root!.querySelectorAll('tr.unit-row')].map((r) => r.querySelectorAll('td.sys')[3].textContent)).toEqual(['', '', '']);
   });
 
   it('keeps Tests with a light tint where the template runs them, and hides both columns where nothing does', async () => {
@@ -287,24 +331,50 @@ describe('the marking screen', () => {
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Feedback for ben-k');
   });
 
-  it('jumps to the next unmarked row', async () => {
+  it('opens full screen from the corner icon as an overlay, and Escape or the icon closes it, focus back on the icon', async () => {
     await marks();
-    await click(button('Next unmarked ↓'));
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Q1 (out of 10) for cy-d');
-  });
-
-  it('fills the window in full screen, and Escape leaves it', async () => {
-    await marks();
-    await click(button('Full screen'));
+    const icon = () => q<HTMLButtonElement>('button.full-toggle');
+    expect([icon().getAttribute('aria-label'), icon().title]).toEqual(['Full screen', 'Full screen']);
+    await click(icon());
     expect(q('.marking').classList.contains('full')).toBe(true);
+    expect(q('.marking').getAttribute('role')).toBe('dialog');
+    expect(icon().getAttribute('aria-label')).toBe('Exit full screen');
+    expect(q('.marking .marks-bar')).not.toBeNull(); // the toolbar stays inside
     await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(q('.marking').classList.contains('full')).toBe(false);
+    expect(document.activeElement).toBe(icon());
+    await click(icon());
+    await click(icon());
     expect(q('.marking').classList.contains('full')).toBe(false);
   });
 
-  it('shows a student’s marks page as it will be, never the private notes', async () => {
+  it('keeps Return marks and Student view above the marking panel, and the toolbar to marking and saving', async () => {
     await marks();
+    const block = q('.return-block');
+    expect(block.nextElementSibling!.classList.contains('marking')).toBe(true);
+    expect(block.querySelector('button.btn.big')!.textContent).toBe('Return marks to 1 student');
+    expect(block.querySelector('.hint-btn')!.getAttribute('aria-label')).toBe('What returning marks does');
+    const tools = q('.marking .marks-bar').textContent!;
+    for (const gone of ['Preview', 'Return marks', 'Student view', 'Next unmarked', 'Open all teams', 'From the submission']) expect(tools).not.toContain(gone);
+  });
+
+  it('folds the submission columns from their own heading', async () => {
+    await marks();
+    const fold = () => q<HTMLButtonElement>('thead th .th-fold');
+    expect([fold().textContent, fold().getAttribute('aria-expanded')]).toEqual(['From the submission ▾', 'true']);
+    await click(fold());
+    expect([fold().textContent, fold().getAttribute('aria-expanded')]).toEqual(['From the submission ▸', 'false']);
+    expect(q('thead').textContent).not.toContain('Days late');
+    expect(q('thead').textContent).toContain('Score'); // every other column stays
+  });
+
+  it('shows a student’s marks page as it will be in a dialog, never the private notes', async () => {
+    await marks();
+    await click(button('Student view'));
+    const dialog = q('[role="dialog"]');
+    expect(dialog.querySelector('#modal-title')!.textContent).toBe('Student view');
     await act(() => {
-      const s = q<HTMLSelectElement>('select.student-pick');
+      const s = q<HTMLSelectElement>('#student-pick');
       s.value = 'ada-l';
       s.dispatchEvent(new Event('change', { bubbles: true }));
     });
@@ -314,6 +384,8 @@ describe('the marking screen', () => {
     expect(view.textContent).toContain('17 / 20');
     expect(view.textContent).toContain('Good.');
     expect(view.textContent).not.toContain('Check the plot.');
+    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(root!.querySelector('.student-view')).toBeNull();
   });
 
   it('opens feedback per question as one row under the unit, closed by default', async () => {
@@ -479,15 +551,10 @@ describe('teams and people on the grid', () => {
     expect([...members[0].querySelectorAll('td.calc')].pop()!.textContent).toBe('20');
   });
 
-  it('opens and closes every team from the toolbar, and opens a team on load where a member has an adjustment', async () => {
-    await mountTeams();
-    await click(button('Open all teams'));
-    expect(root!.querySelectorAll('tr.member-row')).toHaveLength(3);
-    await click(button('Close all teams'));
-    expect(root!.querySelectorAll('tr.member-row')).toHaveLength(0);
-    root!.remove();
+  it('opens a team on load where a member has an adjustment', async () => {
     await mountTeams(teamFiles(TEAMS.replace('      ben-k:\n        adjustment_individual:', '      ben-k:\n        adjustment_individual: -2')));
     expect(root!.querySelectorAll('tr.member-row')).toHaveLength(3);
+    expect(button('Open all teams')).toBeUndefined();
   });
 
   it('names an individual student, handle under the name, and keeps Adjustment behind its chip', async () => {
