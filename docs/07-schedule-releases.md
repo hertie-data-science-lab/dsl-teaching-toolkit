@@ -235,7 +235,7 @@ Could be an exam, a drop-in clinic, a guest lecture, a revision session, a secon
 | `event_datetime` | **yes** | - | when it happens; as displayed on the deployed site schedule |
 | `kind` | no | `special_event` | `special_event`, `exam`, or any other row kind of `releases:` (`lecture`, `lab`, ...) - see below. An unknown value is flagged and shown as `special_event` |
 | `number` | no | the label's number | a session's number (`Lab 1`), as on a release |
-| `title` | no | prettified label | the row label on the site; a session's defaults to the title of the release of the same kind and number |
+| `title` | no | prettified label | the row label on the site; a session's defaults to the title of the shown release of the same kind and number |
 | `details` | no | - | what the row's Details column says: the room, the format, what to bring. There is no default - an exam with no `details:` says nothing, rather than the "Details to be confirmed." the toolkit used to write into every one |
 | `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)** |
 | `show_on_site` | no | `true` | `false` keeps the row in this file and off the site |

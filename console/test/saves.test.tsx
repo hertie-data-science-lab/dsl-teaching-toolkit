@@ -211,6 +211,31 @@ describe('Save on the schedule’s new release, its kind inferred from the folde
     expect(out.lecture.show_on_site).toBe(false);
   });
 
+  it('drops the proposed number when a new lab loses its deploy and becomes a session, and keeps a typed one', async () => {
+    const add = async (number?: string) => {
+      const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
+      await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new' })} />);
+      await click(button('Lab'));
+      expect(q<HTMLInputElement>('#e-num').value).toBe('3');
+      if (number !== undefined) await type('#e-num', number);
+      await type('#e-title', 'Clinic');
+      await click(q('button[aria-label="Remove deploy 1"]'));
+      await type('#e-date', '2026-10-01');
+      await click(buttons('Save')[0]);
+      await settle(() => puts(gh, 'schedule.yml').length > 0);
+      const out = parse(body(puts(gh, 'schedule.yml')[0]));
+      render(null, root!);
+      return out;
+    };
+    const proposed = await add();
+    expect(Object.keys(proposed.releases)).toEqual(['lab-2']);
+    expect(Object.keys(proposed.events)).toEqual(['lab-clinic']);
+    expect(proposed.events['lab-clinic']).not.toHaveProperty('number');
+    const typed = await add('2');
+    expect(Object.keys(typed.events)).toEqual(['lab-2-b']);
+    expect(typed.events['lab-2-b'].number).toBe(2);
+  });
+
   it('writes no number for a readings folder', async () => {
     const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
     const out = await addRelease(gh, f, 'readings/week_3');
@@ -393,6 +418,22 @@ describe('the late penalty on the marks grid', () => {
     await click(tick());
     expect(q<HTMLInputElement>(BOX).value).toBe('');
     expect((await saved(gh2)).late_penalty).toBe('waive');
+  });
+
+  it('an override of 0 waives it, and the tickbox follows', async () => {
+    const gh = github(), f = late();
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    await type(BOX, '0');
+    expect(tick().checked).toBe(false);
+    expect(q('tr.team-row td.pen').textContent).toContain('waived');
+    expect((await saved(gh)).late_penalty).toBe('waive');
+  });
+
+  it('shows nothing on an on-time unit, whatever its late_penalty says', async () => {
+    const f = files({ [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: TEAM_SHEET.replace('    feedback_group:\n', '    late_penalty: half\n    feedback_group:\n') });
+    await mount(envOf(github(), f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    expect(q('tr.team-row td.pen').textContent).toBe('');
+    expect(root!.querySelector(BOX)).toBeNull();
   });
 
   it('says so beside a penalty nobody can apply', async () => {

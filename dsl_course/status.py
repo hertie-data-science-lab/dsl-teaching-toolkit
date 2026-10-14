@@ -393,10 +393,10 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
         if sched.archive and sched.archive.when
         else "archive not scheduled (write an archive: block)"
     )
-    has_due_dates = bool(sched.semester_start or sched.assignments or sched.events)
+    has_due_dates = bool(sched.semester_start or sched.assignments or sched.all_events)
     dates = (
         f"start={sched.semester_start}, {len(sched.assignments)} due date(s), "
-        f"{len(sched.events)} event(s), "
+        f"{len(sched.all_events)} event(s), "
         if has_due_dates
         else ""
     )

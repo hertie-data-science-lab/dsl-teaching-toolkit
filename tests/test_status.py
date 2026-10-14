@@ -342,6 +342,16 @@ def test_c6_says_when_the_whole_semester_freezes(monkeypatch):
     )
 
 
+def test_c6_counts_the_events_sessions_with_the_exams(monkeypatch):
+    # A schedule whose only dated entries are `events:` sessions still has dates.
+    _stub_every_read(monkeypatch)
+    lab = schedule.Event("lab-1-b", "Lab", None, kind="lab")
+    monkeypatch.setattr(schedule, "load", lambda org: schedule.Schedule(sessions=[lab]))
+    row = status.collect("Course", "Semester-f2026")["C6"]
+    assert "1 event(s)" in row["detail"]
+    assert row["status"] == "ok"
+
+
 def test_c6_says_so_when_nothing_will_ever_archive_the_semester(monkeypatch):
     _stub_every_read(monkeypatch)
     monkeypatch.setattr(

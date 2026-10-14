@@ -947,14 +947,17 @@ class LateChoice(NamedTuple):
 
 def late_choice(late_penalty: object) -> LateChoice:
     """The grader's `late_penalty` as a `LateChoice`: a percent or fraction (`10%`, `0.1`)
-    sets the whole penalty; anything else that is not apply or waive is `invalid`."""
+    sets the whole penalty; anything else that is not apply or waive is `invalid`. A set
+    penalty of nothing (`0%`) IS a waiver, and reads as one everywhere it is shown."""
     text = "" if late_penalty is None else str(late_penalty).strip()
     if text.casefold() in ("", "apply"):
         return LateChoice("apply")
     if text.casefold() == "waive":
         return LateChoice("waive")
     fraction = read_penalty(text)[0]
-    return LateChoice("invalid") if fraction is None else LateChoice("set", fraction)
+    if fraction is None:
+        return LateChoice("invalid")
+    return LateChoice("waive") if fraction == 0 else LateChoice("set", fraction)
 
 
 class Penalty(NamedTuple):
@@ -974,7 +977,7 @@ def effective_penalty(
     days_late`, `waive` is nothing, and a percent or fraction (`set`) is the WHOLE penalty
     in place of that arithmetic. A unit that is not late loses nothing whatever is written.
     An `invalid` one keeps the late rule's arithmetic - not a penalty anybody can apply,
-    so `sheet_hold_reasons` holds the unit for a hand decision rather than guess."""
+    so `sheet_hold_reasons` holds a late unit for a hand decision rather than guess."""
     choice = late_choice(late_penalty)
     days = as_decimal(days_late)
     if days is None or days <= 0 or choice.mode == "waive":
@@ -2574,9 +2577,11 @@ def _penalty_display(
     rate: Decimal | None, days_late: object, late_penalty: object = None
 ) -> str:
     """What the late days cost, in the words the student is told them in: `-20%` as the
-    late rule computes it, `waived`, or `-10% (set by hand)` (`effective_penalty`). Empty
-    for a unit that is not late. A `late_penalty` nobody can read shows the late rule's
-    figure: the unit is held, so this is a preview's word, never a student's."""
+    late rule computes it, `waived` (a set `0%` too), or `-10% (set by hand)`
+    (`effective_penalty`). Empty for a unit that is not late. A `late_penalty` nobody can
+    read shows the late rule's figure, because that is what applies as things stand: the
+    unit's mark is held (`sheet_hold_reasons`), but its receipt still reports the late
+    rule's penalty for the time it was handed in."""
     days = as_decimal(days_late)
     if days is None or days <= 0:
         return ""
@@ -2827,9 +2832,14 @@ def sheet_hold_reasons(
             faults.append(fault)
 
     for unit_key, block in _units(spec, sheet):
+        # An unreadable `late_penalty` holds only a LATE unit: on an on-time one there is
+        # nothing for it to apply to (`effective_penalty`), so it holds nobody's mark.
+        days = as_decimal((block.get(INFO_KEY) or {}).get("days_late"))
         fault = _score_fault(spec, block.get(spec.score_key)) or (
             "late_penalty"
-            if late_choice(block.get(LATE_PENALTY_KEY)).mode == "invalid"
+            if days is not None
+            and days > 0
+            and late_choice(block.get(LATE_PENALTY_KEY)).mode == "invalid"
             else ""
         )
         for handle, person in _people(spec, unit_key, block).items():

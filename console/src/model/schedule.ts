@@ -130,11 +130,13 @@ export function scheduleRows(status: Status, sched: Schedule | null, now: number
     if (a.due) rows.push({ ...base, type: 'due', when: a.due });
   }
   if (sched) {
-    // A session with nothing to ship ("Lab 1", group 2) is named as the site names it: its kind and number, its own title else its release's.
+    // A session with nothing to ship ("Lab 1", group 2) is named as the site names it: its kind and number, its own title else that of
+    // the SHOWN release of its kind and number (schedule_plan.planned_rows).
     const titles = new Map<string, string>();
     for (const r of releases) {
-      const k = `${r.kind}:${r.number ?? labelNumber(r.id)}`;
-      if (!titles.has(k)) titles.set(k, r.title);
+      const n = r.number ?? labelNumber(r.id);
+      const k = `${r.kind}:${n}`;
+      if (r.show_on_site && r.title && n !== null && !titles.has(k)) titles.set(k, r.title);
     }
     for (const ev of sched.events) {
       const session = isSession(ev.kind);

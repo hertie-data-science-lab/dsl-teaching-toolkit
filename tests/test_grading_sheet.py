@@ -931,6 +931,9 @@ def test_effective_penalty_reads_apply_waive_or_the_whole_penalty(
         ("0.15", "set"),
         ("15", "invalid"),
         ("waived", "invalid"),
+        # a set penalty of nothing is a waiver, and reads as one
+        ("0%", "waive"),
+        ("0", "waive"),
     ],
 )
 def test_late_choice_reads_the_graders_say_once(late_penalty, mode):
@@ -985,3 +988,37 @@ def test_a_late_penalty_nobody_can_apply_holds_the_unit_on_its_own_line():
     assert fault.lineno == 5 and fault.field == "late_penalty"
     assert "apply, waive or a percentage" in fault.what
     _pii_free([fault], "team-alpha", "ada-l", "ben-k", "half")
+
+
+def test_an_unreadable_late_penalty_holds_no_unit_that_is_on_time():
+    # Nothing can apply to an on-time unit, so nothing it says can hold the mark.
+    sheet = yaml.safe_load(
+        """submissions:
+  ada-l:
+    info:
+      days_late: 0
+    late_penalty: half
+    score:
+      Q1: 12
+  ben-k:
+    late_penalty: half
+    score:
+      Q1: 9
+  cy-d:
+    info:
+      days_late: 1
+    late_penalty: half
+    score:
+      Q1: 9
+"""
+    )
+    assert sheet_hold_reasons(individual(questions=QUESTIONS), sheet) == {
+        "cy-d": "late_penalty"
+    }
+
+
+def test_a_set_penalty_of_nothing_reads_as_waived():
+    rate = penalty_rate("10%")
+    assert grades._penalty_display(rate, 2, "0%") == "waived"
+    assert grades._penalty_display(rate, 2, "waive") == "waived"
+    assert final_grade(20, rate, 2, None, "0%") == Decimal(20)

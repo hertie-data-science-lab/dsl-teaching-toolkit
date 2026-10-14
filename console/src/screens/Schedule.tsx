@@ -6,7 +6,7 @@ import { compileAll, matchRules } from '../edit/glob';
 import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
-import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
+import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, kindIdent, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
   assignmentKey, blankDeploy, blankDraft, blockOf, defaultDeployAt, deployAt, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft,
@@ -430,10 +430,7 @@ function identOf(d: Draft, row: Row | undefined, kind: string): string {
   if (row) return row.ident;
   if (d.kind === 'assignments') return d.number ? `Assignment ${d.number}` : 'Assignment';
   if (d.kind === 'events') return d.type === 'exam' ? 'Exam' : 'Event';
-  if (d.kind === 'session') {
-    const word = KIND_LABEL[kind] ?? kind;
-    return d.number ? `${word} ${d.number}` : word;
-  }
+  if (d.kind === 'session') return kindIdent(kind, d.number || null);
   return '';
 }
 

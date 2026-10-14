@@ -35,6 +35,7 @@ from dsl_course.faults import ConfigFault, FaultKind, header_fault
 from dsl_course.gh_contents import load_yaml_lines
 from dsl_course.materials import PLAN_END, PLAN_START, Declared
 from dsl_course.ops.request import validate
+from dsl_course.schedule_plan import planned_rows
 from tests.conftest import repo_row
 
 COURSE = "hertie-dsl-demo-course-e1234"
@@ -733,7 +734,7 @@ events:
     event_datetime: 2026-09-22T23:59
 """
     )
-    rows = status_json.this_week(sched, [], [], NOW)
+    rows = status_json.this_week(sched, [], [], NOW, planned_rows(sched))
     assert [r["ref"] for r in rows] == ["e0", "e1"]
     assert rows[0]["when"] == "2026-09-23T00:00:00+02:00"
 
@@ -3385,11 +3386,11 @@ def test_a_session_event_fills_its_kinds_week():
 def test_this_week_lists_a_session_event_under_its_kind():
     sched = _sched(SESSIONS)
     now = datetime(2026, 10, 13, 9, 0, tzinfo=UTC)
-    rows = status_json.this_week(sched, [], [], now)
+    rows = status_json.this_week(sched, [], [], now, planned_rows(sched))
     (lab,) = [r for r in rows if r["ref"] == "lab-2-only-group"]
     assert (lab["kind"], lab["title"], lab["state"]) == ("lab", "Trees", "planned")
     early = status_json.this_week(
-        sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC)
+        sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC), planned_rows(sched)
     )
     (group,) = [r for r in early if r["ref"] == "lab-1-group-2"]
     assert group["title"] == "Lab 1"
@@ -3398,7 +3399,9 @@ def test_this_week_lists_a_session_event_under_its_kind():
 def test_this_week_titles_a_session_as_the_release_it_repeats():
     # No `title:` of its own: the lab 1 release's, as on the site row.
     sched = _sched(SESSIONS.replace("  lab_1:\n", "  lab_1:\n    title: Regression\n"))
-    week = status_json.this_week(sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC))
+    week = status_json.this_week(
+        sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC), planned_rows(sched)
+    )
     (group,) = [r for r in week if r["ref"] == "lab-1-group-2"]
     assert (group["kind"], group["title"]) == ("lab", "Regression")
 

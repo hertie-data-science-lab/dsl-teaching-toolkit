@@ -240,6 +240,14 @@ describe('S6 schedule and S11 release', () => {
     expect(sheet).toContain('Add what to release');
     expect(sheet).not.toContain('Give it a number first');
   });
+  it('titles a session only from a shown release with a number, as the site does', () => {
+    const lab = { ...STATUS.releases![0], id: 'lab-9', kind: 'lab', number: 9, title: 'Attention' };
+    const session = SCHEDULE.replace('events:\n', 'events:\n  lab-9-b:\n    kind: lab\n    number: 9\n    event_datetime: 2026-10-09T18:00\n');
+    const nameOf = (r: NonNullable<Status['releases']>[number]) => scheduleRows({ ...STATUS, releases: [...STATUS.releases!, r] }, parseSchedule(session), NOW, 'Europe/Berlin').find((x) => x.entry === 'lab-9-b')?.name;
+    expect(nameOf(lab)).toBe('Attention');
+    expect(nameOf({ ...lab, show_on_site: false })).toBe('');
+    expect(nameOf({ ...lab, id: 'lab-extra', number: null })).toBe('');
+  });
   it('shows Type, Details as markdown and State, with events from schedule.yml', () => {
     const out = html(<ScheduleScreen {...props()} />);
     expect(out).toContain('<span>Details</span>');

@@ -386,10 +386,13 @@ export function nextNumber(doc: Raw, kind: string, kindOf: KindOf = spelledKind)
  * A new entry's draft with its number proposed (`nextNumber`), when it has none yet; any other
  * draft as it is. `kind` is a release's kind as the engine will read it (its own, else the one
  * inferred from its folder). Readings get no proposal, so only a number typed in is kept. A
- * supporting-files entry carries none: it is no row.
+ * supporting-files entry carries none: it is no row. Nor does a session with nothing to ship
+ * (`events:`) get one: the next release number is not its number, so it keeps only one typed in,
+ * and the site shows its kind alone, or its release's number when it repeats one.
  */
 export function withNumber<T extends Draft>(d: T, doc: Raw, kindOf: KindOf = spelledKind, kind?: string): T {
   if ((d.kind !== 'assignments' && d.kind !== 'session') || d.id) return d;
+  if (d.kind === 'session' && sessionBlock(d) === 'events') return d;
   const k = d.kind === 'assignments' ? 'assignment' : kind || d.type || 'lecture';
   if (k === 'assets') return d.number === undefined ? d : { ...d, number: undefined };
   const n = d.number === undefined ? nextNumber(doc, k, kindOf) : null;

@@ -58,7 +58,7 @@ teams:
 | final grade | derived on output, never stored | yes |
 
 The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A late
-unit's `late_penalty` changes the middle term: `waive` takes nothing off, and `15%` takes
+unit's `late_penalty` changes the middle term: `waive` (or `0%`) takes nothing off, and `15%` takes
 off 15% in place of `rate × days_late`; a unit that is not late loses nothing whatever it
 says. The console's Marks tab writes it for you: untick **Apply late penalty**, or type an
 override. A penalty changed after marks were returned goes out again as a changed mark. A
@@ -76,8 +76,8 @@ by hand.
 ### When a sheet has something nobody can act on
 
 The quarter-hourly tick reads every sheet. Anything it cannot use - a save that does not
-parse, a key written twice, a mark or an adjustment that is not a number, a `late_penalty`
-that is not `apply`, `waive` or a percentage, a question
+parse, a key written twice, a mark or an adjustment that is not a number, a late unit's
+`late_penalty` that is not `apply`, `waive` or a percentage, a question
 `grading_config.yml` does not declare, a handle in two submission units (however it is
 capitalised), a team's `members:` that is not one entry per member - opens **one** issue in
 `semester-config` (*grading sheets have entries the grader cannot read*) listing each by file

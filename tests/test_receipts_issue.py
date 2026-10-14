@@ -206,6 +206,15 @@ def test_a_receipt_quotes_the_penalty_its_grader_already_chose():
     )
 
 
+def test_a_receipt_under_a_late_penalty_nobody_can_read_quotes_the_late_rule():
+    # The unit's mark is held for a hand decision; the receipt says what applies as
+    # things stand, which is the late rule's own figure.
+    assert grades.penalty_display(spec(), 2, "half") == "-20%"
+    assert "2 days late (-20%)" in grades.receipt(
+        spec(), course.RECEIPT_UPDATED, sha=SHA, days=2, late_penalty="half"
+    )
+
+
 def test_the_marker_keys_on_the_commit_as_well_as_the_event():
     # Per COMMIT, so a re-run over the same pin says nothing while a genuinely new push
     # still earns its own receipt.

@@ -553,6 +553,12 @@ class Schedule:
     # fixed. The fault is in `faults` like any other.
     instance_unparseable: bool = False
 
+    @property
+    def all_events(self) -> list[Event]:
+        """Every `events:` entry, sessions among them: what a reader that counts or dates
+        the block wants, as against a renderer that shows exams and sessions apart."""
+        return self.events + self.sessions
+
 
 @dataclass
 class Drops:
@@ -2539,7 +2545,7 @@ def _validate_report(sched: Schedule, source: str) -> str:
             f"  {len(sched.releases)} release(s), "
             f"{sum(len(r.deploy) for r in sched.releases)} deploy(s) | "
             f"{len(sched.assignments)} assignment(s) | "
-            f"{len(sched.events) + len(sched.sessions)} event(s)"
+            f"{len(sched.all_events)} event(s)"
             + (f", {n} of them session(s)" if (n := len(sched.sessions)) else "")
         ),
     ]

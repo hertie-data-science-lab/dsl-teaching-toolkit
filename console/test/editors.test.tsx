@@ -395,6 +395,12 @@ describe('marks arithmetic, as grades.py does it', () => {
     // Not a penalty anybody can apply: written as typed, and held.
     expect(overrideValue('150')).toBe('150');
     expect(overrideValue('-5')).toBe('-5');
+    // A set penalty of nothing is a waiver: written as one, and an existing `0%` reads as one.
+    expect(overrideValue('0')).toBe('waive');
+    expect(overrideValue('0%')).toBe('waive');
+    expect(lateChoice('0%')).toEqual({ mode: 'waive' });
+    expect(penaltyText(effectivePenalty(0.1, 2, '0%'), 0.1)).toBe('waived');
+    expect(overrideText('0%')).toBe('');
     expect(overrideText('15%')).toBe('15');
     expect(overrideText(0.15)).toBe('15');
     expect(overrideText('apply')).toBe('');
@@ -695,6 +701,9 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
     expect(nextNumber(doc, 'assignment')).toBe(3);
     const lab = blankDraft('lab', { repo: 'm' }) as ReleaseDraft;
     expect(withNumber(lab, doc, kindOf).number).toBe(4);
+    // A session with nothing to ship is proposed no number: the next release's is not its own.
+    expect(withNumber({ ...lab, deploys: [] }, doc, kindOf).number).toBeUndefined();
+    expect(withNumber({ ...lab, deploys: [], number: 2 }, doc, kindOf).number).toBe(2);
     // Readings are numbered only to join a lecture: nothing is proposed.
     expect(withNumber(blankDraft('readings', { repo: 'm' }) as ReleaseDraft, doc, kindOf).number).toBeUndefined();
     // A draft whose kind is inferred takes that kind's number; readings keep only one typed in.

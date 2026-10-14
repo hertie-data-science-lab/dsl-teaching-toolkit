@@ -154,10 +154,9 @@ def planned_rows(
     (`_undated_placer`)."""
 
     def row(release: schedule.Release, sort_at: date | datetime) -> PlannedRow:
-        kind, _ = entry_kind(release, aliases)
         return PlannedRow(
             key=release.label,
-            kind=kind,
+            kind=kinds[release.label],
             when=release.when,
             sort_at=sort_at,
             tbc=release.tbc,

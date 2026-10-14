@@ -128,14 +128,16 @@ export function scoreTotal(score: unknown, questions?: Record<string, unknown> |
 
 export type LateMode = 'apply' | 'waive' | 'set' | 'bad';
 
-/** A unit's `late_penalty` read once (grades.late_choice): `apply` (absent or blank too), `waive`,
- *  `set` - the whole penalty is `set` - or `bad`, which nobody can apply and the engine holds. */
+/** A unit's `late_penalty` read once (grades.late_choice): `apply` (absent or blank too), `waive`
+ *  (a set `0%` too), `set` - the whole penalty is `set` - or `bad`, which nobody can apply and the
+ *  engine holds. */
 export function lateChoice(latePenalty: unknown): { mode: LateMode; set?: number } {
   const t = latePenalty === null || latePenalty === undefined ? '' : String(latePenalty).trim();
   if (t === '' || t.toLowerCase() === 'apply') return { mode: 'apply' };
   if (t.toLowerCase() === 'waive') return { mode: 'waive' };
   const set = penaltyRate(t);
-  return set === null ? { mode: 'bad' } : { mode: 'set', set };
+  if (set === null) return { mode: 'bad' };
+  return set === 0 ? { mode: 'waive' } : { mode: 'set', set };
 }
 
 /** What a unit loses for lateness (grades.effective_penalty): `fraction` of its total, the `mode`
@@ -179,12 +181,14 @@ export function penaltyText(p: Penalty, rate: number | null): string {
   }
 }
 
-/** What the override box writes: `15` or `15%` as `15%`, cleared as `apply`, anything else as typed
- *  (the engine holds it, and the grid says so). */
+/** What the override box writes: `15` or `15%` as `15%`, `0` as `waive`, cleared as `apply`, anything
+ *  else as typed (the engine holds it, and the grid says so). */
 export function overrideValue(raw: string): string {
   const t = raw.trim().replace(/%$/, '').trim();
   if (!t) return 'apply';
-  return penaltyRate(`${t}%`) === null ? raw.trim() : `${Number(t)}%`;
+  const set = penaltyRate(`${t}%`);
+  if (set === null) return raw.trim();
+  return set === 0 ? 'waive' : `${Number(t)}%`;
 }
 
 /** The override box's text for a stored `late_penalty`: empty unless the penalty is set by hand. */

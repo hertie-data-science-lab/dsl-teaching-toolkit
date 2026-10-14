@@ -129,7 +129,7 @@ from .ops.registry import STATUS_SCHEMA
 from .releaseignore import RELEASEIGNORE, REVIEWED_MARK, listed
 from .repos import default_branch
 from .schedule_plan import (
-    Aliases,
+    PlannedRow,
     Unnumbered,
     deploy_dest,
     duplicate_numbers,
@@ -2076,18 +2076,18 @@ def render_assignments(
 
 
 def render_releases(
-    facts: SemesterFacts, faults: list[ConfigFault], now: datetime
+    facts: SemesterFacts,
+    faults: list[ConfigFault],
+    now: datetime,
+    planned: list[PlannedRow],
 ) -> list[dict]:
-    """One row per `releases:` entry. Source and destination are the entry's FIRST copy."""
+    """One row per `releases:` entry. Source and destination are the entry's FIRST copy.
+    `planned` is the semester's `schedule_plan.planned_rows`, read once by the caller."""
     rows = []
     aliases = lambda repo: facts.aliases.get(repo, {})
     # The number the site gives each row (`schedule_plan.site_rows`); None for a row it
     # does not number (silent, attached readings).
-    numbers = {
-        sr.row.key: sr.number
-        for sr in site_rows(planned_rows(facts.sched, aliases))
-        if not sr.row.session
-    }
+    numbers = {sr.row.key: sr.number for sr in site_rows(planned) if not sr.row.session}
     held = {m.key for m in unnumbered(facts.sched, aliases) if m.block == "releases"}
     for r in facts.sched.releases:
         own = [f for f in faults if f.is_source and f.where == f"releases.{r.label}"]
@@ -2127,13 +2127,13 @@ def this_week(
     releases: list[dict],
     assignments: list[dict],
     now: datetime,
-    aliases: Aliases = lambda _repo: {},
+    planned: list[PlannedRow],
 ) -> list[dict]:
     """What happens from the start of today to the same moment seven days on, in the
     semester's zone: releases, hand-outs, due dates and events (an `events:` session under
-    its own kind, `lab`, titled as its row: `schedule_plan.planned_rows`). The start is
-    included and the end is not, so a moment belongs to exactly one week. `aliases` are
-    the source repos' folder aliases, which a session's title follows its release by."""
+    its own kind, `lab`, titled as its row in `planned`, the semester's
+    `schedule_plan.planned_rows`). The start is included and the end is not, so a moment
+    belongs to exactly one week."""
     tz = ZoneInfo(sched.timezone)
     start = _local_midnight(now, tz)
     end = start + timedelta(days=7)
@@ -2161,7 +2161,7 @@ def this_week(
 
     by_id = {r["id"]: r for r in releases}
     by_slug = {a["slug"]: a for a in assignments}
-    sessions = {r.key: r for r in planned_rows(sched, aliases) if r.session}
+    sessions = {r.key: r for r in planned if r.session}
     for when, what, key, entry in schedule_moments(sched):
         if what == "release":
             state = by_id.get(key, {}).get("state", "planned")
@@ -2508,7 +2508,8 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     for t in course.templates:
         problems += template_problems(t, course.org, moments)
         problems += template_todo_problems(t, course.org, moments)
-    releases = render_releases(facts, facts.schedule_faults, now)
+    planned = planned_rows(facts.sched, lambda repo: facts.aliases.get(repo, {}))
+    releases = render_releases(facts, facts.schedule_faults, now, planned)
     # A late release another problem already holds back is not told twice.
     held = {p["release"] for p in problems if "release" in p}
     problems += late_problems(facts, releases, held, now)
@@ -2563,9 +2564,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "template_moments": {repo: _iso(m.when) for repo, m in moments.items()},
         },
         "problems": problems,
-        "this_week": this_week(
-            sched, releases, assignments, now, lambda repo: facts.aliases.get(repo, {})
-        ),
+        "this_week": this_week(sched, releases, assignments, now, planned),
         "releases": releases,
         "assignments": assignments,
         "students": {
