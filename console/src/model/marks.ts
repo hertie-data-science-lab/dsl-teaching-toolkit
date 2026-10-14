@@ -33,6 +33,9 @@ export interface Unit {
   questionFeedbackPath: Path;
   latePenalty: unknown;
   latePenaltyPath: Path;
+  /** The team's own private notes (a group sheet; a person's notes are on the person). */
+  notes: unknown;
+  notesPath: Path | null;
   people: Person[];
 }
 
@@ -55,6 +58,7 @@ export function readSheet(text: string, doc: unknown): Sheet {
         key, info, score: u.score_group ?? null, scorePath: [container, key, 'score_group'], feedback: u.feedback_group ?? null, feedbackPath: [container, key, 'feedback_group'],
         questionFeedback: obj(u[QUESTION_FEEDBACK_KEY]), questionFeedbackPath: [container, key, QUESTION_FEEDBACK_KEY],
         latePenalty: u[LATE_PENALTY_KEY] ?? null, latePenaltyPath: [container, key, LATE_PENALTY_KEY],
+        notes: u[NOTES_KEY] ?? null, notesPath: [container, key, NOTES_KEY],
         people: Object.entries(obj(u.members)).map(([handle, m]) => {
           const mm = obj(m);
           return { handle, adjustment: mm.adjustment_individual ?? null, feedback: mm.feedback_individual ?? null, notes: mm[NOTES_KEY] ?? null, base: [container, key, 'members', handle] };
@@ -64,6 +68,7 @@ export function readSheet(text: string, doc: unknown): Sheet {
       key, info, score: u.score_individual ?? null, scorePath: [container, key, 'score_individual'], feedback: null, feedbackPath: null,
       questionFeedback: obj(u[QUESTION_FEEDBACK_KEY]), questionFeedbackPath: [container, key, QUESTION_FEEDBACK_KEY],
       latePenalty: u[LATE_PENALTY_KEY] ?? null, latePenaltyPath: [container, key, LATE_PENALTY_KEY],
+      notes: null, notesPath: null,
       people: [{ handle: key, adjustment: u.adjustment_individual ?? null, feedback: u.feedback_individual ?? null, notes: u[NOTES_KEY] ?? null, base: [container, key] }],
     };
   });
