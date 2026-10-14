@@ -337,8 +337,9 @@ def test_names_json_is_the_engines_own_names():
     assert set(names) == {
         "config_repo", "join_repo", "system_dir", "instructors_file",
         "assignments_file", "registry_file", "records", "join_markers",
-        "opencourse_file", "site_config",
+        "opencourse_file", "site_config", "semester_topic",
     }  # fmt: skip
+    assert names["semester_topic"] == course.SEMESTER_TOPIC
     assert names["join_markers"] == {
         "join_course": course.JOIN_COURSE_MARKER,
         "join_team": course.JOIN_TEAM_MARKER,

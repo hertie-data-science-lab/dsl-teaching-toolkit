@@ -2,7 +2,11 @@
 // repo words, and release rows joined on the problem's `release`.
 
 import { describe, expect, it } from 'vitest';
-import { heldSentence, markWord, repoWords, verdictWords } from '../src/model/format';
+import { heldSentence, markWord, repoWords, verdictMain, verdictTags } from '../src/model/format';
+import type { Verdict } from '../src/model/readiness';
+
+/** The verdict as the panel shows it: its main words, then its tags. */
+const verdictWords = (v: Verdict) => [verdictMain(v), ...verdictTags(v)].join(' · ');
 import {
   bitesAt, materialsReadiness, problemCount, problemFromDay, releaseMarks, releaseProblems, standing, stepState, suggestionsCount, templateReadiness, tier, verdictOf,
 } from '../src/model/readiness';

@@ -6,7 +6,7 @@
 
 import { DEFAULT_TIMEZONE, SYSTEM_KINDS } from '../model/policy';
 import type { Setup } from '../model/open';
-import { ARCHIVE_ROWS, instant, startOfDay, type Announcement, type ScheduleRow, type SemesterAssignment, type SemesterFacts } from '../model/student';
+import { ARCHIVE_ROW, instant, startOfDay, type Announcement, type ScheduleRow, type SemesterAssignment, type SemesterFacts } from '../model/student';
 import { assignmentHref } from '../router';
 import { Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
@@ -46,7 +46,7 @@ export function homeUpdates(facts: SemesterFacts, now: number): Update[] {
     const when = a.handout ?? a.due;
     if (a.handedOut && when) out.push({ at: instant(when, tz), assignment: a });
   }
-  const archived = facts.rows.find((r) => ARCHIVE_ROWS.includes(r.id) && r.details);
+  const archived = facts.rows.find((r) => r.id === ARCHIVE_ROW && r.details);
   if (facts.archive && archived) {
     const at = instant(facts.archive, tz), today = startOfDay(now, tz);
     if (at >= today && at - today <= ARCHIVE_NOTICE_DAYS * 864e5) out.push({ at, archive: archived.details });

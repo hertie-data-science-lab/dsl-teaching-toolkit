@@ -83,13 +83,10 @@ describe('the student screens', () => {
     expect(kindTabs(factsFromStatus(renamed))[1]).toEqual(['kind-lab', 'Practicals']);
   });
 
-  it('route a kind tab and Home, and move the old Marks, Join and Set up hashes', () => {
-    expect(parseHash('#kind-drop-in', true)).toEqual({ screen: 'kind-drop-in' });
-    expect(movedHash('#kind-lab', true)).toBeNull();
-    expect(movedHash('#home', true)).toBeNull();
-    expect(movedHash('#marks', true)).toBe('#assignments');
-    expect(movedHash('#join', true)).toBe('#assignments');
-    expect(movedHash('#setup', true)).toBe('#profile');
+  it('route a kind tab and Home', () => {
+    expect(parseHash('#kind-drop-in')).toEqual({ screen: 'kind-drop-in' });
+    expect(movedHash('#kind-lab')).toBeNull();
+    expect(movedHash('#home')).toBeNull();
     expect(studentHref(ORG)).toBe(`?semester=${ORG}#home`);
   });
 
@@ -97,9 +94,9 @@ describe('the student screens', () => {
     const href = materialHref(ORG, 'dl-materials', 'labs/01 intro/lab.md', 'kind-drop-in');
     expect(href).toBe(`?semester=${ORG}#kind-drop-in/${encodeURIComponent('dl-materials/labs/01 intro/lab.md')}`);
     const hash = href.slice(href.indexOf('#'));
-    expect(parseHash(hash, true)).toEqual({ screen: 'kind-drop-in', entry: 'dl-materials/labs/01 intro/lab.md' });
-    expect(movedHash(hash, true)).toBeNull();
-    expect(movedHash('#kind-drop-in/dl-materials/lab.md', true)).toBeNull();
+    expect(parseHash(hash)).toEqual({ screen: 'kind-drop-in', entry: 'dl-materials/labs/01 intro/lab.md' });
+    expect(movedHash(hash)).toBeNull();
+    expect(movedHash('#kind-drop-in/dl-materials/lab.md')).toBeNull();
     // All materials keeps its dash.
     expect(materialHref(ORG, 'dl-materials', 'lab.md')).toBe(`?semester=${ORG}#materials-${encodeURIComponent('dl-materials/lab.md')}`);
   });

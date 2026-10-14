@@ -2,7 +2,7 @@
 // (decision 0011 rule 2). The orgs come from whatever listings the token kind answers,
 // merged; each is classified by the topics on its `.github` repo: `dsl-course-hub` is a
 // course (its semesters come from its registry, `.github/semesters.yml`), `dsl-semester` is
-// a semester; an org still on the retired topic is not listed (model/migration). Push on an
+// a semester. Push on an
 // org's `.github` makes the person an instructor there; membership without it makes them a
 // student of a semester org.
 
@@ -10,8 +10,7 @@ import { parse } from 'yaml';
 import { isObj } from '../edit/yamlText';
 import type { Author, GhRepo, GitHubClient } from '../github/client';
 import { str } from './format';
-import { SEMESTER_TOPIC } from './migration';
-import { CONFIG_REPO, COURSE_REPO, POINTER_PATH, REGISTRY_FILE } from './names';
+import { CONFIG_REPO, COURSE_REPO, POINTER_PATH, REGISTRY_FILE, SEMESTER_TOPIC } from './names';
 
 export const COURSE_HUB_TOPIC = 'dsl-course-hub';
 /** What makes a course repo an assignment template (decision 0014); the `assignment-` name is only the default. */

@@ -67,7 +67,7 @@ describe('the site source behind StudentData', () => {
     expect(f.rows.find((r) => r.id === 'session-12')!.released).toBe(false);
     expect(f.rows.find((r) => r.id === 'term-start')!.allDay).toBe(true);
     expect(f.archive).toBe('2027-01-12T09:00:00');
-    expect(f.rows.find((r) => r.id === 'cohort-archived')).toMatchObject({ title: 'Semester archived', details: '', allDay: true });
+    expect(f.rows.find((r) => r.id === 'semester-archived')).toMatchObject({ title: 'Semester archived', details: '', allDay: true });
     expect(f.materialsRepos).toEqual(['materials']);
     expect(f.latePolicy).toHaveLength(2);
   });

@@ -109,16 +109,15 @@ export function courseFileAfter(text: string, before: Details, after: Details, m
 
 /**
  * Save dsl-course.yml with `after` written over `before`: refused on the save line, before any
- * write, while the course's names are unconfirmed, while `errs` marks a field, when the file
+ * write, while `errs` marks a field, when the file
  * would not be valid, or when a new admin has no GitHub account. True once written.
  */
 export async function saveCourseFile(
   env: Env | null,
   [run, report]: [ReturnType<typeof useSave>[1], (s: SaveState) => void],
-  o: { org: string; migrated?: boolean; file: { text: string; sha: string }; meta: Record<string, unknown>; before: Details; after: Details; errs: Record<string, string> },
+  o: { org: string; file: { text: string; sha: string }; meta: Record<string, unknown>; before: Details; after: Details; errs: Record<string, string> },
 ): Promise<boolean> {
   const refuse = (text: string) => (report({ kind: 'bad', text }), false);
-  if (o.migrated === false) return refuse('Not saved: the console has not yet confirmed this course uses the current names.');
   if (Object.keys(o.errs).length) return refuse('Fix the fields marked in red first.');
   const out = courseFileAfter(o.file.text, o.before, o.after, o.meta);
   if ('error' in out) return refuse(out.error);
@@ -201,13 +200,12 @@ export function WebsiteSwitch(p: CourseProps) {
     file.kind === 'loading' ? 'Not known yet.'
     : file.kind === 'error' ? 'Could not read the website settings.'
     : broken ? `${OPENCOURSE_FILE} does not parse; fix it in Manage.`
-    : p.migrated === false ? 'Not yet: the console has not confirmed this course uses the current names.'
     : busy ? save.text
     : before.enabled ? 'On: updates daily' : 'Off';
   return (
     <div class="field web-switch">
       <label class="switch">
-        <input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked={busy ? pending : before.enabled} disabled={busy || broken || !known || p.migrated === false} onChange={(e) => void flip((e.target as HTMLInputElement).checked)} />
+        <input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked={busy ? pending : before.enabled} disabled={busy || broken || !known} onChange={(e) => void flip((e.target as HTMLInputElement).checked)} />
         <span>Public OpenCourse website <span class="chip">Beta</span></span>
       </label>
       <span class="footnote" id="cd-web-state" aria-live="polite">{word}</span> <a class="textlink" href="#website">Manage</a>
@@ -253,7 +251,7 @@ export function DetailsScreen(p: CourseProps) {
   const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, COURSE_FACTS, d.about), ...defaultErrs };
   const doSave = async () => {
     if (!y || file.kind !== 'ready') return;
-    if (await saveCourseFile(env, [runSave, setSave], { org: course.org, migrated: p.migrated, file, meta, before, after: d, errs })) setDraft(null);
+    if (await saveCourseFile(env, [runSave, setSave], { org: course.org, file, meta, before, after: d, errs })) setDraft(null);
   };
   return (
     <>
@@ -296,7 +294,7 @@ export function DetailsScreen(p: CourseProps) {
               </div>
             </details>
             <div class="form-section">
-              <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml', exists: file.kind !== 'absent' }} />
+              <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before)} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml', exists: file.kind !== 'absent' }} />
             </div>
           </div>
         </div>
@@ -459,7 +457,6 @@ export function WebsiteScreen(p: CourseProps) {
   const siteExists = gh.kind === 'ready' && gh.repos.some((r) => r.name.toLowerCase() === `${course.org}.github.io`.toLowerCase());
   const doSave = async () => {
     if (y?.errors.length) return;
-    if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
     const out = websiteFileAfter(file.kind === 'ready' ? file.text : null, before, { ...d, source_repo: d.source_repo || (d.enabled ? src : '') });
     if ('error' in out) return setSave({ kind: 'bad', text: out.error });
     if (await runSave({ owner: course.org, repo: COURSE_REPO, path: OPENCOURSE_FILE }, out.text, file.kind === 'ready' ? file.sha : null, { message: 'course: edit the public website settings, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setDraft(null);
@@ -506,7 +503,7 @@ export function WebsiteScreen(p: CourseProps) {
         </section>
       ) : null}
       <section class="panel section">
-        <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false || !!y?.errors.length} file={{ org: course.org, repo: COURSE_REPO, path: OPENCOURSE_FILE, exists: file.kind !== 'absent' }} />
+        <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || !!y?.errors.length} file={{ org: course.org, repo: COURSE_REPO, path: OPENCOURSE_FILE, exists: file.kind !== 'absent' }} />
       </section>
     </>
   );

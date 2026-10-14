@@ -213,7 +213,7 @@ describe('the team steps', () => {
 
 describe('the route', () => {
   it('opens #assignment-<slug> as the page, lit under Assignments; with no slug, the list', () => {
-    expect(parseHash('#assignment-a1', true)).toEqual({ screen: 'assignment', entry: 'a1' });
+    expect(parseHash('#assignment-a1')).toEqual({ screen: 'assignment', entry: 'a1' });
     expect(studentScreen('assignment')).toBe('assignment');
     expect(studentNavKey('assignment')).toBe('assignments');
     expect(studentNavKey('week')).toBe('week');

@@ -19,8 +19,6 @@ export interface CohortProps {
   heartbeat?: Heartbeat | null;
   /** A template for the schedule editor's new entry (`?template=`, from New assignment). */
   prefill?: string;
-  /** The course's names were checked and are current (`CourseProps.migrated`): course-file saves wait for it. Absent in render tests. */
-  courseMigrated?: boolean;
 }
 
 /** A semester screen whose status is ready. */
@@ -29,8 +27,6 @@ export interface ReadyProps extends CohortProps {
 }
 
 export interface CourseProps {
-  /** The course's names were checked and are current; saves wait for it. Absent in render tests. */
-  migrated?: boolean;
   course: Course;
   loaded: Loaded; // the course's public status
   cohortStates: Record<string, Loaded>;

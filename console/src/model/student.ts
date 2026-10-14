@@ -301,8 +301,8 @@ export function repoPath(url: string, org: string): { repo: string; path: string
   return { repo: m[2], path: decodeURIComponent(m[3]) };
 }
 
-/** The schedule's archive row ids, now and under the retired name. */
-export const ARCHIVE_ROWS = ['semester-archived', 'cohort-archived'];
+/** The schedule's archive row id. */
+export const ARCHIVE_ROW = 'semester-archived';
 const stem = (name: string) => name.replace(/\.md$/, '');
 const SHAPES: Record<string, SubmitVia> = { external: 'external', 'shared-dropbox-repo': 'shared_dropbox_repo' };
 
@@ -487,12 +487,9 @@ export class SiteSource implements StudentData {
         if (fm.date) announcements.push({ when: str(fm.date), title: str(fm.title), details: str(fm.details) || bodyOf(text).trim() });
         return;
       }
-      // `semester-archived.md` since the rename, `cohort-archived.md` on a site synced before it.
-      const archiveRow = d === '_events' && ARCHIVE_ROWS.includes(stem(e.name));
+      const archiveRow = d === '_events' && stem(e.name) === ARCHIVE_ROW;
       if (archiveRow) archive = fm.date ? str(fm.date) : null;
-      // An old site titles that row with the old word; the console says semester.
-      const title = str(fm.title) === 'Cohort archived' ? 'Semester archived' : str(fm.title);
-      rows.push(...rowsOf(d, e.name, archiveRow ? { ...fm, title, details: '' } : fm, org));
+      rows.push(...rowsOf(d, e.name, archiveRow ? { ...fm, details: '' } : fm, org));
       if (d === '_assignments') assignments.push(assignmentOf(e.name, fm, bodyOf(text)));
     });
     const ppl = yamlOf(people?.text);

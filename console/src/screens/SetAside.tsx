@@ -66,7 +66,7 @@ export function SetAsideDialog({ ask, busy, error, onSetAside, onClose, fallback
  * dialog) goes after the panel inside `ref`'s element, so focus can land on the Set aside tab
  * when the line it came from moved.
  */
-export function useSetAside({ org, files, migrated, write }: { org: string; files: Files; migrated?: boolean; write: boolean }) {
+export function useSetAside({ org, files, write }: { org: string; files: Files; write: boolean }) {
   const env = useEnv();
   const [ask, setAsk] = useState<(Ask & { ids: string[] }) | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -77,7 +77,6 @@ export function useSetAside({ org, files, migrated, write }: { org: string; file
     setError('');
     const refuse = (text: string) => setError(text);
     if (!env) return refuse('Sign in to save.');
-    if (migrated === false) return refuse('Not saved: the console has not yet confirmed this course uses the current names.');
     if (file.kind !== 'ready') return refuse(`Not saved: ${COURSE_FILE} is not read yet.`);
     let text = file.text;
     for (const id of ids) {

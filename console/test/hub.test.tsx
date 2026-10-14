@@ -31,23 +31,19 @@ const props = (over: Partial<CohortProps> = {}): CohortProps => ({ course, cohor
 const current = (out: string) => /<a href="[^"]*" aria-current="page">([^<]+)<\/a>/.exec(out)?.[1];
 
 describe('the assignment hub', () => {
-  it('parses tabs, and the retired Teams and Marks hashes, to the hub', () => {
+  it('parses tabs to the hub', () => {
     expect(parseHash('#assignment-assignment-2')).toEqual({ screen: 'assignment', entry: 'assignment-2' });
     expect(parseHash('#assignment-assignment-2/marks')).toEqual({ screen: 'assignment', entry: 'assignment-2', tab: 'marks' });
-    expect(parseHash('#teams-assignment-3')).toEqual({ screen: 'assignment', entry: 'assignment-3', tab: 'teams' });
-    expect(parseHash('#marks-assignment-2')).toEqual({ screen: 'assignment', entry: 'assignment-2', tab: 'marks' });
-    expect(parseHash('#teams')).toEqual({ screen: 'assignments' });
-    expect(parseHash('#marks')).toEqual({ screen: 'assignments' });
-    expect(hashOf(parseHash('#teams-assignment-3'))).toBe('#assignment-assignment-3/teams');
+    expect(hashOf(parseHash('#assignment-assignment-3/teams'))).toBe('#assignment-assignment-3/teams');
     expect(hashOf(parseHash('#schedule-s5'))).toBe('#schedule-s5');
   });
 
-  it('rewrites an old Teams or Marks hash in the address bar, keeping the query string', () => {
+  it('rewrites a hash naming a tab the hub does not have, keeping the query string', () => {
     const replaceState = vi.fn();
     vi.stubGlobal('history', { replaceState });
     vi.stubGlobal('location', { search: `?cohort=${COHORT_ORG}` });
     try {
-      for (const [old, now] of [['#teams-assignment-3', '#assignment-assignment-3/teams'], ['#marks-assignment-2', '#assignment-assignment-2/marks'], ['#teams', '#assignments'], ['#marks', '#assignments']]) {
+      for (const [old, now] of [['#assignment-assignment-3/nope', '#assignment-assignment-3']]) {
         const to = movedHash(old);
         expect(to).toBe(now);
         replaceHash(to!);

@@ -462,7 +462,7 @@ export function CourseScreen(p: CourseProps) {
   const v = useCourseView(p);
   const computed = v.course !== null;
   const live = liveSemesters(p);
-  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.migrated, write: p.course.write });
+  const aside = useSetAside({ org: p.course.org, files: p.files, write: p.course.write });
   const ready = v.course ? courseReadiness(v.course, v.tiered, aside.list, p.now, v.horizon) : null;
   // The tab the verdict points at, until one is picked.
   const [picked, setTab] = useState<string | null>(null);

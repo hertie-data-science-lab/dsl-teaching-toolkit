@@ -190,20 +190,6 @@ export function weekOf(iso: string, term: Term, tz: string): WeekKey {
   return n < 1 ? 'before' : n > term.weeks ? 'after' : n;
 }
 
-/**
- * Split `items` for a week selection: `dated` holds those in the selected weeks (every dated
- * one when `selected` is empty, which is All weeks), `undated` those no date pins.
- */
-export function inWeeks<T>(items: T[], when: (t: T) => string | null | undefined, selected: WeekKey[], term: Term, tz: string): { dated: T[]; undated: T[] } {
-  const dated: T[] = [], undated: T[] = [];
-  for (const it of items) {
-    const w = when(it);
-    if (!w) undated.push(it);
-    else if (!selected.length || selected.includes(weekOf(w, term, tz))) dated.push(it);
-  }
-  return { dated, undated };
-}
-
 /** A semester week's first day (yyyy-mm-dd): week 1 starts on the semester's start. */
 export const weekStart = (term: Term, w: number): string => addDays(term.start, (w - 1) * 7);
 

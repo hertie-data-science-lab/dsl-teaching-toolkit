@@ -41,6 +41,7 @@ from .course import (
     JOIN_REPO,
     JOIN_TEAM_MARKER,
     LABELS,
+    SEMESTER_TOPIC,
     SOLUTION_BEFORE_CUTOFF,
     SOLUTION_WARNING,
     STARTER_MODES,
@@ -758,11 +759,12 @@ def materials_schema() -> dict:
 def names_json() -> dict:
     """The repo names and paths the console must spell exactly as the engine does, so it
     holds no literal of its own: the config and join repos, the `.system/` folder and every
-    record in it (`records.path`), the instructor files, and a semester site's
-    `_config.yml` keys."""
+    record in it (`records.path`), the instructor files, the semester topic, and a
+    semester site's `_config.yml` keys."""
     return {
         "config_repo": CONFIG_REPO,
         "join_repo": JOIN_REPO,
+        "semester_topic": SEMESTER_TOPIC,
         "system_dir": records.SYSTEM_DIR,
         "instructors_file": INSTRUCTORS_FILE,
         "opencourse_file": opencourse.OPENCOURSE_FILE,

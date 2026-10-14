@@ -12,6 +12,8 @@ export interface Names {
   system_dir: string;
   instructors_file: string;
   assignments_file: string;
+  /** The topic on a semester org's `.github` that marks it as one. */
+  semester_topic: string;
   /** The public website's settings, in the course's `.github` (decision 0016). */
   opencourse_file: string;
   /** The course's list of its semesters, in its `.github`. */
@@ -28,6 +30,7 @@ export const NAMES: Names = names;
 
 export const CONFIG_REPO = NAMES.config_repo;
 export const JOIN_REPO = NAMES.join_repo;
+export const SEMESTER_TOPIC = NAMES.semester_topic;
 export const INSTRUCTORS_FILE = NAMES.instructors_file;
 /** The semester's run settings for its assignments (decision 0010 rule 5). */
 export const ASSIGNMENTS_FILE = NAMES.assignments_file;

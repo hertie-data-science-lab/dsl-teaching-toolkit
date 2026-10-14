@@ -35,6 +35,7 @@
     "team_formation": ".system/team-formation"
   },
   "registry_file": "semesters.yml",
+  "semester_topic": "dsl-semester",
   "site_config": {
     "institution": [
       "schoolname",
