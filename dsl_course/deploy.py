@@ -68,7 +68,7 @@ from .log import (
     log_withheld,
     plural,
 )
-from .releaseignore import RELEASEIGNORE
+from .releaseignore import RELEASEIGNORE, excludes
 from .repos import (
     allow_forking,
     create_repo,
@@ -77,7 +77,7 @@ from .repos import (
 )
 from .schedule import DEFAULT_DEST_REPO, Deploy
 from .schedule_plan import deploy_dest, refuse_unnumbered, unnumbered_release
-from .selection import Selection, at_source
+from .selection import Selection
 from .selection import deny as selection_deny
 
 # Skipped when the WHOLE repo is released (`course_source_path: /`), and only at the repo
@@ -107,9 +107,7 @@ def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
     )
 
 
-def _warn_ignored_source(
-    course_org: str, repo: str, path: str, why: str = "releaseignore"
-) -> None:
+def _warn_ignored_source(course_org: str, repo: str, path: str) -> None:
     """Say that a release's own source path is excluded by a `.releaseignore`.
 
     Faculty naming a path outright is a clear ask, so answering it with nothing at all
@@ -117,13 +115,6 @@ def _warn_ignored_source(
     rather than adding the file. It takes the ::warning::-on-a-green-run channel instead
     of an error for the reason in `_warn_withheld_stub`: the hourly scheduler runs through
     the same `deploy_many`."""
-    if why == "denylist":
-        log_withheld(
-            f"{course_org}/{repo}/{path} was NOT released - solutions, tests, grading "
-            "files, `.env` and `.system/` never reach students (the institution "
-            "denylist). Everything else in this release shipped."
-        )
-        return
     log_withheld(
         f"{course_org}/{repo}/{path} was NOT released - a `{RELEASEIGNORE}` excludes it. "
         "Everything else in this release shipped. Drop the pattern that matches it, or "
@@ -560,14 +551,14 @@ def deploy_many(
                 )
                 errors += 1
                 continue
-            why = at_source(src_root, srcp)
-            if why:
-                # The source path is itself excluded (the denylist or a `.releaseignore`)
-                # - so is everything under it, and no `!` deeper down can re-include any
-                # of it. Nothing else was asked for, so this copy is a no-op rather than a
-                # partial one.
+            if excludes(src_root, srcp):
+                # The source path is itself excluded - so is everything under it, and no
+                # `!` deeper down can re-include any of it. Nothing else was asked for, so
+                # this copy is a no-op rather than a partial one. (A path on the
+                # institution denylist named outright DOES ship: the denylist only stops
+                # a folder copy sweeping one up - `selection.deny`.)
                 _warn_ignored_source(
-                    course_org, d.course_source_repo, d.course_source_path, why
+                    course_org, d.course_source_repo, d.course_source_path
                 )
                 continue
             try:

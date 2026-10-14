@@ -184,7 +184,9 @@ Things whose *literal spelling* is depended on from outside Python:
   `include_lectures`, `withhold`) and a materials repo's `publish.yml` are `legacy` rows the
   0.11.0 migration folds (`migrate.fold_open_site`, `migrate.publish_host`).
 - **`selection`** is the one rule for every outbound copy (decision 0040): the institution
-  denylist (`DENYLIST`, `CLUTTER`), then `.releaseignore`, then the use's Selection
+  denylist (`DENYLIST`, `CLUTTER`; on a release it judges only what lies BELOW the named
+  path, so `from_path: solutions/labs/02` ships while a lab folder's `solutions/` stays
+  behind), then `.releaseignore`, then the use's Selection
   (`semester.yml student_site.host`, `open_course_site.publish`; a release has none but
   the root `.github/` and unwritten stubs), then `institution.yml selection_floor`. `select`
   answers a path list, `deny` a `copytree` walk. A file's kind is the schedule block of the

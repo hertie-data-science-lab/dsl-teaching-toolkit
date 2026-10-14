@@ -113,9 +113,11 @@ Its syntax is **exactly `.gitignore`'s** - patterns, `**`, character classes, `!
 re-include, `/` to anchor or to mean a directory, `#` comments.
 
 It applies to every copy out of the repo it sits in: the semester release, the public
-website and the assignment handout. Before it, every copy drops the institution denylist:
-any folder or file named `solution`, `solutions`, `tests`, `grading_config.yml`, `.env*`,
-`.git` or `.system`, and clutter such as `.DS_Store`. No pattern brings one back. The
+website and the assignment handout. Before it, a folder release leaves the institution
+denylist behind: any folder or file inside it named `solution`, `solutions`, `tests`,
+`grading_config.yml`, `.env*`, `.git` or `.system`, and clutter such as `.DS_Store`. To
+release a solution, name its own path (`from_path: solutions/labs/02_lab`): a path named
+outright ships exactly what it names. `--validate` warns when a folder leaves one behind. The
 sites then choose what they show on top (`student_site.host`, `open_course_site.publish`:
 [11](11-configure-cohort-site.md#what-the-public-sites-show)).
 
@@ -129,8 +131,7 @@ What that means in practice:
   without changing a pattern, for a course that withholds nothing.
 - **Not retroactive.** Adding a pattern stops *future* copies; it does not delete a file you
   already released. Remove that from the semester repo by hand.
-- **Naming a withheld path is refused.** Asking to release a path a `.releaseignore` or the
-  denylist covers
+- **Naming a withheld path is refused.** Asking to release a path a `.releaseignore` covers
   copies nothing and warns on the run summary - the same way `git add` refuses an ignored
   file. `--validate` on `schedule.yml` flags it too, so a scheduled release says so when you
   commit it rather than months later when it fires.

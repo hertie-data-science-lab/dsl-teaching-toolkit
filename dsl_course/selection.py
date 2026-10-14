@@ -333,7 +333,10 @@ def deny(
     kind_of: KindOf = _no_kind,
     limit: Floor | None = None,
 ) -> Deny:
-    """The layers as a `copytree` filter over the clone at `root`: a denied,
+    """The layers as a `copytree` filter over the clone at `root`. The denylist judges the
+    names BELOW the path a copy names, never that path's own ancestors: it stops a folder
+    copy SWEEPING up a `solutions/`, while a copy that names `solutions/labs/02` ships
+    exactly that (decision 0040, coordinator ruling on PR #478). A denied,
     `.releaseignore`-withheld or `use`-excluded name is pruned (nothing inside it is
     walked), and each FILE must also be kept by `use` and `limit`. A folder is never
     dropped for its kind: an `include` may name a file inside one whose kind is out."""
@@ -362,16 +365,10 @@ def deny(
     return ignore
 
 
-def at_source(root: Path, path: Path) -> str | None:
-    """Why a path named outright cannot be copied out of the clone at `root`: `denylist`,
-    `releaseignore`, or None."""
-    if (
-        path != root
-        and root in path.parents
-        and denied(path.relative_to(root).as_posix())
-    ):
-        return "denylist"
-    return "releaseignore" if excludes(root, path) else None
+def swept(path: str) -> bool:
+    """Whether a path BELOW the one a copy names has a denylisted component (clutter
+    aside): what a folder copy leaves behind (`schedule`'s warning)."""
+    return any(is_denied(p) for p in path.split("/") if p)
 
 
 # ------------------------------------------------------------------------ the defaults

@@ -14,6 +14,7 @@ import pytest
 
 from dsl_course import access, course, deploy, ghcli, records, repos, selection
 from dsl_course import repos as repo_mod
+from dsl_course.fs import copy_tree
 from dsl_course.schedule import Deploy, Release, Schedule
 
 
@@ -535,12 +536,34 @@ def test_naming_the_faculty_side_explicitly_still_releases_it(tmp_path):
     assert _release_filter(tmp_path, names, whole=False) == {".git"}
 
 
-def test_the_denylist_never_travels_with_a_release(tmp_path):
+def test_a_folder_release_does_not_sweep_up_the_denylist(tmp_path):
     # Decision 0040 rule 3: the institution denylist is the first layer of every outbound
-    # copy, the release included - a `solutions/` beside the lab it answers stays behind.
+    # copy - a `solutions/` beside the lab it answers stays behind when the lab ships.
     names = ["solutions", "Tests", "grading_config.yml", ".env.local", "lab.ipynb"]
     skipped = _release_filter(tmp_path, names, whole=False, at=tmp_path / "labs" / "01")
     assert skipped == {"solutions", "Tests", "grading_config.yml", ".env.local"}
+
+
+def test_a_solution_named_outright_ships_exactly_what_it_names(tmp_path):
+    # The Maths shape (coordinator ruling on PR #478): `from_path:
+    # solutions/labs/02_lab` -> `labs/02_lab/solutions`. The denylist judges what lies
+    # BELOW the named path, never its ancestors, so the whole folder ships.
+    src = tmp_path / "src"
+    for rel in ("solutions/labs/02_lab/a.ipynb", "solutions/labs/02_lab/data/x.csv"):
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).write_text("x")
+    dest = tmp_path / "dest" / "labs" / "02_lab" / "solutions"
+    copy_tree(
+        src / "solutions/labs/02_lab",
+        dest,
+        selection.deny(src, use=deploy._release_use(False)),
+    )
+    assert sorted(
+        p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file()
+    ) == [
+        "a.ipynb",
+        "data/x.csv",
+    ]
 
 
 # ------------------------------------------ what is never course material, wherever it is

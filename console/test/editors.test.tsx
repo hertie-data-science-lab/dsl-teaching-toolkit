@@ -374,8 +374,8 @@ describe('editing screens', () => {
   it('materials settings previews what is withheld, and nothing about the public website', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
-    // solutions/ is the institution denylist's too (decision 0040): never released, whatever the list says.
-    expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">never released<\/span>/);
+    // solutions/ is the institution denylist's too (decision 0040): a folder release leaves it behind; only naming it ships it.
+    expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">only if named<\/span>/);
     expect(out).toContain('Weekly plan for the syllabus');
     // Copy opens the plan to copy; Write puts it into the syllabus (decision 0031 rule 9).
     expect(out).toContain('>Copy</button>');

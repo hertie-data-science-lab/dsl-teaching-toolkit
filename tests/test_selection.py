@@ -133,13 +133,21 @@ def test_the_copytree_adapter_prunes_and_keeps_the_releaseignore_rule(tmp_path):
     assert deny(str(tmp_path / "readings/01"), ["p.pdf", "key.pdf"]) == {"p.pdf"}
 
 
-def test_a_path_named_outright_says_why_it_cannot_go(tmp_path):
-    (tmp_path / "labs/solutions").mkdir(parents=True)
-    (tmp_path / "drafts").mkdir()
-    (tmp_path / ".releaseignore").write_text("drafts/\n")
-    assert selection.at_source(tmp_path, tmp_path / "labs/solutions") == "denylist"
-    assert selection.at_source(tmp_path, tmp_path / "drafts") == "releaseignore"
-    assert selection.at_source(tmp_path, tmp_path / "labs") is None
+def test_the_denylist_stops_a_sweep_not_a_path_named_outright(tmp_path):
+    # Coordinator ruling on PR #478: a copy of `solutions/labs/02` ships it whole (the
+    # Maths shape); a copy of `labs/01` leaves the `solutions/` inside it behind.
+    for rel in (
+        "solutions/labs/02/a.ipynb",
+        "labs/01/lab.ipynb",
+        "labs/01/solutions/b.ipynb",
+    ):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x")
+    deny = selection.deny(tmp_path)
+    assert deny(str(tmp_path / "solutions/labs/02"), ["a.ipynb"]) == set()
+    assert deny(str(tmp_path / "labs/01"), ["lab.ipynb", "solutions"]) == {"solutions"}
+    assert selection.swept("solutions/b.ipynb")
+    assert not selection.swept("x/.gitkeep")  # clutter is never worth a warning
 
 
 def test_an_exact_pattern_names_one_path_and_everything_under_it():

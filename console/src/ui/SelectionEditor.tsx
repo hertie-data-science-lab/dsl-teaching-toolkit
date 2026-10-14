@@ -48,7 +48,8 @@ export function SelectionEditor(p: SelectionEditorProps) {
   // Out for a reason the tree's lines do not give - its kind, its type, the floor - says so.
   const byKind = p.defaults ? new Set(shownFiles({ ...p, value: { ...p.value, exclude: [] } })) : null;
   const fixed = (path: string): string | null => {
-    if (denied(path)) return p.defaults ? 'never public' : 'never released';
+    // A release leaves the denylist behind unless a schedule entry names the path itself.
+    if (denied(path)) return p.defaults ? 'never public' : 'only if named';
     return byKind && files.has(path) && !byKind.has(path) ? 'not shown' : null;
   };
   const toggleKind = (kind: string) => {

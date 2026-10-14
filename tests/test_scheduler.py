@@ -5268,3 +5268,27 @@ def test_a_tick_asks_for_each_template_once(monkeypatch):
     for _ in range(3):
         assert scheduler._template_for(templates, "C", "a1", entry) is None
     assert asked == ["a1"]
+
+
+def test_a_release_ships_a_solution_it_names_and_not_one_it_sweeps(monkeypatch):
+    # Coordinator ruling on PR #478 (decision 0040): the Maths shape ships the named
+    # `solutions/` folder whole; the lab folder's own `solutions/` stays behind.
+    staged: list[str] = []
+    errors, changed = _release(
+        monkeypatch,
+        {
+            "solutions/labs/02_lab/answers.ipynb": "THE ANSWERS",
+            "labs/01_lab/lab.ipynb": "lab",
+            "labs/01_lab/solutions/a.ipynb": "THE ANSWERS",
+        },
+        [
+            Deploy("cm", "solutions/labs/02_lab", "materials", "labs/02_lab/solutions"),
+            Deploy("cm", "labs/01_lab", "materials", "labs/01_lab"),
+        ],
+        staged,
+    )
+    assert (errors, changed) == (0, True)
+    assert sorted(staged) == [
+        "labs/01_lab/lab.ipynb",
+        "labs/02_lab/solutions/answers.ipynb",
+    ]

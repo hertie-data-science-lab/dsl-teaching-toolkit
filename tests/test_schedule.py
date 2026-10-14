@@ -3476,17 +3476,39 @@ def test_supporting_files_default_off_the_site():
     assert shown == {"data": False, "l1": True}
 
 
-def test_a_denylisted_source_is_a_fault_at_commit_time(monkeypatch):
-    # Decision 0040: the institution denylist is a release's first layer, so a copy named
-    # `solutions/` ships nothing - said here rather than only on a green release run.
-    _org(monkeypatch, {"cm": ["labs", "labs/solutions", "labs/solutions/a.ipynb"]})
-    s = Schedule(releases=[_release("lab-1", "labs/solutions")])
-    faults = schedule.source_faults(s, "Course-Org")
-    assert len(faults) == 1 and "never reach students" in faults[0].line()
+def test_a_folder_that_sweeps_up_a_solution_is_warned_about(monkeypatch):
+    # Decision 0040: a folder copy leaves the institution denylist behind, so a lab folder
+    # holding its `solutions/` ships without them - said at commit time, as a warning.
+    tree = [
+        "labs",
+        "labs/01",
+        "labs/01/lab.ipynb",
+        "labs/01/solutions",
+        "labs/01/solutions/a.ipynb",
+    ]
+    _org(monkeypatch, {"cm": tree})
+    faults = schedule.source_faults(
+        Schedule(releases=[_release("lab-1", "labs/01")]), "Course-Org"
+    )
+    assert len(faults) == 1 and "leaves behind" in faults[0].line()
     assert (
         faults[0].severity(datetime(2026, 9, 8, 9, 0, tzinfo=BERLIN))
         is Severity.WARNING
     )
+
+
+def test_a_solution_released_by_its_own_path_is_no_fault(monkeypatch):
+    # The Maths shape (coordinator ruling on PR #478): naming the denylisted folder
+    # outright ships exactly it, and nothing is said.
+    tree = [
+        "solutions",
+        "solutions/labs",
+        "solutions/labs/02_lab",
+        "solutions/labs/02_lab/a.ipynb",
+    ]
+    _org(monkeypatch, {"cm": tree})
+    s = Schedule(releases=[_release("lab-2", "solutions/labs/02_lab")])
+    assert schedule.source_faults(s, "Course-Org") == []
 
 
 def test_a_copy_may_be_made_public_and_anything_else_is_flagged():

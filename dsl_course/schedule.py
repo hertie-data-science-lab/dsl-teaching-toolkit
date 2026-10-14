@@ -122,7 +122,7 @@ from .gh_contents import (
 from .log import CLIParser, log, log_err
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
 from .repos import default_branch, repo_missing
-from .selection import denied
+from .selection import swept
 
 SCHEDULE_PATH = SCHEDULE_FILE
 
@@ -2595,24 +2595,6 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
             if is_repo_root(w.path):
                 continue
             clean = w.path.strip("/").strip()
-            if denied(clean):
-                # The institution denylist (decision 0040): no release carries it.
-                out.append(
-                    SourceFault(
-                        w.where,
-                        "solutions, tests, grading files, `.env` and `.system/` never "
-                        "reach students, so this copy ships nothing",
-                        w.fires,
-                        field="from_path",
-                        kind=FaultKind.WITHHELD,
-                        file=SCHEDULE_PATH,
-                        ceiling=Severity.WARNING,
-                        lineno=w.lineno("from_path"),
-                        repo=repo,
-                        path=clean,
-                    )
-                )
-                continue
             if clean in withheld:
                 # The file EXISTS, so nothing looks wrong - which is why this is worth
                 # saying here rather than leaving to the `::warning::` a green release run
@@ -2632,7 +2614,30 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                     )
                 )
                 continue
-            if clean in paths:
+            # A folder copy leaves the institution denylist behind (decision 0040): said
+            # here, so a lab folder holding its `solutions/` is not a surprise. Naming the
+            # denylisted path itself ships it, and is never warned about.
+            below = [p[len(clean) + 1 :] for p in paths if p.startswith(f"{clean}/")]
+            left = [p for p in below if swept(p)]
+            if left:
+                out.append(
+                    SourceFault(
+                        w.where,
+                        f"{len(left)} file(s) in it are solutions, tests, grading files "
+                        "or secrets, which a folder release leaves behind - release them "
+                        "by naming their own path",
+                        w.fires,
+                        field="from_path",
+                        kind=FaultKind.WITHHELD,
+                        file=SCHEDULE_PATH,
+                        ceiling=Severity.WARNING,
+                        lineno=w.lineno("from_path"),
+                        repo=repo,
+                        path=clean,
+                    )
+                )
+                continue
+            if clean in paths or below:
                 continue
             out.append(
                 SourceFault(
