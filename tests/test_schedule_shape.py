@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -246,8 +247,57 @@ def test_a_session_s_copy_into_a_readings_folder_becomes_its_readings_entry():
         "session": 1,
         "event_datetime": "2026-09-07T10:00",
         "files": [{"from_course_repo": "cm", "from_path": "readings/01"}],
-        "reading_list": "- A paper.",
+        "reading_guide": "- A paper.",
     }
     assert any("lecture-1-readings" in n for n in notes)
+    sched = schedule.parse(load_yaml_lines(text))
+    assert sched.dropped == [] and sched.faults == []
+
+
+def test_the_term_s_dates_become_the_semester_block():
+    old = (
+        "timezone: Europe/Berlin\n"
+        "semester_start: 2026-09-07\n"
+        "semester_end: 2026-12-18\n"
+        "archive:\n  event_datetime: 2027-02-16\n  show_on_site: false\n"
+    )
+    text, _after, _notes, stops = migrate.schedule_shape(old)
+    assert stops == []
+    data = yaml.safe_load(text)
+    assert data["semester"] == {
+        "start": {"type": "start", "event_datetime": date(2026, 9, 7)},
+        "end": {"type": "end", "event_datetime": date(2026, 12, 18)},
+        "archive": {
+            "type": "archive",
+            "event_datetime": date(2027, 2, 16),
+            "show_on_site": False,
+        },
+    }
+    assert {"semester_start", "semester_end", "archive"}.isdisjoint(data)
+    sched = schedule.parse(load_yaml_lines(text))
+    assert sched.dropped == [] and sched.archive.when.isoformat() == "2027-02-16"
+
+
+def test_a_file_already_one_block_per_kind_takes_only_the_amendment_s_renames():
+    # Shaped before amendment 2: the blocks stay as they are, the term's dates move into
+    # `semester:` and `reading_list` becomes `reading_guide`.
+    old = (
+        "semester_start: 2026-09-07\n"
+        "readings:\n  r1:\n    session: 1\n    event_datetime: 2026-09-01\n"
+        "    reading_list: '- A.'\n"
+        "lectures:\n  l1:\n    session: 1\n    event_datetime: 2026-09-01\n"
+        "assignments:\n  a1:\n    number: 1\n    template: t\n"
+        "    due_datetime: 2026-10-13\n"
+    )
+    text, after, _notes, stops = migrate.schedule_shape(old)
+    assert (stops, after) == ([], None)
+    data = yaml.safe_load(text)
+    assert data["readings"]["r1"]["reading_guide"] == "- A."
+    assert data["lectures"]["l1"] == {
+        "session": 1,
+        "event_datetime": date(2026, 9, 1),
+    }
+    assert data["assignments"]["a1"]["template"] == "t"
+    assert data["semester"]["start"]["type"] == "start"
     sched = schedule.parse(load_yaml_lines(text))
     assert sched.dropped == [] and sched.faults == []
