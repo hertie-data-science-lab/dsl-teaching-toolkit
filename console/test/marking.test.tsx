@@ -4,7 +4,7 @@
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
@@ -335,9 +335,47 @@ describe('Return marks from the marking screen', () => {
     expect(facts).toEqual(['1 student gets marks · 1 not marked yet (skipped) · 1 held (fix first)', 'Final: median 17, range 17–17, 1 held']);
   });
 
+  it('says unsaved rows are not counted until saved', async () => {
+    const gh = github(), f = files(), env = envOf(gh, f);
+    await mount(env, <><AssignmentScreen {...props(f)} /><OpPanel /></>);
+    await type('input[aria-label="Q1 (out of 10) for cy-d"]', '6');
+    await click(button('Return marks to 1 student'));
+    expect(q('.op-facts p').textContent).toBe('1 unsaved row is not counted until you save');
+  });
+
+  it('opens from the Overview on the Marks tab, through the same panel with its figures', async () => {
+    const gh = github(), f = files(), env = envOf(gh, f);
+    const live: Loaded = { ...ready, status: { ...ready.status!, assignments: [{ ...solo, marks: { filled: 1, total: 3 } }] } } as Loaded;
+    await mount(env, <AssignmentScreen {...props(f, { tab: 'overview', loaded: live })} />);
+    const verb = [...root!.querySelectorAll<HTMLAnchorElement>('a.btn')].find((x) => x.textContent === 'Return marks')!;
+    expect(verb.getAttribute('href')).toBe('#assignment-assignment-2/marks');
+    await click(verb);
+    expect(env.ops.current.value).toBeNull(); // nothing opens until the Marks tab has read the sheet
+    render(null, root!);
+    await act(() => render(<EnvCtx.Provider value={env}><AssignmentScreen {...props(f, { loaded: live })} /><OpPanel /></EnvCtx.Provider>, root!));
+    expect(env.ops.current.value?.def.verb).toBe('Return marks to 1 student');
+    expect(q('.op-facts').textContent).toContain('1 held (fix first)');
+  });
+
   it('names who a preview would email, from the private preview issue', () => {
     const def = returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'a', title: 'A', template: 't', units: 1, group: false, when: 'Marking' }, 1, 'a', null, [], 'extra');
     expect(def.dryExtra).toBe('extra');
+  });
+});
+
+describe('growing text boxes', () => {
+  it('grows a textarea with its text where the browser has no field-sizing', async () => {
+    // As Firefox and Safari answer: no field-sizing.
+    vi.stubGlobal('CSS', { supports: () => false, escape: (s: string) => s });
+    await marks();
+    const fb = q<HTMLTextAreaElement>('textarea[aria-label="Feedback for ada-l"]');
+    Object.defineProperty(fb, 'scrollHeight', { configurable: true, get: () => 90 });
+    await act(() => {
+      fb.value = 'A\nlonger\nnote';
+      fb.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(fb.style.height).toBe('92px');
+    vi.unstubAllGlobals();
   });
 });
 

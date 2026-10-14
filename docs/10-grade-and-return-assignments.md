@@ -86,7 +86,8 @@ Enter moves down a column of numbers; in a text box Ctrl+Enter (⌘+Enter) does.
 shows what one student's marks page will hold. Unsaved marks stay in this browser until saved, and
 are offered back (Restore or Discard) on the next visit; a save that meets someone else's keeps
 both and says how many rows they changed. Return marks counts who gets marks, who is skipped and
-who is held, gives the final grades in one line, and after a preview names who would be emailed.
+who is held (and how many unsaved rows it leaves out), gives the final grades in one line, and after a
+preview names who would be emailed. The Overview's Return marks opens this same panel on the Marks tab.
 
 ### When a sheet has something nobody can act on
 

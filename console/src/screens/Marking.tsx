@@ -70,6 +70,24 @@ const FILTER_WORD: Record<Filter, string> = { all: 'All', unmarked: 'Unmarked', 
 /** The issue a Return marks preview writes in semester-config (grades.PREVIEW_TITLE). */
 export const PREVIEW_TITLE = 'Distribute grades preview';
 
+/**
+ * Return marks asked for from another tab (the Overview): the Marks tab opens the panel once its
+ * sheet is read, so the pop-up always carries the sheet's figures. One path, whichever page asks.
+ */
+let pendingReturn: { slug: string; start: 'preview' | 'run' } | null = null;
+export function requestReturnMarks(slug: string, start: 'preview' | 'run'): void {
+  pendingReturn = { slug, start };
+}
+
+/** Whether the browser grows a textarea with its text by itself (CSS `field-sizing`, Chromium only). */
+const sizesItself = () => typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('field-sizing', 'content');
+/** Grow a textarea to its text where the browser does not (Firefox, Safari); its CSS min-height still holds. */
+function grow(el: HTMLTextAreaElement): void {
+  if (sizesItself()) return;
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight + 2}px`;
+}
+
 /** A column header's `?`: small, so the header row does not grow. */
 const ColHint = ({ col, children }: { col: string; children: ComponentChildren }) => <Hint small label={`About ${col}`}>{children}</Hint>;
 
@@ -150,6 +168,18 @@ export function MarksTab(p: TabProps) {
   const [full, setFull] = useState(false);
   const [viewing, setViewing] = useState('');
   const table = useRef<HTMLTableElement>(null);
+  // The Return marks def as this render built it, for a request from the Overview.
+  const returnDef = useRef<ReturnType<typeof returnMarks> | null>(null);
+  useEffect(() => {
+    if (!pendingReturn || pendingReturn.slug !== a.slug || !returnDef.current || !env) return;
+    const { start } = pendingReturn;
+    pendingReturn = null;
+    env.ops.open(returnDef.current, start);
+  });
+  // Textareas grow with their text where the browser cannot do it in CSS.
+  useEffect(() => {
+    table.current?.querySelectorAll('textarea').forEach(grow);
+  });
   const [save, , setSave] = useSave(env);
   const file = p.files.file(org, CONFIG_REPO, path);
   const sha = file.kind === 'ready' ? file.sha : null;
@@ -265,7 +295,7 @@ export function MarksTab(p: TabProps) {
   };
   const input = (pth: Path, orig: unknown, cls: string, label: string, col: string, typed = true, area = false) =>
     area ? (
-      <textarea class={cls} rows={1} aria-label={label} data-col={col} onInput={(e) => set(pth, (e.target as HTMLTextAreaElement).value, false)}>{str(v(pth, orig))}</textarea>
+      <textarea class={cls} rows={1} aria-label={label} data-col={col} onInput={(e) => { grow(e.target as HTMLTextAreaElement); set(pth, (e.target as HTMLTextAreaElement).value, false); }}>{str(v(pth, orig))}</textarea>
     ) : (
       <input class={cls} type="text" inputMode={typed ? 'decimal' : undefined} value={str(v(pth, orig))} aria-label={label} data-col={col} onInput={(e) => set(pth, (e.target as HTMLInputElement).value, typed)} />
     );
@@ -449,6 +479,7 @@ export function MarksTab(p: TabProps) {
   });
   const noun = sheet.group ? 'team' : 'student';
   const facts = [
+    ...(changed ? [`${changed} unsaved ${changed === 1 ? 'row is' : 'rows are'} not counted until you save`] : []),
     `${sending} ${noun}${sending === 1 ? ' gets' : 's get'} marks · ${skipped} not marked yet (skipped) · ${heldUnits} held (fix first)`,
     spread(finals, Object.keys(savedHeld).length),
   ];
@@ -476,7 +507,7 @@ export function MarksTab(p: TabProps) {
           {people.map(({ pr }) => <option value={pr.handle}>{pr.handle}</option>)}
         </select>
         <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!changed} small file={{ org, repo: CONFIG_REPO, path }} note={changed ? `${changed} ${noun}${changed > 1 ? 's' : ''} changed` : 'No unsaved changes'} />
-        <span class="marks-return"><OpButtons def={returnMarks(scope, { ...asgRef(a, group), units: a.units }, sending, name, late, facts, <PreviewEmails org={org} slug={name} />)} small /></span>
+        <span class="marks-return"><OpButtons def={(returnDef.current = returnMarks(scope, asgRef(a, group), sending, name, late, facts, <PreviewEmails org={org} slug={name} />))} small /></span>
       </div>
     </div>
   );
