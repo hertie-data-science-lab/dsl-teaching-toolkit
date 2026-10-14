@@ -113,8 +113,8 @@ export interface MarksCol {
 }
 /** No column is dragged narrower than this. */
 export const MIN_COL = 48;
-/** Feedback and Private notes never get less than this each. */
-export const MIN_TEXT_COL = 220;
+/** Feedback and Private notes never get less than this each (the console beside its side nav at 1280px). */
+export const MIN_TEXT_COL = 170;
 
 /** "13 Oct 22:41" for a recorded `submitted` (`2026-10-13T22:41`, as the sheet holds it); anything else as written. */
 export function submittedShort(v: unknown): string {

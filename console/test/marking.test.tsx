@@ -596,8 +596,9 @@ describe('column widths', () => {
     expect(Number.parseInt(w.who!, 10)).toBeLessThanOrEqual(220);
     expect(q('th.grow').textContent).toContain('Feedback');
     expect(root!.querySelectorAll('tr.unit-row td.grow')).toHaveLength(6);
-    // The table never squeezes the two text columns under 220px each.
-    expect(Number.parseInt(q<HTMLElement>('table.marks').style.minWidth, 10)).toBeGreaterThanOrEqual(56 * 4 + 64 * 2 + 105 + 156 + 440);
+    // The table never squeezes the two text columns under 170px each: exactly the fixed columns plus 2 x 170.
+    const fixed = Object.entries(w).filter(([k]) => k !== 'fb' && k !== 'pn').reduce((n, [, v]) => n + Number.parseInt(String(v), 10), 0);
+    expect(Number.parseInt(q<HTMLElement>('table.marks').style.minWidth, 10)).toBe(fixed + 2 * 170);
     const css = readFileSync(`${process.cwd()}/src/styles/console.css`, 'utf8');
     expect(css).toMatch(/table\.marks \{ table-layout: fixed;/);
     expect(css).toMatch(/table\.marks td\.pen \{[^}]*text-align: left;/);
