@@ -258,3 +258,72 @@ def test_a_materials_yml_syllabus_folds_into_the_semesters_student_site(monkeypa
     assert migrate.semester_layer_kept(None, None, syllabus, new) == []
     files.clear()
     assert migrate.old_materials("C", "course-materials-f2026") == ("", {})
+
+
+# ------------------------------------------------- decision 0040: the selection folds
+
+
+def test_publish_yml_folds_into_the_semesters_host_exactly():
+    # `public:` hosted only what it named: `kinds: []`, its patterns (and `!` lines) as
+    # `include:`. No file anywhere = nothing written: the default applies.
+    texts = {
+        "course-materials-f2026": 'public:\n  - "lectures/**/*.html"\n  - "!lectures/09_*/**"\n',
+        "course-code": None,
+    }
+    host, stops = migrate.publish_host(texts)
+    assert stops == []
+    assert host == {"kinds": [], "include": ["lectures/**/*.html", "!lectures/09_*/**"]}
+    assert migrate.publish_host({"m": None}) == (None, [])
+    assert migrate.publish_host({"m": "public: lectures\n"})[1]
+
+
+def test_the_folded_host_lands_in_semester_yml_and_reads_back():
+    inherited = [("institution", settings.institution_defaults())]
+    host = {"kinds": [], "include": ["lectures/**/*.html"]}
+    new, stops = migrate.semester_layer(
+        "Org-f2026", "release", None, None, "SYLLABUS.md", inherited, None, host
+    )
+    assert stops == []
+    site = yaml.safe_load(new)["student_site"]
+    assert site == {"syllabus": "SYLLABUS.md", "host": host}
+    assert migrate.semester_layer_kept(None, None, "SYLLABUS.md", new, None, host) == []
+    assert migrate.semester_layer_kept(None, None, "SYLLABUS.md", new, None, None)
+
+
+@pytest.mark.parametrize(
+    ("old", "publish"),
+    [
+        (
+            {"enabled": True, "source_repo": "m"},
+            {
+                "kinds": ["lectures", "labs", "exams", "drop-ins", "events"],
+                "exclude": [],
+                "reading_lists": True,
+            },
+        ),
+        (
+            {
+                "source_repo": "m",
+                "readings_mode": "actual-readings",
+                "include_lectures": False,
+                "withhold": ["labs/"],
+            },
+            {"kinds": ["readings"], "exclude": ["labs/"], "reading_lists": False},
+        ),
+        (
+            {"source_repo": "m", "readings_mode": "none"},
+            {
+                "kinds": ["lectures", "labs", "exams", "drop-ins", "events"],
+                "exclude": [],
+                "reading_lists": False,
+            },
+        ),
+    ],
+)
+def test_the_old_open_site_keys_fold_into_publish(old, publish):
+    folded = migrate.fold_open_site(old)
+    assert folded["publish"] == publish
+    assert not set(folded) & {"readings_mode", "include_lectures", "withhold"}
+    opencourse.parse(folded)  # reads clean
+    # Already folded: left alone.
+    assert migrate.fold_open_site(folded) == folded
