@@ -32,6 +32,9 @@ describe('kinds', () => {
     expect(aliasKind('quiz')).toBeNull();
     expect(aliasKind('quiz', { quiz: 'exam' })).toBe('exam');
     expect(aliasKind('quiz', { quiz: 'nonsense' })).toBe('other');
+    // A folder path: a built-in name within ALIAS_DEPTH, a declared path at any depth.
+    expect(aliasKind('students/Labs')).toBe('lab');
+    expect(aliasKind('course/2026/labs')).toBe(null);
     // Decision 0031 rule 10: a folder no name covers is supporting files.
     expect(inferKind('datasets')).toEqual({ kind: 'assets', named: false });
     expect(EMPTY_ENTRY_KIND).toBe('lecture');

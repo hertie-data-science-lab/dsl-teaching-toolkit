@@ -4,10 +4,13 @@
 // `exclude` mode (Course materials, Public website) has a right-aligned button per row; `select` mode
 // (the import picker) has a tick per row, everything ticked until a line leaves it out. It reads as a
 // file tree (decision 0026 rule 5): indent guides, folder and file icons, withheld rows greyed with
-// the name struck through (`ft-out`), the kind chip on top folders.
+// the name struck through (`ft-out`), the kind chip on kind folders. A folder with something
+// withheld inside says how much, and how much still reaches students. `control` swaps the
+// per-row control for the caller's own (Folder kinds' kind picker): one tree, two settings.
 
+import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
-import { buildTree, neverMaterial, standing, toggle, type Standing, type TreeNode } from '../edit/badges';
+import { buildTree, denylisted, neverMaterial, standing, toggle, type Standing, type TreeNode } from '../edit/badges';
 import { compileAll, withheldBy, type Rule } from '../edit/glob';
 import { FileHead, FolderHead } from './FileTree';
 
@@ -22,11 +25,14 @@ export interface PatternTreeProps {
   releasedWord?: string;
   /** A path no list can release, and the word for it (e.g. never-material names), or null. */
   fixed?: (path: string) => string | null;
-  /** A top-level folder's kind label. */
+  /** A kind folder's kind label, by its path. */
   kinds?: Record<string, string>;
+  /** The row's own control in place of the withhold toggle (null: none on that row). */
+  control?: (path: string, dir: boolean) => ComponentChildren;
 }
 
 interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 'mode' | 'withheldWord' | 'releasedWord' | 'fixed' | 'kinds'>> {
+  control?: PatternTreeProps['control'];
   rules: Rule[];
   note: { path: string; text: string } | null;
   setNote: (n: { path: string; text: string } | null) => void;
@@ -34,9 +40,22 @@ interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 
 
 const defaultFixed = (path: string) => (neverMaterial(path) ? 'never copied' : null);
 
-function withheldCount(n: TreeNode, c: Ctx): number {
-  if (!n.children) return c.fixed(n.path) || withheldBy(c.rules, n.path) ? 1 : 0;
-  return n.children.reduce((sum, x) => sum + withheldCount(x, c), 0);
+/**
+ * The files under a folder, in one walk: those withheld (fixed or by a line), and those that
+ * reach students (not withheld, and never a denylisted or never-material one).
+ */
+function counts(n: TreeNode, c: Ctx): { withheld: number; released: number } {
+  if (!n.children) {
+    const out = !!(c.fixed(n.path) || withheldBy(c.rules, n.path));
+    return { withheld: out ? 1 : 0, released: out || denylisted(n.path) ? 0 : 1 };
+  }
+  const sum = { withheld: 0, released: 0 };
+  for (const x of n.children) {
+    const k = counts(x, c);
+    sum.withheld += k.withheld;
+    sum.released += k.released;
+  }
+  return sum;
 }
 
 function Control({ n, dir, s, c }: { n: TreeNode; dir: boolean; s: Standing; c: Ctx }) {
@@ -72,7 +91,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
   const s = standing(c.rules, c.patterns, n.path, dir);
   const out = s.kind === 'own' || s.kind === 'broader';
   const note = c.note?.path === n.path ? <span class="ft-note">{c.note.text}</span> : null;
-  const control = fixed ? null : <Control n={n} dir={dir} s={s} c={c} />;
+  const control = c.control ? c.control(n.path, dir) : fixed ? null : <Control n={n} dir={dir} s={s} c={c} />;
   if (!dir) {
     const word = fixed ?? (out ? c.withheldWord : c.releasedWord);
     return (
@@ -86,15 +105,15 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
       </li>
     );
   }
-  const count = withheldCount(n, c);
+  const count = counts(n, c);
   return (
     <li class={`ft-dir${out ? ' ft-out' : ''}`}>
       <details open={depth === 0}>
         <summary>
           {c.mode === 'select' ? control : null}
           <FolderHead name={n.name} />
-          {depth === 0 && c.kinds[n.name] ? <span class="chip">{c.kinds[n.name]}</span> : null}
-          {out ? <span class="chip amber">{c.withheldWord}</span> : count ? <span class="chip amber">{count} {c.withheldWord}</span> : null}
+          {c.kinds[n.path] ? <span class="chip">{c.kinds[n.path]}</span> : null}
+          {out ? <span class="chip amber">{c.withheldWord}</span> : count.withheld ? <span class="chip amber">{count.withheld} {c.withheldWord} · {count.released} {c.releasedWord}</span> : null}
           <Why s={s} word={c.withheldWord} />
           {c.mode === 'exclude' ? control : null}
           {note}
@@ -112,7 +131,7 @@ export function PatternTree(p: PatternTreeProps) {
     patterns: p.patterns, onChange: p.onChange, mode: p.mode ?? 'exclude',
     withheldWord: p.withheldWord ?? 'withheld', releasedWord: p.releasedWord ?? 'released to students',
     fixed: p.fixed ?? defaultFixed, kinds: p.kinds ?? {}, rules: compileAll(p.patterns),
-    note, setNote,
+    control: p.control, note, setNote,
   };
   return <ul class={`file-tree${c.mode === 'select' ? ' select' : ''}`}>{buildTree(p.files).map((n) => <Node n={n} depth={0} c={c} />)}</ul>;
 }
