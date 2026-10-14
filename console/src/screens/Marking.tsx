@@ -16,7 +16,7 @@ import {
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
 import { assignmentSettings, sheetName } from './RunSettings';
 import { penaltyRate } from '../model/policy';
-import { marksDraft, saveMarksDraft, type MarksDraft } from '../model/prefs';
+import { marksDraft, marksWidths, saveMarksDraft, saveMarksWidths, type MarksDraft } from '../model/prefs';
 import { parseRoster, sameHandle } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef, type LateReturn } from '../ops/defs';
@@ -105,6 +105,26 @@ export function templateChecks(cfg: Record<string, unknown>): { tests: boolean; 
   return { tests: on(cfg.autograde), completion };
 }
 
+/** A grid column: its key, its default width (null: Feedback and Private notes share what is left), and its name. */
+export interface MarksCol {
+  key: string;
+  def: number | null;
+  label: string;
+}
+/** No column is dragged narrower than this. */
+export const MIN_COL = 48;
+/** Feedback and Private notes never get less than this each. */
+export const MIN_TEXT_COL = 220;
+
+/** "13 Oct 22:41" for a recorded `submitted` (`2026-10-13T22:41`, as the sheet holds it); anything else as written. */
+export function submittedShort(v: unknown): string {
+  const t = str(v).trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(t);
+  if (!m) return t;
+  const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(m[2]) - 1];
+  return `${Number(m[3])} ${mon}${m[4] ? ` ${m[4]}:${m[5]}` : ''}`;
+}
+
 /** A column header's `?`: small, so the header row does not grow. */
 const ColHint = ({ col, children }: { col: string; children: ComponentChildren }) => <Hint small label={`About ${col}`}>{children}</Hint>;
 
@@ -185,7 +205,12 @@ export function MarksTab(p: TabProps) {
   const [full, setFull] = useState(false);
   // The Student view dialog: null closed, else the handle shown ('' before one is chosen).
   const [viewing, setViewing] = useState<string | null>(null);
+  // The large editor for one text box: its cell, the dialog's title, and the text as typed there.
+  const [editor, setEditor] = useState<{ path: Path; title: string; text: string } | null>(null);
   const table = useRef<HTMLTableElement>(null);
+  // Column widths the person dragged, kept per sheet in this browser.
+  const [widths, setWidths] = useState<Record<string, number>>(() => marksWidths(org, path));
+  useEffect(() => saveMarksWidths(org, path, widths), [widths, org, path]);
   const fullBtn = useRef<HTMLButtonElement>(null);
   const wasFull = useRef(false);
   // The Return marks def as this render built it, for a request from the Overview.
@@ -318,9 +343,13 @@ export function MarksTab(p: TabProps) {
     const top = n || h;
     return <>{strong ? <b>{top}</b> : <span>{top}</span>}{n ? <><br /><span class="slug footnote">{h}</span></> : null}</>;
   };
+  // A text box carries a corner icon that opens it in a large editor; Save there is the same cell edit.
   const input = (pth: Path, orig: unknown, cls: string, label: string, col: string, typed = true, area = false) =>
     area ? (
-      <textarea class={cls} rows={1} aria-label={label} data-col={col} onInput={(e) => { grow(e.target as HTMLTextAreaElement); set(pth, (e.target as HTMLTextAreaElement).value, false); }}>{str(v(pth, orig))}</textarea>
+      <span class="area-wrap">
+        <textarea class={cls} rows={1} aria-label={label} data-col={col} onInput={(e) => { grow(e.target as HTMLTextAreaElement); set(pth, (e.target as HTMLTextAreaElement).value, false); }}>{str(v(pth, orig))}</textarea>
+        <button class="area-open" type="button" aria-label="Open editor" title={`Open editor: ${label}`} onClick={() => setEditor({ path: pth, title: label, text: str(v(pth, orig)) })}>⤢</button>
+      </span>
     ) : (
       <input class={cls} type="text" inputMode={typed ? 'decimal' : undefined} value={str(v(pth, orig))} aria-label={label} data-col={col} onInput={(e) => set(pth, (e.target as HTMLInputElement).value, typed)} />
     );
@@ -342,7 +371,7 @@ export function MarksTab(p: TabProps) {
       return [<td class="sys">{parts.length ? <span class="chip">{parts.join(' · ')}</span> : null}</td>];
     }
     return [
-      <td class="sys">{str(u.info?.submitted).replace('T', ' ') || (u.info ? 'Nothing' : '—')}</td>,
+      <td class="sys">{submittedShort(u.info?.submitted) || (u.info ? 'Nothing' : '—')}</td>,
       <td class="sys num">{str(u.info?.days_late)}</td>,
       ...(showTests ? [<td class={`sys${runs.tests && !blank(u.info?.autograde) ? ' auto' : ''}`}>{fact(u, 'autograde')}</td>] : []),
       ...(showCompletion ? [<td class="sys">{fact(u, 'completion')}</td>] : []),
@@ -394,8 +423,8 @@ export function MarksTab(p: TabProps) {
           {lateCell(u, pen)}
           {adjOpen ? <td class="adjcol">{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${u.key}`, 'adj')}</td> : null}
           <td class="calc">{round(finalGrade(total, pen, adjOf(pr)))}</td>
-          <td>{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${u.key}`, 'fb', false, true)}</td>
-          <td>{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${u.key}`, 'pn', false, true)}</td>
+          <td class="grow">{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${u.key}`, 'fb', false, true)}</td>
+          <td class="grow">{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${u.key}`, 'pn', false, true)}</td>
         </tr>
       );
     }
@@ -408,8 +437,8 @@ export function MarksTab(p: TabProps) {
           <b>{u.key}</b><br /><span class="footnote team-names">{names.length ? `${names.join(', ')} · ` : ''}{names.length}</span>{heldChip(u)}{qChip}
         </td>{info(u)}{scoreCells}
         {lateCell(u, pen)}{adjOpen ? <td class="adjcol" /> : null}<td class="calc">{round(finalGrade(total, pen, 0))}</td>
-        <td>{u.feedbackPath ? input(u.feedbackPath, u.feedback, 'fb', `Team feedback for ${u.key}`, 'fb', false, true) : null}</td>
-        <td />
+        <td class="grow">{u.feedbackPath ? input(u.feedbackPath, u.feedback, 'fb', `Team feedback for ${u.key}`, 'fb', false, true) : null}</td>
+        <td class="grow">{u.notesPath ? input(u.notesPath, u.notes, 'pn', `Team private notes for ${u.key}`, 'pn', false, true) : null}</td>
       </tr>
     );
   };
@@ -435,8 +464,8 @@ export function MarksTab(p: TabProps) {
         <td class="pen" />
         <td class="adjcol">{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${pr.handle}`, 'adj')}</td>
         <td class="calc">{round(finalGrade(total, pen, adjOf(pr)))}</td>
-        <td>{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${pr.handle}`, 'fb', false, true)}</td>
-        <td>{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${pr.handle}`, 'pn', false, true)}</td>
+        <td class="grow">{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${pr.handle}`, 'fb', false, true)}</td>
+        <td class="grow">{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${pr.handle}`, 'pn', false, true)}</td>
       </tr>
     ));
   };
@@ -524,6 +553,7 @@ export function MarksTab(p: TabProps) {
         <span class="footnote">Show:</span>
         {(['all', 'unmarked', 'late', 'held'] as const).map((f) => <button class={`chip filter${filter === f ? ' on' : ''}`} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}>{FILTER_WORD[f]} {counts[f]}</button>)}
         {sheet.group ? null : <button class="chip adj-chip" type="button" aria-expanded={adjOpen} onClick={() => setAdjChoice(!adjOpen)}>Adjustments {adjOpen ? '▾' : '▸'}</button>}
+        {Object.keys(widths).length ? <button class="btn small quiet reset-widths" type="button" onClick={() => setWidths({})}>Reset widths</button> : null}
         <button class="icon-btn full-toggle" type="button" ref={fullBtn} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} onClick={() => setFull(!full)}>{full ? '⤡' : '⤢'}</button>
       </div>
       <div class="marks-tools">
@@ -533,32 +563,95 @@ export function MarksTab(p: TabProps) {
   );
   const subHint = <ColHint col="From the submission">Filled in by the toolkit from the submission; you never type these. Click the heading to fold these columns into one.</ColHint>;
   const subFold = <button class="th-fold" type="button" aria-expanded={!subFolded} onClick={() => setSubFolded(!subFolded)}>From the submission {subFolded ? '▸' : '▾'}</button>;
+  // The name column fits its longest line (a name, a handle, or a team's members line), up to 220px; longer wraps.
+  const longest = Math.max(
+    8,
+    ...sheet.units.flatMap((u) => [
+      u.key.length + 4,
+      ...(sheet.group ? [`${u.people.map((pr) => realName(pr.handle) || pr.handle).join(', ')} · ${u.people.length}`.length] : []),
+      ...u.people.map((pr) => (realName(pr.handle) || pr.handle).length),
+      qs.length ? 'Feedback per question (9)'.length : 0,
+    ]),
+  );
+  const whoWidth = Math.min(220, Math.max(96, Math.round(longest * 6.4 + 28)));
+  // The grid's columns in order, each content-wide by default; Feedback and Private notes share the rest.
+  const cols: MarksCol[] = [
+    { key: 'who', def: whoWidth, label: sheet.group ? 'Team' : 'Student' },
+    ...(external ? [] : subFolded ? [{ key: 'sub', def: 170, label: 'From the submission' }] : [
+      { key: 'submitted', def: 105, label: 'Submitted' },
+      { key: 'days', def: 56, label: 'Days late' },
+      ...(showTests ? [{ key: 'tests', def: 56, label: 'Tests' }] : []),
+      ...(showCompletion ? [{ key: 'completion', def: 90, label: 'Completion' }] : []),
+    ]),
+    ...qs.map(([q]) => ({ key: `q:${q}`, def: 64, label: q })),
+    { key: 'score', def: 56, label: 'Score' },
+    { key: 'penalty', def: rate !== null ? 156 : 64, label: 'Penalty' },
+    ...(adjOpen ? [{ key: 'adj', def: 86, label: 'Adjustment' }] : []),
+    { key: 'final', def: 56, label: 'Final' },
+    { key: 'fb', def: null, label: 'Feedback' },
+    { key: 'pn', def: null, label: 'Private notes' },
+  ];
+  const widthOf = (c: MarksCol) => widths[c.key] ?? c.def;
+  const setWidth = (k: string, w: number) => setWidths((cur) => ({ ...cur, [k]: Math.max(MIN_COL, Math.round(w)) }));
+  const resetWidth = (k: string) => setWidths((cur) => Object.fromEntries(Object.entries(cur).filter(([x]) => x !== k)));
+  // The table is never narrower than its fixed columns plus the two text columns' minimum.
+  const minTable = cols.reduce((n, c) => n + (c.key === 'fb' || c.key === 'pn' ? Math.max(widths[c.key] ?? 0, MIN_TEXT_COL) : (widthOf(c) ?? 0)), 0);
+  /** The handle on a column's right edge: drag (mouse, pen or touch), arrows by 8px, double-click for the default. */
+  const grip = (key: string) => {
+    const c = cols.find((x) => x.key === key);
+    if (!c) return null;
+    const start = (e: PointerEvent) => {
+      const el = e.currentTarget as HTMLElement;
+      const w0 = widthOf(c) ?? el.parentElement!.getBoundingClientRect().width;
+      const x0 = e.clientX;
+      e.preventDefault();
+      el.setPointerCapture?.(e.pointerId);
+      const move = (m: PointerEvent) => setWidth(key, w0 + m.clientX - x0);
+      const end = () => {
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', end);
+        el.removeEventListener('pointercancel', end);
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', end);
+      el.addEventListener('pointercancel', end);
+    };
+    const keys = (e: KeyboardEvent) => {
+      const d = e.key === 'ArrowLeft' ? -8 : e.key === 'ArrowRight' ? 8 : 0;
+      if (!d) return;
+      e.preventDefault();
+      const el = e.currentTarget as HTMLElement;
+      setWidth(key, (widthOf(c) ?? el.parentElement!.getBoundingClientRect().width) + d);
+    };
+    return <span class="col-grip" role="separator" aria-orientation="vertical" tabindex={0} aria-label={`Resize ${c.label}: drag, or use the arrow keys; double-click resets it`} title="Drag to resize; double-click to reset" data-col-key={key} onPointerDown={start} onKeyDown={keys} onDblClick={() => resetWidth(key)} />;
+  };
+  const colgroup = <colgroup>{cols.map((c) => <col data-col-key={c.key} style={widthOf(c) !== null ? { width: `${widthOf(c)}px` } : undefined} />)}</colgroup>;
   const head = (
     <thead>
       <tr>
-        <th rowSpan={2}>{sheet.group ? 'Team' : 'Student'}</th>
-        {external ? null : subFolded ? <th class="sys" rowSpan={2}>{subFold} {subHint}</th> : <th class="sys grp-h" colSpan={subCols}>{subFold} {subHint}</th>}
+        <th rowSpan={2}>{sheet.group ? 'Team' : 'Student'}{grip('who')}</th>
+        {external ? null : subFolded ? <th class="sys" rowSpan={2}>{subFold} {subHint}{grip('sub')}</th> : <th class="sys grp-h" colSpan={subCols}>{subFold} {subHint}</th>}
         {qs.length ? <th class="grp-h" colSpan={qs.length}>Points per question</th> : null}
         {qs.length
-          ? <th rowSpan={2} class="num">Score{max ? ` / ${max}` : ''} <ColHint col="Score">The questions added up, before any late penalty.</ColHint></th>
-          : <th rowSpan={2}>Score{max ? ` / ${max}` : ''} <ColHint col="Score">Your mark for the whole assignment: a number, or a word such as pass that students get as written.</ColHint></th>}
-        <th rowSpan={2} class="sys">Penalty <ColHint col="Penalty">{rule ? `${rule.charAt(0).toUpperCase()}${rule.slice(1)}. Switch it off to waive it, or type your preferred penalty as a percentage to override it.` : 'No late penalty applies to this assignment.'}</ColHint></th>
-        {adjOpen ? <th rowSpan={2} class="adjcol">Adjustment <ColHint col="Adjustment">Added to this person’s final grade (plus or minus points).</ColHint></th> : null}
-        <th rowSpan={2} class="sys">Final{max ? ` / ${max}` : ''} <ColHint col="Final">What the student gets: the score less any late penalty, plus their adjustment, never below 0.</ColHint></th>
-        <th rowSpan={2}>Feedback <ColHint col="Feedback">Students see this with their marks.{sheet.group ? ' On a team row it reaches every member; on a member’s row, only that member.' : ''}</ColHint></th>
-        <th rowSpan={2}>Private notes <ColHint col="Private notes">For the teaching team only: never sent to students.</ColHint></th>
+          ? <th rowSpan={2} class="num">Score{max ? ` / ${max}` : ''} <ColHint col="Score">The questions added up, before any late penalty.</ColHint>{grip('score')}</th>
+          : <th rowSpan={2}>Score{max ? ` / ${max}` : ''} <ColHint col="Score">Your mark for the whole assignment: a number, or a word such as pass that students get as written.</ColHint>{grip('score')}</th>}
+        <th rowSpan={2} class="sys">Penalty <ColHint col="Penalty">{rule ? `${rule.charAt(0).toUpperCase()}${rule.slice(1)}. Switch it off to waive it, or type your preferred penalty as a percentage to override it.` : 'No late penalty applies to this assignment.'}</ColHint>{grip('penalty')}</th>
+        {adjOpen ? <th rowSpan={2} class="adjcol">Adjustment <ColHint col="Adjustment">Added to this person’s final grade (plus or minus points).</ColHint>{grip('adj')}</th> : null}
+        <th rowSpan={2} class="sys">Final{max ? ` / ${max}` : ''} <ColHint col="Final">What the student gets: the score less any late penalty, plus their adjustment, never below 0.</ColHint>{grip('final')}</th>
+        <th rowSpan={2} class="grow">Feedback <ColHint col="Feedback">Students see this with their marks.{sheet.group ? ' On a team row it reaches every member; on a member’s row, only that member.' : ''}</ColHint>{grip('fb')}</th>
+        <th rowSpan={2} class="grow">Private notes <ColHint col="Private notes">For the teaching team only: never sent to students.{sheet.group ? ' A team’s notes are on its row; each member’s on theirs.' : ''}</ColHint></th>
       </tr>
       <tr>
         {external || subFolded ? null : (
           <>
-            <th class="sys">Submitted <ColHint col="Submitted">When the work was handed in, as the latest collection found it. Nothing: no submission yet.</ColHint></th>
-            <th class="sys">Days late <ColHint col="Days late">Days started after the deadline, counted by the toolkit. 0 is on time.</ColHint></th>
-            {showTests ? <th class="sys">Tests <ColHint col="Tests">The template’s automatic tests passed, filled in at the late cutoff. Information for you, never a mark. — where the template has no tests.</ColHint></th> : null}
-            {showCompletion ? <th class="sys">Completion <ColHint col="Completion">At the late cutoff the toolkit runs the submitted notebook top to bottom in a clean sandbox and records whether it reached the end. “Completed” means every cell ran without an error; otherwise the first error is named. Information for you, never a mark: a notebook can run through and still be wrong, or stop on a missing package and still be right. “—” where the template has no check.</ColHint></th> : null}
+            <th class="sys">Submitted <ColHint col="Submitted">When the work was handed in, as the latest collection found it. Nothing: no submission yet.</ColHint>{grip('submitted')}</th>
+            <th class="sys">Days late <ColHint col="Days late">Days started after the deadline, counted by the toolkit. 0 is on time.</ColHint>{grip('days')}</th>
+            {showTests ? <th class="sys">Tests <ColHint col="Tests">The template’s automatic tests passed, filled in at the late cutoff. Information for you, never a mark. — where the template has no tests.</ColHint>{grip('tests')}</th> : null}
+            {showCompletion ? <th class="sys">Completion <ColHint col="Completion">At the late cutoff the toolkit runs the submitted notebook top to bottom in a clean sandbox and records whether it reached the end. “Completed” means every cell ran without an error; otherwise the first error is named. Information for you, never a mark: a notebook can run through and still be wrong, or stop on a missing package and still be right. “—” where the template has no check.</ColHint>{grip('completion')}</th> : null}
           </>
         )}
         {qs.map(([q, m]) => (
-          <th>{q} <ColHint col={q}>Your points for {q}{outOf(m)}{questionFile(m) ? `, marked from ${questionFile(m)}` : ''}. Leave it blank until you have marked it.</ColHint><span class="grp">{questionPoints(m) != null && questionPoints(m) !== '' ? `/ ${String(questionPoints(m))}` : ''}{questionFile(m) ? <>{questionPoints(m) != null && questionPoints(m) !== '' ? ' · ' : ''}<code>{questionFile(m)}</code></> : null}</span></th>
+          <th>{q} <ColHint col={q}>Your points for {q}{outOf(m)}{questionFile(m) ? `, marked from ${questionFile(m)}` : ''}. Leave it blank until you have marked it.</ColHint><span class="grp">{questionPoints(m) != null && questionPoints(m) !== '' ? `/ ${String(questionPoints(m))}` : ''}{questionFile(m) ? <>{questionPoints(m) != null && questionPoints(m) !== '' ? ' · ' : ''}<code>{questionFile(m)}</code></> : null}</span>{grip(`q:${q}`)}</th>
         ))}
       </tr>
     </thead>
@@ -579,12 +672,22 @@ export function MarksTab(p: TabProps) {
         {tools}
         {external ? <p class="footnote">Submitted outside GitHub: no dates, no late penalty.</p> : null}
         <div class="table-wrap marks-wrap">
-          <table class="grid marks" ref={table} onKeyDown={onKey}>
+          <table class="grid marks" ref={table} onKeyDown={onKey} style={{ minWidth: `${minTable}px` }}>
+            {colgroup}
             {head}
             <tbody>{rows}</tbody>
           </table>
         </div>
       </div>
+      {editor ? (
+        <Modal title={editor.title} onClose={() => setEditor(null)}>
+          <textarea class="big-editor" aria-label={editor.title} value={editor.text} onInput={(e) => setEditor({ ...editor, text: (e.target as HTMLTextAreaElement).value })} />
+          <div class="actions" style="margin-top:12px">
+            <button class="btn" type="button" onClick={() => { set(editor.path, editor.text, false); setEditor(null); }}>Save</button>
+            <button class="btn quiet" type="button" onClick={() => setEditor(null)}>Cancel</button>
+          </div>
+        </Modal>
+      ) : null}
       {viewing !== null ? (
         <Modal title="Student view" onClose={() => setViewing(null)}>
           <div class="field">
