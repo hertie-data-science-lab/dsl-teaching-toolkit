@@ -80,25 +80,18 @@ from .workflows_place import (
 )
 from .workflows_render import (
     for_placement,
-    render_archive_semester,
     render_bootstrap_semester,
     render_central_release,
     render_collect_submissions,
     render_console,
-    render_derive_student_version,
     render_distribute_grades,
-    render_generate_syllabus,
     render_new_assignment,
     render_new_materials,
-    render_open_team_formation,
-    render_patch_assignment,
-    render_propagate_semester,
     render_provision,
     render_publish_site,
     render_refresh,
     render_scheduler,
     render_send_codes,
-    render_status,
     render_sync_membership,
     render_sync_site,
 )
@@ -284,31 +277,14 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
         ".github/workflows/collect-submissions.yml": render_collect_submissions(
             semesters, assignments
         ),
-        ".github/workflows/patch-assignment.yml": render_patch_assignment(
-            semesters, assignments
-        ),
         ".github/workflows/new-materials.yml": render_new_materials(materials),
-        ".github/workflows/generate-syllabus.yml": render_generate_syllabus(
-            source_repos, semesters, materials
-        ),
         ".github/workflows/new-assignment.yml": render_new_assignment(),
-        ".github/workflows/derive-student-version.yml": render_derive_student_version(
-            assignments
-        ),
-        ".github/workflows/sync-site.yml": render_sync_site(semesters),
+        ".github/workflows/sync-site.yml": render_sync_site(),
         ".github/workflows/publish-site.yml": render_publish_site(),
-        ".github/workflows/sync-membership.yml": render_sync_membership(semesters),
+        ".github/workflows/sync-membership.yml": render_sync_membership(),
         ".github/workflows/send-codes.yml": render_send_codes(),
         ".github/workflows/distribute-grades.yml": render_distribute_grades(semesters),
-        ".github/workflows/open-team-formation.yml": render_open_team_formation(
-            semesters
-        ),
-        ".github/workflows/propagate-semester.yml": render_propagate_semester(
-            semesters
-        ),
-        ".github/workflows/archive-semester.yml": render_archive_semester(semesters),
         ".github/workflows/bootstrap-semester.yml": render_bootstrap_semester(),
-        ".github/workflows/check-semester-setup.yml": render_status(semesters),
         ".github/workflows/refresh-actions.yml": render_refresh(),
         ".github/workflows/scheduled-release.yml": render_scheduler(),
         ".github/workflows/console.yml": render_console(),
@@ -320,8 +296,17 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
 
 
 # Retired org-level workflows - removed from orgs seeded before the change, so faculty never
-# see two workflows for one job. Emptied once every live org had refreshed (14 Oct 2026).
-RETIRED_GITHUB_WORKFLOWS: tuple[str, ...] = ()
+# see two workflows for one job. Emptied once every live org has refreshed (decision 0042).
+# Decision 0041: the manual buttons the Console and `python -m dsl_course <op>` now run.
+RETIRED_GITHUB_WORKFLOWS: tuple[str, ...] = (
+    ".github/workflows/patch-assignment.yml",
+    ".github/workflows/generate-syllabus.yml",
+    ".github/workflows/derive-student-version.yml",
+    ".github/workflows/open-team-formation.yml",
+    ".github/workflows/propagate-semester.yml",
+    ".github/workflows/archive-semester.yml",
+    ".github/workflows/check-semester-setup.yml",
+)
 
 
 def seed_github_workflows(course_org: str, central_ref: str) -> int:
@@ -481,7 +466,7 @@ def refresh(course_org: str, *, course_only: bool = False) -> int:
     seeded stubs; repopulate dropdowns; converge each org's repo descriptions, faculty-team
     access and machinery topics (_converge_org_metadata) and rebuild its profile README
     off the same listing; re-push every registered semester's join workflows, its
-    semester-config SYSTEM-owned files (README contract, dispatch-sync*.yml,
+    semester-config SYSTEM-owned files (README contract, dispatch.yml,
     validate-schedule.yml) (skipping semesters whose repos are archived) - never its own config, which stays create-if-missing; (Free-plan
     workaround) propagate the token as a repo secret so those private repos can
     authenticate; and stamp the heartbeat that keeps this org's crons from being

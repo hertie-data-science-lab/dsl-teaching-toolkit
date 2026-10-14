@@ -2408,8 +2408,8 @@ def test_the_ticks_cover_every_rendered_cron():
     rendered = [
         workflows_render.render_scheduler(),
         workflows_render.render_refresh(),
-        workflows_render.render_sync_membership(["S"]),
-        workflows_render.render_sync_site(["S"]),
+        workflows_render.render_sync_membership(),
+        workflows_render.render_sync_site(),
         workflows_render.render_publish_site(),
         *(p.read_text() for p in Path(migrate.ROOT, "templates").rglob("*.yml")),
     ]

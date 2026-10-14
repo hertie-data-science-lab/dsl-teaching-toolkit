@@ -117,23 +117,6 @@ def _all_flags(name: str, args: dict, semester: str | None = SEMESTER) -> set[st
     ("name", "rendered", "args"),
     [
         (
-            "semester.archive",
-            workflows_render.render_archive_semester([SEMESTER]),
-            {"force": True},
-        ),
-        (
-            "assignment.update_copies",
-            workflows_render.render_patch_assignment(
-                [SEMESTER], ["assignment-1-f2026"]
-            ),
-            {
-                "course_source_repo": "assignment-1-f2026",
-                "path": "a.ipynb",
-                "assignment": "a1",
-                "overwrite": True,
-            },
-        ),
-        (
             "assignment.collect_now",
             workflows_render.render_collect_submissions(
                 [SEMESTER], ["assignment-1-f2026"]

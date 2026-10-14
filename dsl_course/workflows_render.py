@@ -325,9 +325,9 @@ def _run_preamble(minutes: int = _TIMEOUT_DEFAULT, *, sandbox: bool = False) -> 
 
 
 # Mail secrets, wired into the env of the workflows that send email (enrolment codes and
-# grade notifications) - and of Check semester setup, which does not send but REPORTS
-# whether a send could: its mail-transport row reads the very same variables, and without
-# them it would report "unset" on every org whatever the truth.
+# grade notifications) - and of the Console, whose Check does not send but REPORTS whether
+# a send could: its mail-transport row reads the very same variables, and without them it
+# would report "unset" on every org whatever the truth.
 # A plain string (not the f-string body) so the GitHub `${{ }}` is literal.
 # Derived from the names the mailer actually reads - the four GRAPH_* transport secrets
 # plus DSL_MAINTAINER_EMAIL, where fault mail goes - so a rename cannot leave an org
@@ -1101,10 +1101,7 @@ on:
 """
 
 
-_FACULTY_ONLY = "(faculty only)"
-
-
-def render_sync_membership(semester_orgs: list[str]) -> str:
+def render_sync_membership() -> str:
     """Consolidated roster + project-teams + faculty sync (replaces the old separate
     Sync enrolment / Sync teams workflows).
 
@@ -1127,7 +1124,8 @@ def render_sync_membership(semester_orgs: list[str]) -> str:
       generally)
     - workflow_dispatch -> manual escape hatch, gated by check-team (the other three
       trigger types skip that gate, same as the existing scheduler workflow already
-      does for cron)
+      does for cron). No inputs (decision 0041): it walks every semester, as the cron
+      does; one semester's check is the Console's `access.check`.
     """
     auto = _sync_auto_job(
         "Sync membership",
@@ -1166,8 +1164,6 @@ on:
   schedule:
     - cron: "13 6 * * *"
   workflow_dispatch:
-    inputs:
-{_semester_dropdown(semester_orgs, optional=True)}
 
 {_concurrency("sync-membership")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -1176,11 +1172,8 @@ on:
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
-          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
         run: |
-          args=(--course-org "$COURSE" --no-preview)
-          [ "$SEMESTER_ORG" != "{_FACULTY_ONLY}" ] && args+=(--semester-org "$SEMESTER_ORG")
-          python3 -m dsl_course.sync_membership "${{args[@]}}"
+          python3 -m dsl_course.sync_membership --course-org "$COURSE" --all-semesters --no-preview
 {_CRON_CLOSE}
 {auto}"""
 
@@ -1240,17 +1233,9 @@ def _sync_auto_job(
 {notice}"""
 
 
-def _semester_dropdown(semester_orgs: list[str], optional: bool = False) -> str:
-    """The plain semester dropdown. `optional` prepends the faculty-only sentinel and pins
-    the default to it (opting IN to a semester must stay a deliberate choice); otherwise the
-    latest semester is pre-selected."""
-    options = ([_FACULTY_ONLY] + semester_orgs) if optional else semester_orgs
-    return _choice_input(
-        "semester_org",
-        "Semester org",
-        options,
-        default=_FACULTY_ONLY if optional else None,
-    )
+def _semester_dropdown(semester_orgs: list[str]) -> str:
+    """The plain semester dropdown, the latest semester pre-selected."""
+    return _choice_input("semester_org", "Semester org", semester_orgs)
 
 
 # Real returns queue PER SEMESTER: two of them reading `distributed.csv` at once both mail
@@ -1342,169 +1327,6 @@ on:
 """
 
 
-def render_open_team_formation(semester_orgs: list[str]) -> str:
-    """Ask the students who still have no team, on a faculty member's say-so.
-
-    The SAME pass the quarter-hourly tick runs, reached from a button: `team_formation.run`
-    reads the open windows and hands them to the very `notify_windows` the scheduler calls,
-    so the record, the claim ordering and the wording cannot fork. Idempotence therefore
-    needs nothing from this button - `mailed.csv` already holds what a first press sent, so
-    a second press mails nobody.
-
-    `assignment` is FREE TEXT and not a dropdown. Every other per-assignment button names
-    a course-org template repo, which this org can discover and list; a team-formation
-    window is keyed on a SCHEDULE key, which lives in each semester's own private
-    schedule.yml - so a dropdown rendered once for the whole course org would either be
-    empty or be one semester's keys offered to another. Left blank it asks about every window
-    open right now, which is the ordinary press; a key with no open window is refused by
-    name rather than passed over.
-    """
-    return f"""name: Open team formation
-
-# Emails every enrolled student who is still without a team for an assignment whose
-# team-formation window is open: the cap, the day formation closes, and a link to the
-# semester's Join team form. It is the same message the scheduler sends by itself when a
-# window opens - this is how you send it again on your own say-so, after announcing the
-# assignment in class or once a semester's mail secrets are finally set.
-# NOTHING IS SAID TWICE: every message is recorded in semester-config's
-# .system/team-formation/mailed.csv, so a second press reaches only the students a first press did
-# not - a newcomer who has since joined GitHub, and nobody else.
-# Leave `assignment` empty for every window that is open. Filling it in narrows the run to
-# ONE schedule.yml assignment key and leaves the other windows alone; a key with no open
-# window is an error, not a quiet no-op.
-# Overnight (23:00-07:00 in the semester's own timezone) the message is HELD, pressed or not
-# - the students' night is the same night either way - and nothing is claimed, so the next
-# quarter-hourly tick sends it in the morning.
-# Preview first; it claims nothing, sends nothing, and prints the counts with a sample of
-# the wording. Needs the GRAPH_* secrets to mail.
-
-on:
-  workflow_dispatch:
-    inputs:
-{_semester_dropdown(semester_orgs)}
-      assignment:
-        description: "Only this schedule.yml assignment key (leave empty for every open window)"
-        required: false
-        default: ""
-      preview:
-        description: "Preview the messages - claim nothing, send nothing"
-        type: boolean
-        default: true
-
-{_concurrency("open-team-formation")}
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  open-team-formation:
-{_run_preamble()}      - name: Open team formation
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COURSE_ORG: ${{{{ github.repository_owner }}}}
-          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
-          ASSIGNMENT: ${{{{ inputs.assignment }}}}
-          PREVIEW: ${{{{ inputs.preview }}}}
-{_MAIL_ENV}
-        run: |
-          args=(--course-org "$COURSE_ORG" --semester-org "$SEMESTER_ORG")
-          [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
-{_PREVIEW_GATE}
-          python3 -m dsl_course.team_formation "${{args[@]}}"
-"""
-
-
-def render_propagate_semester(semester_orgs: list[str]) -> str:
-    """Carry a semester's edits to released material back into the course org."""
-    return f"""name: Propagate semester edits
-
-# A release copies course org -> semester, and lands on `upstream` so that an instructor's
-# correction typed into the semester repo survives the next release. This is the way back:
-# for every path this semester has already been released, it copies what the semester has NOW
-# over the course org's own copy, on a branch `from-<semester-org>`, and opens ONE pull
-# request per source repo. Faculty merge it, cherry-pick from it, or close it.
-# DELETIONS ARE NOT PROPAGATED - a file the semester dropped is named in the pull request
-# and left where it is.
-# The branch is cut fresh from the source repo's default branch and force-pushed on every
-# run, so each run proposes what the semester has then; the pull request is reused.
-# Preview first; it clones nothing and prints the path pairs.
-# Also runs as the first step of Archive semester - see docs/10.
-
-on:
-  workflow_dispatch:
-    inputs:
-{_semester_dropdown(semester_orgs)}
-      preview:
-        description: "Preview the paths - clone nothing, push nothing, open nothing"
-        type: boolean
-        default: true
-
-{_concurrency("propagate-semester")}
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  propagate-semester:
-{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Propagate semester edits
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COURSE_ORG: ${{{{ github.repository_owner }}}}
-          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
-          PREVIEW: ${{{{ inputs.preview }}}}
-        run: |
-          gh auth setup-git
-          args=(--course-org "$COURSE_ORG" --semester-org "$SEMESTER_ORG")
-{_PREVIEW_GATE}
-          python3 -m dsl_course.propagate "${{args[@]}}"
-"""
-
-
-def render_archive_semester(semester_orgs: list[str]) -> str:
-    """Close a finished semester out: carry its edits back, freeze every repo, seal it."""
-    return f"""name: Archive semester
-
-# End of term. The scheduler runs this by itself ONLY for a semester whose schedule.yml
-# writes an `archive:` block (its `event_datetime:` defaults to semester_end + 60 days). Archiving is
-# opt-in, so this button closes a semester out early - and is the only way to close out one
-# that wrote no block. It offers the semester's edits back to this org as a pull request
-# first, closes the toolkit's open notices, syncs the website one last time, then ARCHIVES
-# every repo in the semester org - students' work, `join` so a finished term cannot still
-# be joined, the released materials, the website, `.github` - writes the teardown record
-# into the private semester-config and archives that last, which is what tells every
-# nightly sweep the semester is finished.
-# NOBODY IS REVOKED and NOTHING IS DELETED: an archived repo is read-only for everyone, so
-# students keep read access to their own work, and un-archiving a repo from its own
-# Settings page brings it back exactly as it was. Membership and teams are untouched.
-# `preview` defaults to true and prints counts only. A real run refuses until the semester's
-# archive date has arrived; `force` says so by hand, which is how a semester with no
-# `archive:` block - and so no date - is closed out.
-# A run that dies half way is resumed by running it again - see docs/10.
-
-on:
-  workflow_dispatch:
-    inputs:
-{_semester_dropdown(semester_orgs)}
-      preview:
-        description: "Preview the archive - archive nothing, open no pull request"
-        type: boolean
-        default: true
-      force:
-        description: "Close out before the semester's archive date"
-        type: boolean
-        default: false
-
-{_concurrency("archive-semester")}
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  archive-semester:
-{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Archive semester
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COURSE_ORG: ${{{{ github.repository_owner }}}}
-          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
-          PREVIEW: ${{{{ inputs.preview }}}}
-          FORCE: ${{{{ inputs.force }}}}
-        run: |
-          gh auth setup-git
-          args=(--course-org "$COURSE_ORG" --semester-org "$SEMESTER_ORG")
-{_PREVIEW_GATE}
-          [ "$FORCE" = "true" ] && args+=(--force)
-          python3 -m dsl_course.archive "${{args[@]}}"
-"""
-
-
 # Which semester a Send-codes run is FOR: the roster dispatcher's payload, its only
 # trigger. Used to scope the concurrency group PER SEMESTER - the state two runs race each
 # other over is one semester's students.csv, and a repo-wide group would have a roster push
@@ -1549,7 +1371,7 @@ def render_send_codes() -> str:
 # Needs the GRAPH_* secrets.
 #
 # There is no button: a push to a semester's students.csv is what fires this (its
-# semester-config dispatch-send-codes.yml dispatches `send-codes`), so the roster is the
+# semester-config dispatch.yml dispatches `send-codes`), so the roster is the
 # only thing anyone edits. Re-running is safe - a row is mailed only while its
 # `code_sent_at` is blank - which is also why pushing again does not re-send: to send a
 # row a second time, clear its `code_sent_at` and push that.
@@ -1616,7 +1438,7 @@ on:
 
 
 # The semester a run is SCOPED to, or ''. Only a semester-config dispatcher's push names one
-# (`templates/semester-config/dispatch-scheduled-release.yml` sends driver=semester-config
+# (`templates/semester-config/dispatch.yml` sends driver=semester-config
 # and its own org as semester_org), and so does the migration's catch-up after a semester's
 # unpause (driver=migrate). The run releases into the one semester that changed and
 # hands any site render to Sync site's queue - which a schedule.yml / instructors.yml / teams.csv
@@ -1781,36 +1603,6 @@ on:
 {_ungated_preamble()}{_AUTOGRADE_REPORT}"""
 
 
-def render_status(semester_orgs: list[str]) -> str:
-    """Per-semester checklist of every faculty & instructors input location - identity, people,
-    schedule + release plan, roster, teams, grades - with the current value and a
-    direct edit link for anything missing. Read-only; changes nothing."""
-    return f"""name: Check semester setup
-
-# A per-semester glance view of everything configured (and everything still missing),
-# with direct links to fix it. Read-only - this workflow changes nothing.
-# It carries the GRAPH_* secrets to REPORT on them (present/absent only - no value is
-# printed), never to send: this is where a missing mail transport is meant to be caught,
-# before a roster push tries to mail a semester its codes.
-
-on:
-  workflow_dispatch:
-    inputs:
-{_semester_dropdown(semester_orgs)}
-
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  status:
-{_run_preamble()}      - name: Check semester setup
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COURSE: ${{{{ github.repository_owner }}}}
-          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
-{_MAIL_ENV}
-        run: |
-          python3 -m dsl_course.status --course-org "$COURSE" --semester-org "$SEMESTER_ORG" --preview >> "$GITHUB_STEP_SUMMARY"
-"""
-
-
 # The Console's failure reporting: the cron trio, fired on the dispatches it is made of.
 # Whoever pressed the button in the Console sees the op's own outcome there; what nobody
 # sees is the RUN breaking - a traceback, a revoked token - which only the
@@ -1916,54 +1708,6 @@ on:
 {_CRON_NOTICE}"""
 
 
-def render_generate_syllabus(
-    source_repos: list[str],
-    semester_orgs: list[str],
-    materials: list[str] | None = None,
-) -> str:
-    """Build the syllabus's session-by-session section from a semester's schedule.yml.
-
-    A workflow rather than a CLI habit, because the people who write syllabi are the people
-    who use the Actions tab. It writes only the marked weekly-plan block of the declared
-    syllabus - see dsl_course/syllabus.py."""
-    return f"""name: Generate syllabus
-
-# Writes the weekly plan of a syllabus - one block per session, with its title, its
-# learning objectives and its reading list - from the semester's
-# semester-config/schedule.yml and its readings entries.
-#
-# It goes into your syllabus file (SYLLABUS.md, or the one materials.yml declares),
-# between <!-- dsl:weekly-plan --> and <!-- /dsl:weekly-plan -->; without those lines it
-# adds them under "## Weekly plan" at the end. Move the marked block anywhere in the file
-# and a re-run updates it there; nothing else in the file changes.
-# Dropdowns are refreshed by the 'Refresh actions' workflow.
-
-on:
-  workflow_dispatch:
-    inputs:
-{_choice_input("course_source_repo", "Repo holding your syllabus and readings", source_repos, _newest_materials(source_repos, materials))}
-{_choice_input("semester_org", "Semester whose schedule.yml supplies the sessions", semester_orgs)}
-      preview:
-        description: "Preview - print the block, write nothing to your syllabus"
-        type: boolean
-        default: true
-
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  syllabus:
-{_run_preamble()}      - name: Generate
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COURSE: ${{{{ github.repository_owner }}}}
-          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
-          SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          PREVIEW: ${{{{ inputs.preview }}}}
-        run: |
-          args=(--course-org "$COURSE" --semester-org "$SEMESTER_ORG" --course-source-repo "$SOURCE_REPO")
-{_PREVIEW_GATE}
-          python3 -m dsl_course.syllabus "${{args[@]}}"
-"""
-
-
 def render_new_materials(materials: list[str] | None = None) -> str:
     """Scaffold a correctly-structured course-materials-<tag> repo, then refresh.
 
@@ -2066,110 +1810,7 @@ on:
 """
 
 
-def render_patch_assignment(
-    semester_orgs: list[str], assignments: list[str] | None = None
-) -> str:
-    """Push a correction into every submission repo of an assignment already handed out."""
-    return f"""name: Patch released assignment
-
-# A broken cell, a wrong path, a dataset that moved - after the assignment went out.
-# Commit the fix to the TEMPLATE's default branch first, then run this: it pushes that
-# file (or folder) into every submission repo of the assignment, as a NEW COMMIT on each
-# student's own branch, and posts a note on each Submission receipts issue telling them to pull.
-# It never force-pushes, and it never replaces a file a student has already changed
-# unless `overwrite` says so - their version is kept and counted instead.
-# The frozen semester-side hand-out is patched too, so a student who onboards tomorrow is
-# given the corrected file rather than the one everyone else was just patched off.
-# `preview` defaults to true. See docs/09-release-assignment-to-cohort.md.
-
-on:
-  workflow_dispatch:
-    inputs:
-{_choice_input("semester_org", "Semester org holding the submission repos", semester_orgs)}
-{_assignment_input(assignments or [], "Assignment template holding the corrected file")}
-      path:
-        description: "File or folder on the template's default branch to push (e.g. starter.ipynb, or data/)"
-        required: true
-      overwrite:
-        description: "Replace the file even where the student has already changed it (their work on that file is lost)"
-        type: boolean
-        default: false
-      assignment:
-        description: "Only if two schedule.yml entries share this template: the one to act on (its key)"
-        required: false
-        default: ""
-      preview:
-        description: "Preview - count the repos that would be patched, write nothing"
-        type: boolean
-        default: true
-
-{_concurrency("patch-assignment")}
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  patch:
-{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Patch released assignment
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COURSE_ORG: ${{{{ github.repository_owner }}}}
-          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
-          COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          PATH_INPUT: ${{{{ inputs.path }}}}
-          OVERWRITE: ${{{{ inputs.overwrite }}}}
-          ASSIGNMENT: ${{{{ inputs.assignment }}}}
-          PREVIEW: ${{{{ inputs.preview }}}}
-        run: |
-          gh auth setup-git
-          args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --patch-path "$PATH_INPUT")
-          [ "$OVERWRITE" = "true" ] && args+=(--overwrite)
-          [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
-{_PREVIEW_GATE}
-          python3 -m dsl_course.assign "${{args[@]}}"
-"""
-
-
-def render_derive_student_version(assignments: list[str] | None = None) -> str:
-    """Write a template's student starter onto `main` from its `solution` branch.
-
-    A COURSE-org button: it touches one template repo and no semester, so nothing it can
-    print names a person and its dry run may list the files it would write."""
-    return f"""name: Derive student version
-
-# ONE authored file, two branches. Keep the notebook you actually teach from on the
-# template's `solution` branch, under `solution/`, with the answers fenced off in the
-# nbgrader/Otter vocabulary: `### BEGIN SOLUTION` / `### END SOLUTION`, a `solution` cell
-# tag, or an Rmd/qmd chunk with `solution=TRUE`. This reads that branch and writes the
-# fenced-out version onto `main` - the only branch template-generate copies into a student
-# repo - so the starter is never maintained by hand beside the answer it is meant to be
-# missing. It never writes to `solution`, and a file with nothing fenced in it is never
-# written at all: the "starter" derived from that would be the model answer.
-# `preview` defaults to true and prints the file list and the counts, never the content.
-# See docs/03-add-assignment-to-course.md.
-
-on:
-  workflow_dispatch:
-    inputs:
-{_assignment_input(assignments or [], "Assignment template to derive the student starter for")}
-      preview:
-        description: "Preview - list the files and how much would be stripped out of each"
-        type: boolean
-        default: true
-
-{_concurrency("derive-student-version")}
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  derive:
-{_run_preamble()}      - name: Derive student version
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COURSE_ORG: ${{{{ github.repository_owner }}}}
-          COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          PREVIEW: ${{{{ inputs.preview }}}}
-        run: |
-          args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO")
-{_PREVIEW_GATE}
-          python3 -m dsl_course.derive "${{args[@]}}"
-"""
-
-
-def render_sync_site(semester_orgs: list[str]) -> str:
+def render_sync_site() -> str:
     """Regenerate a semester's website from the live org structure (released sessions +
     schedule.yml dates + assignment catalog). Auto-resyncs on any change the site sources
     from - not just on release:
@@ -2182,7 +1823,9 @@ def render_sync_site(semester_orgs: list[str]) -> str:
     - daily cron -> re-sync every semester (the catch-all: a direct edit to a released
       content repo can't fire a dispatch, because DSL_BOT_TOKEN is deliberately not
       scoped to content repos, so a daily pass reflects such edits within a day).
-    - workflow_dispatch -> manual escape hatch, gated by check-team (single semester).
+    - workflow_dispatch -> manual escape hatch, gated by check-team. No inputs (decision
+      0041): it re-syncs every semester, as the cron does; one semester is the Console's
+      `site.update`.
 
     Releases also call site.sync_site directly (immediate). The push/dispatch/cron paths
     skip the check-team gate (no actor), same as Sync membership and the scheduler."""
@@ -2208,8 +1851,6 @@ on:
   schedule:
     - cron: "41 6 * * *"
   workflow_dispatch:
-    inputs:
-{_choice_input("semester_org", "Semester whose site to regenerate from the org structure", semester_orgs)}
 
 {_concurrency("sync-site")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -2218,10 +1859,9 @@ on:
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
-          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
         run: |
           gh auth setup-git
-          python3 -m dsl_course.site sync --course-org "$COURSE" --semester-org "$SEMESTER_ORG"
+          python3 -m dsl_course.site sync --course-org "$COURSE" --all-semesters
 {_CRON_CLOSE}
 {auto}"""
 

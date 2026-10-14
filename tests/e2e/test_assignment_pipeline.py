@@ -493,7 +493,7 @@ def _write_schedule(run_id: str, handout: datetime, due: datetime) -> Stage:
     keyed on the run, so removing it at teardown takes the whole run out in one edit
     whatever it got as far as adding.
 
-    The push is itself a driver now: the semester's seeded `dispatch-scheduled-release.yml`
+    The push is itself a driver now: the semester's seeded `dispatch.yml`
     fires the course org's Scheduled release from every schedule.yml push, so the edit
     starts a real tick. It is waited out here rather than raced, so the pass dispatched
     next is the one whose log and artefacts the stage after it reads."""

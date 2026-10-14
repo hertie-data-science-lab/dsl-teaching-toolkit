@@ -935,7 +935,7 @@ serially, because it re-renders the org's own workflows as its last step.
 Three Scheduled-release dispatches are needed, not two: the pass that hands out cannot
 also collect, and the DUE date and the CUTOFF drive different passes (refresh, then
 freeze). Each schedule edit the run makes drives a tick of its own as well (the semester's
-`dispatch-scheduled-release.yml` fires on the push), which the harness waits out before
+`dispatch.yml` fires on the push), which the harness waits out before
 dispatching. One-off setup:
 `python3 -c "from dsl_course import gradebook; gradebook.ensure_gradebooks('<demo semester>')"`
 once, so every student in the demo semester already has their `grades-<handle>` repo - a repo

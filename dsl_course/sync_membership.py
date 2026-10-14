@@ -190,7 +190,7 @@ def sync(
                 course_org, org, content_repos, assignments, dry_run=dry_run
             )
             # The Join-team form's only source of truth, refreshed here because this is
-            # what a push to `schedule.yml` wakes (semester-config/dispatch-sync.yml) -
+            # what a push to `schedule.yml` wakes (semester-config/dispatch.yml) -
             # and a form answering off a stale mirror either refuses a real team or lets
             # one form for an assignment the template says is individual.
             lock = sync_team_lock(course_org, org, dry_run=dry_run)

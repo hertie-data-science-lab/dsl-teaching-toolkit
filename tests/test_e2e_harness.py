@@ -313,7 +313,7 @@ def test_the_harness_waits_on_the_group_the_renderer_declares():
 
 
 def test_a_schedule_push_that_drives_no_tick_is_not_an_error(monkeypatch):
-    # `dispatch-scheduled-release.yml` is only in semesters that have refreshed since it
+    # `dispatch.yml` is only in semesters that have refreshed since it
     # shipped. Where it is not, the edit starts nothing and the harness carries on to its
     # own dispatch rather than timing out.
     monkeypatch.setattr(drive, "_runs", lambda repo, workflow, limit=30: [{"id": 1}])

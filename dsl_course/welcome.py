@@ -401,23 +401,21 @@ def refresh_join_workflows(org: str) -> int:
 # tests/test_bootstrap_seeding.py pins this set exactly, so an addition fails loud.
 CONFIG_SYSTEM_FILES = (
     ("README.md", "semester-config/README.md"),
-    (".github/workflows/dispatch-sync.yml", "semester-config/dispatch-sync.yml"),
-    (
-        ".github/workflows/dispatch-sync-site.yml",
-        "semester-config/dispatch-sync-site.yml",
-    ),
-    (
-        ".github/workflows/dispatch-scheduled-release.yml",
-        "semester-config/dispatch-scheduled-release.yml",
-    ),
-    (
-        ".github/workflows/dispatch-send-codes.yml",
-        "semester-config/dispatch-send-codes.yml",
-    ),
+    (".github/workflows/dispatch.yml", "semester-config/dispatch.yml"),
     (
         ".github/workflows/validate-schedule.yml",
         "semester-config/validate-schedule.yml",
     ),
+)
+
+# Retired semester-config workflows, deleted in the same commit that writes the set above.
+# Decision 0041: the four dispatchers became `dispatch.yml`. Emptied once every live
+# semester has refreshed (decision 0042).
+RETIRED_CONFIG_FILES: tuple[str, ...] = (
+    ".github/workflows/dispatch-sync.yml",
+    ".github/workflows/dispatch-sync-site.yml",
+    ".github/workflows/dispatch-scheduled-release.yml",
+    ".github/workflows/dispatch-send-codes.yml",
 )
 
 
@@ -476,7 +474,7 @@ def refresh_config_system_files(org: str, central_ref: str) -> int:
     run that workflow again - three live semesters drifted a whole semester that way.
     `put_files` compares blob shas, so a semester already current is written nothing.
 
-    A failed write here is not cosmetic: without dispatch-sync*.yml a semester's membership
+    A failed write here is not cosmetic: without dispatch.yml a semester's membership
     and site syncs never fire. Returns 1 if the commit didn't land, so callers
     (setup_semester_extras, seed.refresh) go red rather than report a converged semester."""
     if not put_files(
@@ -484,6 +482,7 @@ def refresh_config_system_files(org: str, central_ref: str) -> int:
         CONFIG_REPO,
         config_system_files(central_ref),
         "ci: refresh semester-config contract + dispatchers",
+        delete=RETIRED_CONFIG_FILES,
     ):
         log_err(f"semester-config system files not written in {org}")
         return 1

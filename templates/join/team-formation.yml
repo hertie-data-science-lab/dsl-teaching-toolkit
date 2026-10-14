@@ -457,7 +457,7 @@ jobs:
               // Confirm, and point at the next step. The repo appears within minutes: the
               // window only opens once the assignment has handed out, the handout re-fires
               // on every Scheduled release run, and this commit to teams.csv dispatches one
-              // (dispatch-scheduled-release.yml), which provisions this team's repo.
+              // (dispatch.yml), which provisions this team's repo.
               const lines = outcome.left
                 ? [
                   `Done @${handle} - you've left **${outcome.left}** and ${outcome.count === 1 ? 'started' : 'joined'} **${team}** for \`${assignment}\` (${outcome.count}/${cap}).`,
