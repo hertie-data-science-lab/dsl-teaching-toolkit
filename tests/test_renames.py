@@ -492,7 +492,7 @@ def test_every_rendered_run_of_a_previewing_cli_says_which_it_is(monkeypatch):
                         )
                         if unattended and cli != "console":
                             assert "--no-preview" in text, (name, cli, "unattended")
-    assert seen >= 12
+    assert seen >= 9
 
 
 @pytest.mark.parametrize("event", ["schedule", "repository_dispatch"])
@@ -543,7 +543,7 @@ def test_every_button_previews_by_default_and_no_old_box_is_left():
         if "preview" in inputs:
             boxed += 1
             assert inputs["preview"]["default"] is True, name
-    assert boxed >= 4
+    assert boxed >= 3
 
 
 def test_every_op_with_a_preview_acts_only_when_told_no_preview():

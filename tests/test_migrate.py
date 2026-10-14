@@ -1234,7 +1234,6 @@ def course(fake, monkeypatch):
             "SYLLABUS.md.sample": b"s",
             "SYLLABUS.md": b"x",
             "publish.yml": b'public:\n  - "lectures/**"\n',
-            migrate.RELEASE_WORKFLOWS[0]: b"old",
         },
     )
     # The settings an older publish left in the public site repo.
@@ -1484,9 +1483,7 @@ def test_the_course_re_render_is_checked_in_every_repo_it_writes(
     assert _main(monkeypatch, COURSE, "--no-preview") == 1
     err = capsys.readouterr().err
     assert "re-render did not verify" in err
-    assert f"course-materials-f2026/{migrate.RELEASE_WORKFLOWS[0]}" in err
     assert "course-materials-f2026/.system/MAINTAINING.md" in err
-    assert f"assignment-1-f2026/{migrate.TEMPLATE_WORKFLOWS[0]}" in err
     assert (
         f"assignment-1-f2026/{migrate.RETIRED_WORKFLOWS[0]} (retired: deleted)" in err
     )

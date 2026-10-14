@@ -262,10 +262,10 @@ Every operation is a button in the **Instructor Console** and a command, `python
 
 ## Typical flow
 
-1. **New materials repo** / **New assignment** - scaffold your content repos, then fill them in.
+1. **New course materials** / **New assignment** - scaffold your content repos, then fill them in.
    Write the answer once on the `solution` branch and let **Derive student version** write `main`'s starter from it.
-2. Create an empty **semester org** for the year, add the bot as an Owner, then run **Bootstrap semester**.
-3. Each session: **Release materials** / **Release assignment** - or pre-schedule them in `schedule.yml` (recommended).
+2. Create an empty **semester org** for the year, add the bot as an Owner, then **New semester** sets it up.
+3. Each session: pre-schedule releases and hand-outs in `schedule.yml` (recommended), or **Release** / **Hand out** now.
 4. Grading: the sheet appears at handout -> **Collect submissions** (or wait for the cron) -> type the marks -> **Return marks** (preview first).
 5. End of term: **Archive** - freezes the year's student repos and seals the semester's private record. Nothing is deleted.
 
@@ -346,7 +346,7 @@ _Hertie Data Science Lab._
             else f"- [{c}](https://github.com/{c})"
             for c in (semesters or [])
         )
-        or "_(none registered yet - run Bootstrap semester)_"
+        or "_(none registered yet - set one up with New semester in the Console)_"
     )
     return f"""# {course_name} Course
 
@@ -400,11 +400,6 @@ _(automatically bootstrapped from the central
 
 | Workflow | What it does | Managed |
 | --- | --- | --- |
-| [**Release materials**](https://github.com/{org}/.github/actions/workflows/release-materials.yml) | Manually release materials to student-facing semester orgs *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{central_ref}/docs/07-schedule-releases.md) for regular releases)*. Select path(s) for any folder or file, one or several at a time. | Run by instructor |
-| [**Release assignment**](https://github.com/{org}/.github/actions/workflows/release-assignment.yml) | Generate one private repo per student from a chosen `assignment-*` template repo - or one shared drop box, or no repo at all, depending on the template's `submit_via`. *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{central_ref}/docs/07-schedule-releases.md) for regular releases)* | Run by instructor |
-| [**New materials repo**](https://github.com/{org}/.github/actions/workflows/new-materials.yml) | Scaffolds a correctly-structured `course-materials-<year>` repo (session folders + the Release workflows). Ready for material to be added. | Run by instructor |
-| [**New assignment**](https://github.com/{org}/.github/actions/workflows/new-assignment.yml) | Scaffolds an `assignment-<name>` template repo: brief + starter(s) on `main`; the `solution` branch carries the model solution and `grading_config.yml`. | Run by instructor |
-| [**Bootstrap semester**](https://github.com/{org}/.github/actions/workflows/bootstrap-semester.yml) | Configures a freshly-created semester org (scaffold repos, registration with this course org, workflows). | Run by instructor |
 | [**Collect submissions**](https://github.com/{org}/.github/actions/workflows/collect-submissions.yml) | Refresh an assignment's grading sheet now instead of waiting for the cron. The Console's *Collect now* runs it: grading runs student code in this workflow's own sandboxed job. | Console |
 | [**Distribute grades**](https://github.com/{org}/.github/actions/workflows/distribute-grades.yml) | Send what the grading sheet holds: each student's private `grades-<handle>` repo, the semester grades file, and an email. The Console's *Return marks* and the scheduler both run it, in one queue. | Console |
 | [**Send enrolment codes**](https://github.com/{org}/.github/actions/workflows/send-codes.yml) | Emails each student their enrolment code. There is no button: a push to a semester's `students.csv` fires it, and it sends for real. | Automatic |
@@ -414,8 +409,6 @@ _(automatically bootstrapped from the central
 | [**Refresh actions**](https://github.com/{org}/.github/actions/workflows/refresh-actions.yml) | Repopulates the dropdowns, re-equips content repos, and rebuilds this index. Runs itself nightly. | Auto-handled |
 | [**Scheduled release**](https://github.com/{org}/.github/actions/workflows/scheduled-release.yml) | Auto-releases whatever each semester's `schedule.yml` says is now due, about every 15 minutes. Manual runs default to a preview. | Auto-handled |
 | [**Console**](https://github.com/{org}/.github/actions/workflows/console.yml) | Runs what the Instructor Console asks for. Not for pressing by hand: the Console fills in the request and follows the run. | Auto-handled |
-
-NB: each materials repo *also* carries its own **Release** workflows (run from inside the repo).
 
 ---
 
@@ -430,7 +423,7 @@ NB: each materials repo *also* carries its own **Release** workflows (run from i
                                     main      -> starter + autograder   (students get this)
                                     solution  -> solution/   (pushed to students on demand)
 
-<Course>-f<year>/                 <- one SEMESTER org per year (Bootstrap semester sets it up)
+<Course>-f<year>/                 <- one SEMESTER org per year (New semester sets it up)
 |-- join/                         Join issue -> onboard (enrol)
 |-- semester-config/             students.csv  (private roster)
 |-- materials/                    released lectures/readings  (students-team read)
@@ -440,11 +433,11 @@ NB: each materials repo *also* carries its own **Release** workflows (run from i
 
 This whole structure is fully bootstrapped from the central [`dsl-teaching-toolkit`](https://github.com/{CENTRAL}) repo (via its **Bootstrap Course Org** action), and the actions above run that same central code.
 
-The course-level actions assume this layout - use **New materials repo** / **New assignment** above to scaffold correctly. These scaffolds are designed to be generic & non-prescriptive, however if these formats to not suit your intended course delivery structure, please contact the DSL (`h.baker@hertie-school.org`).
+The course-level actions assume this layout - use **New course materials** / **New assignment** above to scaffold correctly. These scaffolds are designed to be generic & non-prescriptive, however if these formats to not suit your intended course delivery structure, please contact the DSL (`h.baker@hertie-school.org`).
 
 ### Materials repo
 
-(`course-materials-<year>`) - the source for Release materials. Any path in it can be released. The convention below is what the downstream pipeline transformations expect: ordinal-prefixed (`01_`, `02_`, `03_`, ...) sub-directories, which is the only constraint. The following are seeded automatically, but edit them as you wish:
+(`course-materials-<year>`) - the source a release copies from. Any path in it can be released. The convention below is what the downstream pipeline transformations expect: ordinal-prefixed (`01_`, `02_`, `03_`, ...) sub-directories, which is the only constraint. The following are seeded automatically, but edit them as you wish:
 - `lectures/01_.../` - one folder per session's lecture files;
 - `readings/01_.../` - one folder per session's readings;
 - root files (`SYLLABUS.md`, `README.md`).
@@ -455,29 +448,27 @@ Add more sections freely (e.g. `labs/01_.../`, `datasets/01_.../`).
 
 ### Assignment repo
 
-`assignment-<name>` (an `is_template` repo) - the source for Release assignment, once a semester's schedule names it:
+`assignment-<name>` (an `is_template` repo) - the source a hand-out copies from, once a semester's schedule names it:
 - **`main` branch** - the starter code only (no tests, no autograder). This is exactly what students receive (native template-generate copies `main` only).
-- **`solution` branch** - the model solution (`solution/`), plus **`grading_config.yml`** and the **hidden tests** the autograder runs faculty-side at the cutoff. **All of this MUST live on this branch, never on `main`** - that is what guarantees it is never copied into student repos on generate. Only the `solution/` folder reaches students, and only when you run Release assignment with **solution_datetime** `now` (a separate, later commit); the hidden tests and `grading_config.yml` never do.
+- **`solution` branch** - the model solution (`solution/`), plus **`grading_config.yml`** and the **hidden tests** the autograder runs faculty-side at the cutoff. **All of this MUST live on this branch, never on `main`** - that is what guarantees it is never copied into student repos on generate. Only the `solution/` folder reaches students, and only when its `solution_datetime` passes, or you hand it out with **solution_datetime** `now` (a separate, later commit); the hidden tests and `grading_config.yml` never do.
 
 ## Further details on how the actions behave
 
-**Release materials** - run it from the materials repo (`course_source_repo` pre-filled with
-that repo) or from the course org's central `.github` control panel (`course_source_repo` is
-a dropdown). **Both** take the same five fields, which are exactly a `schedule.yml` `deploy:`
-entry: `semester_org`, `course_source_repo`, `course_source_path`, `semester_dest_repo`,
-`semester_dest_path` - so the manual workflow and the scheduled release plan share one
-vocabulary. `course_source_path` is any folder or file (`lectures/03_regression`,
+**Releasing materials** (`release.entry` for a schedule entry, `release.adhoc` for anything
+else) takes the same five fields as a `schedule.yml` `deploy:` entry: `semester_org`,
+`course_source_repo`, `course_source_path`, `semester_dest_repo`, `semester_dest_path` - so
+a release now and the scheduled release plan share one vocabulary. `course_source_path` is any folder or file (`lectures/03_regression`,
 `mlpkg/simulation`, `SYLLABUS.md`); a folder is copied whole, **every file** in it.
 `course_source_path` and `semester_dest_path` accept comma-separated lists paired in order, so
-one click can release several paths at once; a blank `semester_dest_path` mirrors each source
+one release can carry several paths at once; a blank `semester_dest_path` mirrors each source
 path. `semester_dest_repo` (default `materials`) is created on demand, private, with
 `students` **and** `auditors` read. Copies are additive and idempotent: only what you have
 released appears, and re-releasing changes nothing.
 
-**Release assignment** - two stages: (1) it freezes a semester-level template repo
+**Handing out an assignment** (`assignment.handout_now`) - two stages: (1) it freezes a semester-level template repo
 `<assignment>` from your `assignment-*-<year>` template; (2) it generates one private
 `<assignment>-<handle>` repo per onboarded student **from that semester template**, adding
-each as collaborator. After the assignment deadline, rerun with **solution_datetime** `now` to push the
+each as collaborator. After the assignment deadline, hand it out again with **solution_datetime** `now` to push the
 template's `solution` branch into every student repo. Solutions stay on the `solution`
 branch so a normal release never leaks them. A template's `submit_via` can change stage
 (2) instead: `external` creates no repo at all, and `shared_dropbox_repo` creates one

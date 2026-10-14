@@ -1,4 +1,4 @@
-"""Render the run-from-repo and org-level faculty & instructors workflows as YAML text.
+"""Render the course org's workflows as YAML text.
 
 Pure text rendering - no network, no filesystem: every function here takes the already
 discovered dropdown contents (see discovery) and returns the workflow YAML. seed places
@@ -11,35 +11,22 @@ Shared boilerplate that repeats verbatim between renderers is extracted into the
 constants/helpers below (the check-team gate, the checkout+python job preamble, the
 dropdown builders); the prose and ordering stay per-workflow.
 
-The Release materials workflow's inputs are deliberately the SAME five fields as a
-schedule.yml `deploy:` entry (course_source_repo, course_source_path, semester_dest_repo,
-semester_dest_path, plus the semester org) - one vocabulary for the scheduled and the manual
-path, so what faculty learn on the workflow reads straight across into the schedule.
-Nothing about the workflow is discovered from the source repo any more: `course_source_path`
-is free text (a folder, a file, or a comma-separated list), so it needs no per-section
-checkbox and no session dropdown, and both variants stay well under GitHub's 10-input
-workflow_dispatch cap.
+Decision 0041: a manual operation is a Console op (`ops.registry`), not a workflow. What
+is left here is the Console's own workflow, the crons, the `repository_dispatch` targets,
+and the two grading workflows the Console dispatches for their job shape.
 """
 
 from __future__ import annotations
 
 import re
 
-from . import legacy, mailer, policy
+from . import legacy, mailer
 from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
 from .course import (
-    ASSIGNMENT_TYPES,
     CONFIG_REPO,
-    COURSE_DEFAULT_CHOICE,
     MIGRATE_DRIVER,
-    NO_STARTER,
     SANDBOX_USER,
     SCOPED_RUN_TITLE,
-    SOLUTION_NOW,
-    SOLUTION_WARNING,
-    STARTER_FORMATS,
-    SUBMIT_VIA,
-    semester_of,
 )
 
 # Third-party actions pinned to full commit SHAs. Every job below runs with an org-owner
@@ -87,8 +74,8 @@ jobs:
 # conflicts. The nightly refresh is therefore serialised AGAINST ITSELF, and nothing else
 # joins the group.
 #
-# Deliberately NOT shared with the workflows that end in a refresh (New materials, New
-# assignment, Bootstrap semester). Actions concurrency has no `queue:`: a group holds exactly
+# Deliberately NOT shared with the runs that end in a refresh (the Console's New materials,
+# New assignment and New semester). Actions concurrency has no `queue:`: a group holds exactly
 # ONE pending run, so a third arrival CANCELS the second - `cancel-in-progress: false`
 # notwithstanding. Putting an operator's click in a group with a nightly cron therefore
 # means a click that silently does nothing, which is the worse failure: the operator is
@@ -206,8 +193,7 @@ _CHECK_TEAM = (
 # healthy run is an outage, not a safety net.
 #
 # 30 is the ordinary budget - a handful of API calls, or one repo cloned.
-# 60 covers the two jobs that write across MANY repos in series: Bootstrap semester, which
-#     creates and configures a whole org and then converges it, and the scheduler's release
+# 60 covers the job that writes across MANY repos in series: the scheduler's release
 #     job, whose `assignment` handout provisions one repo per student for every semester at
 #     once - so two semesters handing out on the same tick outlast the ordinary budget.
 # 120 covers the jobs that grade: collect budgets 300s PER submission subprocess and walks
@@ -771,18 +757,6 @@ def _newest(options: list[str]) -> str | None:
     return max(dated)[1] if dated else None
 
 
-def _newest_materials(options: list[str], materials: list[str] | None) -> str | None:
-    """The materials-repo option (`dsl-materials` topic) carrying the latest term tag, or
-    None when the dropdown holds none. Spring precedes autumn within a year, so the tag is
-    ordered as (year, autumn?) rather than alphabetically."""
-    dated = [
-        (tag[1:], tag[0] == "f", o)
-        for o in options
-        if o in (materials or ()) and (tag := semester_of(o))
-    ]
-    return max(dated)[2] if dated else None
-
-
 def _choice_input(
     name: str,
     description: str,
@@ -806,155 +780,6 @@ def _choice_input(
         + "        type: choice\n"
         + (f'        default: "{default}"\n' if default else "")
         + f"        options:\n{_choice(options)}"
-    )
-
-
-# The `copy_from` dropdown's first option, and so the one an untouched form submits.
-# It is NAMED rather than empty: every other dropdown here labels its stand-in (`_choice`
-# falls back to `(none-yet)`), and nothing says GitHub accepts an empty-string choice
-# option - if it does not, both scaffold buttons break in every org at the next refresh.
-_FRESH_STARTER = "(fresh starter)"
-
-
-def _copy_from_input(description: str, options: list[str]) -> str:
-    """The `copy_from` dropdown: an existing repo of this kind to start the new one from,
-    or `_FRESH_STARTER` first - the empty skeleton, which is what an untouched form
-    submits. The run step reads that placeholder as no answer, so scaffold still gets an
-    empty `copy_from`.
-
-    No `default:`, unlike every other dropdown here (`_choice_input` pre-selects the
-    newest term): copying a whole repo forward is a choice to make deliberately, and a
-    form arriving with last year's already filled in would make it the accident."""
-    listed = _choice([_FRESH_STARTER, *options])
-    return (
-        f'      copy_from:\n        description: "{description}"\n'
-        f"        required: false\n        type: choice\n        options:\n{listed}"
-    )
-
-
-# The five Release materials inputs read top to bottom as the release itself: what to copy
-# (1, 2), then where it lands (3, 4, 5). They are numbered in the UI because GitHub renders
-# workflow_dispatch inputs as a flat list of boxes with no grouping. The input NAMES are
-# still a schedule.yml `deploy:` entry's keys exactly - the mapping is the key itself, not
-# the label, so the descriptions stay plain English rather than echoing the snake_case.
-# course_source_path and semester_dest_path are comma-separated PARALLEL lists paired by
-# index (see deploy.parse_path_pairs); a blank semester_dest_path mirrors every
-# course_source_path, exactly as an omitted `semester_dest_path:` does in the schedule.
-#
-# semester_dest_path ships EMPTY rather than pre-filled - a `default:` on a free-text box is
-# submitted verbatim, so pre-filling a PATH reads as a value the faculty member chose.
-# semester_dest_repo is the opposite case and carries `materials`, the same default an omitted
-# `semester_dest_repo:` takes in the schedule: `materials` is not a guess at intent, it is the
-# answer the system supplies either way, so showing it teaches the default instead of hiding
-# it. This box used to be required-and-blank on the theory that naming the destination was
-# worth forcing - but a mandatory free-text field IS the typo surface that theory feared, and
-# it made the button contradict the schedule for no gain. A cleared box is still safe:
-# deploy.main resolves `semester_dest_repo.strip() or` the policy's `semester_dest_repo`.
-_COURSE_SOURCE_REPO_DESC = "1. repo to release from in the course org"
-
-_COURSE_SOURCE_PATH_INPUT = """\
-      course_source_path:
-        description: "2. within-repo folder/file path to copy from (or comma-separated list)"
-        required: true"""
-
-_SEMESTER_DEST_INPUTS = f"""\
-      semester_dest_repo:
-        description: "4. repo to release to in the semester org; created if missing"
-        default: "{policy.defaults()["semester_dest_repo"]}"
-        required: true
-      semester_dest_path:
-        description: "5. within-repo destination path (blank mirrors box 2's path(s)); created if missing"
-        required: false"""
-
-
-def _render_release(
-    header: str, semester_orgs: list[str], source_repo_input: str
-) -> str:
-    """The Release materials workflow, shared by both variants. Its five inputs ARE a
-    schedule.yml `deploy:` entry (plus the semester org): the same names, the same meaning -
-    and the same executor, deploy.deploy_many, so a batch of paths clones each repo once
-    whether it arrives from the cron or from this workflow. Only the `course_source_repo`
-    widget differs between variants (a dropdown centrally, a pre-filled string inside a
-    content repo), which is why it is passed in."""
-    return f"""name: Release materials
-{header}
-on:
-  workflow_dispatch:
-    inputs:
-{source_repo_input}
-{_COURSE_SOURCE_PATH_INPUT}
-{_choice_input("semester_org", "3. target semester org", semester_orgs)}
-{_SEMESTER_DEST_INPUTS}
-
-{_concurrency("release-materials")}
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  release:
-{_run_preamble()}      - name: Release
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COURSE_ORG: ${{{{ github.repository_owner }}}}
-          COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
-          COURSE_SOURCE_PATH: ${{{{ inputs.course_source_path }}}}
-          SEMESTER_DEST_REPO: ${{{{ inputs.semester_dest_repo }}}}
-          SEMESTER_DEST_PATH: ${{{{ inputs.semester_dest_path }}}}
-        run: |
-          gh auth setup-git
-          python3 -m dsl_course.deploy --course-org "$COURSE_ORG" \\
-            --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" \\
-            --course-source-path "$COURSE_SOURCE_PATH" --semester-dest-repo "$SEMESTER_DEST_REPO" \\
-            --semester-dest-path "$SEMESTER_DEST_PATH" --no-preview
-"""
-
-
-def render_release(semester_orgs: list[str], repo: str) -> str:
-    """Run-from-repo copy: `course_source_repo` is a free-text field pre-filled with `repo`
-    (the repo this workflow is being seeded into), so the common case needs no thought
-    but a different source repo in the same org can still be typed in."""
-    source_repo_input = (
-        f'      course_source_repo:\n        description: "{_COURSE_SOURCE_REPO_DESC}"\n'
-        f'        required: true\n        default: "{repo}"'
-    )
-    return _render_release(
-        header=(
-            "\n# Run from a course content repo: course_source_repo is pre-filled with THIS"
-            " repo (editable).\n# Copies the given path(s) into the semester org."
-            " course_source_path and\n# semester_dest_path are comma-separated parallel lists"
-            " paired by index - leave\n# semester_dest_path blank to mirror course_source_path."
-            " These are exactly a schedule.yml\n# `deploy:` entry's fields.\n# The semester"
-            " dropdown is refreshed by the 'Refresh actions' workflow.\n"
-        ),
-        semester_orgs=semester_orgs,
-        source_repo_input=source_repo_input,
-    )
-
-
-def render_central_release(
-    source_repos: list[str],
-    semester_orgs: list[str],
-    materials: list[str] | None = None,
-) -> str:
-    """Central copy that lives in .github: `course_source_repo` is a dropdown of the course
-    org's content repos (discovery.discover_content_repos), since this workflow lives
-    outside any one of them, pre-selected on the newest materials repo. Otherwise
-    identical to the run-from-repo workflow."""
-    source_repo_input = _choice_input(
-        "course_source_repo",
-        _COURSE_SOURCE_REPO_DESC,
-        source_repos,
-        _newest_materials(source_repos, materials),
-    )
-    return _render_release(
-        header=(
-            "\n# Central copy: pick the SOURCE repo in this course org, then the path(s) to"
-            " copy into\n# the semester org. course_source_path and semester_dest_path are"
-            " comma-separated parallel lists paired\n# by index - leave semester_dest_path"
-            " blank to mirror course_source_path. These are exactly a\n# schedule.yml"
-            " `deploy:` entry's fields.\n# Dropdowns are refreshed by the 'Refresh actions'"
-            " workflow.\n"
-        ),
-        semester_orgs=semester_orgs,
-        source_repo_input=source_repo_input,
     )
 
 
@@ -986,70 +811,6 @@ def _assignment_input(
         f'      course_source_repo:\n        description: "{description} (e.g. assignment-linear-regression)"\n'
         "        required: true"
     )
-
-
-def render_provision(
-    semester_orgs: list[str],
-    assignments: list[str] | None = None,
-    source_repo: str = "",
-) -> str:
-    """The hand-out button. It asks WHICH assignment and WHERE, and nothing about what
-    the assignment IS: individual or group is the template's own `grading_config.yml`, the
-    same file the grading sheet and the Join-team form read, so a dispatch cannot hand out
-    a shape the rest of the term does not expect.
-
-    Nor which schedule entry, on the rare template two of them hand out from: the run
-    refuses that template and names them, because the SCHEDULE is what knows which is
-    firing and a box asking a faculty member to pick between two keys is a coin toss over
-    which half of a semester gets its repos.
-
-    The four that remain are numbered in the order they are answered - what to hand out,
-    where it goes, then the two switches - because GitHub renders dispatch inputs as a
-    flat list of boxes with no grouping of its own.
-
-    `source_repo` is the repo this copy is being placed in: when
-    that repo is ITSELF one of the templates, the dropdown opens on its own name, the way
-    `render_release` pre-fills `course_source_repo` with the repo it is seeded into. The
-    org `.github` copy, and a materials repo, name no template of their own and get the
-    ordinary newest-term pick."""
-    return f"""name: Release assignment
-
-# Generates one private repo per onboarded student from the chosen assignment template
-# repo (native template-generate). The assignment dropdown lists the course org's
-# assignment-* template repos; refresh repopulates it.
-
-on:
-  workflow_dispatch:
-    inputs:
-{_assignment_input(assignments or [], "1. Course-org repo to hand out from", source_repo)}
-{_choice_input("semester_org", "2. Target semester org", semester_orgs)}
-      solution_datetime:
-        description: "3. Type {SOLUTION_NOW} to also push the model solution from the template's solution branch. {SOLUTION_WARNING} Leave empty otherwise; a later moment belongs in schedule.yml"
-        required: false
-        default: ""
-      preview:
-        description: "4. Preview - list the repos that would be created, create nothing"
-        type: boolean
-        default: true
-
-{_concurrency("release-assignment")}
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  provision:
-{_run_preamble()}      - name: Provision
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COURSE_ORG: ${{{{ github.repository_owner }}}}
-          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
-          COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          SOLUTION_DATETIME: ${{{{ inputs.solution_datetime }}}}
-          PREVIEW: ${{{{ inputs.preview }}}}
-        run: |
-          gh auth setup-git
-          args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG")
-          [ -n "$SOLUTION_DATETIME" ] && args+=(--solution-datetime "$SOLUTION_DATETIME")
-{_PREVIEW_GATE}
-          python3 -m dsl_course.assign "${{args[@]}}"
-"""
 
 
 def render_collect_submissions(
@@ -1402,41 +1163,6 @@ on:
 {_CRON_NOTICE}"""
 
 
-def render_bootstrap_semester() -> str:
-    """Configure a (pre-created, empty) semester org from the course org: join +
-    semester-config + tightened perms, register it, and refresh the dropdowns."""
-    return f"""name: Bootstrap semester
-
-# You create the empty semester org in the web UI first (GitHub has no org-creation API)
-# and add the bot as an owner. Then run this with that org's name.
-
-on:
-  workflow_dispatch:
-    inputs:
-      semester_org:
-        description: "Empty semester org you've already created (bot must be an owner)"
-        required: true
-
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  bootstrap-semester:
-{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Bootstrap + register + refresh
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COURSE: ${{{{ github.repository_owner }}}}
-          SEMESTER: ${{{{ inputs.semester_org }}}}
-          # Forwarded, not looked up: this runs in the COURSE org, whose own bootstrap
-          # propagated the address here, so --propagate-secret can pass it down to the
-          # semester. Empty on a course org that never got one - the semester then falls back
-          # to GRAPH_SENDER like everything else.
-          DSL_MAINTAINER_EMAIL: ${{{{ secrets.DSL_MAINTAINER_EMAIL }}}}
-        run: |
-          python3 -m dsl_course.bootstrap_course --org "$SEMESTER" \\
-            --semester --course "$COURSE" --propagate-secret
-          python3 -m dsl_course.seed refresh --course-org "$COURSE"
-"""
-
-
 # The semester a run is SCOPED to, or ''. Only a semester-config dispatcher's push names one
 # (`templates/semester-config/dispatch.yml` sends driver=semester-config
 # and its own org as semester_org), and so does the migration's catch-up after a semester's
@@ -1708,48 +1434,6 @@ on:
 {_CRON_NOTICE}"""
 
 
-def render_new_materials(materials: list[str] | None = None) -> str:
-    """Scaffold a correctly-structured course-materials-<tag> repo, then refresh.
-
-    `materials` is the course's materials repos (the `dsl-materials` topic): only those
-    can be copied forward into another materials repo. The dropdown is repopulated by the
-    nightly refresh, like every other one."""
-    materials = list(materials or [])
-    return f"""name: New materials repo
-
-# `copy_from` starts the new repo as an existing one - every branch, every file, the whole
-# history - instead of as the empty skeleton, which is how a course carries forward from
-# one year to the next. Only the toolkit's own files are rewritten afterwards; yours
-# arrive exactly as you left them. Leave it on the first option for a fresh starter.
-# The dropdown is refreshed by the 'Refresh actions' workflow.
-
-on:
-  workflow_dispatch:
-    inputs:
-      semester:
-        description: "Semester, e.g. f2026 or s2026 - creates course-materials-<semester>"
-        required: true
-{_copy_from_input(f"Materials repo to copy forward - {_FRESH_STARTER} is the empty skeleton", materials)}
-
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  scaffold:
-{_run_preamble()}      - name: Scaffold materials
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          ORG: ${{{{ github.repository_owner }}}}
-          SEMESTER: ${{{{ inputs.semester }}}}
-          COPY_FROM: ${{{{ inputs.copy_from }}}}
-        run: |
-          gh auth setup-git
-          args=(--org "$ORG" --semester "$SEMESTER")
-          [ "$COPY_FROM" = "{_FRESH_STARTER}" ] && COPY_FROM=""
-          [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
-          python3 -m dsl_course.scaffold materials "${{args[@]}}"
-          python3 -m dsl_course.seed refresh --course-org "$ORG"
-"""
-
-
 # Box 5 is the one answer on this form that is a LIST - any number of starters, seeded
 # side by side - so it is free text where every neighbour is a dropdown: `type: choice`
 # takes one option and nothing else. The vocabulary therefore lives in the description,
@@ -1758,58 +1442,6 @@ on:
 # word the reader would refuse is exactly the form that lies. It and three of the
 # dropdowns arrive at `COURSE_DEFAULT_CHOICE`: the course's `assignment_defaults:` answers
 # them, else the institution policy (`scaffold.resolve_answers`, `settings`).
-_STARTER_FORMATS_INPUT = f"""\
-      formats:
-        description: "2. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only. The first is the runnable one. {COURSE_DEFAULT_CHOICE} = the course's default, else the institution policy's"
-        default: "{COURSE_DEFAULT_CHOICE}\""""
-
-
-def render_new_assignment() -> str:
-    """Scaffold an `assignment-<name>` template repo (main + solution branch), then refresh.
-
-    Five boxes, and between them they are the whole assignment: everything but `formats`
-    lands verbatim in the solution branch's `grading_config.yml`, which the handout, the
-    grading sheet, the receipts and the Join-team form all read. How a semester RUNS it -
-    team formation, max team size, the late rule, visibility - is not asked: it is that
-    semester's `assignments.yml`. No number and no semester (decision 0014): the ordinal
-    comes from a semester's schedule, and a template serves every semester."""
-    return f"""name: New assignment
-
-on:
-  workflow_dispatch:
-    inputs:
-      assignment_name:
-        description: "1. The assignment's name, e.g. Neural networks from scratch - creates assignment-<name>"
-        required: true
-{_STARTER_FORMATS_INPUT}
-{_choice_input("type", "3. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual", required=False)}
-{_choice_input("submit_via", f"4. Where students hand in. assignment_repo = they push to their repo and the late cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole semester, each student pushes into their own folder, peers can read it. {COURSE_DEFAULT_CHOICE} = the course's default, else assignment_repo", [COURSE_DEFAULT_CHOICE, *SUBMIT_VIA], COURSE_DEFAULT_CHOICE, required=False)}
-      autograde:
-        description: "5. Also run hidden tests at the late cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
-        type: boolean
-        default: false
-
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  scaffold:
-{_run_preamble()}      - name: Scaffold assignment
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          ORG: ${{{{ github.repository_owner }}}}
-          NAME: ${{{{ inputs.assignment_name }}}}
-          FORMATS: ${{{{ inputs.formats }}}}
-          TYPE: ${{{{ inputs.type }}}}
-          SUBMIT_VIA: ${{{{ inputs.submit_via }}}}
-          AUTOGRADE: ${{{{ inputs.autograde }}}}
-        run: |
-          gh auth setup-git
-          args=(--org "$ORG" --name "$NAME" --formats "$FORMATS" --type "$TYPE" \\
-            --submit-via "$SUBMIT_VIA" --autograde "$AUTOGRADE")
-          python3 -m dsl_course.scaffold assignment "${{args[@]}}"
-          python3 -m dsl_course.seed refresh --course-org "$ORG"
-"""
-
-
 def render_sync_site() -> str:
     """Regenerate a semester's website from the live org structure (released sessions +
     schedule.yml dates + assignment catalog). Auto-resyncs on any change the site sources

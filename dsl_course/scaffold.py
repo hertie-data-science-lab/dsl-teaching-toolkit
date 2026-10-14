@@ -1057,9 +1057,9 @@ def scaffold_materials(
             org, repo, user_files, "init: materials skeleton", create_only=True
         ):
             failures += 1
-    # Equip the run-from-repo Release workflows (same as Refresh does for content repos).
-    # push_content_workflows lands both in one commit, logs its own failure, and returns
-    # 1 - a materials repo with no Release workflows must not report success.
+    # Converge the run-from-repo workflows, as Refresh does for content repos: none is
+    # hosted now (decision 0041), so this deletes the retired Release buttons a repo copied
+    # forward from an older one still carries. Logs its own failure and returns 1.
     semesters = discover_semesters(org)
     failures += push_content_workflows(
         org,
@@ -1076,22 +1076,10 @@ def scaffold_materials(
 
 
 def _seed_template_workflows(org: str, repo: str) -> int:
-    """Equip the hand-out button, as scaffold_materials equips the release ones: faculty
-    run Release assignment from this repo's own Actions tab, and it opens on THIS
-    template. Which buttons a template hosts, and why, is `TEMPLATE_WORKFLOWS`;
-    `assign.withhold_from_template` is what strips them off the semester copy, so no student
-    repo generated from this template inherits one.
-
-    Every path that makes a template calls it, the copied one included: a copy arrives
-    carrying the SOURCE template's button, pre-selected on last year's assignment, and
-    until something re-renders it the new template's own button hands out the wrong
-    assignment by default.
-
-    Which is also why THIS repo is named into the dropdown rather than looked for in the
-    org listing: a default that is not among the options is dropped (`_assignment_input`),
-    and the listing GitHub answers a moment after `create_repo` need not carry the repo it
-    has only just made - or its `is_template` flag. Left to the listing, the one button
-    whose whole point is this template opened on the newest OTHER assignment instead."""
+    """Converge the template's run-from-repo workflows (`TEMPLATE_WORKFLOWS`, none since
+    decision 0041). Every path that makes a template calls it, the copied one included:
+    a copy arrives carrying the SOURCE template's retired hand-out button, and this is
+    what deletes it."""
     return push_content_workflows(
         org,
         repo,
