@@ -105,6 +105,7 @@ function Label({ t, id, as }: { t: FieldTier; id?: string; as?: 'label' | 'span'
   const inner = (
     <>
       {t.label}
+      {t.hint ? <Hint label={`About ${t.label}`} doc={t.hint.doc}>{t.hint.text}</Hint> : null}
       {t.defaultLabel ? <span class="default"> {t.defaultLabel}</span> : null}
       {t.irreversible ? <span class="default"> cannot be changed after creation</span> : null}
       {t.proposed ? <Prop /> : null}

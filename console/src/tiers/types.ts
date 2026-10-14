@@ -20,6 +20,8 @@ export interface FieldTier {
   /** How the default is written beside the label: "institution default: <value>". */
   defaultLabel?: string;
   widget?: Widget;
+  /** A `?` beside the field's label (named "About <label>"): its text and a docs file (`DOCS`-relative). */
+  hint?: { text: ComponentChildren; doc?: string };
   /** `hint`: a `?` beside the option's label. */
   options?: { value: string; label: string; sub?: string; off?: string; href?: string; hint?: ComponentChildren }[];
   placeholder?: string;

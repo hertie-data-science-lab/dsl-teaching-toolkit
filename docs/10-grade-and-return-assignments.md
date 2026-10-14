@@ -200,10 +200,19 @@ A preview waits for nothing.
 ## Autograding (optional)
 
 Off unless you ask for it. `autograde: true` in the template's `grading_config.yml` runs the
-hidden tests from its `solution` branch at the cutoff, against the frozen pin, in a sandbox with the token stripped. The
+hidden tests from its `solution` branch at the late cutoff, against the frozen pin, in a sandbox with the token stripped. The
 count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
 itself and a student never sees it. Per-test detail goes to `semester-config/.system/autograde/`.
 To regrade, delete `.system/autograde/<slug>/`.
+
+**Writing the tests.** One test function per behaviour, named for it: the per-test detail lists
+each test by name with pass or fail. Import the student's module by its starter
+name (`from starter import fit`) - the runner puts the submission on `sys.path`. Plain
+`assert`s, `pytest.approx` for numbers, `pytest.raises` for errors; count on the standard
+library and pytest, nothing more.
+
+**Worked example:** the demo course's [tests folder](https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/tree/solution/tests) - ten tests and a
+[README](https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/blob/solution/tests/README.md) on adapting them to your assignment.
 
 ### Tests in another language: `tests/run.sh`
 

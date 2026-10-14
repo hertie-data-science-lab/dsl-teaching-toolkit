@@ -43,6 +43,17 @@ describe('the tiered form', () => {
     expect(out).toContain('aria-label="About Written by hand"');
   });
 
+  it('puts a field hint in a ? named for the field, with its docs link', () => {
+    const out = render(<SchemaForm id="t" schema={null} tiers={{ f: { tier: 'default', label: 'Colour', hint: { text: 'x', doc: 'y.md' } } }} values={{}} onChange={() => {}} />);
+    expect(out).toContain('aria-label="About Colour"');
+    expect(out).toMatch(/<a href="[^"]*\/y\.md"/);
+  });
+
+  it('links the autograde hint to the worked demo example', () => {
+    const out = render(<SchemaForm id="t" schema={null} tiers={{ autograde: tiers.autograde }} values={fromConfig({})} onChange={() => {}} />);
+    expect(out).toContain('href="https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/tree/solution/tests"');
+  });
+
   it('counts only non-default Advanced fields', () => {
     expect(layout(tiers, fromConfig({})).changed).toBe(0);
     expect(layout(tiers, fromConfig({ grader_pdf: true, completion_check: false })).changed).toBe(2);
