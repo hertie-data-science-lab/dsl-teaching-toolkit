@@ -198,20 +198,11 @@ def test_the_penalty_shown_is_the_days_times_the_rate():
     assert grades.penalty_display(spec(late_penalty_per_day=None), 2) == ""
 
 
-def test_a_receipt_quotes_the_penalty_its_grader_already_chose():
-    assert grades.penalty_display(spec(), 2, "waive") == "waived"
-    assert grades.penalty_display(spec(), 2, "5%") == "-5% (set by hand)"
-    assert "2 days late (waived)" in grades.receipt(
-        spec(), course.RECEIPT_UPDATED, sha=SHA, days=2, late_penalty="waive"
-    )
-
-
-def test_a_receipt_under_a_late_penalty_nobody_can_read_quotes_the_late_rule():
-    # The unit's mark is held for a hand decision; the receipt says what applies as
-    # things stand, which is the late rule's own figure.
-    assert grades.penalty_display(spec(), 2, "half") == "-20%"
+def test_a_receipt_quotes_the_late_rule_never_the_graders_choice():
+    # A grader's waive or hand-set penalty reaches the student with their marks, through
+    # Distribute grades; a receipt posted before them quotes the late rule alone.
     assert "2 days late (-20%)" in grades.receipt(
-        spec(), course.RECEIPT_UPDATED, sha=SHA, days=2, late_penalty="half"
+        spec(), course.RECEIPT_UPDATED, sha=SHA, days=2
     )
 
 

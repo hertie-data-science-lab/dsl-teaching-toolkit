@@ -1,4 +1,5 @@
 import { PERSON } from '../src/tiers/people';
+import { AUTOGRADE_EXAMPLE } from '../src/ui/bits';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import gradingSchema from '../schemas/grading_config.schema.json';
@@ -51,7 +52,7 @@ describe('the tiered form', () => {
 
   it('links the autograde hint to the worked demo example', () => {
     const out = render(<SchemaForm id="t" schema={null} tiers={{ autograde: tiers.autograde }} values={fromConfig({})} onChange={() => {}} />);
-    expect(out).toContain('href="https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/tree/solution/tests"');
+    expect(out).toContain(`href="${AUTOGRADE_EXAMPLE}"`);
   });
 
   it('counts only non-default Advanced fields', () => {

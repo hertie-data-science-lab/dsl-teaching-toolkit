@@ -53,7 +53,7 @@ teams:
 | `feedback_per_question` (where questions are declared; the team's on a group sheet) | you, optional | yes: a list after the overall feedback, inside the team's quote on a group sheet; a blank cell is not sent |
 | `score_group` | you | never shown as-is; each member's gradebook shows only the final grade it derives - the score itself too, but only for a team with no repo of its own (`shared_dropbox_repo`, `external`) |
 | `adjustment_individual` | you - the ONLY override of the mark, in both shapes | **no** - only the final grade it produced |
-| `late_penalty` (per student or team, beside `info:`; optional) | you: `apply` (the default), `waive`, or the whole penalty as `15%` / `0.15` | the penalty that applied: `-20%`, `waived` or `-15% (set by hand)` |
+| `late_penalty` (per student or team, beside `info:`; optional) | you: `apply` (the default), `waive`, or the whole penalty as `15%` / `0.15` | with their marks (Distribute grades), the penalty that applied: `-20%`, `waived` or `-15% (set by hand)`; a submission receipt quotes the late rule's own figure only |
 | `notes_not_shared_with_students` | you | **never** |
 | final grade | derived on output, never stored | yes |
 
@@ -61,7 +61,9 @@ The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 
 unit's `late_penalty` changes the middle term: `waive` (or `0%`) takes nothing off, and `15%` takes
 off 15% in place of `rate × days_late`; a unit that is not late loses nothing whatever it
 says. The console's Marks tab writes it for you: untick **Apply late penalty**, or type an
-override. A penalty changed after marks were returned goes out again as a changed mark. A
+override. An assignment with no late penalty (`late_penalty_per_day` unset) has nothing to waive or
+override: the Marks tab offers neither, any `late_penalty` written is ignored, and the Distribute
+preview says so. A penalty changed after marks were returned goes out again as a changed mark. A
 non-numeric score (`pass`, `A-`) is passed through verbatim with no arithmetic - unless a
 late penalty applies to it, which no arithmetic can do: that mark is **held**. Nothing is
 posted, written or emailed for it, the preview and the run both count it (`held`), and it

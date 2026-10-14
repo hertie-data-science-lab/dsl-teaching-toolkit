@@ -977,15 +977,22 @@ def effective_penalty(
     days_late`, `waive` is nothing, and a percent or fraction (`set`) is the WHOLE penalty
     in place of that arithmetic. A unit that is not late loses nothing whatever is written.
     An `invalid` one keeps the late rule's arithmetic - not a penalty anybody can apply,
-    so `sheet_hold_reasons` holds a late unit for a hand decision rather than guess."""
+    so `sheet_hold_reasons` holds a late unit for a hand decision rather than guess.
+
+    An assignment with NO late rule (`rate` None) takes nothing off, and whatever
+    `late_penalty` says is ignored (`apply`): there is no policy for it to waive or
+    override, so it neither deducts nor holds (`ignored_late_penalties` counts it for the
+    preview)."""
+    per_day = as_decimal(rate)
+    if per_day is None:
+        return Penalty(Decimal(0), "apply")
     choice = late_choice(late_penalty)
     days = as_decimal(days_late)
     if days is None or days <= 0 or choice.mode == "waive":
         return Penalty(Decimal(0), choice.mode)
     if choice.fraction is not None:
         return Penalty(choice.fraction, choice.mode)
-    per_day = as_decimal(rate)
-    return Penalty(per_day * days if per_day is not None else Decimal(0), choice.mode)
+    return Penalty(per_day * days, choice.mode)
 
 
 def final_grade(
@@ -2178,32 +2185,27 @@ def late_line(spec) -> str:
     return f"Late work is {policy}" if policy else ""
 
 
-def penalty_display(spec, days: int, late_penalty: object = None) -> str:
+def penalty_display(spec, days: int) -> str:
     """`-20%` for the receipt - `_penalty_display` under the spec the caller already holds.
 
     The same function as the gradebook's, deliberately: those are the two places one
     student reads one deduction, and two renderers of it drifted apart above two decimal
-    places the moment one of them rounded."""
-    return _penalty_display(penalty_rate(spec.late_penalty_per_day), days, late_penalty)
+    places the moment one of them rounded. The late rule's own figure only: a grader's
+    `late_penalty` (waived, set by hand) reaches the student with their marks, through
+    Distribute grades, never on a receipt posted before them."""
+    return _penalty_display(penalty_rate(spec.late_penalty_per_day), days)
 
 
 def receipt(
-    spec,
-    event: str,
-    *,
-    sha: str = "",
-    pushed_display: str = "",
-    days: int = 0,
-    late_penalty: object = None,
+    spec, event: str, *, sha: str = "", pushed_display: str = "", days: int = 0
 ) -> str:
-    """One receipt for this assignment, composed from its own late policy and the unit's
-    `late_penalty`, when its grader has already written one."""
+    """One receipt for this assignment, composed from its own late policy."""
     return receipt_body(
         event,
         sha=sha,
         pushed_display=pushed_display,
         days_late=days,
-        penalty_display=penalty_display(spec, days, late_penalty),
+        penalty_display=penalty_display(spec, days),
         late_line=late_line(spec),
     )
 
@@ -2580,8 +2582,8 @@ def _penalty_display(
     late rule computes it, `waived` (a set `0%` too), or `-10% (set by hand)`
     (`effective_penalty`). Empty for a unit that is not late. A `late_penalty` nobody can
     read shows the late rule's figure, because that is what applies as things stand: the
-    unit's mark is held (`sheet_hold_reasons`), but its receipt still reports the late
-    rule's penalty for the time it was handed in."""
+    unit's mark is held (`sheet_hold_reasons`). A receipt never passes `late_penalty`
+    (`penalty_display`): the grader's choice reaches a student only with their marks."""
     days = as_decimal(days_late)
     if days is None or days <= 0:
         return ""
@@ -2831,13 +2833,17 @@ def sheet_hold_reasons(
             recorded.add(fault.key)
             faults.append(fault)
 
+    # No late rule: nothing a `late_penalty` could apply to (`effective_penalty`).
+    has_rule = penalty_rate(spec.late_penalty_per_day) is not None
     for unit_key, block in _units(spec, sheet):
-        # An unreadable `late_penalty` holds only a LATE unit: on an on-time one there is
-        # nothing for it to apply to (`effective_penalty`), so it holds nobody's mark.
+        # An unreadable `late_penalty` holds only a LATE unit: on an on-time one, or under
+        # no late rule, there is nothing for it to apply to (`effective_penalty`), so it
+        # holds nobody's mark.
         days = as_decimal((block.get(INFO_KEY) or {}).get("days_late"))
         fault = _score_fault(spec, block.get(spec.score_key)) or (
             "late_penalty"
-            if days is not None
+            if has_rule
+            and days is not None
             and days > 0
             and late_choice(block.get(LATE_PENALTY_KEY)).mode == "invalid"
             else ""
@@ -3935,6 +3941,19 @@ def _not_marked(spec: SheetSpec, sheet: dict) -> dict[str, list[str]]:
     return out
 
 
+def ignored_late_penalties(spec: SheetSpec, sheet: dict) -> int:
+    """How many units carry a `late_penalty` on an assignment with no late rule - which
+    `effective_penalty` ignores, so the preview says so rather than let a grader believe
+    their waive or override did something."""
+    if penalty_rate(spec.late_penalty_per_day) is not None:
+        return 0
+    return sum(
+        1
+        for _unit, block in _units(spec, sheet)
+        if not is_blank(block.get(LATE_PENALTY_KEY))
+    )
+
+
 def _adjusted_count(spec: SheetSpec, sheet: dict) -> int:
     """How many individual adjustments a grader has written into one sheet - the dry run
     reports it, because an adjustment is the one thing in the file no arithmetic explains."""
@@ -4855,6 +4874,9 @@ def _preview(
     PUBLIC repo. Who would get what goes into the issue, in the private semester-config."""
     told_grades, columns = told
     not_marked = {slug: _not_marked(specs[slug], sheets[slug]) for slug in sheets}
+    ignored = {
+        slug: ignored_late_penalties(specs[slug], sheets[slug] or {}) for slug in sheets
+    }
     exported = {slug for book in books.values() for slug in book}
     for slug in sorted(sheets):
         spec = specs[slug]
@@ -4881,6 +4903,11 @@ def _preview(
         partly = sum(1 for blank in not_marked[slug].values() if blank)
         if partly:
             log(f"    {partly} unit(s) have unmarked questions")
+        if ignored[slug]:
+            log(
+                f"    {ignored[slug]} unit(s) carry a late_penalty, but the assignment "
+                f"has no late policy - ignored"
+            )
         if stray := _undeclared_feedback(spec, units):
             log(
                 f"    WARNING: {stray} unit(s) give feedback on a question the "
@@ -4908,6 +4935,7 @@ def _preview(
             students,
             told_grades,
             not_marked,
+            ignored,
             first_email=first_email,
             moment=moment,
             notify=notify,
@@ -4943,6 +4971,7 @@ def _preview_body(
     students: list[roster.Student],
     told: dict[str, dict[str, str]],
     not_marked: dict[str, dict[str, list[str]]],
+    ignored: dict[str, int] | None = None,
     *,
     first_email: set[str],
     moment: datetime,
@@ -5046,6 +5075,15 @@ def _preview_body(
         ),
         "Each preview replaces this text; the real run closes this issue.",
     ]
+    # A `late_penalty` on an assignment with no late policy: ignored, and said so.
+    no_policy = [
+        f"- **{slug}** has no late policy, so the `late_penalty` on "
+        f"{plural(n, 'unit', 'units')} is ignored: nothing comes off."
+        for slug, n in sorted((ignored or {}).items())
+        if n
+    ]
+    if no_policy:
+        head += ["", *no_policy]
     tail = []
     if emailed:
         # Rendered exactly as the send renders it, course name and all: a preview that

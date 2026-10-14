@@ -149,13 +149,15 @@ export interface Penalty {
 }
 
 /** `rate x days` when absent or `apply`, nothing when waived or not late, the written penalty when
- *  set by hand; a `bad` one keeps the late rule's arithmetic, and the engine holds the unit. */
+ *  set by hand; a `bad` one keeps the late rule's arithmetic, and the engine holds the unit. With no
+ *  late rule (`rate` null) nothing comes off and `late_penalty` is ignored, as the engine ignores it. */
 export function effectivePenalty(rate: number | null, daysLate: unknown, latePenalty: unknown = null): Penalty {
-  const choice = lateChoice(latePenalty);
   const days = num(daysLate);
   const late = days !== null && days > 0;
+  if (rate === null) return { fraction: 0, mode: 'apply', late };
+  const choice = lateChoice(latePenalty);
   if (!late || choice.mode === 'waive') return { fraction: 0, mode: choice.mode, late };
-  return { fraction: choice.set ?? (rate === null ? 0 : rate * days), mode: choice.mode, late };
+  return { fraction: choice.set ?? rate * days, mode: choice.mode, late };
 }
 
 /** `total x (1 - penalty) + adjustment`, floored at 0; null when there is no total. */

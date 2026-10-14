@@ -78,7 +78,7 @@ export function MarksTab(p: TabProps) {
   const scope = cohortScope(p);
   const head = (
     <div class="page-head">
-      <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. A late unit’s penalty can be waived (untick it) or overridden with the whole penalty as a percentage. {group ? 'A team’s marks and feedback reach every member once you return marks.' : 'Nothing reaches a student until you return marks.'}</Hint></h2><p class="lede">{a.marks.filled} of {a.marks.total} marked. {rate !== null ? `Totals and late penalties (${round(rate * 100)}% of the total per late day) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p></div>
+      <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. {rate !== null ? 'A late unit’s penalty can be waived (untick it) or overridden with the whole penalty as a percentage. ' : ''}{group ? 'A team’s marks and feedback reach every member once you return marks.' : 'Nothing reaches a student until you return marks.'}</Hint></h2><p class="lede">{a.marks.filled} of {a.marks.total} marked. {rate !== null ? `Totals and late penalties (${round(rate * 100)}% of the total per late day) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p></div>
       <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name, lateUntil(a, now, tz, year))} /></div>
     </div>
   );
@@ -115,23 +115,31 @@ export function MarksTab(p: TabProps) {
     <td class="sys">{str(u.info?.completion)}</td>,
   ];
   // A late unit's penalty (`late_penalty`): ticked writes `apply`, unticked `waive`; an override
-  // is the whole penalty and implies applied, and clearing it writes `apply` back.
+  // is the whole penalty and implies applied, and clearing it writes `apply` back - or, on a unit
+  // whose sheet has no `late_penalty` key, drops the edit, so no key is written and nothing reads
+  // as changed.
   const lateOf = (u: Unit) => v(u.latePenaltyPath, u.latePenalty);
+  const setLate = (u: Unit, value: string) => {
+    if (value !== 'apply' || (u.latePenalty !== null && u.latePenalty !== undefined)) return set(u.latePenaltyPath, value);
+    const { [key(u.latePenaltyPath)]: _drop, ...rest } = edits;
+    setEdits(rest);
+  };
   // What the unit loses for lateness, worked out once for its late cell and its final grades.
   const lateFor = (u: Unit) => effectivePenalty(rate, u.info?.days_late, lateOf(u));
   const lateCell = (u: Unit, pen: Penalty) => {
     const days = num(u.info?.days_late);
-    if (!pen.late || days === null) return <td class="pen" />;
+    // No late rule: nothing to waive or override, so no controls (the engine ignores the key).
+    if (!pen.late || days === null || rate === null) return <td class="pen" />;
     const computed = penaltyText(effectivePenalty(rate, days), rate);
     const late = `${plural(days, 'day')} late`;
     return (
       <td class="pen">
         {penaltyText(pen, rate)}
         <label class="check late-apply">
-          <input type="checkbox" checked={pen.mode !== 'waive'} onChange={(e) => { const on = (e.target as HTMLInputElement).checked; setTyped({ ...typed, [u.key]: '' }); set(u.latePenaltyPath, on ? 'apply' : 'waive'); }} />
+          <input type="checkbox" checked={pen.mode !== 'waive'} onChange={(e) => { const on = (e.target as HTMLInputElement).checked; setTyped({ ...typed, [u.key]: '' }); setLate(u, on ? 'apply' : 'waive'); }} />
           <span>Apply late penalty ({computed ? `${computed}, ${late}` : late})</span>
         </label>
-        <input class="ovr" type="text" inputMode="decimal" placeholder="Override %" aria-label={`Late penalty override for ${u.key}, as a percentage`} value={typed[u.key] ?? overrideText(lateOf(u))} onInput={(e) => { const raw = (e.target as HTMLInputElement).value; setTyped({ ...typed, [u.key]: raw }); set(u.latePenaltyPath, overrideValue(raw)); }} />
+        <input class="ovr" type="text" inputMode="decimal" placeholder="Override %" aria-label={`Late penalty override for ${u.key}, as a percentage`} value={typed[u.key] ?? overrideText(lateOf(u))} onInput={(e) => { const raw = (e.target as HTMLInputElement).value; setTyped({ ...typed, [u.key]: raw }); setLate(u, overrideValue(raw)); }} />
         {pen.mode === 'bad' ? <Invalid>Write a percentage, or clear it: held until then.</Invalid> : null}
       </td>
     );

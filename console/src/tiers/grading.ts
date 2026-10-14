@@ -8,6 +8,7 @@ import { h } from 'preact';
 import { questionFile, questionPoints, questionsFromRows } from '../model/marks';
 import { helpOf, labelOf } from '../model/labels';
 import { FORMAT_KEYS, SUBMIT_VIA_DEFAULT, SUBMIT_VIA_KEYS } from '../model/policy';
+import { AUTOGRADE_EXAMPLE } from '../ui/bits';
 import { opt, type Tiers, type Values } from './types';
 
 export { VISIBILITY } from '../model/cascade';
@@ -106,7 +107,7 @@ const AUTOGRADE_HINT = {
     'Hidden pytest tests you keep in the template’s tests/ folder on the solution branch run at the late cutoff on each submission’s frozen state, in a sandbox. ' +
       'The pass count (for example 7/10) reaches the grading sheet’s info.autograde and the Marks tab as information for the marker: never a mark, never shown to students. ' +
       'Tests use the standard library and pytest, nothing more; for other languages, add a tests/run.sh. ',
-    h('a', { href: 'https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/tree/solution/tests', target: '_blank', rel: 'noopener' }, 'A worked, annotated example'),
+    h('a', { href: AUTOGRADE_EXAMPLE, target: '_blank', rel: 'noopener' }, 'A worked, annotated example'),
     '.',
   ],
   doc: '10-grade-and-return-assignments.md#autograding-optional',

@@ -404,20 +404,34 @@ describe('the late penalty on the marks grid', () => {
     expect((await saved(gh)).late_penalty).toBe('25%');
   });
 
-  it('clearing the override writes apply back, and unticking an override waives it', async () => {
+  it('clearing the override or re-ticking on a sheet with no late_penalty writes nothing', async () => {
     const gh = github(), f = late();
     await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
     await type(BOX, '25');
     await type(BOX, '');
     expect(tick().checked).toBe(true);
+    expect(root!.textContent).toContain('No unsaved changes');
+    await click(tick());
+    await click(tick());
+    expect(tick().checked).toBe(true);
+    expect(root!.textContent).toContain('No unsaved changes');
+  });
+
+  it('ticking a unit that carries a late_penalty writes apply', async () => {
+    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: LATE.replace('    feedback_group:\n', '    late_penalty: waive\n    feedback_group:\n') });
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    expect(tick().checked).toBe(false);
+    await click(tick());
     expect((await saved(gh)).late_penalty).toBe('apply');
-    const gh2 = github(), f2 = late();
-    render(null, root!);
-    await mount(envOf(gh2, f2), <AssignmentScreen {...props(f2, { entry: 'assignment-3', tab: 'marks' })} />);
+  });
+
+  it('unticking an override waives it', async () => {
+    const gh = github(), f = late();
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
     await type(BOX, '25');
     await click(tick());
     expect(q<HTMLInputElement>(BOX).value).toBe('');
-    expect((await saved(gh2)).late_penalty).toBe('waive');
+    expect((await saved(gh)).late_penalty).toBe('waive');
   });
 
   it('an override of 0 waives it, and the tickbox follows', async () => {
@@ -434,6 +448,17 @@ describe('the late penalty on the marks grid', () => {
     await mount(envOf(github(), f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
     expect(q('tr.team-row td.pen').textContent).toBe('');
     expect(root!.querySelector(BOX)).toBeNull();
+  });
+
+  it('offers no penalty controls when the assignment has no late rule', async () => {
+    const f = files({ [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: LATE.replace('    feedback_group:\n', '    late_penalty: 15%\n    feedback_group:\n') });
+    const noRule: Loaded = { ...ready, status: { ...ready.status!, assignments: [solo, { ...team, settings: {} }] } } as Loaded;
+    await mount(envOf(github(), f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks', loaded: noRule })} />);
+    await type('input[aria-label="Q1 (out of 5) for team-alpha"]', '4');
+    expect(root!.querySelector('.late-apply')).toBeNull();
+    expect(root!.querySelector(BOX)).toBeNull();
+    // The engine ignores the key: nothing comes off.
+    expect(q('tr.team-row td.calc').textContent).toBe('4');
   });
 
   it('says so beside a penalty nobody can apply', async () => {

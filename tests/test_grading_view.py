@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import roster
+from dsl_course import grades, roster
 from dsl_course.grades import (
     NOTES_KEY,
     STUDENT_VIEW_KEYS,
@@ -560,6 +560,22 @@ def test_a_waived_penalty_on_pass_needs_no_hand_decision():
     assert not needs_hand_decision(spec, block)
     block["late_penalty"] = "5%"
     assert needs_hand_decision(spec, block)
+
+
+@pytest.mark.parametrize("late_penalty", ["waive", "15%", "half"])
+def test_no_late_rule_ignores_any_late_penalty(late_penalty):
+    # No policy to waive or override: nothing comes off, nothing is held, nothing shown.
+    spec = individual_spec(late_penalty_per_day=None)
+    block = {"info": {"days_late": 2}, "score_individual": 20}
+    block["late_penalty"] = late_penalty
+    view = student_view(spec, "ada-l", block, "ada-l")
+    assert (view.get("penalty", ""), view["final_grade"]) == ("", "20")
+    assert grades.sheet_hold_reasons(spec, {"submissions": {"ada-l": block}}) == {}
+    block["score_individual"] = "pass"
+    assert not needs_hand_decision(spec, block)
+    assert grades.ignored_late_penalties(spec, {"submissions": {"ada-l": block}}) == 1
+    ruled = individual_spec(late_penalty_per_day="10%")
+    assert grades.ignored_late_penalties(ruled, {"submissions": {"ada-l": block}}) == 0
 
 
 def test_only_a_unit_whose_penalty_moved_its_mark_is_mailed_again():

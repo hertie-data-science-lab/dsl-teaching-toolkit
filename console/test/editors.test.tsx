@@ -374,6 +374,8 @@ describe('marks arithmetic, as grades.py does it', () => {
     expect(effectivePenalty(0.1, 2, '15%').fraction).toBeCloseTo(0.15);
     expect(effectivePenalty(0.1, 2, 0.15).fraction).toBeCloseTo(0.15);
     expect(effectivePenalty(0.1, 0, '15%').fraction).toBe(0);
+    // No late rule: the engine ignores late_penalty, so nothing comes off whatever it says.
+    expect(effectivePenalty(null, 2, '15%').fraction).toBe(0);
     // Nobody can apply these: the late rule's arithmetic, and the engine holds the unit.
     expect(effectivePenalty(0.1, 2, 'half')).toMatchObject({ mode: 'bad', fraction: 0.2 });
     expect(effectivePenalty(0.1, 2, '15').mode).toBe('bad');

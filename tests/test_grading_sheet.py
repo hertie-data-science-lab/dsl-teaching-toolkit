@@ -954,8 +954,8 @@ def test_final_grade_applies_the_penalty_the_grader_chose():
     assert final_grade(20, rate, 2, None, "waive") == Decimal(20)
     assert final_grade(20, rate, 2, None, "5%") == Decimal(19)
     assert final_grade(20, rate, 2, "+1", "0.5") == Decimal(11)
-    # no late rule at all: the grader can still set one by hand
-    assert final_grade(20, None, 2, None, "10%") == Decimal(18)
+    # no late rule at all: there is nothing to waive or override, so it is ignored
+    assert final_grade(20, None, 2, None, "10%") == Decimal(20)
     # unreadable: the late rule's arithmetic, and the unit held (below)
     assert final_grade(20, rate, 2, None, "half") == Decimal(16)
 
@@ -1012,9 +1012,10 @@ def test_an_unreadable_late_penalty_holds_no_unit_that_is_on_time():
       Q1: 9
 """
     )
-    assert sheet_hold_reasons(individual(questions=QUESTIONS), sheet) == {
-        "cy-d": "late_penalty"
-    }
+    ruled = individual(questions=QUESTIONS, late_penalty_per_day="10%")
+    assert sheet_hold_reasons(ruled, sheet) == {"cy-d": "late_penalty"}
+    # No late rule: nothing for it to apply to either, so it holds nobody.
+    assert sheet_hold_reasons(individual(questions=QUESTIONS), sheet) == {}
 
 
 def test_a_set_penalty_of_nothing_reads_as_waived():
