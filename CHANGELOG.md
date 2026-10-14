@@ -23,3 +23,8 @@
   replaces `READINGS.md`, and an assignment's run settings sit on its entry. Folder names
   and `materials.yml` `kinds:` no longer mean anything. The migration's **schedule shape**
   step rewrites each semester's file (decision 0038).
+- The term's own dates are one `semester:` block whose entries name their `type` (`start`,
+  `end`, `break`, `archive`); a break is a grey band on the site and its weeks are never
+  empty. `reading_list` is `reading_guide`; `assets` entries default off the site; an
+  assignment entry may override its template's `type` and `submit_via` (decision 0038
+  amendment 2).

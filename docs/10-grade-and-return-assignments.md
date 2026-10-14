@@ -364,18 +364,20 @@ freeze carries on.
 
 ## Archiving the semester
 
-**Ask for it once and it happens on its own.** Write an `archive:` block in `schedule.yml`
-and the scheduler archives the whole semester org on its date. You do not have to remember
+**Ask for it once and it happens on its own.** Write a `type: archive` entry in the
+`semester:` block of `schedule.yml` and the scheduler archives the whole semester org on its date. You do not have to remember
 it, and nobody has to be around for it.
 
 ```yaml
-archive:
-  event_datetime: 2027-02-16   # optional - default: semester_end + 60 days
-  show_on_site: true     # optional - default: true. A "Semester archived" row on the site
+semester:
+  archive:
+    type: archive
+    event_datetime: 2027-02-16   # optional - default: the end + 60 days
+    show_on_site: true           # optional - default: true. A "Semester archived" row on the site
 ```
 
-The block is the switch: `archive:` on its own is enough, and means sixty days after your
-`semester_end`. **Without the block, nothing is ever archived** - the semester stays live and
+The entry is the switch: `type: archive` on its own is enough, and means sixty days after
+the semester's `type: end` date. **Without it, nothing is ever archived** - the semester stays live and
 writable, and its digest issue says so, semester after semester.
 
 **A fortnight before**, the semester gets one issue in `semester-config` and one email to
@@ -406,7 +408,7 @@ Settings page. It comes back exactly as it was, write access included.
 
 **Archive** (the Console, or `python -m dsl_course semester.archive`) archives a semester
 early, or at all. A preview prints the counts; the real run **refuses** until the archive date has
-arrived, and `force` overrides that - which is how a semester with no `archive:` block, and
+arrived, and `force` overrides that - which is how a semester with no `type: archive` entry, and
 so no date, is archived. Run it again if it fails part-way - it picks up where it stopped,
 and only the last step seals the record.
 

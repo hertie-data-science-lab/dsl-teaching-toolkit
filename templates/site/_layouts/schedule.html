@@ -39,11 +39,12 @@ layout: default
         build; it renders as a plain row. An assignment's due row takes its assignment's
         kind, and a special event the policy's `other` (the kind an unknown one lands on).
         Only a release row (the _lectures collection) carries its background inline; the
-        others take theirs from the `table-row-<kind>` class.
+        others take theirs from the `table-row-<kind>` class. A break (a `semester:` entry
+        of `type: break`) is labelled as the semester kind and banded grey by its class.
         {%- endcomment -%}
         {% for event in all_events_sorted %}
         {% assign key = event.kind %}
-        {% if key == "due" %}{% assign key = "assignment" %}{% elsif key == "special_event" %}{% assign key = "other" %}{% endif %}
+        {% if key == "due" %}{% assign key = "assignment" %}{% elsif key == "special_event" %}{% assign key = "other" %}{% elsif key == "break" %}{% assign key = "semester" %}{% endif %}
         {% assign kind = site.data.kinds | where: "key", key | first %}
         <li class="table-row table-row-{{ event.kind}}"{% if kind and event.collection == "lectures" %} style="background-color: {{ kind.background }};"{% endif %}>
             {% include schedule_row.html event=event label=kind.label colour=kind.colour %}
