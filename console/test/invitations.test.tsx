@@ -24,9 +24,9 @@ function estateFake(pending: { org: string; role: string }[]) {
     .on('GET', '/user/memberships/orgs?state=active&per_page=100&page=1', [])
     .on('GET', '/user/memberships/orgs?state=pending&per_page=100&page=1', pending.map((p) => ({ state: 'pending', role: p.role, organization: { login: p.org } })))
     .on('GET', `/repos/${COURSE}/.github`, { name: '.github', topics: ['dsl-course-hub'], permissions: { push: false, pull: true } })
-    .on('GET', `/repos/${COURSE}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', `course_name: Deep Learning\npeople:\n  course_admins:\n    - github_handle: New-TA\n`))
+    .on('GET', `/repos/${COURSE}/.github/contents/course.yml`, fileBody('dsl-course.yml', `course:\n  name: Deep Learning\npeople:\n  course_admins:\n    - github_handle: New-TA\n`))
     .on('GET', `/repos/${SEM}/.github`, { name: '.github', topics: ['dsl-semester'], permissions: { push: false, pull: true } })
-    .on('GET', `/repos/${SEM}/semester-config/contents/.system/dsl-course.yml`, fileBody('dsl-course.yml', `course: ${COURSE}\n`))
+    .on('GET', `/repos/${SEM}/semester-config/contents/.system/course.yml`, fileBody('dsl-course.yml', `course: ${COURSE}\n`))
     .on('GET', '/repos/other-org/.github', { name: '.github', topics: [], permissions: { push: false, pull: true } });
 }
 

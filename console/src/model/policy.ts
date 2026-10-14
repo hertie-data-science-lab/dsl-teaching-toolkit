@@ -4,6 +4,7 @@
 // falls back to is read here, so the console cannot disagree with the engine.
 
 import policy from '../../schemas/policy.json';
+import names from '../../schemas/names.json';
 import requestSchema from '../../schemas/request.schema.json';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 
@@ -20,24 +21,25 @@ export interface Kind {
 }
 
 export interface Policy {
-  contact: string;
   defaults: {
-    archive: { grace_days: number };
-    formats: string[];
+    archive_grace_days: number;
+    assignment_repo_visibility: string;
     late_penalty_per_day: string;
     late_window_days: number;
+    marks_per_question: boolean;
+    materials_repo: string;
     max_team_size: number;
-    semester_dest_repo: string;
-    team_formation: string;
     timezone: string;
-    visibility: string;
   };
-  institution: Record<string, string>;
+  institution: Record<string, string> & { contacts: string[] };
   kinds: Kind[];
   licences: { name: string; url: string }[];
+  selection_floor: Record<string, unknown>;
 }
 
-export const POLICY: Policy = policy;
+export const POLICY: Policy = policy as unknown as Policy;
+/** The institution's first contact: the open site's contact when a course names none (`policy.contact`). */
+export const CONTACT: string = POLICY.institution.contacts[0];
 export const DEFAULTS = POLICY.defaults;
 
 /** The row kinds, in display order: the console's only kind vocabulary. */
@@ -58,11 +60,11 @@ export const tabTitle = (plural: string): string => plural.charAt(0).toUpperCase
 /** The semester's timezone when its schedule names none. */
 export const DEFAULT_TIMEZONE = DEFAULTS.timezone;
 /** Days after the semester ends that it is archived, when the schedule says nothing. */
-export const ARCHIVE_GRACE_DAYS = DEFAULTS.archive.grace_days;
+export const ARCHIVE_GRACE_DAYS = DEFAULTS.archive_grace_days;
 /** Where a release lands in the semester when its deploy names no repo. */
-export const DEFAULT_DEST_REPO = DEFAULTS.semester_dest_repo;
-/** The starter formats a new template gets when nobody chose; the first is the runnable one. */
-export const DEFAULT_FORMATS = DEFAULTS.formats;
+export const DEFAULT_DEST_REPO = DEFAULTS.materials_repo;
+/** The starter formats a new template gets when nobody chose; the first is the runnable one (`course.DEFAULT_FORMATS`). */
+export const DEFAULT_FORMATS: string[] = names.default_formats;
 
 const pattern = (key: string) => new RegExp((requestSchema.properties as unknown as Record<string, { pattern: string }>)[key].pattern);
 /** A GitHub handle, as the engine's request schema spells it. */

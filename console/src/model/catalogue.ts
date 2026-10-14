@@ -1,5 +1,5 @@
 // The institution's catalogue (decision 0021 rule 5): every course org the toolkit's public
-// `orgs.yml` names, each read off its public `.github` (`dsl-course.yml` for the name and
+// `orgs.yml` names, each read off its public `.github` (`course.yml` for the name and
 // code, `semesters.yml` for its semesters). A course in the person's estate is theirs and is
 // not read again. Everything here is public: a semester's dates come from its `.github`
 // (archived or not) and, while it runs, its public student status (the archive date as its end;
@@ -9,7 +9,7 @@ import { parse } from 'yaml';
 import { isObj } from '../edit/yamlText';
 import type { GitHubClient } from '../github/client';
 import { CENTRAL } from './central';
-import { COURSE_META_PATH, parseRegistry, REGISTRY_PATH, termOf, type Course } from './discovery';
+import { COURSE_META_PATH, courseBlock, parseRegistry, REGISTRY_PATH, termOf, type Course } from './discovery';
 import { addDays, str } from './format';
 import { DEFAULT_TIMEZONE, ORG_NAME_RE } from './policy';
 import { instant } from './student';
@@ -104,7 +104,7 @@ async function readCourse(client: GitHubClient, run: Run, org: string): Promise<
     run(() => client.getContents(org, COURSE_REPO, REGISTRY_PATH)).catch(() => null),
   ]);
   const semesters = (await Promise.all(parseRegistry(registry?.text).map((s) => readSemester(client, run, s)))).filter((s): s is CatalogueSemester => s !== null);
-  return { org, name: str(d.course_name) || org, code: str(d.course_code), semesters, mine: false };
+  return { org, name: str(courseBlock(d).name) || org, code: str(courseBlock(d).code), semesters, mine: false };
 }
 
 const mineOf = (course: Course): CatalogueCourse => ({

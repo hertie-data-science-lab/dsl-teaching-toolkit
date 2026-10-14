@@ -5,7 +5,7 @@
 
 import { COURSE_RUN_KEYS, institutionLayer, resolve, SOURCES, type Layers } from '../model/cascade';
 import { labelOf } from '../model/labels';
-import { DEFAULT_FORMATS, DEFAULT_TIMEZONE, POLICY, SUBMIT_VIA_DEFAULT } from '../model/policy';
+import { CONTACT, DEFAULT_FORMATS, DEFAULT_TIMEZONE, POLICY, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import { FORMATS, SUBMIT, formatWord } from './grading';
 import { runTiers } from './runSettings';
 import { defaultFirst, type Tiers, type Values } from './types';
@@ -26,7 +26,7 @@ const LICENCE = POLICY.licences[0].name;
 /** Course facts the public website shows (decision 0019); each falls back to the institution's, shown grey. */
 export const COURSE_FACTS: Tiers = {
   contact: {
-    tier: 'default', label: 'Contact email', widget: 'email', placeholder: POLICY.contact, defaultLabel: `institution default: ${POLICY.contact}`,
+    tier: 'default', label: 'Contact email', widget: 'email', placeholder: CONTACT, defaultLabel: `institution default: ${CONTACT}`,
     check: (v) => (v && !/^[^@\s]+@[^@\s]+$/.test(String(v)) ? 'Write an email address.' : null),
   },
   licence: {

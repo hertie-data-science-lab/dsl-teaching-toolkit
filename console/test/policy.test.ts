@@ -4,7 +4,6 @@
 
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
-import SKELETON from '../../templates/semester-config/assignments.yml?raw';
 import policy from '../schemas/policy.json';
 import { YamlText } from '../src/edit/yamlText';
 import { effectiveWord, institutionLayer, lateWord, layersOf, readSetting, resolve, semesterName, usableBlock, writeBlock, type Layers } from '../src/model/cascade';
@@ -55,8 +54,8 @@ describe('no default literal in the console', () => {
 
   it('takes the values and the name rules from the engine’s export', () => {
     expect(DEFAULT_TIMEZONE).toBe(policy.defaults.timezone);
-    expect(ARCHIVE_GRACE_DAYS).toBe(policy.defaults.archive.grace_days);
-    expect(DEFAULT_DEST_REPO).toBe(policy.defaults.semester_dest_repo);
+    expect(ARCHIVE_GRACE_DAYS).toBe(policy.defaults.archive_grace_days);
+    expect(DEFAULT_DEST_REPO).toBe(policy.defaults.materials_repo);
     expect(HANDLE_RE.test('anna-adams')).toBe(true);
     expect(HANDLE_RE.test('-anna')).toBe(false);
     expect(ORG_NAME_RE.test('hertie-dsl-demo-f2026')).toBe(true);
@@ -168,6 +167,9 @@ describe('questions', () => {
     for (const bad of ['../secret.tex', '/etc/passwd', 'a\\b.tex', 'a/../b.tex']) expect(questionFileError(bad)).toContain('is not a file inside the submission');
   });
 });
+
+// The 0.10 assignments.yml skeleton the run-settings forms still write into until WP-C.
+const SKELETON = '# INSTRUCTOR-OWNED - yours to edit freely.\n#\n# How THIS semester runs each assignment.\n\n# defaults:\n#   late_window_days: 10\n';
 
 describe('writing a layer', () => {
   it('writes only the keys set, into the seeded skeleton, keeping its comments', () => {

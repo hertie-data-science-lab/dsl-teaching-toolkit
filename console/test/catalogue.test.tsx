@@ -32,7 +32,7 @@ const course: Course = { org: 'Hertie-DSL-Demo-Course-E1234', name: 'Machine Lea
 function catalogueFake(orgs: string | null = ORGS, f = new FakeGitHub()) {
   if (orgs !== null) f.on('GET', ORGS_URL, fileBody('orgs.yml', orgs));
   return f
-    .on('GET', `/repos/${NLP}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Natural Language Processing\ncourse_code: E1282\n'))
+    .on('GET', `/repos/${NLP}/.github/contents/course.yml`, fileBody('dsl-course.yml', 'course:\n  name: Natural Language Processing\n  code: E1282\n'))
     .on('GET', `/repos/${NLP}/.github/contents/semesters.yml`, fileBody('semesters.yml', 'semesters:\n- hertie-nlp-f2025\n- hertie-nlp-f2026\n- hertie-nlp-s2027\n- hertie-nlp-u2026\n- hertie-nlp-w2026\n- hertie-nlp-s2026\n- hertie-nlp-f2024\n'))
     .on('GET', '/repos/hertie-nlp-f2025/.github', { name: '.github', archived: true })
     .on('GET', '/repos/hertie-nlp-f2026/.github', { name: '.github', archived: false })
@@ -45,7 +45,7 @@ function catalogueFake(orgs: string | null = ORGS, f = new FakeGitHub()) {
     .on('GET', '/repos/hertie-nlp-s2026/.github/contents/.system/student-status.json', fileBody('student-status.json', '{ not json'))
     .on('GET', '/repos/hertie-nlp-f2024/.github', { name: '.github', archived: false })
     .on('GET', '/repos/hertie-nlp-f2024/.github/contents/.system/student-status.json', fileBody('student-status.json', JSON.stringify({ archive_datetime: 20250131, term_label: 'Fall 2024' })))
-    .on('GET', `/repos/${BROKEN}/.github/contents/dsl-course.yml`, () => json({ message: 'Server Error' }, 500));
+    .on('GET', `/repos/${BROKEN}/.github/contents/course.yml`, () => json({ message: 'Server Error' }, 500));
   // hertie-nlp-s2027 has no .github yet: it is being set up, so it is not in the catalogue.
 }
 const client = (f: FakeGitHub) => new GitHubClient({ token: () => 't', fetch: f.fetch });
@@ -154,9 +154,9 @@ describe('loading the catalogue', () => {
     const other = 'hertie-intro-to-data-science-c11';
     const f = new FakeGitHub()
       .on('GET', ORGS_URL, fileBody('orgs.yml', `course_orgs:\n  - ${other}\n  - ${NLP}\n`))
-      .on('GET', `/repos/${other}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', '- not\n- a mapping\n'))
+      .on('GET', `/repos/${other}/.github/contents/course.yml`, fileBody('dsl-course.yml', '- not\n- a mapping\n'))
       .on('GET', `/repos/${other}/.github/contents/semesters.yml`, fileBody('semesters.yml', 'semesters: {'))
-      .on('GET', `/repos/${NLP}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Natural Language Processing\n'));
+      .on('GET', `/repos/${NLP}/.github/contents/course.yml`, fileBody('dsl-course.yml', 'course:\n  name: Natural Language Processing\n'));
     const list = await loadCatalogue(client(f), [course]);
     expect(list.map((c) => c.name)).toEqual(['Machine Learning', other, 'Natural Language Processing']);
   });
@@ -169,7 +169,7 @@ describe('loading the catalogue', () => {
       const m = await import('../src/model/catalogue');
       expect(m.REGISTRY_REF).toBe('feature/instructor-console');
       const f = new FakeGitHub().on('GET', ORGS_URL.replace('ref=main', 'ref=feature%2Finstructor-console'), fileBody('orgs.yml', `course_orgs:\n  - ${NLP}\n`))
-        .on('GET', `/repos/${NLP}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Natural Language Processing\n'));
+        .on('GET', `/repos/${NLP}/.github/contents/course.yml`, fileBody('dsl-course.yml', 'course:\n  name: Natural Language Processing\n'));
       const list = await m.loadCatalogue(client(f), [course]);
       expect(list.map((c) => c.name)).toEqual(['Machine Learning', 'Natural Language Processing']);
     } finally {
@@ -349,7 +349,7 @@ describe('All courses', () => {
     const terms = Array.from({ length: 12 }, (_, i) => `hertie-old-${i % 2 ? 'f' : 's'}${2014 + Math.floor(i / 2)}`);
     const f = new FakeGitHub()
       .on('GET', ORGS_URL, fileBody('orgs.yml', `course_orgs:\n  - ${OLD}\n`))
-      .on('GET', `/repos/${OLD}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Old Course\n'))
+      .on('GET', `/repos/${OLD}/.github/contents/course.yml`, fileBody('dsl-course.yml', 'course:\n  name: Old Course\n'))
       .on('GET', `/repos/${OLD}/.github/contents/semesters.yml`, fileBody('semesters.yml', `semesters:\n${terms.map((t) => `- ${t}\n`).join('')}`));
     for (const t of terms) f.on('GET', `/repos/${t}/.github`, { name: '.github', archived: true });
     const h = mount(f);
@@ -387,7 +387,7 @@ describe('All courses', () => {
     const OTHER = 'hertie-geo-e2000';
     const f = new FakeGitHub()
       .on('GET', ORGS_URL, fileBody('orgs.yml', `course_orgs:\n  - ${OTHER}\n`))
-      .on('GET', `/repos/${OTHER}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Geography\n'))
+      .on('GET', `/repos/${OTHER}/.github/contents/course.yml`, fileBody('dsl-course.yml', 'course:\n  name: Geography\n'))
       .on('GET', `/repos/${OTHER}/.github/contents/semesters.yml`, fileBody('semesters.yml', 'semesters:\n- hertie-geo-f2026\n'))
       .on('GET', '/repos/hertie-geo-f2026/.github', { name: '.github', archived: false })
       .on('GET', '/repos/hertie-geo-f2026/.github/contents/.system/student-status.json', fileBody('student-status.json', JSON.stringify({ archive_datetime: '2026-09-01T00:00:00Z' })));
@@ -522,7 +522,7 @@ describe('All courses', () => {
       .on('GET', '/user/orgs?per_page=100&page=1', [])
       .on('GET', '/user/memberships/orgs?state=active&per_page=100&page=1', [MINE, NLP, SEM].map((login) => ({ state: 'active', role: 'member', organization: { login } })))
       .on('GET', `/repos/${MINE}/.github`, { name: '.github', topics: ['dsl-course-hub'], permissions: { push: true } })
-      .on('GET', `/repos/${MINE}/.github/contents/dsl-course.yml`, fileBody('dsl-course.yml', 'course_name: Machine Learning\ncourse_code: E1234\n'))
+      .on('GET', `/repos/${MINE}/.github/contents/course.yml`, fileBody('dsl-course.yml', 'course:\n  name: Machine Learning\n  code: E1234\n'))
       .on('GET', `/repos/${NLP}/.github`, { name: '.github', topics: ['dsl-course-hub'], permissions: { push: false, pull: true } })
       .on('GET', `/repos/${SEM}/.github`, { name: '.github', topics: ['dsl-semester'], archived: false, permissions: { push: false, pull: true } });
     catalogueFake(ORGS, f);

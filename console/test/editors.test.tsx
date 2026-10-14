@@ -13,7 +13,7 @@ import { COURSE_FACTS } from '../src/tiers/course';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
-import { POLICY, penaltyRate } from '../src/model/policy';
+import { CONTACT, POLICY, penaltyRate } from '../src/model/policy';
 import { labelNumber, sessionNumber } from '../src/model/format';
 import { effectivePenalty, finalGrade, lateChoice, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
 import { assignmentKey, blankDeploy, blankDraft, defaultDeployAt, deployAt, draftErrors, entryKey, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
@@ -628,7 +628,7 @@ describe('editing screens', () => {
   });
   it('course details asks for the contact and licence, with the institution’s in grey', () => {
     const out = html(<DetailsScreen {...cp} />);
-    expect(out).toContain(`placeholder="${POLICY.contact}"`);
+    expect(out).toContain(`placeholder="${CONTACT}"`);
     expect(out).toContain(`institution default: ${POLICY.licences[0].name}`);
     expect(out).toContain(`<option value="${POLICY.licences[1].name}"`);
     // The website's on/off is a switch here, beside the link to its own tab.

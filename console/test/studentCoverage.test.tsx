@@ -359,8 +359,8 @@ describe('8. the pending invitation', () => {
     .on('GET', '/user/memberships/orgs?state=active&per_page=100&page=1', [])
     .on('GET', '/user/memberships/orgs?state=pending&per_page=100&page=1', [{ state: 'pending', role: 'member', organization: { login: ORG } }])
     .on('GET', `/repos/${ORG}/.github`, { name: '.github', topics: ['dsl-semester'], permissions: { push: false, pull: true } })
-    .on('GET', `/repos/${ORG}/semester-config/contents/.system/dsl-course.yml`, fileBody('dsl-course.yml', 'course: hertie-dsl-demo-course\n'))
-    .on('GET', '/repos/hertie-dsl-demo-course/.github/contents/dsl-course.yml', fileBody('dsl-course.yml', 'course_name: Deep Learning\n'));
+    .on('GET', `/repos/${ORG}/semester-config/contents/.system/course.yml`, fileBody('dsl-course.yml', 'course: hertie-dsl-demo-course\n'))
+    .on('GET', '/repos/hertie-dsl-demo-course/.github/contents/course.yml', fileBody('dsl-course.yml', 'course:\n  name: Deep Learning\n'));
 
   it('shows the semester as Invited, not as a member’s', async () => {
     const e = await discoverEstate(client(gh()), { kind: 'classic', login: LOGIN });
