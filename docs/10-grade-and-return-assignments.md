@@ -82,7 +82,7 @@ marking and saving, and its corner icon opens it full screen (Escape closes). Th
 per student or team. On a team assignment a team's ▸ shows its members, each with their own Adjustment, feedback and private notes; a
 team with any of those set opens by itself. On an individual one the Adjustment column sits
 behind the **Adjustments** chip. Every column header has a `?`; the **From the submission** heading
-folds its columns into one. Drag a column's edge to resize it (double-click puts it back; widths are kept
+folds its columns into one (folded to begin with in a window narrower than 1400px; your choice is kept). Drag a column's edge to resize it (double-click puts it back; widths are kept
 in this browser), and open any text box's corner ⤢ for a large editor. The filters (All, Unmarked, Late,
 Held) count from the sheet as typed, and a held row says why, by the same rules as Return marks.
 Enter moves down a column of numbers; in a text box Ctrl+Enter (⌘+Enter) does. **Student view**

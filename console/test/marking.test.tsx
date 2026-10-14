@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
@@ -204,6 +204,9 @@ function envOf(gh: FakeGitHub, f: StaticFiles): Env {
 }
 
 let root: HTMLElement | null = null;
+/** The window's width; the grid's tests run in a wide one unless they say otherwise. */
+const windowWidth = (w: number) => Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true });
+beforeEach(() => windowWidth(1440));
 afterEach(() => {
   localStorage.clear();
   if (root) render(null, root);
@@ -620,6 +623,35 @@ describe('column widths', () => {
     await click(button('Reset widths'));
     expect(colW()).toMatchObject({ final: '56px', days: '56px' });
     expect(localStorage.getItem(widthsKey)).toBeNull();
+  });
+
+  it('starts the submission columns folded in a narrow window and open in a wide one or full screen, until the instructor chooses', async () => {
+    const folded = () => q('thead th .th-fold').getAttribute('aria-expanded') === 'false';
+    windowWidth(1280);
+    await marks();
+    expect(folded()).toBe(true);
+    expect(q('thead').textContent).not.toContain('Days late');
+    await click(q('button.full-toggle'));
+    expect(folded()).toBe(false); // full screen counts as wide
+    await click(q('button.full-toggle'));
+    expect(folded()).toBe(true);
+    // The instructor's choice sticks for this sheet, whatever the width, until Reset widths.
+    await click(q('thead th .th-fold'));
+    expect(folded()).toBe(false);
+    expect(JSON.parse(localStorage.getItem(widthsKey)!)).toEqual({ __subFolded: 0 });
+    root!.remove();
+    await marks();
+    expect(folded()).toBe(false);
+    await click(button('Reset widths'));
+    expect(folded()).toBe(true);
+    root!.remove();
+    localStorage.clear();
+    windowWidth(1440);
+    await marks();
+    expect(folded()).toBe(false);
+    windowWidth(1200);
+    await act(() => void window.dispatchEvent(new Event('resize')));
+    expect(folded()).toBe(true);
   });
 
   it('opens with the widths kept from an earlier visit', async () => {

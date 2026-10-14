@@ -111,6 +111,10 @@ export interface MarksCol {
   def: number | null;
   label: string;
 }
+/** Below this window width the submission columns start folded. */
+export const WIDE = 1400;
+/** Where the instructor's fold choice is kept, beside the column widths. */
+const FOLD_KEY = '__subFolded';
 /** No column is dragged narrower than this. */
 export const MIN_COL = 48;
 /** Feedback and Private notes never get less than this each (the console beside its side nav at 1280px). */
@@ -199,7 +203,13 @@ export function MarksTab(p: TabProps) {
   // The late-penalty override box as typed, by unit: the sheet gets `15%`, the box keeps `15.`.
   const [typed, setTyped] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<Filter>('all');
-  const [subFolded, setSubFolded] = useState(false);
+  // The window's width, for the submission columns' default fold.
+  const [winW, setWinW] = useState(() => (typeof window === 'undefined' ? WIDE : window.innerWidth));
+  useEffect(() => {
+    const on = () => setWinW(window.innerWidth);
+    window.addEventListener('resize', on);
+    return () => window.removeEventListener('resize', on);
+  }, []);
   // An individual assignment's Adjustment column: null opens it where the saved sheet has any adjustment.
   const [adjChoice, setAdjChoice] = useState<boolean | null>(null);
   const [full, setFull] = useState(false);
@@ -211,6 +221,10 @@ export function MarksTab(p: TabProps) {
   // Column widths the person dragged, kept per sheet in this browser.
   const [widths, setWidths] = useState<Record<string, number>>(() => marksWidths(org, path));
   useEffect(() => saveMarksWidths(org, path, widths), [widths, org, path]);
+  // "From the submission" folds to one chip in a narrow window (full screen counts as wide), until the
+  // instructor chooses; that choice is kept per sheet with the widths, and Reset widths forgets it.
+  const subFolded = widths[FOLD_KEY] !== undefined ? widths[FOLD_KEY] === 1 : !full && winW < WIDE;
+  const setSubFolded = (fold: boolean) => setWidths((cur) => ({ ...cur, [FOLD_KEY]: fold ? 1 : 0 }));
   const fullBtn = useRef<HTMLButtonElement>(null);
   const wasFull = useRef(false);
   // The Return marks def as this render built it, for a request from the Overview.
