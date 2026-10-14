@@ -391,8 +391,8 @@ project teams are untouched.
 To reopen anything - a grade appeal, a late submission - un-archive that repo from its own
 Settings page. It comes back exactly as it was, write access included.
 
-**Archive semester** is the button for archiving a semester early, or at all. `preview` is on
-by default and prints the counts; the real run **refuses** until the archive date has
+**Archive** (the Console, or `python -m dsl_course semester.archive`) archives a semester
+early, or at all. A preview prints the counts; the real run **refuses** until the archive date has
 arrived, and `force` overrides that - which is how a semester with no `archive:` block, and
 so no date, is archived. Run it again if it fails part-way - it picks up where it stopped,
 and only the last step seals the record.

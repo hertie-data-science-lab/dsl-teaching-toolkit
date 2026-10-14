@@ -50,7 +50,7 @@ push on that semester's repos + .github → the workflows`"]
   ui -.->|reverted on next sync| ci
   ui -.->|reverted on next sync| itag
   ui -->|sticks - manual only| gen["`generic instructors team (course org)
-escape hatch: invisible to config & Check semester setup`"]
+escape hatch: invisible to config & the Console's Check`"]
 ```
 
 ## What `course-admin` grants
@@ -156,7 +156,7 @@ one that reaches nothing inside a course. See
 [central-admin.md](../../docs-admin-arch/central-admin.md).
 
 The generic course-org `instructors` team is the other exception: a manual add sticks until manually
-removed, but it is **invisible to every config file and to Check semester setup**. Use it sparingly and
+removed, but it is **invisible to every config file and to the Console's Check**. Use it sparingly and
 record who's on it elsewhere. Route FA (faculty assistant) and TA access through `instructors.yml`.
 
 ## Rules that catch people out
@@ -183,7 +183,7 @@ record who's on it elsewhere. Route FA (faculty assistant) and TA access through
 
 ## Where to look when access seems wrong
 
-**Check semester setup** (course `.github` → Actions, pick the semester) is read-only and prints a per-semester
+The Console's **Refresh** on a semester (`semester.check`) refreshes a per-semester
 checklist - identity, people, schedule + release plan, roster, teams, grades - with an edit link
 for each gap. Start there. The **Sync membership** run log then lists every add and removal it
 made.

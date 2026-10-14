@@ -770,7 +770,7 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `sync_membership` - the one consolidated entrypoint (roster + teams + faculty) behind the
     **Sync membership** button/cron/dispatch.
   - `roster` / `teams` - read `students.csv` / `teams.csv`.
-  - `status` - the **Check semester setup** per-semester checklist.
+  - `status` - the per-semester checklist the Console's Check runs.
   - `list_orgs` - enumerate DSL course and semester orgs by topic; drives `refresh-inventory.yml`.
   - `ghcli` - the shared `gh`/git subprocess wrappers, their timeouts and rate-limit
     backoff, and the fail-loud read contract (`is_missing_resource`).

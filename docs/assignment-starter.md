@@ -39,11 +39,11 @@ def fit(x, y):
 | `solution=TRUE` | an Rmd/qmd chunk option | the chunk header, with `# YOUR CODE HERE` as its body |
 | `% BEGIN SOLUTION` … `% END SOLUTION` | a `.tex` file | `% YOUR ANSWER HERE` |
 
-Then run **Derive student version** (the template's settings, or course org → `.github` →
-Actions). It writes `solution/starter.ipynb` onto `main` as `starter.ipynb`, and never
+Then run **Derive student version** (the Console, or `python -m dsl_course
+assignment.derive_starter --course-org <org> --arg course_source_repo=<template>`). It writes `solution/starter.ipynb` onto `main` as `starter.ipynb`, and never
 writes to `solution`. Run it after every change to the solution. In the console it runs
-straight away; once it ends, **See on GitHub** opens `main`. On the Actions tab `preview`
-is on by default and lists the files and counts, never their content.
+straight away; once it ends, **See on GitHub** opens `main`. The command previews unless
+given `--no-preview`, listing the files and counts, never their content.
 
 Derive refuses, rather than publish the answer:
 

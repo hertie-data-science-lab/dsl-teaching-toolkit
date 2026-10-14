@@ -31,7 +31,7 @@ Accompanies the e2e [worked example](../example-course/).
 | `[required]` | 6. Enrol | *nothing to run* - the roster push does it | - | - | codes written to the roster + emailed within a minute; students join via the `join` **Join course** issue |
 | *(optional)* | 7. Ad-hoc release | course workflow, per semester | **Release materials** / **Release assignment** | see [08](08-release-materials-to-cohort.md)/[09](09-release-assignment-to-cohort.md) | anything out earlier/differently than the schedule says |
 | *(optional)* | 8. Return marks | course workflows + [`grading_sheets/<slug>.yml`](#grading_sheetsslugyml) | the [grading runbook](10-grade-and-return-assignments.md) | your marks | private per-student gradebooks |
-| *(optional)* | 9. Check semester setup | course workflow, per semester | course `.github` → **Check semester setup** | `semester_org` | what's configured, what's missing, an edit link per gap |
+| *(optional)* | 9. Check the semester | Console, per semester | the semester's **Refresh**, or `python -m dsl_course semester.check` | `semester_org` | what's configured, what's missing, an edit link per gap |
 
 > **Member privileges (once, and only if any assignment uses `visibility: student_choice`).**
 > Semester org → Settings → Member privileges: **Allow members to change repository
@@ -471,7 +471,7 @@ and a lab entry renders two rows.
 
 **A malformed entry is dropped - and every drop is reported.** The parser never raises, so
 the rest of the semester still runs, but nothing is silent: each drop is named in the run log,
-counted by **Check semester setup**, and makes `--validate` exit non-zero. A push to
+counted by the Console's Check (`semester.check`), and makes `--validate` exit non-zero. A push to
 `schedule.yml` runs **Validate schedule** in `semester-config`; a file the scheduler cannot
 fully read goes red and opens an issue naming the bad entry.
 

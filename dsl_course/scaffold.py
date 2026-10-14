@@ -737,7 +737,7 @@ def _actions_table(org: str) -> str:
         "workflows come bootstrapped with it. |\n"
         "| **Refresh actions** | Re-seed the workflows and repopulate dropdowns after you "
         "add sessions/sections/repos. |\n"
-        "| **Check semester setup** | Read-only per-semester checklist of what's configured - it "
+        "| **Check** (Instructor Console) | Per-semester checklist of what's configured - it "
         "says what still needs doing. |\n\n"
         "(**Release materials** and **Release assignment** also appear in this repo's own "
         "Actions tab.)\n"
